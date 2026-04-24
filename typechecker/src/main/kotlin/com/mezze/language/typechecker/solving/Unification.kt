@@ -1117,11 +1117,9 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
 
 /**
  * Format a type for error messages.
+ * Delegates to prettyPrintType from TypePrinter.kt.
  */
-private fun formatType(type: MezzeType): String {
-    // Use prettyPrintType for normalized output (converts 'q12 to 'a, 'b, etc.)
-    return prettyPrintType(type)
-}
+private fun formatType(type: MezzeType): String = prettyPrintType(type)
 
 /**
  * Expand a TypeApplication to a RecordType.

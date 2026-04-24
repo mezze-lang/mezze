@@ -413,16 +413,6 @@ class AbilityResolver(
         return result
     }
 
-    private fun formatType(type: MezzeType): String {
-        // Use centralized registry for primitive types
-        PrimitiveTypes.toName(type)?.let { return it }
-
-        return when (type) {
-            is MezzeType.VarType -> type.variable.toString()
-            else -> type.toString()
-        }
-    }
-
     private fun checkUserDefinedAbilityImpl(
         type: MezzeType,
         abilityName: String,

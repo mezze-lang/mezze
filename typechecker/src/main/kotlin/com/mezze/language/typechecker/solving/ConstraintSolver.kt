@@ -3535,38 +3535,9 @@ class ConstraintSolver(
 
     /**
      * Format a type for error messages.
+     * Delegates to prettyPrintType from TypePrinter.kt.
      */
-    private fun formatType(type: MezzeType): String {
-        // Check primitive types first
-        PrimitiveTypes.toName(type)?.let { return it }
-
-        return when (type) {
-            is MezzeType.VarType -> "'${('a'.code + (type.variable.id % 26)).toChar()}"  // Show as 'a, 'b, etc.
-            is MezzeType.FunctionType -> "{...} -> ..."
-            is MezzeType.RecordType -> {
-                // Use typeName if available
-                type.typeName ?: "{${type.fields.keys.take(3).joinToString()}}"
-            }
-            is MezzeType.VariantType -> {
-                // Use typeName if available, otherwise recognize Bool variant or use constructor names
-                type.typeName ?: if (type.constructors.keys == setOf("True", "False")) {
-                    "Bool"
-                } else {
-                    "[${type.constructors.keys.take(3).joinToString()}]"
-                }
-            }
-            is MezzeType.TypeApplication -> type.constructor
-            is MezzeType.SeqType -> "Seq ${formatType(type.elementType)}"
-            is MezzeType.ListType -> "List ${formatType(type.elementType)}"
-            is MezzeType.SetType -> "Set ${formatType(type.elementType)}"
-            is MezzeType.SortedMapType -> "SortedMap ${formatType(type.keyType)} ${formatType(type.valueType)}"
-            is MezzeType.SortedSetType -> "SortedSet ${formatType(type.elementType)}"
-            is MezzeType.MapType -> "Map ${formatType(type.keyType)} ${formatType(type.valueType)}"
-            is MezzeType.SuspendedType -> "Suspended<${formatType(type.valueType)}>"
-            is MezzeType.EffectRow -> "<${type.effects.take(3).joinToString()}>"
-            else -> type.toString()  // Fallback for any types handled by PrimitiveTypes
-        }
-    }
+    private fun formatType(type: MezzeType): String = prettyPrintType(type)
 
     /**
      * Instantiate a type with fresh type variables.

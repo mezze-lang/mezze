@@ -363,14 +363,6 @@ data class BindingKey(
         fun qualified(qualifier: String, name: String): BindingKey = BindingKey(qualifier = qualifier, localName = name)
 
         /**
-         * Create a binding key from a QualifiedRef.
-         */
-        fun fromQualifiedRef(ref: QualifiedRef): BindingKey = BindingKey(
-            qualifier = ref.qualifier?.shortName,
-            localName = ref.localName
-        )
-
-        /**
          * Parse a string that may contain `::` into a BindingKey.
          *
          * Examples:
@@ -407,68 +399,3 @@ object Keywords {
     const val TO_DBG_STR = "to_dbg_str"
 }
 
-/**
- * A qualified reference to a named item (effect, ability, performer, etc.).
- * May include a module qualifier (e.g., `log::Console`) or be unqualified (`Console`).
- * The typechecker populates `resolvedContentHash` for O(1) runtime lookup.
- */
-@Serializable
-data class QualifiedRef(
-    /** The local name of the referenced item (e.g., "Console" in "log::Console") */
-    val localName: String,
-
-    /** Module qualifier if this is a qualified reference (e.g., ModulePath(["log"])) */
-    val qualifier: ModulePath? = null,
-
-    /**
-     * Content hash of the resolved item (populated by typechecker).
-     * Used for O(1) content-addressed lookups at runtime.
-     */
-    val resolvedContentHash: String? = null,
-
-    /** Source location for error reporting */
-    val sourceLocation: SourceLocation? = null
-) {
-    /** Whether this is a qualified reference (e.g., log::Console vs just Console) */
-    val isQualified: Boolean get() = qualifier != null && qualifier.segments.isNotEmpty()
-
-    /**
-     * Create a copy with the resolved content hash populated.
-     * Used by the typechecker after resolving the reference.
-     */
-    fun withResolvedHash(hash: String): QualifiedRef = copy(resolvedContentHash = hash)
-
-    /**
-     * Create a binding key for looking up this reference.
-     * Uses the last segment of the qualifier (short name) as the key qualifier.
-     */
-    fun toBindingKey(): BindingKey = BindingKey.fromQualifiedRef(this)
-
-    companion object {
-        /**
-         * Create an unqualified reference (local name only).
-         */
-        fun local(name: String, sourceLocation: SourceLocation? = null): QualifiedRef =
-            QualifiedRef(localName = name, sourceLocation = sourceLocation)
-
-        /**
-         * Create a qualified reference with a single-segment qualifier.
-         */
-        fun qualified(qualifier: String, localName: String, sourceLocation: SourceLocation? = null): QualifiedRef =
-            QualifiedRef(
-                localName = localName,
-                qualifier = ModulePath(listOf(qualifier)),
-                sourceLocation = sourceLocation
-            )
-
-        /**
-         * Create a qualified reference with a multi-segment qualifier.
-         */
-        fun qualified(qualifierSegments: List<String>, localName: String, sourceLocation: SourceLocation? = null): QualifiedRef =
-            QualifiedRef(
-                localName = localName,
-                qualifier = if (qualifierSegments.isNotEmpty()) ModulePath(qualifierSegments) else null,
-                sourceLocation = sourceLocation
-            )
-    }
-}

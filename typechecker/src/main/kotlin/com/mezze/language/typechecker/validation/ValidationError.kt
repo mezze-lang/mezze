@@ -1,7 +1,6 @@
 package com.mezze.language.typechecker.validation
 
 import com.mezze.language.ast.MezzeType
-import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.ast.SourceLocation
 import com.mezze.language.ast.prettyPrintType
 import com.mezze.language.typechecker.util.StringDistance
@@ -573,25 +572,6 @@ sealed class ValidationResult {
 
 /**
  * Format a type for error messages.
+ * Delegates to prettyPrintType from TypePrinter.kt.
  */
-private fun formatType(type: MezzeType): String {
-    // Check primitive types first
-    PrimitiveTypes.toName(type)?.let { return it }
-
-    return when (type) {
-        is MezzeType.VarType -> type.variable.toString()
-        is MezzeType.FunctionType -> "{...} -> ..."
-        is MezzeType.RecordType -> "{${type.fields.keys.take(3).joinToString()}}"
-        is MezzeType.VariantType -> "[${type.constructors.keys.take(3).joinToString()}]"
-        is MezzeType.TypeApplication -> "${type.constructor}${if (type.args.isNotEmpty()) " ..." else ""}"
-        is MezzeType.SeqType -> "Seq ${formatType(type.elementType)}"
-        is MezzeType.ListType -> "List ${formatType(type.elementType)}"
-        is MezzeType.SetType -> "Set ${formatType(type.elementType)}"
-        is MezzeType.SortedMapType -> "SortedMap ${formatType(type.keyType)} ${formatType(type.valueType)}"
-        is MezzeType.SortedSetType -> "SortedSet ${formatType(type.elementType)}"
-        is MezzeType.MapType -> "Map ${formatType(type.keyType)} ${formatType(type.valueType)}"
-        is MezzeType.SuspendedType -> "Suspended<${formatType(type.valueType)}>"
-        is MezzeType.EffectRow -> "<${type.effects.take(3).joinToString()}>"
-        else -> type.toString()  // Fallback for any types handled by PrimitiveTypes
-    }
-}
+private fun formatType(type: MezzeType): String = prettyPrintType(type)

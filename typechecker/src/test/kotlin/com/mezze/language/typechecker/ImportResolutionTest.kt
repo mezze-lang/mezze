@@ -187,8 +187,8 @@ class ImportResolutionTest {
     inner class NoColonColonStringManipulation {
 
         @Test
-        fun `QualifiedRef stores path as list not string`() {
-            val ref = QualifiedRef.qualified(listOf("std", "effects", "log"), "Console")
+        fun `ParsedQualifiedRef stores path as list not string`() {
+            val ref = ParsedQualifiedRef("Console", ParsedModulePath(listOf("std", "effects", "log")), Loc("test.mz", 1, 1, 1, 1))
 
             // Path is stored as list
             assertEquals(listOf("std", "effects", "log"), ref.qualifier?.segments)

@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Nested
  * for import binding map keys. These tests verify that:
  * 1. Key string generation is consistent
  * 2. Factory methods work correctly
- * 3. Integration with QualifiedRef and Identifier works
+ * 3. Usage patterns for import resolution work
  */
 class BindingKeyTest {
 
@@ -85,62 +85,14 @@ class BindingKeyTest {
     }
 
     // ========================================================================
-    // FROM QUALIFIED REF
+    // FACTORY METHODS
     // ========================================================================
 
     @Nested
-    inner class FromQualifiedRef {
+    inner class FactoryMethods {
 
         @Test
-        fun `fromQualifiedRef with unqualified ref`() {
-            val ref = QualifiedRef.local("Console")
-            val key = BindingKey.fromQualifiedRef(ref)
-
-            assertNull(key.qualifier)
-            assertEquals("Console", key.localName)
-            assertEquals("Console", key.toKeyString())
-        }
-
-        @Test
-        fun `fromQualifiedRef with single-segment qualifier`() {
-            val ref = QualifiedRef.qualified("log", "Console")
-            val key = BindingKey.fromQualifiedRef(ref)
-
-            assertEquals("log", key.qualifier)
-            assertEquals("Console", key.localName)
-            assertEquals("log::Console", key.toKeyString())
-        }
-
-        @Test
-        fun `fromQualifiedRef with multi-segment qualifier uses shortName`() {
-            val ref = QualifiedRef.qualified(listOf("std", "effects", "log"), "Console")
-            val key = BindingKey.fromQualifiedRef(ref)
-
-            // Uses the SHORT name (last segment) as qualifier
-            assertEquals("log", key.qualifier)
-            assertEquals("Console", key.localName)
-            assertEquals("log::Console", key.toKeyString())
-        }
-
-        @Test
-        fun `QualifiedRef toBindingKey helper works`() {
-            val ref = QualifiedRef.qualified("log", "info")
-            val key = ref.toBindingKey()
-
-            assertEquals("log", key.qualifier)
-            assertEquals("info", key.localName)
-        }
-    }
-
-    // ========================================================================
-    // FROM IDENTIFIER
-    // ========================================================================
-
-    @Nested
-    inner class FromIdentifierEquivalent {
-
-        @Test
-        fun `unqualified identifier creates unqualified key`() {
+        fun `unqualified creates key with null qualifier`() {
             val key = BindingKey.unqualified("myVar")
 
             assertNull(key.qualifier)
@@ -149,23 +101,12 @@ class BindingKeyTest {
         }
 
         @Test
-        fun `single-segment qualifier creates qualified key`() {
+        fun `qualified creates key with qualifier and localName`() {
             val key = BindingKey.qualified("bytes", "from_string")
 
             assertEquals("bytes", key.qualifier)
             assertEquals("from_string", key.localName)
             assertEquals("bytes::from_string", key.toKeyString())
-        }
-
-        @Test
-        fun `multi-segment qualifier uses short name via QualifiedRef`() {
-            val ref = QualifiedRef.qualified(listOf("std", "collections", "seq"), "map")
-            val key = BindingKey.fromQualifiedRef(ref)
-
-            // Uses the SHORT name (last segment) as qualifier
-            assertEquals("seq", key.qualifier)
-            assertEquals("map", key.localName)
-            assertEquals("seq::map", key.toKeyString())
         }
     }
 
@@ -227,8 +168,7 @@ class BindingKeyTest {
             bindings[key.toKeyString()] = "log::info type"
 
             // When resolving an identifier like log::info
-            val lookupRef = QualifiedRef.qualified("log", "info")
-            val lookupKey = lookupRef.toBindingKey().toKeyString()
+            val lookupKey = BindingKey.qualified("log", "info").toKeyString()
 
             assertEquals("log::info type", bindings[lookupKey])
         }
@@ -243,8 +183,7 @@ class BindingKeyTest {
             bindings[key.toKeyString()] = "info type"
 
             // When resolving an identifier like info (no qualifier)
-            val lookupRef = QualifiedRef.local("info")
-            val lookupKey = lookupRef.toBindingKey().toKeyString()
+            val lookupKey = BindingKey.unqualified("info").toKeyString()
 
             assertEquals("info type", bindings[lookupKey])
         }
@@ -255,13 +194,11 @@ class BindingKeyTest {
             val handlers = mutableMapOf<String, String>()
 
             // Handler is registered with qualified key
-            val handlerRef = QualifiedRef.qualified("log", "Console")
-            val key = handlerRef.toBindingKey()
+            val key = BindingKey.qualified("log", "Console")
             handlers[key.toKeyString()] = "Console handler"
 
             // When performing, we look up using the same key format
-            val performRef = QualifiedRef.qualified("log", "Console")
-            val lookupKey = performRef.toBindingKey().toKeyString()
+            val lookupKey = BindingKey.qualified("log", "Console").toKeyString()
 
             assertEquals("Console handler", handlers[lookupKey])
         }

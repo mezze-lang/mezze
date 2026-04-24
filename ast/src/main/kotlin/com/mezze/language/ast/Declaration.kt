@@ -7,16 +7,6 @@ import kotlinx.serialization.Serializable
  */
 
 
-/** A comment in the source code, preserved for the formatter. */
-@Serializable
-data class Comment(
-    val text: String,
-    val line: Int,
-    val column: Int,
-    val isTrailing: Boolean = false
-)
-
-
 /**
  * A resolved import with type information, for IDE support.
  */
@@ -77,19 +67,6 @@ data class AbilityConstraint(
     val typeParam: String,
     val typeArgs: List<MezzeType> = emptyList()
 )
-
-/**
- * Ability constraint in function type signatures (string-based, for display/IDE).
- * Distinct from MezzeType.FunctionAbilityConstraint which uses resolved MezzeType args.
- */
-@Serializable
-data class DisplayFunctionAbilityConstraint(
-    val abilityName: String,
-    val typeArgNames: List<String> = emptyList(),
-    val associatedTypeBindingNames: Map<String, String> = emptyMap()
-) {
-    val hasAssociatedTypes: Boolean get() = associatedTypeBindingNames.isNotEmpty()
-}
 
 /**
  * Display constraint for debugging and testing purposes.
