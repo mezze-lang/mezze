@@ -28,14 +28,41 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     private final Object[] elements;
 
     @CompilationFinal
+    private final int length;
+
+    @CompilationFinal
     private final Comparator<Object> comparator;
+
+    private final Object[] ownerToken;
 
     @SuppressWarnings("unchecked")
     private MezzeSortedSet(Object[] elements, Comparator<?> comparator) {
         this.elements = elements;
+        this.length = elements.length;
         this.comparator = comparator != null
                 ? (Comparator<Object>) comparator
                 : (a, b) -> ((Comparable<Object>) a).compareTo(b);
+        this.ownerToken = null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private MezzeSortedSet(Object[] elements, int length, Comparator<?> comparator, Object[] ownerToken) {
+        this.elements = elements;
+        this.length = length;
+        this.comparator = comparator != null
+                ? (Comparator<Object>) comparator
+                : (a, b) -> ((Comparable<Object>) a).compareTo(b);
+        this.ownerToken = ownerToken;
+    }
+
+    private boolean isOwner() {
+        return ownerToken != null && ownerToken[0] == this;
+    }
+
+    private void revokeOwnership() {
+        if (ownerToken != null && ownerToken[0] == this) {
+            ownerToken[0] = null;
+        }
     }
 
     // ===== CONSTRUCTION =====
@@ -136,20 +163,21 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      * Returns the number of elements.
      */
     public int size() {
-        return elements.length;
+        return length;
     }
 
     /**
      * Returns true if empty.
      */
     public boolean isEmpty() {
-        return elements.length == 0;
+        return length == 0;
     }
 
     /**
      * Returns true if the element is present.
      */
     public boolean contains(A elem) {
+        revokeOwnership();
         return binarySearch(elem) >= 0;
     }
 
@@ -168,7 +196,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     @TruffleBoundary
     private int binarySearchObject(Object elem) {
         int low = 0;
-        int high = elements.length - 1;
+        int high = length - 1;
 
         while (low <= high) {
             int mid = (low + high) >>> 1;
@@ -194,6 +222,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      */
     @TruffleBoundary
     public boolean containsObject(Object elem) {
+        revokeOwnership();
         return binarySearchObject(elem) >= 0;
     }
 
@@ -209,12 +238,40 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
         }
 
         int insertPos = -(idx + 1);
-        Object[] newElements = new Object[elements.length + 1];
+
+        if (isOwner() && length < elements.length && insertPos == length) {
+            // O(1) fast path: appending at end with spare capacity
+            elements[length] = elem;
+            Object[] token = ownerToken;
+            @SuppressWarnings("unchecked")
+            MezzeSortedSet<A> result = new MezzeSortedSet<>(elements, length + 1, comparator, token);
+            token[0] = result;
+            return result;
+        }
+
+        if (isOwner() && length < elements.length) {
+            // Spare capacity, inserting in middle — shift in-place
+            System.arraycopy(elements, insertPos, elements, insertPos + 1, length - insertPos);
+            elements[insertPos] = elem;
+            Object[] token = ownerToken;
+            @SuppressWarnings("unchecked")
+            MezzeSortedSet<A> result = new MezzeSortedSet<>(elements, length + 1, comparator, token);
+            token[0] = result;
+            return result;
+        }
+
+        // Allocate with spare capacity
+        int newCapacity = Math.max(length + 1, length + (length >> 1) + 4);
+        Object[] newElements = new Object[newCapacity];
         System.arraycopy(elements, 0, newElements, 0, insertPos);
         newElements[insertPos] = elem;
-        System.arraycopy(elements, insertPos, newElements, insertPos + 1, elements.length - insertPos);
+        System.arraycopy(elements, insertPos, newElements, insertPos + 1, length - insertPos);
 
-        return new MezzeSortedSet<>(newElements, comparator);
+        Object[] token = new Object[1];
+        @SuppressWarnings("unchecked")
+        MezzeSortedSet<A> result = new MezzeSortedSet<>(newElements, length + 1, comparator, token);
+        token[0] = result;
+        return result;
     }
 
     /**
@@ -228,13 +285,13 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
             return this;  // Not present
         }
 
-        if (elements.length == 1) {
+        if (length == 1) {
             return empty();
         }
 
-        Object[] newElements = new Object[elements.length - 1];
+        Object[] newElements = new Object[length - 1];
         System.arraycopy(elements, 0, newElements, 0, idx);
-        System.arraycopy(elements, idx + 1, newElements, idx, elements.length - idx - 1);
+        System.arraycopy(elements, idx + 1, newElements, idx, length - idx - 1);
 
         return new MezzeSortedSet<>(newElements, comparator);
     }
@@ -271,7 +328,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
         if (isEmpty()) {
             throw new NoSuchElementException("Empty set");
         }
-        return (A) elements[elements.length - 1];
+        return (A) elements[length - 1];
     }
 
     /**
@@ -289,18 +346,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      */
     @TruffleBoundary
     public MezzeSortedSet<A> add(A elem) {
-        int idx = binarySearch(elem);
-        if (idx >= 0) {
-            return this;  // Already present
-        }
-
-        int insertPos = -(idx + 1);
-        Object[] newElements = new Object[elements.length + 1];
-        System.arraycopy(elements, 0, newElements, 0, insertPos);
-        newElements[insertPos] = elem;
-        System.arraycopy(elements, insertPos, newElements, insertPos + 1, elements.length - insertPos);
-
-        return new MezzeSortedSet<>(newElements, comparator);
+        return addObject(elem);
     }
 
     /**
@@ -313,13 +359,13 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
             return this;  // Not present
         }
 
-        if (elements.length == 1) {
+        if (length == 1) {
             return empty();
         }
 
-        Object[] newElements = new Object[elements.length - 1];
+        Object[] newElements = new Object[length - 1];
         System.arraycopy(elements, 0, newElements, 0, idx);
-        System.arraycopy(elements, idx + 1, newElements, idx, elements.length - idx - 1);
+        System.arraycopy(elements, idx + 1, newElements, idx, length - idx - 1);
 
         return new MezzeSortedSet<>(newElements, comparator);
     }
@@ -356,11 +402,11 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
         int idx = binarySearch(from);
         if (idx < 0) idx = -(idx + 1);
 
-        if (idx >= elements.length) {
+        if (idx >= length) {
             return empty();
         }
 
-        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, idx, elements.length), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, idx, length), comparator);
     }
 
     /**
@@ -412,7 +458,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
             return (A) elements[idx];
         }
         int insertPos = -(idx + 1);
-        if (insertPos >= elements.length) {
+        if (insertPos >= length) {
             return null;
         }
         return (A) elements[insertPos];
@@ -448,7 +494,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
         } else {
             idx = -(idx + 1);
         }
-        if (idx >= elements.length) {
+        if (idx >= length) {
             return null;
         }
         return (A) elements[idx];
@@ -488,10 +534,10 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
         if (other.isEmpty()) return this;
 
         // Merge sorted arrays
-        Object[] result = new Object[elements.length + other.elements.length];
+        Object[] result = new Object[length + other.length];
         int i = 0, j = 0, k = 0;
 
-        while (i < elements.length && j < other.elements.length) {
+        while (i < length && j < other.length) {
             int cmp = compareElements(elements[i], other.elements[j]);
             if (cmp < 0) {
                 result[k++] = elements[i++];
@@ -503,10 +549,10 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
             }
         }
 
-        while (i < elements.length) {
+        while (i < length) {
             result[k++] = elements[i++];
         }
-        while (j < other.elements.length) {
+        while (j < other.length) {
             result[k++] = other.elements[j++];
         }
 
@@ -521,10 +567,10 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     public MezzeSortedSet<A> intersect(MezzeSortedSet<A> other) {
         if (isEmpty() || other.isEmpty()) return empty();
 
-        Object[] result = new Object[Math.min(elements.length, other.elements.length)];
+        Object[] result = new Object[Math.min(length, other.length)];
         int i = 0, j = 0, k = 0;
 
-        while (i < elements.length && j < other.elements.length) {
+        while (i < length && j < other.length) {
             int cmp = compareElements(elements[i], other.elements[j]);
             if (cmp < 0) {
                 i++;
@@ -549,10 +595,10 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
         if (isEmpty()) return this;
         if (other.isEmpty()) return this;
 
-        Object[] result = new Object[elements.length];
+        Object[] result = new Object[length];
         int i = 0, j = 0, k = 0;
 
-        while (i < elements.length && j < other.elements.length) {
+        while (i < length && j < other.length) {
             int cmp = compareElements(elements[i], other.elements[j]);
             if (cmp < 0) {
                 result[k++] = elements[i++];
@@ -564,7 +610,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
             }
         }
 
-        while (i < elements.length) {
+        while (i < length) {
             result[k++] = elements[i++];
         }
 
@@ -581,7 +627,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
 
             @Override
             public boolean hasNext() {
-                return index < elements.length;
+                return index < length;
             }
 
             @Override
@@ -600,7 +646,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      */
     @SuppressWarnings("unchecked")
     public A[] toArray() {
-        return (A[]) elements.clone();
+        return (A[]) Arrays.copyOf(elements, length);
     }
 
     // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
@@ -628,8 +674,8 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      * Only safe within LocalMut context.
      */
     public void mutSet(int index, A value) {
-        if (index < 0 || index >= elements.length) {
-            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + elements.length);
+        if (index < 0 || index >= length) {
+            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + length);
         }
         elements[index] = value;
     }
@@ -639,8 +685,8 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      * Only safe within LocalMut context.
      */
     public void mutSwap(int i, int j) {
-        if (i < 0 || i >= elements.length || j < 0 || j >= elements.length) {
-            throw new IndexOutOfBoundsException("Indices: " + i + ", " + j + ", Size: " + elements.length);
+        if (i < 0 || i >= length || j < 0 || j >= length) {
+            throw new IndexOutOfBoundsException("Indices: " + i + ", " + j + ", Size: " + length);
         }
         Object tmp = elements[i];
         elements[i] = elements[j];
@@ -653,7 +699,7 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("SortedSet(");
-        for (int i = 0; i < elements.length; i++) {
+        for (int i = 0; i < length; i++) {
             if (i > 0) sb.append(", ");
             sb.append(elements[i]);
         }
@@ -665,12 +711,12 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof MezzeSortedSet<?> other)) return false;
-        return Arrays.equals(elements, other.elements);
+        return Arrays.equals(toArray(), other.toArray());
     }
 
     @Override
     public int hashCode() {
-        return Arrays.hashCode(elements);
+        return Arrays.hashCode(toArray());
     }
 
     // ===== INTEROP LIBRARY =====
@@ -682,17 +728,17 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
 
     @ExportMessage
     long getArraySize() {
-        return elements.length;
+        return length;
     }
 
     @ExportMessage
     boolean isArrayElementReadable(long index) {
-        return index >= 0 && index < elements.length;
+        return index >= 0 && index < length;
     }
 
     @ExportMessage
     Object readArrayElement(long index) throws InvalidArrayIndexException {
-        if (index < 0 || index >= elements.length) {
+        if (index < 0 || index >= length) {
             throw InvalidArrayIndexException.create(index);
         }
         return elements[(int) index];
