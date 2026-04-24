@@ -43,31 +43,41 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
     @CompilationFinal
     private final int mask;  // capacity - 1, for fast modulo
 
-    @CompilationFinal
-    private final boolean owned;  // True if we uniquely own the buffer (can mutate without copy)
+    /**
+     * COW ownership token. token[0] == this means we own the buffer.
+     * On mutation, ownership transfers to the new deque.
+     * On any read, ownership is revoked to prevent corruption if reused.
+     */
+    private final Object[] ownerToken;
 
-    private MezzeDeque(Object[] buffer, int head, int tail, int size, boolean owned) {
+    private MezzeDeque(Object[] buffer, int head, int tail, int size, Object[] ownerToken) {
         this.buffer = buffer;
         this.head = head;
         this.tail = tail;
         this.size = size;
         this.mask = buffer.length - 1;
-        this.owned = owned;
+        this.ownerToken = ownerToken;
     }
 
     private MezzeDeque(Object[] buffer, int head, int tail, int size) {
-        this(buffer, head, tail, size, true);
+        Object[] token = new Object[1];
+        this.buffer = buffer;
+        this.head = head;
+        this.tail = tail;
+        this.size = size;
+        this.mask = buffer.length - 1;
+        this.ownerToken = token;
+        token[0] = this;
     }
 
-    /**
-     * Returns an owned copy of the buffer for mutation.
-     * If we already own the buffer, just marks it as unowned for the returned deque.
-     */
-    private Object[] ensureOwnedBuffer() {
-        if (owned) {
-            return buffer;  // We own it, can share with child
+    private boolean isOwner() {
+        return ownerToken != null && ownerToken[0] == this;
+    }
+
+    private void revokeOwnership() {
+        if (ownerToken != null && ownerToken[0] == this) {
+            ownerToken[0] = null;
         }
-        return buffer.clone();  // Need to copy
     }
 
     // ===== CONSTRUCTION =====
@@ -148,6 +158,7 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      */
     @SuppressWarnings("unchecked")
     public A peekFront() {
+        revokeOwnership();
         if (isEmpty()) {
             throw new NoSuchElementException("Empty deque");
         }
@@ -159,6 +170,7 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      */
     @SuppressWarnings("unchecked")
     public A peekBack() {
+        revokeOwnership();
         if (isEmpty()) {
             throw new NoSuchElementException("Empty deque");
         }
@@ -170,6 +182,7 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      */
     @SuppressWarnings("unchecked")
     public A get(int index) {
+        revokeOwnership();
         if (index < 0 || index >= size) {
             throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + size);
         }
@@ -190,19 +203,20 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
 
         int newHead = (head - 1) & mask;
 
-        // Fast path: we own the buffer and slot is available
-        // Note: for pushFront from empty deque (head=0), newHead wraps to end of buffer
-        // which should always be null in a fresh buffer
-        if (owned) {
-            // Fast path: mutate in place, mark as unowned for us
-            buffer[newHead] = element;
-            return new MezzeDeque<>(buffer, newHead, tail, size + 1, false);
+        Object[] workBuffer;
+        Object[] token;
+        if (isOwner()) {
+            workBuffer = buffer;
+            token = ownerToken;
+        } else {
+            workBuffer = buffer.clone();
+            token = new Object[1];
         }
 
-        // Slow path: need to copy (buffer is shared)
-        Object[] newBuffer = buffer.clone();
-        newBuffer[newHead] = element;
-        return new MezzeDeque<>(newBuffer, newHead, tail, size + 1, true);
+        workBuffer[newHead] = element;
+        MezzeDeque<A> result = new MezzeDeque<>(workBuffer, newHead, tail, size + 1, token);
+        token[0] = result;
+        return result;
     }
 
     /**
@@ -215,19 +229,21 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
             return grow().pushBack(element);
         }
 
-        // Fast path: we own the buffer
-        if (owned) {
-            // Fast path: mutate in place, mark as unowned for us
-            buffer[tail] = element;
-            int newTail = (tail + 1) & mask;
-            return new MezzeDeque<>(buffer, head, newTail, size + 1, false);
+        Object[] workBuffer;
+        Object[] token;
+        if (isOwner()) {
+            workBuffer = buffer;
+            token = ownerToken;
+        } else {
+            workBuffer = buffer.clone();
+            token = new Object[1];
         }
 
-        // Slow path: need to copy (buffer is shared)
-        Object[] newBuffer = buffer.clone();
-        newBuffer[tail] = element;
+        workBuffer[tail] = element;
         int newTail = (tail + 1) & mask;
-        return new MezzeDeque<>(newBuffer, head, newTail, size + 1, true);
+        MezzeDeque<A> result = new MezzeDeque<>(workBuffer, head, newTail, size + 1, token);
+        token[0] = result;
+        return result;
     }
 
     // ===== POP OPERATIONS =====
@@ -251,10 +267,9 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
 
         int newHead = (head + 1) & mask;
 
-        // For pop, we can share the buffer since we're just narrowing the view
-        // The original element stays in the buffer but outside our view
-        // Mark as unowned so future pushes will copy
-        return new PopResult<>(element, new MezzeDeque<>(buffer, newHead, tail, size - 1, false));
+        // Pop shares the buffer but doesn't claim ownership — narrowing the view
+        revokeOwnership();
+        return new PopResult<>(element, new MezzeDeque<>(buffer, newHead, tail, size - 1, (Object[]) null));
     }
 
     /**
@@ -275,9 +290,9 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
             return new PopResult<>(element, empty());
         }
 
-        // For pop, we can share the buffer since we're just narrowing the view
-        // Mark as unowned so future pushes will copy
-        return new PopResult<>(element, new MezzeDeque<>(buffer, head, backIndex, size - 1, false));
+        // Pop shares the buffer but doesn't claim ownership
+        revokeOwnership();
+        return new PopResult<>(element, new MezzeDeque<>(buffer, head, backIndex, size - 1, (Object[]) null));
     }
 
     /**
@@ -475,7 +490,7 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
         for (int i = 0; i < size; i++) {
             newBuffer[i] = get(i);
         }
-        return new MezzeDeque<>(newBuffer, 0, size, size, true);
+        return new MezzeDeque<>(newBuffer, 0, size, size);
     }
 
     /**
