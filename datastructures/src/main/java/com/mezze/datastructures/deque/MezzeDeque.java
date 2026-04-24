@@ -55,7 +55,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
         this.owned = owned;
     }
 
-    // Legacy constructor for compatibility
     private MezzeDeque(Object[] buffer, int head, int tail, int size) {
         this(buffer, head, tail, size, true);
     }

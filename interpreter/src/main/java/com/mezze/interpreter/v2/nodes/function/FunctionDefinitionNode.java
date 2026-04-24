@@ -80,53 +80,7 @@ public final class FunctionDefinitionNode extends MezzeNode {
     private CallTarget callTarget;
 
     /**
-     * Full constructor with parameter names for record unpacking.
-     * Uses KIND_OBJECT for all closure slots (backwards compatible).
-     */
-    public FunctionDefinitionNode(
-            String name,
-            int[] closureSlots,
-            String[] parameterNames,
-            MezzeNode bodyNode,
-            FrameDescriptor frameDescriptor
-    ) {
-        this(name, null, closureSlots, null, parameterNames, bodyNode, frameDescriptor, null);
-    }
-
-    /**
-     * Constructor with content hash for CallTarget caching.
-     * Uses KIND_OBJECT for all closure slots (backwards compatible).
-     */
-    public FunctionDefinitionNode(
-            String name,
-            String contentHash,
-            int[] closureSlots,
-            String[] parameterNames,
-            MezzeNode bodyNode,
-            FrameDescriptor frameDescriptor
-    ) {
-        this(name, contentHash, closureSlots, null, parameterNames, bodyNode, frameDescriptor, null);
-    }
-
-    /**
-     * Full constructor with typed closure slots.
-     * closureKinds specifies the type of each closure slot (KIND_LONG, KIND_DOUBLE, KIND_BOOLEAN, KIND_OBJECT).
-     */
-    public FunctionDefinitionNode(
-            String name,
-            String contentHash,
-            int[] closureSlots,
-            int[] closureKinds,
-            String[] parameterNames,
-            MezzeNode bodyNode,
-            FrameDescriptor frameDescriptor
-    ) {
-        this(name, contentHash, closureSlots, closureKinds, parameterNames, bodyNode, frameDescriptor, null);
-    }
-
-    /**
      * Full constructor with typed closure slots and ability slot requirements.
-     * This is used for polymorphic functions that have ability constraints.
      */
     public FunctionDefinitionNode(
             String name,
@@ -148,47 +102,6 @@ public final class FunctionDefinitionNode extends MezzeNode {
         this.bodyNode = bodyNode;
         this.frameDescriptor = frameDescriptor;
         this.abilitySlotRequirements = abilitySlotRequirements != null ? abilitySlotRequirements : EMPTY_ABILITY_REQS;
-    }
-
-    /**
-     * Backwards compatible constructor (uses parameter count, no names).
-     * Only for simple cases where record unpacking isn't needed.
-     */
-    public FunctionDefinitionNode(
-            String name,
-            int[] closureSlots,
-            int parameterCount,
-            MezzeNode bodyNode,
-            FrameDescriptor frameDescriptor
-    ) {
-        this.name = name;
-        this.contentHash = null;
-        this.closureSlots = closureSlots != null && closureSlots.length > 0 ? closureSlots : EMPTY_SLOTS;
-        this.closureKinds = null;
-        this.parameterNames = EMPTY_STRINGS;
-        this.closureCount = this.closureSlots.length;
-        this.parameterCount = parameterCount;
-        this.bodyNode = bodyNode;
-        this.frameDescriptor = frameDescriptor;
-        this.abilitySlotRequirements = EMPTY_ABILITY_REQS;
-    }
-
-    /**
-     * Create with eager CallTarget initialization.
-     */
-    public static FunctionDefinitionNode createEager(
-            MezzeLanguage language,
-            String name,
-            int[] closureSlots,
-            String[] parameterNames,
-            MezzeNode bodyNode,
-            FrameDescriptor frameDescriptor
-    ) {
-        FunctionDefinitionNode node = new FunctionDefinitionNode(
-            name, closureSlots, parameterNames, bodyNode, frameDescriptor
-        );
-        node.initializeCallTarget(language);
-        return node;
     }
 
     private void initializeCallTarget(MezzeLanguage language) {

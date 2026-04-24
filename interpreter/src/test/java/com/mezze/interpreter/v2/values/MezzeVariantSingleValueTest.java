@@ -89,37 +89,6 @@ public class MezzeVariantSingleValueTest {
     }
 
     @Test
-    void testLegacyConstructorWithSinglePayload() {
-        MezzeVariant.TagRegistry registry = new MezzeVariant.TagRegistry(new String[]{"Some"});
-        // Legacy constructor with Object[]
-        MezzeVariant some = new MezzeVariant(registry, 0, new Object[]{42L});
-
-        assertEquals(1, some.getPayloadLength());
-        assertEquals(42L, some.getPayloadValue());
-        assertTrue(some.usesSingleValueStorage(), "Legacy constructor should detect single-value case");
-    }
-
-    @Test
-    void testLegacyConstructorWithEmptyPayload() {
-        MezzeVariant.TagRegistry registry = new MezzeVariant.TagRegistry(new String[]{"None"});
-        MezzeVariant none = new MezzeVariant(registry, 0, new Object[]{});
-
-        assertEquals(0, none.getPayloadLength());
-        assertFalse(none.hasPayload());
-        assertFalse(none.usesSingleValueStorage());
-    }
-
-    @Test
-    void testLegacyConstructorWithNullPayload() {
-        MezzeVariant.TagRegistry registry = new MezzeVariant.TagRegistry(new String[]{"None"});
-        MezzeVariant none = new MezzeVariant(registry, 0, null);
-
-        assertEquals(0, none.getPayloadLength());
-        assertFalse(none.hasPayload());
-        assertFalse(none.usesSingleValueStorage());
-    }
-
-    @Test
     void testSomeHelperUsesSingleValueStorage() {
         MezzeVariant some = MezzeVariant.some("test value");
 

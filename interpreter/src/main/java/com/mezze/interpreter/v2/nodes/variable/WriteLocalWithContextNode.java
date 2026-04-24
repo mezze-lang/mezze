@@ -159,11 +159,11 @@ public final class WriteLocalWithContextNode extends MezzeNode {
         if (globalRegistered) return;
 
         MezzeContext context = MezzeContext.get(this);
-        // Register by content hash for precise lookup (if available)
+        // Register by content hash for precise lookup
         if (contentHash != null) {
             context.defineGlobal(contentHash, value);
         }
-        // Also register by variable name for backward compatibility
+        // Also register by variable name for name-based lookups
         context.defineGlobal(variableName, value);
 
         // Mark as registered - after JIT, this makes the if-check a constant false

@@ -125,7 +125,7 @@ public final class NativeDispatch extends MezzeNode {
     /**
      * Check if a function name is a known native function.
      * Called at parse time, not in hot path.
-     * Supports both __native_ (new standard) and native_ (legacy) prefixes.
+     * All native functions use the __native_ prefix.
      */
     public static boolean isNativeFunction(String name) {
         return HANDLERS.containsKey(name) || HANDLERS_WITH_NODE.containsKey(name);
@@ -1816,7 +1816,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_char_to_int", (r, c) ->
             CharNatives.toInt(getString(r, "c")));
         HANDLERS.put("__native_char_to_str", (r, c) ->
-            CharNatives.toString(getString(r, "c")));
+            getString(r, "c"));
         HANDLERS.put("__native_char_is_letter", (r, c) ->
             CharNatives.isLetter(getString(r, "c")));
         HANDLERS.put("__native_char_is_digit", (r, c) ->

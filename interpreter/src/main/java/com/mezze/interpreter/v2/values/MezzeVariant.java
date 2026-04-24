@@ -250,8 +250,9 @@ public final class MezzeVariant implements TruffleObject {
         this.payloadLength = payloadLength;
     }
 
+
     /**
-     * Legacy constructor for compatibility - routes to specialized storage.
+     * Construct a variant from an Object[] payload, routing to specialized storage.
      */
     public MezzeVariant(TagRegistry registry, int tag, Object[] payload) {
         this.registry = registry;
@@ -259,19 +260,16 @@ public final class MezzeVariant implements TruffleObject {
         this.longValue = 0;
         this.doubleValue = 0.0;
         if (payload == null || payload.length == 0) {
-            // No payload
             this.payloadType = PayloadType.NONE;
             this.payload = EMPTY_PAYLOAD;
             this.singleValue = NO_SINGLE_VALUE;
             this.payloadLength = 0;
         } else if (payload.length == 1) {
-            // Single payload - use specialized storage
             this.payloadType = PayloadType.OBJECT;
             this.payload = EMPTY_PAYLOAD;
             this.singleValue = payload[0];
             this.payloadLength = 1;
         } else {
-            // Multi payload - use array
             this.payloadType = PayloadType.MULTI;
             this.payload = payload;
             this.singleValue = NO_SINGLE_VALUE;

@@ -136,8 +136,8 @@ public class NodePerformanceTest {
         );
 
         // Create variants with integer tags
-        MezzeVariant some = new MezzeVariant(optionRegistry, 0, new Object[]{42L}); // Some(42) - tag 0
-        MezzeVariant none = new MezzeVariant(optionRegistry, 1, new Object[0]);      // None - tag 1
+        MezzeVariant some = MezzeVariant.singlePayload(optionRegistry, 0, 42L); // Some(42) - tag 0
+        MezzeVariant none = MezzeVariant.noPayload(optionRegistry, 1);              // None - tag 1
 
         // Verify tag values
         assertEquals(0, some.getTag());

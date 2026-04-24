@@ -46,14 +46,6 @@ public final class MonomorphicCallNode extends MezzeNode {
         this.argumentNode = argumentNode;
     }
 
-    /** Backward compat — ignores isClosureFactory */
-    public MonomorphicCallNode(String functionName, String contentHash, MezzeNode argumentNode, boolean ignored) {
-        this(functionName, contentHash, argumentNode);
-    }
-
-    public MonomorphicCallNode(String functionName, MezzeNode argumentNode) {
-        this(functionName, null, argumentNode);
-    }
 
     // When the hash resolves to an already-evaluated value (not a function),
     // this flag tells execute() to return the cached value directly.

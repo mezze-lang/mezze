@@ -39,10 +39,6 @@ public final class CharNatives {
         return c.charAt(0);
     }
 
-    @TruffleBoundary
-    public static String toString(String c) {
-        return c;
-    }
 
     // ==================== Character Classification ====================
 
@@ -115,14 +111,6 @@ public final class CharNatives {
         return MezzeVariant.none();
     }
 
-    /**
-     * Convert a character to its digit value in base 10.
-     * Legacy overload for backward compatibility.
-     */
-    @TruffleBoundary
-    public static MezzeVariant digitToInt(String c) {
-        return digitToInt(c, 10);
-    }
 
     // ==================== Comparison ====================
 

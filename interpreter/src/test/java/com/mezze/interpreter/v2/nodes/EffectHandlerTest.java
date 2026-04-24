@@ -54,7 +54,7 @@ public class EffectHandlerTest {
         // Body: read the handler slot and return it
         MezzeNode bodyNode = new ReadLocalNode(handlerSlot, ReadLocalNode.KIND_OBJECT);
 
-        HandleNode handleNode = new HandleNode(handlerSlot, new String[0], null, handlerNode, bodyNode);
+        HandleNode handleNode = new HandleNode(handlerSlot, new String[0], null, new String[0], handlerNode, bodyNode, -1, null, null, false, false);
 
         MezzeRootNode root = new MezzeRootNode(null, fd, handleNode, "test-handle", 0, 0, new int[0]);
         CallTarget target = root.getCallTarget();
@@ -95,7 +95,7 @@ public class EffectHandlerTest {
         MezzeNode innerBodyNode = new IntLiteralNode(100);
 
         // Handle with inner handler
-        HandleNode innerHandle = new HandleNode(handlerSlot, new String[0], null, innerHandlerNode, innerBodyNode);
+        HandleNode innerHandle = new HandleNode(handlerSlot, new String[0], null, new String[0], innerHandlerNode, innerBodyNode, -1, null, null, false, false);
 
         // Outer body: do inner handle, then read handler slot
         MezzeNode outerBodyNode = new MezzeNode() {
@@ -115,7 +115,7 @@ public class EffectHandlerTest {
                 new MezzeNode[]{new IntLiteralNode(0)}
         );
 
-        HandleNode outerHandle = new HandleNode(handlerSlot, new String[0], null, outerHandlerNode, outerBodyNode);
+        HandleNode outerHandle = new HandleNode(handlerSlot, new String[0], null, new String[0], outerHandlerNode, outerBodyNode, -1, null, null, false, false);
 
         MezzeRootNode root = new MezzeRootNode(null, fd, outerHandle, "test-restore", 0, 0, new int[0]);
         CallTarget target = root.getCallTarget();
@@ -227,7 +227,7 @@ public class EffectHandlerTest {
             }
         };
 
-        HandleNode handleNode = new HandleNode(handlerSlot, new String[0], null, handlerNode, bodyNode);
+        HandleNode handleNode = new HandleNode(handlerSlot, new String[0], null, new String[0], handlerNode, bodyNode, -1, null, null, false, false);
 
         MezzeRootNode root = new MezzeRootNode(null, fd, handleNode, "test-perf", 0, 0, new int[0]);
         CallTarget target = root.getCallTarget();
@@ -308,8 +308,7 @@ public class EffectHandlerTest {
         MezzeNode handlerNode = new IntLiteralNode(1);
         MezzeNode bodyNode = new IntLiteralNode(2);
 
-        // Use old constructor (backward compatible)
-        HandleNode handleNode = new HandleNode(handlerSlot, new String[]{"Effect"}, "Handler", handlerNode, bodyNode);
+        HandleNode handleNode = new HandleNode(handlerSlot, new String[]{"Effect"}, "Handler", new String[0], handlerNode, bodyNode, -1, null, null, false, false);
 
         assertFalse(handleNode.isScopedEffect(), "Non-scoped handle should report isScopedEffect=false");
         assertEquals(-1, handleNode.getScopeSlot(), "Scope slot should be -1 for non-scoped");

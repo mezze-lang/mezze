@@ -88,10 +88,6 @@ public final class DynamicEffectCallNode extends MezzeNode {
         this.callNode = IndirectCallNode.create();
     }
 
-    /** Constructor without content hash (backward compatibility) */
-    public DynamicEffectCallNode(String effectName, String operationName, MezzeNode argumentNode) {
-        this(effectName, operationName, argumentNode, null);
-    }
 
     @Override
     public Object execute(VirtualFrame frame) {
@@ -289,14 +285,4 @@ public final class DynamicEffectCallNode extends MezzeNode {
         return new DynamicEffectCallNode(effectName, operationName, argumentNode, effectContentHash);
     }
 
-    /**
-     * Create a dynamic effect call node (backward compatible, no content hash).
-     *
-     * @param effectName The effect name (e.g., "Log", "Random")
-     * @param operationName The operation name (e.g., "log", "nextInt")
-     * @param argumentNode The argument expression node
-     */
-    public static DynamicEffectCallNode create(String effectName, String operationName, MezzeNode argumentNode) {
-        return new DynamicEffectCallNode(effectName, operationName, argumentNode, null);
-    }
 }

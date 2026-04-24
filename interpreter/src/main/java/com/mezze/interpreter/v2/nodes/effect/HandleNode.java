@@ -422,20 +422,6 @@ public final class HandleNode extends MezzeNode {
     private IndirectCallNode indirectCallNode;
 
     /**
-     * Standard constructor for non-scoped effects (backward compatible).
-     */
-    public HandleNode(
-            int handlerSlot,
-            String[] effectNames,
-            String handlerName,
-            MezzeNode handlerNode,
-            MezzeNode bodyNode
-    ) {
-        this(handlerSlot, effectNames, handlerName, new String[0], handlerNode, bodyNode,
-             -1, null, null, false, false);
-    }
-
-    /**
      * Full constructor with scoped effect support and content hashes.
      */
     public HandleNode(

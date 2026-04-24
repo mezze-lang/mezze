@@ -87,16 +87,6 @@ public final class StaticAbilityCallNode extends MezzeNode {
             : Assumption.ALWAYS_VALID;
     }
 
-    /**
-     * Create without assumption (legacy compatibility).
-     */
-    public StaticAbilityCallNode(
-            CallTarget callTarget,
-            Object[] closureValues,
-            MezzeNode[] argumentNodes
-    ) {
-        this(callTarget, closureValues, argumentNodes, null);
-    }
 
     private static final Object[] EMPTY_CLOSURE = new Object[0];
 

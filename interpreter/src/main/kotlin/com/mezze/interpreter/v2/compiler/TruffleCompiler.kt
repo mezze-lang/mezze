@@ -156,7 +156,7 @@ class TruffleCompiler(
                     val fnNode = FunctionLookupNode(node.targetHash.hex)
                     TailCallNode.create(fnNode, arrayOf(argNode))
                 } else {
-                    MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, argNode, false)
+                    MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, argNode)
                 }
             }
             is CallLocalIR -> {

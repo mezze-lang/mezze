@@ -15,10 +15,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * Test helper for V2 interpreter tests.
- *
- * Mirrors the V1 MezzeTestHelper API for compatibility,
- * but uses the V2 optimized interpreter.
+ * Test helper for interpreter tests.
  *
  * Usage:
  *   Object result = MezzeTestHelper.run("1 + 2");
