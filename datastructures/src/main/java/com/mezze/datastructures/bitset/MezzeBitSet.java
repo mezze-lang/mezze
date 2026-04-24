@@ -25,9 +25,29 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
     @CompilationFinal
     private final int cardinality;  // Cached count of set bits
 
+    /** COW ownership token for O(1) amortized add chains. */
+    private final Object[] ownerToken;
+
     private MezzeBitSet(long[] words, int cardinality) {
         this.words = words;
         this.cardinality = cardinality;
+        this.ownerToken = null;
+    }
+
+    private MezzeBitSet(long[] words, int cardinality, Object[] ownerToken) {
+        this.words = words;
+        this.cardinality = cardinality;
+        this.ownerToken = ownerToken;
+    }
+
+    private boolean isOwner() {
+        return ownerToken != null && ownerToken[0] == this;
+    }
+
+    private void revokeOwnership() {
+        if (ownerToken != null && ownerToken[0] == this) {
+            ownerToken[0] = null;
+        }
     }
 
     // ===== CONSTRUCTION =====
@@ -142,6 +162,7 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
      * Returns true if the bit at index is set.
      */
     public boolean contains(int index) {
+        revokeOwnership();
         if (index < 0) return false;
         int wordIndex = index >>> 6;
         if (wordIndex >= words.length) return false;
@@ -192,16 +213,24 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
             return this;
         }
 
-        // Need to grow?
-        long[] newWords;
-        if (wordIndex >= words.length) {
-            newWords = Arrays.copyOf(words, wordIndex + 1);
-        } else {
-            newWords = words.clone();
+        if (isOwner() && wordIndex < words.length) {
+            // O(1): bit fits in existing words array — set in-place
+            words[wordIndex] |= mask;
+            var result = new MezzeBitSet(words, cardinality + 1, ownerToken);
+            ownerToken[0] = result;
+            return result;
         }
 
+        // Allocate with spare capacity
+        int newCapacity = Math.max(wordIndex + 1, words.length + Math.max(1, words.length >> 1) + 1);
+        long[] newWords = new long[newCapacity];
+        System.arraycopy(words, 0, newWords, 0, words.length);
         newWords[wordIndex] |= mask;
-        return new MezzeBitSet(newWords, cardinality + 1);
+
+        Object[] token = new Object[1];
+        var result = new MezzeBitSet(newWords, cardinality + 1, token);
+        token[0] = result;
+        return result;
     }
 
     /**
@@ -209,6 +238,7 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
      */
     @TruffleBoundary
     public MezzeBitSet remove(int index) {
+        revokeOwnership();
         if (index < 0 || !contains(index)) {
             return this;
         }
@@ -582,8 +612,11 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
     @Override
     public int hashCode() {
         int result = cardinality;
-        for (long word : words) {
-            result = 31 * result + Long.hashCode(word);
+        // Only hash up to last non-zero word (ignore spare capacity)
+        int len = words.length;
+        while (len > 0 && words[len - 1] == 0) len--;
+        for (int i = 0; i < len; i++) {
+            result = 31 * result + Long.hashCode(words[i]);
         }
         return result;
     }
