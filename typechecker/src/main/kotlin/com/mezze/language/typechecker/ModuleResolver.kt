@@ -11,6 +11,7 @@ import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.hashing.ContentHashComputer
 import com.mezze.language.typechecker.util.StringDistance
+import com.mezze.language.typechecker.util.TypeAnnotationConverter
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.Files
@@ -894,7 +895,7 @@ class ModuleResolver(
                     // Priority: 1) typeContext (inferred), 2) annotation, 3) fresh var
                     val fromContext = typeContext?.get(name)
                     val fromAnnotation = decl.typeAnnotation
-                        ?.let { convertParsedTypeAnnotation(it) }
+                        ?.let { TypeAnnotationConverter.convert(it, faithful = false) }
                     val mezzeType: MezzeType = fromContext ?: fromAnnotation
                         ?: MezzeType.VarType(TypeVar.fresh())
 
@@ -988,8 +989,8 @@ class ModuleResolver(
                     // Also export each operation as a FUNCTION
                     for (op in decl.operations) {
                         val opType: MezzeType = MezzeType.FunctionType(
-                            paramType = convertParsedTypeAnnotation(op.paramType),
-                            returnType = convertParsedTypeAnnotation(op.returnType)
+                            paramType = TypeAnnotationConverter.convert(op.paramType, faithful = false),
+                            returnType = TypeAnnotationConverter.convert(op.returnType, faithful = false)
                         )
                         exports[op.name] = ExportedItem(
                             name = op.name,
@@ -1080,42 +1081,6 @@ class ModuleResolver(
         }
 
         return exports
-    }
-
-    /**
-     * Convert a [ParsedTypeAnnotation] to a [MezzeType].
-     *
-     * Handles the most common surface forms. Falls back to a fresh [TypeVar] for
-     * anything complex that would require full type-checking to resolve.
-     */
-    private fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
-        return when (annotation) {
-            is ParsedNamedType -> {
-                PrimitiveTypes.fromName(annotation.name)?.let { return it }
-                MezzeType.VarType(TypeVar.fresh())
-            }
-            is ParsedFunctionType -> {
-                val effectRow = annotation.effects?.let { row ->
-                    val rowVar = if (row.isPolymorphic) RowVar.fresh() else null
-                    MezzeType.EffectRow.simple(row.effects.toSet(), rowVar, row.isPerformed)
-                }
-                MezzeType.FunctionType(
-                    paramType = convertParsedTypeAnnotation(annotation.paramType),
-                    returnType = convertParsedTypeAnnotation(annotation.returnType),
-                    effects = effectRow
-                )
-            }
-            is ParsedRecordType -> {
-                val fields = annotation.entries.associate { e ->
-                    e.name to convertParsedTypeAnnotation(e.type)
-                }
-                MezzeType.RecordType(fields)
-            }
-            is ParsedSeqType -> MezzeType.SeqType(convertParsedTypeAnnotation(annotation.elementType))
-            is ParsedTypeApp -> MezzeType.VarType(TypeVar.fresh())
-            is ParsedQualifiedType -> MezzeType.VarType(TypeVar.fresh())
-            is ParsedVariantType -> MezzeType.VarType(TypeVar.fresh())
-        }
     }
 
     /**

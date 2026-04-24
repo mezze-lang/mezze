@@ -1073,6 +1073,10 @@ class ContextBuilder {
      * This is the public entry point that clears the type variable cache
      * before conversion to ensure each top-level annotation gets fresh variables.
      */
+    // TODO: Could eventually use TypeAnnotationConverter from util/, but this version does
+    // type declaration lookups (currentTypeDecls, currentEffectDecls, currentAbilityDecls),
+    // hermetic effect validation, content hash resolution, and List/Seq/Set/Map sugar
+    // that require ContextBuilder state not available to the shared utility.
     /**
      * Convert a ParsedTypeAnnotation to MezzeType.
      * This is the primary converter — works directly on v2 types.

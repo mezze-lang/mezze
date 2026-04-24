@@ -33,10 +33,4 @@ object CodebaseLoader {
         return moduleMap
     }
 
-    /**
-     * Load modules map suitable for TypeChecker.preloadModules().
-     */
-    fun loadModulesForTypeChecker(codebase: Codebase): Map<String, com.mezze.language.parsedast.ParsedModule> {
-        return loadAllParsedModules(codebase)
-    }
 }

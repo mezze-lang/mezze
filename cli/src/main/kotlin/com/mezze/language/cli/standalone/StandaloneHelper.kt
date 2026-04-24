@@ -50,24 +50,6 @@ object StandaloneHelper {
         }
     }
 
-    /**
-     * Execute from JSON (legacy format, for backwards compatibility).
-     * Note: v1 Program serialization is dead -- this re-parses via v2 pipeline.
-     */
-    @JvmStatic
-    fun executeFromJson(astJson: String, @Suppress("UNUSED_PARAMETER") modulesJson: String): Any? {
-        // Type-check using v2 pipeline — re-parse the serialized source
-        val typeChecker = TypeChecker()
-        val projectRoot = java.nio.file.Paths.get(".")
-        val parser = com.mezze.language.parser.MezzeParser()
-        val parsedModule = parser.parseParsedModule(astJson, file = "<standalone>")
-        val typeCheckResult = typeChecker.typeCheck(parsedModule, projectRoot)
-        val functions = typeCheckResult.loweredFunctions
-
-        // Execute using full Truffle with JIT optimization
-        return executeTruffleFunctions(functions)
-    }
-
     private fun executeTruffleFunctions(functions: List<FunctionIR>): Any? {
         val engine = Engine.newBuilder()
             .allowExperimentalOptions(true)

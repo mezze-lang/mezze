@@ -6,23 +6,15 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.Visibility as PVisibility
 import com.mezze.language.formatter.Formatter
 import com.mezze.language.ast.prettyPrintType
-import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.typechecker.*
 import com.mezze.language.typechecker.printing.ErrorFormatter
 import org.graalvm.polyglot.PolyglotException
 import com.mezze.language.codebase.CodebaseLoader
 import com.mezze.language.codebase.CodebasePopulator
 import com.mezze.language.codebase.SQLiteCodebase
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.builtins.MapSerializer
-import kotlinx.serialization.builtins.serializer
-import org.graalvm.polyglot.Context
-import org.graalvm.polyglot.Engine
-import org.graalvm.polyglot.Source
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.Base64
 
 /**
  * Flag to track if pre-compiled stdlib has been loaded.
@@ -921,13 +913,6 @@ private fun readStdin(): String {
 
 
 
-// prettyPrintAST and prettyPrintItem removed — v1 Program/ProgramItem types deleted.
-// Use prettyPrintParsedModule for formatted output.
-
-// ============================================================================
-// PARSED AST PRETTY PRINTING
-// ============================================================================
-
 private fun prettyPrintParsedModule(module: ParsedModule): String {
     val sb = StringBuilder()
     sb.appendLine("Module: ${module.path}")
@@ -1527,120 +1512,6 @@ public class Main {
     println("✅ Created Java wrapper (using SQLite codebase)")
 }
 
-private fun copyMezzeLanguageJars(tempDir: File) {
-    val libsDir = File(tempDir, "libs")
-    libsDir.mkdirs()
-
-    // Find the CLI's lib directory by locating where this class is loaded from
-    val cliLocation = object {}.javaClass.protectionDomain.codeSource.location
-    val cliJarOrClassDir = File(cliLocation.toURI())
-
-    // Navigate to the lib directory
-    // For installed CLI: /path/to/mezze/lib/cli-1.0.0.jar -> /path/to/mezze/lib/
-    // For development: /path/to/mezze/cli/build/classes/kotlin/main/ -> /path/to/mezze/cli/build/install/mezze/lib/
-    val cliLibDir = if (cliJarOrClassDir.isFile) {
-        // Running from JAR - lib directory is parent
-        cliJarOrClassDir.parentFile
-    } else {
-        // Running from classes directory (development) - need to find install/mezze/lib
-        var current: File? = cliJarOrClassDir
-        while (current != null && !File(current, "lib").exists()) {
-            current = current.parentFile
-        }
-        File(current ?: cliJarOrClassDir, "lib")
-    }
-
-    if (!cliLibDir.exists() || !cliLibDir.isDirectory) {
-        throw IllegalStateException("Cannot find CLI lib directory at: ${cliLibDir.absolutePath}")
-    }
-
-    // Copy Mezze component JARs from CLI's lib directory
-    val jarsToCP = mapOf(
-        "ast-1.0.0.jar" to "mezze-ast.jar",
-        "interpreter-1.0.0.jar" to "mezze-interpreter.jar",
-        "parser-1.0.0.jar" to "mezze-parser.jar",
-        "typechecker-1.0.0.jar" to "mezze-typechecker.jar"
-    )
-
-    for ((sourceJarName, destJarName) in jarsToCP) {
-        val sourceJar = File(cliLibDir, sourceJarName)
-        if (sourceJar.exists()) {
-            sourceJar.copyTo(File(libsDir, destJarName), overwrite = true)
-            println("📦 Copied $sourceJarName")
-        } else {
-            throw IllegalStateException("Required JAR not found in CLI lib: ${sourceJar.absolutePath}")
-        }
-    }
-
-    // Copy Truffle compiler JAR for JIT optimization
-    val truffleCompilerJar = File(System.getenv("JAVA_HOME") ?: "/", "lib/truffle/truffle-compiler.jar")
-    if (truffleCompilerJar.exists()) {
-        truffleCompilerJar.copyTo(File(libsDir, "truffle-compiler.jar"), overwrite = true)
-        println("📦 Copied Truffle JIT compiler")
-    } else {
-        println("⚠️  Truffle compiler JAR not found - JAR will run in interpreter mode")
-    }
-}
-
-private fun copyStdlib(tempDir: File) {
-    val stdlibDest = File(tempDir, "stdlib")
-    stdlibDest.mkdirs()
-
-    // Try to extract stdlib from embedded resources first (works anywhere)
-    try {
-        val classLoader = Thread.currentThread().contextClassLoader ?: object {}.javaClass.classLoader
-
-        // Read the manifest file generated at build time (lists all stdlib files)
-        val manifestStream = classLoader.getResourceAsStream("stdlib/MANIFEST.txt")
-        if (manifestStream != null) {
-            val stdlibPaths = manifestStream.bufferedReader().readLines()
-                .filter { it.isNotBlank() }
-
-            var copiedCount = 0
-            for (path in stdlibPaths) {
-                val resourcePath = "stdlib/$path"
-                val inputStream = classLoader.getResourceAsStream(resourcePath)
-                if (inputStream != null) {
-                    val destFile = File(stdlibDest, path)
-                    destFile.parentFile?.mkdirs()
-                    destFile.outputStream().use { output ->
-                        inputStream.copyTo(output)
-                    }
-                    copiedCount++
-                }
-            }
-
-            if (copiedCount > 0) {
-                println("Copied stdlib files from embedded resources ($copiedCount files)")
-                return
-            }
-        }
-
-        // If manifest not found or no files copied, print debug info
-        println("Could not find stdlib manifest in JAR, trying filesystem...")
-    } catch (e: Exception) {
-        // Fall back to filesystem if resource extraction fails
-        println("Exception while extracting stdlib: ${e.message}, trying filesystem...")
-    }
-
-    // Fallback: Try to copy from filesystem (for development)
-    val projectRootPath = System.getProperty("mezze.project.root")
-        ?: detectProjectRoot()?.absolutePath
-
-    if (projectRootPath != null) {
-        val projectRoot = File(projectRootPath)
-        val stdlibSource = File(projectRoot, "stdlib")
-        if (stdlibSource.exists()) {
-            stdlibSource.copyRecursively(stdlibDest, overwrite = true)
-            println("Copied stdlib files from filesystem")
-            return
-        }
-    }
-
-    throw IllegalStateException("Cannot find stdlib: not in embedded resources and not on filesystem")
-}
-
-
 /**
  * Build JAR using javac + jar (zero external dependencies!)
  * Only requires GraalVM/Java which is already needed to run the JAR
@@ -1806,13 +1677,6 @@ Enable-Native-Access: ALL-UNNAMED
     println("✅ Built standalone JAR with Truffle runtime (zero external dependencies!)")
 }
 
-// =============================================================================
-// Package-based command handlers
-// =============================================================================
-
-/**
- * Package-based command handlers
- */
 private fun handleDevCommand(args: List<String>) {
     com.mezze.language.cli.commands.DevCommand().execute(args)
 }
@@ -2153,185 +2017,3 @@ private fun levenshteinDistance(s1: String, s2: String): Int {
     return dp[m][n]
 }
 
-private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<String, TypeAliasInfo>) {
-    println("✅ Type checking successful!")
-    println("━".repeat(50))
-
-    val typedModule = result.typedModule
-    if (typedModule == null) {
-        println("(no typed module available)")
-        return
-    }
-
-    // Count different types of items
-    val letBindings = typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
-    val typeDeclarations = typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedTypeDecl>()
-    val effectDeclarations = typedModule.effectDecls
-    val abilityDeclarations = typedModule.abilityDecls
-
-    // Print summary
-    println("📊 Summary:")
-    if (letBindings.isNotEmpty()) println("   ${letBindings.size} variable(s)")
-    if (typeDeclarations.isNotEmpty()) println("   ${typeDeclarations.size} type(s)")
-    if (effectDeclarations.isNotEmpty()) println("   ${effectDeclarations.size} effect(s)")
-    if (abilityDeclarations.isNotEmpty()) println("   ${abilityDeclarations.size} ability(s)")
-    println()
-
-    // Print type declarations first
-    if (typeDeclarations.isNotEmpty()) {
-        println("🏷️  Types:")
-        for (item in typeDeclarations) {
-            println("   ${item.name}")
-        }
-        println()
-    }
-
-    // Print effect declarations
-    if (effectDeclarations.isNotEmpty()) {
-        println("⚡ Effects:")
-        for (item in effectDeclarations) {
-            println("   ${item.name} (${item.operations.size} operations)")
-        }
-        println()
-    }
-
-    // Print variables with better formatting
-    if (letBindings.isNotEmpty()) {
-        println("📝 Variables:")
-        for (item in letBindings) {
-            val typeStr = prettyPrintTypeWithAliases(item.scheme.type, typeAliases, showExpansion = false)
-
-            // Add emoji based on type
-            val emoji = when {
-                typeStr.contains("->") -> "🔧" // Function
-                typeStr.contains("|") -> "🏷️"  // Variant
-                typeStr.contains("{") -> "📦" // Record
-                typeStr == "Int" || typeStr == "Float" || typeStr == "Nat" || typeStr == "Frac" -> "🔢"
-                typeStr == "Str" -> "📝"
-                typeStr == "Bool" -> "✅"
-                else -> "📋"
-            }
-
-            println("   $emoji ${item.name} : $typeStr")
-        }
-    }
-
-    println()
-    println("🎉 All types check out! Your code is ready to run.")
-}
-
-private fun printFileCheckSuccess(result: TypeCheckResult, typeAliases: Map<String, TypeAliasInfo>) {
-    // Print warnings first (before success message)
-    if (result.warnings.isNotEmpty()) {
-        for (warning in result.warnings) {
-            val locationStr = warning.sourceLocation?.let { ":${it.line}:${it.column}" } ?: ""
-            println("⚠️  Warning$locationStr: ${warning.message}")
-        }
-        println()
-    }
-
-    println("Type check passed")
-    println("━".repeat(50))
-
-    val typedModule = result.typedModule
-    if (typedModule == null) {
-        println("(no typed module available)")
-        return
-    }
-
-    // Only print main file bindings
-    val mainBindings = typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
-    val mainTypes = typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedTypeDecl>()
-    val mainEffects = typedModule.effectDecls
-
-    // Print types
-    if (mainTypes.isNotEmpty()) {
-        for (typeDecl in mainTypes) {
-            println("type ${typeDecl.name}")
-        }
-        println()
-    }
-
-    // Print effects
-    if (mainEffects.isNotEmpty()) {
-        for (effectDecl in mainEffects) {
-            println("effect ${effectDecl.name} (${effectDecl.operations.size} operations)")
-        }
-        println()
-    }
-
-    // Print bindings
-    for (binding in mainBindings) {
-        val typeStr = prettyPrintTypeWithAliases(binding.scheme.type, typeAliases, showExpansion = false)
-        println("${binding.name} : $typeStr")
-    }
-}
-
-/**
- * Pretty print a V2 interpreter result.
- * V2 returns native Java types (Long, Double, Boolean, String) and V2-specific value types.
- */
-private fun prettyPrintV2Result(result: Any?): String {
-    return when (result) {
-        null -> "null"
-        is com.mezze.interpreter.v2.values.MezzeUnit -> "()"
-        is Long -> result.toString()
-        is Double -> result.toString()
-        is Boolean -> result.toString()
-        is String -> "\"$result\""
-        is com.mezze.interpreter.v2.values.MezzeVariant -> {
-            val constructorName = result.constructorName
-            if (result.hasPayload()) {
-                val payloadValue = result.payloadValue
-                if (payloadValue is com.mezze.interpreter.v2.values.MezzeRecord) {
-                    "$constructorName ${prettyPrintV2Result(payloadValue)}"
-                } else {
-                    "$constructorName(${prettyPrintV2Result(payloadValue)})"
-                }
-            } else {
-                constructorName
-            }
-        }
-        is com.mezze.interpreter.v2.values.MezzeRecord -> {
-            val shape = result.shape
-            val fields = (0 until shape.fieldCount).map { i ->
-                val fieldName = shape.getFieldName(i)
-                val fieldValue = result.getField(i)
-                "$fieldName = ${prettyPrintV2Result(fieldValue)}"
-            }
-            "{ ${fields.joinToString(", ")} }"
-        }
-        is com.mezze.datastructures.list.MezzeList<*> -> {
-            val elements = (0 until result.size()).map { i ->
-                prettyPrintV2Result(result[i])
-            }
-            "[${elements.joinToString(", ")}]"
-        }
-        is com.mezze.interpreter.v2.values.MezzeFunction -> "<function:${result.name}>"
-        else -> result.toString()
-    }
-}
-
-/**
- * Format a type check error with source location and code snippet.
- * This provides better error messages that help users locate and fix issues.
- */
-private fun formatTypeCheckError(
-    error: TypeChecker.TypeCheckError,
-    sourceCode: String?,
-    fileName: String?
-): String {
-    return SourceContext.formatError(
-        errorType = "Type Error",
-        message = error.message,
-        location = error.sourceLocation?.let { loc ->
-            // Add filename to location if not already present
-            if (loc.file == null && fileName != null) {
-                com.mezze.language.ast.SourceLocation(loc.line, loc.column, fileName)
-            } else {
-                loc
-            }
-        },
-        sourceCode = sourceCode
-    )
-}

@@ -1,6 +1,5 @@
 package com.mezze.language.cli
 
-import com.mezze.language.ast.hashing.MezzeHash
 import com.mezze.language.codebase.CodebaseManager
 import com.mezze.language.codebase.SQLiteCodebase
 import com.mezze.language.parser.MezzeParser
@@ -49,14 +48,6 @@ class CachedParser(
         }
 
     /**
-     * Statistics for debugging/optimization.
-     */
-    var cacheHits = 0
-        private set
-    var cacheMisses = 0
-        private set
-
-    /**
      * Parse a file, using cache if available.
      *
      * @param file The source file to parse
@@ -75,7 +66,6 @@ class CachedParser(
      * @return The parsed ParsedModule
      */
     fun parseSource(source: String, filePath: String? = null): ParsedModule {
-        cacheMisses++
         return parser.parseParsedModule(source, file = filePath ?: "<unknown>")
     }
 

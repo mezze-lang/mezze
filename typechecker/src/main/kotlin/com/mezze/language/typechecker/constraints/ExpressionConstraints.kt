@@ -4370,6 +4370,10 @@ class ExpressionConstraintGenerator {
         }
     }
 
+    // TODO: Could eventually use TypeAnnotationConverter from util/, but this version does
+    // import resolution, hermetic effect validation via ContextBuilder.validateHermeticEffects,
+    // open row vars on records/variants, typeName on inline variants, and collection type
+    // sugar (Seq/List/Set/Map) that require constraint context not available to the shared utility.
     /**
      * Convert a ParsedTypeAnnotation to a MezzeType.
      *

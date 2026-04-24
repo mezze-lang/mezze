@@ -20,10 +20,6 @@ object CodebaseSerialization {
         encodeDefaults = false  // Skip null/default values for smaller output
     }
 
-    // ========================================================================
-    // TYPE SERIALIZATION
-    // ========================================================================
-
     /**
      * Serialize a MezzeType to CBOR bytes.
      */
@@ -38,10 +34,6 @@ object CodebaseSerialization {
         return cbor.decodeFromByteArray(MezzeType.serializer(), bytes)
     }
 
-    // ========================================================================
-    // V2 TYPED MODULE SERIALIZATION
-    // ========================================================================
-
     /**
      * Serialize a v2 TypedModule to CBOR bytes.
      */
@@ -55,10 +47,6 @@ object CodebaseSerialization {
     fun deserializeTypedModule(bytes: ByteArray): com.mezze.language.typedast.TypedModule {
         return cbor.decodeFromByteArray(bytes)
     }
-
-    // ========================================================================
-    // TRUFFLE IR SERIALIZATION
-    // ========================================================================
 
     /**
      * Serialize a FunctionIR to CBOR bytes.

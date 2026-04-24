@@ -1361,6 +1361,10 @@ class TypedAstBuilder(
         return null
     }
 
+    // TODO: Could eventually use TypeAnnotationConverter from util/, but this version has
+    // special Unit handling ("Unit" -> empty RecordType), uppercase -> TypeApp logic,
+    // instance-level typeVarCache, open row vars, and associatedTypeBindings on ability
+    // constraints that are specific to typed AST emission.
     /**
      * Convert a ParsedTypeAnnotation to MezzeType.
      *
