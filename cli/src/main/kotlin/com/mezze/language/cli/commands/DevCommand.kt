@@ -3,6 +3,8 @@ package com.mezze.language.cli.commands
 import com.akuleshov7.ktoml.Toml
 import com.mezze.language.cli.`package`.MezzeToml
 
+import com.mezze.language.codebase.SQLiteMezzeStore
+import com.mezze.language.codebase.StorePopulator
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
@@ -10,13 +12,17 @@ import com.mezze.language.typechecker.printing.ErrorFormatter
 import com.mezze.language.ast.*
 import com.mezze.language.typedast.TypedLetDecl
 import java.io.File
+import java.security.MessageDigest
 
 /**
- * Handle `mezze dev` command to execute apps from Mezze.toml
+ * Handle `mez dev` command — incremental compile + execute.
  *
- * Usage:
- *   mezze dev              # Run default app (first [[app]])
- *   mezze dev --app server # Run specific app by name
+ * Flow:
+ * 1. Read Mezze.toml → find app entry file
+ * 2. Open .mz/cache.sqlite
+ * 3. Check staleness (source hash vs stored hash)
+ * 4. If stale: parse → typecheck → lower → scatter into store
+ * 5. Execute via Truffle
  */
 class DevCommand {
 
@@ -24,12 +30,9 @@ class DevCommand {
         val mezzeToml = File(currentDir, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
-            println("❌ Error: No Mezze.toml found in current directory")
+            println("Error: No Mezze.toml found in current directory")
             println()
-            println("This doesn't look like a Mezze package.")
-            println("Location: ${currentDir.absolutePath}")
-            println()
-            println("💡 Run 'mezze init' to create a new package, or use 'mezze exec <file>' for file-based execution.")
+            println("Run 'mez init' to create a new project, or use 'mez exec <file>' for single-file execution.")
             return
         }
 
@@ -38,27 +41,17 @@ class DevCommand {
         val manifest = try {
             Toml.decodeFromString(MezzeToml.serializer(), tomlContent)
         } catch (e: Exception) {
-            println("❌ Error: Failed to parse Mezze.toml")
-            println()
-            println("The manifest file has invalid TOML syntax.")
-            println("Error: ${e.message}")
-            println()
-            println("💡 Check the syntax of your Mezze.toml file.")
+            println("Error: Failed to parse Mezze.toml: ${e.message}")
             return
         }
 
-        // Check if package has any apps
         if (manifest.app == null || manifest.app.isEmpty()) {
-            println("❌ Error: No apps defined in Mezze.toml")
+            println("Error: No [[app]] entries in Mezze.toml")
             println()
-            println("This package has no [[app]] entries.")
-            println()
-            println("💡 Add an app to your Mezze.toml:")
-            println("   [[app]]")
-            println("   name = \"${manifest.`package`.name}\"")
-            println("   path = \"src/app.mz\"")
-            println()
-            println("   Or use 'mezze exec <file>' for file-based execution.")
+            println("Add an app:")
+            println("  [[app]]")
+            println("  name = \"${manifest.`package`.name}\"")
+            println("  path = \"src/app.mz\"")
             return
         }
 
@@ -67,169 +60,134 @@ class DevCommand {
             ?: args.getOrNull(args.indexOf("--app") + 1)?.takeIf { !it.startsWith("--") }
 
         val appConfig = if (appName != null) {
-            // Find app by name
             manifest.app.find { it.name == appName } ?: run {
-                println("❌ Error: App '$appName' not found in Mezze.toml")
-                println()
-                println("Available apps:")
-                manifest.app.forEach { app ->
-                    println("  - ${app.name} (${app.path})")
-                }
+                println("Error: App '$appName' not found. Available: ${manifest.app.map { it.name }}")
                 return
             }
         } else {
-            // Use first app
             manifest.app.first()
         }
 
-        println("🚀 Running app: ${appConfig.name}")
-        println()
-
-        // Resolve app file path
         val appFile = File(currentDir, appConfig.path)
         if (!appFile.exists()) {
-            println("❌ Error: App file not found")
-            println()
-            println("Expected: ${appFile.absolutePath}")
-            println("Configured in Mezze.toml: [[app]] path = \"${appConfig.path}\"")
-            println()
-            println("💡 Check that the path in your Mezze.toml is correct.")
+            println("Error: App file not found: ${appFile.absolutePath}")
             return
         }
 
-        // Read source
-        val source = appFile.readText()
+        // Open project store
+        val store = SQLiteMezzeStore.forProject(currentDir)
 
-        // Parse and type-check
-        val parser = MezzeParser()
-        val fileName = appFile.name
-        val ast = try {
-            parser.parseParsedModule(source, file = fileName)
-        } catch (e: com.mezze.language.parser.ParseException) {
-            println("❌ Parse Error")
-            println("━".repeat(50))
-            println(e.message)
-            kotlin.system.exitProcess(1)
-        }
-
-        val typeChecker = TypeChecker()
-        val typeCheckResult = try {
-            typeChecker.typeCheck(ast, currentDir.toPath())
-        } catch (e: TypeCheckError) {
-            println(ErrorFormatter.format(e, source))
-            kotlin.system.exitProcess(1)
-        }
-
-        // TODO: Populate MezzeStore from typecheck result (#99)
-
-        // Check if program has a 'main' function and auto-call it
-        val mainBinding = typeCheckResult.typedModule?.decls
-            ?.filterIsInstance<TypedLetDecl>()
-            ?.find { it.name == "main" }
-
-        if (mainBinding == null) {
-            println("❌ Error: App must have a 'main' function")
-            println()
-            println("File: ${appFile.absolutePath}")
-            println()
-            println("💡 Apps must define a main function with type {} -> {}")
-            println()
-            println("Example:")
-            println("  use std::effects::log::{println, Log, Console}")
-            println()
-            println("  let main = {} -> perform Console in do")
-            println("    println { msg = \"Hello from ${appConfig.name}!\" }")
-            kotlin.system.exitProcess(1)
-        }
-
-        // Validate main has type {} -> {}
-        val mainType = mainBinding.scheme.type
-        val isValidMainType = mainType is MezzeType.FunctionType &&
-                              mainType.paramType is MezzeType.RecordType &&
-                              (mainType.paramType as MezzeType.RecordType).fields.isEmpty() &&
-                              !(mainType.paramType as MezzeType.RecordType).isOpen &&
-                              mainType.returnType is MezzeType.RecordType &&
-                              (mainType.returnType as MezzeType.RecordType).fields.isEmpty() &&
-                              !(mainType.returnType as MezzeType.RecordType).isOpen
-
-        if (!isValidMainType) {
-            println("❌ Type Error: 'main' must have type {} -> {}")
-            println("━".repeat(50))
-            println("Expected: {} -> {}")
-            println("Actual:   ${prettyPrintType(mainType)}")
-            println()
-            println("💡 The main function must:")
-            println("   - Take no arguments: {}")
-            println("   - Return nothing: {}")
-            println("   - Perform side effects (like printing) instead of returning values")
-            kotlin.system.exitProcess(1)
-        }
-
-        // Check if user is manually calling main (warn them)
-        // v1 Expression types have been deleted; detect via ParsedModule instead
-        val hasManualMainCall = ast.decls.filterIsInstance<com.mezze.language.parsedast.ParsedTopLevelExpr>().any { tle ->
-            val expr = tle.expression
-            expr is com.mezze.language.parsedast.ParsedFunctionCall &&
-            expr.function is com.mezze.language.parsedast.ParsedIdentifier &&
-            (expr.function as com.mezze.language.parsedast.ParsedIdentifier).localName == "main"
-        }
-
-        if (hasManualMainCall) {
-            println("⚠️  Warning: Manual call to 'main' detected")
-            println()
-            println("You have a 'main {}' call in your code, but 'mezze dev' automatically")
-            println("calls main for you. This will cause main to run twice!")
-            println()
-            println("💡 Remove the manual 'main {}' call from your code.")
-            println()
-        }
-
-        // Use TruffleIR (loweredFunctions) — all modules are already included via monomorphization.
-        // The compileFromIR path finds "main" and executes its body directly,
-        // so no need to append a main() call.
-        val functions = typeCheckResult.loweredFunctions
-
-        // Execute using V2 interpreter with TruffleIR
         try {
-            System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
-            System.setProperty("polyglot.log.level", "OFF")
+            val totalStart = System.nanoTime()
 
-            // Set up V2 context
-            val context = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.v2.runtime.MezzeLanguage.ID)
-                .allowAllAccess(true)
-                .allowCreateThread(true)
-                .build()
+            // Read source and check staleness
+            val source = appFile.readText()
+            val sourceHash = sha256(source)
+            val filePath = appFile.absolutePath
+            val modulePath = manifest.`package`.name
 
-            try {
-                // Store TruffleIR functions for direct execution (bypasses parsing)
-                com.mezze.interpreter.v2.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, currentDir.toPath())
+            val stale = store.isFileStale(filePath, sourceHash)
 
-                // Create a dummy source to trigger MezzeLanguage.parse()
-                val source = org.graalvm.polyglot.Source.newBuilder(
-                    com.mezze.interpreter.v2.runtime.MezzeLanguage.ID,
-                    "# Direct TruffleIR execution",
-                    "__direct_execution__.mz"
-                ).buildLiteral()
+            val functions: List<com.mezze.language.truffleir.FunctionIR>
+            val typeCheckResult: com.mezze.language.typechecker.TypeCheckResult
 
-                // Execute via polyglot API
-                context.eval(source)
-            } finally {
-                // Use cancelIfExecuting=true for Go/Rust-style semantics:
-                // When main exits, any fire-and-forget tasks (unawaited spawns) are cancelled.
-                // This matches Go (goroutines die when main exits) and Rust (tokio tasks cancelled).
-                // See: https://www.graalvm.org/truffle/javadoc/org/graalvm/polyglot/Context.html
-                context.close(true)
+            if (stale) {
+                // Compile: parse → typecheck → lower
+                val parser = MezzeParser()
+                val ast = try {
+                    parser.parseParsedModule(source, file = appFile.name)
+                } catch (e: com.mezze.language.parser.ParseException) {
+                    println("Parse Error: ${e.message}")
+                    kotlin.system.exitProcess(3)
+                }
+
+                val typeChecker = TypeChecker()
+                typeCheckResult = try {
+                    typeChecker.typeCheck(ast, currentDir.toPath())
+                } catch (e: TypeCheckError) {
+                    println(ErrorFormatter.format(e, source))
+                    kotlin.system.exitProcess(4)
+                }
+
+                functions = typeCheckResult.loweredFunctions
+
+                // Scatter into store
+                StorePopulator.populate(store, typeCheckResult, modulePath, filePath, sourceHash)
+            } else {
+                // Fresh — still need to typecheck for execution (functions aren't in store yet as CallTargets)
+                // TODO: When MezzeExecutor is wired to load IR from store directly,
+                // this path can skip typechecking entirely and just load cached FunctionIRs.
+                val parser = MezzeParser()
+                val ast = parser.parseParsedModule(source, file = appFile.name)
+                val typeChecker = TypeChecker()
+                typeCheckResult = try {
+                    typeChecker.typeCheck(ast, currentDir.toPath())
+                } catch (e: TypeCheckError) {
+                    println(ErrorFormatter.format(e, source))
+                    kotlin.system.exitProcess(4)
+                }
+                functions = typeCheckResult.loweredFunctions
             }
 
-            // Execution completed silently
+            // Validate main function exists
+            val mainBinding = typeCheckResult.typedModule?.decls
+                ?.filterIsInstance<TypedLetDecl>()
+                ?.find { it.name == "main" }
+
+            if (mainBinding == null) {
+                println("Error: App must define a 'main' function with type {} -> {}")
+                kotlin.system.exitProcess(4)
+            }
+
+            // Execute via Truffle
+            executeWithTruffle(functions, typeCheckResult.performerRecords, currentDir)
+
+            val totalTime = (System.nanoTime() - totalStart) / 1_000_000
+            if (System.getenv("MEZZE_TIMING") != null) {
+                System.err.println("Total: ${totalTime}ms (${if (stale) "recompiled" else "cached"})")
+            }
+
         } catch (e: org.graalvm.polyglot.PolyglotException) {
-            println("❌ Runtime Error:")
-            println(e.message ?: "Unknown runtime error")
-            kotlin.system.exitProcess(1)
+            println("Runtime Error: ${e.message}")
+            kotlin.system.exitProcess(5)
         } catch (e: Exception) {
-            println("❌ Error:")
-            println(e.message ?: "Unknown error")
+            println("Error: ${e.message}")
             kotlin.system.exitProcess(1)
+        } finally {
+            store.close()
         }
+    }
+
+    private fun executeWithTruffle(
+        functions: List<com.mezze.language.truffleir.FunctionIR>,
+        performerRecords: List<Array<String>>,
+        projectDir: File
+    ) {
+        System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
+        System.setProperty("polyglot.log.level", "OFF")
+
+        val context = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.v2.runtime.MezzeLanguage.ID)
+            .allowAllAccess(true)
+            .allowCreateThread(true)
+            .build()
+
+        try {
+            com.mezze.interpreter.v2.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, performerRecords, projectDir.toPath())
+
+            val source = org.graalvm.polyglot.Source.newBuilder(
+                com.mezze.interpreter.v2.runtime.MezzeLanguage.ID,
+                "# Direct TruffleIR execution",
+                "__direct_execution__.mz"
+            ).buildLiteral()
+
+            context.eval(source)
+        } finally {
+            context.close(true)
+        }
+    }
+
+    private fun sha256(content: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 }
