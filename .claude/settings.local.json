@@ -94,6 +94,7 @@
       "WebFetch(domain:wiremock.org)",
       "Bash(/Users/shriyans/Projects/funk/cli/build/install/mez/bin/mez dev:*)",
       "Bash(mez run:*)",
+<<<<<<< Updated upstream
       "Bash(mez dev)",
       "Bash(./cli/build/install/cli/bin/mezze run:*)",
       "Bash(/bin/ls:*)",
@@ -351,6 +352,12 @@
       "WebFetch(domain:deepwiki.com)",
       "Bash(node:*)",
       "Bash(:)"
+=======
+      "Bash(mez exec:*)",
+      "Bash(/Users/shriyans/Projects/funk/cli/build/install/mez/bin/mez exec:*)",
+      "Bash(do grep -l \"TypeCheckResult\" \"$f\")",
+      "Bash(/Users/shriyans/Projects/funk/cli/build/install/mez/bin/mez dev:*)"
+>>>>>>> Stashed changes
     ],
     "deny": [],
     "ask": []
