@@ -12,9 +12,6 @@ data class ParsedModule(
     val orphanComments: List<ParsedComment> = emptyList()
 )
 
-// ============================================================================
-// DECLARATIONS
-// ============================================================================
 
 /**
  * All top-level declarations.
@@ -33,9 +30,6 @@ sealed interface ParsedDecl {
     val trailingComment: ParsedComment?
 }
 
-// ============================================================================
-// LET BINDINGS
-// ============================================================================
 
 /**
  * Let binding: `let x = expr` / `pub let x: Type = expr`
@@ -60,9 +54,6 @@ data class ParsedLetDecl(
     val variableName: String get() = (pattern as ParsedVariablePattern).name
 }
 
-// ============================================================================
-// TYPE DECLARATIONS
-// ============================================================================
 
 /**
  * Type declaration: `type X = ...` / `pub type X 'a = ...`
@@ -129,9 +120,6 @@ data class ParsedNewtypeDef(
     override val loc: Loc
 ) : ParsedTypeDef
 
-// ============================================================================
-// ABILITY DECLARATIONS
-// ============================================================================
 
 /**
  * Ability declaration: `ability Eq for 'a where { ... }`
@@ -174,9 +162,6 @@ data class ParsedAbilityOp(
     val loc: Loc
 )
 
-// ============================================================================
-// ABILITY IMPLEMENTATIONS
-// ============================================================================
 
 /**
  * The target of an impl block — named ability or inherent.
@@ -258,9 +243,6 @@ data class ParsedImplOp(
     val loc: Loc
 )
 
-// ============================================================================
-// EFFECT DECLARATIONS
-// ============================================================================
 
 /**
  * Effect declaration: `effect FileSystem where { ... }`
@@ -295,9 +277,6 @@ data class ParsedEffectOp(
     val loc: Loc
 )
 
-// ============================================================================
-// PERFORMER (EFFECT IMPLEMENTATION)
-// ============================================================================
 
 /**
  * Performer declaration: `impl FileSystem for LocalDisk where { ... }`
@@ -338,9 +317,6 @@ data class ParsedPerformerOp(
     val loc: Loc
 )
 
-// ============================================================================
-// MODULE SYSTEM
-// ============================================================================
 
 /** Use declaration: `use std::int` / `use std::int::{add, multiply}` */
 @Serializable
@@ -364,9 +340,6 @@ data class ParsedPubUseDecl(
     override val loc: Loc
 ) : ParsedDecl
 
-// ============================================================================
-// TOP-LEVEL EXPRESSION
-// ============================================================================
 
 /** Bare expression at the top level of a module. */
 @Serializable

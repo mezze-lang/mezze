@@ -9,12 +9,7 @@ import kotlinx.serialization.Serializable
  * Computed from the content (structure, types, body) of a definition.
  * NOT from its name or file path.
  * Two definitions with identical content have identical hashes.
- */
-/**
- * Content hash — the universal identifier for definitions.
- *
- * During migration, accepts hashes of varying lengths (v1 uses SHA3-512 = 128 hex,
- * display format is 32 hex). Eventually standardize on SHA3-256 = 64 hex.
+ * Accepts hashes of varying lengths for compatibility across pipeline stages.
  */
 @JvmInline
 @Serializable

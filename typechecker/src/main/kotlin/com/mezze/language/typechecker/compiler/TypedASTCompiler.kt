@@ -5,7 +5,6 @@ import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.MezzeType.*
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.parsedast.Loc
-import com.mezze.language.resolvedast.SlotKind
 import com.mezze.language.truffleir.*
 import com.mezze.language.typedast.*
 

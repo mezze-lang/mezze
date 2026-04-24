@@ -18,9 +18,6 @@ import kotlinx.serialization.json.JsonClassDiscriminator
  * - UsePath: Module system import paths
  */
 
-// ============================================================================
-// TYPE VARIABLES
-// ============================================================================
 
 /**
  * Type variables for polymorphic type inference.
@@ -158,9 +155,6 @@ data class RowVar(val name: String) {
     fun isUserSpecified(): Boolean = name.startsWith("userOpen_")
 }
 
-// ============================================================================
-// SOURCE LOCATION TRACKING
-// ============================================================================
 
 /**
  * Source location for error reporting.
@@ -178,27 +172,10 @@ data class SourceLocation(
     override fun toString(): String = if (file != null) "$file:$line:$column" else "$line:$column"
 }
 
-// ============================================================================
-// SYNTAX METADATA (Not part of AST, not part of content hash)
-// ============================================================================
 
 /**
- * Tracks syntax metadata for desugared constructs to improve error messages.
- *
- * This is NOT part of the AST and NOT included in content hashing.
- * It's used solely to provide better error messages by remembering the
- * original syntax that was desugared during parsing.
- *
- * For example:
- * - User writes: `-x`
- * - Parser desugars to: `NumSub.neg {n = x}`
- * - Metadata records: "This came from operator `-`"
- * - Error messages can say: "Type error in operator `-`" instead of "Type error in call to NumSub.neg"
- *
- * ## Thread Safety
- *
- * **THREAD-SAFE**: Uses ThreadLocal storage so each thread has its own metadata map.
- * This allows parallel parsing of multiple files without race conditions.
+ * Thread-local metadata tracking desugared operator syntax for better error messages.
+ * NOT part of the AST or content hash.
  */
 object SyntaxMetadata {
     // Each thread gets its own metadata map - prevents race conditions
@@ -245,18 +222,11 @@ object SyntaxMetadata {
     }
 }
 
-// ============================================================================
-// MODULE SYSTEM
-// ============================================================================
 
 /**
- * Visibility modifier for declarations.
+ * Typealias to the canonical Visibility enum in parsedast.Loc.
  */
-@Serializable
-enum class Visibility {
-    PUBLIC,    // pub - visible to other modules
-    PRIVATE    // default - only visible within module
-}
+typealias Visibility = com.mezze.language.parsedast.Visibility
 
 /**
  * Use path types for import declarations.
@@ -360,31 +330,9 @@ data class ImportItem(
     val needsRuntimeBinding: Boolean get() = kind == ImportItemKind.VALUE
 }
 
-// ============================================================================
-// QUALIFIED REFERENCES
-// ============================================================================
 
 /**
- * A binding key for looking up imported items.
- *
- * This replaces the old pattern of using `"$alias::$name"` string concatenation.
- * The key consists of a qualifier (module alias or path) and a local name.
- *
- * ## Design Principle
- *
- * Binding keys should be compared structurally, not as strings.
- * The `toKeyString()` method produces a stable string key for map lookups,
- * but the `::` in that string is an implementation detail of the key format.
- *
- * ## Examples
- *
- * ```kotlin
- * // Qualified key for "log::info"
- * val key1 = BindingKey(qualifier = "log", localName = "info")
- *
- * // Unqualified key for "info"
- * val key2 = BindingKey.unqualified("info")
- * ```
+ * A binding key for looking up imported items: qualifier (module alias) + local name.
  */
 @Serializable
 data class BindingKey(
@@ -446,9 +394,6 @@ data class BindingKey(
     }
 }
 
-// ============================================================================
-// LANGUAGE KEYWORDS
-// ============================================================================
 
 /**
  * Language keyword constants shared across parser, typechecker, and interpreter.
@@ -464,36 +409,8 @@ object Keywords {
 
 /**
  * A qualified reference to a named item (effect, ability, performer, etc.).
- *
- * This is the canonical way to represent references that may be qualified
- * with a module path (e.g., `log::Console` or just `Console`).
- *
- * ## Design Principle
- *
- * The `::` syntax is a parsing concern only. After parsing, all qualified
- * references are represented as structured `QualifiedRef` objects. No code
- * outside the parser should construct or parse `::` strings.
- *
- * ## Resolution Flow
- *
- * 1. Parser produces QualifiedRef(qualifier=["log"], localName="Console")
- * 2. Import resolver resolves qualifier to find the module
- * 3. TypeChecker looks up localName in the module's exports
- * 4. TypeChecker populates resolvedContentHash
- * 5. Interpreter uses resolvedContentHash for O(1) lookup
- *
- * ## Examples
- *
- * ```mezze
- * use std::effects::log
- *
- * # Qualified reference - qualifier=["log"], localName="Console"
- * perform log::Console in log::info {msg = "hello"}
- *
- * # Unqualified reference - qualifier=null, localName="Console"
- * use std::effects::log::{Console}
- * perform Console in info {msg = "hello"}
- * ```
+ * May include a module qualifier (e.g., `log::Console`) or be unqualified (`Console`).
+ * The typechecker populates `resolvedContentHash` for O(1) runtime lookup.
  */
 @Serializable
 data class QualifiedRef(

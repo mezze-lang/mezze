@@ -1,6 +1,5 @@
 package com.mezze.language.truffleir
 
-import com.mezze.language.resolvedast.SlotKind
 import com.mezze.language.typedast.Hash
 import kotlinx.serialization.Serializable
 
@@ -13,9 +12,10 @@ import kotlinx.serialization.Serializable
  * This is what gets serialized to SQLite and read by TruffleCompiler.
  */
 
-// ============================================================================
-// SOURCE INFO (compact — file index instead of file path)
-// ============================================================================
+@Serializable
+enum class SlotKind {
+    LONG, DOUBLE, BOOLEAN, OBJECT
+}
 
 @Serializable
 data class SourceInfo(
@@ -31,9 +31,6 @@ data class FileTable(
     val files: List<String>
 )
 
-// ============================================================================
-// FUNCTION IR
-// ============================================================================
 
 @Serializable
 data class FunctionIR(
@@ -53,9 +50,6 @@ data class FunctionIR(
     val returnType: String? = null
 )
 
-// ============================================================================
-// IR NODES — minimal, with source info
-// ============================================================================
 
 @Serializable
 sealed interface NodeIR {

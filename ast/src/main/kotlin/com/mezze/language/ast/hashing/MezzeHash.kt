@@ -4,40 +4,11 @@ import kotlinx.serialization.Serializable
 import java.security.MessageDigest
 
 /**
- * Content-addressable hash for Mezze definitions.
+ * Content-addressable SHA3-512 hash for Mezze definitions.
  *
- * MezzeHash is a cryptographic identifier derived from the structural content of a definition.
- * Two definitions with identical structure (after normalization) produce the same hash,
- * regardless of their names, source locations, or comments.
- *
- * ## Hash Properties
- *
- * - **Deterministic**: Same structure always produces same hash
- * - **Collision-resistant**: SHA3-512 provides ~2^256 security bits
- * - **Alpha-invariant**: Internal variable names don't affect the hash
- * - **Structure-sensitive**: Different structure = different hash
- *
- * ## What Affects the Hash
- *
- * Included:
- * - Expression structure (function body, etc.)
- * - Type structure (parameter types, return types, effects)
- * - Ability constraints
- * - Dependencies (hashes of referenced definitions)
- *
- * Excluded:
- * - Definition names (top-level and internal let/match bindings)
- * - Source locations
- * - Comments and documentation
- * - Inferred types (only structure matters)
- *
- * ## Mezze-Specific Consideration
- *
- * In Mezze, function parameters are record fields (named parameters).
- * Parameter names ARE part of the API, so `{x, y} -> x + y` and `{a, b} -> a + b`
- * have DIFFERENT hashes. Only internal bindings (let, match) are alpha-renamed.
- *
- * @property bytes The raw SHA3-512 hash bytes (64 bytes)
+ * Deterministic, collision-resistant, alpha-invariant (for internal bindings),
+ * and structure-sensitive. Parameter names ARE part of the hash because they
+ * are API in Mezze's named-parameter model.
  */
 @Serializable
 @ConsistentCopyVisibility
@@ -56,16 +27,6 @@ data class MezzeHash private constructor(
      */
     override fun toString(): String {
         return "#" + bytes.take(DISPLAY_BYTES).joinToString("") {
-            String.format("%02x", it)
-        }
-    }
-
-    /**
-     * Short display format for compact output (first 8 bytes = 16 hex chars).
-     * Example: #a7f9e2c8b1d4a6f3
-     */
-    fun toShortString(): String {
-        return "#" + bytes.take(SHORT_DISPLAY_BYTES).joinToString("") {
             String.format("%02x", it)
         }
     }
@@ -101,8 +62,6 @@ data class MezzeHash private constructor(
         const val SHORT_DISPLAY_BYTES = 8
 
         private val sha3: ThreadLocal<MessageDigest> = ThreadLocal.withInitial {
-            // SHA3-512 is available in Java 9+
-            // For Java 8 compatibility, you might need Bouncy Castle
             try {
                 MessageDigest.getInstance("SHA3-512")
             } catch (e: Exception) {
@@ -157,28 +116,6 @@ data class MezzeHash private constructor(
         }
 
         /**
-         * Combine multiple hashes into one (for dependency hashing).
-         * Used when a definition depends on other definitions.
-         */
-        fun combine(hashes: List<MezzeHash>): MezzeHash {
-            if (hashes.isEmpty()) {
-                return fromBytes(ByteArray(0))
-            }
-
-            val digest = sha3.get()
-            digest.reset()
-
-            // Include count to distinguish [a, b] from [ab]
-            digest.update(hashes.size.toBigInteger().toByteArray())
-
-            for (hash in hashes) {
-                digest.update(hash.bytes)
-            }
-
-            return MezzeHash(digest.digest())
-        }
-
-        /**
          * Derive a content hash for an individual ability impl operation.
          * Hash(implHash || operationName)
          */
@@ -199,11 +136,6 @@ data class MezzeHash private constructor(
             return builder.build().toString()
         }
 
-        /**
-         * Null hash for cases where hashing is not yet performed.
-         * This is a sentinel value, not a valid content hash.
-         */
-        val NULL = MezzeHash(ByteArray(HASH_SIZE_BYTES))
     }
 }
 
@@ -294,71 +226,10 @@ class MezzeHashBuilder {
     }
 
     /**
-     * Append a list of hashes (sorted for determinism).
-     */
-    fun appendDependencies(hashes: List<MezzeHash>): MezzeHashBuilder {
-        appendInt(hashes.size)
-        // Sort by hash bytes to ensure deterministic ordering
-        val sorted = hashes.sortedBy { it.toFullHexString() }
-        for (hash in sorted) {
-            append(hash)
-        }
-        return this
-    }
-
-    /**
-     * Append a nullable value with a tag.
-     */
-    fun <T> appendNullable(value: T?, appender: MezzeHashBuilder.(T) -> Unit): MezzeHashBuilder {
-        if (value == null) {
-            appendBoolean(false)
-        } else {
-            appendBoolean(true)
-            appender(value)
-        }
-        return this
-    }
-
-    /**
-     * Append a list of items.
-     */
-    fun <T> appendList(items: List<T>, appender: MezzeHashBuilder.(T) -> Unit): MezzeHashBuilder {
-        appendInt(items.size)
-        for (item in items) {
-            appender(item)
-        }
-        return this
-    }
-
-    /**
-     * Append a map of items (sorted by key for determinism).
-     */
-    fun <K : Comparable<K>, V> appendMap(
-        map: Map<K, V>,
-        keyAppender: MezzeHashBuilder.(K) -> Unit,
-        valueAppender: MezzeHashBuilder.(V) -> Unit
-    ): MezzeHashBuilder {
-        appendInt(map.size)
-        for ((key, value) in map.toSortedMap()) {
-            keyAppender(key)
-            valueAppender(value)
-        }
-        return this
-    }
-
-    /**
      * Build the final hash.
      */
     fun build(): MezzeHash {
         return MezzeHash.fromRawBytes(digest.digest())
-    }
-
-    /**
-     * Reset the builder for reuse.
-     */
-    fun reset(): MezzeHashBuilder {
-        digest.reset()
-        return this
     }
 }
 

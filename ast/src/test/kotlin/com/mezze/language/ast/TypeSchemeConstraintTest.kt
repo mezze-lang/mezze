@@ -102,8 +102,8 @@ class TypeSchemeConstraintTest {
             AbilityConstraint(abilityName = "Eq", typeParam = "c")
         )
         
-        val merged = mergeConstraints(constraints1, constraints2)
-        
+        val merged = (constraints1 + constraints2).distinctBy { "${it.abilityName}:${it.typeParam}" }
+
         // Should contain all unique constraint combinations
         assertEquals(4, merged.size)
         assertTrue(merged.any { it.abilityName == "NumAdd" && it.typeParam == "a" })
@@ -123,8 +123,8 @@ class TypeSchemeConstraintTest {
             AbilityConstraint(abilityName = "Ord", typeParam = "a")
         )
         
-        val merged = mergeConstraints(constraints1, constraints2)
-        
+        val merged = (constraints1 + constraints2).distinctBy { "${it.abilityName}:${it.typeParam}" }
+
         // Should deduplicate constraints
         assertEquals(3, merged.size)
         assertTrue(merged.any { it.abilityName == "NumAdd" && it.typeParam == "a" })

@@ -49,14 +49,7 @@ object ContentHashRegistry {
         CONSTANT
     }
 
-    /**
-     * Register a content hash with its display information.
-     *
-     * @param hash The content hash (full hex string)
-     * @param qualifiedName The qualified name (e.g., "std::int::add")
-     * @param modulePath The module path (e.g., "std::int")
-     * @param kind The type of declaration
-     */
+    /** Register a content hash with its display information. */
     fun register(
         hash: String,
         qualifiedName: String,

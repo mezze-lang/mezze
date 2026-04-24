@@ -466,19 +466,6 @@ class ContentAddressableHashingE2ETest {
         assertEquals(hash1, hash2, "Same builder operations should produce same hash")
     }
 
-    @Test
-    fun `MezzeHash combine is order-sensitive`() {
-        val h1 = MezzeHash.fromString("a")
-        val h2 = MezzeHash.fromString("b")
-
-        val combined1 = MezzeHash.combine(listOf(h1, h2))
-        val combined2 = MezzeHash.combine(listOf(h2, h1))
-
-        // Order matters for combine (not sorted internally)
-        assertNotEquals(combined1, combined2,
-            "MezzeHash.combine should be order-sensitive (sorting done at call site when needed)")
-    }
-
     // =========================================================================
     // PHASE 9: COMPLEX SCENARIOS
     // =========================================================================

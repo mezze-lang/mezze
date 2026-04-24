@@ -14,9 +14,6 @@ sealed interface ParsedExpr {
     val loc: Loc
 }
 
-// ============================================================================
-// LITERALS
-// ============================================================================
 
 /** Integer literal: `42` */
 @Serializable
@@ -66,9 +63,6 @@ data class ParsedCharLit(
     override val loc: Loc
 ) : ParsedExpr
 
-// ============================================================================
-// VARIABLES
-// ============================================================================
 
 /**
  * Identifier — simple or qualified variable/function reference.
@@ -86,9 +80,6 @@ data class ParsedIdentifier(
     val isQualified: Boolean get() = qualifier != null
 }
 
-// ============================================================================
-// FUNCTIONS
-// ============================================================================
 
 /**
  * Lambda expression: `{ x, y } -> x + y` or `{ x: Int } -> x + 1`
@@ -116,9 +107,6 @@ data class ParsedFunctionCall(
     override val loc: Loc
 ) : ParsedExpr
 
-// ============================================================================
-// PIPE
-// ============================================================================
 
 /** Pipe expression: `value |> f { param = @ }` */
 @Serializable
@@ -134,9 +122,6 @@ data class ParsedPipePlaceholder(
     override val loc: Loc
 ) : ParsedExpr
 
-// ============================================================================
-// RECORDS
-// ============================================================================
 
 /**
  * Record literal: `{ x = 1, y }`, `{ ...r, x = 2 }`, `{}`
@@ -160,9 +145,6 @@ data class ParsedMemberAccess(
     override val loc: Loc
 ) : ParsedExpr
 
-// ============================================================================
-// VARIANTS
-// ============================================================================
 
 /**
  * Variant construction: `Some { val = 42 }`, `None`, `Red`, `True`, `False`
@@ -177,9 +159,6 @@ data class ParsedVariantConstruct(
     override val loc: Loc
 ) : ParsedExpr
 
-// ============================================================================
-// CONTROL FLOW
-// ============================================================================
 
 /** If expression: `if cond then a else b` */
 @Serializable
@@ -224,9 +203,6 @@ data class ParsedIfLetGuard(
     val loc: Loc
 )
 
-// ============================================================================
-// BLOCKS
-// ============================================================================
 
 /**
  * Do block: `do  let x = 1  x + 1`
@@ -259,9 +235,6 @@ sealed interface ParsedStatement {
     ) : ParsedStatement
 }
 
-// ============================================================================
-// SEQUENCES
-// ============================================================================
 
 /** Seq literal: `[1, 2, 3]`, `[x, ...rest]`, `[]` */
 @Serializable
@@ -270,9 +243,6 @@ data class ParsedSeqLit(
     override val loc: Loc
 ) : ParsedExpr
 
-// ============================================================================
-// EFFECTS
-// ============================================================================
 
 /**
  * Perform expression: `perform Handler in body`
@@ -303,9 +273,6 @@ data class ParsedEffectCall(
     override val loc: Loc
 ) : ParsedExpr
 
-// ============================================================================
-// GROUPING
-// ============================================================================
 
 /**
  * Parenthesized expression: `(expr)`

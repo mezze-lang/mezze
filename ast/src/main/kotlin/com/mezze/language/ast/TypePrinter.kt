@@ -95,9 +95,6 @@ private fun printVariantType(
     }
 }
 
-// ============================================================================
-// EFFECT ROW PRINTING
-// ============================================================================
 
 /**
  * Pretty print an effect row, including effect instances with their associated types.
@@ -160,9 +157,6 @@ private fun prettyPrintEffectRow(effectRow: MezzeType.EffectRow, typeVarMapping:
     return "<${parts.joinToString(", ")}>"
 }
 
-// ============================================================================
-// PRETTY PRINTING
-// ============================================================================
 
 /**
  * Pretty printer for Mezze types with proper type variable naming
@@ -290,13 +284,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
 }
 }
 
-/**
- * Pretty printer for Mezze types with type alias expansion support.
- *
- * The typeDeclarations parameter was removed — TypeDeclaration, VariantDefinition,
- * and related types from the v1 AST have been deleted. Type alias matching now
- * relies solely on the typeAliases map.
- */
+/** Pretty print a type with type alias expansion support. */
 fun prettyPrintTypeWithAliases(
     type: MezzeType,
     typeAliases: Map<String, TypeAliasInfo> = emptyMap(),
@@ -726,25 +714,6 @@ fun printTypeWithConstraints(type: MezzeType, constraints: List<InspectAbilityCo
         "$typeStr with $constraintStr"
     } else {
         typeStr
-    }
-}
-
-/**
- * Print a function type with its constraints
- */
-fun printFunctionTypeWithConstraints(type: MezzeType.FunctionType, constraints: List<InspectAbilityConstraint>): String {
-    return printTypeWithConstraints(type, constraints)
-}
-
-/**
- * Print a type scheme
- */
-fun printTypeScheme(scheme: TypeScheme): String {
-    return if (scheme.isMonomorphic) {
-        prettyPrintType(scheme.type)
-    } else {
-        val vars = scheme.quantifiedVars.map { "'${it.name}" }.sorted().joinToString(" ")
-        "\u2200$vars. ${prettyPrintType(scheme.type)}"
     }
 }
 

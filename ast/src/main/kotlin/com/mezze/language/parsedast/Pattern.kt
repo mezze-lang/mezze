@@ -104,9 +104,6 @@ sealed interface ParsedStringPatternPart {
     @Serializable data class Capture(val variableName: String) : ParsedStringPatternPart
 }
 
-// ============================================================================
-// Pattern Utilities
-// ============================================================================
 
 fun ParsedPattern.isIrrefutable(): Boolean = when (this) {
     is ParsedVariablePattern -> true

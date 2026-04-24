@@ -12,7 +12,7 @@ import com.mezze.language.typechecker.TypeChecker
 import com.oracle.truffle.api.CallTarget
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.FrameSlotKind
-import com.mezze.language.resolvedast.SlotKind
+import com.mezze.language.truffleir.SlotKind
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 

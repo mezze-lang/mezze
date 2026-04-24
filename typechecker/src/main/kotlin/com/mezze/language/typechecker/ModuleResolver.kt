@@ -173,7 +173,7 @@ data class ExportedItem(
     val type: ExportedItemType,
     val mezzeType: MezzeType,
     val originalName: String,
-    val visibility: com.mezze.language.ast.Visibility = com.mezze.language.ast.Visibility.PUBLIC,
+    val visibility: com.mezze.language.parsedast.Visibility = com.mezze.language.parsedast.Visibility.PUBLIC,
     val contentHash: String  // Content hash hex string for content-addressed lookup (REQUIRED)
 )
 

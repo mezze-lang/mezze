@@ -3,32 +3,11 @@ package com.mezze.language.ast
 import kotlinx.serialization.Serializable
 
 /**
- * AST nodes for type checking results and shared declaration types.
- *
- * This file contains:
- * - TypeCheckResult: Result of type checking (uses v2 TypedModule)
- * - Comment, ResolvedImport, ImportKind: IDE/LSP support types
- * - AbilityConstraint, FunctionAbilityConstraint, InspectAbilityConstraint, AbilityDependency: Shared constraint types
- * - Visibility: pub/private visibility enum
- *
- * V1 stub types (Program, ProgramItem, LetBinding, EffectDeclaration, EffectOperation,
- * AbilityDeclaration, AbilityOperation, TopLevelExpression, UseDeclaration, PubUseDeclaration)
- * have been deleted. The v2 pipeline uses ParsedModule/TypedModule instead.
+ * Type checking results, IDE support types, and shared constraint types.
  */
 
-// ============================================================================
-// COMMENTS
-// ============================================================================
 
-/**
- * A comment in the source code, preserved for the formatter.
- *
- * @param text The full comment text including the '#' character
- * @param line The line number where the comment appears (1-indexed)
- * @param column The column number where the comment starts (1-indexed)
- * @param isTrailing True if the comment is on the same line as code (trailing comment),
- *                   false if it's on its own line (leading comment)
- */
+/** A comment in the source code, preserved for the formatter. */
 @Serializable
 data class Comment(
     val text: String,
@@ -37,9 +16,6 @@ data class Comment(
     val isTrailing: Boolean = false
 )
 
-// ============================================================================
-// RESOLVED IMPORTS
-// ============================================================================
 
 /**
  * A resolved import with type information, for IDE support.
@@ -62,9 +38,6 @@ enum class ImportKind {
     PERFORMER   // An effect performer (impl)
 }
 
-// ============================================================================
-// TYPE CHECK RESULT
-// ============================================================================
 
 @Serializable
 data class TypeCheckResult(
@@ -97,9 +70,6 @@ data class TypeCheckWarning(
     val sourceLocation: SourceLocation? = null
 )
 
-// ============================================================================
-// ABILITY CONSTRAINTS (shared between v1 and v2)
-// ============================================================================
 
 @Serializable
 data class AbilityConstraint(
@@ -109,11 +79,11 @@ data class AbilityConstraint(
 )
 
 /**
- * Ability constraint in function type signatures.
- * TypeAnnotation references replaced with String type representations.
+ * Ability constraint in function type signatures (string-based, for display/IDE).
+ * Distinct from MezzeType.FunctionAbilityConstraint which uses resolved MezzeType args.
  */
 @Serializable
-data class FunctionAbilityConstraint(
+data class DisplayFunctionAbilityConstraint(
     val abilityName: String,
     val typeArgNames: List<String> = emptyList(),
     val associatedTypeBindingNames: Map<String, String> = emptyMap()
@@ -130,8 +100,3 @@ data class InspectAbilityConstraint(
     val abilityName: String
 )
 
-@Serializable
-data class AbilityDependency(
-    val abilityName: String,
-    val typeArgNames: List<String> = emptyList()
-)

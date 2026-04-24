@@ -18,9 +18,6 @@ sealed interface TypedExpr {
     val loc: Loc
 }
 
-// ============================================================================
-// VARIABLES
-// ============================================================================
 
 @Serializable
 data class TypedVar(
@@ -39,9 +36,6 @@ sealed interface BindingRef {
     @Serializable data class Native(val name: String) : BindingRef
 }
 
-// ============================================================================
-// LITERALS
-// ============================================================================
 
 @Serializable data class TypedIntLit(val value: Long, override val type: MezzeType, override val loc: Loc) : TypedExpr
 @Serializable data class TypedNatLit(val value: Long, override val type: MezzeType, override val loc: Loc) : TypedExpr
@@ -63,9 +57,6 @@ sealed interface TypedStringPart {
     @Serializable data class Interpolation(val expr: TypedExpr) : TypedStringPart
 }
 
-// ============================================================================
-// FUNCTIONS
-// ============================================================================
 
 @Serializable
 data class TypedLambda(
@@ -115,9 +106,6 @@ data class AbilityImplRef(
     val targetType: MezzeType
 )
 
-// ============================================================================
-// RECORDS
-// ============================================================================
 
 @Serializable
 data class TypedRecord(
@@ -149,9 +137,6 @@ data class TypedRecordUpdate(
     override val loc: Loc
 ) : TypedExpr
 
-// ============================================================================
-// VARIANTS
-// ============================================================================
 
 @Serializable
 data class TypedVariantConstruct(
@@ -161,9 +146,6 @@ data class TypedVariantConstruct(
     override val loc: Loc
 ) : TypedExpr
 
-// ============================================================================
-// PATTERN MATCHING
-// ============================================================================
 
 @Serializable
 data class TypedMatch(
@@ -199,9 +181,6 @@ data class PatternBinding(
     val loc: Loc
 )
 
-// ============================================================================
-// CONTROL FLOW
-// ============================================================================
 
 @Serializable
 data class TypedIf(
@@ -226,9 +205,6 @@ sealed interface TypedStatement {
     @Serializable data class Expr(val expr: TypedExpr, val loc: Loc) : TypedStatement
 }
 
-// ============================================================================
-// SEQUENCES
-// ============================================================================
 
 @Serializable
 data class TypedSeq(
@@ -243,9 +219,6 @@ sealed interface TypedSeqElement {
     @Serializable data class Spread(val expr: TypedExpr) : TypedSeqElement
 }
 
-// ============================================================================
-// EFFECTS
-// ============================================================================
 
 @Serializable
 data class TypedPerform(
@@ -277,9 +250,6 @@ data class TypedPerformOp(
     override val loc: Loc
 ) : TypedExpr
 
-// ============================================================================
-// PIPE (preserved for source mapping)
-// ============================================================================
 
 @Serializable
 data class TypedPipe(

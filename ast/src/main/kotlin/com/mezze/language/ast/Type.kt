@@ -9,19 +9,9 @@ import kotlinx.serialization.json.JsonClassDiscriminator
 /**
  * Type system representations for the Mezze language.
  *
- * This file contains:
- * - MezzeType: Sealed interface for all type representations
- * - TypeScheme: Polymorphic type schemes for let-polymorphism
- * - UsageContext: Bidirectional type inference support
- * - Type conversion and normalization utilities
- * - BuiltinTypes: Built-in type constructor utilities
- *
- * Part of the refactored AST module - previously in MezzeAST.kt.
+ * Contains MezzeType (sealed interface for all type representations)
+ * and TypeScheme (polymorphic type schemes for let-polymorphism).
  */
-
-// ============================================================================
-// TYPES
-// ============================================================================
 
 @Serializable
 @JsonClassDiscriminator("typeKind")
@@ -454,117 +444,3 @@ data class TypeScheme(
         }
     }
 }
-
-// ============================================================================
-// BIDIRECTIONAL TYPE INFERENCE - USAGE CONSTRAINTS
-// ============================================================================
-
-/**
- * Usage context - represents how a value is used in the program
- *
- * This is used for bidirectional type inference to propagate type information
- * from usage sites back to definitions. For example, if we have:
- *
- *   let x = parse {str = "123"}
- *   let y = x + 10
- *
- * The usage `x + 10` creates a UsageContext.BinaryOp that tells us
- * x must be Int (because + requires NumAdd ability).
- */
-@Serializable
-@JsonClassDiscriminator("usageContextKind")
-sealed interface UsageContext {
-    /**
-     * Type annotation usage - the value is annotated with an explicit type
-     * Example: let x: Int = ...
-     */
-    @Serializable
-    data class TypeAnnotation(val annotatedType: MezzeType) : UsageContext
-
-    /**
-     * Binary operator usage - the value is used with a binary operator
-     * Example: x + 10 (x is left operand, operator is +, right operand type is Int)
-     */
-    @Serializable
-    data class BinaryOp(
-        val operator: String,
-        val position: OperandPosition,  // LEFT or RIGHT
-        val otherOperandType: MezzeType
-    ) : UsageContext
-
-    /**
-     * Field access usage - a specific field is accessed on the value
-     * Example: user.name (implies user must be a record with a `name` field)
-     */
-    @Serializable
-    data class FieldAccess(
-        val fieldName: String,
-        val expectedFieldType: MezzeType
-    ) : UsageContext
-
-    /**
-     * Function call usage - the value is called as a function
-     * Example: f {x = 10} (implies f must be a function taking {x: Int})
-     */
-    @Serializable
-    data class FunctionCall(
-        val argumentType: MezzeType,
-        val expectedReturnType: MezzeType? = null
-    ) : UsageContext
-
-    /**
-     * Match pattern usage - the value is matched against a pattern
-     * Example: match x { Some {val} -> ... } (implies x must be Option type)
-     */
-    @Serializable
-    data class MatchPattern(
-        val constructorName: String,
-        val constructorDataType: MezzeType?
-    ) : UsageContext
-
-    /**
-     * Function return usage - the value is returned from a function
-     * This propagates the expected return type into the expression
-     */
-    @Serializable
-    data class FunctionReturn(
-        val expectedReturnType: MezzeType
-    ) : UsageContext
-}
-
-/**
- * Position of an operand in a binary operation
- */
-@Serializable
-enum class OperandPosition {
-    LEFT,   // Left operand (e.g., x in `x + 10`)
-    RIGHT   // Right operand (e.g., x in `10 + x`)
-}
-
-/**
- * Usage constraint - links a type variable to how it's used
- *
- * These constraints are collected during type inference and used to
- * propagate type information backwards from usage sites to definitions.
- *
- * Example:
- *   let parse = {str} -> Decode.decode {value = str}
- *   let x = parse {str = "123"}
- *   let y = x + 10
- *
- * This generates a UsageConstraint:
- *   - typeVar: the type variable for 'x'
- *   - usageContext: BinaryOp("+", LEFT, Int)
- *   - inferredType: Int
- *   - sourceLocation: location of `x + 10`
- *
- * The constraint solver can then use this to infer that x : Int,
- * and therefore parse must return Int, and therefore Decode Int is needed.
- */
-@Serializable
-data class UsageConstraint(
-    val typeVar: TypeVar,
-    val usageContext: UsageContext,
-    val inferredType: MezzeType,
-    val sourceLocation: SourceLocation? = null
-)

@@ -19,7 +19,7 @@ class TypeDisplayIntegrationTest {
             InspectAbilityConstraint("'a", "NumAdd")
         )
 
-        val result = printFunctionTypeWithConstraints(functionType, constraints)
+        val result = printTypeWithConstraints(functionType, constraints)
         assertEquals("{ x: 'a, y: 'a } -> 'a with 'a : NumAdd", result)
     }
 
@@ -37,7 +37,7 @@ class TypeDisplayIntegrationTest {
             InspectAbilityConstraint("'a", "Eq")
         )
 
-        val result = printFunctionTypeWithConstraints(functionType, constraints)
+        val result = printTypeWithConstraints(functionType, constraints)
         assertEquals("{ x: 'a, y: 'a } -> Bool with 'a : Eq", result)
     }
 
@@ -60,14 +60,13 @@ class TypeDisplayIntegrationTest {
             InspectAbilityConstraint("'c", "Ord")
         )
 
-        val result = printFunctionTypeWithConstraints(functionType, constraints)
+        val result = printTypeWithConstraints(functionType, constraints)
         assertEquals("{ x: 'a, y: 'b } -> 'c with 'a : NumAdd, 'b : Eq, 'c : Ord", result)
     }
 
     @Test
     fun `test type scheme with constraints for let-polymorphism`() {
         // Simulate: ∀'a. 'a -> 'a
-        // Note: TypeVar name should NOT include the quote - it's added by printTypeScheme
         val typeVar = TypeVar("a")
         val functionType = MezzeType.FunctionType(
             MezzeType.VarType(typeVar),
@@ -75,8 +74,14 @@ class TypeDisplayIntegrationTest {
         )
         val scheme = TypeScheme(setOf(typeVar), functionType)
 
-        val result = printTypeScheme(scheme)
-        assertEquals("∀'a. 'a -> 'a", result)
+        // Inline what printTypeScheme did: for non-monomorphic, show forall vars
+        val result = if (scheme.isMonomorphic) {
+            prettyPrintType(scheme.type)
+        } else {
+            val vars = scheme.quantifiedVars.map { "'${it.name}" }.sorted().joinToString(" ")
+            "\u2200$vars. ${prettyPrintType(scheme.type)}"
+        }
+        assertEquals("\u2200'a. 'a -> 'a", result)
     }
 
     @Test
@@ -91,7 +96,7 @@ class TypeDisplayIntegrationTest {
             InspectAbilityConstraint("'a", "NumAdd")
         )
 
-        val result = printFunctionTypeWithConstraints(functionType, constraints)
+        val result = printTypeWithConstraints(functionType, constraints)
         assertEquals("'a -> 'a <IO> with 'a : NumAdd", result)
     }
 

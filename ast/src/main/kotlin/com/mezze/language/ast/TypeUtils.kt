@@ -1,20 +1,8 @@
 package com.mezze.language.ast
 
 /**
- * Type utilities for normalization, substitution, and constraint handling.
- *
- * This file contains internal utilities for manipulating MezzeType instances:
- * - Type variable normalization (renaming to 'a, 'b, 'c, etc.)
- * - Type variable substitution
- * - Type variable collection
- * - Constraint merging
- *
- * Part of the refactored AST module.
+ * Type utilities for normalization, substitution, and type variable collection.
  */
-
-// ============================================================================
-// IDENTITY-BASED TYPE VARIABLE MAP
-// ============================================================================
 
 /**
  * A Map implementation that uses object identity (System.identityHashCode) for TypeVar keys.
@@ -48,10 +36,6 @@ private class IdentityBasedTypeVarMap(
     override fun containsValue(value: TypeVar): Boolean =
         identityToValue.containsValue(value)
 }
-
-// ============================================================================
-// TYPE VARIABLE COLLECTION
-// ============================================================================
 
 /**
  * Core function: Collect all type variables from a type in order of appearance (left-to-right, depth-first).
@@ -140,64 +124,6 @@ private fun collectTypeVarsRecursive(type: MezzeType, collector: MutableList<Typ
     }
 }
 
-// ============================================================================
-// TYPE NORMALIZATION
-// ============================================================================
-
-/**
- * Normalize type variables with constraint awareness to preserve unification relationships
- */
-fun normalizeTypeVariablesWithConstraints(type: MezzeType, constraints: List<Pair<MezzeType, MezzeType>>): MezzeType {
-    val typeVarsInOrder = collectTypeVarsInOrder(type)
-
-    // Create equivalence classes based on constraints
-    val equivalenceClasses = mutableListOf<MutableSet<TypeVar>>()
-    val processed = mutableSetOf<TypeVar>()
-
-    for (typeVar in typeVarsInOrder) {
-        if (typeVar in processed) continue
-
-        val equivalenceClass = mutableSetOf<TypeVar>()
-        equivalenceClass.add(typeVar)
-        processed.add(typeVar)
-
-        // Find all type variables that should be unified with this one
-        for ((type1, type2) in constraints) {
-            val vars1 = collectTypeVarsInOrder(type1, sortFields = false).toSet()
-            val vars2 = collectTypeVarsInOrder(type2, sortFields = false).toSet()
-
-            if (typeVar in vars1) {
-                vars2.forEach { otherVar ->
-                    if (otherVar !in processed) {
-                        equivalenceClass.add(otherVar)
-                        processed.add(otherVar)
-                    }
-                }
-            } else if (typeVar in vars2) {
-                vars1.forEach { otherVar ->
-                    if (otherVar !in processed) {
-                        equivalenceClass.add(otherVar)
-                        processed.add(otherVar)
-                    }
-                }
-            }
-        }
-
-        equivalenceClasses.add(equivalenceClass)
-    }
-
-    // Create mapping from old names to new normalized names
-    val mapping = mutableMapOf<TypeVar, TypeVar>()
-    equivalenceClasses.forEachIndexed { index, equivalenceClass ->
-        val normalizedName = "'${('a' + index)}"
-        for (typeVar in equivalenceClass) {
-            mapping[typeVar] = TypeVar(normalizedName, typeVar.level)
-        }
-    }
-
-    return substituteTypeVariables(type, mapping)
-}
-
 /**
  * Normalize type variables in a type to start from 'a, 'b, 'c, etc.
  * This provides clean, readable output by renaming type variables in order of appearance.
@@ -205,10 +131,8 @@ fun normalizeTypeVariablesWithConstraints(type: MezzeType, constraints: List<Pai
 fun normalizeTypeVariables(type: MezzeType): MezzeType {
     val typeVarsInOrder = collectTypeVarsInOrder(type)
 
-    // CRITICAL FIX: Use identity-based distinct to preserve independence of type variables
-    // TypeVar is a data class, so .distinct() uses structural equality (name + level)
-    // This would incorrectly merge independent type variables with the same name!
-    // Instead, we track by object identity using a map
+    // Use identity-based distinct because TypeVar is a data class -- .distinct()
+    // would merge independent type variables with the same name. Track by identity.
     val seenIdentities = mutableMapOf<Int, TypeVar>()  // identity -> first occurrence
     val uniqueTypeVars = mutableListOf<TypeVar>()
 
@@ -249,8 +173,7 @@ fun substituteTypeVariables(type: MezzeType, mapping: Map<TypeVar, TypeVar>): Me
         is MezzeType.FunctionType -> {
             val newParamType = substituteTypeVariables(type.paramType, mapping)
             val newReturnType = substituteTypeVariables(type.returnType, mapping)
-            // CRITICAL FIX: Also substitute type variables in ability constraints
-            // This ensures constraint type variables are normalized along with param/return types
+            // Also substitute type variables in ability constraints
             val newAbilityConstraints = type.abilityConstraints.map { constraint ->
                 MezzeType.FunctionAbilityConstraint(
                     constraint.abilityName,
@@ -270,7 +193,7 @@ fun substituteTypeVariables(type: MezzeType, mapping: Map<TypeVar, TypeVar>): Me
             val newConstructors = type.constructors.mapValues { (_, caseType) ->
                 caseType?.let { substituteTypeVariables(it, mapping) }
             }
-            // CRITICAL FIX: Preserve row variable during type variable normalization
+            // Preserve row variable during type variable normalization
             MezzeType.VariantType(newConstructors, type.rowVar)
         }
         is MezzeType.TypeApplication -> {
@@ -319,10 +242,3 @@ fun substituteTypeVariables(type: MezzeType, mapping: Map<TypeVar, TypeVar>): Me
     }
 }
 
-/**
- * Merge two lists of ability constraints, removing duplicates
- */
-fun mergeConstraints(constraints1: List<AbilityConstraint>, constraints2: List<AbilityConstraint>): List<AbilityConstraint> {
-    val merged = (constraints1 + constraints2).distinctBy { "${it.abilityName}:${it.typeParam}" }
-    return merged
-}

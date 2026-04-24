@@ -46,18 +46,6 @@ object BuiltinTypeRegistry {
     }
 
     /**
-     * Get the home module path for a built-in type.
-     * Returns null if the type is not a built-in type.
-     */
-    fun getHomeModule(typeName: String): String? = typeHomeModule[typeName]
-
-    /**
-     * Check if a module path is the home module for a given built-in type.
-     */
-    fun isHomeModule(typeName: String, modulePath: String): Boolean =
-        typeHomeModule[typeName] == modulePath
-
-    /**
      * Get all built-in type names whose home module matches the given path.
      * These types should be treated as "local" for orphan rule purposes.
      */
@@ -66,14 +54,4 @@ object BuiltinTypeRegistry {
             .filter { it.value == modulePath }
             .map { it.key }
             .toSet()
-
-    /**
-     * All registered type names.
-     */
-    val allTypeNames: Set<String> = typeHomeModule.keys
-
-    /**
-     * Check if a type name is a registered built-in type.
-     */
-    fun isBuiltinType(typeName: String): Boolean = typeName in typeHomeModule
 }

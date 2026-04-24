@@ -16,7 +16,6 @@ import com.mezze.interpreter.v2.nodes.effect.DynamicEffectCallNode
 import com.mezze.interpreter.v2.converter.InterpolatedStringNode
 import com.mezze.interpreter.v2.nodes.builtin.NativeDispatch
 import com.mezze.interpreter.v2.runtime.MezzeLanguage
-import com.mezze.language.resolvedast.SlotKind
 import com.mezze.language.truffleir.*
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.FrameSlotKind

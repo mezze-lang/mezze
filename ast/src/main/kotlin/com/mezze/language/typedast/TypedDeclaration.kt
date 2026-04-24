@@ -15,9 +15,6 @@ import kotlinx.serialization.Serializable
  * Abilities and effects are still present (consumed by later stages).
  */
 
-// ============================================================================
-// MODULE
-// ============================================================================
 
 @Serializable
 data class TypedModule(
@@ -81,9 +78,6 @@ data class ModuleDependency(
     val importedHashes: Set<Hash>        // Which specific definitions we use from it
 )
 
-// ============================================================================
-// DECLARATIONS — all have Hash and Loc
-// ============================================================================
 
 @Serializable
 sealed interface TypedDecl {
@@ -113,9 +107,6 @@ data class TypedTypeDecl(
     override val loc: Loc
 ) : TypedDecl
 
-// ============================================================================
-// TYPE SCHEME & PARAMS
-// ============================================================================
 
 @Serializable
 data class TypeScheme(
@@ -142,9 +133,6 @@ data class TypedAbilityConstraint(
     val typeArgs: List<MezzeType>
 )
 
-// ============================================================================
-// ABILITY DECLARATIONS (consumed by monomorphizer)
-// ============================================================================
 
 @Serializable
 data class TypedAbilityDecl(
@@ -184,9 +172,6 @@ data class TypedAbilityImpl(
     val loc: Loc
 )
 
-// ============================================================================
-// EFFECT DECLARATIONS (passed through to interpreter)
-// ============================================================================
 
 @Serializable
 data class TypedEffectDecl(
@@ -227,9 +212,6 @@ data class TypedPerformerParam(
     val loc: Loc
 )
 
-// ============================================================================
-// TYPE DEFINITIONS
-// ============================================================================
 
 @Serializable
 sealed interface TypedTypeDef

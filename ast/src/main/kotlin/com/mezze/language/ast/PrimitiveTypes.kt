@@ -75,11 +75,7 @@ object PrimitiveTypes {
      */
     val allTypes: Set<MezzeType> = typeToName.keys
 
-    // toAnnotation removed — IdentifierTypeAnnotation was in the deleted TypeAnnotation.kt
-
-    // ========================================================================
-    // TYPE CATEGORIES
-    // ========================================================================
+    // toAnnotation removed -- IdentifierTypeAnnotation was in the deleted TypeAnnotation.kt
 
     /**
      * Numeric types that support arithmetic operations.
@@ -96,14 +92,6 @@ object PrimitiveTypes {
      */
     fun isNumericType(type: MezzeType): Boolean = type in numericTypes
 
-    /**
-     * All numeric type names.
-     */
-    val numericTypeNames: Set<String> = numericTypes.mapNotNull { toName(it) }.toSet()
-
-    // ========================================================================
-    // TYPE MATCHING
-    // ========================================================================
 
     /**
      * Check if a type name matches a MezzeType.
@@ -119,10 +107,6 @@ object PrimitiveTypes {
         val primitiveType = nameToType[name] ?: return false
         return primitiveType == type
     }
-
-    // ========================================================================
-    // EXTENDED TYPE MATCHING (includes Ordering + Bool variant)
-    // ========================================================================
 
     /**
      * Extended name-to-type mapping that includes Ordering.
@@ -169,23 +153,4 @@ object PrimitiveTypes {
                type.rowVar == null
     }
 
-    // ========================================================================
-    // COLLECTION TYPE MATCHING
-    // ========================================================================
-
-    /**
-     * Check if a TypeApplication constructor name matches a built-in collection type.
-     * Uses BuiltinTypes constants to avoid hardcoded string comparisons.
-     *
-     * Returns true if the constructor name is a well-known collection type
-     * (Seq, List, Set, Map, SortedMap, SortedSet, Deque).
-     */
-    fun isBuiltinCollectionConstructor(constructorName: String): Boolean =
-        constructorName in BUILTIN_COLLECTION_NAMES
-
-    private val BUILTIN_COLLECTION_NAMES = setOf(
-        BuiltinTypes.SEQ, BuiltinTypes.LIST, BuiltinTypes.SET, BuiltinTypes.MAP,
-        BuiltinTypes.SORTED_MAP, BuiltinTypes.SORTED_SET, BuiltinTypes.DEQUE,
-        BuiltinTypes.NON_EMPTY_LIST
-    )
 }
