@@ -22,11 +22,31 @@ public final class LongSeqStorage implements SeqStorage {
     private final long[] data;
 
     @CompilationFinal
-    private final int length;
+    private final int length;  // logical size (may be < data.length when spare capacity exists)
+
+    /** COW ownership token for O(1) amortized append chains. */
+    private final Object[] ownerToken;
 
     public LongSeqStorage(long[] data) {
         this.data = data;
         this.length = data.length;
+        this.ownerToken = null;
+    }
+
+    private LongSeqStorage(long[] data, int length, Object[] ownerToken) {
+        this.data = data;
+        this.length = length;
+        this.ownerToken = ownerToken;
+    }
+
+    private boolean isOwner() {
+        return ownerToken != null && ownerToken[0] == this;
+    }
+
+    /** Returns a trimmed array (length == data.length) for external use. */
+    private long[] trimmedData() {
+        if (length == data.length) return data;
+        return Arrays.copyOf(data, length);
     }
 
     @Override
@@ -73,12 +93,26 @@ public final class LongSeqStorage implements SeqStorage {
     }
 
     /**
-     * Unboxed append.
+     * Unboxed append with COW + spare capacity.
+     * O(1) amortized in chains like s = s.append(1).append(2).append(3).
      */
     public LongSeqStorage appendLong(long value) {
-        long[] newData = Arrays.copyOf(data, length + 1);
+        if (isOwner() && length < data.length) {
+            // O(1): write into spare capacity, transfer ownership
+            data[length] = value;
+            var result = new LongSeqStorage(data, length + 1, ownerToken);
+            ownerToken[0] = result;
+            return result;
+        }
+        // Allocate with spare capacity for future appends (1.5x + 4)
+        int newCapacity = Math.max(length + 1, length + (length >> 1) + 4);
+        long[] newData = new long[newCapacity];
+        System.arraycopy(data, 0, newData, 0, length);
         newData[length] = value;
-        return new LongSeqStorage(newData);
+        Object[] token = new Object[1];
+        var result = new LongSeqStorage(newData, length + 1, token);
+        token[0] = result;
+        return result;
     }
 
     @Override
@@ -144,7 +178,7 @@ public final class LongSeqStorage implements SeqStorage {
      * The returned array should not be modified.
      */
     public long[] getArray() {
-        return data;
+        return trimmedData();
     }
 
     // ===== SIMD-optimized numeric operations =====
@@ -154,7 +188,7 @@ public final class LongSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public long sum() {
-        return VectorOps.sumLong(data);
+        return VectorOps.sumLong(trimmedData());
     }
 
     /**
@@ -174,7 +208,7 @@ public final class LongSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public long product() {
-        return VectorOps.productLong(data);
+        return VectorOps.productLong(trimmedData());
     }
 
     /**
@@ -185,7 +219,7 @@ public final class LongSeqStorage implements SeqStorage {
         if (length == 0) {
             throw new IllegalStateException("Empty sequence has no minimum");
         }
-        return VectorOps.minLong(data);
+        return VectorOps.minLong(trimmedData());
     }
 
     /**
@@ -196,7 +230,7 @@ public final class LongSeqStorage implements SeqStorage {
         if (length == 0) {
             throw new IllegalStateException("Empty sequence has no maximum");
         }
-        return VectorOps.maxLong(data);
+        return VectorOps.maxLong(trimmedData());
     }
 
     /**
@@ -204,7 +238,7 @@ public final class LongSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public int indexOf(long value) {
-        return VectorOps.indexOfLong(data, value);
+        return VectorOps.indexOfLong(trimmedData(), value);
     }
 
     /**
@@ -232,7 +266,7 @@ public final class LongSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public LongSeqStorage add(LongSeqStorage other) {
-        return new LongSeqStorage(VectorOps.addLong(data, other.data));
+        return new LongSeqStorage(VectorOps.addLong(trimmedData(), other.trimmedData()));
     }
 
     /**
@@ -240,7 +274,7 @@ public final class LongSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public LongSeqStorage scale(long factor) {
-        return new LongSeqStorage(VectorOps.scaleLong(data, factor));
+        return new LongSeqStorage(VectorOps.scaleLong(trimmedData(), factor));
     }
 
     /**
@@ -280,19 +314,19 @@ public final class LongSeqStorage implements SeqStorage {
     @Override
     @TruffleBoundary
     public String toString() {
-        return "LongSeqStorage" + Arrays.toString(data);
+        return "LongSeqStorage" + Arrays.toString(trimmedData());
     }
 
     @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof LongSeqStorage other)) return false;
-        return Arrays.equals(data, other.data);
+        return Arrays.equals(trimmedData(), other.trimmedData());
     }
 
     @Override
     public int hashCode() {
-        return Arrays.hashCode(data);
+        return Arrays.hashCode(trimmedData());
     }
 
     // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
@@ -337,7 +371,7 @@ public final class LongSeqStorage implements SeqStorage {
      */
     @TruffleBoundary
     public void mutSort() {
-        Arrays.sort(data);
+        Arrays.sort(data, 0, length);
     }
 
     /**
@@ -361,7 +395,7 @@ public final class LongSeqStorage implements SeqStorage {
      * Only safe within LocalMut context.
      */
     public void mutFill(long value) {
-        Arrays.fill(data, value);
+        Arrays.fill(data, 0, length, value);
     }
 
     /**
