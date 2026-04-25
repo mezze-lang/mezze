@@ -3,85 +3,1017 @@ package com.mezze.language.formatter
 import com.mezze.language.parsedast.*
 
 /**
- * Pretty printer for Mezze AST.
+ * Pretty printer for Mezze ParsedAST.
  *
- * Converts ParsedModule nodes back to formatted source code with consistent style.
- * Handles comment attachment based on source positions.
- *
- * NOTE: This is a stub implementation. The v1 types (Program, LetBinding, etc.)
- * have been deleted. A full v2 PrettyPrinter operating on ParsedModule is needed
- * for complete formatting support.
+ * Converts ParsedModule back to formatted source code with consistent style.
+ * Comments are attached to declarations via leadingComments/trailingComment fields.
  */
 class PrettyPrinter {
     private val config = FormatterConfig
     private val output = StringBuilder()
     private var indentLevel = 0
-    private var currentLine = 1
     private var currentColumn = 0
 
-    /**
-     * Print a complete ParsedModule to formatted source code.
-     * Stub implementation — returns minimal representation.
-     */
     fun printModule(module: ParsedModule): String {
         output.clear()
         indentLevel = 0
-        currentLine = 1
         currentColumn = 0
 
+        var isFirst = true
+        var lastWasUse = false
+
         for (decl in module.decls) {
-            printParsedDecl(decl)
+            val isUse = decl is ParsedUseDecl || decl is ParsedPubUseDecl
+
+            if (!isFirst) {
+                if (lastWasUse && !isUse) {
+                    newLine()
+                } else if (!lastWasUse) {
+                    newLine()
+                }
+            }
+            isFirst = false
+            lastWasUse = isUse
+
+            printLeadingComments(decl)
+            printDecl(decl)
+            printTrailingComment(decl)
+        }
+
+        // Print orphan comments (not attached to any declaration)
+        for (comment in module.orphanComments) {
+            if (output.isNotEmpty() && !output.endsWith("\n")) newLine()
+            append(comment.text)
+            newLine()
         }
 
         return output.toString().trimEnd() + "\n"
     }
 
-    private fun printParsedDecl(decl: ParsedDecl) {
+    // =========================================================================
+    // DECLARATIONS
+    // =========================================================================
+
+    private fun printDecl(decl: ParsedDecl) {
         when (decl) {
-            is ParsedLetDecl -> {
-                if (decl.visibility == Visibility.PUBLIC) append("pub ")
-                append("let ")
-                append(decl.variableName)
-                append(" = ...")
+            is ParsedLetDecl -> printLetDecl(decl)
+            is ParsedTypeDecl -> printTypeDecl(decl)
+            is ParsedEffectDecl -> printEffectDecl(decl)
+            is ParsedAbilityDecl -> printAbilityDecl(decl)
+            is ParsedImplAbilityDecl -> printImplAbilityDecl(decl)
+            is ParsedPerformerDecl -> printPerformerDecl(decl)
+            is ParsedUseDecl -> printUseDecl(decl)
+            is ParsedPubUseDecl -> printPubUseDecl(decl)
+            is ParsedTopLevelExpr -> {
+                printExpr(decl.expression)
                 newLine()
-            }
-            is ParsedEffectDecl -> {
-                append("effect ")
-                append(decl.name)
-                append(" where { ... }")
-                newLine()
-            }
-            is ParsedAbilityDecl -> {
-                append("ability ")
-                append(decl.name)
-                append(" where { ... }")
-                newLine()
-            }
-            is ParsedUseDecl -> {
-                append("use ")
-                append(formatUsePath(decl.path))
-                newLine()
-            }
-            is ParsedPubUseDecl -> {
-                append("pub use ")
-                append(formatUsePath(decl.path))
-                newLine()
-            }
-            else -> {
-                // Other declaration types — skip for now
             }
         }
     }
 
-    private fun formatUsePath(path: ParsedUsePath): String {
-        return when (path) {
-            is ParsedUsePath.Module -> path.path.segments.joinToString("::")
-            is ParsedUsePath.Selective -> {
-                val base = path.modulePath.segments.joinToString("::")
-                val items = path.items.joinToString(", ") { item ->
-                    item.alias?.let { "${item.name} as $it" } ?: item.name
+    private fun printLetDecl(decl: ParsedLetDecl) {
+        if (decl.visibility == Visibility.PUBLIC) append("pub ")
+        append("let ")
+        printPattern(decl.pattern)
+        decl.typeAnnotation?.let {
+            append(": ")
+            printTypeAnnotation(it)
+        }
+        append(" = ")
+        printExpr(decl.value)
+        newLine()
+    }
+
+    private fun printTypeDecl(decl: ParsedTypeDecl) {
+        if (decl.visibility == Visibility.PUBLIC) append("pub ")
+        when (val def = decl.definition) {
+            is ParsedNewtypeDef -> {
+                append("newtype ")
+                append(decl.name)
+                printTypeParams(decl.typeParams)
+                append(" = ")
+                append(def.constructor)
+                append(" ")
+                printTypeAnnotation(def.wrappedType)
+            }
+            else -> {
+                append("type ")
+                append(decl.name)
+                printTypeParams(decl.typeParams)
+                append(" = ")
+                printTypeDef(decl.definition)
+            }
+        }
+        newLine()
+    }
+
+    private fun printTypeParams(typeParams: List<String>) {
+        if (typeParams.isNotEmpty()) {
+            append(" ")
+            append(typeParams.joinToString(" "))
+        }
+    }
+
+    private fun printTypeDef(def: ParsedTypeDef) {
+        when (def) {
+            is ParsedRecordDef -> printRecordDef(def)
+            is ParsedVariantDef -> printVariantDef(def)
+            is ParsedNewtypeDef -> { /* handled in printTypeDecl */ }
+        }
+    }
+
+    private fun printRecordDef(def: ParsedRecordDef) {
+        if (def.fields.isEmpty() && !def.isOpen) {
+            append("{}")
+            return
+        }
+        val width = 4 + def.fields.sumOf { it.name.length + 2 + estimateTypeWidth(it.type) + 2 }
+        if (width <= config.RECORD_SINGLE_LINE_THRESHOLD) {
+            append("{ ")
+            def.fields.forEachIndexed { i, field ->
+                append(field.name)
+                append(": ")
+                printTypeAnnotation(field.type)
+                if (i < def.fields.size - 1) append(", ")
+            }
+            if (def.isOpen) { append(", ...") }
+            append(" }")
+        } else {
+            append("{")
+            newLine()
+            indent {
+                def.fields.forEachIndexed { i, field ->
+                    printIndent()
+                    append(field.name)
+                    append(": ")
+                    printTypeAnnotation(field.type)
+                    if (config.TRAILING_COMMA_IN_MULTILINE || i < def.fields.size - 1) append(",")
+                    newLine()
                 }
-                "$base::{ $items }"
+                if (def.isOpen) { printIndent(); append("..."); newLine() }
+            }
+            printIndent()
+            append("}")
+        }
+    }
+
+    private fun printVariantDef(def: ParsedVariantDef) {
+        val width = 4 + def.constructors.sumOf { c ->
+            c.name.length + (c.dataType?.let { 1 + estimateTypeWidth(it) } ?: 0) + 2
+        }
+        if (width <= config.RECORD_SINGLE_LINE_THRESHOLD && def.constructors.isNotEmpty()) {
+            append("| ")
+            def.constructors.forEachIndexed { i, c ->
+                if (i > 0) append(", ")
+                append(c.name)
+                c.dataType?.let { append(" "); printTypeAnnotation(it) }
+            }
+            if (def.isOpen) append(", ...")
+            append(" |")
+        } else {
+            append("|")
+            newLine()
+            indent {
+                def.constructors.forEach { c ->
+                    printIndent()
+                    append(c.name)
+                    c.dataType?.let { append(" "); printTypeAnnotation(it) }
+                    append(",")
+                    newLine()
+                }
+                if (def.isOpen) { printIndent(); append("..."); newLine() }
+            }
+            printIndent()
+            append("|")
+        }
+    }
+
+    private fun printEffectDecl(decl: ParsedEffectDecl) {
+        append("effect ")
+        append(decl.name)
+        if (decl.associatedTypes.isNotEmpty()) {
+            append(" having ")
+            append(decl.associatedTypes.joinToString(", "))
+        }
+        append(" where {")
+        newLine()
+        indent {
+            decl.operations.forEachIndexed { i, op ->
+                printIndent()
+                append(op.name)
+                append(": ")
+                printTypeAnnotation(op.paramType)
+                append(" -> ")
+                printTypeAnnotation(op.returnType)
+                if (op.effects.isNotEmpty()) {
+                    append(" <")
+                    append(op.effects.joinToString(", "))
+                    append(">")
+                }
+                if (i < decl.operations.size - 1) append(",")
+                newLine()
+            }
+        }
+        printIndent()
+        append("}")
+        newLine()
+    }
+
+    private fun printAbilityDecl(decl: ParsedAbilityDecl) {
+        append("ability ")
+        append(decl.name)
+        val receiverParam = decl.receiverTypeParam
+        val genericParams = if (receiverParam != null) {
+            decl.typeParams.filter { it != receiverParam }
+        } else {
+            decl.typeParams.dropLast(1)
+        }
+        if (genericParams.isNotEmpty()) {
+            append(" ")
+            append(genericParams.joinToString(" "))
+        }
+        append(" for ")
+        append(receiverParam ?: decl.typeParams.lastOrNull() ?: "'a")
+
+        if (decl.dependencies.isNotEmpty()) {
+            append(" with ")
+            decl.dependencies.forEachIndexed { i, dep ->
+                if (i > 0) append(", ")
+                append(dep.abilityName)
+                if (dep.typeArgs.isNotEmpty()) {
+                    append(" ")
+                    dep.typeArgs.forEach { arg -> printTypeAnnotation(arg) }
+                }
+            }
+        }
+
+        append(" where {")
+        newLine()
+        indent {
+            decl.operations.forEachIndexed { i, op ->
+                printIndent()
+                append(op.name)
+                append(": ")
+                printTypeAnnotation(op.paramType)
+                if (op.abilityConstraints.isNotEmpty()) {
+                    append(" with ")
+                    printAbilityConstraints(op.abilityConstraints)
+                }
+                append(" -> ")
+                printTypeAnnotation(op.returnType)
+                op.effects?.let { append(" "); printEffectRow(it) }
+                if (i < decl.operations.size - 1) append(",")
+                newLine()
+            }
+        }
+        printIndent()
+        append("}")
+        newLine()
+    }
+
+    private fun printImplAbilityDecl(decl: ParsedImplAbilityDecl) {
+        append("impl ")
+        if (decl.forallVars.isNotEmpty()) {
+            append("forall ")
+            append(decl.forallVars.joinToString(" ") { "'$it" })
+            append(". ")
+        }
+        when (val target = decl.target) {
+            is ParsedImplTarget.Named -> {
+                if (target.ability.qualifier != null) {
+                    append(target.ability.qualifier!!.segments.joinToString("::"))
+                    append("::")
+                }
+                append(target.ability.localName)
+                for (typeArg in decl.abilityTypeArgs) {
+                    append(" ")
+                    printTypeAnnotation(typeArg)
+                }
+                append(" for ")
+                decl.targetTypes.forEachIndexed { i, type ->
+                    if (i > 0) append(" ")
+                    printTypeAnnotation(type)
+                }
+            }
+            is ParsedImplTarget.Inherent -> {
+                decl.targetTypes.forEachIndexed { i, type ->
+                    if (i > 0) append(" ")
+                    printTypeAnnotation(type)
+                }
+            }
+        }
+        if (decl.associatedTypeBindings.isNotEmpty()) {
+            append(" having ")
+            decl.associatedTypeBindings.entries.forEachIndexed { i, (name, type) ->
+                if (i > 0) append(", ")
+                append("$name = ")
+                printTypeAnnotation(type)
+            }
+        }
+        append(" where {")
+        newLine()
+        indent {
+            decl.operations.forEachIndexed { i, op ->
+                printIndent()
+                append(op.name)
+                // Print type annotation if present (the bug fix: don't drop these)
+                val pType = op.paramType
+                val rType = op.returnType
+                if (pType != null && rType != null) {
+                    append(": ")
+                    printTypeAnnotation(pType)
+                    if (op.abilityConstraints.isNotEmpty()) {
+                        append(" with ")
+                        printAbilityConstraints(op.abilityConstraints)
+                    }
+                    append(" -> ")
+                    printTypeAnnotation(rType)
+                }
+                append(" = ")
+                printExpr(op.implementation)
+                if (decl.operations.size > 1 || i < decl.operations.size - 1) {
+                    trimTrailingNewlines()
+                    append(",")
+                }
+                newLine()
+            }
+        }
+        printIndent()
+        append("}")
+        newLine()
+    }
+
+    private fun printPerformerDecl(decl: ParsedPerformerDecl) {
+        append("impl ")
+        if (decl.effect.qualifier != null) {
+            append(decl.effect.qualifier!!.segments.joinToString("::"))
+            append("::")
+        }
+        append(decl.effect.localName)
+        append(" for ")
+        append(decl.performerName)
+        if (decl.params.isNotEmpty()) {
+            append(" { ")
+            decl.params.forEachIndexed { i, p ->
+                if (i > 0) append(", ")
+                append(p.name)
+                append(": ")
+                printTypeAnnotation(p.type)
+            }
+            append(" }")
+        }
+        append(" where {")
+        newLine()
+        indent {
+            decl.operations.forEachIndexed { i, op ->
+                printIndent()
+                append(op.name)
+                append(" = ")
+                printExpr(op.implementation)
+                if (decl.operations.size > 1 || i < decl.operations.size - 1) {
+                    trimTrailingNewlines()
+                    append(",")
+                }
+                newLine()
+            }
+        }
+        printIndent()
+        append("}")
+        newLine()
+    }
+
+    private fun printUseDecl(decl: ParsedUseDecl) {
+        append("use ")
+        printUsePath(decl.path)
+        newLine()
+    }
+
+    private fun printPubUseDecl(decl: ParsedPubUseDecl) {
+        append("pub use ")
+        printUsePath(decl.path)
+        newLine()
+    }
+
+    private fun printUsePath(path: ParsedUsePath) {
+        when (path) {
+            is ParsedUsePath.Module -> append(path.path.segments.joinToString("::"))
+            is ParsedUsePath.Selective -> {
+                append(path.modulePath.segments.joinToString("::"))
+                append("::{ ")
+                path.items.forEachIndexed { i, item ->
+                    if (i > 0) append(", ")
+                    append(item.name)
+                    item.alias?.let { append(" as "); append(it) }
+                }
+                append(" }")
+            }
+        }
+    }
+
+    // =========================================================================
+    // EXPRESSIONS
+    // =========================================================================
+
+    private fun printExpr(expr: ParsedExpr) {
+        when (expr) {
+            is ParsedIntLit -> append(expr.value.toString())
+            is ParsedNatLit -> append("${expr.value}n")
+            is ParsedFloatLit -> append(formatFloat(expr.value))
+            is ParsedFracLit -> append("${expr.numerator}//${expr.denominator}")
+            is ParsedStringLit -> printStringLit(expr)
+            is ParsedCharLit -> { append("'"); append(expr.value.toString()); append("'") }
+            is ParsedIdentifier -> printIdentifier(expr)
+            is ParsedRecordLit -> printRecordLit(expr)
+            is ParsedSeqLit -> printSeqLit(expr)
+            is ParsedMemberAccess -> { printExpr(expr.receiver); append("."); append(expr.member) }
+            is ParsedVariantConstruct -> printVariantConstruct(expr)
+            is ParsedLambda -> printLambda(expr)
+            is ParsedFunctionCall -> printFunctionCall(expr)
+            is ParsedBinaryOp -> printBinaryOp(expr)
+            is ParsedUnaryOp -> printUnaryOp(expr)
+            is ParsedIf -> printIf(expr)
+            is ParsedMatch -> printMatch(expr)
+            is ParsedDo -> printDo(expr)
+            is ParsedPerform -> printPerform(expr)
+            is ParsedEffectCall -> printEffectCall(expr)
+            is ParsedPipe -> printPipe(expr)
+            is ParsedPipePlaceholder -> append("@")
+            is ParsedParens -> { append("("); printExpr(expr.expr); append(")") }
+        }
+    }
+
+    private fun printStringLit(expr: ParsedStringLit) {
+        append("\"")
+        for (part in expr.parts) {
+            when (part) {
+                is ParsedStringPart.Literal -> append(escapeString(part.value))
+                is ParsedStringPart.Interpolation -> {
+                    append("\$(")
+                    printExpr(part.expr)
+                    append(")")
+                }
+            }
+        }
+        append("\"")
+    }
+
+    private fun printIdentifier(expr: ParsedIdentifier) {
+        if (expr.qualifier != null) {
+            append(expr.qualifier!!.segments.joinToString("::"))
+            append("::")
+        }
+        append(expr.localName)
+    }
+
+    private fun printRecordLit(expr: ParsedRecordLit) {
+        if (expr.entries.isEmpty()) { append("{}"); return }
+
+        val width = estimateRecordLitWidth(expr)
+        if (width <= config.RECORD_SINGLE_LINE_THRESHOLD) {
+            append("{ ")
+            var first = true
+            for (entry in expr.entries) {
+                if (!first) append(", ")
+                first = false
+                printRecordEntry(entry)
+            }
+            append(" }")
+        } else {
+            append("{")
+            newLine()
+            indent {
+                for ((i, entry) in expr.entries.withIndex()) {
+                    printIndent()
+                    printRecordEntry(entry)
+                    if (config.TRAILING_COMMA_IN_MULTILINE || i < expr.entries.size - 1) append(",")
+                    newLine()
+                }
+            }
+            printIndent()
+            append("}")
+        }
+    }
+
+    private fun printRecordEntry(entry: ParsedRecordEntry) {
+        when (entry) {
+            is ParsedRecordEntry.Field -> {
+                append(entry.name)
+                entry.value?.let { append(" = "); printExpr(it) }
+            }
+            is ParsedRecordEntry.Spread -> { append("..."); printExpr(entry.expr) }
+        }
+    }
+
+    private fun printSeqLit(expr: ParsedSeqLit) {
+        if (expr.elements.isEmpty()) { append("[]"); return }
+
+        val width = estimateSeqLitWidth(expr)
+        if (width <= config.ARRAY_SINGLE_LINE_THRESHOLD) {
+            append("[")
+            expr.elements.forEachIndexed { i, elem ->
+                if (i > 0) append(", ")
+                printSeqElement(elem)
+            }
+            append("]")
+        } else {
+            append("[")
+            newLine()
+            indent {
+                expr.elements.forEachIndexed { i, elem ->
+                    printIndent()
+                    printSeqElement(elem)
+                    if (config.TRAILING_COMMA_IN_MULTILINE || i < expr.elements.size - 1) append(",")
+                    newLine()
+                }
+            }
+            printIndent()
+            append("]")
+        }
+    }
+
+    private fun printSeqElement(elem: ParsedSeqElement) {
+        when (elem) {
+            is ParsedSeqElement.Regular -> printExpr(elem.expr)
+            is ParsedSeqElement.Spread -> { append("..."); printExpr(elem.expr) }
+        }
+    }
+
+    private fun printVariantConstruct(expr: ParsedVariantConstruct) {
+        append(expr.constructor)
+        expr.value?.let {
+            append(" ")
+            val needsParens = it is ParsedFunctionCall || it is ParsedIf || it is ParsedMatch
+            if (needsParens) append("(")
+            printExpr(it)
+            if (needsParens) append(")")
+        }
+    }
+
+    private fun printLambda(expr: ParsedLambda) {
+        printLambdaParams(expr.params)
+
+        if (expr.abilityConstraints.isNotEmpty()) {
+            append(" with ")
+            printAbilityConstraints(expr.abilityConstraints)
+        }
+
+        expr.returnType?.let {
+            append(" -> ")
+            printTypeAnnotation(it)
+        }
+
+        val bodyWidth = estimateExprWidth(expr.body)
+        val wouldExceed = currentColumn + 4 + bodyWidth > config.MAX_LINE_LENGTH
+
+        if (wouldExceed && !isSimpleExpr(expr.body)) {
+            append(" ->")
+            newLine()
+            indent { printIndent(); printExpr(expr.body) }
+        } else {
+            append(" -> ")
+            printExpr(expr.body)
+        }
+    }
+
+    private fun printLambdaParams(params: ParsedLambdaParams) {
+        when (params) {
+            is ParsedLambdaParams.Untyped -> {
+                if (params.names.isEmpty() && !params.isOpen) {
+                    append("{}")
+                } else {
+                    append("{ ")
+                    append(params.names.joinToString(", "))
+                    if (params.isOpen) {
+                        if (params.names.isNotEmpty()) append(", ")
+                        append("...")
+                    }
+                    append(" }")
+                }
+            }
+            is ParsedLambdaParams.Typed -> {
+                // Typed params are record type syntax
+                printRecordTypeAnnotation(ParsedRecordType(params.fields, false, params.fields.firstOrNull()?.loc ?: Loc("", 0, 0, 0, 0)))
+            }
+        }
+    }
+
+    private fun printFunctionCall(expr: ParsedFunctionCall) {
+        // Check for chained method calls: x.foo {..}.bar {..}
+        val chain = tryExtractMethodChain(expr)
+        if (chain != null && chain.second.size >= 2) {
+            printMethodChain(chain)
+            return
+        }
+
+        val needsParens = expr.function is ParsedLambda || expr.function is ParsedIf
+        if (needsParens) append("(")
+        printExpr(expr.function)
+        if (needsParens) append(")")
+        append(" ")
+        printExpr(expr.arguments)
+    }
+
+    private fun printBinaryOp(expr: ParsedBinaryOp) {
+        val needsParensLeft = needsParens(expr.left, expr.op, isLeft = true)
+        val needsParensRight = needsParens(expr.right, expr.op, isLeft = false)
+
+        if (needsParensLeft) append("(")
+        printExpr(expr.left)
+        if (needsParensLeft) append(")")
+
+        append(" ${expr.op} ")
+
+        if (needsParensRight) append("(")
+        printExpr(expr.right)
+        if (needsParensRight) append(")")
+    }
+
+    private fun printUnaryOp(expr: ParsedUnaryOp) {
+        append(expr.op)
+        val needsParens = expr.operand is ParsedFunctionCall || expr.operand is ParsedIf || expr.operand is ParsedBinaryOp
+        if (needsParens) append("(")
+        printExpr(expr.operand)
+        if (needsParens) append(")")
+    }
+
+    private data class MethodChainSegment(val method: String, val args: ParsedExpr)
+
+    private fun tryExtractMethodChain(expr: ParsedFunctionCall): Pair<ParsedExpr, List<MethodChainSegment>>? {
+        val func = expr.function
+        if (func !is ParsedMemberAccess) return null
+        val segments = mutableListOf(MethodChainSegment(func.member, expr.arguments))
+        var current = func.receiver
+        while (current is ParsedFunctionCall && current.function is ParsedMemberAccess) {
+            val ma = current.function as ParsedMemberAccess
+            segments.add(0, MethodChainSegment(ma.member, current.arguments))
+            current = ma.receiver
+        }
+        if (segments.size < 2) return null
+        return Pair(current, segments)
+    }
+
+    private fun printMethodChain(chain: Pair<ParsedExpr, List<MethodChainSegment>>) {
+        val (root, segments) = chain
+        var estLen = estimateExprWidth(root)
+        for (seg in segments) estLen += 1 + seg.method.length + 1 + estimateExprWidth(seg.args)
+
+        if (estLen > config.MAX_LINE_LENGTH || segments.size > 3) {
+            printExpr(root)
+            newLine()
+            indent {
+                for ((i, seg) in segments.withIndex()) {
+                    printIndent()
+                    append(".${seg.method} ")
+                    printExpr(seg.args)
+                    if (i < segments.size - 1) newLine()
+                }
+            }
+        } else {
+            printExpr(root)
+            for (seg in segments) { append(".${seg.method} "); printExpr(seg.args) }
+        }
+    }
+
+    private fun printPipe(expr: ParsedPipe) {
+        val segments = mutableListOf<ParsedExpr>()
+        var current: ParsedExpr = expr
+        while (current is ParsedPipe) {
+            segments.add(0, current.right)
+            current = current.left
+        }
+        segments.add(0, current)
+
+        val estLen = currentColumn + segments.sumOf { estimateExprWidth(it) } + (segments.size - 1) * 4
+        val useMultiLine = estLen > config.MAX_LINE_LENGTH || segments.size > 3
+
+        if (useMultiLine) {
+            printExpr(segments[0])
+            newLine()
+            indent {
+                for (i in 1 until segments.size) {
+                    printIndent()
+                    append("|> ")
+                    printExpr(segments[i])
+                    if (i < segments.size - 1) newLine()
+                }
+            }
+        } else {
+            printExpr(segments[0])
+            for (i in 1 until segments.size) { append(" |> "); printExpr(segments[i]) }
+        }
+    }
+
+    private fun printIf(expr: ParsedIf) {
+        append("if ")
+        printExpr(expr.condition)
+        append(" then ")
+        printExpr(expr.thenBranch)
+        append(" else ")
+        printExpr(expr.elseBranch)
+    }
+
+    private fun printMatch(expr: ParsedMatch) {
+        append("match ")
+        printExpr(expr.scrutinee)
+        append(" is")
+        newLine()
+        indent {
+            for (case in expr.cases) {
+                printIndent()
+                case.patterns.forEachIndexed { i, p ->
+                    if (i > 0) append(" | ")
+                    printPattern(p)
+                }
+                case.guard?.let { append(" if "); printExpr(it) }
+                for (ifLet in case.ifLetBindings) {
+                    append(" if let ")
+                    printPattern(ifLet.pattern)
+                    append(" = ")
+                    printExpr(ifLet.expr)
+                }
+                append(" -> ")
+                printExpr(case.body)
+                trimTrailingNewlines()
+                newLine()
+            }
+        }
+    }
+
+    private fun printDo(expr: ParsedDo) {
+        append("do")
+        newLine()
+        indent {
+            for (stmt in expr.statements) {
+                printIndent()
+                printStatement(stmt)
+                newLine()
+            }
+            printIndent()
+            printExpr(expr.result)
+        }
+    }
+
+    private fun printStatement(stmt: ParsedStatement) {
+        when (stmt) {
+            is ParsedStatement.Let -> {
+                append("let ")
+                printPattern(stmt.pattern)
+                stmt.typeAnnotation?.let { append(": "); printTypeAnnotation(it) }
+                append(" = ")
+                printExpr(stmt.value)
+            }
+            is ParsedStatement.Expr -> printExpr(stmt.expr)
+        }
+    }
+
+    private fun printPerform(expr: ParsedPerform) {
+        append("perform ")
+        expr.handlers.forEachIndexed { i, handler ->
+            if (i > 0) append(", ")
+            if (handler.performer.qualifier != null) {
+                append(handler.performer.qualifier!!.segments.joinToString("::"))
+                append("::")
+            }
+            append(handler.performer.localName)
+            handler.params?.let { append(" "); printRecordLit(it) }
+        }
+        append(" in ")
+        printExpr(expr.body)
+    }
+
+    private fun printEffectCall(expr: ParsedEffectCall) {
+        if (expr.operation.qualifier != null) {
+            append(expr.operation.qualifier!!.segments.joinToString("::"))
+            append("::")
+        }
+        append(expr.operation.localName)
+        append(" ")
+        printExpr(expr.arguments)
+    }
+
+    // =========================================================================
+    // PATTERNS
+    // =========================================================================
+
+    private fun printPattern(pattern: ParsedPattern) {
+        when (pattern) {
+            is ParsedWildcardPattern -> append("_")
+            is ParsedVariablePattern -> append(pattern.name)
+            is ParsedConstructorPattern -> {
+                append(pattern.constructor)
+                pattern.payload?.let { append(" "); printPattern(it) }
+            }
+            is ParsedRecordPattern -> printRecordPattern(pattern)
+            is ParsedLiteralPattern -> printLiteralValue(pattern.value)
+            is ParsedSeqPattern -> printSeqPattern(pattern)
+            is ParsedStringInterpPattern -> printStringInterpPattern(pattern)
+        }
+    }
+
+    private fun printRecordPattern(pattern: ParsedRecordPattern) {
+        if (pattern.entries.isEmpty() && !pattern.isOpen) { append("{}"); return }
+        append("{ ")
+        pattern.entries.forEachIndexed { i, entry ->
+            if (i > 0) append(", ")
+            append(entry.name)
+            entry.pattern?.let { append(" = "); printPattern(it) }
+        }
+        if (pattern.isOpen) {
+            if (pattern.entries.isNotEmpty()) append(", ")
+            append("...")
+        }
+        append(" }")
+    }
+
+    private fun printSeqPattern(pattern: ParsedSeqPattern) {
+        append("[")
+        pattern.elements.forEachIndexed { i, elem ->
+            if (i > 0) append(", ")
+            printPattern(elem)
+        }
+        pattern.restPattern?.let {
+            if (pattern.elements.isNotEmpty()) append(", ")
+            append("...")
+            append(it)
+        }
+        append("]")
+    }
+
+    private fun printStringInterpPattern(pattern: ParsedStringInterpPattern) {
+        append("\"")
+        for (part in pattern.parts) {
+            when (part) {
+                is ParsedStringPatternPart.Literal -> append(escapeString(part.value))
+                is ParsedStringPatternPart.Capture -> { append("\$("); append(part.variableName); append(")") }
+            }
+        }
+        append("\"")
+    }
+
+    private fun printLiteralValue(value: ParsedLiteralValue) {
+        when (value) {
+            is ParsedLiteralValue.IntValue -> append(value.value.toString())
+            is ParsedLiteralValue.NatValue -> append("${value.value}n")
+            is ParsedLiteralValue.FloatValue -> append(formatFloat(value.value))
+            is ParsedLiteralValue.StringValue -> { append("\""); append(escapeString(value.value)); append("\"") }
+            is ParsedLiteralValue.BoolValue -> append(if (value.value) "True" else "False")
+        }
+    }
+
+    // =========================================================================
+    // TYPE ANNOTATIONS
+    // =========================================================================
+
+    private fun printTypeAnnotation(type: ParsedTypeAnnotation) {
+        when (type) {
+            is ParsedNamedType -> append(type.name)
+            is ParsedQualifiedType -> {
+                append(type.modulePath.joinToString("::"))
+                append("::")
+                append(type.typeName)
+                if (type.args.isNotEmpty()) {
+                    append(" ")
+                    type.args.forEachIndexed { i, arg ->
+                        if (i > 0) append(" ")
+                        val needsParens = arg is ParsedFunctionType || (arg is ParsedTypeApp && arg.args.isNotEmpty())
+                        if (needsParens) append("(")
+                        printTypeAnnotation(arg)
+                        if (needsParens) append(")")
+                    }
+                }
+            }
+            is ParsedTypeApp -> {
+                append(type.constructor)
+                if (type.args.isNotEmpty()) {
+                    append(" ")
+                    type.args.forEachIndexed { i, arg ->
+                        if (i > 0) append(" ")
+                        val needsParens = arg is ParsedFunctionType || (arg is ParsedTypeApp && arg.args.isNotEmpty())
+                        if (needsParens) append("(")
+                        printTypeAnnotation(arg)
+                        if (needsParens) append(")")
+                    }
+                }
+            }
+            is ParsedRecordType -> printRecordTypeAnnotation(type)
+            is ParsedVariantType -> printVariantTypeAnnotation(type)
+            is ParsedFunctionType -> printFunctionTypeAnnotation(type)
+            is ParsedSeqType -> { append("["); printTypeAnnotation(type.elementType); append("]") }
+        }
+    }
+
+    private fun printRecordTypeAnnotation(type: ParsedRecordType) {
+        if (type.entries.isEmpty() && !type.isOpen) { append("{}"); return }
+        // Record type annotations MUST be single-line (parser uses indentation-based parsing)
+        append("{ ")
+        type.entries.forEachIndexed { i, entry ->
+            if (i > 0) append(", ")
+            append(entry.name)
+            append(": ")
+            printTypeAnnotation(entry.type)
+        }
+        if (type.isOpen) {
+            if (type.entries.isNotEmpty()) append(", ")
+            append("...")
+        }
+        append(" }")
+    }
+
+    private fun printVariantTypeAnnotation(type: ParsedVariantType) {
+        append("| ")
+        type.constructors.forEachIndexed { i, c ->
+            if (i > 0) append(", ")
+            append(c.name)
+            c.dataType?.let { append(" "); printTypeAnnotation(it) }
+        }
+        if (type.isOpen) append(", ...")
+        append(" |")
+    }
+
+    private fun printFunctionTypeAnnotation(type: ParsedFunctionType) {
+        printTypeAnnotation(type.paramType)
+        if (type.abilityConstraints.isNotEmpty()) {
+            append(" with ")
+            printAbilityConstraints(type.abilityConstraints)
+        }
+        append(" -> ")
+        printTypeAnnotation(type.returnType)
+        type.effects?.let { append(" "); printEffectRow(it) }
+    }
+
+    private fun printEffectRow(row: ParsedEffectRow) {
+        append("<")
+        val allEffects = row.effects.toMutableList()
+        for (ann in row.effectAnnotations) {
+            val sb = StringBuilder(ann.name)
+            if (ann.associatedTypes.isNotEmpty()) {
+                sb.append(" having ")
+                ann.associatedTypes.entries.forEachIndexed { i, (name, typeAnn) ->
+                    if (i > 0) sb.append(", ")
+                    sb.append("$name = ")
+                    sb.append(formatTypeSimple(typeAnn))
+                }
+            }
+            allEffects.add(sb.toString())
+        }
+        append(allEffects.joinToString(", "))
+        if (row.isPolymorphic) { if (allEffects.isNotEmpty()) append(", "); append("...") }
+        if (row.isPerformed) { if (allEffects.isNotEmpty() || row.isPolymorphic) append(", "); append("*") }
+        append(">")
+    }
+
+    private fun printAbilityConstraints(constraints: List<ParsedFnAbilityConstraint>) {
+        constraints.forEachIndexed { i, c ->
+            if (i > 0) append(", ")
+            append(c.abilityName)
+            if (c.typeArgs.isNotEmpty()) {
+                append(" ")
+                c.typeArgs.forEachIndexed { j, arg ->
+                    if (j > 0) append(" ")
+                    printTypeAnnotation(arg)
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // COMMENTS
+    // =========================================================================
+
+    private fun printLeadingComments(decl: ParsedDecl) {
+        val comments = when (decl) {
+            is ParsedLetDecl -> decl.leadingComments
+            is ParsedTypeDecl -> decl.leadingComments
+            is ParsedEffectDecl -> decl.leadingComments
+            is ParsedAbilityDecl -> decl.leadingComments
+            is ParsedImplAbilityDecl -> decl.leadingComments
+            is ParsedPerformerDecl -> decl.leadingComments
+            else -> emptyList()
+        }
+        for (comment in comments) {
+            printIndent()
+            append(comment.text)
+            newLine()
+        }
+    }
+
+    private fun printTrailingComment(decl: ParsedDecl) {
+        val comment = when (decl) {
+            is ParsedLetDecl -> decl.trailingComment
+            is ParsedTypeDecl -> decl.trailingComment
+            is ParsedEffectDecl -> decl.trailingComment
+            is ParsedAbilityDecl -> decl.trailingComment
+            is ParsedImplAbilityDecl -> decl.trailingComment
+            is ParsedPerformerDecl -> decl.trailingComment
+            else -> null
+        }
+        if (comment != null) {
+            // Remove the last newline, add trailing comment, then re-add newline
+            if (output.isNotEmpty() && output.last() == '\n') {
+                output.deleteCharAt(output.length - 1)
+                append("  ")
+                append(comment.text)
+                output.append('\n')
             }
         }
     }
@@ -93,16 +1025,117 @@ class PrettyPrinter {
     private fun append(s: String) {
         output.append(s)
         val lastNewline = s.lastIndexOf('\n')
-        if (lastNewline >= 0) {
-            currentColumn = s.length - lastNewline - 1
-        } else {
-            currentColumn += s.length
-        }
+        if (lastNewline >= 0) currentColumn = s.length - lastNewline - 1
+        else currentColumn += s.length
     }
 
     private fun newLine() {
         output.append("\n")
-        currentLine++
         currentColumn = 0
+    }
+
+    private fun trimTrailingNewlines() {
+        while (output.isNotEmpty() && output.last() in listOf('\n', ' ', '\t')) {
+            output.deleteCharAt(output.length - 1)
+        }
+        val lastNewline = output.lastIndexOf('\n')
+        currentColumn = if (lastNewline >= 0) output.length - lastNewline - 1 else output.length
+    }
+
+    private fun printIndent() {
+        repeat(indentLevel) { output.append(config.INDENT_STRING) }
+        currentColumn = indentLevel * config.INDENT_WIDTH
+    }
+
+    private inline fun indent(block: () -> Unit) { indentLevel++; block(); indentLevel-- }
+
+    private fun escapeString(s: String): String = s
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+        .replace("\r", "\\r")
+        .replace("\$", "\\\$")
+
+    private fun formatFloat(value: Double): String {
+        val s = value.toString()
+        return if (!s.contains('.') && !s.contains('e') && !s.contains('E')) "$s.0" else s
+    }
+
+    private fun formatTypeSimple(type: ParsedTypeAnnotation): String = when (type) {
+        is ParsedNamedType -> type.name
+        is ParsedTypeApp -> if (type.args.isEmpty()) type.constructor
+            else "${type.constructor} ${type.args.joinToString(" ") { formatTypeSimple(it) }}"
+        else -> type.toString()
+    }
+
+    private fun needsParens(expr: ParsedExpr, op: String, isLeft: Boolean): Boolean {
+        if (expr !is ParsedBinaryOp) return false
+        val outerPrec = operatorPrecedence(op)
+        val innerPrec = operatorPrecedence(expr.op)
+        return if (isLeft) innerPrec < outerPrec else innerPrec <= outerPrec
+    }
+
+    private fun operatorPrecedence(op: String): Int = when (op) {
+        "||" -> 1; "&&" -> 2; "==", "!=" -> 3; "<", ">", "<=", ">=" -> 4
+        "+", "-" -> 5; "*", "/", "%" -> 6; else -> 0
+    }
+
+    private fun isSimpleExpr(expr: ParsedExpr): Boolean = when (expr) {
+        is ParsedIntLit, is ParsedFloatLit, is ParsedStringLit,
+        is ParsedNatLit, is ParsedFracLit, is ParsedCharLit,
+        is ParsedIdentifier, is ParsedPipePlaceholder -> true
+        is ParsedVariantConstruct -> expr.value == null || isSimpleExpr(expr.value!!)
+        is ParsedMemberAccess -> isSimpleExpr(expr.receiver)
+        is ParsedBinaryOp -> isSimpleExpr(expr.left) && isSimpleExpr(expr.right)
+        else -> false
+    }
+
+    private fun estimateExprWidth(expr: ParsedExpr): Int = when (expr) {
+        is ParsedIntLit -> expr.value.toString().length
+        is ParsedNatLit -> expr.value.toString().length + 1
+        is ParsedFloatLit -> expr.value.toString().length
+        is ParsedFracLit -> expr.numerator.toString().length + expr.denominator.toString().length + 2
+        is ParsedStringLit -> expr.parts.sumOf { when (it) { is ParsedStringPart.Literal -> it.value.length; is ParsedStringPart.Interpolation -> 4 } } + 2
+        is ParsedCharLit -> 3
+        is ParsedIdentifier -> expr.localName.length + (expr.qualifier?.segments?.sumOf { it.length + 2 } ?: 0)
+        is ParsedPipePlaceholder -> 1
+        is ParsedVariantConstruct -> expr.constructor.length + (expr.value?.let { estimateExprWidth(it) + 1 } ?: 0)
+        is ParsedMemberAccess -> estimateExprWidth(expr.receiver) + expr.member.length + 1
+        is ParsedFunctionCall -> estimateExprWidth(expr.function) + estimateExprWidth(expr.arguments) + 1
+        is ParsedBinaryOp -> estimateExprWidth(expr.left) + expr.op.length + 2 + estimateExprWidth(expr.right)
+        is ParsedUnaryOp -> expr.op.length + estimateExprWidth(expr.operand)
+        is ParsedRecordLit -> estimateRecordLitWidth(expr)
+        is ParsedParens -> estimateExprWidth(expr.expr) + 2
+        is ParsedPipe -> estimateExprWidth(expr.left) + estimateExprWidth(expr.right) + 4
+        else -> 20
+    }
+
+    private fun estimateRecordLitWidth(expr: ParsedRecordLit): Int {
+        if (expr.entries.isEmpty()) return 2
+        return 4 + expr.entries.sumOf { entry ->
+            when (entry) {
+                is ParsedRecordEntry.Field -> entry.name.length + (entry.value?.let { 3 + estimateExprWidth(it) } ?: 0) + 2
+                is ParsedRecordEntry.Spread -> 3 + estimateExprWidth(entry.expr) + 2
+            }
+        }
+    }
+
+    private fun estimateSeqLitWidth(expr: ParsedSeqLit): Int {
+        if (expr.elements.isEmpty()) return 2
+        return 2 + expr.elements.sumOf { elem ->
+            when (elem) {
+                is ParsedSeqElement.Regular -> estimateExprWidth(elem.expr) + 2
+                is ParsedSeqElement.Spread -> 3 + estimateExprWidth(elem.expr) + 2
+            }
+        }
+    }
+
+    private fun estimateTypeWidth(type: ParsedTypeAnnotation): Int = when (type) {
+        is ParsedNamedType -> type.name.length
+        is ParsedTypeApp -> type.constructor.length + 1 + type.args.sumOf { estimateTypeWidth(it) + 1 }
+        is ParsedRecordType -> 4 + type.entries.sumOf { it.name.length + 2 + estimateTypeWidth(it.type) + 2 }
+        is ParsedFunctionType -> estimateTypeWidth(type.paramType) + 4 + estimateTypeWidth(type.returnType)
+        else -> 10
     }
 }
