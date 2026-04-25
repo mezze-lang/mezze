@@ -104,7 +104,7 @@ object SourceContext {
                 sb.appendLine(" $lineNumStr | $displayContent")
 
                 // Show error pointer - calculate visual column accounting for tabs
-                val pointerPadding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
+                val pointerPadding = " ".repeat(lineNumberWidth + 4) // account for " " + lineNum + " | "
                 val visualColumn = calculateVisualColumn(lineContent, errorColumn)
                 // Compute underline length from Loc span (same-line only)
                 // Loc is inclusive on both ends, so length = endCol - startCol + 1
@@ -200,7 +200,7 @@ object SourceContext {
                 sb.appendLine(" $lineNumStr | $displayContent")
 
                 // Show error underline - calculate visual column accounting for tabs
-                val pointerPadding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
+                val pointerPadding = " ".repeat(lineNumberWidth + 4) // account for " " + lineNum + " | "
                 val visualColumn = calculateVisualColumn(lineContent, errorColumn)
                 val underline = " ".repeat(maxOf(0, visualColumn - 1)) + "^".repeat(maxOf(1, spanLength))
                 sb.appendLine("$pointerPadding$underline")
