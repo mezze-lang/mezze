@@ -98,6 +98,36 @@ class MezzeLanguageServer : LanguageServer, LanguageClientAware {
 
             // Inlay hints (types on pipes, chains, let bindings)
             inlayHintProvider = Either.forLeft(true)
+
+            // Rename support
+            renameProvider = Either.forLeft(true)
+
+            // Semantic tokens (syntax highlighting)
+            // Token types and modifiers are defined by the LSP spec:
+            // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#semanticTokenTypes
+            semanticTokensProvider = SemanticTokensWithRegistrationOptions().apply {
+                legend = SemanticTokensLegend(
+                    listOf(
+                        SemanticTokenTypes.Keyword,
+                        SemanticTokenTypes.Function,
+                        SemanticTokenTypes.Variable,
+                        SemanticTokenTypes.Type,
+                        SemanticTokenTypes.String,
+                        SemanticTokenTypes.Number,
+                        SemanticTokenTypes.Comment,
+                        SemanticTokenTypes.Operator,
+                        SemanticTokenTypes.Property,
+                        SemanticTokenTypes.Parameter,
+                        SemanticTokenTypes.EnumMember   // for variant constructors
+                    ),
+                    listOf(
+                        SemanticTokenModifiers.Declaration,
+                        SemanticTokenModifiers.Definition,
+                        SemanticTokenModifiers.Readonly
+                    )
+                )
+                full = Either.forLeft(true)
+            }
         }
 
         val serverInfo = ServerInfo("Mezze Language Server", "1.0.0")

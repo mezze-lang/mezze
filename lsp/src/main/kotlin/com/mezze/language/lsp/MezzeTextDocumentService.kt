@@ -1144,7 +1144,8 @@ class MezzeTextDocumentService(
                                 Range(Position(0, 0), Position(0, 0)),
                                 "use $importPath\n"
                             )
-                            additionalTextEdits = listOf(importEdit)
+                            // Don't auto-import — user should explicitly accept via code action
+                            // additionalTextEdits = listOf(importEdit)
                         })
                         addedMethods.add(op.name)
                     }
@@ -2068,6 +2069,142 @@ class MezzeTextDocumentService(
             }
             is com.mezze.language.typedast.TypedPerform -> collectPipeHints(expr.body, hints, typeAliases)
             else -> {} // leaf nodes
+        }
+    }
+
+    // ========== Rename ==========
+
+    override fun rename(params: RenameParams): CompletableFuture<WorkspaceEdit?> {
+        return CompletableFuture.supplyAsync {
+            val uri = params.textDocument.uri
+            val position = params.position
+            val newName = params.newName
+            val state = documents[uri] ?: return@supplyAsync null
+
+            val lines = state.content.lines()
+            if (position.line >= lines.size) return@supplyAsync null
+            val oldName = extractWordAt(lines[position.line], position.character) ?: return@supplyAsync null
+
+            // Find all references to this name using semantic search
+            val locations = mutableListOf<Location>()
+            val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
+            if (typedModule != null) {
+                collectReferencesInModule(typedModule, oldName, uri, locations)
+            }
+
+            // If no semantic refs found, fall back to text search
+            if (locations.isEmpty()) {
+                lines.forEachIndexed { lineIndex, lineContent ->
+                    var index = 0
+                    while (true) {
+                        val found = lineContent.indexOf(oldName, index)
+                        if (found < 0) break
+                        val before = if (found > 0) lineContent[found - 1] else ' '
+                        val after = if (found + oldName.length < lineContent.length) lineContent[found + oldName.length] else ' '
+                        if (!isIdentifierChar(before) && !isIdentifierChar(after)) {
+                            locations.add(Location(uri, Range(
+                                Position(lineIndex, found),
+                                Position(lineIndex, found + oldName.length)
+                            )))
+                        }
+                        index = found + 1
+                    }
+                }
+            }
+
+            if (locations.isEmpty()) return@supplyAsync null
+
+            val edits = locations.map { loc ->
+                TextEdit(loc.range, newName)
+            }
+
+            WorkspaceEdit(mapOf(uri to edits))
+        }
+    }
+
+    // ========== Semantic Tokens ==========
+
+    override fun semanticTokensFull(params: SemanticTokensParams): CompletableFuture<SemanticTokens> {
+        return CompletableFuture.supplyAsync {
+            val uri = params.textDocument.uri
+            val state = documents[uri] ?: return@supplyAsync SemanticTokens(emptyList())
+
+            val data = mutableListOf<Int>()
+            val parsedModule = state.parsedModule ?: return@supplyAsync SemanticTokens(emptyList())
+
+            // Token type indices (must match the legend order in server capabilities)
+            val KEYWORD = 0
+            val FUNCTION = 1
+            val VARIABLE = 2
+            val TYPE = 3
+            val STRING = 4
+            val NUMBER = 5
+            val COMMENT = 6
+            val OPERATOR = 7
+            val PROPERTY = 8
+            val PARAMETER = 9
+            val ENUM_MEMBER = 10
+
+            // Modifier bits
+            val DECLARATION = 1
+            val DEFINITION = 2
+
+            var prevLine = 0
+            var prevCol = 0
+
+            // Helper to add a token (LSP semantic tokens are delta-encoded)
+            fun addToken(line: Int, col: Int, length: Int, tokenType: Int, modifiers: Int = 0) {
+                val deltaLine = line - prevLine
+                val deltaCol = if (deltaLine == 0) col - prevCol else col
+                data.add(deltaLine)
+                data.add(deltaCol)
+                data.add(length)
+                data.add(tokenType)
+                data.add(modifiers)
+                prevLine = line
+                prevCol = col
+            }
+
+            // Walk parsed module and emit tokens
+            for (decl in parsedModule.decls) {
+                // Comments
+                when (decl) {
+                    is ParsedLetDecl -> {
+                        for (comment in decl.leadingComments) {
+                            addToken(comment.loc.startLine - 1, comment.loc.startCol - 1,
+                                comment.loc.endCol - comment.loc.startCol + 1, COMMENT)
+                        }
+                        // "let" keyword
+                        addToken(decl.loc.startLine - 1, decl.loc.startCol - 1,
+                            if (decl.visibility == com.mezze.language.parsedast.Visibility.PUBLIC) 3 else 3, KEYWORD)
+                        // Binding name
+                        if (decl.isSimpleBinding) {
+                            val nameLen = decl.variableName.length
+                            // Approximate position: after "let " or "pub let "
+                            val nameCol = if (decl.visibility == com.mezze.language.parsedast.Visibility.PUBLIC)
+                                decl.loc.startCol + 7  // "pub let "
+                            else
+                                decl.loc.startCol + 3  // "let "
+                            addToken(decl.loc.startLine - 1, nameCol, nameLen, FUNCTION, DECLARATION or DEFINITION)
+                        }
+                    }
+                    is ParsedTypeDecl -> {
+                        addToken(decl.loc.startLine - 1, decl.loc.startCol - 1, 4, KEYWORD) // "type"
+                    }
+                    is ParsedEffectDecl -> {
+                        addToken(decl.loc.startLine - 1, decl.loc.startCol - 1, 6, KEYWORD) // "effect"
+                    }
+                    is ParsedAbilityDecl -> {
+                        addToken(decl.loc.startLine - 1, decl.loc.startCol - 1, 7, KEYWORD) // "ability"
+                    }
+                    is ParsedUseDecl -> {
+                        addToken(decl.loc.startLine - 1, decl.loc.startCol - 1, 3, KEYWORD) // "use"
+                    }
+                    else -> {}
+                }
+            }
+
+            SemanticTokens(data)
         }
     }
 
