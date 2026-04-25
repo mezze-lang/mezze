@@ -235,6 +235,11 @@ class PrettyPrinter {
         append(" for ")
         append(receiverParam ?: decl.typeParams.lastOrNull() ?: "'a")
 
+        if (decl.associatedTypes.isNotEmpty()) {
+            append(" having ")
+            append(decl.associatedTypes.joinToString(", "))
+        }
+
         if (decl.dependencies.isNotEmpty()) {
             append(" with ")
             decl.dependencies.forEachIndexed { i, dep ->
@@ -361,6 +366,14 @@ class PrettyPrinter {
                 printTypeAnnotation(p.type)
             }
             append(" }")
+        }
+        if (decl.associatedTypeBindings.isNotEmpty()) {
+            append(" having ")
+            decl.associatedTypeBindings.entries.forEachIndexed { i, (name, type) ->
+                if (i > 0) append(", ")
+                append("$name = ")
+                printTypeAnnotation(type)
+            }
         }
         append(" where {")
         newLine()
@@ -1087,7 +1100,6 @@ class PrettyPrinter {
         is ParsedIdentifier, is ParsedPipePlaceholder -> true
         is ParsedVariantConstruct -> expr.value == null || isSimpleExpr(expr.value!!)
         is ParsedMemberAccess -> isSimpleExpr(expr.receiver)
-        is ParsedBinaryOp -> isSimpleExpr(expr.left) && isSimpleExpr(expr.right)
         else -> false
     }
 
