@@ -381,6 +381,16 @@ class PrettyPrinter {
             decl.operations.forEachIndexed { i, op ->
                 printIndent()
                 append(op.name)
+                // Preserve type annotations if present
+                val pType = op.paramType
+                val rType = op.returnType
+                if (pType != null && rType != null) {
+                    append(": ")
+                    printTypeAnnotation(pType)
+                    append(" -> ")
+                    printTypeAnnotation(rType)
+                    op.effects?.let { append(" "); printEffectRow(it) }
+                }
                 append(" = ")
                 printExpr(op.implementation)
                 if (decl.operations.size > 1 || i < decl.operations.size - 1) {

@@ -1022,6 +1022,34 @@ class FormatterTest {
     }
 
     @Test
+    fun `format impl for imported ability preserves type annotations`() {
+        // When ability is NOT in same file, parser keeps as ParsedPerformerDecl.
+        // The formatter must still preserve type annotations on performer ops.
+        val input = """
+            impl Eq for Color where {
+                eq: {it: Color, r: Color} -> Bool = {it, r} -> True,
+                neq: {it: Color, r: Color} -> Bool = {it, r} -> False
+            }
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("eq: { it: Color, r: Color } -> Bool ="), "eq type annotation must be preserved for imported ability impl. Got:\n$output")
+        assertTrue(output.contains("neq: { it: Color, r: Color } -> Bool ="), "neq type annotation must be preserved")
+    }
+
+    @Test
+    fun `format impl for imported ability annotation is idempotent`() {
+        val input = """
+            impl Eq for Color where {
+                eq: {it: Color, r: Color} -> Bool = {it, r} -> True,
+                neq: {it: Color, r: Color} -> Bool = {it, r} -> False
+            }
+        """.trimIndent()
+        val first = formatter.format(input)
+        val second = formatter.format(first)
+        assertEquals(first, second, "Formatting impl with type annotations must be idempotent")
+    }
+
+    @Test
     fun `format impl without type annotations stays without`() {
         val input = """
             impl Eq for Int where {
