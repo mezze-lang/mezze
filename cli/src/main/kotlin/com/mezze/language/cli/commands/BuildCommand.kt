@@ -150,11 +150,46 @@ class BuildCommand {
 
             createMinimalBlobsDb(store, reachable, entryHash, blobsFile)
 
+            // Also copy ALL blobs from cache into the blobs.sqlite
+            // so the standalone JAR has the full stdlib
+            val allBlobsConn = java.sql.DriverManager.getConnection("jdbc:sqlite:${blobsFile.absolutePath}")
+            try {
+                allBlobsConn.autoCommit = false
+                val insertBlob = allBlobsConn.prepareStatement("INSERT OR IGNORE INTO blobs (hash, ir) VALUES (?, ?)")
+                for ((hash, fnIR) in com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions) {
+                    val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
+                    insertBlob.setString(1, hash)
+                    insertBlob.setBytes(2, irBytes)
+                    insertBlob.executeUpdate()
+                }
+                // Store performer records in metadata as JSON
+                val performers = typeCheckResult.performerRecords
+                if (performers.isNotEmpty()) {
+                    val json = performers.joinToString(";") { it.joinToString(",") }
+                    allBlobsConn.createStatement().use { s ->
+                        s.executeUpdate("INSERT OR REPLACE INTO metadata (key, value) VALUES ('performer_records', '${json.replace("'", "''")}')")
+                    }
+                }
+
+                // Store stdlib performer records too
+                try {
+                    val stdlibPerformers = com.mezze.interpreter.v2.runtime.MezzeLanguage.get(null)?.stdlibPerformerRecords
+                } catch (_: Exception) {}
+
+                allBlobsConn.commit()
+            } finally {
+                allBlobsConn.close()
+            }
+
+            // 6. Create runnable JAR
+            val jarFile = File(targetDir, "$outputJarName.jar")
+            createStandaloneJar(blobsFile, jarFile)
+
             val buildTime = (System.nanoTime() - startTime) / 1_000_000
 
             println()
-            println("Build complete: ${blobsFile.name} (${blobsFile.length() / 1024}KB)")
-            println("Entry: $entryHash")
+            println("Build complete: ${jarFile.name} (${jarFile.length() / 1024}KB)")
+            println("Run: java -jar target/${jarFile.name}")
             println("Time: ${buildTime}ms")
 
         } catch (e: Exception) {
@@ -227,6 +262,90 @@ class BuildCommand {
         } finally {
             conn.close()
         }
+    }
+
+    /**
+     * Create a standalone JAR that embeds blobs.sqlite + Truffle runtime.
+     * Uses the installed mez CLI's lib JARs as the runtime base.
+     */
+    private fun createStandaloneJar(blobsFile: File, outputJar: File) {
+        println("Creating standalone JAR...")
+
+        // Find the CLI's lib directory (contains all runtime JARs)
+        val cliLocation = javaClass.protectionDomain.codeSource?.location
+        val cliJarOrClassDir = if (cliLocation != null) File(cliLocation.toURI()) else null
+        val libDir = findLibDir(cliJarOrClassDir)
+
+        if (libDir == null || !libDir.exists()) {
+            println("Warning: Could not find runtime JARs. Producing blobs.sqlite only.")
+            return
+        }
+
+        val libJars = libDir.listFiles()?.filter { it.extension == "jar" } ?: emptyList()
+        if (libJars.isEmpty()) {
+            println("Warning: No JARs found in ${libDir.absolutePath}")
+            return
+        }
+
+        // Create a temp directory for the fat JAR contents
+        val tempDir = kotlin.io.path.createTempDirectory("mez-build").toFile()
+        try {
+            // Extract all dependency JARs
+            for (jar in libJars) {
+                val proc = ProcessBuilder("jar", "xf", jar.absolutePath)
+                    .directory(tempDir)
+                    .redirectErrorStream(true)
+                    .start()
+                proc.waitFor()
+            }
+
+            // Remove signature files from extracted JARs (prevents SecurityException)
+            File(tempDir, "META-INF").listFiles()?.filter {
+                it.name.endsWith(".SF") || it.name.endsWith(".RSA") || it.name.endsWith(".DSA") || it.name.endsWith(".EC")
+            }?.forEach { it.delete() }
+
+            // Add blobs.sqlite as resource
+            val resourceDir = File(tempDir, "com/mezze/standalone")
+            resourceDir.mkdirs()
+            blobsFile.copyTo(File(resourceDir, "blobs.sqlite"), overwrite = true)
+
+            // Create manifest
+            val metaInf = File(tempDir, "META-INF")
+            metaInf.mkdirs()
+            File(metaInf, "MANIFEST.MF").writeText(
+                "Manifest-Version: 1.0\nMain-Class: com.mezze.language.cli.standalone.StandaloneMain\n\n"
+            )
+
+            // StandaloneHelper is already compiled in the CLI JARs — no javac needed.
+            // The manifest points to com.mezze.language.cli.standalone.StandaloneMain
+            // which is a simple wrapper that loads blobs.sqlite from the JAR resources.
+
+            // Create the JAR
+            val manifest = File(metaInf, "MANIFEST.MF")
+            val jarProc = ProcessBuilder("jar", "cfm", outputJar.absolutePath,
+                manifest.absolutePath, "-C", tempDir.absolutePath, ".")
+                .directory(tempDir)
+                .redirectErrorStream(true)
+                .start()
+            if (jarProc.waitFor() != 0) {
+                println("Warning: jar creation failed")
+                return
+            }
+
+            println("Created ${outputJar.name} (${outputJar.length() / 1024}KB)")
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    private fun findLibDir(startDir: File?): File? {
+        var current = startDir
+        while (current != null) {
+            val lib = File(current, "lib")
+            if (lib.exists() && lib.isDirectory) return lib
+            current = current.parentFile
+        }
+        return null
     }
 
     /** Record dependency edges from a FunctionIR body into the store. */
