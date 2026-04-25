@@ -415,6 +415,32 @@ class MezzeTextDocumentService(
         // Helper to wrap in syntax-highlighted code block
         fun codeBlock(code: String): String = "```mezze\n$code\n```"
 
+        // PRIORITY: Use TypedAST position-based lookup for precise hover
+        // This finds the exact expression at the cursor position, including
+        // subexpressions in lambda bodies, record fields, etc.
+        val typedModule = result?.typedModule ?: lastSuccessfulResult[state.uri]?.typedModule
+        if (typedModule != null) {
+            val line = position.line + 1  // LSP is 0-indexed, Loc is 1-indexed
+            val col = position.character + 1
+            when (val lookup = TypedAstLookup.findAtPosition(typedModule, line, col)) {
+                is TypedAstLookup.LookupResult.Expr -> {
+                    val expr = lookup.expr
+                    val typeStr = formatType(expr.type)
+                    return when (expr) {
+                        is com.mezze.language.typedast.TypedVar -> codeBlock("${expr.name} : $typeStr")
+                        is com.mezze.language.typedast.TypedFieldAccess -> codeBlock(".${expr.field} : $typeStr")
+                        is com.mezze.language.typedast.TypedCall -> codeBlock("$typeStr")
+                        else -> codeBlock(typeStr)
+                    }
+                }
+                is TypedAstLookup.LookupResult.Binding -> {
+                    val typeStr = formatType(lookup.type)
+                    return codeBlock("${lookup.name} : $typeStr")
+                }
+                is TypedAstLookup.LookupResult.NotFound -> {} // Fall through to word-based lookup
+            }
+        }
+
         // If we have type check result, use it for full type info
         if (result != null) {
             // 1. Look up top-level bindings with inferred types via TypedModule
@@ -1697,7 +1723,57 @@ class MezzeTextDocumentService(
     // ========== Signature Help ==========
 
     override fun signatureHelp(params: SignatureHelpParams): CompletableFuture<SignatureHelp?> {
-        return CompletableFuture.completedFuture(null)
+        return CompletableFuture.supplyAsync {
+            val uri = params.textDocument.uri
+            val position = params.position
+            val state = documents[uri] ?: return@supplyAsync null
+            val result = state.typeCheckResult ?: lastSuccessfulResult[uri] ?: return@supplyAsync null
+
+            // Find the function being called by looking at the text before the cursor
+            val lines = state.content.lines()
+            if (position.line >= lines.size) return@supplyAsync null
+            val line = lines[position.line]
+            val beforeCursor = line.substring(0, minOf(position.character, line.length))
+
+            // Look for "functionName {" pattern
+            val funcMatch = Regex("""(\w+)\s*\{[^}]*$""").find(beforeCursor) ?: return@supplyAsync null
+            val funcName = funcMatch.groupValues[1]
+
+            // Find the function's type
+            val funcType = findFunctionType(funcName, result, state) ?: return@supplyAsync null
+
+            if (funcType !is MezzeType.FunctionType) return@supplyAsync null
+
+            val paramStr = prettyPrintTypeWithAliases(funcType.paramType, state.typeAliases)
+            val returnStr = prettyPrintTypeWithAliases(funcType.returnType, state.typeAliases)
+
+            val sigInfo = SignatureInformation("$funcName $paramStr -> $returnStr")
+
+            // Add parameter info if param is a record
+            if (funcType.paramType is MezzeType.RecordType) {
+                val recordType = funcType.paramType as MezzeType.RecordType
+                sigInfo.parameters = recordType.fields.map { (name, type) ->
+                    ParameterInformation("$name: ${prettyPrintTypeWithAliases(type, state.typeAliases)}")
+                }
+            }
+
+            SignatureHelp(listOf(sigInfo), 0, 0)
+        }
+    }
+
+    /** Find a function's type by name from the type check result. */
+    private fun findFunctionType(name: String, result: TypeCheckResult, state: DocumentState): MezzeType? {
+        // Check typed bindings
+        val typedBinding = result.typedModule?.decls
+            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            ?.find { it.name == name }
+        if (typedBinding != null) return typedBinding.scheme.type
+
+        // Check imports
+        val import = result.resolvedImports.find { it.localName == name }
+        if (import != null) return import.type
+
+        return null
     }
 
     // ========== Document Formatting ==========
