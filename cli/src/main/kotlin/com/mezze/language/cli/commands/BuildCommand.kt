@@ -94,6 +94,16 @@ class BuildCommand {
             // 2. Scatter into store
             StorePopulator.populate(store, typeCheckResult, modulePath, appFile.absolutePath, sourceHash)
 
+            // Store ALL lowered user functions (including lambdas) in blobs
+            for (fn in typeCheckResult.loweredFunctions) {
+                val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fn)
+                store.putBlob(fn.hash, com.mezze.language.codebase.BlobKind.FUNCTION,
+                    com.mezze.language.codebase.Visibility.PRIVATE, null, irBytes)
+            }
+            // Store the user's lowered function hashes for standalone JAR loading
+            val userFunctionHashes = typeCheckResult.loweredFunctions.map { it.hash.hex }
+            store.setMetadata("user_function_hashes", userFunctionHashes.joinToString(";"))
+
             // 2b. Load stdlib FunctionIRs into store so transitive closure includes them
             try {
                 val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
@@ -171,10 +181,19 @@ class BuildCommand {
                     }
                 }
 
-                // Store stdlib performer records too
-                try {
-                    val stdlibPerformers = com.mezze.interpreter.v2.runtime.MezzeLanguage.get(null)?.stdlibPerformerRecords
-                } catch (_: Exception) {}
+                // Store user lowered functions in blobs.sqlite
+                for (fn in typeCheckResult.loweredFunctions) {
+                    val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fn)
+                    insertBlob.setString(1, fn.hash.hex)
+                    insertBlob.setBytes(2, irBytes)
+                    insertBlob.executeUpdate()
+                }
+
+                // Store user function hash list in metadata
+                allBlobsConn.createStatement().use { s ->
+                    val hashList = typeCheckResult.loweredFunctions.joinToString(";") { it.hash.hex }
+                    s.executeUpdate("INSERT OR REPLACE INTO metadata (key, value) VALUES ('user_function_hashes', '${hashList}')")
+                }
 
                 allBlobsConn.commit()
             } finally {

@@ -158,6 +158,14 @@ class DevCommand {
                 kotlin.system.exitProcess(4)
             }
 
+            // Debug: print performer records
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println("[DEBUG] ${functions.size} functions, ${typeCheckResult.performerRecords.size} performer records")
+                for ((i, pr) in typeCheckResult.performerRecords.withIndex()) {
+                    System.err.println("[DEBUG] performer[$i]: ${pr.joinToString(", ") { it.take(16) + "..." }}")
+                }
+            }
+
             // Execute via Truffle
             executeWithTruffle(functions, typeCheckResult.performerRecords, currentDir, inspect || inspectBrk, inspectBrk)
 

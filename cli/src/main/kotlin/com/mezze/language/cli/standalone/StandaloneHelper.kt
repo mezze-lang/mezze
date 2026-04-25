@@ -34,18 +34,26 @@ object StandaloneHelper {
                     }
                 } ?: throw RuntimeException("No entry_hash in blobs.sqlite metadata")
 
-                // Load all FunctionIR blobs
+                // Load ONLY user FunctionIRs — identified by the stored hash list
+                // Stdlib is handled by PrecompiledStdlib at Language init time
+                val userHashList = db.createStatement().use { stmt ->
+                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'user_function_hashes'").use { rs ->
+                        if (rs.next()) rs.getString(1).split(";").toSet() else emptySet()
+                    }
+                }
+
                 val functions = mutableListOf<FunctionIR>()
-                db.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT ir FROM blobs WHERE ir IS NOT NULL").use { rs ->
-                        while (rs.next()) {
+                for (hash in userHashList) {
+                    if (hash.isEmpty()) continue
+                    val stmt = db.prepareStatement("SELECT ir FROM blobs WHERE hash = ?")
+                    stmt.setString(1, hash)
+                    stmt.executeQuery().use { rs ->
+                        if (rs.next()) {
                             val irBytes = rs.getBytes("ir")
                             if (irBytes != null) {
                                 try {
                                     functions.add(CodebaseSerialization.deserializeFunctionIR(irBytes))
-                                } catch (_: Exception) {
-                                    // Skip blobs that can't be deserialized (may be typed-only)
-                                }
+                                } catch (_: Exception) {}
                             }
                         }
                     }
@@ -68,6 +76,11 @@ object StandaloneHelper {
                             }
                         }
                     }
+                }
+
+                System.err.println("[STANDALONE] ${functions.size} functions, ${performers.size} performer records")
+                for ((i, pr) in performers.withIndex()) {
+                    System.err.println("[STANDALONE] performer[$i]: ${pr.joinToString(", ") { it.take(16) + "..." }}")
                 }
 
                 // Execute via Truffle
