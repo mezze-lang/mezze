@@ -238,11 +238,11 @@ object StorePopulator {
             }
             is com.mezze.language.truffleir.DictMethodCallIR -> collectEdgesFromNode(node.arg, report)
             is com.mezze.language.truffleir.ReadContextFnIR -> report(node.name, EdgeKind.REFERENCES)
+            is com.mezze.language.truffleir.ReadContextIR -> report(node.name, EdgeKind.REFERENCES)
             // Leaf nodes — no edges
             is com.mezze.language.truffleir.ReadLocalIR -> {}
             is com.mezze.language.truffleir.ReadCaptureIR -> {}
             is com.mezze.language.truffleir.ReadArgIR -> {}
-            is com.mezze.language.truffleir.ReadContextIR -> {}
             is com.mezze.language.truffleir.LongLitIR -> {}
             is com.mezze.language.truffleir.DoubleLitIR -> {}
             is com.mezze.language.truffleir.BoolLitIR -> {}

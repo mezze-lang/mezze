@@ -287,6 +287,12 @@ class BuildCommand {
                 }
                 is com.mezze.language.truffleir.SeqGetIR -> { walk(node.seq); walk(node.index) }
                 is com.mezze.language.truffleir.DictMethodCallIR -> walk(node.arg)
+                is com.mezze.language.truffleir.ReadContextIR -> {
+                    try { store.addEdge(fromHash, com.mezze.language.typedast.Hash(node.name), com.mezze.language.codebase.EdgeKind.REFERENCES) } catch (_: Exception) {}
+                }
+                is com.mezze.language.truffleir.ReadContextFnIR -> {
+                    try { store.addEdge(fromHash, com.mezze.language.typedast.Hash(node.name), com.mezze.language.codebase.EdgeKind.REFERENCES) } catch (_: Exception) {}
+                }
                 else -> {} // leaf nodes
             }
         }

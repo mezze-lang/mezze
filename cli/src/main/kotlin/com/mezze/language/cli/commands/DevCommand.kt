@@ -79,6 +79,22 @@ class DevCommand {
         // Open project store
         val store = SQLiteMezzeStore.forProject(currentDir)
 
+        // Load stdlib into store on first use
+        if (store.getMetadata("stdlib_loaded") == null) {
+            try {
+                val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
+                store.transaction {
+                    for ((hash, fnIR) in precompiled.preloweredFunctions) {
+                        val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
+                        store.putBlob(com.mezze.language.typedast.Hash(hash),
+                            com.mezze.language.codebase.BlobKind.FUNCTION,
+                            com.mezze.language.codebase.Visibility.PUBLIC, null, irBytes)
+                    }
+                    store.setMetadata("stdlib_loaded", "true")
+                }
+            } catch (_: Exception) {}
+        }
+
         try {
             val totalStart = System.nanoTime()
 
