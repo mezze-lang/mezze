@@ -107,8 +107,9 @@ object SourceContext {
                 val pointerPadding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
                 val visualColumn = calculateVisualColumn(lineContent, errorColumn)
                 // Compute underline length from Loc span (same-line only)
-                val underlineLength = if (location.startLine == location.endLine && location.endCol > location.startCol)
-                    location.endCol - location.startCol
+                // Loc is inclusive on both ends, so length = endCol - startCol + 1
+                val underlineLength = if (location.startLine == location.endLine && location.endCol >= location.startCol)
+                    location.endCol - location.startCol + 1
                 else 1
                 val pointer = " ".repeat(maxOf(0, visualColumn - 1)) + "^".repeat(maxOf(1, underlineLength))
                 sb.appendLine("$pointerPadding$pointer")
