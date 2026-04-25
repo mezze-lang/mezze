@@ -1740,7 +1740,7 @@ internal val MezzeParser.additiveExpression: Parser<ParsedExpr>
                 val right = multiplicativeExpression(opStream)
                 when (right) {
                     is ParseResult.Success -> {
-                        val loc = result.value.loc
+                        val loc = result.value.loc.spanTo(right.value.loc)
                         result = ParseResult.Success(
                             desugarBinaryOperatorParsed(
                                 op.text,
@@ -1800,7 +1800,7 @@ internal val MezzeParser.multiplicativeExpression: Parser<ParsedExpr>
                 val right = unaryExpression(opStream)
                 when (right) {
                     is ParseResult.Success -> {
-                        val loc = result.value.loc
+                        val loc = result.value.loc.spanTo(right.value.loc)
                         result = ParseResult.Success(
                             desugarBinaryOperatorParsed(
                                 op.text,
