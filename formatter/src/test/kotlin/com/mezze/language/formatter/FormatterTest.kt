@@ -979,24 +979,21 @@ class FormatterTest {
 
     @Test
     fun `format impl preserves operation type annotations`() {
+        // Ability must be in same file for parser to resolve impl as ParsedImplAbilityDecl
         val input = """
+            ability Eq for 'a where {
+                eq: {it: 'a, r: 'a} -> Bool,
+                neq: {it: 'a, r: 'a} -> Bool
+            }
+
             impl Eq for Int where {
                 eq: {it: Int, r: Int} -> Bool = {it, r} -> __native_int_eq {l = it, r = r},
                 neq: {it: Int, r: Int} -> Bool = {it, r} -> __native_int_neq {l = it, r = r}
             }
         """.trimIndent()
         val output = formatter.format(input)
-        // NOTE: This test currently fails because the PARSER drops the type annotation
-        // when re-parsing `eq: {it: Int, r: Int} -> Bool = {it, r} -> ...`.
-        // The functionTypeAnnotation parser consumes too much or fails and falls through.
-        // This is a parser bug, not a formatter bug — the formatter prints what it gets.
-        // TODO: Fix parser's implAbilityOperationParser to preserve type annotations.
-        assertTrue(output.contains("eq"), "Operation name must be present")
-        // Uncomment when parser bug is fixed:
-        // assertTrue(output.contains("eq: { it: Int, r: Int } -> Bool ="), "eq type annotation must be preserved")
-        assertTrue(output.contains("neq"), "neq operation must be present")
-        // Uncomment when parser bug is fixed:
-        // assertTrue(output.contains("neq: { it: Int, r: Int } -> Bool ="), "neq type annotation must be preserved")
+        assertTrue(output.contains("eq: { it: Int, r: Int } -> Bool ="), "eq type annotation must be preserved")
+        assertTrue(output.contains("neq: { it: Int, r: Int } -> Bool ="), "neq type annotation must be preserved")
     }
 
     @Test
