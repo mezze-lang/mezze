@@ -153,9 +153,12 @@ class NumericLiteralUnderscoreTest {
         val source = "let x = 1_000 + 2_000"
         val module = parser.parseParsedModule(source)
         val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
-        // Operators are desugared to function calls during parsing
-        // Just verify it parses successfully
-        assert(letBinding.value is ParsedFunctionCall)
+        // Operators are now preserved as ParsedBinaryOp in the AST
+        assert(letBinding.value is ParsedBinaryOp)
+        val binOp = letBinding.value as ParsedBinaryOp
+        assertEquals("+", binOp.op)
+        assertEquals(1000L, (binOp.left as ParsedIntLit).value)
+        assertEquals(2000L, (binOp.right as ParsedIntLit).value)
     }
 
     @Test
@@ -163,8 +166,8 @@ class NumericLiteralUnderscoreTest {
         val source = "let x = 1_000n + 2_000n"
         val module = parser.parseParsedModule(source)
         val letBinding = module.decls.filterIsInstance<ParsedLetDecl>().first()
-        // Operators are desugared to function calls during parsing
-        // Just verify it parses successfully
-        assert(letBinding.value is ParsedFunctionCall)
+        assert(letBinding.value is ParsedBinaryOp)
+        val binOp = letBinding.value as ParsedBinaryOp
+        assertEquals("+", binOp.op)
     }
 }

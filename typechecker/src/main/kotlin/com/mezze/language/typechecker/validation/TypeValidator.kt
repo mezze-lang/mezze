@@ -1797,6 +1797,15 @@ class TypeValidator(
                 errors.addAll(validatePatternsInExpression(expr.expr, substitution))
             }
 
+            is com.mezze.language.parsedast.ParsedBinaryOp -> {
+                errors.addAll(validatePatternsInExpression(expr.left, substitution))
+                errors.addAll(validatePatternsInExpression(expr.right, substitution))
+            }
+
+            is com.mezze.language.parsedast.ParsedUnaryOp -> {
+                errors.addAll(validatePatternsInExpression(expr.operand, substitution))
+            }
+
             // Leaf nodes - no sub-expressions to validate
             is com.mezze.language.parsedast.ParsedIdentifier,
             is com.mezze.language.parsedast.ParsedIntLit,
@@ -1936,6 +1945,15 @@ class TypeValidator(
 
             is com.mezze.language.parsedast.ParsedParens -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.expr, implDeclarations, effectDeclarations, functionDefinitions))
+            }
+
+            is com.mezze.language.parsedast.ParsedBinaryOp -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.left, implDeclarations, effectDeclarations, functionDefinitions))
+                errors.addAll(validatePerformExpressionsInExpression(expr.right, implDeclarations, effectDeclarations, functionDefinitions))
+            }
+
+            is com.mezze.language.parsedast.ParsedUnaryOp -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.operand, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
             // Leaf nodes
@@ -2152,6 +2170,9 @@ class TypeValidator(
                 }
 
                 is com.mezze.language.parsedast.ParsedParens -> traverse(e.expr)
+
+                is com.mezze.language.parsedast.ParsedBinaryOp -> { traverse(e.left); traverse(e.right) }
+                is com.mezze.language.parsedast.ParsedUnaryOp -> traverse(e.operand)
 
                 // Leaf nodes
                 is com.mezze.language.parsedast.ParsedIdentifier,

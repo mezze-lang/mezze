@@ -113,10 +113,59 @@ class ExpressionConstraintGenerator {
             // Blocks
             is ParsedDo -> generateDo(expr, context)
 
+            // Operators — desugar to method calls for type checking
+            is ParsedBinaryOp -> generateBinaryOp(expr, context)
+            is ParsedUnaryOp -> generateUnaryOp(expr, context)
+
             // Effects
             is ParsedPerform -> generatePerform(expr, context)
             is ParsedEffectCall -> generateEffectCall(expr, context)
         }
+    }
+
+    /**
+     * Generate constraints for a binary operator by desugaring to method call.
+     * `x + y` → `x.add {r = y}` — but with better error messages that reference the operator.
+     */
+    private fun generateBinaryOp(expr: ParsedBinaryOp, context: ConstraintContext): ConstraintResult {
+        val op = com.mezze.language.parser.OperatorMapping.getBinaryOp(expr.op)
+            ?: throw com.mezze.language.typechecker.TypeCheckError(
+                "Unknown operator: ${expr.op}", expr.loc
+            )
+
+        // Desugar to method call: x + y → x.add {r = y}
+        val desugared = ParsedFunctionCall(
+            function = ParsedMemberAccess(expr.left, op.method, expr.loc),
+            arguments = ParsedRecordLit(listOf(ParsedRecordEntry.Field("r", expr.right, expr.loc)), expr.loc),
+            loc = expr.loc
+        )
+
+        // Mark as operator for error message enrichment
+        com.mezze.language.ast.SyntaxMetadata.markAsOperator(expr.loc, expr.op)
+
+        return generateFunctionCall(desugared, context)
+    }
+
+    /**
+     * Generate constraints for a unary operator by desugaring to method call.
+     * `-x` → `x.neg {}`, `!x` → `x.not {}`
+     */
+    private fun generateUnaryOp(expr: ParsedUnaryOp, context: ConstraintContext): ConstraintResult {
+        val op = com.mezze.language.parser.OperatorMapping.getUnaryOp(expr.op)
+            ?: throw com.mezze.language.typechecker.TypeCheckError(
+                "Unknown operator: ${expr.op}", expr.loc
+            )
+
+        // Desugar to method call: -x → x.neg {}
+        val desugared = ParsedFunctionCall(
+            function = ParsedMemberAccess(expr.operand, op.method, expr.loc),
+            arguments = ParsedRecordLit(emptyList(), expr.loc),
+            loc = expr.loc
+        )
+
+        com.mezze.language.ast.SyntaxMetadata.markAsOperator(expr.loc, expr.op)
+
+        return generateFunctionCall(desugared, context)
     }
 
     /** Convert ParsedIf to ParsedMatch for unified type-checking. */

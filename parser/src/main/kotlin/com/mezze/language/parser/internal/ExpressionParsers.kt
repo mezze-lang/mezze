@@ -2331,21 +2331,8 @@ internal fun MezzeParser.desugarBinaryOperatorParsed(
     right: ParsedExpr,
     loc: Loc
 ): ParsedExpr {
-    val op = OperatorMapping.getBinaryOp(operator)
-        ?: throw IllegalArgumentException("Unknown binary operator: $operator")
-    val operationName = op.method
-
-    // Desugar to method call syntax: x + y → x.add { r = y }
-    val desugared = ParsedFunctionCall(
-        function = ParsedMemberAccess(left, operationName, loc),
-        arguments = ParsedRecordLit(listOf(ParsedRecordEntry.Field("r", right, loc)), loc),
-        loc = loc
-    )
-
-    // Mark this expression as coming from operator syntax for better error messages
-    SyntaxMetadata.markAsOperator(loc, operator)
-
-    return desugared
+    // Preserve the operator in the AST — typechecker desugars to method call internally
+    return ParsedBinaryOp(operator, left, right, loc)
 }
 
 /**
@@ -2357,24 +2344,8 @@ internal fun MezzeParser.desugarUnaryOperatorParsed(
     operand: ParsedExpr,
     loc: Loc
 ): ParsedExpr {
-    val op = OperatorMapping.getUnaryOp(operator)
-        ?: throw IllegalArgumentException("Unknown unary operator: $operator")
-    val operationName = op.method
-
-    // Desugar to method call syntax: -x → x.neg {}, !x → x.not {}
-    // The constraint generator resolves this via tryGenerateMethodCall which
-    // stores MethodCallInfo. The TypedAstBuilder uses MethodCallInfo to inject
-    // the receiver into the args and resolve the function correctly.
-    val desugared = ParsedFunctionCall(
-        function = ParsedMemberAccess(operand, operationName, loc),
-        arguments = ParsedRecordLit(emptyList(), loc),
-        loc = loc
-    )
-
-    // Mark this expression as coming from operator syntax for better error messages
-    SyntaxMetadata.markAsOperator(loc, operator)
-
-    return desugared
+    // Preserve the operator in the AST — typechecker desugars to method call internally
+    return ParsedUnaryOp(operator, operand, loc)
 }
 
 /**

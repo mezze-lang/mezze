@@ -945,6 +945,36 @@ class TypedAstBuilder(
             // PIPE
             // ------------------------------------------------------------------
 
+            // Operators — desugar to method call for TypedAST
+            is ParsedBinaryOp -> {
+                val op = com.mezze.language.parser.OperatorMapping.getBinaryOp(expr.op)
+                if (op != null) {
+                    val desugared = ParsedFunctionCall(
+                        function = ParsedMemberAccess(expr.left, op.method, expr.loc),
+                        arguments = ParsedRecordLit(listOf(ParsedRecordEntry.Field("r", expr.right, expr.loc)), expr.loc),
+                        loc = expr.loc
+                    )
+                    buildExpr(desugared, file, contextType)
+                } else {
+                    // Unknown operator — build as typed literal error
+                    TypedIntLit(0, MezzeType.IntType, loc)
+                }
+            }
+
+            is ParsedUnaryOp -> {
+                val op = com.mezze.language.parser.OperatorMapping.getUnaryOp(expr.op)
+                if (op != null) {
+                    val desugared = ParsedFunctionCall(
+                        function = ParsedMemberAccess(expr.operand, op.method, expr.loc),
+                        arguments = ParsedRecordLit(emptyList(), expr.loc),
+                        loc = expr.loc
+                    )
+                    buildExpr(desugared, file, contextType)
+                } else {
+                    TypedIntLit(0, MezzeType.IntType, loc)
+                }
+            }
+
             is ParsedPipe -> {
                 val left = buildExpr(expr.left, file)
                 val right = buildExpr(expr.right, file, contextType)

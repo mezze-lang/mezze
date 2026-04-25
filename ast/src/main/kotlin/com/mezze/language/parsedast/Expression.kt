@@ -108,6 +108,34 @@ data class ParsedFunctionCall(
 ) : ParsedExpr
 
 
+/**
+ * Binary operator expression: `x + y`, `a == b`, `p && q`
+ *
+ * Preserved from source — NOT desugared to method calls.
+ * The typechecker desugars to `x.add {r = y}` internally but keeps
+ * the original operator for error messages.
+ */
+@Serializable
+data class ParsedBinaryOp(
+    val op: String,
+    val left: ParsedExpr,
+    val right: ParsedExpr,
+    override val loc: Loc
+) : ParsedExpr
+
+/**
+ * Unary operator expression: `-x`, `!flag`
+ *
+ * Preserved from source — NOT desugared to method calls.
+ */
+@Serializable
+data class ParsedUnaryOp(
+    val op: String,
+    val operand: ParsedExpr,
+    override val loc: Loc
+) : ParsedExpr
+
+
 /** Pipe expression: `value |> f { param = @ }` */
 @Serializable
 data class ParsedPipe(
