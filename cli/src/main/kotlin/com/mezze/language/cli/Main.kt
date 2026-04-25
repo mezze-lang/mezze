@@ -155,6 +155,7 @@ fun main(args: Array<String>) {
             "remove" -> handleRemoveCommand(remainingArgs)
             "sync" -> handleSyncCommand(remainingArgs)
             // Developer tools
+            "test" -> com.mezze.language.cli.commands.TestCommand().execute(remainingArgs)
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
             // Internal commands (for build system)
