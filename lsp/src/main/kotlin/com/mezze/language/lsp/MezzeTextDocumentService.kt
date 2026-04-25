@@ -631,51 +631,116 @@ class MezzeTextDocumentService(
     }
 
     private fun findDefinitions(state: DocumentState, position: Position): List<Location> {
-        // Get the word at position
         val lines = state.content.lines()
         if (position.line >= lines.size) return emptyList()
 
         val line = lines[position.line]
         val word = extractWordAt(line, position.character) ?: return emptyList()
+        val result = state.typeCheckResult ?: lastSuccessfulResult[state.uri]
 
-        // Find the definition in the AST
-        val result = state.typeCheckResult ?: return emptyList()
+        // 1. Try TypedAST position lookup — finds the exact expression at cursor
+        val typedModule = result?.typedModule
+        if (typedModule != null) {
+            val lookupLine = position.line + 1
+            val lookupCol = position.character + 1
+            val lookup = TypedAstLookup.findAtPosition(typedModule, lookupLine, lookupCol)
+            when (lookup) {
+                is TypedAstLookup.LookupResult.Expr -> {
+                    val expr = lookup.expr
+                    if (expr is com.mezze.language.typedast.TypedVar) {
+                        // Variable reference — find where it was defined
+                        when (val binding = expr.binding) {
+                            is com.mezze.language.typedast.BindingRef.Local -> {
+                                // Local variable — find the let binding in current file
+                                val defLoc = findLocalBindingLoc(typedModule, expr.name)
+                                if (defLoc != null) return listOf(locToLocation(state.uri, defLoc))
+                            }
+                            is com.mezze.language.typedast.BindingRef.ByHash -> {
+                                // Imported — find the import declaration
+                                val importLoc = findImportLoc(state, expr.name)
+                                if (importLoc != null) return listOf(importLoc)
+                            }
+                            is com.mezze.language.typedast.BindingRef.Param -> {
+                                // Lambda parameter — find the enclosing lambda
+                                // For now, point to current position
+                            }
+                            is com.mezze.language.typedast.BindingRef.Capture -> {}
+                            is com.mezze.language.typedast.BindingRef.Native -> {}
+                        }
+                    }
+                }
+                is TypedAstLookup.LookupResult.Binding -> {
+                    return listOf(locToLocation(state.uri, lookup.loc))
+                }
+                is TypedAstLookup.LookupResult.NotFound -> {}
+            }
+        }
 
-        // Look for definitions in parsed module
+        // 2. Fallback: search parsed module declarations by name
         val parsedModule = state.parsedModule
         if (parsedModule != null) {
             for (decl in parsedModule.decls) {
-                when (decl) {
-                    is ParsedLetDecl -> {
-                        if (decl.isSimpleBinding && decl.variableName == word) {
-                            val loc = decl.loc
-                            return listOf(Location(
-                                state.uri,
-                                Range(
-                                    Position(loc.startLine - 1, loc.startCol - 1),
-                                    Position(loc.startLine - 1, loc.startCol + word.length - 1)
-                                )
-                            ))
-                        }
-                    }
-                    is ParsedTypeDecl -> {
-                        if (decl.name == word) {
-                            val loc = decl.loc
-                            return listOf(Location(
-                                state.uri,
-                                Range(
-                                    Position(loc.startLine - 1, loc.startCol - 1),
-                                    Position(loc.startLine - 1, loc.startCol + word.length - 1)
-                                )
-                            ))
-                        }
-                    }
-                    else -> {}
+                val (name, loc) = when (decl) {
+                    is ParsedLetDecl -> if (decl.isSimpleBinding) Pair(decl.variableName, decl.loc) else continue
+                    is ParsedTypeDecl -> Pair(decl.name, decl.loc)
+                    is ParsedAbilityDecl -> Pair(decl.name, decl.loc)
+                    is ParsedEffectDecl -> Pair(decl.name, decl.loc)
+                    else -> continue
                 }
+                if (name == word) return listOf(locToLocation(state.uri, loc))
+            }
+        }
+
+        // 3. Check imports — jump to the import source
+        if (result != null) {
+            val import = result.resolvedImports.find { it.localName == word }
+            if (import != null) {
+                val importLoc = findImportLoc(state, word)
+                if (importLoc != null) return listOf(importLoc)
             }
         }
 
         return emptyList()
+    }
+
+    /** Find the Loc of a local binding by name in the TypedModule. */
+    private fun findLocalBindingLoc(module: com.mezze.language.typedast.TypedModule, name: String): Loc? {
+        // Check top-level let bindings
+        for (decl in module.decls) {
+            if (decl is com.mezze.language.typedast.TypedLetDecl && decl.name == name) {
+                return decl.loc
+            }
+        }
+        // TODO: search let bindings in do blocks (nested scope)
+        return null
+    }
+
+    /** Find the Location of an imported symbol (points to the use declaration or source file). */
+    private fun findImportLoc(state: DocumentState, name: String): Location? {
+        val parsedModule = state.parsedModule ?: return null
+        // Find the use declaration that imports this name
+        for (decl in parsedModule.decls) {
+            when (decl) {
+                is ParsedUseDecl -> {
+                    val path = decl.path
+                    if (path is ParsedUsePath.Selective) {
+                        if (path.items.any { it.name == name || it.alias == name }) {
+                            return locToLocation(state.uri, decl.loc)
+                        }
+                    }
+                }
+                else -> {}
+            }
+        }
+        return null
+    }
+
+    /** Convert a Loc to an LSP Location. */
+    private fun locToLocation(uri: String, loc: Loc): Location {
+        return Location(uri, Range(
+            Position(loc.startLine - 1, loc.startCol - 1),
+            Position(loc.endLine - 1, loc.endCol)
+        ))
     }
 
     // ========== Completion ==========
@@ -1641,41 +1706,103 @@ class MezzeTextDocumentService(
             val position = params.position
             val state = documents[uri] ?: return@supplyAsync emptyList()
 
-            // Get the word at position
             val lines = state.content.lines()
             if (position.line >= lines.size) return@supplyAsync emptyList()
+            val word = extractWordAt(lines[position.line], position.character) ?: return@supplyAsync emptyList()
 
-            val line = lines[position.line]
-            val word = extractWordAt(line, position.character) ?: return@supplyAsync emptyList()
-
-            // Find all occurrences of the word
             val locations = mutableListOf<Location>()
 
-            lines.forEachIndexed { lineIndex, lineContent ->
-                var index = 0
-                while (true) {
-                    val found = lineContent.indexOf(word, index)
-                    if (found < 0) break
+            // Try semantic references via TypedAST — find all TypedVar with same name
+            val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
+            if (typedModule != null) {
+                collectReferencesInModule(typedModule, word, uri, locations)
+            }
 
-                    // Check it's a whole word
-                    val before = if (found > 0) lineContent[found - 1] else ' '
-                    val after = if (found + word.length < lineContent.length) lineContent[found + word.length] else ' '
-
-                    if (!isIdentifierChar(before) && !isIdentifierChar(after)) {
-                        locations.add(Location(
-                            uri,
-                            Range(
+            // If TypedAST didn't find anything, fall back to text search
+            if (locations.isEmpty()) {
+                lines.forEachIndexed { lineIndex, lineContent ->
+                    var index = 0
+                    while (true) {
+                        val found = lineContent.indexOf(word, index)
+                        if (found < 0) break
+                        val before = if (found > 0) lineContent[found - 1] else ' '
+                        val after = if (found + word.length < lineContent.length) lineContent[found + word.length] else ' '
+                        if (!isIdentifierChar(before) && !isIdentifierChar(after)) {
+                            locations.add(Location(uri, Range(
                                 Position(lineIndex, found),
                                 Position(lineIndex, found + word.length)
-                            )
-                        ))
+                            )))
+                        }
+                        index = found + 1
                     }
-
-                    index = found + 1
                 }
             }
 
             locations
+        }
+    }
+
+    /** Collect all references to a name in the TypedModule. */
+    private fun collectReferencesInModule(module: com.mezze.language.typedast.TypedModule, name: String, uri: String, locations: MutableList<Location>) {
+        for (decl in module.decls) {
+            if (decl is com.mezze.language.typedast.TypedLetDecl) {
+                // Include the definition itself
+                if (decl.name == name) {
+                    locations.add(locToLocation(uri, decl.loc))
+                }
+                // Search expression tree for references
+                collectReferencesInExpr(decl.value, name, uri, locations)
+            }
+        }
+    }
+
+    /** Recursively find all TypedVar references to a name. */
+    private fun collectReferencesInExpr(expr: com.mezze.language.typedast.TypedExpr, name: String, uri: String, locations: MutableList<Location>) {
+        when (expr) {
+            is com.mezze.language.typedast.TypedVar -> {
+                if (expr.name == name) locations.add(locToLocation(uri, expr.loc))
+            }
+            is com.mezze.language.typedast.TypedCall -> {
+                collectReferencesInExpr(expr.function, name, uri, locations)
+                collectReferencesInExpr(expr.arg, name, uri, locations)
+            }
+            is com.mezze.language.typedast.TypedLambda -> collectReferencesInExpr(expr.body, name, uri, locations)
+            is com.mezze.language.typedast.TypedRecord -> {
+                for (entry in expr.entries) when (entry) {
+                    is com.mezze.language.typedast.TypedRecordEntry.Field -> collectReferencesInExpr(entry.value, name, uri, locations)
+                    is com.mezze.language.typedast.TypedRecordEntry.Spread -> collectReferencesInExpr(entry.expr, name, uri, locations)
+                }
+            }
+            is com.mezze.language.typedast.TypedFieldAccess -> collectReferencesInExpr(expr.record, name, uri, locations)
+            is com.mezze.language.typedast.TypedBlock -> {
+                for (stmt in expr.statements) when (stmt) {
+                    is com.mezze.language.typedast.TypedStatement.Let -> collectReferencesInExpr(stmt.value, name, uri, locations)
+                    is com.mezze.language.typedast.TypedStatement.Expr -> collectReferencesInExpr(stmt.expr, name, uri, locations)
+                }
+                collectReferencesInExpr(expr.result, name, uri, locations)
+            }
+            is com.mezze.language.typedast.TypedMatch -> {
+                collectReferencesInExpr(expr.scrutinee, name, uri, locations)
+                for (case in expr.cases) collectReferencesInExpr(case.body, name, uri, locations)
+            }
+            is com.mezze.language.typedast.TypedIf -> {
+                collectReferencesInExpr(expr.condition, name, uri, locations)
+                collectReferencesInExpr(expr.thenBranch, name, uri, locations)
+                collectReferencesInExpr(expr.elseBranch, name, uri, locations)
+            }
+            is com.mezze.language.typedast.TypedPipe -> {
+                collectReferencesInExpr(expr.left, name, uri, locations)
+                collectReferencesInExpr(expr.right, name, uri, locations)
+            }
+            is com.mezze.language.typedast.TypedPerform -> collectReferencesInExpr(expr.body, name, uri, locations)
+            is com.mezze.language.typedast.TypedVariantConstruct -> expr.payload?.let { collectReferencesInExpr(it, name, uri, locations) }
+            is com.mezze.language.typedast.TypedSeq -> {
+                for (elem in expr.elements) when (elem) {
+                    is com.mezze.language.typedast.TypedSeqElement.Regular -> collectReferencesInExpr(elem.expr, name, uri, locations)
+                    is com.mezze.language.typedast.TypedSeqElement.Spread -> collectReferencesInExpr(elem.expr, name, uri, locations)
+                }
+            }
+            else -> {} // leaf nodes
         }
     }
 
@@ -1717,7 +1844,44 @@ class MezzeTextDocumentService(
     // ========== Code Actions ==========
 
     override fun codeAction(params: CodeActionParams): CompletableFuture<List<Either<Command, CodeAction>>> {
-        return CompletableFuture.completedFuture(emptyList())
+        return CompletableFuture.supplyAsync {
+            val uri = params.textDocument.uri
+            val state = documents[uri] ?: return@supplyAsync emptyList()
+            val actions = mutableListOf<Either<Command, CodeAction>>()
+
+            // Check diagnostics for auto-import suggestions
+            for (diagnostic in params.context.diagnostics) {
+                val msg = diagnostic.message ?: continue
+
+                // "Undefined variable or function: X" → suggest import
+                if (msg.contains("Undefined variable") || msg.contains("not defined or not imported")) {
+                    val nameMatch = Regex("'(\\w+)'|: (\\w+)$").find(msg)
+                    val undefinedName = nameMatch?.groupValues?.firstOrNull { it.isNotEmpty() && it != msg }
+
+                    if (undefinedName != null) {
+                        // Search stdlib for matching exports
+                        try {
+                            val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
+                            for ((_, module) in precompiled.v2Modules) {
+                                val hasExport = module.exports.containsKey(undefinedName)
+                                if (hasExport) {
+                                    val importText = "use ${module.path}::$undefinedName\n"
+                                    val action = CodeAction("Import '$undefinedName' from ${module.path}")
+                                    action.kind = CodeActionKind.QuickFix
+                                    action.diagnostics = listOf(diagnostic)
+                                    action.edit = WorkspaceEdit(mapOf(
+                                        uri to listOf(TextEdit(Range(Position(0, 0), Position(0, 0)), importText))
+                                    ))
+                                    actions.add(Either.forRight(action))
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+
+            actions
+        }
     }
 
     // ========== Signature Help ==========
