@@ -56,7 +56,9 @@ data class LibraryConfig(
 @Serializable
 data class AppConfig(
     val name: String,
-    val path: String = "src/app.mz"
+    val path: String = "src/app.mz",
+    /** Entry point function name. Defaults to "main". */
+    val entry: String = "main"
 )
 
 /**

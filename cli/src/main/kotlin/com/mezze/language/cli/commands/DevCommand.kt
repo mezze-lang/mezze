@@ -129,13 +129,14 @@ class DevCommand {
                 functions = typeCheckResult.loweredFunctions
             }
 
-            // Validate main function exists
+            // Validate entry function exists
+            val entryName = appConfig.entry
             val mainBinding = typeCheckResult.typedModule?.decls
                 ?.filterIsInstance<TypedLetDecl>()
-                ?.find { it.name == "main" }
+                ?.find { it.name == entryName }
 
             if (mainBinding == null) {
-                println("Error: App must define a 'main' function with type {} -> {}")
+                println("Error: App must define a '$entryName' function with type {} -> {}")
                 kotlin.system.exitProcess(4)
             }
 

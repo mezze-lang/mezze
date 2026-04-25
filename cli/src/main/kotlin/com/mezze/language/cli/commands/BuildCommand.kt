@@ -94,22 +94,23 @@ class BuildCommand {
             // 2. Scatter into store
             StorePopulator.populate(store, typeCheckResult, modulePath, appFile.absolutePath, sourceHash)
 
-            // 3. Validate main
+            // 3. Validate entry function
+            val entryName = appConfig.entry
             val mainBinding = typeCheckResult.typedModule?.decls
                 ?.filterIsInstance<TypedLetDecl>()
-                ?.find { it.name == "main" }
+                ?.find { it.name == entryName }
 
             if (mainBinding == null) {
-                println("Error: App must define a 'main' function with type {} -> {}")
+                println("Error: App must define a '$entryName' function with type {} -> {}")
                 kotlin.system.exitProcess(4)
             }
 
             // 4. Find entry hash and compute transitive closure
-            val entryHash = store.resolveName(modulePath, "main")
+            val entryHash = store.resolveName(modulePath, entryName)
                 ?: store.resolveName(modulePath, "__entry__")
 
             if (entryHash == null) {
-                println("Error: Could not resolve entry point hash for 'main'")
+                println("Error: Could not resolve entry point hash for '$entryName'")
                 kotlin.system.exitProcess(1)
             }
 
