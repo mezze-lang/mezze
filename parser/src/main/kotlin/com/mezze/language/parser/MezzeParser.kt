@@ -37,6 +37,20 @@ class MezzeParser {
         try {
             val lexer = Lexer(source)
             val tokens = lexer.tokenize()
+
+            // In strict mode, fail on lexer errors
+            val firstError = tokens.find { it.type == com.mezze.language.parser.internal.TokenType.ERROR }
+            if (firstError != null) {
+                throw ParseException(
+                    "Unexpected character '${firstError.text}'",
+                    firstError.position,
+                    firstError.line,
+                    firstError.column,
+                    source,
+                    file
+                )
+            }
+
             val stream = TokenStream(tokens)
 
             return when (val result = parsedModuleParser(stream)) {
@@ -80,21 +94,43 @@ class MezzeParser {
 
         val errors = mutableListOf<ParseException>()
         val decls = mutableListOf<ParsedDecl>()
+        val orphanComments = mutableListOf<ParsedComment>()
 
         try {
             val lexer = Lexer(source)
             val tokens = lexer.tokenize()
             var stream = TokenStream(tokens)
 
-            // Skip leading newlines
-            stream = skipNewlines(stream)
+            // Skip leading newlines and collect comments
+            val (startStream, leadingComments) = skipNewlinesCollectComments(stream)
+            stream = startStream
+            var pendingComments = leadingComments.toMutableList()
 
             // Parse top-level items with recovery
             while (stream.current()?.type != TokenType.EOF) {
                 when (val result = parsedTopLevelItem(stream)) {
                     is ParseResult.Success -> {
-                        decls.add(result.value)
-                        stream = skipNewlines(result.remaining)
+                        val decl = attachCommentsToDecl(result.value, pendingComments)
+                        decls.add(decl)
+                        pendingComments = mutableListOf()
+
+                        // Check for trailing comment
+                        val afterDecl = result.remaining
+                        val nextToken = afterDecl.current()
+                        if (nextToken?.type == TokenType.COMMENT && nextToken.line == getLastDeclLine(decl)) {
+                            val text = nextToken.text
+                            val isDoc = text.startsWith("##")
+                            val commentFile = currentFile ?: "<unknown>"
+                            val loc = Loc(commentFile, nextToken.line, nextToken.column, nextToken.line, nextToken.column + text.length - 1)
+                            decls[decls.size - 1] = attachTrailingComment(decls.last(), ParsedComment(text, isDoc, loc))
+                            stream = afterDecl.advance()
+                        } else {
+                            stream = afterDecl
+                        }
+
+                        val (nextStream, betweenComments) = skipNewlinesCollectComments(stream)
+                        pendingComments.addAll(betweenComments)
+                        stream = nextStream
                     }
                     is ParseResult.Failure -> {
                         // Record the error
@@ -109,11 +145,14 @@ class MezzeParser {
 
                         // Synchronize: skip to next top-level declaration
                         stream = synchronizeToNextDeclaration(stream)
+                        pendingComments = mutableListOf() // discard comments in error region
                     }
                 }
             }
 
-            val parsedModule = resolveParsedImplDeclarations(ParsedModule(file ?: "<unknown>", decls))
+            orphanComments.addAll(pendingComments)
+
+            val parsedModule = resolveParsedImplDeclarations(ParsedModule(file ?: "<unknown>", decls, orphanComments))
 
             return ParseResultWithRecovery(parsedModule, errors)
         } finally {
@@ -377,6 +416,7 @@ class MezzeParser {
             when (token.type) {
                 TokenType.NEWLINE -> current = current.advance()
                 TokenType.COMMENT -> current = current.advance()
+                TokenType.ERROR -> current = current.advance()  // Skip lexer errors in recovery mode
                 else -> break
             }
         }

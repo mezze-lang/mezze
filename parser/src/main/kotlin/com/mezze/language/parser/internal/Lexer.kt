@@ -171,11 +171,7 @@ class Lexer(private val source: String) {
             if (isAtEnd()) break
 
             val token = nextToken()
-            if (token.type != TokenType.ERROR) {
-                tokens.add(token)
-            } else {
-                throw LexerException("Unexpected character '${token.text}' at line $line, column $column")
-            }
+            tokens.add(token)  // Always add, including ERROR tokens — parser handles recovery
         }
 
         tokens.add(Token(TokenType.EOF, InternedTokens.EMPTY, position, line, column))
