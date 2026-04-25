@@ -1213,7 +1213,7 @@ class ConstraintSolver(
                         // Check if implementation exists; pass abilityHash for hash-preferred lookup.
                         val hasImpl = checkAbilityImplementation(abilityName, closedTypeArgs, tracked.abilityHash)
                         if (!hasImpl) {
-                            return Pair(generateAbilityErrorMessage(abilityName, closedTypeArgs), errorLoc)
+                            return Pair(generateAbilityErrorMessage(abilityName, closedTypeArgs, errorLoc), errorLoc)
                         }
                     } else {
                         // Some types are still type variables - try bidirectional inference!
@@ -1298,7 +1298,7 @@ class ConstraintSolver(
             if (!hasImpl) {
                 // No implementation found - this is a type error
                 // Generate better error messages for specific cases
-                val errorMessage = generateAbilityErrorMessage(abilityName, trackingArgs)
+                val errorMessage = generateAbilityErrorMessage(abilityName, trackingArgs, constraint.loc)
                 return ConstraintResult.Failure(errorMessage)
             }
 
@@ -1893,76 +1893,46 @@ class ConstraintSolver(
      * Generate a user-friendly error message for ability constraint failures.
      * Provides specific messages for common cases like arithmetic with function types.
      */
-    private fun generateAbilityErrorMessage(abilityName: String, typeArgs: List<MezzeType>): String {
-        // Check if any type argument is a function type
+    private fun generateAbilityErrorMessage(abilityName: String, typeArgs: List<MezzeType>, loc: com.mezze.language.parsedast.Loc? = null): String {
         val hasFunctionType = typeArgs.any { it is MezzeType.FunctionType }
         val typeNames = typeArgs.map { formatType(it) }.joinToString(", ")
-
-        // Get the primary type for impl suggestion
         val primaryType = typeArgs.firstOrNull()?.let { formatType(it) } ?: typeNames
 
-        if (hasFunctionType) {
-            // Functions cannot implement abilities
-            val operatorName = when (abilityName) {
-                "NumAdd" -> "+"
-                "NumSub" -> "-"
-                "NumMul" -> "*"
-                "NumDiv" -> "/"
-                "NumMod" -> "%"
-                // NumNeg removed — neg is a method of NumSub
-                else -> null
-            }
+        // Get original operator from AST (ParsedBinaryOp/ParsedUnaryOp preserved in SyntaxMetadata)
+        val operator = loc?.let { com.mezze.language.ast.SyntaxMetadata.getOperatorSyntax(it) }
 
-            return if (operatorName != null) {
-                "Cannot use '$operatorName' with a function. Functions cannot implement $abilityName."
+        if (hasFunctionType) {
+            return if (operator != null) {
+                "Cannot use '$operator' with a function. Functions cannot implement $abilityName."
             } else {
                 "Functions cannot implement '$abilityName'."
             }
         }
 
-        // Provide helpful messages with impl suggestion
+        // If we have the original operator from the AST, use it directly
+        if (operator != null) {
+            return "Cannot use '$operator' with $typeNames. To enable this, implement: impl $abilityName for $primaryType where { ... }"
+        }
+
+        // Generic ability error — no hardcoded ability→operator mappings.
+        // The operator (if any) comes from SyntaxMetadata above.
+        // Special cases only for abilities that need unique hint text.
         return when (abilityName) {
-            "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod" -> {
-                val operator = when (abilityName) {
-                    "NumAdd" -> "+"
-                    "NumSub" -> "-"
-                    "NumMul" -> "*"
-                    "NumDiv" -> "/"
-                    "NumMod" -> "%"
-                    else -> abilityName
-                }
-                "Cannot use '$operator' with $typeNames. To enable this, implement: impl $abilityName for $primaryType where { ... }"
-            }
-            "Eq" -> "Cannot compare $typeNames for equality. To enable this, implement: impl Eq $primaryType where { ... }"
-            "Ord" -> "Cannot compare $typeNames for ordering. To enable this, implement: impl Ord $primaryType where { ... } (requires Eq)"
-            "Show" -> "Cannot convert $typeNames to String. To enable this, implement: impl Show $primaryType where { ... }"
-            "Hash" -> "Cannot hash $typeNames. To enable this, implement: impl Hash $primaryType where { ... }"
-            "Default" -> "No default value for $typeNames. To enable this, implement: impl Default $primaryType where { ... }"
-            "Parse" -> "Cannot parse into $typeNames. To enable this, implement: impl Parse $primaryType where { ... }"
-            "Convert" -> "Cannot convert between the given types. To enable this, implement: impl Convert for $typeNames where { ... }"
             "Decode", "DecodeRepr" -> {
-                // Special handling for Decode/DecodeRepr - check if the data type is a type variable
                 val dataType = typeArgs.getOrNull(1)
                 if (dataType is MezzeType.VarType) {
-                    """Cannot infer decode target type for $abilityName call.
-  The result type 'a in Result 'a DecodeError could not be determined from context.
-
-  Hint: Add a type annotation to specify the expected type:
-    let person: {name: String, age: Int} = DecodeRepr.decode_repr {val = json, fmt = json_fmt, config = default_config}
-
-  Or use the result in a way that constrains its type:
-    let person = DecodeRepr.decode_repr {val = json, fmt = json_fmt, config = default_config}
-    person.name  # This would constrain person to have a 'name' field"""
+                    """Cannot infer decode target type. Add a type annotation:
+  let result: MyType = decode {val = data, fmt = fmt}"""
                 } else {
-                    "Cannot decode $typeNames. Ensure the format implements DecodeFormat and the data type is serializable."
+                    "$typeNames does not implement '$abilityName'. Ensure the data type is serializable."
                 }
             }
             "Encode", "EncodeRepr" -> {
                 val dataType = typeArgs.getOrNull(1)
                 if (dataType is MezzeType.VarType) {
-                    "Cannot infer encode source type for $abilityName call. Add a type annotation to the value being encoded."
+                    "Cannot infer encode source type. Add a type annotation to the value being encoded."
                 } else {
-                    "Cannot encode $typeNames. Ensure the format implements Format and the data type is serializable."
+                    "$typeNames does not implement '$abilityName'. Ensure the data type is serializable."
                 }
             }
             else -> "$typeNames does not implement '$abilityName'. To enable this, implement: impl $abilityName for $primaryType where { ... }"
