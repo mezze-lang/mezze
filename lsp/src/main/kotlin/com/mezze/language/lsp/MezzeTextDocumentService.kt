@@ -1011,11 +1011,79 @@ class MezzeTextDocumentService(
             }
         }
 
+        // 4. Unimported abilities — show methods from abilities that exist in stdlib
+        //    but are NOT currently imported, with auto-import text edit
+        val importedAbilityNames = allAbilities.map { it.name }.toSet()
+        try {
+            val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
+            for ((_, module) in precompiled.v2Modules) {
+                for (abilityDecl in module.abilityDecls) {
+                    if (abilityDecl.name in importedAbilityNames) continue
+                    // Check if this ability has an impl for the receiver type
+                    val hasImpl = module.abilityImpls.any { impl ->
+                        impl.abilityHash == abilityDecl.hash &&
+                        impl.targetTypes.any { targetType ->
+                            matchesType(baseType, targetType)
+                        }
+                    } || isBuiltinAbilityForType(abilityDecl.name, baseType)
+
+                    if (!hasImpl) continue
+
+                    // Find the module path for the import
+                    val modulePath = module.path
+
+                    for (op in abilityDecl.operations) {
+                        if (op.name in addedMethods) continue
+                        val opParamStr = prettyPrintType(op.paramType)
+                        if (!opParamStr.contains("it")) continue
+
+                        // Determine the use statement to add
+                        val importPath = "${modulePath}::${abilityDecl.name}"
+
+                        items.add(CompletionItem(op.name).apply {
+                            kind = CompletionItemKind.Method
+                            detail = "${abilityDecl.name}.${op.name} (auto-import)"
+                            documentation = Either.forLeft("${prettyPrintType(op.paramType)} -> ${prettyPrintType(op.returnType)}\n\nRequires: use $importPath")
+                            insertText = "${op.name} {}"
+                            insertTextFormat = InsertTextFormat.Snippet
+                            // Lower sort priority — imported abilities come first
+                            sortText = "z_${op.name}"
+                            // Add auto-import as additional text edit
+                            val importEdit = TextEdit(
+                                Range(Position(0, 0), Position(0, 0)),
+                                "use $importPath\n"
+                            )
+                            additionalTextEdits = listOf(importEdit)
+                        })
+                        addedMethods.add(op.name)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // PrecompiledStdlib may not be available in all contexts
+        }
+
         // Filter by partial method name if user already typed some characters after the dot
         return if (partialMethod.isNotEmpty()) {
             items.filter { it.label.startsWith(partialMethod, ignoreCase = true) }
         } else {
             items
+        }
+    }
+
+    /** Check if a MezzeType matches a TypedAST type (simplified matching). */
+    private fun matchesType(mezzeType: MezzeType, typedType: MezzeType): Boolean {
+        return when {
+            mezzeType is MezzeType.IntType && typedType is MezzeType.IntType -> true
+            mezzeType is MezzeType.FloatType && typedType is MezzeType.FloatType -> true
+            mezzeType is MezzeType.StringType && typedType is MezzeType.StringType -> true
+            mezzeType is MezzeType.BoolType && typedType is MezzeType.BoolType -> true
+            mezzeType is MezzeType.NatType && typedType is MezzeType.NatType -> true
+            mezzeType is MezzeType.CharType && typedType is MezzeType.CharType -> true
+            mezzeType is MezzeType.SeqType && typedType is MezzeType.SeqType -> true
+            mezzeType is MezzeType.ListType && typedType is MezzeType.ListType -> true
+            mezzeType is MezzeType.VarType || typedType is MezzeType.VarType -> true // polymorphic — always matches
+            else -> false
         }
     }
 
@@ -1667,6 +1735,99 @@ class MezzeTextDocumentService(
                 server.logError("Formatting failed: ${e.message}")
                 emptyList()
             }
+        }
+    }
+
+    // ========== Inlay Hints ==========
+
+    override fun inlayHint(params: InlayHintParams): CompletableFuture<List<InlayHint>> {
+        return CompletableFuture.supplyAsync {
+            val uri = params.textDocument.uri
+            val state = documents[uri] ?: return@supplyAsync emptyList()
+            val result = state.typeCheckResult ?: lastSuccessfulResult[uri] ?: return@supplyAsync emptyList()
+            val typedModule = result.typedModule ?: return@supplyAsync emptyList()
+
+            val hints = mutableListOf<InlayHint>()
+
+            // 1. Let bindings without type annotations — show inferred type
+            for (decl in typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
+                // Only show hint if there's no explicit type annotation in the source
+                val parsedDecl = state.parsedModule?.decls
+                    ?.filterIsInstance<com.mezze.language.parsedast.ParsedLetDecl>()
+                    ?.find { it.isSimpleBinding && it.variableName == decl.name }
+
+                if (parsedDecl?.typeAnnotation == null) {
+                    val typeStr = prettyPrintTypeWithAliases(decl.scheme.type, state.typeAliases)
+                    // Skip unresolved type variables
+                    if (!typeStr.contains("'") && typeStr != "{}") {
+                        val loc = decl.loc
+                        val hint = InlayHint()
+                        hint.position = Position(loc.startLine - 1, loc.endCol)
+                        hint.setLabel(": $typeStr")
+                        hint.kind = InlayHintKind.Type
+                        hint.paddingLeft = true
+                        hints.add(hint)
+                    }
+                }
+            }
+
+            // 2. Pipe chain segments — show intermediate types
+            // Walk the TypedAST looking for TypedPipe on separate lines
+            for (decl in typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
+                collectPipeHints(decl.value, hints, state.typeAliases)
+            }
+
+            hints
+        }
+    }
+
+    private fun collectPipeHints(
+        expr: com.mezze.language.typedast.TypedExpr,
+        hints: MutableList<InlayHint>,
+        typeAliases: Map<String, TypeAliasInfo>
+    ) {
+        when (expr) {
+            is com.mezze.language.typedast.TypedPipe -> {
+                // Show type at end of left side if it's on a different line from right
+                if (expr.left.loc.endLine != expr.right.loc.startLine) {
+                    val typeStr = prettyPrintTypeWithAliases(expr.left.type, typeAliases)
+                    if (!typeStr.contains("'")) {
+                        val hint = InlayHint()
+                        hint.position = Position(expr.left.loc.endLine - 1, expr.left.loc.endCol)
+                        hint.setLabel(": $typeStr")
+                        hint.kind = InlayHintKind.Type
+                        hint.paddingLeft = true
+                        hints.add(hint)
+                    }
+                }
+                collectPipeHints(expr.left, hints, typeAliases)
+                collectPipeHints(expr.right, hints, typeAliases)
+            }
+            is com.mezze.language.typedast.TypedBlock -> {
+                for (stmt in expr.statements) {
+                    when (stmt) {
+                        is com.mezze.language.typedast.TypedStatement.Let -> collectPipeHints(stmt.value, hints, typeAliases)
+                        is com.mezze.language.typedast.TypedStatement.Expr -> collectPipeHints(stmt.expr, hints, typeAliases)
+                    }
+                }
+                collectPipeHints(expr.result, hints, typeAliases)
+            }
+            is com.mezze.language.typedast.TypedCall -> {
+                collectPipeHints(expr.function, hints, typeAliases)
+                collectPipeHints(expr.arg, hints, typeAliases)
+            }
+            is com.mezze.language.typedast.TypedLambda -> collectPipeHints(expr.body, hints, typeAliases)
+            is com.mezze.language.typedast.TypedMatch -> {
+                collectPipeHints(expr.scrutinee, hints, typeAliases)
+                for (case in expr.cases) collectPipeHints(case.body, hints, typeAliases)
+            }
+            is com.mezze.language.typedast.TypedIf -> {
+                collectPipeHints(expr.condition, hints, typeAliases)
+                collectPipeHints(expr.thenBranch, hints, typeAliases)
+                collectPipeHints(expr.elseBranch, hints, typeAliases)
+            }
+            is com.mezze.language.typedast.TypedPerform -> collectPipeHints(expr.body, hints, typeAliases)
+            else -> {} // leaf nodes
         }
     }
 

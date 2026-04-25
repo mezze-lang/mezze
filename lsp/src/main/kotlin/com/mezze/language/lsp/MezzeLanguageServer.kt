@@ -95,6 +95,9 @@ class MezzeLanguageServer : LanguageServer, LanguageClientAware {
 
             // Folding ranges
             foldingRangeProvider = Either.forLeft(true)
+
+            // Inlay hints (types on pipes, chains, let bindings)
+            inlayHintProvider = Either.forLeft(true)
         }
 
         val serverInfo = ServerInfo("Mezze Language Server", "1.0.0")
