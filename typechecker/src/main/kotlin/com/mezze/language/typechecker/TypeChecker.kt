@@ -1383,12 +1383,15 @@ class TypeChecker(
                 part is com.mezze.language.parsedast.ParsedStringPart.Interpolation && hasPipes(part.expr)
             }
             is com.mezze.language.parsedast.ParsedEffectCall -> hasPipes(expr.arguments)
+            is com.mezze.language.parsedast.ParsedBinaryOp -> hasPipes(expr.left) || hasPipes(expr.right)
+            is com.mezze.language.parsedast.ParsedUnaryOp -> hasPipes(expr.operand)
             else -> false
         }
         val hasAnyPipes = module.decls.any { decl ->
             when (decl) {
                 is com.mezze.language.parsedast.ParsedLetDecl -> hasPipes(decl.value)
                 is com.mezze.language.parsedast.ParsedImplAbilityDecl -> decl.operations.any { hasPipes(it.implementation) }
+                is com.mezze.language.parsedast.ParsedPerformerDecl -> decl.operations.any { hasPipes(it.implementation) }
                 is com.mezze.language.parsedast.ParsedTopLevelExpr -> hasPipes(decl.expression)
                 else -> false
             }
@@ -1437,6 +1440,8 @@ class TypeChecker(
                     else -> part
                 }
             })
+            is com.mezze.language.parsedast.ParsedBinaryOp -> expr.copy(left = desugar(expr.left), right = desugar(expr.right))
+            is com.mezze.language.parsedast.ParsedUnaryOp -> expr.copy(operand = desugar(expr.operand))
             else -> expr
         }
 
