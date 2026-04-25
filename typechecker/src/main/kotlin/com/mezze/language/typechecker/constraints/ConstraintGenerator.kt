@@ -2254,8 +2254,11 @@ class ConstraintGenerator(
             val inferredEffects = inferredType.effects?.effects ?: emptySet()
 
             // Check if annotation declares effects not used in implementation (overpromising)
+            // Skip if annotation has polymorphic effects (...) — effect widening is allowed
+            // A pure function is a valid subtype of an effectful type
+            val isPolymorphic = annotationType.effects?.isOpen == true
             val overpromisedEffects = annotatedEffects - inferredEffects
-            if (overpromisedEffects.isNotEmpty()) {
+            if (overpromisedEffects.isNotEmpty() && !isPolymorphic) {
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Type annotation mismatch for '$varName': Annotation declares effects ${overpromisedEffects.joinToString(", ")} " +
                     "which are not used in the implementation.",
