@@ -845,7 +845,8 @@ class ConstraintGenerator(
                                 abilityName = constraint.abilityName,
                                 abilityHash = abilityDeclarations[constraint.abilityName]?.contentHash,
                                 typeArgs = allTypeArgs,
-                                context = "Type annotation on ${getBindingName(binding)}"
+                                context = "Type annotation on ${getBindingName(binding)}",
+                                loc = binding.loc
                             )
                         } else {
                             null
@@ -861,6 +862,7 @@ class ConstraintGenerator(
                 left = exprResult.type,
                 right = annotatedType,
                 context = "Type annotation on $bindingName",
+                loc = binding.value.loc,
                 errorContext = ErrorContext.TypeAnnotation(bindingName = bindingName)
             )
 
@@ -1239,7 +1241,8 @@ class ConstraintGenerator(
             ?: abilityDeclarations[qualifiedAbilityName]
             ?: throw com.mezze.language.typechecker.TypeCheckError(
                 "Ability '$qualifiedAbilityName' is not defined or not imported. " +
-                "Did you forget to import it with 'use'?"
+                "Did you forget to import it with 'use'?",
+                impl.loc
             )
 
         // Build allTypeArgs: concrete abilityTypeArgs (excluding type vars) + targetTypes
@@ -1316,7 +1319,8 @@ class ConstraintGenerator(
                     val undefinedVar = realUndefined.first()
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: " +
-                        "Undefined variable '${undefinedVar.name}'"
+                        "Undefined variable '${undefinedVar.name}'",
+                        undefinedVar.loc
                     )
                 }
 
@@ -1335,7 +1339,8 @@ class ConstraintGenerator(
                         }
                         if (!allFieldAccessErrors) {
                             throw com.mezze.language.typechecker.TypeCheckError(
-                                "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}"
+                                "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}",
+                                implOp.loc
                             )
                         }
                     }
@@ -1354,7 +1359,8 @@ class ConstraintGenerator(
                             val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
                             throw com.mezze.language.typechecker.TypeCheckError(
                                 "Method '${implOp.name}' in impl ${abilityName} returns wrong type: " +
-                                "expected $expectedTypeStr, but body returns $actualTypeStr."
+                                "expected $expectedTypeStr, but body returns $actualTypeStr.",
+                                implOp.loc
                             )
                         }
                     }
@@ -1393,7 +1399,8 @@ class ConstraintGenerator(
             ?: effectDeclarations[effectRef.localName]  // Fallback to local name for selective imports
             ?: throw com.mezze.language.typechecker.TypeCheckError(
                 "Effect '${effectLookupKey}' is not defined or not imported. " +
-                "Did you forget to import it with 'use'?"
+                "Did you forget to import it with 'use'?",
+                impl.loc
             )
 
         // Build substitution map: 'state -> Int, etc. (associated type bindings)
@@ -1847,7 +1854,8 @@ class ConstraintGenerator(
                                 val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
                                 throw com.mezze.language.typechecker.TypeCheckError(
                                     "Operation '${implOp.name}' in impl ${effectRef.localName} returns wrong type: " +
-                                    "expected $expectedTypeStr, but body returns $actualTypeStr."
+                                    "expected $expectedTypeStr, but body returns $actualTypeStr.",
+                                    implOp.loc
                                 )
                             }
                             is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
