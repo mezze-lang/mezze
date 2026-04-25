@@ -173,17 +173,42 @@ class MezzeParser {
 
 
     private val parsedModuleParser: Parser<ParsedModule> = { stream ->
-        // Skip leading newlines
-        var currentStream = skipNewlines(stream)
+        // Skip leading newlines and collect any leading comments
+        val (startStream, leadingComments) = skipNewlinesCollectComments(stream)
+        var currentStream = startStream
         val decls = mutableListOf<ParsedDecl>()
+        val orphanComments = mutableListOf<ParsedComment>()
+        var pendingComments = leadingComments.toMutableList()
         var failure: ParseResult.Failure? = null
 
-        // Parse top-level items, skipping newlines between them
+        // Parse top-level items, collecting comments between them
         while (currentStream.current()?.type != TokenType.EOF && failure == null) {
             when (val result = parsedTopLevelItem(currentStream)) {
                 is ParseResult.Success -> {
-                    decls.add(result.value)
-                    currentStream = skipNewlines(result.remaining)
+                    // Attach pending comments to this declaration
+                    val decl = attachCommentsToDecl(result.value, pendingComments)
+                    decls.add(decl)
+                    pendingComments = mutableListOf()
+
+                    // Check for trailing comment on the same line
+                    val afterDecl = result.remaining
+                    val nextToken = afterDecl.current()
+                    if (nextToken?.type == TokenType.COMMENT && nextToken.line == getLastDeclLine(decl)) {
+                        val text = nextToken.text
+                        val isDoc = text.startsWith("##")
+                        val file = currentFile ?: "<unknown>"
+                        val loc = Loc(file, nextToken.line, nextToken.column, nextToken.line, nextToken.column + text.length - 1)
+                        val trailing = ParsedComment(text, isDoc, loc)
+                        decls[decls.size - 1] = attachTrailingComment(decls.last(), trailing)
+                        currentStream = afterDecl.advance()
+                    } else {
+                        currentStream = afterDecl
+                    }
+
+                    // Collect comments before next declaration
+                    val (nextStream, betweenComments) = skipNewlinesCollectComments(currentStream)
+                    pendingComments.addAll(betweenComments)
+                    currentStream = nextStream
                 }
                 is ParseResult.Failure -> {
                     failure = ParseResult.Failure(
@@ -196,7 +221,44 @@ class MezzeParser {
             }
         }
 
-        failure ?: ParseResult.Success(ParsedModule(currentFile ?: "<unknown>", decls), currentStream)
+        // Any remaining pending comments are orphans
+        orphanComments.addAll(pendingComments)
+
+        failure ?: ParseResult.Success(
+            ParsedModule(currentFile ?: "<unknown>", decls, orphanComments),
+            currentStream
+        )
+    }
+
+    private fun getLastDeclLine(decl: ParsedDecl): Int = decl.loc.endLine
+
+    private fun attachCommentsToDecl(decl: ParsedDecl, comments: List<ParsedComment>): ParsedDecl {
+        if (comments.isEmpty()) return decl
+        return when (decl) {
+            is ParsedLetDecl -> decl.copy(leadingComments = comments)
+            is ParsedTypeDecl -> decl.copy(leadingComments = comments)
+            is ParsedEffectDecl -> decl.copy(leadingComments = comments)
+            is ParsedAbilityDecl -> decl.copy(leadingComments = comments)
+            is ParsedImplAbilityDecl -> decl.copy(leadingComments = comments)
+            is ParsedPerformerDecl -> decl.copy(leadingComments = comments)
+            is ParsedUseDecl -> decl // use decls don't have comment fields
+            is ParsedPubUseDecl -> decl
+            is ParsedTopLevelExpr -> decl
+        }
+    }
+
+    private fun attachTrailingComment(decl: ParsedDecl, comment: ParsedComment): ParsedDecl {
+        return when (decl) {
+            is ParsedLetDecl -> decl.copy(trailingComment = comment)
+            is ParsedTypeDecl -> decl.copy(trailingComment = comment)
+            is ParsedEffectDecl -> decl.copy(trailingComment = comment)
+            is ParsedAbilityDecl -> decl.copy(trailingComment = comment)
+            is ParsedImplAbilityDecl -> decl.copy(trailingComment = comment)
+            is ParsedPerformerDecl -> decl.copy(trailingComment = comment)
+            is ParsedUseDecl -> decl
+            is ParsedPubUseDecl -> decl
+            is ParsedTopLevelExpr -> decl
+        }
     }
 
     // Declaration parsers (defined later to avoid forward reference)
@@ -319,6 +381,31 @@ class MezzeParser {
             }
         }
         return current
+    }
+
+    /**
+     * Skip newlines and collect COMMENT tokens into a list.
+     * Used by the module parser to attach comments to declarations.
+     */
+    internal fun skipNewlinesCollectComments(stream: TokenStream): Pair<TokenStream, List<ParsedComment>> {
+        var current = stream
+        val comments = mutableListOf<ParsedComment>()
+        while (true) {
+            val token = current.current() ?: break
+            when (token.type) {
+                TokenType.NEWLINE -> current = current.advance()
+                TokenType.COMMENT -> {
+                    val text = token.text
+                    val isDoc = text.startsWith("##")
+                    val file = currentFile ?: "<unknown>"
+                    val loc = Loc(file, token.line, token.column, token.line, token.column + text.length - 1)
+                    comments.add(ParsedComment(text, isDoc, loc))
+                    current = current.advance()
+                }
+                else -> break
+            }
+        }
+        return Pair(current, comments)
     }
 
     internal fun tok(type: TokenType): Parser<Token> =
