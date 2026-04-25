@@ -321,6 +321,13 @@ class TypeChecker(
         val perBindingMustBeOpenRowVars = programConstraintResult.perBindingMustBeOpenRowVars
         val perBindingSolveErrors = programConstraintResult.perBindingSolveErrors
         val perBindingSubstitution = programConstraintResult.perBindingSubstitution
+        val collectedTypeCheckErrors = programConstraintResult.collectedTypeCheckErrors
+
+        // Check for collected TypeCheckErrors (from recovery — preserves metadata)
+        if (collectedTypeCheckErrors.isNotEmpty()) {
+            // Re-throw the first one to preserve metadata (errorType, field info, etc.)
+            throw collectedTypeCheckErrors.first()
+        }
 
         // Check for per-binding solve errors
         if (perBindingSolveErrors.isNotEmpty()) {

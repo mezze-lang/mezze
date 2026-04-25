@@ -36,7 +36,8 @@ data class ProgramConstraintResult(
     val constraintResults: Map<String, ConstraintResult>,
     val perBindingMustBeOpenRowVars: Set<RowVar>,  // Row variables that must stay open from per-binding solving
     val perBindingSolveErrors: List<com.mezze.language.typechecker.solving.ConstraintSolver.ConstraintError> = emptyList(),  // Errors from per-binding solving
-    val perBindingSubstitution: com.mezze.language.typechecker.solving.Substitution = com.mezze.language.typechecker.solving.Substitution.empty  // Accumulated substitution from per-binding solving (for bidirectional inference)
+    val perBindingSubstitution: com.mezze.language.typechecker.solving.Substitution = com.mezze.language.typechecker.solving.Substitution.empty,  // Accumulated substitution from per-binding solving (for bidirectional inference)
+    val collectedTypeCheckErrors: List<com.mezze.language.typechecker.TypeCheckError> = emptyList()  // TypeCheckErrors caught during recovery
 ) {
 }
 
@@ -98,6 +99,8 @@ class ConstraintGenerator(
 
         // Track errors from per-binding solving
         val perBindingSolveErrors = mutableListOf<com.mezze.language.typechecker.solving.ConstraintSolver.ConstraintError>()
+        // Track TypeCheckErrors caught during recovery (preserves metadata)
+        val collectedTypeCheckErrors = mutableListOf<com.mezze.language.typechecker.TypeCheckError>()
 
         // Track accumulated substitution from per-binding solving (for bidirectional inference)
         var perBindingSubstitution = com.mezze.language.typechecker.solving.Substitution.empty
@@ -131,7 +134,7 @@ class ConstraintGenerator(
         // SECOND PASS: Process each program item with placeholders in context
         for (item in module.decls) {
             when (item) {
-                is ParsedLetDecl -> {
+                is ParsedLetDecl -> try {
                     // Reuse the converted annotation type from first pass to ensure same TypeVar instances
                     val preConvertedAnnotationType = annotationTypes[item]
                     val result = generateLetBinding(item, currentContext, recordLiteralBindings, preConvertedAnnotationType)
@@ -548,6 +551,12 @@ class ConstraintGenerator(
                             }
                         }
                     }
+                } catch (e: com.mezze.language.typechecker.TypeCheckError) {
+                    // Error recovery: collect the original error (preserves metadata), continue
+                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata) else e)
+                    if (item.isSimpleBinding) {
+                        currentContext = currentContext.extendMono(item.variableName, MezzeType.VarType(TypeVar.fresh()))
+                    }
                 }
                 is ParsedTypeDecl,
                 is ParsedAbilityDecl,
@@ -555,13 +564,15 @@ class ConstraintGenerator(
                     // These are handled by ContextBuilder in Phase 1
                     // Nothing to do here
                 }
-                is ParsedPerformerDecl -> {
+                is ParsedPerformerDecl -> try {
                     // CRITICAL: Validate effect implementation bodies
                     // ContextBuilder registers the performer in Phase 1
                     // Here in Phase 2, we type-check the implementation bodies
                     validateEffectImplementation(item, currentContext)
+                } catch (e: com.mezze.language.typechecker.TypeCheckError) {
+                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata) else e)
                 }
-                is ParsedImplAbilityDecl -> {
+                is ParsedImplAbilityDecl -> try {
                     // CRITICAL: Validate ability implementation bodies
                     // ContextBuilder registers the implementation in Phase 1
                     // Here in Phase 2, we type-check the implementation bodies
@@ -671,6 +682,8 @@ class ConstraintGenerator(
                             )
                         }
                     }
+                } catch (e: com.mezze.language.typechecker.TypeCheckError) {
+                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata) else e)
                 }
                 is ParsedTopLevelExpr -> {
                     // Top-level expressions (for REPL)
@@ -717,7 +730,8 @@ class ConstraintGenerator(
             constraintResults = results,
             perBindingMustBeOpenRowVars = solver.getMustBeOpenRowVars(),
             perBindingSolveErrors = perBindingSolveErrors,
-            perBindingSubstitution = perBindingSubstitution
+            perBindingSubstitution = perBindingSubstitution,
+            collectedTypeCheckErrors = collectedTypeCheckErrors
         )
     }
 
