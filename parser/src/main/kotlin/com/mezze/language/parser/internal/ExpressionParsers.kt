@@ -1459,8 +1459,7 @@ internal val MezzeParser.logicalOrExpression: Parser<ParsedExpr>
                 val right = logicalAndExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> {
-                        val file = currentFile ?: "<unknown>"
-                        val loc = result.value.loc
+                        val loc = result.value.loc.spanTo(right.value.loc)
                         ParseResult.Success(
                             desugarBinaryOperatorParsed(
                                 op.text,
@@ -1494,7 +1493,7 @@ internal val MezzeParser.logicalAndExpression: Parser<ParsedExpr>
                 val right = pipeExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> {
-                        val loc = result.value.loc
+                        val loc = result.value.loc.spanTo(right.value.loc)
                         ParseResult.Success(
                             desugarBinaryOperatorParsed(
                                 op.text,
@@ -1690,7 +1689,7 @@ internal val MezzeParser.comparisonExpression: Parser<ParsedExpr>
                 val right = additiveExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> {
-                        val loc = result.value.loc
+                        val loc = result.value.loc.spanTo(right.value.loc)
                         ParseResult.Success(
                             desugarBinaryOperatorParsed(
                                 op.text,
@@ -1872,7 +1871,7 @@ internal val MezzeParser.unaryExpression: Parser<ParsedExpr>
                         val operand = unaryExpression(opStream)
                         when (operand) {
                             is ParseResult.Success -> ParseResult.Success(
-                                desugarUnaryOperatorParsed(token.text, operand.value, opLoc),
+                                desugarUnaryOperatorParsed(token.text, operand.value, opLoc.spanTo(operand.value.loc)),
                                 operand.remaining
                             )
                             is ParseResult.Failure -> operand
@@ -1885,7 +1884,7 @@ internal val MezzeParser.unaryExpression: Parser<ParsedExpr>
                 val operand = unaryExpression(opStream)
                 when (operand) {
                     is ParseResult.Success -> ParseResult.Success(
-                        desugarUnaryOperatorParsed(token.text, operand.value, opLoc),
+                        desugarUnaryOperatorParsed(token.text, operand.value, opLoc.spanTo(operand.value.loc)),
                         operand.remaining
                     )
                     is ParseResult.Failure -> operand
@@ -1899,7 +1898,7 @@ internal val MezzeParser.unaryExpression: Parser<ParsedExpr>
             val operand = unaryExpression(opStream) // Right-associative: !(!x) is valid
             when (operand) {
                 is ParseResult.Success -> ParseResult.Success(
-                    desugarUnaryOperatorParsed(token.text, operand.value, opLoc),
+                    desugarUnaryOperatorParsed(token.text, operand.value, opLoc.spanTo(operand.value.loc)),
                     operand.remaining
                 )
                 is ParseResult.Failure -> operand
