@@ -408,12 +408,14 @@ class PrettyPrinter {
     private fun printUseDecl(decl: ParsedUseDecl) {
         append("use ")
         printUsePath(decl.path)
+        decl.alias?.let { append(" as "); append(it) }
         newLine()
     }
 
     private fun printPubUseDecl(decl: ParsedPubUseDecl) {
         append("pub use ")
         printUsePath(decl.path)
+        decl.alias?.let { append(" as "); append(it) }
         newLine()
     }
 
