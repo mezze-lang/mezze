@@ -27,6 +27,8 @@ import java.security.MessageDigest
 class DevCommand {
 
     fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
+        val inspect = args.contains("--inspect")
+        val inspectBrk = args.contains("--inspect-brk")
         val mezzeToml = File(currentDir, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
@@ -141,7 +143,7 @@ class DevCommand {
             }
 
             // Execute via Truffle
-            executeWithTruffle(functions, typeCheckResult.performerRecords, currentDir)
+            executeWithTruffle(functions, typeCheckResult.performerRecords, currentDir, inspect || inspectBrk, inspectBrk)
 
             val totalTime = (System.nanoTime() - totalStart) / 1_000_000
             if (System.getenv("MEZZE_TIMING") != null) {
@@ -162,15 +164,26 @@ class DevCommand {
     private fun executeWithTruffle(
         functions: List<com.mezze.language.truffleir.FunctionIR>,
         performerRecords: List<Array<String>>,
-        projectDir: File
+        projectDir: File,
+        inspect: Boolean = false,
+        inspectBrk: Boolean = false
     ) {
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
         System.setProperty("polyglot.log.level", "OFF")
 
-        val context = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.v2.runtime.MezzeLanguage.ID)
+        val builder = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.v2.runtime.MezzeLanguage.ID)
             .allowAllAccess(true)
             .allowCreateThread(true)
-            .build()
+
+        // Enable Chrome DevTools debugger
+        if (inspect || inspectBrk) {
+            builder.option("inspect", "true")
+            if (inspectBrk) builder.option("inspect.Suspend", "true")
+            System.err.println("Debugger listening on ws://127.0.0.1:9229")
+            System.err.println("Open chrome://inspect in Chrome to connect")
+        }
+
+        val context = builder.build()
 
         try {
             com.mezze.interpreter.v2.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, performerRecords, projectDir.toPath())
