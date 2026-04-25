@@ -131,9 +131,6 @@ class BuildCommand {
             println("Build complete: ${blobsFile.name} (${blobsFile.length() / 1024}KB)")
             println("Entry: $entryHash")
             println("Time: ${buildTime}ms")
-            println()
-            println("Note: Full JAR packaging (with embedded Truffle runtime) coming soon.")
-            println("The blobs.sqlite contains all compiled IR needed for execution.")
 
         } catch (e: Exception) {
             println("Error: ${e.message}")
@@ -155,40 +152,56 @@ class BuildCommand {
     ) {
         if (outputFile.exists()) outputFile.delete()
 
-        val targetStore = SQLiteMezzeStore.inMemory()
+        // Create file-based store directly
+        val targetStore = SQLiteMezzeStore.forProject(outputFile.parentFile)
+        // Actually we need a fresh DB at the output path, not .mz/cache.sqlite
+        // Use a direct connection
+        val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${outputFile.absolutePath}")
+        conn.createStatement().use { s ->
+            s.executeUpdate("PRAGMA journal_mode=WAL")
+            s.executeUpdate("CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, ir BLOB NOT NULL) WITHOUT ROWID")
+            s.executeUpdate("CREATE TABLE IF NOT EXISTS names (module TEXT NOT NULL, name TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (module, name)) WITHOUT ROWID")
+            s.executeUpdate("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID")
+        }
+
         try {
-            targetStore.transaction {
-                // Copy only reachable blobs (IR only — no typed column needed for execution)
-                for (hash in reachable) {
-                    val irBytes = sourceStore.getIR(hash) ?: continue
-                    targetStore.putBlob(hash, com.mezze.language.codebase.BlobKind.FUNCTION,
-                        com.mezze.language.codebase.Visibility.PUBLIC, null, irBytes)
-                }
+            conn.autoCommit = false
 
-                // Copy names for stack traces
-                for (hash in reachable) {
-                    val names = sourceStore.getNamesForHash(hash)
-                    for (name in names) {
-                        targetStore.registerName(name.module, name.name, hash)
-                    }
-                }
+            val insertBlob = conn.prepareStatement("INSERT OR REPLACE INTO blobs (hash, ir) VALUES (?, ?)")
+            val insertName = conn.prepareStatement("INSERT OR REPLACE INTO names (module, name, hash) VALUES (?, ?, ?)")
 
-                // Store entry hash in metadata
-                targetStore.setMetadata("entry_hash", entryHash.hex)
+            var blobCount = 0
+            for (hash in reachable) {
+                val irBytes = sourceStore.getIR(hash) ?: continue
+                insertBlob.setString(1, hash.hex)
+                insertBlob.setBytes(2, irBytes)
+                insertBlob.executeUpdate()
+                blobCount++
             }
 
-            // TODO: Export in-memory SQLite to file
-            // For now, just report what would be in the JAR
-            println("Would create blobs.sqlite with ${reachable.size} blobs")
+            for (hash in reachable) {
+                val names = sourceStore.getNamesForHash(hash)
+                for (name in names) {
+                    insertName.setString(1, name.module)
+                    insertName.setString(2, name.name)
+                    insertName.setString(3, hash.hex)
+                    insertName.executeUpdate()
+                }
+            }
 
+            conn.createStatement().use { s ->
+                s.executeUpdate("INSERT OR REPLACE INTO metadata (key, value) VALUES ('entry_hash', '${entryHash.hex}')")
+            }
+
+            conn.commit()
+            println("Created blobs.sqlite with $blobCount blobs")
+
+        } catch (e: Exception) {
+            conn.rollback()
+            throw e
         } finally {
-            targetStore.close()
+            conn.close()
         }
-    }
-
-    // For now, create a placeholder file
-    init {
-        // TODO: Implement proper SQLite export to file
     }
 
     private fun sha256(content: String): String {
