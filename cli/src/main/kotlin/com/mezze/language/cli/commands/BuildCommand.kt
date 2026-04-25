@@ -94,6 +94,30 @@ class BuildCommand {
             // 2. Scatter into store
             StorePopulator.populate(store, typeCheckResult, modulePath, appFile.absolutePath, sourceHash)
 
+            // 2b. Load stdlib FunctionIRs into store so transitive closure includes them
+            try {
+                val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
+                val stdlibFunctions = precompiled.preloweredFunctions
+                println("Loading ${stdlibFunctions.size} stdlib functions into store...")
+                store.transaction {
+                    for ((hash, fnIR) in stdlibFunctions) {
+                        val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
+                        store.putBlob(
+                            com.mezze.language.typedast.Hash(hash),
+                            com.mezze.language.codebase.BlobKind.FUNCTION,
+                            com.mezze.language.codebase.Visibility.PUBLIC,
+                            null,
+                            irBytes
+                        )
+                        // Record edges so transitive closure works
+                        val fromHash = com.mezze.language.typedast.Hash(hash)
+                        collectEdgesFromIR(fnIR, store, fromHash)
+                    }
+                }
+            } catch (e: Exception) {
+                System.err.println("Warning: Could not load stdlib into store: ${e.message}")
+            }
+
             // 3. Validate entry function
             val entryName = appConfig.entry
             val mainBinding = typeCheckResult.typedModule?.decls
@@ -203,6 +227,70 @@ class BuildCommand {
         } finally {
             conn.close()
         }
+    }
+
+    /** Record dependency edges from a FunctionIR body into the store. */
+    private fun collectEdgesFromIR(
+        fnIR: com.mezze.language.truffleir.FunctionIR,
+        store: SQLiteMezzeStore,
+        fromHash: com.mezze.language.typedast.Hash
+    ) {
+        fun walk(node: com.mezze.language.truffleir.NodeIR) {
+            when (node) {
+                is com.mezze.language.truffleir.CallDirectIR -> {
+                    try { store.addEdge(fromHash, node.targetHash, com.mezze.language.codebase.EdgeKind.CALLS) } catch (_: Exception) {}
+                    walk(node.arg)
+                }
+                is com.mezze.language.truffleir.MakeLambdaIR -> {
+                    try { store.addEdge(fromHash, node.functionHash, com.mezze.language.codebase.EdgeKind.CALLS) } catch (_: Exception) {}
+                }
+                is com.mezze.language.truffleir.HandleIR -> {
+                    walk(node.body)
+                    for (h in node.handlers) {
+                        try { store.addEdge(fromHash, h.handlerHash, com.mezze.language.codebase.EdgeKind.REFERENCES) } catch (_: Exception) {}
+                        try { store.addEdge(fromHash, h.effectHash, com.mezze.language.codebase.EdgeKind.REFERENCES) } catch (_: Exception) {}
+                    }
+                }
+                is com.mezze.language.truffleir.PerformOpIR -> {
+                    try { store.addEdge(fromHash, node.effectHash, com.mezze.language.codebase.EdgeKind.REFERENCES) } catch (_: Exception) {}
+                    walk(node.arg)
+                }
+                is com.mezze.language.truffleir.BlockIR -> {
+                    for (s in node.stmts) when (s) {
+                        is com.mezze.language.truffleir.StmtIR.Let -> walk(s.value)
+                        is com.mezze.language.truffleir.StmtIR.Expr -> walk(s.node)
+                    }
+                    walk(node.result)
+                }
+                is com.mezze.language.truffleir.CallLocalIR -> walk(node.arg)
+                is com.mezze.language.truffleir.CallNativeIR -> walk(node.arg)
+                is com.mezze.language.truffleir.CallIndirectIR -> { walk(node.function); walk(node.arg) }
+                is com.mezze.language.truffleir.MakeRecordIR -> node.fields.forEach { walk(it.value) }
+                is com.mezze.language.truffleir.ReadFieldIR -> walk(node.record)
+                is com.mezze.language.truffleir.RecordUpdateIR -> { walk(node.record); node.updates.forEach { walk(it.value) } }
+                is com.mezze.language.truffleir.MakeVariantIR -> node.payload?.let { walk(it) }
+                is com.mezze.language.truffleir.MatchIR -> {
+                    walk(node.scrutinee)
+                    for (c in node.cases) { walk(c.body); c.guard?.let { walk(it) } }
+                }
+                is com.mezze.language.truffleir.IfIR -> { walk(node.cond); walk(node.thenBr); walk(node.elseBr) }
+                is com.mezze.language.truffleir.WriteLocalIR -> walk(node.value)
+                is com.mezze.language.truffleir.InlineBinaryOpIR -> { walk(node.left); walk(node.right) }
+                is com.mezze.language.truffleir.InterpolatedStringIR -> {
+                    for (p in node.parts) if (p is com.mezze.language.truffleir.StringPartIR.Expr) walk(p.node)
+                }
+                is com.mezze.language.truffleir.MakeSeqIR -> {
+                    for (e in node.elements) when (e) {
+                        is com.mezze.language.truffleir.SeqElementIR.Regular -> walk(e.node)
+                        is com.mezze.language.truffleir.SeqElementIR.Spread -> walk(e.node)
+                    }
+                }
+                is com.mezze.language.truffleir.SeqGetIR -> { walk(node.seq); walk(node.index) }
+                is com.mezze.language.truffleir.DictMethodCallIR -> walk(node.arg)
+                else -> {} // leaf nodes
+            }
+        }
+        walk(fnIR.body)
     }
 
     private fun sha256(content: String): String {
