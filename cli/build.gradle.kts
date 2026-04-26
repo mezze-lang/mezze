@@ -52,8 +52,9 @@ dependencies {
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
     kapt("org.graalvm.truffle:truffle-dsl-processor:24.2.2") // Add annotation processor
 
-    // JSON serialization for enhanced AST
+    // Serialization for enhanced AST and stdlib pre-compilation
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-cbor:1.6.2")
 
     // Package manager dependencies
     implementation("io.github.z4kn4fein:semver:2.0.0")           // Semantic versioning

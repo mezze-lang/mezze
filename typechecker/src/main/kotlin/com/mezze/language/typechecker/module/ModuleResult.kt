@@ -226,6 +226,7 @@ sealed class ImportResolutionResult {
  * This contains all items imported from other modules,
  * ready to be merged with the current module's TypingContext.
  */
+@kotlinx.serialization.Serializable
 data class ModuleImportContext(
     val importedBindings: Map<String, ImportedBinding>,      // Imported functions/values (keyed by name)
     val importedTypes: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,         // Imported type declarations (keyed by name)
@@ -299,6 +300,7 @@ data class ModuleImportContext(
 /**
  * An imported binding (function, value, etc.).
  */
+@kotlinx.serialization.Serializable
 data class ImportedBinding(
     val name: String,                  // Local name (may be aliased)
     val originalName: String,          // Original name in source module
