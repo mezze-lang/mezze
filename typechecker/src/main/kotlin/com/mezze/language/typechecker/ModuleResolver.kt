@@ -77,7 +77,7 @@ data class ProgramIndex(
             val letDecls = decls.filterIsInstance<ParsedLetDecl>()
 
             // Compute content hashes using ParsedDeclHasher (v2-native, Unison-style)
-            val hasher = com.mezze.language.typechecker.hashing.ParsedDeclHasher
+            val hasher = com.mezze.language.parsedast.ParsedDeclHasher
             val file = module.path
 
             val hashedEffects = effectDecls.mapValues { (_, decl) ->
@@ -900,7 +900,7 @@ class ModuleResolver(
                         ?: MezzeType.VarType(TypeVar.fresh())
 
                     // Compute content hash via ParsedDeclHasher (v2-native, Unison-style)
-                    val contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashLetDecl(decl)
+                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl)
                         ?: "unknown_${name}_hash"
 
                     exports[name] = ExportedItem(
@@ -926,7 +926,7 @@ class ModuleResolver(
                 is ParsedTypeDecl -> {
                     if (decl.visibility != com.mezze.language.parsedast.Visibility.PUBLIC) continue
 
-                    val contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashTypeDecl(decl)
+                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(decl)
 
                     // Priority: 1) typeContext (inferred), 2) fresh var
                     val fromContext = typeContext?.get(decl.name)
@@ -965,7 +965,7 @@ class ModuleResolver(
                 // Effect declarations — always public
                 // ----------------------------------------------------------------
                 is ParsedEffectDecl -> {
-                    val contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashEffectDecl(decl)
+                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl)
 
                     // Priority: 1) typeContext (inferred), 2) fresh var
                     val fromContext = typeContext?.get(decl.name)
@@ -1006,7 +1006,7 @@ class ModuleResolver(
                 // Ability declarations — always public
                 // ----------------------------------------------------------------
                 is ParsedAbilityDecl -> {
-                    val contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashAbilityDecl(decl)
+                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashAbilityDecl(decl)
 
                     // Priority: 1) typeContext (inferred), 2) fresh var
                     val fromContext = typeContext?.get(decl.name)
@@ -1032,7 +1032,7 @@ class ModuleResolver(
                 // Performer (effect implementation) declarations
                 // ----------------------------------------------------------------
                 is ParsedPerformerDecl -> {
-                    val contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashPerformerDecl(decl)
+                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(decl)
 
                     // Don't overwrite an existing TYPE export with a HANDLER export
                     val existingExport = exports[decl.performerName]

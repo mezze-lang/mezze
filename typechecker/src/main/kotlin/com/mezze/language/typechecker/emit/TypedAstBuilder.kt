@@ -13,6 +13,7 @@ import com.mezze.language.typechecker.constraints.ConstraintResult.MethodCallInf
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.module.ModuleImportContext
 import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.solving.closeGeneratedRowVars
 
 /**
@@ -121,7 +122,7 @@ class TypedAstBuilder(
         }
 
         // Add hashes for all let declarations in this module
-        val moduleHashes = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashAllLetDecls(module)
+        val moduleHashes = com.mezze.language.parsedast.ParsedDeclHasher.hashAllLetDecls(module)
         for ((name, hash) in moduleHashes) {
             val key = BindingKey.unqualified(name)
             if (key !in mutableHashes) {
@@ -183,7 +184,7 @@ class TypedAstBuilder(
             abilityImplsList.map { it.hash.hex } +
             effectDeclsList.map { it.hash.hex } +
             performerDeclsList.map { it.hash.hex }
-        val moduleHash = computeHash(allHashes.sorted().joinToString(""))
+        val moduleHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { b -> for (h in allHashes.sorted()) b.append(h) }.build().toFullHexString())
 
         return TypedModule(
             path = module.path,
@@ -216,7 +217,7 @@ class TypedAstBuilder(
             val type = closeGeneratedRowVars(rawType)
             val value = buildExpr(decl.value, file, type)
 
-            val destrHash = computeHash("let_$destrName:${typeToString(type)}")
+            val destrHash = Hash(com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl))
             val scheme = V2TypeScheme(emptyList(), emptyList(), type)
             decls.add(TypedLetDecl(destrHash, destrName, emptyList(), value, scheme, false, loc))
 
@@ -242,9 +243,9 @@ class TypedAstBuilder(
         identifierContext[name] = type
 
         // Compute content hash for this declaration
-        val hash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashLetDecl(decl, file)
-            ?.let { Hash.fromV1(it) }
-            ?: computeHash("let_$name:${typeToString(type)}")
+        val hash = com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl, file)
+            ?.let { Hash(it) }
+            ?: Hash(com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl))
 
         val scheme = V2TypeScheme(emptyList(), emptyList(), type)
         val isPublic = decl.visibility == ParsedVisibility.PUBLIC
@@ -271,7 +272,7 @@ class TypedAstBuilder(
         exports: MutableMap<String, ExportEntry>
     ) {
         val loc = decl.loc
-        val hash = computeHash("type_${decl.name}")
+        val hash = Hash(decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(decl))
 
         val def: TypedTypeDef = when (val d = decl.definition) {
             is ParsedRecordDef -> TypedRecordDef(
@@ -303,7 +304,7 @@ class TypedAstBuilder(
         exports: MutableMap<String, ExportEntry>
     ) {
         val loc = decl.loc
-        val hash = computeHash("ability_${decl.name}")
+        val hash = Hash(decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashAbilityDecl(decl))
 
         val ops = decl.operations.mapIndexed { idx, op ->
             typeVarCache.clear()
@@ -345,12 +346,14 @@ class TypedAstBuilder(
         val loc = decl.loc
 
         // Resolve ability hash from target — must match the TypedAbilityDecl.hash
-        // which uses computeHash("ability_${name}"). Previously used V1 contentHash
         // which was a different hash and caused abilityHash != decl.hash mismatch.
         val abilityHash = when (val target = decl.target) {
             is ParsedImplTarget.Named -> {
                 val abilityName = target.ability.localName
-                computeHash("ability_$abilityName")
+                val abilityDecl = abilityDeclarations[abilityName]
+                    ?: importContext?.importedAbilities?.get(abilityName)
+                    ?: error("Ability '$abilityName' not found in declarations or imports")
+                Hash(abilityDecl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashAbilityDecl(abilityDecl))
             }
             is ParsedImplTarget.Inherent -> Hash.ZERO
         }
@@ -371,7 +374,7 @@ class TypedAstBuilder(
 
         // File+location hash — includes file path to disambiguate impls at same line/col in different files.
         // TODO: migrate to TypedASTHasher.hashAbilityImpl for true content-based hashing (requires cache rebuild)
-        val hash = computeHash("impl_${loc.file}_${loc.startLine}_${loc.startCol}")
+        val hash = Hash(decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashImplAbilityDecl(decl))
 
         impls.add(TypedAbilityImpl(
             hash = hash,
@@ -391,7 +394,7 @@ class TypedAstBuilder(
         exports: MutableMap<String, ExportEntry>
     ) {
         val loc = decl.loc
-        val hash = computeHash("effect_${decl.name}")
+        val hash = Hash(decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl))
 
         val ops = decl.operations.mapIndexed { idx, op ->
             typeVarCache.clear()
@@ -417,12 +420,11 @@ class TypedAstBuilder(
         val contentHash = decl.contentHash
             ?: implDeclarations[decl.performerName]?.contentHash
             ?: identifierContentHashes[BindingKey(null, decl.performerName)]
-        val hash = if (contentHash != null) Hash.fromV1(contentHash) else computeHash("performer_${decl.performerName}")
+        val hash = Hash(decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(decl))
 
         // Resolve effect hash — must match the TypedEffectDecl.hash
-        // which uses computeHash("effect_${name}").
         val effectName = decl.effect.localName
-        val effectHash = computeHash("effect_$effectName")
+        val effectHash = resolveEffectHash(effectName)
 
         // Build params
         val params = decl.params.map { param ->
@@ -471,7 +473,7 @@ class TypedAstBuilder(
         decls: MutableList<TypedDecl>
     ) {
         val loc = decl.loc
-        val hash = computeHash("__toplevel_expr_${decls.size}")
+        val hash = Hash(com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(decl.expression))
         val type = MezzeType.VarType(TypeVar("unknown"))
         val value = buildExpr(decl.expression, file, type)
         decls.add(TypedLetDecl(
@@ -621,10 +623,9 @@ class TypedAstBuilder(
                         val isEffect = effectDeclarations.containsKey(receiverName)
                             || importContext?.importedEffects?.containsKey(receiverName) == true
                         if (isEffect) {
-                            // Use canonical hash: computeHash("effect_${name}")
                             // This matches TypedEffectDecl.hash and buildPerformerDecl's effectHash.
                             // No fallbacks needed — the name IS the canonical source of truth.
-                            val effectHash = computeHash("effect_$receiverName")
+                            val effectHash = resolveEffectHash(receiverName)
                             val opName = memberAccess.member
                             val argExpr = buildExpr(expr.arguments, file)
                             return TypedPerformOp(
@@ -652,20 +653,16 @@ class TypedAstBuilder(
                     // Build the function reference — use ByHash
                     val fn = if (methodInfo.methodHash != null) {
                         // Direct call by hash — no field access, no lambda wrapper
-                        val hash = Hash.fromV1(methodInfo.methodHash!!)
+                        val hash = Hash(methodInfo.methodHash!!)
                         TypedVar(
                             name = methodInfo.methodName,
                             binding = BindingRef.ByHash(hash),
                             type = substitution.apply(contextType),
                             loc = memberAccess.loc
                         )
-                    } else if (methodInfo.isInherentMethod && methodInfo.implSourceFile.isNotEmpty()) {
-                        // Inherent method: file+location hash matching buildAbilityImpl
-                        val implHash = computeHash("impl_${methodInfo.implSourceFile}_${methodInfo.implStartLine}_${methodInfo.implStartCol}")
-                        val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
-                        builder.append(implHash.hex)
-                        builder.append(methodInfo.methodName)
-                        val opHash = Hash(builder.build().toFullHexString())
+                    } else if (methodInfo.isInherentMethod && methodInfo.implContentHash != null) {
+                        val implHash = Hash(methodInfo.implContentHash)
+                        val opHash = Hash.computeOpHash(implHash, methodInfo.methodName)
                         TypedVar(
                             name = methodInfo.methodName,
                             binding = BindingRef.ByHash(opHash),
@@ -872,7 +869,7 @@ class TypedAstBuilder(
                                 if (lambdaParamScopes.isNotEmpty() && destrName !in lambdaParamScopes.last()) {
                                     lambdaParamScopes.last().add(destrName)
                                 }
-                                val destrHash = computeHash("do_let_$destrName:${typeToString(resolvedType)}")
+                                val destrHash = Hash(com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(stmt.value))
                                 stmts.add(TypedStatement.Let(destrName, destrHash, resolvedType, value, stmt.loc))
 
                                 // For each field in the pattern, create a field access let
@@ -902,7 +899,7 @@ class TypedAstBuilder(
 
                                 // Use v1 content hash if available, otherwise compute
                                 val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
-                                val contentHash = if (v1LetHash != null) Hash.fromV1(v1LetHash) else computeHash("do_let_$name:${typeToString(resolvedType)}")
+                                val contentHash = Hash(v1LetHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(stmt.value))
                                 stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc))
                             }
                         }
@@ -1016,7 +1013,7 @@ class TypedAstBuilder(
                 // Resolve which effect this operation belongs to
                 val effectName = qualifier?.segments?.lastOrNull() ?: opName
                 // Use canonical hash — matches TypedEffectDecl.hash
-                val effectHash = computeHash("effect_$effectName")
+                val effectHash = resolveEffectHash(effectName)
 
                 val argExpr = buildExpr(expr.arguments, file)
 
@@ -1229,10 +1226,11 @@ class TypedAstBuilder(
         // then fall back to implDeclarations/importedImpls
         val implDecl = implDeclarations[performerName]
         val importedImpl = importContext?.importedImpls?.get(performerName)
-        val rawContentHash = identifierContentHashes[BindingKey(null, performerName)]
+        val performerHash = Hash(identifierContentHashes[BindingKey(null, performerName)]
             ?: implDecl?.contentHash
             ?: importedImpl?.contentHash
-        val performerHash = Hash.fromV1(rawContentHash)
+            ?: implDecl?.let { com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(it) }
+            ?: "0".repeat(64))
 
         // Resolve effect hash from performer
         val effectName = implDecl?.effect?.localName
@@ -1242,7 +1240,7 @@ class TypedAstBuilder(
         // Use canonical hash — matches TypedEffectDecl.hash and buildPerformOp.
         // No fallbacks needed — the name IS the canonical source of truth.
         val effectHash = if (effectName != null) {
-            computeHash("effect_$effectName")
+            resolveEffectHash(effectName)
         } else {
             Hash.ZERO
         }
@@ -1327,19 +1325,19 @@ class TypedAstBuilder(
         if (qualifier != null) {
             val qualKey = BindingKey(qualifier.shortName, name)
             val hash = hashes[qualKey]
-            if (hash != null) return BindingRef.ByHash(Hash.fromV1(hash))
+            if (hash != null) return BindingRef.ByHash(Hash(hash))
         }
 
         // Unqualified: check content hashes
         val unqualKey = BindingKey.unqualified(name)
         val localHash = hashes[unqualKey]
         if (localHash != null) {
-            return BindingRef.ByHash(Hash.fromV1(localHash))
+            return BindingRef.ByHash(Hash(localHash))
         }
 
         // Check importContext
         importContext?.importedBindings?.get(name)?.let { binding ->
-            return BindingRef.ByHash(Hash.fromV1(binding.contentHash))
+            return BindingRef.ByHash(Hash(binding.contentHash))
         }
 
         // Check if it's a native function
@@ -1426,7 +1424,9 @@ class TypedAstBuilder(
                         typeArgs = constraint.typeArgs.map { convertParsedTypeAnnotation(it) },
                         associatedTypeBindings = constraint.associatedTypeBindings.mapValues { (_, ta) ->
                             convertParsedTypeAnnotation(ta)
-                        }
+                        },
+                        abilityHash = abilityDeclarations[constraint.abilityName]?.contentHash
+                            ?: WellKnownHashConstants.resolveAbilityHash(constraint.abilityName)
                     )
                 }
                 MezzeType.FunctionType(
@@ -1476,8 +1476,8 @@ class TypedAstBuilder(
             TypedImport(
                 localName = binding.name,
                 originalName = binding.originalName,
-                moduleHash = computeHash(binding.modulePath),
-                declHash = Hash.fromV1(binding.contentHash),
+                moduleHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append(binding.modulePath) }.build().toFullHexString()),
+                declHash = Hash(binding.contentHash),
                 type = binding.type,
                 kind = ExportKind.FUNCTION
             )
@@ -1512,28 +1512,28 @@ class TypedAstBuilder(
                 null -> {
                     // Punning: { x } means { x = x }
                     identifierContext[fieldName] = fieldType
-                    val fieldHash = computeHash("do_let_$fieldName:${typeToString(fieldType)}")
+                    val fieldHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(fieldName) }.build().toFullHexString())
                     stmts.add(TypedStatement.Let(fieldName, fieldHash, fieldType, fieldAccess, loc))
                 }
                 is ParsedVariablePattern -> {
                     // Rename: { x as renamed }
                     val bindingName = p.name
                     identifierContext[bindingName] = fieldType
-                    val fieldHash = computeHash("do_let_$bindingName:${typeToString(fieldType)}")
+                    val fieldHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(bindingName) }.build().toFullHexString())
                     stmts.add(TypedStatement.Let(bindingName, fieldHash, fieldType, fieldAccess, loc))
                 }
                 is ParsedRecordPattern -> {
                     // Nested: { inner: { x, y } }
                     val nestedVarName = "__destr_${fieldName}_${stmts.size}"
                     identifierContext[nestedVarName] = fieldType
-                    val nestedHash = computeHash("do_let_$nestedVarName:${typeToString(fieldType)}")
+                    val nestedHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(nestedVarName) }.build().toFullHexString())
                     stmts.add(TypedStatement.Let(nestedVarName, nestedHash, fieldType, fieldAccess, loc))
                     emitRecordDestructureFields(p.entries, nestedVarName, fieldType, loc, stmts)
                 }
                 else -> {
                     // Other patterns (wildcard, etc.) — bind with field name
                     identifierContext[fieldName] = fieldType
-                    val fieldHash = computeHash("do_let_$fieldName:${typeToString(fieldType)}")
+                    val fieldHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(fieldName) }.build().toFullHexString())
                     stmts.add(TypedStatement.Let(fieldName, fieldHash, fieldType, fieldAccess, loc))
                 }
             }
@@ -1566,7 +1566,7 @@ class TypedAstBuilder(
             when (val p = entry.pattern) {
                 null -> {
                     // Punning: { x }
-                    val fieldHash = computeHash("let_$fieldName:${typeToString(fieldType)}")
+                    val fieldHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(fieldName) }.build().toFullHexString())
                     val fieldScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
                     decls.add(TypedLetDecl(fieldHash, fieldName, emptyList(), fieldAccess, fieldScheme, isPublic, loc))
                     if (isPublic) {
@@ -1576,7 +1576,7 @@ class TypedAstBuilder(
                 is ParsedVariablePattern -> {
                     // Rename: { x as renamed }
                     val bindingName = p.name
-                    val fieldHash = computeHash("let_$bindingName:${typeToString(fieldType)}")
+                    val fieldHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(bindingName) }.build().toFullHexString())
                     val fieldScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
                     decls.add(TypedLetDecl(fieldHash, bindingName, emptyList(), fieldAccess, fieldScheme, isPublic, loc))
                     if (isPublic) {
@@ -1586,14 +1586,14 @@ class TypedAstBuilder(
                 is ParsedRecordPattern -> {
                     // Nested: { inner: { x, y } }
                     val nestedVarName = "__destructured_${fieldName}_${decls.size}"
-                    val nestedHash = computeHash("let_$nestedVarName:${typeToString(fieldType)}")
+                    val nestedHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(nestedVarName) }.build().toFullHexString())
                     val nestedScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
                     decls.add(TypedLetDecl(nestedHash, nestedVarName, emptyList(), fieldAccess, nestedScheme, false, loc))
                     emitRecordDestructureDeclFields(p.entries, nestedVarName, fieldType, loc, isPublic, decls, exports)
                 }
                 else -> {
                     // Other patterns — bind with field name
-                    val fieldHash = computeHash("let_$fieldName:${typeToString(fieldType)}")
+                    val fieldHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(fieldName) }.build().toFullHexString())
                     val fieldScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
                     decls.add(TypedLetDecl(fieldHash, fieldName, emptyList(), fieldAccess, fieldScheme, isPublic, loc))
                     if (isPublic) {
@@ -1617,10 +1617,11 @@ class TypedAstBuilder(
         else -> ann.javaClass.simpleName
     }
 
-    private fun computeHash(input: String): Hash {
-        val builder = MezzeHashBuilder()
-        builder.append(input)
-        return Hash.fromV1(builder.build().toFullHexString())
+    private fun resolveEffectHash(effectName: String): Hash {
+        val decl = effectDeclarations[effectName]
+            ?: importContext?.importedEffects?.get(effectName)
+            ?: error("Effect '$effectName' not found in declarations or imports")
+        return Hash(decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl))
     }
 
     /**
@@ -1700,22 +1701,22 @@ class TypedAstBuilder(
             // Try: BindingKey(abilityName, methodName) or the method name in the impl.
             val qualKey = BindingKey(abilityName, methodName)
             identifierContentHashes[qualKey]?.let {
-                return BindingRef.ByHash(Hash.fromV1(it))
+                return BindingRef.ByHash(Hash(it))
             }
 
             // Try unqualified method name
             val unqualKey = BindingKey.unqualified(methodName)
             identifierContentHashes[unqualKey]?.let {
-                return BindingRef.ByHash(Hash.fromV1(it))
+                return BindingRef.ByHash(Hash(it))
             }
 
             // Try import context
             importContext?.importedBindings?.get(methodName)?.let { binding ->
-                return BindingRef.ByHash(Hash.fromV1(binding.contentHash))
+                return BindingRef.ByHash(Hash(binding.contentHash))
             }
 
             // Fall back to using the impl content hash itself as the method reference
-            return BindingRef.ByHash(Hash.fromV1(matchingImpl.contentHash))
+            return BindingRef.ByHash(Hash(matchingImpl.contentHash))
         }
 
         return null
@@ -1731,17 +1732,17 @@ class TypedAstBuilder(
         implContentHash: String?
     ): BindingRef? {
         if (implContentHash != null) {
-            return BindingRef.ByHash(Hash.fromV1(implContentHash))
+            return BindingRef.ByHash(Hash(implContentHash))
         }
 
         // Fallback: try to find by method name
         val unqualKey = BindingKey.unqualified(methodName)
         identifierContentHashes[unqualKey]?.let {
-            return BindingRef.ByHash(Hash.fromV1(it))
+            return BindingRef.ByHash(Hash(it))
         }
 
         importContext?.importedBindings?.get(methodName)?.let { binding ->
-            return BindingRef.ByHash(Hash.fromV1(binding.contentHash))
+            return BindingRef.ByHash(Hash(binding.contentHash))
         }
 
         return null

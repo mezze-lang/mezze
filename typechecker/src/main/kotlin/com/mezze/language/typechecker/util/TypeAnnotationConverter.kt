@@ -59,7 +59,8 @@ object TypeAnnotationConverter {
                     annotation.abilityConstraints.map { c ->
                         MezzeType.FunctionAbilityConstraint(
                             abilityName = c.abilityName,
-                            typeArgs = c.typeArgs.map { convert(it, faithful, includeAbilityConstraints, typeVarCache) }
+                            typeArgs = c.typeArgs.map { convert(it, faithful, includeAbilityConstraints, typeVarCache) },
+                            abilityHash = com.mezze.language.typechecker.WellKnownHashConstants.resolveAbilityHash(c.abilityName)
                         )
                     }
                 } else {

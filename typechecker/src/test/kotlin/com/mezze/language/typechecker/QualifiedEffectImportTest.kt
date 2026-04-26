@@ -101,7 +101,8 @@ class QualifiedEffectImportTest {
     }
 
     @Test
-    fun `impl with unqualified effect name and module import should error`() {
+    fun `impl with unqualified effect name and module import works via transitive collection`() {
+        // With transitive effect collection, `Log` is available when the module is imported
         val source = """
             use std::effects::log
 
@@ -110,13 +111,9 @@ class QualifiedEffectImportTest {
             }
         """.trimIndent()
 
-        val exception = assertThrows<TypeCheckError> {
-            val parsedModule = parser.parseParsedModule(source, "test.mz")
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
-
-        assertTrue(exception.message?.contains("not defined or not imported") == true,
-            "Error should mention effect not imported: ${exception.message}")
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
+        assertNotNull(result)
     }
 
     // ========================================================================

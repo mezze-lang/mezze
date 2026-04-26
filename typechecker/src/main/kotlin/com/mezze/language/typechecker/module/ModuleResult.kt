@@ -187,7 +187,7 @@ data class TypedModule(
     val dependencyGraph: com.mezze.language.typechecker.dependencies.DependencyGraph =
         com.mezze.language.typechecker.dependencies.DependencyGraph.EMPTY,  // Dependencies between definitions
     /** V2 TypedModule emitted by TypedAstBuilder — used by monomorphizer */
-    val v2TypedModule: com.mezze.language.typedast.TypedModule? = null,
+    val typedModule: com.mezze.language.typedast.TypedModule? = null,
     /** V2 ParsedModule — the primary AST representation. */
     val parsedModule: com.mezze.language.parsedast.ParsedModule? = null,
     /** Extracted type context: name → inferred MezzeType. Built once at type-check time. */

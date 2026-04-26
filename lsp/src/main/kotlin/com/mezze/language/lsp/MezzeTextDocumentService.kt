@@ -584,10 +584,9 @@ class MezzeTextDocumentService(
 
     /**
      * Find a local binding's type by searching through the typed module.
-     * TODO: Rewrite for v2 ParsedExpr when LSP is redesigned.
+     * Stubbed — needs ParsedExpr scope walking to resolve local let bindings.
      */
     private fun findLocalBindingType(name: String, typedModule: com.mezze.language.typedast.TypedModule?, line: Int): MezzeType? {
-        // Stubbed — needs v2 ParsedExpr rewrite for local scope walking.
         return null
     }
 
@@ -1107,7 +1106,7 @@ class MezzeTextDocumentService(
         val importedAbilityNames = allAbilities.map { it.name }.toSet()
         try {
             val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
-            for ((_, module) in precompiled.v2Modules) {
+            for ((_, module) in precompiled.stdlibTypedModules) {
                 for (abilityDecl in module.abilityDecls) {
                     if (abilityDecl.name in importedAbilityNames) continue
                     // Check if this ability has an impl for the receiver type
@@ -1302,10 +1301,9 @@ class MezzeTextDocumentService(
 
     /**
      * Get local variable completions - variables in scope at the current position.
-     * TODO: Rewrite for v2 ParsedExpr when LSP is redesigned.
+     * Stubbed — needs ParsedExpr tree walking to find variables in scope at cursor.
      */
     private fun getLocalVariableCompletions(state: DocumentState, position: Position): List<CompletionItem> {
-        // Stubbed — v1 Expression tree walking removed. Needs v2 ParsedExpr rewrite.
         return emptyList()
     }
 
@@ -1863,7 +1861,7 @@ class MezzeTextDocumentService(
                         // Search stdlib for matching exports
                         try {
                             val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
-                            for ((_, module) in precompiled.v2Modules) {
+                            for ((_, module) in precompiled.stdlibTypedModules) {
                                 val hasExport = module.exports.containsKey(undefinedName)
                                 if (hasExport) {
                                     val importText = "use ${module.path}::$undefinedName\n"

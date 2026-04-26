@@ -1,6 +1,6 @@
 package com.mezze.language.cli.standalone
 
-import com.mezze.interpreter.v2.runtime.MezzeLanguage
+import com.mezze.interpreter.runtime.MezzeLanguage
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.codebase.CodebaseSerialization
 import org.graalvm.polyglot.Context
@@ -76,11 +76,6 @@ object StandaloneHelper {
                             }
                         }
                     }
-                }
-
-                System.err.println("[STANDALONE] ${functions.size} functions, ${performers.size} performer records")
-                for ((i, pr) in performers.withIndex()) {
-                    System.err.println("[STANDALONE] performer[$i]: ${pr.joinToString(", ") { it.take(16) + "..." }}")
                 }
 
                 // Execute via Truffle

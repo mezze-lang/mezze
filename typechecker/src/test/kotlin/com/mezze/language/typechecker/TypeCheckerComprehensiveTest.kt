@@ -40,11 +40,7 @@ class TypeCheckerComprehensiveTest {
     @TestFactory
     fun `valid programs should type check successfully`(): List<DynamicTest> {
         val validFixturesDir = File(getFixturesPath(), "valid")
-        return validFixturesDir.listFiles { file -> file.extension == "mezze" }
-            ?.filter { file ->
-                // FIXME: inspect_ability.mz causes typechecker to hang
-                file.nameWithoutExtension != "inspect_ability"
-            }
+        return validFixturesDir.listFiles { file -> file.extension == "mz" }
             ?.map { file ->
                 DynamicTest.dynamicTest("Valid: ${file.nameWithoutExtension}") {
                     val source = loadMezzeFile(file.absolutePath)
@@ -65,7 +61,7 @@ class TypeCheckerComprehensiveTest {
     @TestFactory
     fun `invalid programs should fail type checking`(): List<DynamicTest> {
         val invalidFixturesDir = File(getFixturesPath(), "invalid")
-        return invalidFixturesDir.listFiles { file -> file.extension == "mezze" }
+        return invalidFixturesDir.listFiles { file -> file.extension == "mz" }
             ?.map { file ->
                 DynamicTest.dynamicTest("Invalid: ${file.nameWithoutExtension}") {
                     val source = loadMezzeFile(file.absolutePath)

@@ -60,6 +60,7 @@ object BuiltInAbilities {
             try {
                 val source = com.mezze.language.typechecker.ModuleResolver.readStdlibFile(embeddedPath)
                     ?: com.mezze.language.typechecker.ModuleResolver.readStdlibFile(diskPath)
+                    ?: readFromFilesystem(diskPath)
                     ?: continue
                 val module = parser.parseParsedModule(source, embeddedPath)
                 for (decl in module.decls.filterIsInstance<ParsedAbilityDecl>()) {
@@ -73,7 +74,7 @@ object BuiltInAbilities {
                     }
                     result[decl.name] = methods
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // Parse failures for built-in ability definitions are silently ignored;
                 // the ability will be absent and the typechecker will report missing impls.
             }
@@ -95,6 +96,16 @@ object BuiltInAbilities {
         }
 
         return result
+    }
+
+    /**
+     * Read an ability file from the filesystem using mezze.project.root system property.
+     * Fallback for when classpath resources aren't available (e.g., test context).
+     */
+    private fun readFromFilesystem(relativePath: String): String? {
+        val projectRoot = System.getProperty("mezze.project.root") ?: return null
+        val file = java.io.File(projectRoot, "stdlib/$relativePath")
+        return if (file.exists()) file.readText() else null
     }
 
     /**

@@ -11,6 +11,7 @@ import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.WellKnownHashes
+import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.util.TypeAnnotationMatcher
 
@@ -1219,7 +1220,7 @@ class ConstraintSolver(
                         // Some types are still type variables - try bidirectional inference!
                         // This is key for multi-parameter abilities like Convert 'a 'b
                         // When 'a = Int, we can look for impl Convert for Int String and infer 'b = String
-                        val inferredSubst = tryBidirectionalInference(abilityName, closedTypeArgs)
+                        val inferredSubst = tryBidirectionalInference(abilityName, closedTypeArgs, tracked.abilityHash)
                         if (inferredSubst != null) {
                             // Store the inferred substitution for later application
                             deferredInference.putAll(inferredSubst.mappings)
@@ -1479,7 +1480,7 @@ class ConstraintSolver(
                 if (checkCodecAbilityImplementation(abilityName, formatType, dataType)) {
                     return true
                 }
-            } else if (typeArgs.size == 1 && abilityName in setOf("EncodeRepr", "DecodeRepr")) {
+            } else if (typeArgs.size == 1 && (effectiveHash == WellKnownHashConstants.ABILITY_ENCODEREPR || effectiveHash == WellKnownHashConstants.ABILITY_DECODEREPR)) {
                 // Roc-style single-parameter ability: EncodeRepr 'a or DecodeRepr 'a
                 // The format is provided at the method call site, not at constraint time.
                 // We still need to generate the codec impl so the compiler can emit FunctionIR.
@@ -1567,7 +1568,7 @@ class ConstraintSolver(
      *       Currently `canDeriveOrHasImpl` calls `checkAbilityImplementation` without hash.
      */
     private fun isCodecAbility(abilityName: String, abilityHash: String? = null): Boolean =
-        WellKnownHashes.isCodecAbility(abilityHash) || abilityName in WellKnownHashes.CODEC_ABILITY_NAMES
+        WellKnownHashes.isCodecAbility(abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName))
 
     /**
      * Check and possibly generate a codec ability implementation.
@@ -1810,6 +1811,7 @@ class ConstraintSolver(
      * ability impls is fixed in ModuleTypeChecker/ConstraintSolver.
      */
     private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: String? = null): Boolean {
+        val resolvedHash = abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName)
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
 
         // Track if the original type was a newtype — newtypes don't auto-derive Eq/Ord
@@ -1865,7 +1867,9 @@ class ConstraintSolver(
             }
 
             // Logical operators only work on Bool
-            abilityName == "LogicalAnd" || abilityName == "LogicalOr" || abilityName == "LogicalNot" -> {
+            resolvedHash == WellKnownHashConstants.ABILITY_LOGICALAND ||
+            resolvedHash == WellKnownHashConstants.ABILITY_LOGICALOR ||
+            resolvedHash == WellKnownHashConstants.ABILITY_LOGICALNOT -> {
                 unwrappedType is MezzeType.BoolType || BuiltInAbilities.isBoolVariant(unwrappedType) ||
                 isBoolLikeVariant(unwrappedType)
             }
@@ -2001,18 +2005,16 @@ class ConstraintSolver(
      * @param typeArgs The type arguments (may contain type variables)
      * @return Substitution binding type variables to concrete types, or null if inference failed
      */
-    private fun tryBidirectionalInference(abilityName: String, typeArgs: List<MezzeType>): Substitution? {
-        // Special handling for DecodeRepr with unknown data type (Roc-style single-parameter ability)
-        // This enables: let person = DecodeRepr.decode_repr {val = json_data, fmt = json_fmt, config = default_config}
-        // where the result type is inferred from downstream usage
-        if (abilityName == "DecodeRepr" && typeArgs.size == 1) {
+    private fun tryBidirectionalInference(abilityName: String, typeArgs: List<MezzeType>, abilityHash: String? = null): Substitution? {
+        val resolvedHash = abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName)
+        if (resolvedHash == WellKnownHashConstants.ABILITY_DECODEREPR && typeArgs.size == 1) {
             val dataType = typeArgs[0]
 
             // If data is a type variable, try to infer from generated impls
             if (dataType is MezzeType.VarType) {
                 // Look for generated DecodeRepr impls - the data type is in targetTypes[0]
                 val matchingImpls = generatedCodecImpls.values.filter { impl ->
-                    impl.abilityName == "DecodeRepr" &&
+                    WellKnownHashConstants.resolveAbilityHash(impl.abilityName) == WellKnownHashConstants.ABILITY_DECODEREPR &&
                     impl.targetTypes.isNotEmpty()
                 }
 
@@ -2028,7 +2030,7 @@ class ConstraintSolver(
             }
         }
         // Also handle old-style Decode with 2 params for backward compatibility
-        if (abilityName == "Decode" && typeArgs.size == 2) {
+        if (resolvedHash == WellKnownHashConstants.ABILITY_DECODE && typeArgs.size == 2) {
             val formatType = typeArgs[0]
             val dataType = typeArgs[1]
 
@@ -2037,7 +2039,7 @@ class ConstraintSolver(
                 // Look for generated Decode impls for this format using STRUCTURAL matching
                 // targetTypes stores MezzeType directly — no v1 conversion needed
                 val matchingImpls = generatedCodecImpls.values.filter { impl ->
-                    impl.abilityName == "Decode" &&
+                    WellKnownHashConstants.resolveAbilityHash(impl.abilityName) == WellKnownHashConstants.ABILITY_DECODE &&
                     impl.targetTypes.size >= 2 &&
                     typeMatchesMezzeType(formatType, impl.targetTypes[0])
                 }

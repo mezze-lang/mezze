@@ -442,15 +442,4 @@ class BuildCommand {
         return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 
-    /**
-     * Legacy execute with JAR callback — kept for backward compatibility with Main.kt.
-     */
-    fun execute(
-        args: List<String>,
-        currentDir: File = File(System.getProperty("user.dir")),
-        createJarFunction: (File, File, String, com.mezze.language.typechecker.TypeCheckResult) -> Unit
-    ) {
-        // Delegate to new implementation
-        execute(args, currentDir)
-    }
 }

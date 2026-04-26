@@ -54,7 +54,9 @@ class MezzeParser {
             val stream = TokenStream(tokens)
 
             return when (val result = parsedModuleParser(stream)) {
-                is ParseResult.Success -> resolveParsedImplDeclarations(result.value)
+                is ParseResult.Success -> com.mezze.language.parsedast.ParsedDeclHasher.computeAllHashes(
+                    resolveParsedImplDeclarations(result.value)
+                )
                 is ParseResult.Failure -> throw ParseException(
                     result.message,
                     result.position,

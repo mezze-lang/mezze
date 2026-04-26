@@ -108,7 +108,7 @@ class ContextBuilder {
             .mapValues { (_, decl) ->
                 if (decl.contentHash != null) decl
                 else {
-                    val hash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashEffectDecl(decl)
+                    val hash = com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl)
                     if (hash != null) decl.copy(contentHash = hash) else decl
                 }
             }
@@ -165,7 +165,7 @@ class ContextBuilder {
             } else {
                 // Real effect performer — compute content hash via ParsedDeclHasher
                 val perfWithHash = if (perfDecl.contentHash != null) perfDecl
-                    else perfDecl.copy(contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashPerformerDecl(perfDecl))
+                    else perfDecl.copy(contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(perfDecl))
                 resolvedParsedPerformerDecls.add(perfWithHash)
             }
         }
@@ -712,7 +712,7 @@ class ContextBuilder {
     ): TypingContext {
         // Ensure content hash is available (compute if missing)
         val implWithHash = if (implDecl.contentHash != null) implDecl else {
-            implDecl.copy(contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashPerformerDecl(implDecl))
+            implDecl.copy(contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(implDecl))
         }
         @Suppress("NAME_SHADOWING")
         val implDecl = implWithHash
@@ -1073,7 +1073,7 @@ class ContextBuilder {
      * This is the public entry point that clears the type variable cache
      * before conversion to ensure each top-level annotation gets fresh variables.
      */
-    // TODO: Could eventually use TypeAnnotationConverter from util/, but this version does
+    // Inline type annotation conversion (avoids dependency on util/TypeAnnotationConverter). This version does
     // type declaration lookups (currentTypeDecls, currentEffectDecls, currentAbilityDecls),
     // hermetic effect validation, content hash resolution, and List/Seq/Set/Map sugar
     // that require ContextBuilder state not available to the shared utility.
@@ -1312,7 +1312,7 @@ class ContextBuilder {
     /** Ensure a ParsedImplAbilityDecl has a content hash (compute via ParsedDeclHasher if missing). */
     private fun ensureContentHash(decl: ParsedImplAbilityDecl, @Suppress("UNUSED_PARAMETER") file: String): ParsedImplAbilityDecl {
         if (decl.contentHash != null) return decl
-        return decl.copy(contentHash = com.mezze.language.typechecker.hashing.ParsedDeclHasher.hashImplAbilityDecl(decl))
+        return decl.copy(contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashImplAbilityDecl(decl))
     }
 
     companion object {

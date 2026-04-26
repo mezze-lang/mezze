@@ -78,7 +78,7 @@ class PatternConstraintGenerator {
         return PatternConstraintResult(
             bindings = mapOf(pattern.name to scrutineeType),
             constraints = emptyList(),
-            bindingLocations = mapOf(pattern.name to pattern.loc!!).filterValues { it != null }.mapValues { it.value!! }
+            bindingLocations = mapOf(pattern.name to pattern.loc)
         )
     }
 

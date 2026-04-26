@@ -13,7 +13,7 @@ import com.mezze.language.typedast.Hash
  * Instead, it orchestrates the initial compilation:
  * 1. Resolve entry hash → load FunctionIR from store
  * 2. Collect transitively referenced hashes
- * 3. Feed all needed FunctionIRs into the existing TruffleCompiler/V2PipelineRunner
+ * 3. Feed all needed FunctionIRs into the existing TruffleCompiler/PipelineRunner
  * 4. The Truffle runtime then handles execution and on-demand compilation
  *
  * Later, getCachedStdlibCallTarget in MezzeLanguage can be refactored to
@@ -94,7 +94,7 @@ class MezzeExecutor(
 
     /**
      * Walk a NodeIR tree and collect all hash references (CallDirect, MakeLambda, etc.).
-     * This is the same traversal as V2PipelineRunner.collectHashesFromNode but operates
+     * This is the same traversal as PipelineRunner.collectHashesFromNode but operates
      * on the FunctionIR level for store-based loading.
      */
     private fun collectReferencedHashes(node: com.mezze.language.truffleir.NodeIR, queue: ArrayDeque<String>) {

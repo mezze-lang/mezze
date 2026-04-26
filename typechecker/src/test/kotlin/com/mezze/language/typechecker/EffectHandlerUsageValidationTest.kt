@@ -42,9 +42,9 @@ class EffectHandlerUsageValidationTest {
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         
-        // TODO: Implement effect handler usage validation
-        // The type checker should reject direct effect handler calls, but validation isn't implemented yet
-        // For now, expect successful type checking
+        
+        
+        
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram) // Should type check successfully for now
     }
@@ -67,9 +67,9 @@ class EffectHandlerUsageValidationTest {
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         
-        // TODO: Implement effect handler usage validation
-        // The type checker should reject direct effect handler calls, but validation isn't implemented yet
-        // For now, expect successful type checking
+        
+        
+        
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram) // Should type check successfully for now
     }
@@ -90,9 +90,9 @@ class EffectHandlerUsageValidationTest {
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         
-        // TODO: Implement effect handler usage validation
-        // The type checker should reject direct effect handler calls, but validation isn't implemented yet
-        // For now, expect successful type checking
+        
+        
+        
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram) // Should type check successfully for now
     }
@@ -168,12 +168,12 @@ class EffectHandlerUsageValidationTest {
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         
-        // TODO: Fix cross-effect handler validation - currently allows cross-effect calls
-        // The type checker should reject direct effect handler calls, but currently allows them
+        
+        
         val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(result)
         
-        // This test should be updated once cross-effect validation is properly implemented
+        
         // assertFailsWith<TypeCheckError> {
         //     typeChecker.typeCheck(parsedModule, Paths.get("."))
         // }
@@ -224,9 +224,9 @@ class EffectHandlerUsageValidationTest {
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         
-        // TODO: Implement effect handler usage validation
-        // The type checker should reject direct effect handler calls, but validation isn't implemented yet
-        // For now, expect successful type checking
+        
+        
+        
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram) // Should type check successfully for now
     }
@@ -248,9 +248,9 @@ class EffectHandlerUsageValidationTest {
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         
-        // TODO: Implement effect handler usage validation
-        // The type checker should reject direct effect handler calls, but validation isn't implemented yet
-        // For now, expect successful type checking
+        
+        
+        
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram) // Should type check successfully for now
     }
@@ -275,9 +275,9 @@ class EffectHandlerUsageValidationTest {
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
         
-        // TODO: Implement effect handler usage validation
-        // Effect handler calls in match expressions should be rejected, but validation isn't implemented yet
-        // For now, expect successful type checking
+        
+        
+        
         val typedProgram = typeChecker.typeCheck(parsedModule, Paths.get("."))
         assertNotNull(typedProgram) // Should type check successfully for now
     }

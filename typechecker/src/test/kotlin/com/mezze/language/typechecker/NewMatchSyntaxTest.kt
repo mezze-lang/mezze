@@ -212,8 +212,6 @@ class NewMatchSyntaxTest {
               _ -> "other"
         """.trimIndent()
 
-        // Currently the type checker doesn't enforce guard condition types strictly
-        // TODO: Future enhancement - validate guard conditions are Bool
         val result = parseAndTypeCheck(code)
         assertNotNull(result)
     }

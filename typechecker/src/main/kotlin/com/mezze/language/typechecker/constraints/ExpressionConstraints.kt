@@ -757,12 +757,11 @@ class ExpressionConstraintGenerator {
         }
 
         if (receiverName != null) {
-            // Check if user has defined their own ability with this name (shadowing built-in)
-            val userDefinedAbility = context.abilityDeclarations[receiverName]
-
             // Direct Ability.method access — return the FULL method type (with `it` param).
             // Example: Eq.eq returns {it: 'a, r: 'a} -> Bool
-            if (userDefinedAbility == null && BuiltInAbilities.isBuiltInAbility(receiverName)) {
+            // Check both: built-in abilities AND user-defined/stdlib abilities (which may
+            // shadow the built-in due to transitive collection from stdlib modules).
+            if (BuiltInAbilities.isBuiltInAbility(receiverName)) {
                 val freshTypeVar = MezzeType.VarType(TypeVar.fresh())
                 val methodType = BuiltInAbilities.getAbilityMethodType(
                     receiverName,
@@ -2569,7 +2568,9 @@ class ExpressionConstraintGenerator {
                         abilityName = constraint.abilityName,
                         typeArgs = constraint.typeArgs.map { typeAnn ->
                             convertParsedTypeAnnotation(typeAnn)
-                        }
+                        },
+                        abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash
+                            ?: com.mezze.language.typechecker.WellKnownHashConstants.resolveAbilityHash(constraint.abilityName)
                     )
                 }
             }
@@ -4417,7 +4418,7 @@ class ExpressionConstraintGenerator {
         }
     }
 
-    // TODO: Could eventually use TypeAnnotationConverter from util/, but this version does
+    // Inline type annotation conversion (avoids dependency on util/TypeAnnotationConverter). This version does
     // import resolution, hermetic effect validation via ContextBuilder.validateHermeticEffects,
     // open row vars on records/variants, typeName on inline variants, and collection type
     // sugar (Seq/List/Set/Map) that require constraint context not available to the shared utility.
@@ -4493,7 +4494,8 @@ class ExpressionConstraintGenerator {
                     abilityConstraints = annotation.abilityConstraints.map { constraint ->
                         MezzeType.FunctionAbilityConstraint(
                             abilityName = constraint.abilityName,
-                            typeArgs = constraint.typeArgs.map { convertParsedTypeAnnotation(it) }
+                            typeArgs = constraint.typeArgs.map { convertParsedTypeAnnotation(it) },
+                            abilityHash = com.mezze.language.typechecker.WellKnownHashConstants.resolveAbilityHash(constraint.abilityName)
                         )
                     }
                 )

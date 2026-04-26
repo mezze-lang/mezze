@@ -61,7 +61,7 @@ class PipelineTraceTest {
         }
 
         // Stage 2: Mono
-        val preludeV2 = PrecompiledStdlib.v2Modules
+        val preludeV2 = PrecompiledStdlib.stdlibTypedModules
         val allModules = HashMap<Hash, com.mezze.language.typedast.TypedModule>()
         allModules.putAll(preludeV2)
         allModules[wrapped.hash] = wrapped

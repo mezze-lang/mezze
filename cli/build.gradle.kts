@@ -100,41 +100,11 @@ tasks.named<ProcessResources>("processResources") {
     }
 }
 
-// Task to pre-compile stdlib to SQLite for embedding in JAR and native image.
-// Always cleans old db first to prevent stale data.
-tasks.register<JavaExec>("compileStdlib") {
-    dependsOn("classes")  // Need compiled classes, not full JAR
+// Stdlib is compiled at runtime by PrecompiledStdlib from source files.
+// This task is a no-op placeholder for build dependencies (shadowJar, native).
+tasks.register("compileStdlib") {
     group = "build"
-    description = "Pre-compile stdlib modules to SQLite database"
-
-    val stdlibDb = file("${layout.buildDirectory.get()}/resources/main/stdlib.db")
-
-    classpath = sourceSets.main.get().runtimeClasspath
-    mainClass.set("com.mezze.language.cli.MainKt")
-    args = listOf("--compile-stdlib", stdlibDb.absolutePath)
-
-    // Set project root for stdlib discovery
-    systemProperty("mezze.project.root", project.rootDir.absolutePath)
-
-    // JVM args for Truffle
-    jvmArgs(
-        "--enable-native-access=ALL-UNNAMED",
-        "--add-opens=java.base/java.lang=ALL-UNNAMED",
-        "--add-opens=java.base/java.nio=ALL-UNNAMED",
-        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-    )
-
-    // Clean old db before compiling
-    doFirst {
-        if (stdlibDb.exists()) {
-            stdlibDb.delete()
-            println("Cleaned old stdlib.db")
-        }
-    }
-
-    // Re-run if any .mz file changed
-    inputs.dir(project.rootDir.resolve("stdlib/std"))
-    outputs.file(stdlibDb)
+    description = "Stdlib compilation (handled at runtime by PrecompiledStdlib)"
 }
 
 // shadowJar depends on compileStdlib so stdlib.db is always fresh in the JAR
@@ -270,7 +240,7 @@ graalvmNative {
                 "-H:+AddAllCharsets",
 
                 // Initialize V2 interpreter classes at build time
-                "--initialize-at-build-time=com.mezze.interpreter.v2",
+                "--initialize-at-build-time=com.mezze.interpreter",
 
                 // Initialize datastructures classes at build time (MezzeSeq, MezzeList, etc.)
                 "--initialize-at-build-time=com.mezze.datastructures",

@@ -195,7 +195,7 @@ class DevCommand {
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
         System.setProperty("polyglot.log.level", "OFF")
 
-        val builder = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.v2.runtime.MezzeLanguage.ID)
+        val builder = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.runtime.MezzeLanguage.ID)
             .allowAllAccess(true)
             .allowCreateThread(true)
 
@@ -210,10 +210,10 @@ class DevCommand {
         val context = builder.build()
 
         try {
-            com.mezze.interpreter.v2.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, performerRecords, projectDir.toPath())
+            com.mezze.interpreter.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, performerRecords, projectDir.toPath())
 
             val source = org.graalvm.polyglot.Source.newBuilder(
-                com.mezze.interpreter.v2.runtime.MezzeLanguage.ID,
+                com.mezze.interpreter.runtime.MezzeLanguage.ID,
                 "# Direct TruffleIR execution",
                 "__direct_execution__.mz"
             ).buildLiteral()

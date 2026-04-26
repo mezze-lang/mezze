@@ -224,43 +224,43 @@ class TestCommand {
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
         System.setProperty("polyglot.log.level", "OFF")
 
-        val context = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.v2.runtime.MezzeLanguage.ID)
+        val context = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.runtime.MezzeLanguage.ID)
             .allowAllAccess(true)
             .allowCreateThread(true)
             .build()
 
         return try {
-            com.mezze.interpreter.v2.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, performerRecords, projectDir.toPath())
+            com.mezze.interpreter.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, performerRecords, projectDir.toPath())
 
             val source = org.graalvm.polyglot.Source.newBuilder(
-                com.mezze.interpreter.v2.runtime.MezzeLanguage.ID,
+                com.mezze.interpreter.runtime.MezzeLanguage.ID,
                 "# Test execution",
                 "__test_execution__.mz"
             ).buildLiteral()
 
             context.eval(source)
-            com.mezze.interpreter.v2.runtime.MezzeLanguage.getLastExecutionResult()
+            com.mezze.interpreter.runtime.MezzeLanguage.getLastExecutionResult()
         } finally {
             context.close(true)
         }
     }
 
     private fun isUnitResult(result: Any): Boolean {
-        return result is com.mezze.interpreter.v2.values.MezzeRecord && result.fieldCount == 0
+        return result is com.mezze.interpreter.values.MezzeRecord && result.fieldCount == 0
     }
 
     private fun isOkResult(result: Any): Boolean {
-        return result is com.mezze.interpreter.v2.values.MezzeVariant && result.constructorName == "Ok"
+        return result is com.mezze.interpreter.values.MezzeVariant && result.constructorName == "Ok"
     }
 
     private fun isErrResult(result: Any): Boolean {
-        return result is com.mezze.interpreter.v2.values.MezzeVariant && result.constructorName == "Err"
+        return result is com.mezze.interpreter.values.MezzeVariant && result.constructorName == "Err"
     }
 
     private fun getErrMessage(result: Any): String {
-        if (result is com.mezze.interpreter.v2.values.MezzeVariant) {
+        if (result is com.mezze.interpreter.values.MezzeVariant) {
             val payload = result.getPayloadValue()
-            if (payload is com.mezze.interpreter.v2.values.MezzeRecord) {
+            if (payload is com.mezze.interpreter.values.MezzeRecord) {
                 val msg = payload.getField("error") ?: payload.getField("val") ?: payload.getField("msg")
                 return msg?.toString() ?: result.toString()
             }

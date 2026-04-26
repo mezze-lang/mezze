@@ -1461,10 +1461,11 @@ class TypedASTCompiler(
     }
 
     private fun compileBlock(expr: TypedBlock, src: SourceInfo): NodeIR {
+        val savedLocalMappings = localsByName.toMap()
         val stmts = expr.statements.map { stmt ->
             when (stmt) {
                 is TypedStatement.Let -> {
-                    val slot = allocLocal(stmt.name)
+                    val slot = forceAllocLocal(stmt.name)
                     val stmtValue = stmt.value
                     val valueIR = if (stmtValue is TypedLambda) {
                         // Let-bound lambda: check if it matches a top-level function.
@@ -1499,7 +1500,10 @@ class TypedASTCompiler(
                 is TypedStatement.Expr -> StmtIR.Expr(compileExpr(stmt.expr), locToSourceInfo(stmt.loc))
             }
         }
-        return BlockIR(stmts, compileExpr(expr.result), src)
+        val resultIR = compileExpr(expr.result)
+        localsByName.clear()
+        localsByName.putAll(savedLocalMappings)
+        return BlockIR(stmts, resultIR, src)
     }
 
     private fun compileMatch(expr: TypedMatch, src: SourceInfo): NodeIR {
@@ -2065,12 +2069,7 @@ class TypedASTCompiler(
 
     companion object {
         @JvmStatic
-        fun computeOpHash(implHash: Hash, opName: String): Hash {
-            val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
-            builder.append(implHash.hex)
-            builder.append(opName)
-            return Hash(builder.build().toFullHexString())
-        }
+        fun computeOpHash(implHash: Hash, opName: String): Hash = Hash.computeOpHash(implHash, opName)
     }
 
     private fun locToSourceInfo(loc: Loc): SourceInfo {

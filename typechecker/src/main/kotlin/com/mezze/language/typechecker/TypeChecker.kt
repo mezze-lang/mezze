@@ -298,14 +298,40 @@ class TypeChecker(
             )
         }
 
-        val allEffectDeclarations = buildResult.effectDeclarations +
+        // Include effects from ALL loaded modules (not just directly imported ones).
+        // User code may reference effects indirectly via performers (e.g., perform MutPerformer
+        // references the Mut effect, even if the user only imported MutPerformer).
+        val transitiveEffects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
+        for ((_, module) in loadedModules) {
+            module.parsedModule?.decls?.filterIsInstance<com.mezze.language.parsedast.ParsedEffectDecl>()?.forEach {
+                transitiveEffects[it.name] = it
+            }
+        }
+        for ((_, cached) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
+            cached.parsedModule?.decls?.filterIsInstance<com.mezze.language.parsedast.ParsedEffectDecl>()?.forEach {
+                transitiveEffects[it.name] = it
+            }
+        }
+        val allEffectDeclarations = transitiveEffects +
+            buildResult.effectDeclarations +
             (importContext?.importedEffects ?: emptyMap())
 
         val allTypeDeclarations = buildResult.typeDeclarations +
             (importContext?.importedTypes ?: emptyMap())
 
         val importedAbilities = importContext?.importedAbilities ?: emptyMap()
-        val allAbilityDeclarations = buildResult.abilityDeclarations + importedAbilities
+        val transitiveAbilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
+        for ((_, module) in loadedModules) {
+            module.parsedModule?.decls?.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()?.forEach {
+                transitiveAbilities[it.name] = it
+            }
+        }
+        for ((_, cached) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
+            cached.parsedModule?.decls?.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()?.forEach {
+                transitiveAbilities[it.name] = it
+            }
+        }
+        val allAbilityDeclarations = transitiveAbilities + buildResult.abilityDeclarations + importedAbilities
 
         val constraintGenerator = ConstraintGenerator.create(
             typeDeclarations = allTypeDeclarations,
@@ -575,7 +601,11 @@ class TypeChecker(
                     } else {
                         emittedTypedModule = typed
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    if (System.getenv("MEZZE_DEBUG") != null) {
+                        System.err.println("[BUILDER] ${e.javaClass.simpleName}: ${e.message}")
+                        e.printStackTrace(System.err)
+                    }
                     // TypedAstBuilder errors are non-fatal for type checking; the typed module
                     // will be null and the pipeline will skip lowering.
                 }
@@ -589,12 +619,12 @@ class TypeChecker(
                     allAbilityImpls.addAll(wrapped.abilityImpls)
                     allAbilityImpls.addAll(PrecompiledStdlib.stdlibAbilityImpls)
                     for ((_, v1Module) in loadedModules) {
-                        val v2m = v1Module.v2TypedModule ?: continue
-                        allAbilityImpls.addAll(v2m.abilityImpls)
+                        val stdlibModule = v1Module.typedModule ?: continue
+                        allAbilityImpls.addAll(stdlibModule.abilityImpls)
                     }
                     for ((_, cached) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
-                        val v2m = cached.v2TypedModule ?: continue
-                        allAbilityImpls.addAll(v2m.abilityImpls)
+                        val stdlibModule = cached.typedModule ?: continue
+                        allAbilityImpls.addAll(stdlibModule.abilityImpls)
                     }
 
                     // Build decl index for ByHash resolution
@@ -605,7 +635,7 @@ class TypeChecker(
 
                     // Collect ALL prelude decl hashes to skip during compilation
                     val preludeHashes = mutableSetOf<String>()
-                    val fnHashes = PrecompiledStdlib.preloweredFunctionHashes.ifEmpty { PrecompiledStdlib.preloweredFunctions.keys }
+                    val fnHashes = PrecompiledStdlib.preloweredFunctions.keys
                     preludeHashes.addAll(fnHashes)
                     preludeHashes.addAll(PrecompiledStdlib.stdlibDeclHashes)
 
@@ -622,20 +652,20 @@ class TypeChecker(
                     val importedPerformers = mutableListOf<com.mezze.language.typedast.TypedPerformerDecl>()
                     val seenHashes = mutableSetOf<com.mezze.language.typedast.Hash>()
                     for ((_, v1Module) in loadedModules) {
-                        val v2m = v1Module.v2TypedModule ?: continue
-                        if (v2m.hash in preludeModuleHashes) continue  // skip prelude
-                        if (v2m.hash in seenHashes) continue
-                        seenHashes.add(v2m.hash)
-                        importedModules.add(v2m)
-                        importedPerformers.addAll(v2m.performerDecls)
+                        val stdlibModule = v1Module.typedModule ?: continue
+                        if (stdlibModule.hash in preludeModuleHashes) continue  // skip prelude
+                        if (stdlibModule.hash in seenHashes) continue
+                        seenHashes.add(stdlibModule.hash)
+                        importedModules.add(stdlibModule)
+                        importedPerformers.addAll(stdlibModule.performerDecls)
                     }
                     for ((_, cached) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
-                        val v2m = cached.v2TypedModule ?: continue
-                        if (v2m.hash in preludeModuleHashes) continue  // skip prelude
-                        if (v2m.hash in seenHashes) continue
-                        seenHashes.add(v2m.hash)
-                        importedModules.add(v2m)
-                        importedPerformers.addAll(v2m.performerDecls)
+                        val stdlibModule = cached.typedModule ?: continue
+                        if (stdlibModule.hash in preludeModuleHashes) continue  // skip prelude
+                        if (stdlibModule.hash in seenHashes) continue
+                        seenHashes.add(stdlibModule.hash)
+                        importedModules.add(stdlibModule)
+                        importedPerformers.addAll(stdlibModule.performerDecls)
                     }
 
                     val result = compiler.compile(wrapped, importedModules, importedPerformers)
@@ -1064,7 +1094,7 @@ class TypeChecker(
                     loweredFunctions = result.loweredFunctions ?: emptyList(),
                     typedModule = result.typedModule,
                     performerRecords = result.loweredPerformers,
-                    loadedModules = result.loadedModules.mapValues { (_, m) -> m.v2TypedModule }.filterValues { it != null }.mapValues { (_, v) -> v!! }
+                    loadedModules = result.loadedModules.mapValues { (_, m) -> m.typedModule }.filterValues { it != null }.mapValues { (_, v) -> v!! }
                 )
             }
             is TypeCheckResult.Failure -> {

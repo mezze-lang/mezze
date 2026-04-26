@@ -264,7 +264,7 @@ class ModuleTypeChecker(
                         exports = updatedExports,
                         context = moduleContext,
                         substitution = result.substitution,
-                        v2TypedModule = result.typedModule,
+                        typedModule = result.typedModule,
                         parsedModule = resolvedModule,
                         typeContext = typeContext
                     )
@@ -330,7 +330,8 @@ class ModuleTypeChecker(
             }
         }
 
-        // TODO: Add imported types, abilities, effects
+        // Types, abilities, effects are handled by ContextBuilder + TypeChecker.typeCheck()
+        // via importContext.importedTypes/importedAbilities/importedEffects — not via TypingContext.
 
         return context
     }

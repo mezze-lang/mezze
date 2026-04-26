@@ -162,7 +162,7 @@ class ConstraintGenerator(
                         .map { name ->
                             ConstraintResult.DuplicateBinding(
                                 name = name,
-                                loc = null  // TODO: Track source locations for patterns
+                                loc = patternResult.bindingLocations[name]
                             )
                         }
 
