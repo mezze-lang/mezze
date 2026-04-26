@@ -298,13 +298,22 @@ object PrecompiledStdlib {
     @OptIn(ExperimentalSerializationApi::class)
     private fun tryLoadFullFromSqlite(): FullCacheData? {
         return try {
-            val stream = PrecompiledStdlib::class.java.classLoader
-                .getResourceAsStream(STDLIB_SQLITE_RESOURCE) ?: return null
-
-            val tempFile = java.io.File.createTempFile("mezze-stdlib", ".sqlite")
-            try {
+            // Try filesystem first (native binary, installed via install.sh)
+            val fsPath = java.io.File(System.getProperty("user.home"), ".mezze/cache/stdlib.sqlite")
+            val sqlitePath = if (fsPath.exists()) {
+                fsPath.absolutePath
+            } else {
+                // Fall back to JAR classpath resource
+                val stream = PrecompiledStdlib::class.java.classLoader
+                    .getResourceAsStream(STDLIB_SQLITE_RESOURCE) ?: return null
+                val tempFile = java.io.File.createTempFile("mezze-stdlib-full", ".sqlite")
+                tempFile.deleteOnExit()
                 tempFile.writeBytes(stream.readAllBytes())
-                val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${tempFile.absolutePath}")
+                tempFile.absolutePath
+            }
+
+            try {
+                val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:$sqlitePath")
 
                 // Check version — v2 has prelude context
                 val version = conn.createStatement().use { stmt ->
@@ -399,9 +408,7 @@ object PrecompiledStdlib {
                 if (functions.isNotEmpty()) {
                     FullCacheData(importContext, functions, performers, depGraph, abilityImpls, declHashes, moduleHashes)
                 } else null
-            } finally {
-                tempFile.delete()
-            }
+            } catch (_: Exception) { null }
         } catch (e: Exception) {
             if (System.getenv("MEZZE_DEBUG") != null) {
                 System.err.println("[PrecompiledStdlib] Failed to load full cache from stdlib.sqlite: ${e.message}")

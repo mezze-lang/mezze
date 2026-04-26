@@ -125,6 +125,14 @@ else
     echo -e "${YELLOW}Warning: mezze-lang.jar not found. mez dev and mez build will be limited.${NC}"
 fi
 
+# Copy pre-compiled stdlib.sqlite for fast startup (both native binary and JVM)
+STDLIB_SQLITE="$REPO_ROOT/cli/build/generated/resources/stdlib.sqlite"
+if [ -f "$STDLIB_SQLITE" ]; then
+    mkdir -p "$MEZZE_HOME/cache"
+    cp "$STDLIB_SQLITE" "$MEZZE_HOME/cache/stdlib.sqlite"
+    echo -e "${GREEN}Pre-compiled stdlib installed ($(du -h "$MEZZE_HOME/cache/stdlib.sqlite" | cut -f1))${NC}"
+fi
+
 # Store the stdlib location for the binary to find
 echo "$REPO_ROOT" > "$MEZZE_HOME/project-root"
 
