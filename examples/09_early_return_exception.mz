@@ -13,10 +13,7 @@ let safe_div = {a, b} ->
     else a / b
 
 let main = {} ->
-    perform Console i
-    
-    
-    do
+    perform Console in do
         # Early return: exit computation as soon as condition met
         let result = perform EarlyReturn in do
             let _ = if 3 > 10 then Return.return {val = "found 3"} else {}

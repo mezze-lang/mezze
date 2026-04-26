@@ -285,10 +285,13 @@ class TypedASTCompiler(
                 if (fn is TypedFieldAccess) {
                     val methodName = fn.field
                     val receiverType = fn.record.type
-                    // If receiver is VarType and the method is a known ability op, record it
+                    // If receiver is VarType and the method is a known ability op,
+                    // only flag as needing dict if there are multiple candidates
+                    // (ambiguous — can't resolve statically). Single candidate = resolved
+                    // in compileCall without needing a dict param.
                     if (receiverType is VarType && methodName !in inlineableOps) {
                         val opCandidates = abilityOpIndex[methodName]
-                        if (opCandidates != null && opCandidates.isNotEmpty()) {
+                        if (opCandidates != null && opCandidates.size > 1) {
                             out.add(methodName)
                         }
                     }
@@ -952,8 +955,14 @@ class TypedASTCompiler(
                 return compileInlineOp(inlineOp, receiverIR, argIR, src)
             }
 
-            // Try ability method resolution (skip VarType — let runtime dispatch handle it)
-            val opHash = if (receiverType !is VarType) tryResolveAbilityOp(methodName, receiverType) else null
+            // Try ability method resolution. For concrete types, resolve directly.
+            // For VarType, try single-candidate resolution (monomorphized code where
+            // the type variable wasn't fully substituted but only one impl exists).
+            val opHash = tryResolveAbilityOp(methodName, receiverType)
+                ?: if (receiverType is VarType) {
+                    val candidates = abilityOpIndex[methodName]
+                    if (candidates != null && candidates.size == 1) candidates.first().opHash else null
+                } else null
             if (opHash != null) {
                 val receiverIR = compileReceiverExpr(fn.record)
                 // Build arg with receiver injected

@@ -152,11 +152,15 @@ object PipelineRunner {
 
             // __entry__ body returns the entry function closure
             val entryClosureNode = compiler.compileNode(mainFn.body, source)
-            // Create {} argument
-            val unitArgNode = com.mezze.interpreter.nodes.literal.UnitLiteralNode()
+            // Create empty record {} argument (MezzeRecord.empty(), not MezzeUnit)
+            val emptyRecordNode = object : com.mezze.interpreter.nodes.MezzeNode() {
+                override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): Any {
+                    return com.mezze.interpreter.values.MezzeRecord.empty()
+                }
+            }
             // Invoke the closure with {}
             bodyNode = com.mezze.interpreter.nodes.function.InvokeNode.create(
-                entryClosureNode, arrayOf(unitArgNode)
+                entryClosureNode, arrayOf(emptyRecordNode)
             )
         } else {
             // No named entry — fall back to __entry__ (tests/REPL) or last function
