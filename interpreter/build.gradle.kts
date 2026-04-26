@@ -17,6 +17,7 @@ dependencies {
     implementation(project(":parser"))
     implementation(project(":typechecker"))
     implementation(project(":datastructures"))
+    implementation(project(":codebase"))
 
     // Truffle API - for language implementation
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
