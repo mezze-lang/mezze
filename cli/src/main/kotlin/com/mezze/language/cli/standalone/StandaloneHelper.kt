@@ -78,8 +78,15 @@ object StandaloneHelper {
                     }
                 }
 
+                // Read entry function name from metadata
+                val entryName = db.createStatement().use { stmt ->
+                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'entry_name'").use { rs ->
+                        if (rs.next()) rs.getString(1) else null
+                    }
+                }
+
                 // Execute via Truffle
-                executeWithTruffle(functions, performers)
+                executeWithTruffle(functions, performers, entryName)
             }
         } finally {
             tempFile.delete()
@@ -95,7 +102,7 @@ object StandaloneHelper {
         return null
     }
 
-    private fun executeWithTruffle(functions: List<FunctionIR>, performers: List<Array<String>> = emptyList()) {
+    private fun executeWithTruffle(functions: List<FunctionIR>, performers: List<Array<String>> = emptyList(), entryName: String? = null) {
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
         System.setProperty("polyglot.log.level", "OFF")
 
@@ -106,7 +113,11 @@ object StandaloneHelper {
 
         try {
             val projectRoot = java.nio.file.Paths.get(".")
-            MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot)
+            if (entryName != null) {
+                MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot, entryName)
+            } else {
+                MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot)
+            }
 
             val source = Source.newBuilder(
                 MezzeLanguage.ID,

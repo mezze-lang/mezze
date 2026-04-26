@@ -158,7 +158,7 @@ class BuildCommand {
             val outputJarName = if (manifest.app.size == 1) "${manifest.`package`.name}" else appConfig.name
             val blobsFile = File(targetDir, "$outputJarName.blobs.sqlite")
 
-            createMinimalBlobsDb(store, reachable, entryHash, blobsFile)
+            createMinimalBlobsDb(store, reachable, entryHash, blobsFile, entryName)
 
             // Also copy ALL blobs from cache into the blobs.sqlite
             // so the standalone JAR has the full stdlib
@@ -227,7 +227,8 @@ class BuildCommand {
         sourceStore: SQLiteMezzeStore,
         reachable: Set<com.mezze.language.typedast.Hash>,
         entryHash: com.mezze.language.typedast.Hash,
-        outputFile: File
+        outputFile: File,
+        entryName: String = "main"
     ) {
         if (outputFile.exists()) outputFile.delete()
 
@@ -270,6 +271,7 @@ class BuildCommand {
 
             conn.createStatement().use { s ->
                 s.executeUpdate("INSERT OR REPLACE INTO metadata (key, value) VALUES ('entry_hash', '${entryHash.hex}')")
+                s.executeUpdate("INSERT OR REPLACE INTO metadata (key, value) VALUES ('entry_name', '$entryName')")
             }
 
             conn.commit()
@@ -358,12 +360,25 @@ class BuildCommand {
     }
 
     private fun findLibDir(startDir: File?): File? {
+        // 1. ~/.mezze/lib/ (installed via install.sh)
+        val mezzeHome = File(System.getProperty("user.home"), ".mezze/lib")
+        if (mezzeHome.exists() && mezzeHome.isDirectory) return mezzeHome
+
+        // 2. Walk up from the binary/class location looking for lib/
         var current = startDir
         while (current != null) {
             val lib = File(current, "lib")
             if (lib.exists() && lib.isDirectory) return lib
             current = current.parentFile
         }
+
+        // 3. Development: cli/build/libs/ relative to project root
+        val projectRoot = System.getProperty("mezze.project.root")
+        if (projectRoot != null) {
+            val devLibs = File(projectRoot, "cli/build/libs")
+            if (devLibs.exists()) return devLibs
+        }
+
         return null
     }
 

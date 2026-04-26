@@ -100,20 +100,35 @@ else
     exit 1
 fi
 
-# Create installation directory
+# Create installation directories
 echo ""
-echo -e "Installing to ${GREEN}$MEZZE_BIN${NC}..."
+echo -e "Installing to ${GREEN}$MEZZE_HOME${NC}..."
 mkdir -p "$MEZZE_BIN"
+mkdir -p "$MEZZE_HOME/lib"
 
 # Copy the native binary (remove first to avoid OS caching issues with overwritten executables)
 rm -f "$MEZZE_BIN/mez"
 cp "$NATIVE_BINARY" "$MEZZE_BIN/mez"
 chmod +x "$MEZZE_BIN/mez"
 
+# Copy the runtime JAR (needed for mez dev JVM subprocess and mez build fat JAR)
+SHADOW_JAR="$REPO_ROOT/cli/build/libs/mezze.jar"
+if [ ! -f "$SHADOW_JAR" ]; then
+    echo -e "${YELLOW}Building shadow JAR...${NC}"
+    cd "$REPO_ROOT"
+    ./gradlew :cli:shadowJar
+fi
+if [ -f "$SHADOW_JAR" ]; then
+    cp "$SHADOW_JAR" "$MEZZE_HOME/lib/mezze-lang.jar"
+    echo -e "${GREEN}Runtime JAR installed ($(du -h "$MEZZE_HOME/lib/mezze-lang.jar" | cut -f1))${NC}"
+else
+    echo -e "${YELLOW}Warning: mezze-lang.jar not found. mez dev and mez build will be limited.${NC}"
+fi
+
 # Store the stdlib location for the binary to find
 echo "$REPO_ROOT" > "$MEZZE_HOME/project-root"
 
-echo -e "${GREEN}Mezze binary installed!${NC}"
+echo -e "${GREEN}Mezze installed!${NC}"
 echo ""
 
 # Detect shell and config file
