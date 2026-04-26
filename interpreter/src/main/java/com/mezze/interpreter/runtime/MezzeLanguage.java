@@ -2,9 +2,7 @@ package com.mezze.interpreter.runtime;
 
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeUnit;
-import com.mezze.language.parser.MezzeParser;
 import com.mezze.language.truffleir.FunctionIR;
-import com.mezze.language.typechecker.TypeChecker;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.TruffleLanguage;
@@ -47,10 +45,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     // Store last execution context (variable bindings) for test access
     private static final AtomicReference<Map<String, Object>> lastContextStore = new AtomicReference<>();
 
-    // Shared parser and typechecker — created once, reused across all parse() calls.
-    // Both are stateless (no per-compilation mutable state in the instances themselves).
-    private static final MezzeParser sharedParser = new MezzeParser();
-    private static final TypeChecker sharedTypeChecker = new TypeChecker();
+    // Parser and typechecker live on MezzeContext (per-context isolation).
+    // NOT static — GraalVM native-image cannot serialize TypeChecker into the image heap
+    // because it triggers BuiltInAbilities/stdlib loading at class init time.
 
     // CallTarget cache — shared across all tests for the same Language instance.
     // Content-hash keys ensure identical functions reuse the same CallTarget,
@@ -189,9 +186,10 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         // Clear per-context user function state — each test gets fresh user functions.
         // Stdlib cache (Language-level) is NOT cleared — it persists across all Contexts.
         var ctx = getCurrentContext();
-        if (ctx != null) {
-            ctx.clearUserState();
+        if (ctx == null) {
+            throw new RuntimeException("MezzeLanguage.parse() called without a context");
         }
+        ctx.clearUserState();
 
         // Check for direct TruffleIR execution (from tests or CLI)
         List<FunctionIR> directFunctions = directExecutionFunctions.get();
@@ -224,9 +222,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             projectRoot = Paths.get(".");
         }
 
-        // Parse to v2 ParsedModule and typecheck via v2 pipeline
-        var parsedModule = sharedParser.parseParsedModule(sourceCode, source.getPath() != null ? source.getPath() : "<unknown>");
-        var typeCheckResult = sharedTypeChecker.typeCheck(parsedModule, projectRoot, true, null);
+        // Parse and typecheck via context-owned instances (proper isolation, native-image safe)
+        var parsedModule = ctx.getParser().parseParsedModule(sourceCode, source.getPath() != null ? source.getPath() : "<unknown>");
+        var typeCheckResult = ctx.getTypeChecker().typeCheck(parsedModule, projectRoot, true, null);
 
         var loweredFunctions = typeCheckResult.getLoweredFunctions();
         if (loweredFunctions != null && !loweredFunctions.isEmpty()) {

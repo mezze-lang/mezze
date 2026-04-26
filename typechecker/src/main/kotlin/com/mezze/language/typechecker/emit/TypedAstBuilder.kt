@@ -39,9 +39,9 @@ class TypedAstBuilder(
     private val substitution: Substitution,
     private val constraintResults: Map<String, ConstraintResult>,
     private val abilityImpls: Map<String, TypingContext.AbilityImplInfo>,
-    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,   // v1 for now, will migrate later
-    private val abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,  // v1 for now
-    private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,    // v1 for now
+    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
+    private val abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
+    private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
     private val performerToEffect: Map<String, String>,
     private val importContext: ModuleImportContext?,
     private val identifierContentHashes: Map<BindingKey, String>,
@@ -446,19 +446,14 @@ class TypedAstBuilder(
         // Compute per-operation content hashes via TypedASTHasher
         // Each operation hash includes the effect hash + op name + body content
         val opHashes = ops.mapValues { (opName, opBody) ->
-            try {
-                val opBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()
-                opBuilder.append(byteArrayOf(com.mezze.language.ast.hashing.HashTags.IMPL_DECLARATION))
-                opBuilder.append(effectHash.hex)
-                opBuilder.append(hash.hex)
-                opBuilder.append(opName)
-                // Include the body content hash
-                val bodyHash = com.mezze.language.typechecker.hashing.TypedASTHasher.hashExpr(opBody)
-                opBuilder.append(bodyHash.hex)
-                Hash(opBuilder.build().toFullHexString())
-            } catch (_: Exception) {
-                Hash.ZERO
-            }
+            val opBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()
+            opBuilder.append(byteArrayOf(com.mezze.language.ast.hashing.HashTags.IMPL_DECLARATION))
+            opBuilder.append(effectHash.hex)
+            opBuilder.append(hash.hex)
+            opBuilder.append(opName)
+            val bodyHash = com.mezze.language.typechecker.hashing.TypedASTHasher.hashExpr(opBody)
+            opBuilder.append(bodyHash.hex)
+            Hash(opBuilder.build().toFullHexString())
         }
 
         decls.add(TypedPerformerDecl(hash, effectHash, decl.performerName, params, assocTypeBindings, ops, opHashes, loc))
