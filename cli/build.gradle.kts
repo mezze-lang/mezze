@@ -112,6 +112,12 @@ tasks.shadowJar {
     dependsOn("compileStdlib")
     archiveFileName.set("mezze.jar")
     mergeServiceFiles()
+    // Truffle API is a multi-release JAR — JDK 21+ version of JDKAccessor
+    // has virtual thread support. Without this, the base class is loaded
+    // which throws "VirtualThread is not supported on this JDK".
+    manifest {
+        attributes("Multi-Release" to "true")
+    }
 }
 
 // Task to build standalone JARs with Truffle runtime for compiled Mezze programs
