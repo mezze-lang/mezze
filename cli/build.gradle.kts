@@ -100,11 +100,32 @@ tasks.named<ProcessResources>("processResources") {
     }
 }
 
-// Stdlib is compiled at runtime by PrecompiledStdlib from source files.
-// This task is a no-op placeholder for build dependencies (shadowJar, native).
-tasks.register("compileStdlib") {
+// Pre-compile stdlib to SQLite at build time.
+// Parses + typechecks + lowers all stdlib modules once, stores FunctionIRs in stdlib.sqlite.
+// Embedded in the JAR — PrecompiledStdlib loads from it instead of re-parsing on every JVM start.
+val compileStdlib by tasks.registering(JavaExec::class) {
+    dependsOn(":typechecker:classes", ":codebase:classes", ":parser:classes", ":ast:classes", ":stdlib:classes")
     group = "build"
-    description = "Stdlib compilation (handled at runtime by PrecompiledStdlib)"
+    description = "Pre-compile stdlib to SQLite (FunctionIRs + performer records)"
+
+    classpath = sourceSets.main.get().runtimeClasspath
+
+    mainClass.set("com.mezze.language.cli.StdlibPrecompilerKt")
+
+    val outputFile = layout.buildDirectory.file("generated/resources/stdlib.sqlite")
+    val stdlibDir = rootProject.projectDir
+
+    args = listOf(outputFile.get().asFile.absolutePath, stdlibDir.absolutePath)
+    outputs.file(outputFile)
+    inputs.dir(rootProject.projectDir.resolve("stdlib/std"))
+
+    // Needs access to stdlib source files for parsing
+    systemProperty("mezze.project.root", stdlibDir.absolutePath)
+}
+
+// Include pre-compiled stdlib.sqlite as a JAR resource
+sourceSets.main {
+    resources.srcDir(layout.buildDirectory.dir("generated/resources"))
 }
 
 // shadowJar depends on compileStdlib so stdlib.db is always fresh in the JAR

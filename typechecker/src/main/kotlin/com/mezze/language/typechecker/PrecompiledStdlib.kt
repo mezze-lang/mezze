@@ -17,6 +17,7 @@ import java.nio.file.Paths
 object PrecompiledStdlib {
 
     private const val STDLIB_MODULES_RESOURCE = "mezze-stdlib-modules.cbor"
+    private const val STDLIB_SQLITE_RESOURCE = "stdlib.sqlite"
 
     @OptIn(ExperimentalSerializationApi::class)
     private val cbor = Cbor {
@@ -164,50 +165,57 @@ object PrecompiledStdlib {
             stdlibTypedModules = v2
         }
 
-        // Pre-lower all stdlib modules: mono → resolve → lower once at startup.
-        // Build full module map including transitive deps from ModuleTypeChecker cache.
-        val allModulesForPrelower = HashMap<Hash, com.mezze.language.typedast.TypedModule>(stdlibTypedModules)
-        for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
-            val stdlibModule = cached.typedModule
-            if (stdlibModule != null && stdlibModule.hash !in allModulesForPrelower) {
-                allModulesForPrelower[stdlibModule.hash] = stdlibModule
-            }
+        // Try loading pre-compiled FunctionIRs from embedded stdlib.sqlite resource.
+        // If available (built by Gradle compileStdlib task), skip the expensive
+        // TypedASTCompiler.compile step (~1.2s saved).
+        val prelowerStart = System.nanoTime()
+        val preloaded = tryLoadPreloweredFromSqlite()
+        if (System.getenv("MEZZE_DEBUG") != null) {
+            val ms = (System.nanoTime() - prelowerStart) / 1_000_000
+            System.err.println("[PrecompiledStdlib] ${if (preloaded != null) "Loaded ${preloaded.functions.size} FunctionIRs from stdlib.sqlite" else "stdlib.sqlite not found, compiling from source"} (${ms}ms)")
         }
+        if (preloaded != null) {
+            preloweredFunctions = preloaded.functions
+            preloweredPerformerRecords = preloaded.performers
+            stdlibDependencyGraph = preloaded.dependencyGraph
+        } else {
+            // Fallback: compile from TypedModules (expensive, ~1.2s)
+            val allModulesForPrelower = HashMap<Hash, com.mezze.language.typedast.TypedModule>(stdlibTypedModules)
+            for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
+                val stdlibModule = cached.typedModule
+                if (stdlibModule != null && stdlibModule.hash !in allModulesForPrelower) {
+                    allModulesForPrelower[stdlibModule.hash] = stdlibModule
+                }
+            }
 
-        val preFunctions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
-        val prePerformers = mutableListOf<Array<String>>()
+            val preFunctions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
+            val prePerformers = mutableListOf<Array<String>>()
 
-        // Compile performer records eagerly (small, needed for all tests).
-        // FunctionIRs compiled LAZILY per-module when first referenced — saves ~500MB.
-        val allAbilityImpls = allModulesForPrelower.values.flatMap { it.abilityImpls }
-        for ((_, typedMod) in allModulesForPrelower) {
-            try {
-                val compiler = com.mezze.language.typechecker.compiler.TypedASTCompiler(
-                    abilityImpls = allAbilityImpls
-                )
-                val result = compiler.compile(typedMod)
-                // Only keep performer records eagerly; FunctionIRs compiled on-demand
-                for (pr in result.performerRecords) {
-                    val arr = mutableListOf(pr.performerHash, pr.effectHash)
-                    for (i in pr.operationHashes.indices) {
-                        arr.add(pr.operationHashes[i])
-                        arr.add(pr.operationNames.getOrElse(i) { "op_$i" })
+            val allAbilityImpls = allModulesForPrelower.values.flatMap { it.abilityImpls }
+            for ((_, typedMod) in allModulesForPrelower) {
+                try {
+                    val compiler = com.mezze.language.typechecker.compiler.TypedASTCompiler(
+                        abilityImpls = allAbilityImpls
+                    )
+                    val result = compiler.compile(typedMod)
+                    for (pr in result.performerRecords) {
+                        val arr = mutableListOf(pr.performerHash, pr.effectHash)
+                        for (i in pr.operationHashes.indices) {
+                            arr.add(pr.operationHashes[i])
+                            arr.add(pr.operationNames.getOrElse(i) { "op_$i" })
+                        }
+                        prePerformers.add(arr.toTypedArray())
                     }
-                    prePerformers.add(arr.toTypedArray())
-                }
-                // Build hash→FunctionIR map for lazy compilation
-                for (fn in result.functions) {
-                    preFunctions.putIfAbsent(fn.hash.hex, fn)
-                }
-            } catch (_: Exception) {
-                // Compilation errors during stdlib precompilation are non-fatal;
-                // the module will be compiled on demand if needed.
+                    for (fn in result.functions) {
+                        preFunctions.putIfAbsent(fn.hash.hex, fn)
+                    }
+                } catch (_: Exception) {}
             }
-        }
 
-        preloweredFunctions = preFunctions
-        preloweredPerformerRecords = prePerformers
-        buildDependencyGraph()
+            preloweredFunctions = preFunctions
+            preloweredPerformerRecords = prePerformers
+            buildDependencyGraph()
+        }
 
         // Extract lightweight metadata.
         stdlibAbilityImpls = stdlibTypedModules.values.flatMap { it.abilityImpls }
@@ -250,5 +258,84 @@ object PrecompiledStdlib {
     fun serializeV2Modules(): ByteArray {
         val moduleList = stdlibTypedModules.values.toList()
         return cbor.encodeToByteArray(moduleList)
+    }
+
+    private data class PreloweredData(
+        val functions: Map<String, com.mezze.language.truffleir.FunctionIR>,
+        val performers: List<Array<String>>,
+        val dependencyGraph: Map<String, Set<String>>
+    )
+
+    /**
+     * Try loading pre-compiled FunctionIRs from embedded stdlib.sqlite resource.
+     * Generated by StdlibPrecompiler at Gradle build time.
+     * Uses raw JDBC to avoid circular dependency on :codebase module.
+     */
+    private fun tryLoadPreloweredFromSqlite(): PreloweredData? {
+        return try {
+            val stream = PrecompiledStdlib::class.java.classLoader
+                .getResourceAsStream(STDLIB_SQLITE_RESOURCE) ?: return null
+
+            val tempFile = java.io.File.createTempFile("mezze-stdlib", ".sqlite")
+            try {
+                tempFile.writeBytes(stream.readAllBytes())
+                val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${tempFile.absolutePath}")
+
+                val functions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
+                val performers = mutableListOf<Array<String>>()
+                val depGraph = mutableMapOf<String, Set<String>>()
+
+                // Load all FunctionIRs from blobs table
+                conn.createStatement().use { stmt ->
+                    stmt.executeQuery("SELECT hash, ir FROM blobs WHERE ir IS NOT NULL").use { rs ->
+                        while (rs.next()) {
+                            val hash = rs.getString("hash")
+                            val irBytes = rs.getBytes("ir")
+                            try {
+                                val fn = kotlinx.serialization.cbor.Cbor.decodeFromByteArray<com.mezze.language.truffleir.FunctionIR>(irBytes)
+                                functions[hash] = fn
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+
+                // Load performer records
+                conn.createStatement().use { stmt ->
+                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'performer_records'").use { rs ->
+                        if (rs.next()) {
+                            val data = rs.getString("value")
+                            if (data != null && data.isNotEmpty()) {
+                                for (record in data.split(";")) {
+                                    performers.add(record.split(",").toTypedArray())
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Load dependency graph
+                conn.createStatement().use { stmt ->
+                    stmt.executeQuery("SELECT key, value FROM metadata WHERE key LIKE 'deps:%'").use { rs ->
+                        while (rs.next()) {
+                            val hash = rs.getString("key").removePrefix("deps:")
+                            val deps = rs.getString("value")
+                            if (deps.isNotEmpty()) {
+                                depGraph[hash] = deps.split(";").toSet()
+                            }
+                        }
+                    }
+                }
+
+                conn.close()
+
+                if (functions.isNotEmpty()) {
+                    PreloweredData(functions, performers, depGraph)
+                } else null
+            } finally {
+                tempFile.delete()
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 }

@@ -41,6 +41,16 @@ class SQLiteMezzeStore private constructor(
             }
         }
 
+        /** Open read-write store at a specific file path. */
+        fun forFile(path: File): SQLiteMezzeStore {
+            path.parentFile?.mkdirs()
+            val conn = DriverManager.getConnection("jdbc:sqlite:${path.absolutePath}")
+            return SQLiteMezzeStore(conn, readOnly = false).also {
+                it.configurePragmas()
+                it.initSchema()
+            }
+        }
+
         /** Open read-only store (for deps.sqlite, JAR blobs.sqlite). */
         fun readOnly(path: File): SQLiteMezzeStore {
             val conn = DriverManager.getConnection("jdbc:sqlite:file:${path.absolutePath}?mode=ro")
@@ -243,6 +253,19 @@ class SQLiteMezzeStore private constructor(
         return getIRStmt.executeQuery().use { rs ->
             if (rs.next()) rs.getBytes("ir") else null
         }
+    }
+
+    /** Get all blob hashes in the store. */
+    fun getAllBlobHashes(): List<Hash> {
+        val result = mutableListOf<Hash>()
+        conn.createStatement().use { stmt ->
+            stmt.executeQuery("SELECT hash FROM blobs").use { rs ->
+                while (rs.next()) {
+                    result.add(Hash(rs.getString("hash")))
+                }
+            }
+        }
+        return result
     }
 
     // ====================================================================

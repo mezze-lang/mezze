@@ -18,6 +18,8 @@ object JvmLauncher {
         "-Dpolyglot.engine.WarnInterpreterOnly=false"
     )
 
+    private val CDS_ARCHIVE = File(System.getProperty("user.home"), ".mezze/cache/mezze.jsa")
+
     /**
      * Find a Java 21+ executable. Returns null if not found.
      *
