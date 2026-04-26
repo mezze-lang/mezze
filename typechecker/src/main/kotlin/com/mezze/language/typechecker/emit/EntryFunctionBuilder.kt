@@ -31,7 +31,7 @@ object EntryFunctionBuilder {
      * If the module already has a `pub let main`, returns it unchanged.
      */
     fun wrapTopLevel(module: TypedModule): TypedModule {
-        // Check if there's already a main function
+        // Check if there's already a public main function
         val hasMain = module.decls.any {
             it is TypedLetDecl && it.name == "main" && it.isPublic
         }

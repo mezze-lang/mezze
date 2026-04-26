@@ -166,6 +166,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private static final ThreadLocal<List<FunctionIR>> directExecutionFunctions = new ThreadLocal<>();
     private static final ThreadLocal<List<String[]>> directExecutionPerformers = new ThreadLocal<>();
     private static final ThreadLocal<Path> directExecutionRoot = new ThreadLocal<>();
+    private static final ThreadLocal<String> directExecutionEntryName = new ThreadLocal<>();
 
     @Override
     protected MezzeContext createContext(Env env) {
@@ -199,6 +200,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             directExecutionPerformers.remove();
             Path projectRoot = directExecutionRoot.get();
             directExecutionRoot.remove();
+            String entryName = directExecutionEntryName.get();
+            directExecutionEntryName.remove();
             if (projectRoot == null) {
                 projectRoot = Paths.get(System.getProperty("mezze.project.root", "."));
             }
@@ -206,7 +209,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             // All modules are already included in the FunctionIR list — no import extraction needed
             return com.mezze.interpreter.compiler.PipelineRunner.compileFromIR(
                 this, directFunctions, Collections.emptyList(), projectRoot,
-                performers != null ? performers : Collections.emptyList()
+                performers != null ? performers : Collections.emptyList(),
+                entryName
             );
         }
 
@@ -350,6 +354,18 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         directExecutionFunctions.set(functions);
         directExecutionPerformers.set(performers);
         directExecutionRoot.set(projectRoot);
+        directExecutionEntryName.set(null);
+    }
+
+    /**
+     * Set pre-lowered TruffleIR functions with explicit entry function name.
+     * Used by mez dev — the entry function (e.g., "main") is called automatically.
+     */
+    public static void setFunctionsForDirectExecution(List<FunctionIR> functions, List<String[]> performers, Path projectRoot, String entryName) {
+        directExecutionFunctions.set(functions);
+        directExecutionPerformers.set(performers);
+        directExecutionRoot.set(projectRoot);
+        directExecutionEntryName.set(entryName);
     }
 
     /**

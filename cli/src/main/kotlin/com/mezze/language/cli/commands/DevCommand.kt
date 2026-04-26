@@ -230,7 +230,7 @@ class DevCommand {
                 kotlin.system.exitProcess(exitCode)
             } else {
                 // Development mode (running on JVM already): execute in-process
-                executeWithTruffle(functions, typeCheckResult.performerRecords, currentDir, inspect || inspectBrk, inspectBrk)
+                executeWithTruffle(functions, typeCheckResult.performerRecords, currentDir, inspect || inspectBrk, inspectBrk, entryName)
 
                 val totalTime = (System.nanoTime() - totalStart) / 1_000_000
                 if (System.getenv("MEZZE_TIMING") != null) {
@@ -254,7 +254,8 @@ class DevCommand {
         performerRecords: List<Array<String>>,
         projectDir: File,
         inspect: Boolean = false,
-        inspectBrk: Boolean = false
+        inspectBrk: Boolean = false,
+        entryName: String = "main"
     ) {
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
         System.setProperty("polyglot.log.level", "OFF")
@@ -274,7 +275,7 @@ class DevCommand {
         val context = builder.build()
 
         try {
-            com.mezze.interpreter.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, performerRecords, projectDir.toPath())
+            com.mezze.interpreter.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, performerRecords, projectDir.toPath(), entryName)
 
             val source = org.graalvm.polyglot.Source.newBuilder(
                 com.mezze.interpreter.runtime.MezzeLanguage.ID,

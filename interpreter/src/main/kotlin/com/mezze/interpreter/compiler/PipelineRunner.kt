@@ -52,7 +52,8 @@ object PipelineRunner {
         functions: List<com.mezze.language.truffleir.FunctionIR>,
         importedModulePaths: List<String> = emptyList(),
         projectRoot: Path = Path.of("."),
-        performerRecords: List<Array<String>> = emptyList()
+        performerRecords: List<Array<String>> = emptyList(),
+        entryName: String? = null
     ): CallTarget {
         if (functions.isEmpty()) {
             val fd = FrameDescriptor.newBuilder().build()
@@ -128,13 +129,41 @@ object PipelineRunner {
             }
         }
 
-        // Find entry function
-        val mainFn = functions.find { it.name == "__entry__" }
-            ?: functions.find { it.name == "main" }
-            ?: functions.last()
+        // Find the entry point and compile it.
+        //
+        // If a named entry function exists (from Mezze.toml entryName), compile a call
+        // to it: `entryName {}`. This is the mez dev path.
+        //
+        // If no named entry, use __entry__ (tests/REPL wrapping of top-level expressions)
+        // or fall back to the last function.
+        val namedEntry = if (entryName != null) functions.find { it.name == entryName } else null
 
-        val source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
-        val bodyNode = compiler.compileNode(mainFn.body, source)
+        val mainFn: com.mezze.language.truffleir.FunctionIR
+        val source: com.oracle.truffle.api.source.Source
+        val bodyNode: com.mezze.interpreter.nodes.MezzeNode
+
+        if (namedEntry != null) {
+            // Named entry function exists (mez dev path).
+            // __entry__ body evaluates all declarations and returns the entry closure.
+            // We then invoke that closure with {}.
+            val wrapperFn = functions.find { it.name == "__entry__" }
+            mainFn = wrapperFn ?: namedEntry
+            source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
+
+            // __entry__ body returns the entry function closure
+            val entryClosureNode = compiler.compileNode(mainFn.body, source)
+            // Create {} argument
+            val unitArgNode = com.mezze.interpreter.nodes.literal.UnitLiteralNode()
+            // Invoke the closure with {}
+            bodyNode = com.mezze.interpreter.nodes.function.InvokeNode.create(
+                entryClosureNode, arrayOf(unitArgNode)
+            )
+        } else {
+            // No named entry — fall back to __entry__ (tests/REPL) or last function
+            mainFn = functions.find { it.name == "__entry__" } ?: functions.last()
+            source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
+            bodyNode = compiler.compileNode(mainFn.body, source)
+        }
 
         // Build hash→name map for performer/handler lookup by name
         val hashToName = mutableMapOf<String, String>()

@@ -212,6 +212,7 @@ class InitCommand {
                 appendLine("[[app]]")
                 appendLine("name = \"$packageName\"")
                 appendLine("path = \"src/app.mz\"")
+                appendLine("entry = \"main\"")
             }
 
             appendLine()

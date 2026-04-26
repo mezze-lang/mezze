@@ -31,6 +31,7 @@ object DevRunner {
 
         val projectRoot = File(parsed["project-root"] ?: ".")
         val cachePath = File(parsed["cache"] ?: File(projectRoot, ".mz/cache.sqlite").absolutePath)
+        val entryName = parsed["entry-name"] ?: "main"
         val inspect = parsed.containsKey("inspect")
         val inspectBrk = parsed.containsKey("inspect-brk")
 
@@ -50,7 +51,17 @@ object DevRunner {
                 System.exit(1)
             }
 
-            executeWithTruffle(functions, performers, projectRoot.toPath(), inspect, inspectBrk)
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println("[DevRunner] Loaded ${functions.size} functions, ${performers.size} performers from cache")
+                for (fn in functions) {
+                    System.err.println("[DevRunner]   fn: ${fn.hash.hex.take(16)}... name=${fn.name ?: "<anon>"}")
+                }
+                for ((i, pr) in performers.withIndex()) {
+                    System.err.println("[DevRunner]   performer[$i]: ${pr.joinToString(", ") { it.take(16) + "..." }}")
+                }
+            }
+
+            executeWithTruffle(functions, performers, projectRoot.toPath(), entryName, inspect, inspectBrk)
         } finally {
             store.close()
         }
@@ -75,6 +86,7 @@ object DevRunner {
         functions: List<FunctionIR>,
         performers: List<Array<String>>,
         projectRoot: Path,
+        entryName: String,
         inspect: Boolean,
         inspectBrk: Boolean
     ) {
@@ -94,7 +106,7 @@ object DevRunner {
 
         val context = builder.build()
         try {
-            MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot)
+            MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot, entryName)
 
             val source = Source.newBuilder(
                 MezzeLanguage.ID,
