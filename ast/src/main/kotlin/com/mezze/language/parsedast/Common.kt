@@ -3,6 +3,20 @@ package com.mezze.language.parsedast
 import kotlinx.serialization.Serializable
 
 /**
+ * The token that separates segments in a module path: `a::b::c`.
+ * Defined here, in the AST module, so every layer (parser, typechecker,
+ * codebase, lsp) speaks the same separator without hardcoded literals.
+ */
+const val MODULE_PATH_SEPARATOR = "::"
+
+/**
+ * The root namespace for the standard library. Modules whose path starts
+ * with `STDLIB_NAMESPACE_PREFIX` (= "std::") are stdlib, never user code.
+ */
+const val STDLIB_NAMESPACE = "std"
+const val STDLIB_NAMESPACE_PREFIX = "$STDLIB_NAMESPACE$MODULE_PATH_SEPARATOR"
+
+/**
  * Module path segments — e.g., std::collections::list = ["std", "collections", "list"]
  */
 @Serializable
@@ -10,7 +24,7 @@ data class ParsedModulePath(
     val segments: List<String>
 ) {
     val shortName: String get() = segments.last()
-    override fun toString(): String = segments.joinToString("::")
+    override fun toString(): String = segments.joinToString(MODULE_PATH_SEPARATOR)
 }
 
 /**

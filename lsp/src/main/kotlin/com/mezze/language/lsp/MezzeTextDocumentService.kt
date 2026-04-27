@@ -56,6 +56,16 @@ class MezzeTextDocumentService(
     // Store for project mode (will be rebuilt in LSP task #106)
     private var projectStore: MezzeStore? = null
 
+    // Project root directory and Mezze.toml package name. Cached at init so
+    // every LSP write to cache.sqlite uses the same modulePath derivation as
+    // `mez dev` (so concurrent tools share rows in typed_modules).
+    private var projectRootDir: File? = null
+    private var packageName: String? = null
+    /** Absolute path of the first [[app]] entry's file from Mezze.toml. The
+     *  module derivation rule treats this file as the package's main module.
+     *  Null if Mezze.toml has no [[app]] block. */
+    private var entryFilePath: String? = null
+
     /**
      * State for an open document.
      */
@@ -87,7 +97,11 @@ class MezzeTextDocumentService(
             if (projectRoot != null) {
                 try {
                     projectStore = SQLiteMezzeStore.forProject(projectRoot)
-                    server.logInfo("Using project store at ${projectRoot}/.mz/cache.sqlite")
+                    projectRootDir = projectRoot
+                    val (pkg, entry) = readMezzeTomlEntries(projectRoot)
+                    packageName = pkg
+                    entryFilePath = entry?.let { File(projectRoot, it).absolutePath }
+                    server.logInfo("Using project store at ${projectRoot}/.mz/cache.sqlite (package=$packageName, entry=$entry)")
 
                     // Hydrate typechecker cache from the shared store. If
                     // `mez dev` (or a previous LSP session) typed modules
@@ -259,35 +273,43 @@ class MezzeTextDocumentService(
                     // - Module path comes from typedModule.path (filename for
                     //   LSP-loaded files; this is wrong for multi-file projects
                     //   sharing the same package — tracked in #169).
-                    // - Only the entry module is written; transitive imports
-                    //   resolve via in-memory cache only — tracked in #168.
                     val store = projectStore
                     val typedMod = result.typedModule
-                    if (store != null && typedMod != null && filePath != null) {
-                        try {
-                            val sourceHash = sha256Hex(content)
-                            val publicResult = com.mezze.language.typechecker.TypeCheckResult(
-                                resolvedImports = buildResolvedImports(result.importContext),
-                                warnings = result.warnings.map {
-                                    com.mezze.language.typechecker.TypeCheckWarning(it.message, it.loc)
-                                },
-                                importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
-                                importedEffects = result.importContext?.importedEffects ?: emptyMap(),
-                                loweredFunctions = result.loweredFunctions ?: emptyList(),
-                                typedModule = typedMod,
-                                performerRecords = result.loweredPerformers
-                            )
-                            StorePopulator.populate(
-                                store,
-                                publicResult,
-                                modulePath = typedMod.path,
-                                filePath = filePath.toString(),
-                                sourceHash = sourceHash
-                            )
-                        } catch (e: Exception) {
-                            // Non-fatal: store write failures shouldn't block
-                            // diagnostics. Log and move on.
-                            server.logError("Failed to populate store from LSP typecheck: ${e.message}")
+                    val rootDir = projectRootDir
+                    val pkgName = packageName
+                    if (store != null && typedMod != null && filePath != null && rootDir != null && pkgName != null) {
+                        // Use ModulePath.derive so the modulePath we write
+                        // matches what `mez dev` writes for the same file —
+                        // `(modulePath, sourceHash)` rows are then shared.
+                        // If the file lives outside the project's src/, skip
+                        // (caller is editing a scratch file; not our concern).
+                        val derived = com.mezze.language.codebase.ModulePath
+                            .derive(rootDir, filePath.toFile(), pkgName, entryFilePath)
+                        if (derived != null) {
+                            try {
+                                val sourceHash = sha256Hex(content)
+                                val publicResult = com.mezze.language.typechecker.TypeCheckResult(
+                                    resolvedImports = buildResolvedImports(result.importContext),
+                                    warnings = result.warnings.map {
+                                        com.mezze.language.typechecker.TypeCheckWarning(it.message, it.loc)
+                                    },
+                                    importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
+                                    importedEffects = result.importContext?.importedEffects ?: emptyMap(),
+                                    loweredFunctions = result.loweredFunctions ?: emptyList(),
+                                    typedModule = typedMod,
+                                    performerRecords = result.loweredPerformers
+                                )
+                                StorePopulator.populate(
+                                    store,
+                                    publicResult,
+                                    modulePath = derived,
+                                    filePath = filePath.toString(),
+                                    sourceHash = sourceHash
+                                )
+                            } catch (e: Exception) {
+                                // Non-fatal: store write failures shouldn't block diagnostics.
+                                server.logError("Failed to populate store from LSP typecheck: ${e.message}")
+                            }
                         }
                     }
                 }
@@ -2283,5 +2305,35 @@ class MezzeTextDocumentService(
     private fun sha256Hex(content: String): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Read `[package].name` and the first `[[app]].path` from Mezze.toml
+     * without pulling in a TOML library (avoids a cyclic LSP↔CLI
+     * dependency). Both are simple keys; a focused regex is enough.
+     *
+     * Returns (packageName, firstAppPath). Either may be null if the file
+     * is missing or the key isn't found — the LSP still works, it just
+     * can't write cross-tool-shareable modulePaths for those cases.
+     */
+    private fun readMezzeTomlEntries(projectRoot: File): Pair<String?, String?> {
+        val toml = File(projectRoot, "Mezze.toml").takeIf { it.exists() }
+            ?: return null to null
+        val text = try { toml.readText() } catch (_: Exception) { return null to null }
+
+        val packageBlock = Regex("""\[package\][^\[]*""", RegexOption.MULTILINE)
+            .find(text)?.value
+        val pkg = packageBlock?.let {
+            Regex("""name\s*=\s*"([^"]+)"""").find(it)?.groupValues?.get(1)
+        }
+
+        // First [[app]] block's `path = "..."`.
+        val appBlock = Regex("""\[\[app\]\][^\[]*""", RegexOption.MULTILINE)
+            .find(text)?.value
+        val entry = appBlock?.let {
+            Regex("""path\s*=\s*"([^"]+)"""").find(it)?.groupValues?.get(1)
+        }
+
+        return pkg to entry
     }
 }

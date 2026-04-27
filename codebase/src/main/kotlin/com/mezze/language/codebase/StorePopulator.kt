@@ -88,8 +88,10 @@ object StorePopulator {
             // compatibility with DevRunner's keying. Re-compute SHA-256 here
             // so both tools share the same `(modulePath, sourceHash)` keys.
             for ((loadedPath, loadedTyped) in result.loadedModules) {
-                if (loadedPath == modulePath) continue          // already wrote above
-                if (loadedPath.startsWith("std::")) continue    // stdlib handled by PrecompiledStdlib
+                if (loadedPath == modulePath) continue
+                if (loadedPath.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) {
+                    continue  // stdlib handled by PrecompiledStdlib
+                }
                 val src = result.loadedModuleSources[loadedPath] ?: continue
                 val file = File(src.filePath).takeIf { it.exists() } ?: continue
                 val sha256 = sha256Hex(file.readText())

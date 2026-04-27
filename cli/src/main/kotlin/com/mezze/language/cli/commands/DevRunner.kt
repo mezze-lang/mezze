@@ -341,11 +341,16 @@ object DevRunner {
         val timing = System.getenv("MEZZE_TIMING") != null
         fun ms() = (System.nanoTime() - startTime) / 1_000_000
 
-        // COLD_START fast path — if cache is populated, use it (skip compile).
-        // Any other mode always recompiles.
+        // COLD_START fast path — if cache is populated AND every module's
+        // file on disk still matches its stored sourceHash, use the cached
+        // functions and skip the compile.
+        //
+        // Checking only the entry file isn't enough: a transitive import
+        // (e.g. `watchtest::utils`) may have changed while `app.mz` didn't.
+        // Walking every row in `modules` is cheap (sub-ms for tens of files).
         if (mode == ReloadMode.COLD_START) {
             val cached = loadFunctions(store, appName)
-            if (cached.isNotEmpty() && !store.isFileStale(filePath, sourceHash)) {
+            if (cached.isNotEmpty() && !anyProjectFileStale(store)) {
                 val performers = loadPerformerRecords(store, appName)
                 executeAndReport(cached, performers, projectRoot, entryName, inspect, inspectBrk, engine, startTime)
                 return
@@ -539,6 +544,21 @@ object DevRunner {
 
     private fun loadPerformerRecords(store: SQLiteMezzeStore, appName: String): List<Array<String>> =
         store.getAppPerformerRecords(appName)
+
+    /**
+     * True if any module recorded in the store has a source file on disk
+     * whose SHA-256 differs from the stored sourceHash. Returns true also
+     * if a recorded source file is missing (treat as stale → recompile).
+     */
+    private fun anyProjectFileStale(store: SQLiteMezzeStore): Boolean {
+        for (mod in store.getAllModules()) {
+            val filePath = mod.filePath ?: continue
+            val file = File(filePath)
+            if (!file.exists()) return true
+            if (sha256(file.readText()) != mod.sourceHash) return true
+        }
+        return false
+    }
 
     private fun printSeparator() { System.err.println(ANSI_GRAY + SEPARATOR + ANSI_RESET) }
     private fun printError(label: String, msg: String) { System.err.println(); if (label.isNotEmpty()) System.err.println("${ANSI_RED}$label${ANSI_RESET}"); System.err.println(msg) }
