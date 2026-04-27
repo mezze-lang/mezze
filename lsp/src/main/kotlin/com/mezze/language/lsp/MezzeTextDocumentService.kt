@@ -8,6 +8,9 @@ import com.mezze.language.typechecker.ImportKind
 import com.mezze.language.parsedast.*
 import com.mezze.language.codebase.MezzeStore
 import com.mezze.language.codebase.SQLiteMezzeStore
+import com.mezze.language.codebase.StorePopulator
+import com.mezze.language.codebase.StoreHydration
+import com.mezze.language.codebase.CodebaseSerialization
 import com.mezze.language.formatter.Formatter
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parser.ParseException
@@ -85,6 +88,25 @@ class MezzeTextDocumentService(
                 try {
                     projectStore = SQLiteMezzeStore.forProject(projectRoot)
                     server.logInfo("Using project store at ${projectRoot}/.mz/cache.sqlite")
+
+                    // Hydrate typechecker cache from the shared store. If
+                    // `mez dev` (or a previous LSP session) typed modules
+                    // here, we get them for free — the next typecheck call
+                    // hits cache instead of re-typechecking.
+                    val store = projectStore!!
+                    val stats = StoreHydration.hydrateTypedModules(store) { modulePath, blob ->
+                        try {
+                            val v2 = CodebaseSerialization.deserializeTypedModule(blob)
+                            com.mezze.language.typechecker.module.ModuleTypeChecker
+                                .hydrateFromV2Module(modulePath, v2)
+                            true
+                        } catch (_: Exception) {
+                            false
+                        }
+                    }
+                    server.logInfo(
+                        "Hydrated typed modules from store: ${stats.hits} hit, ${stats.misses} miss (${stats.elapsedMs}ms)"
+                    )
                 } catch (e: Exception) {
                     server.logError("Failed to create store: ${e.message}")
                     e.printStackTrace()
@@ -228,6 +250,46 @@ class MezzeTextDocumentService(
                         importedEffects = result.importContext?.importedEffects ?: emptyMap()
                     )
                     lastSuccessfulResult[uri] = typeCheckResult!!
+
+                    // Write typed bytes + per-decl blobs into the shared store
+                    // so concurrent `mez dev` (and a future LSP restart) see
+                    // them. Same path StorePopulator uses for the CLI.
+                    //
+                    // Caveats:
+                    // - Module path comes from typedModule.path (filename for
+                    //   LSP-loaded files; this is wrong for multi-file projects
+                    //   sharing the same package — tracked in #169).
+                    // - Only the entry module is written; transitive imports
+                    //   resolve via in-memory cache only — tracked in #168.
+                    val store = projectStore
+                    val typedMod = result.typedModule
+                    if (store != null && typedMod != null && filePath != null) {
+                        try {
+                            val sourceHash = sha256Hex(content)
+                            val publicResult = com.mezze.language.typechecker.TypeCheckResult(
+                                resolvedImports = buildResolvedImports(result.importContext),
+                                warnings = result.warnings.map {
+                                    com.mezze.language.typechecker.TypeCheckWarning(it.message, it.loc)
+                                },
+                                importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
+                                importedEffects = result.importContext?.importedEffects ?: emptyMap(),
+                                loweredFunctions = result.loweredFunctions ?: emptyList(),
+                                typedModule = typedMod,
+                                performerRecords = result.loweredPerformers
+                            )
+                            StorePopulator.populate(
+                                store,
+                                publicResult,
+                                modulePath = typedMod.path,
+                                filePath = filePath.toString(),
+                                sourceHash = sourceHash
+                            )
+                        } catch (e: Exception) {
+                            // Non-fatal: store write failures shouldn't block
+                            // diagnostics. Log and move on.
+                            server.logError("Failed to populate store from LSP typecheck: ${e.message}")
+                        }
+                    }
                 }
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> {
                     result.errors.forEach { error ->
@@ -2214,5 +2276,12 @@ class MezzeTextDocumentService(
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** SHA-256 over the source bytes; matches DevRunner's sourceHash so
+     *  cache.sqlite rows written by either tool share the same key. */
+    private fun sha256Hex(content: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 }

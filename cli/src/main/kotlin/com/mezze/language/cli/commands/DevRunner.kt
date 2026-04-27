@@ -432,48 +432,26 @@ object DevRunner {
     }
 
     /**
-     * Walk every module recorded in the store. For each one, hash its source
-     * file on disk and look up a cached typed module at that hash. If the
-     * source matches what was typed before, deserialize the typed blob and
-     * preload it into ModuleTypeChecker.globalCache so the next typecheck
-     * skips re-typecheck for that module (cache hit).
+     * Pre-load typed modules from the store so the typechecker skips
+     * re-typecheck for files whose source on disk hasn't changed.
      *
-     * Files that have changed since their last cached typecheck miss here
-     * and fall through to fresh typecheck — same as today's behavior.
+     * Delegates the walk to [com.mezze.language.codebase.StoreHydration];
+     * passes a lambda that deserializes the blob and pushes it into
+     * ModuleTypeChecker.globalCache.
      */
     private fun hydrateTypedModulesFromStore(store: SQLiteMezzeStore, projectRoot: File) {
-        val timing = System.getenv("MEZZE_TIMING") != null
-        val start = System.nanoTime()
-        var hits = 0
-        var misses = 0
-
-        for (mod in store.getAllModules()) {
-            val filePath = mod.filePath ?: continue
-            val file = File(filePath).takeIf { it.exists() } ?: continue
-            val onDiskHash = sha256(file.readText())
-            if (onDiskHash != mod.sourceHash) {
-                misses++
-                continue
-            }
-            val blob = store.getTypedModule(mod.path, onDiskHash) ?: run {
-                misses++
-                return@run null
-            } ?: continue
+        val stats = com.mezze.language.codebase.StoreHydration.hydrateTypedModules(store) { modulePath, blob ->
             try {
                 val v2Module = CodebaseSerialization.deserializeTypedModule(blob)
                 com.mezze.language.typechecker.module.ModuleTypeChecker
-                    .hydrateFromV2Module(mod.path, v2Module)
-                hits++
-            } catch (e: Exception) {
-                // Bad blob — drop it so we don't trip on it again.
-                store.clearTypedModulesForPath(mod.path)
-                misses++
+                    .hydrateFromV2Module(modulePath, v2Module)
+                true
+            } catch (_: Exception) {
+                false
             }
         }
-
-        if (timing) {
-            val ms = (System.nanoTime() - start) / 1_000_000
-            System.err.println("[${ms}ms] hydrated typed modules: $hits hit, $misses miss")
+        if (System.getenv("MEZZE_TIMING") != null) {
+            System.err.println("[${stats.elapsedMs}ms] hydrated typed modules: ${stats.hits} hit, ${stats.misses} miss")
         }
     }
 
