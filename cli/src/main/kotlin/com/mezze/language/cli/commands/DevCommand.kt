@@ -74,7 +74,6 @@ class DevCommand {
         val classpath = com.mezze.language.cli.JvmLauncher.buildClasspath()
         val programArgs = mutableListOf(
             "--project-root=${currentDir.absolutePath}",
-            "--cache=${File(currentDir, ".mz/cache.sqlite").absolutePath}",
             "--entry-file=${appConfig.path}",
             "--entry-name=${entryName}",
             "--module-path=${modulePath}",

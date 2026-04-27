@@ -101,7 +101,7 @@ class MezzeTextDocumentService(
                     val (pkg, entry) = readMezzeTomlEntries(projectRoot)
                     packageName = pkg
                     entryFilePath = entry?.let { File(projectRoot, it).absolutePath }
-                    server.logInfo("Using project store at ${projectRoot}/.mz/cache.sqlite (package=$packageName, entry=$entry)")
+                    server.logInfo("Using project store at ${SQLiteMezzeStore.resolveCacheFile(projectRoot).absolutePath} (package=$packageName, entry=$entry)")
 
                     // Hydrate typechecker cache from the shared store. If
                     // `mez dev` (or a previous LSP session) typed modules

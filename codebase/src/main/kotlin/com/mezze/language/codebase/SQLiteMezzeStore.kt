@@ -37,12 +37,32 @@ class SQLiteMezzeStore private constructor(
         const val PROJECT_DIR = ".mz"
         const val CACHE_FILE = "cache.sqlite"
         const val DEPS_FILE = "deps.sqlite"
+        const val CACHE_DIR_ENV = "MEZZE_CACHE_DIR"
 
-        /** Open or create project cache at `.mz/cache.sqlite`. */
+        /**
+         * Resolve where this project's cache.sqlite lives.
+         *
+         * Priority:
+         *   1. `MEZZE_CACHE_DIR` env var → `<MEZZE_CACHE_DIR>/cache.sqlite`
+         *      (CI runners, shared mounts, Docker volumes can override.)
+         *   2. Default → `<projectRoot>/.mz/cache.sqlite`
+         *
+         * Single source of truth — every caller goes through `forProject` /
+         * `hasCache`, so they all pick this up automatically.
+         */
+        fun resolveCacheFile(projectRoot: File): File {
+            val override = System.getenv(CACHE_DIR_ENV)?.takeIf { it.isNotBlank() }
+            return if (override != null) {
+                File(override, CACHE_FILE)
+            } else {
+                File(File(projectRoot, PROJECT_DIR), CACHE_FILE)
+            }
+        }
+
+        /** Open or create project cache (location resolved via [resolveCacheFile]). */
         fun forProject(projectRoot: File): SQLiteMezzeStore {
-            val mezDir = File(projectRoot, PROJECT_DIR)
-            if (!mezDir.exists()) mezDir.mkdirs()
-            val dbFile = File(mezDir, CACHE_FILE)
+            val dbFile = resolveCacheFile(projectRoot)
+            dbFile.parentFile?.mkdirs()
             val conn = DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}")
             return SQLiteMezzeStore(conn, readOnly = false).also {
                 it.configurePragmas()
@@ -75,9 +95,9 @@ class SQLiteMezzeStore private constructor(
             }
         }
 
-        /** Check if project has an existing cache. */
+        /** Check if project has an existing cache (location resolved via [resolveCacheFile]). */
         fun hasCache(projectRoot: File): Boolean =
-            File(projectRoot, "$PROJECT_DIR/$CACHE_FILE").exists()
+            resolveCacheFile(projectRoot).exists()
 
         /** Find project root by walking up from a path looking for Mezze.toml. */
         fun findProjectRoot(startPath: File): File? {

@@ -47,7 +47,6 @@ object DevRunner {
         val parsed = parseArgs(args)
 
         val projectRoot = File(parsed["project-root"] ?: ".")
-        val cachePath = File(parsed["cache"] ?: File(projectRoot, ".mz/cache.sqlite").absolutePath)
         val entryFile = parsed["entry-file"] ?: "src/app.mz"
         val entryName = parsed["entry-name"] ?: "main"
         val modulePath = parsed["module-path"] ?: "app"
