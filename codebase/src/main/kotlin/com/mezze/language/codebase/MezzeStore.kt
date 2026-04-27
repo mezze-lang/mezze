@@ -151,6 +151,28 @@ interface MezzeStore : AutoCloseable {
     fun getAppPerformerRecords(name: String): List<Array<String>>
 
     // ====================================================================
+    // TYPED MODULES — cached v2 TypedModule per (modulePath, sourceHash)
+    //
+    // Lets tools skip whole-module re-typecheck on JVM start when the source
+    // file's bytes match what was typed before. Keyed by (path, sourceHash)
+    // so multiple in-flight versions of the same module can coexist (e.g.
+    // LSP saw an in-progress edit, dev saw the saved file).
+    // ====================================================================
+
+    /** Cache a typed module. Idempotent: same (path, sourceHash) → same blob. */
+    fun putTypedModule(modulePath: String, sourceHash: String, typedBlob: ByteArray)
+
+    /** Look up a cached typed module by (path, sourceHash). Null if not present. */
+    fun getTypedModule(modulePath: String, sourceHash: String): ByteArray?
+
+    /**
+     * Drop all cached typed-module entries for [modulePath]. Called when a
+     * module is deleted from the project so old (path, sourceHash) entries
+     * don't outlive their source.
+     */
+    fun clearTypedModulesForPath(modulePath: String)
+
+    // ====================================================================
     // LIFECYCLE
     // ====================================================================
 

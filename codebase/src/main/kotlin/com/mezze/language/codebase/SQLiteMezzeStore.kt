@@ -24,7 +24,16 @@ class SQLiteMezzeStore private constructor(
 ) : MezzeStore {
 
     companion object {
-        const val SCHEMA_VERSION = 5
+        /**
+         * Current schema version. Each bump must be accompanied by a
+         * `migrateVN(stmt)` function below that applies the diff from
+         * the previous version. Migrations run in order, never destructively.
+         *
+         * Bump history:
+         *  - v5: apps + app_functions + app_performers tables.
+         *  - v6: typed_modules table — caches v2 TypedModule per (path, sourceHash).
+         */
+        const val SCHEMA_VERSION = 6
         const val PROJECT_DIR = ".mz"
         const val CACHE_FILE = "cache.sqlite"
         const val DEPS_FILE = "deps.sqlite"
@@ -97,142 +106,203 @@ class SQLiteMezzeStore private constructor(
     }
 
     private fun initSchema() {
-        val currentVersion = try {
-            conn.createStatement().use { s ->
-                s.executeQuery("SELECT value FROM metadata WHERE key = 'schema_version'").use { rs ->
-                    if (rs.next()) rs.getString(1).toIntOrNull() ?: 0 else 0
-                }
-            }
-        } catch (_: Exception) { 0 }
-
-        if (currentVersion < SCHEMA_VERSION) {
-            createTables()
-            conn.createStatement().use { s ->
-                s.executeUpdate("INSERT OR REPLACE INTO metadata (key, value) VALUES ('schema_version', '$SCHEMA_VERSION')")
-            }
-        }
-    }
-
-    private fun createTables() {
+        // The metadata table holds schema_version; we have to ensure it exists
+        // before we can read the current version. (CREATE TABLE IF NOT EXISTS
+        // is idempotent; safe to run on every open.)
         conn.createStatement().use { s ->
-            // Tier 6: Metadata (created first — schema version lives here)
             s.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS metadata (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 ) WITHOUT ROWID
             """.trimIndent())
+        }
 
-            // Tier 1: Content-addressed storage
-            s.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS blobs (
-                    hash TEXT PRIMARY KEY,
-                    kind TEXT NOT NULL,
-                    visibility TEXT NOT NULL DEFAULT 'PRIVATE',
-                    typed BLOB,
-                    ir BLOB
-                ) WITHOUT ROWID
-            """.trimIndent())
+        val currentVersion = readSchemaVersion()
 
-            s.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS names (
-                    module TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    hash TEXT NOT NULL,
-                    PRIMARY KEY (module, name)
-                ) WITHOUT ROWID
-            """.trimIndent())
-            s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_names_hash ON names(hash)")
+        if (currentVersion == 0) {
+            // Fresh DB — create the full schema in one shot, mark it at the
+            // current version. This is the fast path for new projects.
+            createV1ThroughCurrent()
+        } else if (currentVersion < SCHEMA_VERSION) {
+            // Existing DB at an older version — apply migrations one at a time
+            // so old data is preserved.
+            for (target in (currentVersion + 1)..SCHEMA_VERSION) {
+                conn.createStatement().use { s -> applyMigration(target, s) }
+            }
+        }
 
-            // Tier 2: Source tracking
-            s.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS modules (
-                    path TEXT PRIMARY KEY,
-                    file_path TEXT,
-                    source_hash TEXT NOT NULL
-                ) WITHOUT ROWID
-            """.trimIndent())
+        writeSchemaVersion(SCHEMA_VERSION)
+    }
 
-            // Tier 3: Dependency graph
-            s.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS edges (
-                    from_hash TEXT NOT NULL,
-                    to_hash TEXT NOT NULL,
-                    kind TEXT NOT NULL,
-                    PRIMARY KEY (from_hash, to_hash, kind)
-                ) WITHOUT ROWID
-            """.trimIndent())
-            s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_hash)")
+    private fun readSchemaVersion(): Int = try {
+        conn.createStatement().use { s ->
+            s.executeQuery("SELECT value FROM metadata WHERE key = 'schema_version'").use { rs ->
+                if (rs.next()) rs.getString(1).toIntOrNull() ?: 0 else 0
+            }
+        }
+    } catch (_: Exception) { 0 }
 
-            // Tier 4: Ability/Effect index
-            s.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS ability_impls (
-                    hash TEXT PRIMARY KEY,
-                    ability_hash TEXT NOT NULL,
-                    target_type TEXT NOT NULL,
-                    module TEXT
-                ) WITHOUT ROWID
-            """.trimIndent())
-            s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_ability_impls_ability ON ability_impls(ability_hash)")
-            s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_ability_impls_type ON ability_impls(target_type)")
-
-            s.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS effect_performers (
-                    hash TEXT PRIMARY KEY,
-                    effect_hash TEXT NOT NULL,
-                    performer_name TEXT NOT NULL,
-                    module TEXT
-                ) WITHOUT ROWID
-            """.trimIndent())
-            s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_effect_performers_effect ON effect_performers(effect_hash)")
-
-            // Tier 5: LSP source locations
-            s.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS references_ (
-                    target_hash TEXT NOT NULL,
-                    file_path TEXT NOT NULL,
-                    start_line INTEGER NOT NULL,
-                    start_col INTEGER NOT NULL,
-                    end_line INTEGER NOT NULL,
-                    end_col INTEGER NOT NULL
-                )
-            """.trimIndent())
-            s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_references_target ON references_(target_hash)")
-            s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_references_file ON references_(file_path)")
-
-            // Tier 7: Apps + per-app function/performer manifests.
-            // Replaces the `user_function_hashes` and `performer_records` CSV blobs
-            // that used to live in metadata.
-            s.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS apps (
-                    name TEXT PRIMARY KEY,
-                    entry_name TEXT NOT NULL,
-                    entry_module TEXT NOT NULL,
-                    source_file TEXT
-                ) WITHOUT ROWID
-            """.trimIndent())
-
-            s.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS app_functions (
-                    app_name TEXT NOT NULL,
-                    hash TEXT NOT NULL,
-                    ord INTEGER NOT NULL,
-                    PRIMARY KEY (app_name, hash)
-                ) WITHOUT ROWID
-            """.trimIndent())
-            s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_app_functions_app_ord ON app_functions(app_name, ord)")
-
-            s.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS app_performers (
-                    app_name TEXT NOT NULL,
-                    record_idx INTEGER NOT NULL,
-                    position INTEGER NOT NULL,
-                    hash TEXT NOT NULL,
-                    PRIMARY KEY (app_name, record_idx, position)
-                ) WITHOUT ROWID
-            """.trimIndent())
+    private fun writeSchemaVersion(version: Int) {
+        conn.createStatement().use { s ->
+            s.executeUpdate("INSERT OR REPLACE INTO metadata (key, value) VALUES ('schema_version', '$version')")
         }
     }
+
+    /**
+     * Apply the migration that takes the schema from version [target]-1 to
+     * [target]. Each branch is the diff from the previous version — additive
+     * only (CREATE TABLE / ADD COLUMN / CREATE INDEX). Never DROP / ALTER
+     * destructively; preserve old data.
+     */
+    private fun applyMigration(target: Int, s: java.sql.Statement) {
+        when (target) {
+            // v1-v5 are folded into createV1ThroughCurrent for fresh DBs.
+            // For an old DB at v < 5 we don't have explicit migration steps
+            // recorded; the safe move is to apply the v5 schema additively.
+            1, 2, 3, 4, 5 -> applyV5BaseSchema(s)
+            6 -> applyV6TypedModules(s)
+            else -> error("No migration registered for schema v$target")
+        }
+    }
+
+    /**
+     * Apply v5 base schema: blobs, names, modules, edges, ability_impls,
+     * effect_performers, references_, apps, app_functions, app_performers.
+     * All CREATE IF NOT EXISTS — idempotent and safe on partial schemas.
+     */
+    private fun applyV5BaseSchema(s: java.sql.Statement) {
+        s.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS blobs (
+                hash TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                visibility TEXT NOT NULL DEFAULT 'PRIVATE',
+                typed BLOB,
+                ir BLOB
+            ) WITHOUT ROWID
+        """.trimIndent())
+
+        s.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS names (
+                module TEXT NOT NULL,
+                name TEXT NOT NULL,
+                hash TEXT NOT NULL,
+                PRIMARY KEY (module, name)
+            ) WITHOUT ROWID
+        """.trimIndent())
+        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_names_hash ON names(hash)")
+
+        s.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS modules (
+                path TEXT PRIMARY KEY,
+                file_path TEXT,
+                source_hash TEXT NOT NULL
+            ) WITHOUT ROWID
+        """.trimIndent())
+
+        s.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS edges (
+                from_hash TEXT NOT NULL,
+                to_hash TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                PRIMARY KEY (from_hash, to_hash, kind)
+            ) WITHOUT ROWID
+        """.trimIndent())
+        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_hash)")
+
+        s.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS ability_impls (
+                hash TEXT PRIMARY KEY,
+                ability_hash TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                module TEXT
+            ) WITHOUT ROWID
+        """.trimIndent())
+        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_ability_impls_ability ON ability_impls(ability_hash)")
+        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_ability_impls_type ON ability_impls(target_type)")
+
+        s.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS effect_performers (
+                hash TEXT PRIMARY KEY,
+                effect_hash TEXT NOT NULL,
+                performer_name TEXT NOT NULL,
+                module TEXT
+            ) WITHOUT ROWID
+        """.trimIndent())
+        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_effect_performers_effect ON effect_performers(effect_hash)")
+
+        s.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS references_ (
+                target_hash TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                start_line INTEGER NOT NULL,
+                start_col INTEGER NOT NULL,
+                end_line INTEGER NOT NULL,
+                end_col INTEGER NOT NULL
+            )
+        """.trimIndent())
+        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_references_target ON references_(target_hash)")
+        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_references_file ON references_(file_path)")
+
+        s.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS apps (
+                name TEXT PRIMARY KEY,
+                entry_name TEXT NOT NULL,
+                entry_module TEXT NOT NULL,
+                source_file TEXT
+            ) WITHOUT ROWID
+        """.trimIndent())
+
+        s.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS app_functions (
+                app_name TEXT NOT NULL,
+                hash TEXT NOT NULL,
+                ord INTEGER NOT NULL,
+                PRIMARY KEY (app_name, hash)
+            ) WITHOUT ROWID
+        """.trimIndent())
+        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_app_functions_app_ord ON app_functions(app_name, ord)")
+
+        s.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS app_performers (
+                app_name TEXT NOT NULL,
+                record_idx INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                hash TEXT NOT NULL,
+                PRIMARY KEY (app_name, record_idx, position)
+            ) WITHOUT ROWID
+        """.trimIndent())
+    }
+
+    /**
+     * v6: Cache typed v2 TypedModule per (module_path, source_hash). Hydrating
+     * from this on JVM start lets us skip whole-module re-typecheck when source
+     * hasn't changed. typed_at is unix-millis for diagnostics / GC pressure.
+     */
+    private fun applyV6TypedModules(s: java.sql.Statement) {
+        s.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS typed_modules (
+                module_path TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                typed_blob BLOB NOT NULL,
+                typed_at INTEGER NOT NULL,
+                PRIMARY KEY (module_path, source_hash)
+            ) WITHOUT ROWID
+        """.trimIndent())
+        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_typed_modules_path ON typed_modules(module_path)")
+    }
+
+    /**
+     * Fast path for fresh DBs: apply every migration in order. Equivalent to
+     * applying v1..v6 sequentially, but skips the per-version dance.
+     */
+    private fun createV1ThroughCurrent() {
+        conn.createStatement().use { s ->
+            applyV5BaseSchema(s)
+            applyV6TypedModules(s)
+        }
+    }
+
 
     // ====================================================================
     // BLOBS
@@ -753,6 +823,48 @@ class SQLiteMezzeStore private constructor(
                 }
                 return byRecord.toSortedMap().values.map { it.toTypedArray() }
             }
+        }
+    }
+
+    // ====================================================================
+    // TYPED MODULES
+    // ====================================================================
+
+    private val putTypedModuleStmt: PreparedStatement by lazy {
+        conn.prepareStatement("""
+            INSERT OR REPLACE INTO typed_modules (module_path, source_hash, typed_blob, typed_at)
+            VALUES (?, ?, ?, ?)
+        """.trimIndent())
+    }
+
+    override fun putTypedModule(modulePath: String, sourceHash: String, typedBlob: ByteArray) {
+        putTypedModuleStmt.apply {
+            setString(1, modulePath)
+            setString(2, sourceHash)
+            setBytes(3, typedBlob)
+            setLong(4, System.currentTimeMillis())
+            executeUpdate()
+        }
+    }
+
+    private val getTypedModuleStmt: PreparedStatement by lazy {
+        conn.prepareStatement(
+            "SELECT typed_blob FROM typed_modules WHERE module_path = ? AND source_hash = ?"
+        )
+    }
+
+    override fun getTypedModule(modulePath: String, sourceHash: String): ByteArray? {
+        getTypedModuleStmt.setString(1, modulePath)
+        getTypedModuleStmt.setString(2, sourceHash)
+        return getTypedModuleStmt.executeQuery().use { rs ->
+            if (rs.next()) rs.getBytes(1) else null
+        }
+    }
+
+    override fun clearTypedModulesForPath(modulePath: String) {
+        conn.prepareStatement("DELETE FROM typed_modules WHERE module_path = ?").use { stmt ->
+            stmt.setString(1, modulePath)
+            stmt.executeUpdate()
         }
     }
 

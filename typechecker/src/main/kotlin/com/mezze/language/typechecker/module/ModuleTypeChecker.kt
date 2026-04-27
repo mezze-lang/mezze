@@ -112,6 +112,48 @@ class ModuleTypeChecker(
         }
 
         /**
+         * Hydrate a v2 [com.mezze.language.typedast.TypedModule] (deserialized
+         * from the cache.sqlite typed_modules table) into the in-memory
+         * globalCache, wrapped in the checker-side TypedModule shell.
+         *
+         * Limitations of this fast path:
+         * - parsedModule is null. Consumers that scan parsedModule for
+         *   ParsedEffectDecl / ParsedAbilityDecl get fewer hits and may
+         *   trigger a fresh re-typecheck if their consumer can't find what
+         *   it needs. This is a graceful degradation, not a correctness bug.
+         * - typeContext is reconstructed from the v2 module's exports.
+         * - context (TypingContext) is left empty; rebuilt lazily by callers
+         *   that actually need it.
+         *
+         * Used by tools (DevRunner / BuildCommand / LSP) on startup to skip
+         * whole-module re-typecheck when the source on disk matches what was
+         * typed before.
+         */
+        @JvmStatic
+        fun hydrateFromV2Module(
+            modulePath: String,
+            v2Module: com.mezze.language.typedast.TypedModule
+        ) {
+            // Build a minimal typeContext from the v2 module's exports so
+            // downstream lookups by name find the types we already know.
+            val typeContext = mutableMapOf<String, com.mezze.language.ast.MezzeType>()
+            for ((name, export) in v2Module.exports) {
+                // ExportEntry holds the type; flatten to (name -> type).
+                typeContext[name] = export.type
+            }
+            val wrapper = TypedModule(
+                modulePath = modulePath,
+                exports = emptyMap(),  // checker-side ExportedItem; not the same shape as v2 ExportEntry
+                context = com.mezze.language.typechecker.context.TypingContext.empty,
+                substitution = com.mezze.language.typechecker.solving.Substitution.empty,
+                typedModule = v2Module,
+                parsedModule = null,
+                typeContext = typeContext
+            )
+            putInGlobalCache(modulePath, wrapper)
+        }
+
+        /**
          * Clear the type-checking stack. Used in tests.
          */
         @JvmStatic

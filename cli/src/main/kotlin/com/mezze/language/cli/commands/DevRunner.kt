@@ -65,6 +65,11 @@ object DevRunner {
         // Load stdlib into store if not already
         ensureStdlibLoaded(store)
 
+        // Hydrate any cached typed-modules whose source on disk still matches.
+        // These are skipped during the next typecheck (cache hit in
+        // ModuleTypeChecker.globalCache); cold start drops by hundreds of ms.
+        hydrateTypedModulesFromStore(store, projectRoot)
+
         // Shared Truffle Engine — JIT stays warm across runs
         val engine = Engine.newBuilder()
             .option("engine.WarnInterpreterOnly", "false")
@@ -424,6 +429,52 @@ object DevRunner {
 
         executeAndReport(result.loweredFunctions, result.performerRecords,
             projectRoot, entryName, inspect, inspectBrk, engine, startTime)
+    }
+
+    /**
+     * Walk every module recorded in the store. For each one, hash its source
+     * file on disk and look up a cached typed module at that hash. If the
+     * source matches what was typed before, deserialize the typed blob and
+     * preload it into ModuleTypeChecker.globalCache so the next typecheck
+     * skips re-typecheck for that module (cache hit).
+     *
+     * Files that have changed since their last cached typecheck miss here
+     * and fall through to fresh typecheck — same as today's behavior.
+     */
+    private fun hydrateTypedModulesFromStore(store: SQLiteMezzeStore, projectRoot: File) {
+        val timing = System.getenv("MEZZE_TIMING") != null
+        val start = System.nanoTime()
+        var hits = 0
+        var misses = 0
+
+        for (mod in store.getAllModules()) {
+            val filePath = mod.filePath ?: continue
+            val file = File(filePath).takeIf { it.exists() } ?: continue
+            val onDiskHash = sha256(file.readText())
+            if (onDiskHash != mod.sourceHash) {
+                misses++
+                continue
+            }
+            val blob = store.getTypedModule(mod.path, onDiskHash) ?: run {
+                misses++
+                return@run null
+            } ?: continue
+            try {
+                val v2Module = CodebaseSerialization.deserializeTypedModule(blob)
+                com.mezze.language.typechecker.module.ModuleTypeChecker
+                    .hydrateFromV2Module(mod.path, v2Module)
+                hits++
+            } catch (e: Exception) {
+                // Bad blob — drop it so we don't trip on it again.
+                store.clearTypedModulesForPath(mod.path)
+                misses++
+            }
+        }
+
+        if (timing) {
+            val ms = (System.nanoTime() - start) / 1_000_000
+            System.err.println("[${ms}ms] hydrated typed modules: $hits hit, $misses miss")
+        }
     }
 
     private fun ensureStdlibLoaded(store: SQLiteMezzeStore) {

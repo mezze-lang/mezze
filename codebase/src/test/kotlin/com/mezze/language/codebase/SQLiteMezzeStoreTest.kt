@@ -345,7 +345,52 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `schema_version is set`() {
-        assertEquals("5", store.getMetadata("schema_version"))
+        assertEquals("6", store.getMetadata("schema_version"))
+    }
+
+    // ====================================================================
+    // TYPED MODULES
+    // ====================================================================
+
+    @Test
+    fun `putTypedModule and getTypedModule round-trip`() {
+        val blob = byteArrayOf(0x01, 0x02, 0x03, 0x04)
+        store.putTypedModule("myapp::utils", "abc123", blob)
+        val got = store.getTypedModule("myapp::utils", "abc123")
+        assertNotNull(got)
+        assertArrayEquals(blob, got!!)
+    }
+
+    @Test
+    fun `getTypedModule returns null when missing`() {
+        assertNull(store.getTypedModule("nope", "nope"))
+    }
+
+    @Test
+    fun `same path different sourceHash coexist`() {
+        store.putTypedModule("myapp::utils", "v1", byteArrayOf(0x01))
+        store.putTypedModule("myapp::utils", "v2", byteArrayOf(0x02))
+        assertArrayEquals(byteArrayOf(0x01), store.getTypedModule("myapp::utils", "v1")!!)
+        assertArrayEquals(byteArrayOf(0x02), store.getTypedModule("myapp::utils", "v2")!!)
+    }
+
+    @Test
+    fun `clearTypedModulesForPath drops all versions`() {
+        store.putTypedModule("myapp::utils", "v1", byteArrayOf(0x01))
+        store.putTypedModule("myapp::utils", "v2", byteArrayOf(0x02))
+        store.putTypedModule("myapp::other", "v1", byteArrayOf(0x03))
+        store.clearTypedModulesForPath("myapp::utils")
+        assertNull(store.getTypedModule("myapp::utils", "v1"))
+        assertNull(store.getTypedModule("myapp::utils", "v2"))
+        assertArrayEquals(byteArrayOf(0x03), store.getTypedModule("myapp::other", "v1")!!)
+    }
+
+    @Test
+    fun `putTypedModule is idempotent`() {
+        val blob = byteArrayOf(0x05, 0x06)
+        store.putTypedModule("p", "h", blob)
+        store.putTypedModule("p", "h", blob)
+        assertArrayEquals(blob, store.getTypedModule("p", "h")!!)
     }
 
     // ====================================================================

@@ -69,6 +69,12 @@ object StorePopulator {
             val typedModule = result.typedModule
             if (typedModule != null) {
                 scatterTypedModule(store, typedModule, modulePath, existing)
+
+                // Cache the whole TypedModule blob keyed by (path, sourceHash).
+                // Lets future JVM starts skip re-typecheck if source matches.
+                // Idempotent: same (path, hash) → same bytes → INSERT OR REPLACE no-op.
+                val typedBlob = CodebaseSerialization.serializeTypedModule(typedModule)
+                store.putTypedModule(modulePath, sourceHash, typedBlob)
             }
 
             val functions = result.loweredFunctions
