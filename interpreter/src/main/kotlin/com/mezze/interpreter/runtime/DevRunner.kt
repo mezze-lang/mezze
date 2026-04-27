@@ -159,13 +159,10 @@ object DevRunner {
                 return
             }
 
-            // Clear ALL caches — nuclear option for correctness
+            // Clear caches so recompilation sees fresh state
             com.mezze.language.typechecker.ModuleResolver.clearCache()
-            com.mezze.language.typechecker.TypeChecker.clearCache()
-            com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
             com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack()
             com.mezze.interpreter.compiler.PipelineRunner.clearCache()
-            MezzeLanguage.clearLastResult()
 
             val typeChecker = com.mezze.language.typechecker.TypeChecker()
             val result = try {
