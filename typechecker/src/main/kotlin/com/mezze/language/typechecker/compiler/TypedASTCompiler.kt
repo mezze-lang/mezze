@@ -512,7 +512,7 @@ class TypedASTCompiler(
         // (as a MezzeFunction) so VarType method calls can use DictMethodCallIR
         // for statically-resolved indirect dispatch.
         val dictMethods = dictMethodsForHash[hash] ?: emptySet()
-        val dictParamNames = dictMethods.sorted().map { "__dict_$it" }
+        val dictParamNames = dictMethods.sorted().map { com.mezze.language.ast.MagicParams.dictParamName(it) }
         currentDictParams = dictParamNames
 
         // All params = regular params + dict params
@@ -997,7 +997,7 @@ class TypedASTCompiler(
                         }
                     }
                     for (dictMethodName in opDictMethods.sorted()) {
-                        val dictParamName = "__dict_$dictMethodName"
+                        val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(dictMethodName)
                         val resolvedHash = resolveOpHashFromConcreteTypes(dictMethodName, concreteTypesForDict)
                         if (resolvedHash != null) {
                             fields.add(FieldIR(dictParamName, ReadContextFnIR(resolvedHash.hex, src)))
@@ -1046,7 +1046,7 @@ class TypedASTCompiler(
                     // Dictionary passing: if the current function has a __dict_<method> param,
                     // read the resolved impl function from the frame and call it directly.
                     // No runtime dispatch — the typechecker resolved everything statically.
-                    val dictParamName = "__dict_$methodName"
+                    val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
                     val dictParamIdx = currentParamNames.indexOf(dictParamName)
                     if (dictParamIdx >= 0) {
                         val dictSlot = currentCaptureCount + dictParamIdx
@@ -1142,7 +1142,7 @@ class TypedASTCompiler(
         // For each required dict method, try to resolve the op hash using concrete types
         val dictFields = mutableListOf<FieldIR>()
         for (methodName in dictMethods.sorted()) {
-            val dictParamName = "__dict_$methodName"
+            val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
             val opHash = resolveOpHashFromConcreteTypes(methodName, concreteTypes)
             if (opHash != null) {
                 // ReadContextFnIR fetches the MezzeFunction from the global registry by hash
@@ -1282,7 +1282,7 @@ class TypedASTCompiler(
         // Resolve each dict method
         val resolvedDicts = mutableListOf<Pair<String, NodeIR>>() // dictParamName -> resolved value IR
         for (methodName in dictMethods.sorted()) {
-            val dictParamName = "__dict_$methodName"
+            val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
             val opHash = resolveOpHashFromConcreteTypes(methodName, allConcreteTypes)
             if (opHash != null) {
                 resolvedDicts.add(dictParamName to ReadContextFnIR(opHash.hex, src))

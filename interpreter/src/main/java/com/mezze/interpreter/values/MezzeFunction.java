@@ -186,7 +186,7 @@ public final class MezzeFunction implements TruffleObject {
         java.util.List<String> remaining = new java.util.ArrayList<>();
         for (String param : parameterNames) {
             // Skip hidden dictionary params — not user-visible
-            if (param.startsWith("__dict_")) continue;
+            if (com.mezze.language.ast.MagicParams.INSTANCE.isMagic(param)) continue;
             if (partialArgs != null && partialArgs.containsKey(param)) continue;
             remaining.add(param);
         }
@@ -203,7 +203,7 @@ public final class MezzeFunction implements TruffleObject {
         for (String param : parameterNames) {
             // Skip hidden dictionary params — these are injected by the compiler
             // for dictionary passing and should not affect partial application checks.
-            if (param.startsWith("__dict_")) {
+            if (com.mezze.language.ast.MagicParams.INSTANCE.isMagic(param)) {
                 continue;
             }
             // Check if param is already provided via partial args

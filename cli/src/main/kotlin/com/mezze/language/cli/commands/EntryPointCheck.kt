@@ -19,13 +19,10 @@ import com.mezze.language.typedast.TypedLetDecl
  */
 object EntryPointCheck {
 
-    /**
-     * The typechecker injects synthetic record fields named `__dict_*` to
-     * carry resolved ability impls into polymorphic functions. These are an
-     * implementation detail, never written or seen by the user. Strip them
-     * before comparing record shapes.
-     */
-    private const val DICT_PARAM_PREFIX = "__dict_"
+    // The typechecker injects synthetic record fields for ability dispatch
+    // (and, in future, other compiler-managed params). Strip them before
+    // comparing record shapes — `MagicParams.isMagic` is the single source
+    // of truth for "is this name compiler-injected?".
 
     sealed class Result {
         object Ok : Result()
@@ -73,7 +70,7 @@ object EntryPointCheck {
     private fun userVisibleFields(type: MezzeType): Map<String, MezzeType>? {
         if (type !is MezzeType.RecordType) return null
         if (type.isOpen) return null
-        return type.fields.filterKeys { !it.startsWith(DICT_PARAM_PREFIX) }
+        return type.fields.filterKeys { !com.mezze.language.ast.MagicParams.isMagic(it) }
     }
 
     private fun isEmptyClosedRecord(type: MezzeType): Boolean =
@@ -89,7 +86,7 @@ object EntryPointCheck {
         is MezzeType.StringType -> "Str"
         is MezzeType.BoolType -> "Bool"
         is MezzeType.RecordType -> {
-            val visible = type.fields.filterKeys { !it.startsWith(DICT_PARAM_PREFIX) }
+            val visible = type.fields.filterKeys { !com.mezze.language.ast.MagicParams.isMagic(it) }
             if (visible.isEmpty() && type.isClosed) "{}"
             else if (visible.isEmpty()) "{ ... }"
             else {
