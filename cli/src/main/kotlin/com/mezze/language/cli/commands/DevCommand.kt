@@ -97,6 +97,8 @@ class DevCommand {
 
         try {
             val totalStart = System.nanoTime()
+            val timing = System.getenv("MEZZE_TIMING") != null
+            fun elapsed() = (System.nanoTime() - totalStart) / 1_000_000
 
             // Read source and check staleness
             val source = appFile.readText()
@@ -105,6 +107,7 @@ class DevCommand {
             val modulePath = manifest.`package`.name
 
             val stale = store.isFileStale(filePath, sourceHash)
+            if (timing) System.err.println("[${elapsed()}ms] staleness check (stale=$stale)")
 
             val functions: List<com.mezze.language.truffleir.FunctionIR>
             val typeCheckResult: com.mezze.language.typechecker.TypeCheckResult
@@ -118,6 +121,7 @@ class DevCommand {
                     println("Parse Error: ${e.message}")
                     kotlin.system.exitProcess(3)
                 }
+                if (timing) System.err.println("[${elapsed()}ms] parsed")
 
                 val typeChecker = TypeChecker()
                 typeCheckResult = try {
@@ -126,6 +130,7 @@ class DevCommand {
                     println(ErrorFormatter.format(e, source))
                     kotlin.system.exitProcess(4)
                 }
+                if (timing) System.err.println("[${elapsed()}ms] typechecked + lowered")
 
                 functions = typeCheckResult.loweredFunctions
 
@@ -197,6 +202,8 @@ class DevCommand {
                 }
             }
 
+            if (timing) System.err.println("[${elapsed()}ms] ready to execute")
+
             // Execute: spawn JVM subprocess (native image) or run in-process (development)
             if (isNativeImage()) {
                 store.close()  // flush WAL, release lock before subprocess reads
@@ -212,7 +219,9 @@ class DevCommand {
                 val classpath = com.mezze.language.cli.JvmLauncher.buildClasspath()
                 val programArgs = mutableListOf(
                     "--project-root=${currentDir.absolutePath}",
-                    "--cache=${File(currentDir, ".mz/cache.sqlite").absolutePath}"
+                    "--cache=${File(currentDir, ".mz/cache.sqlite").absolutePath}",
+                    "--entry-file=${appConfig.path}",
+                    "--entry-name=${entryName}"
                 )
                 if (inspect) programArgs.add("--inspect")
                 if (inspectBrk) programArgs.add("--inspect-brk")
