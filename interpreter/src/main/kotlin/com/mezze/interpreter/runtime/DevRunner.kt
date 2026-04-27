@@ -2,6 +2,7 @@ package com.mezze.interpreter.runtime
 
 import com.mezze.language.codebase.CodebaseSerialization
 import com.mezze.language.codebase.SQLiteMezzeStore
+import com.mezze.language.codebase.StorePopulator
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.typedast.Hash
 import org.graalvm.polyglot.Context
@@ -10,15 +11,16 @@ import org.graalvm.polyglot.Source
 import java.io.File
 import java.nio.file.*
 import java.nio.file.attribute.BasicFileAttributes
+import java.security.MessageDigest
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
 /**
  * JVM entry point for `mez dev` execution.
  *
- * Default: watch mode — compile, execute, watch for .mz changes, repeat.
- * JVM stays alive. Truffle Engine reused (JIT stays warm).
- * ~97ms hot reload on file change.
+ * Default: watch mode — compile, store in cache.sqlite, execute, watch, repeat.
+ * Same compile/store/execute path as the native binary. JVM stays alive.
+ * Truffle Engine reused (JIT stays warm). ~100ms hot reload.
  */
 object DevRunner {
 
@@ -37,46 +39,44 @@ object DevRunner {
         val cachePath = File(parsed["cache"] ?: File(projectRoot, ".mz/cache.sqlite").absolutePath)
         val entryFile = parsed["entry-file"] ?: "src/app.mz"
         val entryName = parsed["entry-name"] ?: "main"
+        val modulePath = parsed["module-path"] ?: "app"
         val noWatch = parsed.containsKey("no-watch")
         val inspect = parsed.containsKey("inspect")
         val inspectBrk = parsed.containsKey("inspect-brk")
 
+        System.setProperty("mezze.project.root", projectRoot.absolutePath)
+        System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
+        System.setProperty("polyglot.log.level", "OFF")
+
+        // Open project store — stays open for the lifetime of the process
+        val store = SQLiteMezzeStore.forProject(projectRoot)
+
+        // Load stdlib into store if not already
+        ensureStdlibLoaded(store)
+
+        // Shared Truffle Engine — JIT stays warm across runs
+        val engine = Engine.newBuilder()
+            .option("engine.WarnInterpreterOnly", "false")
+            .build()
+
         if (noWatch) {
-            runSingleExecution(cachePath, projectRoot, entryName, inspect, inspectBrk)
-        } else {
-            runWatchMode(projectRoot, entryFile, entryName, inspect, inspectBrk)
-        }
-    }
-
-    private fun runSingleExecution(
-        cachePath: File, projectRoot: File, entryName: String,
-        inspect: Boolean, inspectBrk: Boolean
-    ) {
-        if (!cachePath.exists()) {
-            System.err.println("Error: Cache not found at ${cachePath.absolutePath}")
-            System.exit(1)
-        }
-
-        val store = SQLiteMezzeStore.readOnly(cachePath)
-        try {
+            // Single run from cache
             val functions = loadFunctions(store)
             val performers = loadPerformerRecords(store)
-
-            if (functions.isEmpty()) {
-                System.err.println("Error: No functions found in cache.")
-                System.exit(1)
+            if (functions.isNotEmpty()) {
+                executeWithTruffle(functions, performers, projectRoot.toPath(), entryName, inspect, inspectBrk, engine)
             }
-
-            val engine = Engine.newBuilder().option("engine.WarnInterpreterOnly", "false").build()
-            executeWithTruffle(functions, performers, projectRoot.toPath(), entryName, inspect, inspectBrk, engine)
             engine.close()
-        } finally {
             store.close()
+        } else {
+            // Watch mode
+            runWatchMode(store, engine, projectRoot, entryFile, entryName, modulePath, inspect, inspectBrk)
         }
     }
 
     private fun runWatchMode(
-        projectRoot: File, entryFile: String, entryName: String,
+        store: SQLiteMezzeStore, engine: Engine,
+        projectRoot: File, entryFile: String, entryName: String, modulePath: String,
         inspect: Boolean, inspectBrk: Boolean
     ) {
         val sourceFile = File(projectRoot, entryFile)
@@ -85,25 +85,15 @@ object DevRunner {
             System.exit(1)
         }
 
-        System.setProperty("mezze.project.root", projectRoot.absolutePath)
-        System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
-        System.setProperty("polyglot.log.level", "OFF")
-
-        // Shared Truffle Engine — JIT stays warm across runs
-        val engine = Engine.newBuilder()
-            .option("engine.WarnInterpreterOnly", "false")
-            .build()
-
-        // First run
+        // First run — always compile
         printSeparator()
-        val ok = compileAndExecute(sourceFile, projectRoot, entryName, inspect, inspectBrk, engine)
+        compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, inspect, inspectBrk)
         printWatching()
 
         // Watch loop
         val watcher = FileSystems.getDefault().newWatchService()
         val srcDir = sourceFile.parentFile.toPath()
 
-        // Register all directories under src/ recursively
         Files.walkFileTree(srcDir, object : SimpleFileVisitor<Path>() {
             override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
                 dir.register(watcher, StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_CREATE)
@@ -117,15 +107,12 @@ object DevRunner {
 
             for (event in key.pollEvents()) {
                 val filename = event.context()?.toString() ?: continue
-                if (filename.endsWith(".mz")) {
-                    changedFiles.add(filename)
-                }
+                if (filename.endsWith(".mz")) changedFiles.add(filename)
             }
             key.reset()
 
             if (changedFiles.isNotEmpty()) {
-                // Debounce — editors save multiple times
-                Thread.sleep(50)
+                Thread.sleep(50) // debounce
                 watcher.poll()?.let { it.pollEvents(); it.reset() }
 
                 printSeparator()
@@ -133,67 +120,134 @@ object DevRunner {
                 System.err.println("${ANSI_GRAY}[$timestamp]${ANSI_RESET} ${changedFiles.joinToString(", ")} changed")
                 System.err.println()
 
-                compileAndExecute(sourceFile, projectRoot, entryName, inspect, inspectBrk, engine)
+                compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, inspect, inspectBrk)
                 printWatching()
             }
         }
     }
 
     /**
-     * Compile and execute. Returns true on success, false on error.
-     * Errors are printed with full formatting — never crashes the watcher.
+     * The unified compile/store/execute path.
+     * Same logic as DevCommand in the native binary:
+     * 1. Check staleness (SHA-256)
+     * 2. If stale: parse → typecheck → lower → store in cache.sqlite
+     * 3. If fresh: load FunctionIRs from cache.sqlite
+     * 4. Execute via Truffle
      */
-    private fun compileAndExecute(
-        sourceFile: File, projectRoot: File, entryName: String,
-        inspect: Boolean, inspectBrk: Boolean, engine: Engine
-    ): Boolean {
+    private fun compileStoreExecute(
+        store: SQLiteMezzeStore, engine: Engine,
+        sourceFile: File, projectRoot: File, entryName: String, modulePath: String,
+        inspect: Boolean, inspectBrk: Boolean
+    ) {
         val startTime = System.nanoTime()
         val source = sourceFile.readText()
+        val sourceHash = sha256(source)
+        val filePath = sourceFile.absolutePath
 
-        // Parse
-        val parser = com.mezze.language.parser.MezzeParser()
-        val ast = try {
-            parser.parseParsedModule(source, sourceFile.name)
-        } catch (e: com.mezze.language.parser.ParseException) {
-            printError("Parse Error", e.message ?: "Unknown parse error")
-            return false
+        val stale = store.isFileStale(filePath, sourceHash)
+        if (System.getenv("MEZZE_DEBUG") != null) {
+            System.err.println("[DevRunner] file=$filePath stale=$stale hash=${sourceHash.take(16)} source_preview=${source.lines().last { it.contains("msg") || it.isNotBlank() }.trim().take(40)}")
         }
 
-        // Typecheck + lower
-        com.mezze.language.typechecker.ModuleResolver.clearCache()
-        com.mezze.language.typechecker.TypeChecker.clearCache()
-        val typeChecker = com.mezze.language.typechecker.TypeChecker()
-        val result = try {
-            typeChecker.typeCheck(ast, projectRoot.toPath())
-        } catch (e: com.mezze.language.typechecker.TypeCheckError) {
-            val formatted = try {
-                com.mezze.language.typechecker.printing.ErrorFormatter.format(e, source)
-            } catch (_: Exception) { e.message ?: "Unknown type error" }
-            printError("", formatted)
-            return false
-        }
+        val functions: List<FunctionIR>
+        val performers: List<Array<String>>
 
-        val functions = result.loweredFunctions
-        if (functions.isEmpty()) {
-            printError("Error", "No functions produced by compiler")
-            return false
+        if (stale) {
+            // Clear typechecker caches for the changed module
+            com.mezze.language.typechecker.ModuleResolver.clearCache()
+            com.mezze.language.typechecker.TypeChecker.clearCache()
+            com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
+            com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack()
+            com.mezze.interpreter.compiler.PipelineRunner.clearCache()
+
+            // Compile
+            val parser = com.mezze.language.parser.MezzeParser()
+            val ast = try {
+                parser.parseParsedModule(source, sourceFile.name)
+            } catch (e: com.mezze.language.parser.ParseException) {
+                printError("Parse Error", e.message ?: "Unknown parse error")
+                return
+            }
+
+            val typeChecker = com.mezze.language.typechecker.TypeChecker()
+            val result = try {
+                typeChecker.typeCheck(ast, projectRoot.toPath())
+            } catch (e: com.mezze.language.typechecker.TypeCheckError) {
+                val formatted = try {
+                    com.mezze.language.typechecker.printing.ErrorFormatter.format(e, source)
+                } catch (_: Exception) { e.message ?: "Unknown type error" }
+                printError("", formatted)
+                return
+            }
+
+            functions = result.loweredFunctions
+            performers = result.performerRecords
+
+            if (functions.isEmpty()) {
+                printError("Error", "No functions produced by compiler")
+                return
+            }
+
+            // Store in cache.sqlite — same as DevCommand
+            try {
+                StorePopulator.populate(store, result, modulePath, filePath, sourceHash)
+                store.setMetadata("entry_name", entryName)
+                store.setMetadata("module_path", modulePath)
+                store.setMetadata("user_function_hashes",
+                    functions.joinToString(";") { it.hash.hex })
+                if (performers.isNotEmpty()) {
+                    store.setMetadata("performer_records",
+                        performers.joinToString(";") { it.joinToString(",") })
+                }
+            } catch (_: Exception) {}
+        } else {
+            // Fresh — load from cache.sqlite
+            val cachedHashes = store.getMetadata("user_function_hashes")
+            if (cachedHashes == null || cachedHashes.isEmpty()) {
+                printError("Error", "No cached functions. Delete .mz/ and retry.")
+                return
+            }
+            functions = cachedHashes.split(";").mapNotNull { hex ->
+                if (hex.isEmpty()) return@mapNotNull null
+                val irBytes = store.getIR(Hash(hex)) ?: return@mapNotNull null
+                CodebaseSerialization.deserializeFunctionIR(irBytes)
+            }
+            val performerData = store.getMetadata("performer_records")
+            performers = if (performerData != null && performerData.isNotEmpty()) {
+                performerData.split(";").map { it.split(",").toTypedArray() }
+            } else emptyList()
         }
 
         // Execute
         try {
-            executeWithTruffle(functions, result.performerRecords, projectRoot.toPath(), entryName, inspect, inspectBrk, engine)
+            executeWithTruffle(functions, performers, projectRoot.toPath(), entryName, inspect, inspectBrk, engine)
         } catch (e: org.graalvm.polyglot.PolyglotException) {
             printError("Runtime Error", e.message ?: "Unknown error")
-            return false
+            return
         } catch (e: Exception) {
             printError("Error", e.message ?: "Unknown error")
-            return false
+            return
         }
 
         val elapsed = (System.nanoTime() - startTime) / 1_000_000
         System.err.println()
         System.err.println("${ANSI_GREEN}[done in ${elapsed}ms]${ANSI_RESET}")
-        return true
+    }
+
+    private fun ensureStdlibLoaded(store: SQLiteMezzeStore) {
+        if (store.getMetadata("stdlib_loaded") != null) return
+        try {
+            val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
+            store.transaction {
+                for ((hash, fnIR) in precompiled.preloweredFunctions) {
+                    val irBytes = CodebaseSerialization.serializeFunctionIR(fnIR)
+                    store.putBlob(Hash(hash),
+                        com.mezze.language.codebase.BlobKind.FUNCTION,
+                        com.mezze.language.codebase.Visibility.PUBLIC, null, irBytes)
+                }
+                store.setMetadata("stdlib_loaded", "true")
+            }
+        } catch (_: Exception) {}
     }
 
     private fun executeWithTruffle(
@@ -218,32 +272,16 @@ object DevRunner {
         val context = builder.build()
         try {
             MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot, entryName)
-
-            val source = Source.newBuilder(
-                MezzeLanguage.ID,
-                "# DevRunner execution",
-                "__dev_runner__.mz"
-            ).buildLiteral()
-
+            val source = Source.newBuilder(MezzeLanguage.ID, "# DevRunner", "__dev_runner__.mz").buildLiteral()
             context.eval(source)
         } finally {
             context.close(true)
         }
     }
 
-    private fun printSeparator() {
-        System.err.println(ANSI_GRAY + SEPARATOR + ANSI_RESET)
-    }
-
-    private fun printError(label: String, message: String) {
-        System.err.println()
-        System.err.println("${ANSI_RED}$label${ANSI_RESET}")
-        System.err.println(message)
-    }
-
-    private fun printWatching() {
-        System.err.println()
-        System.err.println("${ANSI_GRAY}Watching for changes... (Ctrl+C to stop)${ANSI_RESET}")
+    private fun sha256(content: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 
     private fun loadFunctions(store: SQLiteMezzeStore): List<FunctionIR> {
@@ -261,6 +299,10 @@ object DevRunner {
         return raw.split(";").map { it.split(",").toTypedArray() }
     }
 
+    private fun printSeparator() { System.err.println(ANSI_GRAY + SEPARATOR + ANSI_RESET) }
+    private fun printError(label: String, msg: String) { System.err.println(); if (label.isNotEmpty()) System.err.println("${ANSI_RED}$label${ANSI_RESET}"); System.err.println(msg) }
+    private fun printWatching() { System.err.println(); System.err.println("${ANSI_GRAY}Watching for changes... (Ctrl+C to stop)${ANSI_RESET}") }
+
     private fun parseArgs(args: Array<String>): Map<String, String> {
         val result = mutableMapOf<String, String>()
         for (arg in args) {
@@ -269,9 +311,7 @@ object DevRunner {
                     val (key, value) = arg.removePrefix("--").split("=", limit = 2)
                     result[key] = value
                 }
-                arg.startsWith("--") -> {
-                    result[arg.removePrefix("--")] = ""
-                }
+                arg.startsWith("--") -> result[arg.removePrefix("--")] = ""
             }
         }
         return result

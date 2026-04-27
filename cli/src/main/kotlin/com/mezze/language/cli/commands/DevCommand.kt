@@ -221,7 +221,8 @@ class DevCommand {
                     "--project-root=${currentDir.absolutePath}",
                     "--cache=${File(currentDir, ".mz/cache.sqlite").absolutePath}",
                     "--entry-file=${appConfig.path}",
-                    "--entry-name=${entryName}"
+                    "--entry-name=${entryName}",
+                    "--module-path=${modulePath}"
                 )
                 if (inspect) programArgs.add("--inspect")
                 if (inspectBrk) programArgs.add("--inspect-brk")
