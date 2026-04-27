@@ -162,6 +162,29 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         importedCallTargetCache.put(hash, ct);
     }
 
+    /**
+     * Evict CallTargets for the given hashes from all Language-level caches.
+     * Stdlib hashes never change in a JVM lifetime (content-addressed), so
+     * they're typically absent — caller decides.
+     */
+    public void invalidateHashes(java.util.Collection<String> hashes) {
+        for (String h : hashes) {
+            importedCallTargetCache.remove(h);
+            stdlibCallTargetCache.remove(h);
+        }
+    }
+
+    /**
+     * DevRunner sets this before each watch reload — parse() picks it up and
+     * calls invalidateHashes() before compiling the fresh user FunctionIRs.
+     * Thread-local because parse() runs on whatever thread Polyglot picks.
+     */
+    private static final ThreadLocal<java.util.Collection<String>> hashesToInvalidate = new ThreadLocal<>();
+
+    public static void setHashesToInvalidate(java.util.Collection<String> hashes) {
+        hashesToInvalidate.set(hashes);
+    }
+
     // ThreadLocal for direct TruffleIR execution (bypasses parsing)
     private static final ThreadLocal<List<FunctionIR>> directExecutionFunctions = new ThreadLocal<>();
     private static final ThreadLocal<List<String[]>> directExecutionPerformers = new ThreadLocal<>();
@@ -183,6 +206,14 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     protected CallTarget parse(ParsingRequest request) throws Exception {
         Source source = request.getSource();
         String sourceCode = source.getCharacters().toString();
+
+        // Watch-mode targeted invalidation: DevRunner has computed the set of
+        // hashes whose content changed since last reload. Evict only those.
+        java.util.Collection<String> changed = hashesToInvalidate.get();
+        if (changed != null) {
+            hashesToInvalidate.remove();
+            invalidateHashes(changed);
+        }
 
         // Clear per-context user function state — each test gets fresh user functions.
         // Stdlib cache (Language-level) is NOT cleared — it persists across all Contexts.

@@ -29,6 +29,9 @@ interface MezzeStore : AutoCloseable {
     /** Check existence without loading data. */
     fun blobExists(hash: Hash): Boolean
 
+    /** Bulk existence check — returns the subset of hashes already present. */
+    fun blobsExist(hashes: Collection<Hash>): Set<Hash>
+
     /** Get IR bytes only (avoids deserializing typed). For executor hot path. */
     fun getIR(hash: Hash): ByteArray?
 
@@ -126,6 +129,28 @@ interface MezzeStore : AutoCloseable {
     fun setMetadata(key: String, value: String)
 
     // ====================================================================
+    // APPS — per-app entry metadata + function/performer manifests
+    // ====================================================================
+
+    /** Upsert an app's basic info. */
+    fun putApp(name: String, entryName: String, entryModule: String, sourceFile: String?)
+
+    /** Look up an app by name. */
+    fun getApp(name: String): AppRow?
+
+    /** Replace this app's function manifest. The order of the list is preserved. */
+    fun setAppFunctionHashes(name: String, hashes: List<Hash>)
+
+    /** Get the ordered function hashes for an app, or empty list if none. */
+    fun getAppFunctionHashes(name: String): List<Hash>
+
+    /** Replace this app's performer records (record_idx → ordered hashes). */
+    fun setAppPerformerRecords(name: String, records: List<Array<String>>)
+
+    /** Get the performer records for an app. */
+    fun getAppPerformerRecords(name: String): List<Array<String>>
+
+    // ====================================================================
     // LIFECYCLE
     // ====================================================================
 
@@ -170,6 +195,13 @@ data class BlobRow(
     override fun equals(other: Any?): Boolean = other is BlobRow && hash == other.hash
     override fun hashCode(): Int = hash.hashCode()
 }
+
+data class AppRow(
+    val name: String,
+    val entryName: String,
+    val entryModule: String,
+    val sourceFile: String?
+)
 
 data class NameRow(
     val module: String,

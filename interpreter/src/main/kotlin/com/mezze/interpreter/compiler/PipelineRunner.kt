@@ -39,6 +39,19 @@ object PipelineRunner {
         compiledFunctionCache.clear()
     }
 
+    /**
+     * Evict entries for the given hashes. Hash-keyed caches are content-addressed,
+     * so unchanged hashes can stay; only changed hashes need to go.
+     * Used by DevRunner watch mode to keep stdlib warm across reloads.
+     */
+    @JvmStatic
+    fun invalidateHashes(hashes: Collection<String>) {
+        for (h in hashes) {
+            typedModuleCache.remove(h)
+            compiledFunctionCache.remove(h)
+        }
+    }
+
     // tryCompile deleted — TypedASTCompiler replaces the old Mono→Resolve→Lower pipeline
 
     /**

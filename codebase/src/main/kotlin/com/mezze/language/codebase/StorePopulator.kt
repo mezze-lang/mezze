@@ -13,10 +13,26 @@ import com.mezze.language.truffleir.FunctionIR
  * This is the bridge between the compilation pipeline and the storage layer.
  * Called by `mez dev`, `mez check`, and `mez build` after each file is compiled.
  */
+/**
+ * Result of a populate() call — what actually changed in the store.
+ *
+ * Drives:
+ * - Watch mode CallTarget invalidation (only rebuild changed hashes)
+ * - Surgical cache invalidation in ModuleResolver / PipelineRunner
+ * - Logging / telemetry
+ */
+data class PopulateDelta(
+    /** Hashes newly written this run. Subset of all hashes in result. */
+    val newHashes: Set<Hash>,
+    /** Hashes already present in the store, skipped (no IO). */
+    val unchangedHashes: Set<Hash>,
+)
+
 object StorePopulator {
 
     /**
-     * Scatter a TypeCheckResult into the store.
+     * Scatter a TypeCheckResult into the store, skipping definitions whose
+     * content hash already exists. Returns the delta.
      *
      * @param store The MezzeStore to write to
      * @param result The TypeCheckResult from TypeChecker.typeCheck()
@@ -30,106 +46,136 @@ object StorePopulator {
         modulePath: String,
         filePath: String?,
         sourceHash: String
-    ) {
+    ): PopulateDelta {
+        // Collect all hashes we might write so we can do one bulk existence check.
+        val candidateHashes = mutableSetOf<Hash>()
+        result.typedModule?.let { module ->
+            module.decls.filterIsInstance<TypedLetDecl>().mapTo(candidateHashes) { it.hash }
+            module.decls.filterIsInstance<TypedTypeDecl>().mapTo(candidateHashes) { it.hash }
+            module.abilityDecls.mapTo(candidateHashes) { it.hash }
+            module.abilityImpls.mapTo(candidateHashes) { it.hash }
+            module.effectDecls.mapTo(candidateHashes) { it.hash }
+            module.performerDecls.mapTo(candidateHashes) { it.hash }
+        }
+        result.loweredFunctions.mapTo(candidateHashes) { it.hash }
+
+        val existing = store.blobsExist(candidateHashes)
+        val newHashes = candidateHashes - existing
+
         store.transaction {
-            // Register the module
+            // Register the module — always update (file may have new sourceHash)
             store.putModule(modulePath, filePath, sourceHash)
 
-            // Scatter TypedModule declarations
             val typedModule = result.typedModule
             if (typedModule != null) {
-                scatterTypedModule(store, typedModule, modulePath)
+                scatterTypedModule(store, typedModule, modulePath, existing)
             }
 
-            // Store lowered FunctionIRs
             val functions = result.loweredFunctions
             if (functions.isNotEmpty()) {
-                scatterFunctionIRs(store, functions, modulePath)
+                scatterFunctionIRs(store, functions, modulePath, existing)
             }
         }
+
+        return PopulateDelta(newHashes = newHashes, unchangedHashes = existing)
     }
 
     /**
      * Scatter a TypedModule's declarations into individual blobs.
+     * Skips putBlob for hashes already in the store; always re-registers names
+     * and edges (cheap; cover module-level rebinding).
      */
-    private fun scatterTypedModule(store: MezzeStore, module: TypedModule, modulePath: String) {
-        // Let bindings → function blobs
+    private fun scatterTypedModule(
+        store: MezzeStore,
+        module: TypedModule,
+        modulePath: String,
+        existing: Set<Hash>
+    ) {
         for (decl in module.decls.filterIsInstance<TypedLetDecl>()) {
-            val visibility = if (decl.isPublic) Visibility.PUBLIC else Visibility.PRIVATE
-            val typedBytes = CodebaseSerialization.serializeTypedLetDecl(decl)
-
-            store.putBlob(decl.hash, BlobKind.FUNCTION, visibility, typedBytes, null)
+            if (decl.hash !in existing) {
+                val visibility = if (decl.isPublic) Visibility.PUBLIC else Visibility.PRIVATE
+                store.putBlob(decl.hash, BlobKind.FUNCTION, visibility,
+                    CodebaseSerialization.serializeTypedLetDecl(decl), null)
+            }
             store.registerName(modulePath, decl.name, decl.hash)
         }
 
-        // Type declarations → type blobs
         for (decl in module.decls.filterIsInstance<TypedTypeDecl>()) {
-            val visibility = if (decl.isPublic) Visibility.PUBLIC else Visibility.PRIVATE
-            val typedBytes = CodebaseSerialization.serializeTypedTypeDecl(decl)
-
-            store.putBlob(decl.hash, BlobKind.TYPE, visibility, typedBytes, null)
+            if (decl.hash !in existing) {
+                val visibility = if (decl.isPublic) Visibility.PUBLIC else Visibility.PRIVATE
+                store.putBlob(decl.hash, BlobKind.TYPE, visibility,
+                    CodebaseSerialization.serializeTypedTypeDecl(decl), null)
+            }
             store.registerName(modulePath, decl.name, decl.hash)
         }
 
-        // Ability declarations
         for (decl in module.abilityDecls) {
-            val typedBytes = CodebaseSerialization.serializeTypedAbilityDecl(decl)
-            store.putBlob(decl.hash, BlobKind.ABILITY, Visibility.PUBLIC, typedBytes, null)
+            if (decl.hash !in existing) {
+                store.putBlob(decl.hash, BlobKind.ABILITY, Visibility.PUBLIC,
+                    CodebaseSerialization.serializeTypedAbilityDecl(decl), null)
+            }
             store.registerName(modulePath, decl.name, decl.hash)
         }
 
-        // Ability implementations
         for (impl in module.abilityImpls) {
-            val typedBytes = CodebaseSerialization.serializeTypedAbilityImpl(impl)
-            store.putBlob(impl.hash, BlobKind.ABILITY_IMPL, Visibility.PUBLIC, typedBytes, null)
-
-            // Index for lookup: "find impl of ability X for type Y"
+            if (impl.hash !in existing) {
+                store.putBlob(impl.hash, BlobKind.ABILITY_IMPL, Visibility.PUBLIC,
+                    CodebaseSerialization.serializeTypedAbilityImpl(impl), null)
+                store.addEdge(impl.hash, impl.abilityHash, EdgeKind.IMPLEMENTS)
+            }
             val targetType = impl.targetTypes.firstOrNull()?.toString() ?: "unknown"
             store.putAbilityImpl(impl.hash, impl.abilityHash, targetType, modulePath)
-
-            // Edge: impl implements ability
-            store.addEdge(impl.hash, impl.abilityHash, EdgeKind.IMPLEMENTS)
         }
 
-        // Effect declarations
         for (decl in module.effectDecls) {
-            val typedBytes = CodebaseSerialization.serializeTypedEffectDecl(decl)
-            store.putBlob(decl.hash, BlobKind.EFFECT, Visibility.PUBLIC, typedBytes, null)
+            if (decl.hash !in existing) {
+                store.putBlob(decl.hash, BlobKind.EFFECT, Visibility.PUBLIC,
+                    CodebaseSerialization.serializeTypedEffectDecl(decl), null)
+            }
             store.registerName(modulePath, decl.name, decl.hash)
         }
 
-        // Performer declarations
         for (decl in module.performerDecls) {
-            val typedBytes = CodebaseSerialization.serializeTypedPerformerDecl(decl)
-            store.putBlob(decl.hash, BlobKind.PERFORMER, Visibility.PUBLIC, typedBytes, null)
+            if (decl.hash !in existing) {
+                store.putBlob(decl.hash, BlobKind.PERFORMER, Visibility.PUBLIC,
+                    CodebaseSerialization.serializeTypedPerformerDecl(decl), null)
+                store.addEdge(decl.hash, decl.effectHash, EdgeKind.IMPLEMENTS)
+            }
             store.registerName(modulePath, decl.name, decl.hash)
-
-            // Index for lookup: "find all performers for effect X"
             store.putEffectPerformer(decl.hash, decl.effectHash, decl.name, modulePath)
-
-            // Edge: performer implements effect
-            store.addEdge(decl.hash, decl.effectHash, EdgeKind.IMPLEMENTS)
         }
     }
 
     /**
      * Store lowered FunctionIRs and record dependency edges.
+     *
+     * - If hash existed in store BEFORE this populate run AND its blob already
+     *   has IR: skip entirely (content-addressed: same hash → same bytes).
+     * - Otherwise: read current blob row (might have been written by
+     *   scatterTypedModule earlier in this same transaction with typed-only)
+     *   and merge in IR.
      */
-    private fun scatterFunctionIRs(store: MezzeStore, functions: List<FunctionIR>, modulePath: String) {
+    private fun scatterFunctionIRs(
+        store: MezzeStore,
+        functions: List<FunctionIR>,
+        modulePath: String,
+        preExistingWithIR: Set<Hash>
+    ) {
         for (fn in functions) {
+            // Read current blob — covers both cases:
+            //   (a) blob written by scatterTypedModule moments ago (typed set, ir=null)
+            //   (b) blob existed before this run (skip if ir already set)
+            val row = store.getBlob(fn.hash)
+            if (row?.ir != null) continue  // already complete
+
             val irBytes = CodebaseSerialization.serializeFunctionIR(fn)
-
-            // Update the blob's IR column (typed may already be set from scatterTypedModule)
-            val existing = store.getBlob(fn.hash)
-            if (existing != null) {
-                // Blob exists from typed scatter — add IR
-                store.putBlob(fn.hash, existing.kind, existing.visibility, existing.typed, irBytes)
-            } else {
-                // New blob (lambda body, monomorphic instance, etc.)
-                store.putBlob(fn.hash, BlobKind.FUNCTION, Visibility.PRIVATE, null, irBytes)
-            }
-
-            // Record dependency edges from this function's IR body
+            store.putBlob(
+                fn.hash,
+                row?.kind ?: BlobKind.FUNCTION,
+                row?.visibility ?: Visibility.PRIVATE,
+                row?.typed,
+                irBytes
+            )
             recordEdges(store, fn)
         }
     }

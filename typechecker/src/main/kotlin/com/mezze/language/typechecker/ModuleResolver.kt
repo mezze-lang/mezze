@@ -343,6 +343,24 @@ class ModuleResolver(
         }
 
         /**
+         * Watch-mode targeted eviction: drop entries for the given module paths.
+         * Stdlib + unchanged user modules stay cached.
+         *
+         * Also drops the corresponding content-hash entries so a future load with
+         * the (now-changed) source content doesn't get a stale hit.
+         */
+        @JvmStatic
+        fun invalidateModulePaths(modulePaths: Collection<String>) {
+            synchronized(cacheLock) {
+                for (path in modulePaths) {
+                    val mod = moduleCache.remove(path)
+                    mod?.sourceHash?.let { contentHashCache.remove(it) }
+                    moduleLoadingLocks.remove(path)
+                }
+            }
+        }
+
+        /**
          * Get or create a per-module lock for loading (thread-safe).
          */
         private fun getModuleLock(modulePath: String): Any {
@@ -359,6 +377,13 @@ class ModuleResolver(
                 return moduleCache[modulePath]
             }
         }
+
+        /**
+         * Public read-only snapshot of (modulePath -> Module) for tooling
+         * (e.g. mez dev watch mode needs file paths to register watches).
+         */
+        @JvmStatic
+        fun snapshot(): Map<String, Module> = synchronized(cacheLock) { moduleCache.toMap() }
 
         /**
          * Get a module from the cache by content hash (thread-safe).

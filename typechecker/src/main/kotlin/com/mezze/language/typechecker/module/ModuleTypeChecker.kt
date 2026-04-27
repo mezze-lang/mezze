@@ -122,6 +122,21 @@ class ModuleTypeChecker(
         }
 
         /**
+         * Watch-mode targeted eviction: drop typed modules and any in-flight
+         * stack entries for the given module paths.
+         * Stdlib stays cached.
+         */
+        @JvmStatic
+        fun invalidateModulePaths(modulePaths: Collection<String>) {
+            synchronized(globalCacheLock) {
+                for (path in modulePaths) globalCache.remove(path)
+            }
+            synchronized(stackLock) {
+                for (path in modulePaths) typeCheckingStack.remove(path)
+            }
+        }
+
+        /**
          * Check if a module is currently being type-checked (for cycle detection).
          */
         private fun isTypeChecking(modulePath: String): Boolean {

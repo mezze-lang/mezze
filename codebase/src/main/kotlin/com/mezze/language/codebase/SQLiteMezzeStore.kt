@@ -24,7 +24,7 @@ class SQLiteMezzeStore private constructor(
 ) : MezzeStore {
 
     companion object {
-        const val SCHEMA_VERSION = 4
+        const val SCHEMA_VERSION = 5
         const val PROJECT_DIR = ".mz"
         const val CACHE_FILE = "cache.sqlite"
         const val DEPS_FILE = "deps.sqlite"
@@ -199,6 +199,38 @@ class SQLiteMezzeStore private constructor(
             """.trimIndent())
             s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_references_target ON references_(target_hash)")
             s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_references_file ON references_(file_path)")
+
+            // Tier 7: Apps + per-app function/performer manifests.
+            // Replaces the `user_function_hashes` and `performer_records` CSV blobs
+            // that used to live in metadata.
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS apps (
+                    name TEXT PRIMARY KEY,
+                    entry_name TEXT NOT NULL,
+                    entry_module TEXT NOT NULL,
+                    source_file TEXT
+                ) WITHOUT ROWID
+            """.trimIndent())
+
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS app_functions (
+                    app_name TEXT NOT NULL,
+                    hash TEXT NOT NULL,
+                    ord INTEGER NOT NULL,
+                    PRIMARY KEY (app_name, hash)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_app_functions_app_ord ON app_functions(app_name, ord)")
+
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS app_performers (
+                    app_name TEXT NOT NULL,
+                    record_idx INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    hash TEXT NOT NULL,
+                    PRIMARY KEY (app_name, record_idx, position)
+                ) WITHOUT ROWID
+            """.trimIndent())
         }
     }
 
@@ -242,6 +274,24 @@ class SQLiteMezzeStore private constructor(
     override fun blobExists(hash: Hash): Boolean {
         blobExistsStmt.setString(1, hash.hex)
         return blobExistsStmt.executeQuery().use { it.next() }
+    }
+
+    override fun blobsExist(hashes: Collection<Hash>): Set<Hash> {
+        if (hashes.isEmpty()) return emptySet()
+        val present = HashSet<Hash>(hashes.size)
+        // SQLite default SQLITE_MAX_VARIABLE_NUMBER is 999 (older builds) / 32766 (newer).
+        // Stay safe with a chunk size of 500.
+        for (chunk in hashes.chunked(500)) {
+            val placeholders = chunk.joinToString(",") { "?" }
+            val sql = "SELECT hash FROM blobs WHERE hash IN ($placeholders)"
+            conn.prepareStatement(sql).use { stmt ->
+                chunk.forEachIndexed { i, h -> stmt.setString(i + 1, h.hex) }
+                stmt.executeQuery().use { rs ->
+                    while (rs.next()) present.add(Hash(rs.getString(1)))
+                }
+            }
+        }
+        return present
     }
 
     private val getIRStmt: PreparedStatement by lazy {
@@ -601,6 +651,108 @@ class SQLiteMezzeStore private constructor(
             setString(1, key)
             setString(2, value)
             executeUpdate()
+        }
+    }
+
+    // ====================================================================
+    // APPS
+    // ====================================================================
+
+    private val putAppStmt: PreparedStatement by lazy {
+        conn.prepareStatement("""
+            INSERT OR REPLACE INTO apps (name, entry_name, entry_module, source_file)
+            VALUES (?, ?, ?, ?)
+        """.trimIndent())
+    }
+
+    override fun putApp(name: String, entryName: String, entryModule: String, sourceFile: String?) {
+        putAppStmt.apply {
+            setString(1, name)
+            setString(2, entryName)
+            setString(3, entryModule)
+            if (sourceFile != null) setString(4, sourceFile) else setNull(4, java.sql.Types.VARCHAR)
+            executeUpdate()
+        }
+    }
+
+    private val getAppStmt: PreparedStatement by lazy {
+        conn.prepareStatement("SELECT name, entry_name, entry_module, source_file FROM apps WHERE name = ?")
+    }
+
+    override fun getApp(name: String): AppRow? {
+        getAppStmt.setString(1, name)
+        return getAppStmt.executeQuery().use { rs ->
+            if (rs.next()) AppRow(
+                name = rs.getString(1),
+                entryName = rs.getString(2),
+                entryModule = rs.getString(3),
+                sourceFile = rs.getString(4)
+            ) else null
+        }
+    }
+
+    override fun setAppFunctionHashes(name: String, hashes: List<Hash>) {
+        conn.prepareStatement("DELETE FROM app_functions WHERE app_name = ?").use { stmt ->
+            stmt.setString(1, name)
+            stmt.executeUpdate()
+        }
+        if (hashes.isEmpty()) return
+        conn.prepareStatement("INSERT INTO app_functions (app_name, hash, ord) VALUES (?, ?, ?)").use { stmt ->
+            hashes.forEachIndexed { i, h ->
+                stmt.setString(1, name)
+                stmt.setString(2, h.hex)
+                stmt.setInt(3, i)
+                stmt.addBatch()
+            }
+            stmt.executeBatch()
+        }
+    }
+
+    override fun getAppFunctionHashes(name: String): List<Hash> {
+        conn.prepareStatement("SELECT hash FROM app_functions WHERE app_name = ? ORDER BY ord").use { stmt ->
+            stmt.setString(1, name)
+            stmt.executeQuery().use { rs ->
+                val out = mutableListOf<Hash>()
+                while (rs.next()) out.add(Hash(rs.getString(1)))
+                return out
+            }
+        }
+    }
+
+    override fun setAppPerformerRecords(name: String, records: List<Array<String>>) {
+        conn.prepareStatement("DELETE FROM app_performers WHERE app_name = ?").use { stmt ->
+            stmt.setString(1, name)
+            stmt.executeUpdate()
+        }
+        if (records.isEmpty()) return
+        conn.prepareStatement("INSERT INTO app_performers (app_name, record_idx, position, hash) VALUES (?, ?, ?, ?)").use { stmt ->
+            records.forEachIndexed { recordIdx, record ->
+                record.forEachIndexed { pos, hash ->
+                    stmt.setString(1, name)
+                    stmt.setInt(2, recordIdx)
+                    stmt.setInt(3, pos)
+                    stmt.setString(4, hash)
+                    stmt.addBatch()
+                }
+            }
+            stmt.executeBatch()
+        }
+    }
+
+    override fun getAppPerformerRecords(name: String): List<Array<String>> {
+        conn.prepareStatement(
+            "SELECT record_idx, position, hash FROM app_performers WHERE app_name = ? ORDER BY record_idx, position"
+        ).use { stmt ->
+            stmt.setString(1, name)
+            stmt.executeQuery().use { rs ->
+                val byRecord = mutableMapOf<Int, MutableList<String>>()
+                while (rs.next()) {
+                    val recordIdx = rs.getInt(1)
+                    val hash = rs.getString(3)
+                    byRecord.getOrPut(recordIdx) { mutableListOf() }.add(hash)
+                }
+                return byRecord.toSortedMap().values.map { it.toTypedArray() }
+            }
         }
     }
 
