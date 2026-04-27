@@ -102,6 +102,10 @@ class SQLiteMezzeStore private constructor(
             s.executeUpdate("PRAGMA cache_size=-64000")   // 64MB
             s.executeUpdate("PRAGMA mmap_size=268435456")  // 256MB
             s.executeUpdate("PRAGMA foreign_keys=OFF")
+            // Wait up to 5s for a contended write lock instead of failing
+            // immediately with SQLITE_BUSY. Required when LSP and `mez dev`
+            // write to the same cache.sqlite concurrently.
+            s.executeUpdate("PRAGMA busy_timeout=5000")
         }
     }
 
