@@ -1,5 +1,6 @@
-package com.mezze.interpreter.runtime
+package com.mezze.language.cli.commands
 
+import com.mezze.interpreter.runtime.MezzeLanguage
 import com.mezze.language.codebase.CodebaseSerialization
 import com.mezze.language.codebase.SQLiteMezzeStore
 import com.mezze.language.codebase.StorePopulator
@@ -377,6 +378,21 @@ object DevRunner {
 
         if (result.loweredFunctions.isEmpty()) {
             printError("Error", "No functions produced by compiler")
+            return
+        }
+
+        // Validate the entry function has shape `{} -> {} <*>` BEFORE we try
+        // to invoke it. Better error here than a runtime crash later.
+        val entryDecl = result.typedModule?.decls
+            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            ?.find { it.name == entryName }
+        if (entryDecl == null) {
+            printError("Error", "App must define a '$entryName' function with type `{} -> {} <*>`")
+            return
+        }
+        val entryCheck = EntryPointCheck.check(entryDecl)
+        EntryPointCheck.errorMessage(entryCheck, entryName)?.let { msg ->
+            printError("Error", msg)
             return
         }
 

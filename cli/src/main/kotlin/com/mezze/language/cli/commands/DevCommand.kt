@@ -84,7 +84,7 @@ class DevCommand {
         if (inspectBrk) programArgs.add("--inspect-brk")
 
         val exitCode = com.mezze.language.cli.JvmLauncher.spawn(
-            mainClass = "com.mezze.interpreter.runtime.DevRunner",
+            mainClass = "com.mezze.language.cli.commands.DevRunner",
             classpath = classpath,
             programArgs = programArgs
         )

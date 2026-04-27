@@ -133,14 +133,19 @@ class BuildCommand {
             }
             if (timing) System.err.println("[${ms()}ms] stdlib seed checked")
 
-            // 3. Validate entry function
+            // 3. Validate entry function — must exist and have shape `{} -> {} <*>`
+            //    (effects allowed, ability constraints allowed, dict params hidden).
             val entryName = appConfig.entry
             val mainBinding = typeCheckResult.typedModule?.decls
                 ?.filterIsInstance<TypedLetDecl>()
                 ?.find { it.name == entryName }
 
             if (mainBinding == null) {
-                println("Error: App must define a '$entryName' function with type {} -> {}")
+                println("Error: App must define a '$entryName' function with type {} -> {} <*>")
+                kotlin.system.exitProcess(4)
+            }
+            EntryPointCheck.errorMessage(EntryPointCheck.check(mainBinding!!), entryName)?.let { msg ->
+                println("Error: $msg")
                 kotlin.system.exitProcess(4)
             }
 
