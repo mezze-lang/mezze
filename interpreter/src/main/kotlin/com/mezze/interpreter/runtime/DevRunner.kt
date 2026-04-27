@@ -25,7 +25,17 @@ import java.time.format.DateTimeFormatter
 object DevRunner {
 
     private val TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss")
+    private val runCounter = java.util.concurrent.atomic.AtomicInteger(0)
+    @Volatile private var lastDelta: com.mezze.language.codebase.PopulateDelta? = null
     private const val SEPARATOR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    private const val ANSI_YELLOW = "[33m"
+    private const val ANSI_CYAN = "[36m"
+    private const val ANSI_BOLD = "[1m"
+    private const val ANSI_CLEAR = "[2J[H"  // clear screen + cursor home
+
+    /** TTY-aware: don't emit ANSI escapes if stderr isn't a terminal (e.g. piped to a file). */
+    private val isTty: Boolean by lazy { System.console() != null }
+    private val noClear: Boolean by lazy { System.getenv("MEZZE_NO_CLEAR") != null || !isTty }
     private const val ANSI_RED = "\u001b[31m"
     private const val ANSI_GREEN = "\u001b[32m"
     private const val ANSI_GRAY = "\u001b[90m"
@@ -40,7 +50,7 @@ object DevRunner {
         val entryFile = parsed["entry-file"] ?: "src/app.mz"
         val entryName = parsed["entry-name"] ?: "main"
         val modulePath = parsed["module-path"] ?: "app"
-        val noWatch = parsed.containsKey("no-watch")
+        val appName = parsed["app-name"] ?: modulePath
         val inspect = parsed.containsKey("inspect")
         val inspectBrk = parsed.containsKey("inspect-brk")
 
@@ -59,25 +69,14 @@ object DevRunner {
             .option("engine.WarnInterpreterOnly", "false")
             .build()
 
-        if (noWatch) {
-            // Single run from cache
-            val functions = loadFunctions(store)
-            val performers = loadPerformerRecords(store)
-            if (functions.isNotEmpty()) {
-                executeWithTruffle(functions, performers, projectRoot.toPath(), entryName, inspect, inspectBrk, engine)
-            }
-            engine.close()
-            store.close()
-        } else {
-            // Watch mode
-            runWatchMode(store, engine, projectRoot, entryFile, entryName, modulePath, inspect, inspectBrk)
-        }
+        // Watch mode is the only mode — JVM stays alive, recompiles on file changes
+        runWatchMode(store, engine, projectRoot, entryFile, entryName, modulePath, appName, inspect, inspectBrk)
     }
 
     private fun runWatchMode(
         store: SQLiteMezzeStore, engine: Engine,
         projectRoot: File, entryFile: String, entryName: String, modulePath: String,
-        inspect: Boolean, inspectBrk: Boolean
+        appName: String, inspect: Boolean, inspectBrk: Boolean
     ) {
         val sourceFile = File(projectRoot, entryFile)
         if (!sourceFile.exists()) {
@@ -85,144 +84,330 @@ object DevRunner {
             System.exit(1)
         }
 
-        // First run — always compile
-        printSeparator()
-        compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, inspect, inspectBrk)
+        // First run — always execute (use cache if present, else compile).
+        printHeader(appName, entryFile)
+        compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, appName, inspect, inspectBrk, ReloadMode.COLD_START)
         printWatching()
 
-        // Watch loop
+        // Watch only the dirs containing files this app depends on.
+        // After every compile, we recompute the set from ModuleResolver and adjust.
         val watcher = FileSystems.getDefault().newWatchService()
-        val srcDir = sourceFile.parentFile.toPath()
+        val watchedDirs = HashMap<Path, java.nio.file.WatchKey>()
+        syncWatchedDirs(watcher, watchedDirs, sourceFile, projectRoot)
 
-        Files.walkFileTree(srcDir, object : SimpleFileVisitor<Path>() {
-            override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
-                dir.register(watcher, StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_CREATE)
-                return FileVisitResult.CONTINUE
-            }
-        })
+        // One queue feeds both file events and keyboard events into the main loop.
+        val events = java.util.concurrent.LinkedBlockingQueue<DevEvent>()
+        startFileWatcherThread(watcher, events)
+        val keyboardActive = startKeyboardThread(events)
 
         while (true) {
-            val key = watcher.take()
-            val changedFiles = mutableSetOf<String>()
-
-            for (event in key.pollEvents()) {
-                val filename = event.context()?.toString() ?: continue
-                if (filename.endsWith(".mz")) changedFiles.add(filename)
+            when (val event = events.take()) {
+                is DevEvent.FilesChanged -> {
+                    Thread.sleep(50) // debounce — collect any near-simultaneous events
+                    val coalesced = mutableSetOf<String>().apply { addAll(event.files) }
+                    while (true) {
+                        val next = events.poll() ?: break
+                        if (next is DevEvent.FilesChanged) coalesced.addAll(next.files) else { events.add(next); break }
+                    }
+                    // Evict module-resolver entries for the files that changed.
+                    // Without this, the typechecker would re-use the previously-typed
+                    // version of an imported module even though its source has new bytes.
+                    invalidateChangedModules(coalesced, projectRoot)
+                    if (!noClear) System.err.print(ANSI_CLEAR)
+                    printReloadBanner(appName, coalesced)
+                    compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, appName, inspect, inspectBrk, ReloadMode.WATCH_RELOAD)
+                    syncWatchedDirs(watcher, watchedDirs, sourceFile, projectRoot)
+                    printWatching(keyboardActive)
+                }
+                DevEvent.Rerun -> {
+                    if (!noClear) System.err.print(ANSI_CLEAR)
+                    printForceRunBanner(appName)
+                    compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, appName, inspect, inspectBrk, ReloadMode.FORCE_RUN)
+                    syncWatchedDirs(watcher, watchedDirs, sourceFile, projectRoot)
+                    printWatching(keyboardActive)
+                }
+                DevEvent.Clear -> {
+                    if (!noClear) System.err.print(ANSI_CLEAR)
+                    printHeader(appName, entryFile)
+                    printWatching(keyboardActive)
+                }
+                DevEvent.Help -> {
+                    System.err.println()
+                    System.err.println("${ANSI_BOLD}keys${ANSI_RESET}")
+                    System.err.println("  ${ANSI_BOLD}r${ANSI_RESET}  re-run (force, even with no changes)")
+                    System.err.println("  ${ANSI_BOLD}c${ANSI_RESET}  clear screen")
+                    System.err.println("  ${ANSI_BOLD}h${ANSI_RESET}  show this help")
+                    System.err.println("  ${ANSI_BOLD}q${ANSI_RESET}  quit")
+                    System.err.println()
+                }
+                DevEvent.Quit -> {
+                    System.err.println()
+                    System.err.println("${ANSI_GRAY}bye${ANSI_RESET}")
+                    return
+                }
             }
-            key.reset()
+        }
+    }
 
-            if (changedFiles.isNotEmpty()) {
-                Thread.sleep(50) // debounce
-                watcher.poll()?.let { it.pollEvents(); it.reset() }
+    private sealed class DevEvent {
+        data class FilesChanged(val files: Set<String>) : DevEvent()
+        object Rerun : DevEvent()
+        object Clear : DevEvent()
+        object Help : DevEvent()
+        object Quit : DevEvent()
+    }
 
-                printSeparator()
-                val timestamp = LocalTime.now().format(TIME_FMT)
-                System.err.println("${ANSI_GRAY}[$timestamp]${ANSI_RESET} ${changedFiles.joinToString(", ")} changed")
-                System.err.println()
+    private fun startFileWatcherThread(
+        watcher: java.nio.file.WatchService,
+        events: java.util.concurrent.BlockingQueue<DevEvent>
+    ) {
+        Thread {
+            while (true) {
+                val key = try { watcher.take() } catch (_: InterruptedException) { return@Thread }
+                val files = mutableSetOf<String>()
+                for (event in key.pollEvents()) {
+                    val filename = event.context()?.toString() ?: continue
+                    if (filename.endsWith(".mz")) files.add(filename)
+                }
+                key.reset()
+                if (files.isNotEmpty()) events.add(DevEvent.FilesChanged(files))
+            }
+        }.apply { isDaemon = true; name = "mez-watch-fs" }.start()
+    }
 
-                compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, inspect, inspectBrk)
-                printWatching()
+    /**
+     * Start a thread that reads single keystrokes from stdin in raw mode (no
+     * Enter required). Returns true if raw mode was successfully enabled.
+     *
+     * stty-based; macOS/Linux only. Windows support tracked in #159.
+     * If we can't enable raw mode (non-interactive stdin, no stty, etc.),
+     * keyboard events are silently disabled — file-watcher events still work.
+     */
+    private fun startKeyboardThread(events: java.util.concurrent.BlockingQueue<DevEvent>): Boolean {
+        if (System.console() == null) return false
+        val osName = System.getProperty("os.name").lowercase()
+        if (osName.contains("windows")) return false  // tracked in #159
+
+        // Save current stty settings, switch to raw mode.
+        val saved = try {
+            ProcessBuilder("stty", "-g")
+                .redirectInput(ProcessBuilder.Redirect.INHERIT)
+                .redirectErrorStream(true)
+                .start().inputStream.bufferedReader().readText().trim()
+        } catch (_: Exception) { return false }
+        if (saved.isEmpty()) return false
+
+        try {
+            ProcessBuilder("stty", "-icanon", "-echo", "min", "1")
+                .redirectInput(ProcessBuilder.Redirect.INHERIT)
+                .redirectErrorStream(true)
+                .start().waitFor()
+        } catch (_: Exception) { return false }
+
+        Runtime.getRuntime().addShutdownHook(Thread {
+            try { ProcessBuilder("stty", saved).redirectInput(ProcessBuilder.Redirect.INHERIT).start().waitFor() } catch (_: Exception) {}
+        })
+
+        Thread {
+            try {
+                while (true) {
+                    val ch = System.`in`.read()
+                    if (ch < 0) return@Thread
+                    when (ch.toChar().lowercaseChar()) {
+                        'r' -> events.add(DevEvent.Rerun)
+                        'c' -> events.add(DevEvent.Clear)
+                        'h', '?' -> events.add(DevEvent.Help)
+                        'q' -> { events.add(DevEvent.Quit); return@Thread }
+                        '' -> { events.add(DevEvent.Quit); return@Thread } // Ctrl+C as char (rare; signal usually)
+                    }
+                }
+            } catch (_: Exception) {}
+        }.apply { isDaemon = true; name = "mez-watch-keys" }.start()
+        return true
+    }
+
+    /**
+     * Map changed filenames (basename only — that's all WatchService gives us)
+     * to the module paths whose `Module.filePath` ends with that name, then
+     * evict those module paths from both resolver caches.
+     *
+     * Coarse but correct: a "utils.mz" event might match multiple modules in
+     * different dirs. Evicting all of them is safe — they'll be re-resolved on
+     * next typecheck, and ModuleResolver dedups by content hash.
+     */
+    private fun invalidateChangedModules(changedFiles: Set<String>, projectRoot: File) {
+        val rootPath = projectRoot.toPath().toAbsolutePath().normalize()
+        val toEvict = mutableSetOf<String>()
+        for ((modulePath, module) in com.mezze.language.typechecker.ModuleResolver.snapshot()) {
+            val filePath = module.filePath.takeIf { it.isNotBlank() } ?: continue
+            val abs = java.nio.file.Paths.get(filePath).toAbsolutePath().normalize()
+            // Only evict modules under the project root (don't touch stdlib).
+            if (!abs.startsWith(rootPath)) continue
+            val basename = abs.fileName.toString()
+            if (basename in changedFiles) toEvict.add(modulePath)
+        }
+        if (toEvict.isNotEmpty()) {
+            com.mezze.language.typechecker.ModuleResolver.invalidateModulePaths(toEvict)
+            com.mezze.language.typechecker.module.ModuleTypeChecker.invalidateModulePaths(toEvict)
+        }
+    }
+
+    /**
+     * Compute the set of directories we want to watch — the parent dirs of every
+     * project-local file actually loaded by the typechecker. Stdlib is excluded
+     * (it lives under the install dir and never changes during a dev session).
+     *
+     * Mutates [watchedDirs]: registers any new dirs, cancels keys for dirs no
+     * longer needed.
+     */
+    private fun syncWatchedDirs(
+        watcher: java.nio.file.WatchService,
+        watchedDirs: MutableMap<Path, java.nio.file.WatchKey>,
+        sourceFile: File,
+        projectRoot: File
+    ) {
+        val rootPath = projectRoot.toPath().toAbsolutePath().normalize()
+
+        // Always include the entry file's parent directory.
+        val wanted = HashSet<Path>()
+        wanted.add(sourceFile.parentFile.toPath().toAbsolutePath().normalize())
+
+        // Add parent dirs of every loaded module that lives under the project root.
+        for ((_, module) in com.mezze.language.typechecker.ModuleResolver.snapshot()) {
+            val filePath = module.filePath.takeIf { it.isNotBlank() } ?: continue
+            val abs = java.nio.file.Paths.get(filePath).toAbsolutePath().normalize()
+            if (abs.startsWith(rootPath)) {
+                wanted.add(abs.parent ?: continue)
+            }
+        }
+
+        // Register new dirs.
+        for (dir in wanted) {
+            if (dir !in watchedDirs && java.nio.file.Files.isDirectory(dir)) {
+                watchedDirs[dir] = dir.register(
+                    watcher,
+                    StandardWatchEventKinds.ENTRY_MODIFY,
+                    StandardWatchEventKinds.ENTRY_CREATE
+                )
+            }
+        }
+        // Cancel ones we no longer want.
+        val iter = watchedDirs.entries.iterator()
+        while (iter.hasNext()) {
+            val (dir, key) = iter.next()
+            if (dir !in wanted) {
+                key.cancel()
+                iter.remove()
             }
         }
     }
 
     /**
-     * The unified compile/store/execute path.
-     * Same logic as DevCommand in the native binary:
-     * 1. Check staleness (SHA-256)
-     * 2. If stale: parse → typecheck → lower → store in cache.sqlite
-     * 3. If fresh: load FunctionIRs from cache.sqlite
-     * 4. Execute via Truffle
+     * Reload outcome: how the watch-mode reload should behave after compile.
+     */
+    private enum class ReloadMode {
+        /** First run on JVM startup — always execute. Use cache if present, else compile. */
+        COLD_START,
+        /** File changed — recompile, decide on hash delta whether to execute. */
+        WATCH_RELOAD,
+        /** User asked for `r` — compile + execute regardless of delta. */
+        FORCE_RUN,
+    }
+
+    /**
+     * The unified compile/store/execute path. Watch-mode invariants:
+     * - Always parse + typecheck on WATCH_RELOAD (we can't know if anything
+     *   changed semantically without typechecking).
+     * - The per-definition hash delta decides whether we execute. No semantic
+     *   change → skip exec, print "no changes".
+     * - On COLD_START we read from cache if it's populated, otherwise compile.
      */
     private fun compileStoreExecute(
         store: SQLiteMezzeStore, engine: Engine,
         sourceFile: File, projectRoot: File, entryName: String, modulePath: String,
-        inspect: Boolean, inspectBrk: Boolean
+        appName: String, inspect: Boolean, inspectBrk: Boolean,
+        mode: ReloadMode
     ) {
         val startTime = System.nanoTime()
         val source = sourceFile.readText()
         val sourceHash = sha256(source)
         val filePath = sourceFile.absolutePath
+        val timing = System.getenv("MEZZE_TIMING") != null
+        fun ms() = (System.nanoTime() - startTime) / 1_000_000
 
-        val stale = store.isFileStale(filePath, sourceHash)
-        if (System.getenv("MEZZE_DEBUG") != null) {
-            System.err.println("[DevRunner] file=$filePath stale=$stale hash=${sourceHash.take(16)} source_preview=${source.lines().last { it.contains("msg") || it.isNotBlank() }.trim().take(40)}")
+        // COLD_START fast path — if cache is populated, use it (skip compile).
+        // Any other mode always recompiles.
+        if (mode == ReloadMode.COLD_START) {
+            val cached = loadFunctions(store, appName)
+            if (cached.isNotEmpty() && !store.isFileStale(filePath, sourceHash)) {
+                val performers = loadPerformerRecords(store, appName)
+                executeAndReport(cached, performers, projectRoot, entryName, inspect, inspectBrk, engine, startTime)
+                return
+            }
         }
 
-        if (stale) {
-            // Compile the changed file
-            val parser = com.mezze.language.parser.MezzeParser()
-            val ast = try {
-                parser.parseParsedModule(source, sourceFile.name)
-            } catch (e: com.mezze.language.parser.ParseException) {
-                printError("Parse Error", e.message ?: "Unknown parse error")
-                return
-            }
-
-            // Clear caches so recompilation sees fresh state
-            com.mezze.language.typechecker.ModuleResolver.clearCache()
-            com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack()
-            com.mezze.interpreter.compiler.PipelineRunner.clearCache()
-
-            val typeChecker = com.mezze.language.typechecker.TypeChecker()
-            val result = try {
-                typeChecker.typeCheck(ast, projectRoot.toPath())
-            } catch (e: com.mezze.language.typechecker.TypeCheckError) {
-                val formatted = try {
-                    com.mezze.language.typechecker.printing.ErrorFormatter.format(e, source)
-                } catch (_: Exception) { e.message ?: "Unknown type error" }
-                printError("", formatted)
-                return
-            }
-
-            if (result.loweredFunctions.isEmpty()) {
-                printError("Error", "No functions produced by compiler")
-                return
-            }
-
-            // Write to cache.sqlite for next fresh run
-            try {
-                StorePopulator.populate(store, result, modulePath, filePath, sourceHash)
-                store.setMetadata("entry_name", entryName)
-                store.setMetadata("module_path", modulePath)
-                store.setMetadata("user_function_hashes",
-                    result.loweredFunctions.joinToString(";") { it.hash.hex })
-                if (result.performerRecords.isNotEmpty()) {
-                    store.setMetadata("performer_records",
-                        result.performerRecords.joinToString(";") { it.joinToString(",") })
-                }
-            } catch (_: Exception) {}
-
-            // Use freshly compiled functions directly (not from store)
-            return executeAndReport(result.loweredFunctions, result.performerRecords,
-                projectRoot, entryName, inspect, inspectBrk, engine, startTime)
+        // Compile — parse + typecheck + lower.
+        val parser = com.mezze.language.parser.MezzeParser()
+        val ast = try {
+            parser.parseParsedModule(source, sourceFile.name)
+        } catch (e: com.mezze.language.parser.ParseException) {
+            printError("Parse Error", e.message ?: "Unknown parse error")
+            return
         }
+        if (timing) System.err.println("[${ms()}ms] parsed")
 
-        // Fresh path — load from cache.sqlite
-        val functions = loadFunctions(store)
-        val performers = loadPerformerRecords(store)
+        // Surgically invalidate the entry module's typed cache so the new
+        // source is re-typechecked. Stdlib + unchanged dep modules stay cached;
+        // if a dep file changed, we evict it on the next sync via the watcher
+        // event matching its module path. (Cheap: only evicts on actual change.)
+        com.mezze.language.typechecker.ModuleResolver.invalidateModulePaths(listOf(modulePath))
+        com.mezze.language.typechecker.module.ModuleTypeChecker.invalidateModulePaths(listOf(modulePath))
 
-        if (functions.isEmpty()) {
-            printError("Error", "No functions in cache. Delete .mz/ and retry.")
+        val typeChecker = com.mezze.language.typechecker.TypeChecker()
+        val result = try {
+            typeChecker.typeCheck(ast, projectRoot.toPath())
+        } catch (e: com.mezze.language.typechecker.TypeCheckError) {
+            val formatted = try {
+                com.mezze.language.typechecker.printing.ErrorFormatter.format(e, source)
+            } catch (_: Exception) { e.message ?: "Unknown type error" }
+            printError("", formatted)
+            return
+        }
+        if (timing) System.err.println("[${ms()}ms] typechecked + lowered (${result.loweredFunctions.size} fns)")
+
+        if (result.loweredFunctions.isEmpty()) {
+            printError("Error", "No functions produced by compiler")
             return
         }
 
-        executeAndReport(functions, performers, projectRoot, entryName, inspect, inspectBrk, engine, startTime)
+        // Write to cache.sqlite — delta tells us what actually changed.
+        val delta = StorePopulator.populate(store, result, modulePath, filePath, sourceHash)
+        store.transaction {
+            store.putApp(appName, entryName, modulePath, filePath)
+            store.setAppFunctionHashes(appName, result.loweredFunctions.map { it.hash })
+            store.setAppPerformerRecords(appName, result.performerRecords)
+        }
+        if (timing) System.err.println("[${ms()}ms] stored (${delta.newHashes.size} new, ${delta.unchangedHashes.size} skip)")
 
-        // Execute
-        try {
-            executeWithTruffle(functions, performers, projectRoot.toPath(), entryName, inspect, inspectBrk, engine)
-        } catch (e: org.graalvm.polyglot.PolyglotException) {
-            printError("Runtime Error", e.message ?: "Unknown error")
-            return
-        } catch (e: Exception) {
-            printError("Error", e.message ?: "Unknown error")
+        // Decide whether to execute.
+        // - WATCH_RELOAD with empty delta = file changed but no semantic change
+        //   (whitespace, comment, edit to unimported file). Skip execution.
+        // - COLD_START / FORCE_RUN always execute.
+        if (mode == ReloadMode.WATCH_RELOAD && delta.newHashes.isEmpty()) {
+            val elapsed = ms()
+            System.err.println()
+            System.err.println("${ANSI_GRAY}no changes · ${ANSI_GREEN}${elapsed}ms${ANSI_RESET}${ANSI_GRAY} (press ${ANSI_BOLD}r${ANSI_RESET}${ANSI_GRAY} to re-run)${ANSI_RESET}")
+            lastDelta = delta
             return
         }
 
-        val elapsed = (System.nanoTime() - startTime) / 1_000_000
-        System.err.println()
-        System.err.println("${ANSI_GREEN}[done in ${elapsed}ms]${ANSI_RESET}")
+        // Hand the changed-hash set to MezzeLanguage so its CallTarget cache
+        // evicts only changed hashes (#152). Empty set = no eviction.
+        MezzeLanguage.setHashesToInvalidate(delta.newHashes.map { it.hex })
+        lastDelta = delta
+
+        executeAndReport(result.loweredFunctions, result.performerRecords,
+            projectRoot, entryName, inspect, inspectBrk, engine, startTime)
     }
 
     private fun ensureStdlibLoaded(store: SQLiteMezzeStore) {
@@ -238,7 +423,11 @@ object DevRunner {
                 }
                 store.setMetadata("stdlib_loaded", "true")
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // Non-fatal: stdlib will fall back to PrecompiledStdlib at runtime.
+            // But surface the cause so cache.sqlite issues don't hide.
+            System.err.println("${ANSI_RED}warning:${ANSI_RESET} failed to seed stdlib into cache.sqlite: ${e.message}")
+        }
     }
 
     private fun executeAndReport(
@@ -256,8 +445,9 @@ object DevRunner {
             return
         }
         val elapsed = (System.nanoTime() - startTime) / 1_000_000
+        val color = if (elapsed < 200) ANSI_GREEN else ANSI_YELLOW
         System.err.println()
-        System.err.println("${ANSI_GREEN}[done in ${elapsed}ms]${ANSI_RESET}")
+        System.err.println("${ANSI_GRAY}ready in ${color}${elapsed}ms${ANSI_RESET}")
     }
 
     private fun executeWithTruffle(
@@ -282,7 +472,8 @@ object DevRunner {
         val context = builder.build()
         try {
             MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot, entryName)
-            val source = Source.newBuilder(MezzeLanguage.ID, "# DevRunner", "__dev_runner__.mz").buildLiteral()
+            val runId = runCounter.incrementAndGet()
+            val source = Source.newBuilder(MezzeLanguage.ID, "# DevRunner $runId", "__dev_runner_${runId}__.mz").buildLiteral()
             context.eval(source)
         } finally {
             context.close(true)
@@ -294,24 +485,46 @@ object DevRunner {
         return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 
-    private fun loadFunctions(store: SQLiteMezzeStore): List<FunctionIR> {
-        val hashList = store.getMetadata("user_function_hashes") ?: return emptyList()
-        return hashList.split(";").mapNotNull { hex ->
-            if (hex.isEmpty()) return@mapNotNull null
-            val irBytes = store.getIR(Hash(hex)) ?: return@mapNotNull null
+    private fun loadFunctions(store: SQLiteMezzeStore, appName: String): List<FunctionIR> {
+        return store.getAppFunctionHashes(appName).mapNotNull { hash ->
+            val irBytes = store.getIR(hash) ?: return@mapNotNull null
             CodebaseSerialization.deserializeFunctionIR(irBytes)
         }
     }
 
-    private fun loadPerformerRecords(store: SQLiteMezzeStore): List<Array<String>> {
-        val raw = store.getMetadata("performer_records") ?: return emptyList()
-        if (raw.isEmpty()) return emptyList()
-        return raw.split(";").map { it.split(",").toTypedArray() }
-    }
+    private fun loadPerformerRecords(store: SQLiteMezzeStore, appName: String): List<Array<String>> =
+        store.getAppPerformerRecords(appName)
 
     private fun printSeparator() { System.err.println(ANSI_GRAY + SEPARATOR + ANSI_RESET) }
     private fun printError(label: String, msg: String) { System.err.println(); if (label.isNotEmpty()) System.err.println("${ANSI_RED}$label${ANSI_RESET}"); System.err.println(msg) }
-    private fun printWatching() { System.err.println(); System.err.println("${ANSI_GRAY}Watching for changes... (Ctrl+C to stop)${ANSI_RESET}") }
+    private fun printWatching(keyboardActive: Boolean = false) {
+        System.err.println()
+        if (keyboardActive) {
+            System.err.println("${ANSI_GRAY}watching · press ${ANSI_BOLD}r${ANSI_RESET}${ANSI_GRAY} to re-run, ${ANSI_BOLD}h${ANSI_RESET}${ANSI_GRAY} for help, ${ANSI_BOLD}q${ANSI_RESET}${ANSI_GRAY} to quit${ANSI_RESET}")
+        } else {
+            System.err.println("${ANSI_GRAY}watching for changes — press Ctrl+C to stop${ANSI_RESET}")
+        }
+    }
+
+    private fun printHeader(appName: String, entryFile: String) {
+        if (!noClear) System.err.print(ANSI_CLEAR)
+        System.err.println("${ANSI_BOLD}${ANSI_CYAN}mez dev${ANSI_RESET}${ANSI_GRAY} · $appName${ANSI_RESET}")
+        System.err.println("${ANSI_GRAY}$entryFile${ANSI_RESET}")
+        System.err.println()
+    }
+
+    private fun printReloadBanner(appName: String, changedFiles: Set<String>) {
+        val timestamp = LocalTime.now().format(TIME_FMT)
+        val files = changedFiles.joinToString(", ")
+        System.err.println("${ANSI_BOLD}${ANSI_CYAN}mez dev${ANSI_RESET}${ANSI_GRAY} · $appName · ${ANSI_RESET}${ANSI_YELLOW}reload${ANSI_RESET}${ANSI_GRAY} · [$timestamp] $files${ANSI_RESET}")
+        System.err.println()
+    }
+
+    private fun printForceRunBanner(appName: String) {
+        val timestamp = LocalTime.now().format(TIME_FMT)
+        System.err.println("${ANSI_BOLD}${ANSI_CYAN}mez dev${ANSI_RESET}${ANSI_GRAY} · $appName · ${ANSI_RESET}${ANSI_CYAN}re-run${ANSI_RESET}${ANSI_GRAY} · [$timestamp]${ANSI_RESET}")
+        System.err.println()
+    }
 
     private fun parseArgs(args: Array<String>): Map<String, String> {
         val result = mutableMapOf<String, String>()

@@ -2,27 +2,13 @@ package com.mezze.language.cli.commands
 
 import com.akuleshov7.ktoml.Toml
 import com.mezze.language.cli.`package`.MezzeToml
-
-import com.mezze.language.codebase.SQLiteMezzeStore
-import com.mezze.language.codebase.StorePopulator
-import com.mezze.language.parser.MezzeParser
-import com.mezze.language.typechecker.TypeChecker
-import com.mezze.language.typechecker.TypeCheckError
-import com.mezze.language.typechecker.printing.ErrorFormatter
-import com.mezze.language.ast.*
-import com.mezze.language.typedast.TypedLetDecl
 import java.io.File
-import java.security.MessageDigest
 
 /**
- * Handle `mez dev` command — incremental compile + execute.
+ * `mez dev` — spawn JVM subprocess running DevRunner.
  *
- * Flow:
- * 1. Read Mezze.toml → find app entry file
- * 2. Open .mz/cache.sqlite
- * 3. Check staleness (source hash vs stored hash)
- * 4. If stale: parse → typecheck → lower → scatter into store
- * 5. Execute via Truffle
+ * Native binary is a thin shell: validate Mezze.toml, find Java, spawn DevRunner.
+ * DevRunner does all the work — stdlib load, compile, store, execute, watch.
  */
 class DevCommand {
 
@@ -38,7 +24,6 @@ class DevCommand {
             return
         }
 
-        // Parse Mezze.toml
         val tomlContent = mezzeToml.readText()
         val manifest = try {
             Toml.decodeFromString(MezzeToml.serializer(), tomlContent)
@@ -57,7 +42,6 @@ class DevCommand {
             return
         }
 
-        // Determine which app to run
         val appName = args.find { it.startsWith("--app=") }?.substringAfter("=")
             ?: args.getOrNull(args.indexOf("--app") + 1)?.takeIf { !it.startsWith("--") }
 
@@ -76,234 +60,34 @@ class DevCommand {
             return
         }
 
-        // Open project store
-        val store = SQLiteMezzeStore.forProject(currentDir)
+        val modulePath = manifest.`package`.name
+        val entryName = appConfig.entry
 
-        // Load stdlib into store on first use
-        if (store.getMetadata("stdlib_loaded") == null) {
-            try {
-                val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
-                store.transaction {
-                    for ((hash, fnIR) in precompiled.preloweredFunctions) {
-                        val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
-                        store.putBlob(com.mezze.language.typedast.Hash(hash),
-                            com.mezze.language.codebase.BlobKind.FUNCTION,
-                            com.mezze.language.codebase.Visibility.PUBLIC, null, irBytes)
-                    }
-                    store.setMetadata("stdlib_loaded", "true")
-                }
-            } catch (_: Exception) {}
-        }
-
-        try {
-            val totalStart = System.nanoTime()
-            val timing = System.getenv("MEZZE_TIMING") != null
-            fun elapsed() = (System.nanoTime() - totalStart) / 1_000_000
-
-            // Read source and check staleness
-            val source = appFile.readText()
-            val sourceHash = sha256(source)
-            val filePath = appFile.absolutePath
-            val modulePath = manifest.`package`.name
-
-            val stale = store.isFileStale(filePath, sourceHash)
-            if (timing) System.err.println("[${elapsed()}ms] staleness check (stale=$stale)")
-
-            val functions: List<com.mezze.language.truffleir.FunctionIR>
-            val typeCheckResult: com.mezze.language.typechecker.TypeCheckResult
-
-            if (stale) {
-                // Compile: parse → typecheck → lower
-                val parser = MezzeParser()
-                val ast = try {
-                    parser.parseParsedModule(source, file = appFile.name)
-                } catch (e: com.mezze.language.parser.ParseException) {
-                    println("Parse Error: ${e.message}")
-                    kotlin.system.exitProcess(3)
-                }
-                if (timing) System.err.println("[${elapsed()}ms] parsed")
-
-                val typeChecker = TypeChecker()
-                typeCheckResult = try {
-                    typeChecker.typeCheck(ast, currentDir.toPath())
-                } catch (e: TypeCheckError) {
-                    println(ErrorFormatter.format(e, source))
-                    kotlin.system.exitProcess(4)
-                }
-                if (timing) System.err.println("[${elapsed()}ms] typechecked + lowered")
-
-                functions = typeCheckResult.loweredFunctions
-
-                // Scatter into store
-                StorePopulator.populate(store, typeCheckResult, modulePath, filePath, sourceHash)
-
-                // Store execution metadata for DevRunner (JVM subprocess)
-                val entryName = appConfig.entry
-                store.setMetadata("entry_name", entryName)
-                store.setMetadata("module_path", modulePath)
-                store.setMetadata("user_function_hashes",
-                    typeCheckResult.loweredFunctions.joinToString(";") { it.hash.hex })
-                if (typeCheckResult.performerRecords.isNotEmpty()) {
-                    store.setMetadata("performer_records",
-                        typeCheckResult.performerRecords.joinToString(";") { it.joinToString(",") })
-                }
-            } else {
-                // Fresh — load cached FunctionIRs from store (skip parse + typecheck)
-                val cachedHashes = store.getMetadata("user_function_hashes")
-                if (cachedHashes != null && cachedHashes.isNotEmpty()) {
-                    functions = cachedHashes.split(";").mapNotNull { hash ->
-                        if (hash.isEmpty()) return@mapNotNull null
-                        val irBytes = store.getIR(com.mezze.language.typedast.Hash(hash))
-                            ?: return@mapNotNull null
-                        com.mezze.language.codebase.CodebaseSerialization.deserializeFunctionIR(irBytes)
-                    }
-                    // Load performer records from metadata
-                    val performerData = store.getMetadata("performer_records")
-                    val cachedPerformers = if (performerData != null && performerData.isNotEmpty()) {
-                        performerData.split(";").map { it.split(",").toTypedArray() }
-                    } else emptyList()
-
-                    typeCheckResult = com.mezze.language.typechecker.TypeCheckResult(
-                        loweredFunctions = functions,
-                        performerRecords = cachedPerformers
-                    )
-                } else {
-                    // No cached IR — fall back to full compile
-                    val parser = MezzeParser()
-                    val ast = parser.parseParsedModule(source, file = appFile.name)
-                    val typeChecker = TypeChecker()
-                    typeCheckResult = try {
-                        typeChecker.typeCheck(ast, currentDir.toPath())
-                    } catch (e: TypeCheckError) {
-                        println(ErrorFormatter.format(e, source))
-                        kotlin.system.exitProcess(4)
-                    }
-                    functions = typeCheckResult.loweredFunctions
-                }
-            }
-
-            // Validate entry function exists (skip if loaded from cache — was validated at compile time)
-            val entryName = appConfig.entry
-            if (typeCheckResult.typedModule != null) {
-                val mainBinding = typeCheckResult.typedModule?.decls
-                    ?.filterIsInstance<TypedLetDecl>()
-                    ?.find { it.name == entryName }
-                if (mainBinding == null) {
-                    println("Error: App must define a '$entryName' function with type {} -> {}")
-                    kotlin.system.exitProcess(4)
-                }
-            }
-
-            // Debug: print performer records
-            if (System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println("[DEBUG] ${functions.size} functions, ${typeCheckResult.performerRecords.size} performer records")
-                for ((i, pr) in typeCheckResult.performerRecords.withIndex()) {
-                    System.err.println("[DEBUG] performer[$i]: ${pr.joinToString(", ") { it.take(16) + "..." }}")
-                }
-            }
-
-            if (timing) System.err.println("[${elapsed()}ms] ready to execute")
-
-            // Execute: spawn JVM subprocess (native image) or run in-process (development)
-            if (isNativeImage()) {
-                store.close()  // flush WAL, release lock before subprocess reads
-
-                val java = com.mezze.language.cli.JvmLauncher.findJava()
-                if (java == null) {
-                    println("Error: Java 21+ required for 'mez dev'. Install with:")
-                    println("  sdk install java 24.0.1-graal    # sdkman")
-                    println("  brew install graalvm-jdk          # macOS")
-                    kotlin.system.exitProcess(1)
-                }
-
-                val classpath = com.mezze.language.cli.JvmLauncher.buildClasspath()
-                val programArgs = mutableListOf(
-                    "--project-root=${currentDir.absolutePath}",
-                    "--cache=${File(currentDir, ".mz/cache.sqlite").absolutePath}",
-                    "--entry-file=${appConfig.path}",
-                    "--entry-name=${entryName}",
-                    "--module-path=${modulePath}"
-                )
-                if (inspect) programArgs.add("--inspect")
-                if (inspectBrk) programArgs.add("--inspect-brk")
-
-                val exitCode = com.mezze.language.cli.JvmLauncher.spawn(
-                    mainClass = "com.mezze.interpreter.runtime.DevRunner",
-                    classpath = classpath,
-                    programArgs = programArgs
-                )
-
-                val totalTime = (System.nanoTime() - totalStart) / 1_000_000
-                if (System.getenv("MEZZE_TIMING") != null) {
-                    System.err.println("Total: ${totalTime}ms (${if (stale) "recompiled" else "cached"}, JVM subprocess)")
-                }
-                kotlin.system.exitProcess(exitCode)
-            } else {
-                // Development mode (running on JVM already): execute in-process
-                executeWithTruffle(functions, typeCheckResult.performerRecords, currentDir, inspect || inspectBrk, inspectBrk, entryName)
-
-                val totalTime = (System.nanoTime() - totalStart) / 1_000_000
-                if (System.getenv("MEZZE_TIMING") != null) {
-                    System.err.println("Total: ${totalTime}ms (${if (stale) "recompiled" else "cached"})")
-                }
-            }
-
-        } catch (e: org.graalvm.polyglot.PolyglotException) {
-            println("Runtime Error: ${e.message}")
-            kotlin.system.exitProcess(5)
-        } catch (e: Exception) {
-            println("Error: ${e.message}")
+        val java = com.mezze.language.cli.JvmLauncher.findJava()
+        if (java == null) {
+            println("Error: Java 21+ required for 'mez dev'. Install with:")
+            println("  sdk install java 24.0.1-graal    # sdkman")
+            println("  brew install graalvm-jdk          # macOS")
             kotlin.system.exitProcess(1)
-        } finally {
-            if (!isNativeImage()) store.close()
-        }
-    }
-
-    private fun executeWithTruffle(
-        functions: List<com.mezze.language.truffleir.FunctionIR>,
-        performerRecords: List<Array<String>>,
-        projectDir: File,
-        inspect: Boolean = false,
-        inspectBrk: Boolean = false,
-        entryName: String = "main"
-    ) {
-        System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
-        System.setProperty("polyglot.log.level", "OFF")
-
-        val builder = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.runtime.MezzeLanguage.ID)
-            .allowAllAccess(true)
-            .allowCreateThread(true)
-
-        // Enable Chrome DevTools debugger
-        if (inspect || inspectBrk) {
-            builder.option("inspect", "true")
-            if (inspectBrk) builder.option("inspect.Suspend", "true")
-            System.err.println("Debugger listening on ws://127.0.0.1:9229")
-            System.err.println("Open chrome://inspect in Chrome to connect")
         }
 
-        val context = builder.build()
+        val classpath = com.mezze.language.cli.JvmLauncher.buildClasspath()
+        val programArgs = mutableListOf(
+            "--project-root=${currentDir.absolutePath}",
+            "--cache=${File(currentDir, ".mz/cache.sqlite").absolutePath}",
+            "--entry-file=${appConfig.path}",
+            "--entry-name=${entryName}",
+            "--module-path=${modulePath}",
+            "--app-name=${appConfig.name}"
+        )
+        if (inspect) programArgs.add("--inspect")
+        if (inspectBrk) programArgs.add("--inspect-brk")
 
-        try {
-            com.mezze.interpreter.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, performerRecords, projectDir.toPath(), entryName)
-
-            val source = org.graalvm.polyglot.Source.newBuilder(
-                com.mezze.interpreter.runtime.MezzeLanguage.ID,
-                "# Direct TruffleIR execution",
-                "__direct_execution__.mz"
-            ).buildLiteral()
-
-            context.eval(source)
-        } finally {
-            context.close(true)
-        }
+        val exitCode = com.mezze.language.cli.JvmLauncher.spawn(
+            mainClass = "com.mezze.interpreter.runtime.DevRunner",
+            classpath = classpath,
+            programArgs = programArgs
+        )
+        kotlin.system.exitProcess(exitCode)
     }
-
-    private fun sha256(content: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
-    }
-
-    private fun isNativeImage(): Boolean =
-        System.getProperty("org.graalvm.nativeimage.imagecode") != null
 }

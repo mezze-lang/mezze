@@ -69,6 +69,8 @@ class BuildCommand {
 
         try {
             val startTime = System.nanoTime()
+            val timing = System.getenv("MEZZE_TIMING") != null
+            fun ms() = (System.nanoTime() - startTime) / 1_000_000
 
             // 1. Compile
             val source = appFile.readText()
@@ -82,6 +84,7 @@ class BuildCommand {
                 println("Parse Error: ${e.message}")
                 kotlin.system.exitProcess(3)
             }
+            if (timing) System.err.println("[${ms()}ms] parsed")
 
             val typeChecker = TypeChecker()
             val typeCheckResult = try {
@@ -90,43 +93,45 @@ class BuildCommand {
                 println(ErrorFormatter.format(e, source))
                 kotlin.system.exitProcess(4)
             }
+            if (timing) System.err.println("[${ms()}ms] typechecked + lowered (${typeCheckResult.loweredFunctions.size} fns)")
 
-            // 2. Scatter into store
+            // 2. Scatter into store. populate() returns a delta — only blobs
+            //    whose hashes aren't already present get written.
             StorePopulator.populate(store, typeCheckResult, modulePath, appFile.absolutePath, sourceHash)
 
-            // Store ALL lowered user functions (including lambdas) in blobs
-            for (fn in typeCheckResult.loweredFunctions) {
-                val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fn)
-                store.putBlob(fn.hash, com.mezze.language.codebase.BlobKind.FUNCTION,
-                    com.mezze.language.codebase.Visibility.PRIVATE, null, irBytes)
+            // Store the user's lowered function manifest for standalone JAR loading.
+            // (StorePopulator already stored the FunctionIRs by hash — manifest links
+            // app -> ordered hashes.)
+            store.transaction {
+                store.putApp(appConfig.name, appConfig.entry, modulePath, appFile.absolutePath)
+                store.setAppFunctionHashes(appConfig.name, typeCheckResult.loweredFunctions.map { it.hash })
+                store.setAppPerformerRecords(appConfig.name, typeCheckResult.performerRecords)
             }
-            // Store the user's lowered function hashes for standalone JAR loading
-            val userFunctionHashes = typeCheckResult.loweredFunctions.map { it.hash.hex }
-            store.setMetadata("user_function_hashes", userFunctionHashes.joinToString(";"))
 
-            // 2b. Load stdlib FunctionIRs into store so transitive closure includes them
+            // 2b. Load stdlib FunctionIRs into store — but skip ones already present
+            //     (typically all of them after `mez dev` has run).
             try {
                 val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
                 val stdlibFunctions = precompiled.preloweredFunctions
-                println("Loading ${stdlibFunctions.size} stdlib functions into store...")
-                store.transaction {
-                    for ((hash, fnIR) in stdlibFunctions) {
-                        val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
-                        store.putBlob(
-                            com.mezze.language.typedast.Hash(hash),
-                            com.mezze.language.codebase.BlobKind.FUNCTION,
-                            com.mezze.language.codebase.Visibility.PUBLIC,
-                            null,
-                            irBytes
-                        )
-                        // Record edges so transitive closure works
-                        val fromHash = com.mezze.language.typedast.Hash(hash)
-                        collectEdgesFromIR(fnIR, store, fromHash)
+                val candidates = stdlibFunctions.keys.map { com.mezze.language.typedast.Hash(it) }
+                val present = store.blobsExist(candidates)
+                val missing = stdlibFunctions.filter { (hash, _) -> com.mezze.language.typedast.Hash(hash) !in present }
+                if (missing.isNotEmpty()) {
+                    println("Loading ${missing.size} stdlib functions into store (${present.size} already cached)...")
+                    store.transaction {
+                        for ((hash, fnIR) in missing) {
+                            val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
+                            val h = com.mezze.language.typedast.Hash(hash)
+                            store.putBlob(h, com.mezze.language.codebase.BlobKind.FUNCTION,
+                                com.mezze.language.codebase.Visibility.PUBLIC, null, irBytes)
+                            collectEdgesFromIR(fnIR, store, h)
+                        }
                     }
                 }
             } catch (e: Exception) {
                 System.err.println("Warning: Could not load stdlib into store: ${e.message}")
             }
+            if (timing) System.err.println("[${ms()}ms] stdlib seed checked")
 
             // 3. Validate entry function
             val entryName = appConfig.entry
@@ -159,50 +164,89 @@ class BuildCommand {
             val blobsFile = File(targetDir, "$outputJarName.blobs.sqlite")
 
             createMinimalBlobsDb(store, reachable, entryHash, blobsFile, entryName)
+            if (timing) System.err.println("[${ms()}ms] blobs.sqlite created (reachable subset)")
 
-            // Also copy ALL blobs from cache into the blobs.sqlite
-            // so the standalone JAR has the full stdlib
+            // The standalone JAR's blobs.sqlite needs every blob the program
+            // could ever look up at runtime — including stdlib hashes that
+            // weren't statically reachable (ability dispatch, effect performers
+            // resolved at runtime, etc.). createMinimalBlobsDb wrote the
+            // reachable subset; pad it with any remaining stdlib + user blobs
+            // that aren't already present in blobs.sqlite.
             val allBlobsConn = java.sql.DriverManager.getConnection("jdbc:sqlite:${blobsFile.absolutePath}")
             try {
                 allBlobsConn.autoCommit = false
+                val existing = HashSet<String>()
+                allBlobsConn.createStatement().use { s ->
+                    s.executeQuery("SELECT hash FROM blobs").use { rs ->
+                        while (rs.next()) existing.add(rs.getString(1))
+                    }
+                }
                 val insertBlob = allBlobsConn.prepareStatement("INSERT OR IGNORE INTO blobs (hash, ir) VALUES (?, ?)")
+                var stdlibAdded = 0
                 for ((hash, fnIR) in com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions) {
+                    if (hash in existing) continue
                     val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
                     insertBlob.setString(1, hash)
                     insertBlob.setBytes(2, irBytes)
                     insertBlob.executeUpdate()
+                    stdlibAdded++
                 }
-                // Store performer records in metadata as JSON
-                val performers = typeCheckResult.performerRecords
-                if (performers.isNotEmpty()) {
-                    val json = performers.joinToString(";") { it.joinToString(",") }
-                    allBlobsConn.createStatement().use { s ->
-                        s.executeUpdate("INSERT OR REPLACE INTO metadata (key, value) VALUES ('performer_records', '${json.replace("'", "''")}')")
-                    }
-                }
-
-                // Store user lowered functions in blobs.sqlite
                 for (fn in typeCheckResult.loweredFunctions) {
+                    if (fn.hash.hex in existing) continue
                     val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fn)
                     insertBlob.setString(1, fn.hash.hex)
                     insertBlob.setBytes(2, irBytes)
                     insertBlob.executeUpdate()
                 }
+                if (stdlibAdded > 0) println("Padded blobs.sqlite with $stdlibAdded extra stdlib blobs (out of ${com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions.size})")
 
-                // Store user function hash list in metadata
+                // Store user function manifest in app_functions table (ordered)
+                allBlobsConn.prepareStatement(
+                    "INSERT OR REPLACE INTO app_functions (app_name, hash, ord) VALUES (?, ?, ?)"
+                ).use { stmt ->
+                    typeCheckResult.loweredFunctions.forEachIndexed { i, fn ->
+                        stmt.setString(1, appConfig.name)
+                        stmt.setString(2, fn.hash.hex)
+                        stmt.setInt(3, i)
+                        stmt.addBatch()
+                    }
+                    stmt.executeBatch()
+                }
+
+                // Store performer records in app_performers table
+                val performers = typeCheckResult.performerRecords
+                if (performers.isNotEmpty()) {
+                    allBlobsConn.prepareStatement(
+                        "INSERT OR REPLACE INTO app_performers (app_name, record_idx, position, hash) VALUES (?, ?, ?, ?)"
+                    ).use { stmt ->
+                        performers.forEachIndexed { recordIdx, record ->
+                            record.forEachIndexed { pos, hash ->
+                                stmt.setString(1, appConfig.name)
+                                stmt.setInt(2, recordIdx)
+                                stmt.setInt(3, pos)
+                                stmt.setString(4, hash)
+                                stmt.addBatch()
+                            }
+                        }
+                        stmt.executeBatch()
+                    }
+                }
+
+                // App name needed by the standalone JAR loader at boot time.
                 allBlobsConn.createStatement().use { s ->
-                    val hashList = typeCheckResult.loweredFunctions.joinToString(";") { it.hash.hex }
-                    s.executeUpdate("INSERT OR REPLACE INTO metadata (key, value) VALUES ('user_function_hashes', '${hashList}')")
+                    s.executeUpdate("INSERT OR REPLACE INTO metadata (key, value) VALUES ('app_name', '${appConfig.name.replace("'", "''")}')")
                 }
 
                 allBlobsConn.commit()
             } finally {
                 allBlobsConn.close()
             }
+            if (timing) System.err.println("[${ms()}ms] blobs.sqlite padded + manifest written")
 
             // 6. Create runnable JAR
             val jarFile = File(targetDir, "$outputJarName.jar")
             createStandaloneJar(blobsFile, jarFile)
+            if (timing) System.err.println("[${ms()}ms] standalone JAR packed")
 
             val buildTime = (System.nanoTime() - startTime) / 1_000_000
 
@@ -242,6 +286,9 @@ class BuildCommand {
             s.executeUpdate("CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, ir BLOB NOT NULL) WITHOUT ROWID")
             s.executeUpdate("CREATE TABLE IF NOT EXISTS names (module TEXT NOT NULL, name TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (module, name)) WITHOUT ROWID")
             s.executeUpdate("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID")
+            // App manifest — what to load and run when this JAR boots.
+            s.executeUpdate("CREATE TABLE IF NOT EXISTS app_functions (app_name TEXT NOT NULL, hash TEXT NOT NULL, ord INTEGER NOT NULL, PRIMARY KEY (app_name, hash)) WITHOUT ROWID")
+            s.executeUpdate("CREATE TABLE IF NOT EXISTS app_performers (app_name TEXT NOT NULL, record_idx INTEGER NOT NULL, position INTEGER NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (app_name, record_idx, position)) WITHOUT ROWID")
         }
 
         try {
@@ -292,7 +339,8 @@ class BuildCommand {
     private fun createStandaloneJar(blobsFile: File, outputJar: File) {
         println("Creating standalone JAR...")
 
-        // Find the CLI's lib directory (contains all runtime JARs)
+        // Find the runtime JAR (mezze-lang.jar) — this is the single shadow JAR
+        // that contains all of mezze + Truffle + dependencies.
         val cliLocation = javaClass.protectionDomain.codeSource?.location
         val cliJarOrClassDir = if (cliLocation != null) File(cliLocation.toURI()) else null
         val libDir = findLibDir(cliJarOrClassDir)
@@ -307,52 +355,85 @@ class BuildCommand {
             println("Warning: No JARs found in ${libDir.absolutePath}")
             return
         }
+        if (libJars.size > 1) {
+            // We expect a single shadow JAR. If more, fall back to the legacy extract+repack path.
+            println("Warning: ${libJars.size} JARs in $libDir; expected 1 shadow JAR. Falling back to legacy packing.")
+            createStandaloneJarLegacy(libJars, blobsFile, outputJar)
+            return
+        }
 
-        // Create a temp directory for the fat JAR contents
-        val tempDir = kotlin.io.path.createTempDirectory("mez-build").toFile()
-        try {
-            // Extract all dependency JARs
-            for (jar in libJars) {
-                val proc = ProcessBuilder("jar", "xf", jar.absolutePath)
-                    .directory(tempDir)
-                    .redirectErrorStream(true)
-                    .start()
-                proc.waitFor()
+        val sourceJar = libJars.first()
+
+        // Stream entries from the source JAR into the output JAR using
+        // `copyRawEntries` — no extract, no recompression. Just byte copy.
+        // Then append blobs.sqlite + a fresh MANIFEST pointing at StandaloneMain.
+        org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream(
+            java.io.FileOutputStream(outputJar).buffered(64 * 1024)
+        ).use { out ->
+            @Suppress("DEPRECATION")
+            val src = org.apache.commons.compress.archivers.zip.ZipFile(sourceJar)
+            try {
+                src.copyRawEntries(out, org.apache.commons.compress.archivers.zip.ZipArchiveEntryPredicate { e ->
+                    val name = e.name
+                    when {
+                        name == "META-INF/MANIFEST.MF" -> false  // we'll write our own
+                        name.startsWith("META-INF/") &&
+                            (name.endsWith(".SF") || name.endsWith(".RSA") ||
+                             name.endsWith(".DSA") || name.endsWith(".EC")) -> false
+                        else -> true
+                    }
+                })
+            } finally {
+                src.close()
             }
 
-            // Remove signature files from extracted JARs (prevents SecurityException)
+            // Append the user's blobs.sqlite under the resource path StandaloneHelper expects.
+            val blobEntry = org.apache.commons.compress.archivers.zip.ZipArchiveEntry("com/mezze/standalone/blobs.sqlite")
+            out.putArchiveEntry(blobEntry)
+            java.io.FileInputStream(blobsFile).buffered().use { it.copyTo(out) }
+            out.closeArchiveEntry()
+
+            // Write a fresh MANIFEST.MF pointing at StandaloneMain.
+            val manEntry = org.apache.commons.compress.archivers.zip.ZipArchiveEntry("META-INF/MANIFEST.MF")
+            out.putArchiveEntry(manEntry)
+            val manifest = "Manifest-Version: 1.0\nMain-Class: com.mezze.language.cli.standalone.StandaloneMain\n\n"
+            out.write(manifest.toByteArray())
+            out.closeArchiveEntry()
+        }
+
+        println("Created ${outputJar.name} (${outputJar.length() / 1024}KB)")
+    }
+
+    /**
+     * Legacy extract+repack path. Used only when the lib dir contains multiple
+     * JARs (development / non-shadow builds). Slow (~7s) but supports merging.
+     */
+    private fun createStandaloneJarLegacy(libJars: List<File>, blobsFile: File, outputJar: File) {
+        val tempDir = kotlin.io.path.createTempDirectory("mez-build").toFile()
+        try {
+            for (jar in libJars) {
+                ProcessBuilder("jar", "xf", jar.absolutePath)
+                    .directory(tempDir).redirectErrorStream(true).start().waitFor()
+            }
             File(tempDir, "META-INF").listFiles()?.filter {
                 it.name.endsWith(".SF") || it.name.endsWith(".RSA") || it.name.endsWith(".DSA") || it.name.endsWith(".EC")
             }?.forEach { it.delete() }
-
-            // Add blobs.sqlite as resource
             val resourceDir = File(tempDir, "com/mezze/standalone")
             resourceDir.mkdirs()
             blobsFile.copyTo(File(resourceDir, "blobs.sqlite"), overwrite = true)
-
-            // Create manifest
             val metaInf = File(tempDir, "META-INF")
             metaInf.mkdirs()
             File(metaInf, "MANIFEST.MF").writeText(
                 "Manifest-Version: 1.0\nMain-Class: com.mezze.language.cli.standalone.StandaloneMain\n\n"
             )
-
-            // StandaloneHelper is already compiled in the CLI JARs — no javac needed.
-            // The manifest points to com.mezze.language.cli.standalone.StandaloneMain
-            // which is a simple wrapper that loads blobs.sqlite from the JAR resources.
-
-            // Create the JAR
             val manifest = File(metaInf, "MANIFEST.MF")
             val jarProc = ProcessBuilder("jar", "cfm", outputJar.absolutePath,
                 manifest.absolutePath, "-C", tempDir.absolutePath, ".")
-                .directory(tempDir)
-                .redirectErrorStream(true)
-                .start()
+                .directory(tempDir).redirectErrorStream(true).start()
             if (jarProc.waitFor() != 0) {
                 println("Warning: jar creation failed")
                 return
             }
-
             println("Created ${outputJar.name} (${outputJar.length() / 1024}KB)")
         } finally {
             tempDir.deleteRecursively()

@@ -15,6 +15,9 @@ object JvmLauncher {
         "--add-opens=java.base/java.lang=ALL-UNNAMED",
         "--add-opens=java.base/java.nio=ALL-UNNAMED",
         "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+        // JDK 24+: Truffle uses Unsafe::objectFieldOffset internally; silence the
+        // deprecation warning rather than letting it flood `mez dev` startup.
+        "--sun-misc-unsafe-memory-access=allow",
         "-Dpolyglot.engine.WarnInterpreterOnly=false"
     )
 

@@ -27,63 +27,50 @@ object StandaloneHelper {
             // Open the SQLite database
             val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${tempFile.absolutePath}")
             conn.use { db ->
-                // Read entry hash from metadata
-                val entryHash = db.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'entry_hash'").use { rs ->
+                // Single scalar metadata: app_name, entry_hash, entry_name.
+                fun meta(key: String): String? = db.createStatement().use { stmt ->
+                    stmt.executeQuery("SELECT value FROM metadata WHERE key = '$key'").use { rs ->
                         if (rs.next()) rs.getString(1) else null
-                    }
-                } ?: throw RuntimeException("No entry_hash in blobs.sqlite metadata")
-
-                // Load ONLY user FunctionIRs — identified by the stored hash list
-                // Stdlib is handled by PrecompiledStdlib at Language init time
-                val userHashList = db.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'user_function_hashes'").use { rs ->
-                        if (rs.next()) rs.getString(1).split(";").toSet() else emptySet()
                     }
                 }
 
+                meta("entry_hash") ?: throw RuntimeException("No entry_hash in blobs.sqlite metadata")
+                val appName = meta("app_name") ?: throw RuntimeException("No app_name in blobs.sqlite metadata")
+                val entryName = meta("entry_name")
+
+                // Load user FunctionIRs from app_functions in stored order.
                 val functions = mutableListOf<FunctionIR>()
-                for (hash in userHashList) {
-                    if (hash.isEmpty()) continue
-                    val stmt = db.prepareStatement("SELECT ir FROM blobs WHERE hash = ?")
-                    stmt.setString(1, hash)
+                db.prepareStatement(
+                    "SELECT b.ir FROM app_functions af JOIN blobs b ON b.hash = af.hash WHERE af.app_name = ? ORDER BY af.ord"
+                ).use { stmt ->
+                    stmt.setString(1, appName)
                     stmt.executeQuery().use { rs ->
-                        if (rs.next()) {
-                            val irBytes = rs.getBytes("ir")
-                            if (irBytes != null) {
-                                try {
-                                    functions.add(CodebaseSerialization.deserializeFunctionIR(irBytes))
-                                } catch (_: Exception) {}
-                            }
+                        while (rs.next()) {
+                            val irBytes = rs.getBytes("ir") ?: continue
+                            try {
+                                functions.add(CodebaseSerialization.deserializeFunctionIR(irBytes))
+                            } catch (_: Exception) {}
                         }
                     }
                 }
 
                 if (functions.isEmpty()) {
-                    throw RuntimeException("No executable functions in blobs.sqlite")
+                    throw RuntimeException("No executable functions in blobs.sqlite for app '$appName'")
                 }
 
-                // Load performer records from metadata
-                val performers = mutableListOf<Array<String>>()
-                db.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'performer_records'").use { rs ->
-                        if (rs.next()) {
-                            val json = rs.getString(1)
-                            if (json.isNotEmpty()) {
-                                for (record in json.split(";")) {
-                                    performers.add(record.split(",").toTypedArray())
-                                }
-                            }
+                // Performer records from app_performers, grouped by record_idx, ordered by position.
+                val byRecord = mutableMapOf<Int, MutableList<String>>()
+                db.prepareStatement(
+                    "SELECT record_idx, position, hash FROM app_performers WHERE app_name = ? ORDER BY record_idx, position"
+                ).use { stmt ->
+                    stmt.setString(1, appName)
+                    stmt.executeQuery().use { rs ->
+                        while (rs.next()) {
+                            byRecord.getOrPut(rs.getInt(1)) { mutableListOf() }.add(rs.getString(3))
                         }
                     }
                 }
-
-                // Read entry function name from metadata
-                val entryName = db.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'entry_name'").use { rs ->
-                        if (rs.next()) rs.getString(1) else null
-                    }
-                }
+                val performers = byRecord.toSortedMap().values.map { it.toTypedArray() }.toMutableList()
 
                 // Execute via Truffle
                 executeWithTruffle(functions, performers, entryName)
