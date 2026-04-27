@@ -191,7 +191,13 @@ data class TypedModule(
     /** V2 ParsedModule — the primary AST representation. */
     val parsedModule: com.mezze.language.parsedast.ParsedModule? = null,
     /** Extracted type context: name → inferred MezzeType. Built once at type-check time. */
-    val typeContext: Map<String, MezzeType> = emptyMap()
+    val typeContext: Map<String, MezzeType> = emptyMap(),
+    /** Source file path (carried through from LoadedModule) so the persistent
+     *  typed_modules cache can key by (modulePath, sourceHash). null for
+     *  in-memory / scratch modules. */
+    val filePath: String? = null,
+    /** SHA-256 of the source bytes when this module was typechecked. */
+    val sourceHash: String? = null,
 )
 
 // ============================================================================

@@ -1094,7 +1094,13 @@ class TypeChecker(
                     loweredFunctions = result.loweredFunctions ?: emptyList(),
                     typedModule = result.typedModule,
                     performerRecords = result.loweredPerformers,
-                    loadedModules = result.loadedModules.mapValues { (_, m) -> m.typedModule }.filterValues { it != null }.mapValues { (_, v) -> v!! }
+                    loadedModules = result.loadedModules.mapValues { (_, m) -> m.typedModule }.filterValues { it != null }.mapValues { (_, v) -> v!! },
+                    loadedModuleSources = result.loadedModules
+                        .mapNotNull { (path, m) ->
+                            val fp = m.filePath ?: return@mapNotNull null
+                            val sh = m.sourceHash ?: return@mapNotNull null
+                            path to com.mezze.language.typechecker.LoadedModuleSource(fp, sh)
+                        }.toMap()
                 )
             }
             is TypeCheckResult.Failure -> {

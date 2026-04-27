@@ -323,7 +323,9 @@ class ModuleTypeChecker(
                         substitution = result.substitution,
                         typedModule = result.typedModule,
                         parsedModule = resolvedModule,
-                        typeContext = typeContext
+                        typeContext = typeContext,
+                        filePath = module.filePath,
+                        sourceHash = module.sourceHash,
                     )
 
                     // Cache the result in GLOBAL cache (thread-safe)

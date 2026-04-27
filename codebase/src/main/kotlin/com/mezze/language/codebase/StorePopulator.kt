@@ -3,6 +3,8 @@ package com.mezze.language.codebase
 import com.mezze.language.typechecker.TypeCheckResult
 import com.mezze.language.typedast.*
 import com.mezze.language.truffleir.FunctionIR
+import java.io.File
+import java.security.MessageDigest
 
 /**
  * Scatters compilation pipeline output into a MezzeStore.
@@ -75,6 +77,25 @@ object StorePopulator {
                 // Idempotent: same (path, hash) → same bytes → INSERT OR REPLACE no-op.
                 val typedBlob = CodebaseSerialization.serializeTypedModule(typedModule)
                 store.putTypedModule(modulePath, sourceHash, typedBlob)
+            }
+
+            // Cache typed bytes for every transitively-loaded project module
+            // (skip stdlib — its modulePath starts with "std::" and lives
+            // inside the install dir, never a project file).
+            //
+            // The LoadedModule.sourceHash from ImportResolver is a MezzeHash
+            // (#-prefixed SHA3-512). Hydration uses SHA-256 of file bytes for
+            // compatibility with DevRunner's keying. Re-compute SHA-256 here
+            // so both tools share the same `(modulePath, sourceHash)` keys.
+            for ((loadedPath, loadedTyped) in result.loadedModules) {
+                if (loadedPath == modulePath) continue          // already wrote above
+                if (loadedPath.startsWith("std::")) continue    // stdlib handled by PrecompiledStdlib
+                val src = result.loadedModuleSources[loadedPath] ?: continue
+                val file = File(src.filePath).takeIf { it.exists() } ?: continue
+                val sha256 = sha256Hex(file.readText())
+                store.putModule(loadedPath, src.filePath, sha256)
+                val blob = CodebaseSerialization.serializeTypedModule(loadedTyped)
+                store.putTypedModule(loadedPath, sha256, blob)
             }
 
             val functions = result.loweredFunctions
@@ -303,5 +324,12 @@ object StorePopulator {
             is com.mezze.language.truffleir.CharLitIR -> {}
             is com.mezze.language.truffleir.FracLitIR -> {}
         }
+    }
+
+    /** SHA-256 of source bytes; matches DevRunner / LSP keying convention
+     *  for the typed_modules table. */
+    private fun sha256Hex(content: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 }
