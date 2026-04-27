@@ -159,10 +159,13 @@ object DevRunner {
                 return
             }
 
-            // Clear module caches so typechecker sees fresh source.
-            // Don't call TypeChecker.clearCache() — it triggers PrecompiledStdlib re-init.
+            // Clear ALL caches — nuclear option for correctness
             com.mezze.language.typechecker.ModuleResolver.clearCache()
+            com.mezze.language.typechecker.TypeChecker.clearCache()
+            com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
             com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack()
+            com.mezze.interpreter.compiler.PipelineRunner.clearCache()
+            MezzeLanguage.clearLastResult()
 
             val typeChecker = com.mezze.language.typechecker.TypeChecker()
             val result = try {
@@ -180,36 +183,34 @@ object DevRunner {
                 return
             }
 
-            // Write to cache.sqlite — the store is the source of truth
-            val newHashes = result.loweredFunctions.joinToString(";") { it.hash.hex }
+            // Write to cache.sqlite for next fresh run
             try {
                 StorePopulator.populate(store, result, modulePath, filePath, sourceHash)
                 store.setMetadata("entry_name", entryName)
                 store.setMetadata("module_path", modulePath)
-                store.setMetadata("user_function_hashes", newHashes)
+                store.setMetadata("user_function_hashes",
+                    result.loweredFunctions.joinToString(";") { it.hash.hex })
                 if (result.performerRecords.isNotEmpty()) {
                     store.setMetadata("performer_records",
                         result.performerRecords.joinToString(";") { it.joinToString(",") })
                 }
-            } catch (e: Exception) {
-                System.err.println("[DevRunner] Store write failed: ${e.message}")
-            }
-            if (System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println("[DevRunner] Stored ${result.loweredFunctions.size} functions, hashes start: ${newHashes.take(32)}...")
-            }
+            } catch (_: Exception) {}
+
+            // Use freshly compiled functions directly (not from store)
+            return executeAndReport(result.loweredFunctions, result.performerRecords,
+                projectRoot, entryName, inspect, inspectBrk, engine, startTime)
         }
 
-        // ALWAYS load from cache.sqlite — single source of truth
+        // Fresh path — load from cache.sqlite
         val functions = loadFunctions(store)
         val performers = loadPerformerRecords(store)
-        if (System.getenv("MEZZE_DEBUG") != null) {
-            System.err.println("[DevRunner] Loaded ${functions.size} functions from store, first: ${functions.firstOrNull()?.name}/${functions.firstOrNull()?.hash?.hex?.take(16)}")
-        }
 
         if (functions.isEmpty()) {
             printError("Error", "No functions in cache. Delete .mz/ and retry.")
             return
         }
+
+        executeAndReport(functions, performers, projectRoot, entryName, inspect, inspectBrk, engine, startTime)
 
         // Execute
         try {
@@ -241,6 +242,25 @@ object DevRunner {
                 store.setMetadata("stdlib_loaded", "true")
             }
         } catch (_: Exception) {}
+    }
+
+    private fun executeAndReport(
+        functions: List<FunctionIR>, performers: List<Array<String>>,
+        projectRoot: File, entryName: String, inspect: Boolean, inspectBrk: Boolean,
+        engine: Engine, startTime: Long
+    ) {
+        try {
+            executeWithTruffle(functions, performers, projectRoot.toPath(), entryName, inspect, inspectBrk, engine)
+        } catch (e: org.graalvm.polyglot.PolyglotException) {
+            printError("Runtime Error", e.message ?: "Unknown error")
+            return
+        } catch (e: Exception) {
+            printError("Error", e.message ?: "Unknown error")
+            return
+        }
+        val elapsed = (System.nanoTime() - startTime) / 1_000_000
+        System.err.println()
+        System.err.println("${ANSI_GREEN}[done in ${elapsed}ms]${ANSI_RESET}")
     }
 
     private fun executeWithTruffle(
