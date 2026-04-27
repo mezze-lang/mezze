@@ -149,18 +149,8 @@ object DevRunner {
             System.err.println("[DevRunner] file=$filePath stale=$stale hash=${sourceHash.take(16)} source_preview=${source.lines().last { it.contains("msg") || it.isNotBlank() }.trim().take(40)}")
         }
 
-        val functions: List<FunctionIR>
-        val performers: List<Array<String>>
-
         if (stale) {
-            // Clear typechecker caches for the changed module
-            com.mezze.language.typechecker.ModuleResolver.clearCache()
-            com.mezze.language.typechecker.TypeChecker.clearCache()
-            com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
-            com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack()
-            com.mezze.interpreter.compiler.PipelineRunner.clearCache()
-
-            // Compile
+            // Compile the changed file
             val parser = com.mezze.language.parser.MezzeParser()
             val ast = try {
                 parser.parseParsedModule(source, sourceFile.name)
@@ -168,6 +158,11 @@ object DevRunner {
                 printError("Parse Error", e.message ?: "Unknown parse error")
                 return
             }
+
+            // Clear module caches so typechecker sees fresh source.
+            // Don't call TypeChecker.clearCache() — it triggers PrecompiledStdlib re-init.
+            com.mezze.language.typechecker.ModuleResolver.clearCache()
+            com.mezze.language.typechecker.module.ModuleTypeChecker.clearTypeCheckingStack()
 
             val typeChecker = com.mezze.language.typechecker.TypeChecker()
             val result = try {
@@ -180,42 +175,40 @@ object DevRunner {
                 return
             }
 
-            functions = result.loweredFunctions
-            performers = result.performerRecords
-
-            if (functions.isEmpty()) {
+            if (result.loweredFunctions.isEmpty()) {
                 printError("Error", "No functions produced by compiler")
                 return
             }
 
-            // Store in cache.sqlite — same as DevCommand
+            // Write to cache.sqlite — the store is the source of truth
+            val newHashes = result.loweredFunctions.joinToString(";") { it.hash.hex }
             try {
                 StorePopulator.populate(store, result, modulePath, filePath, sourceHash)
                 store.setMetadata("entry_name", entryName)
                 store.setMetadata("module_path", modulePath)
-                store.setMetadata("user_function_hashes",
-                    functions.joinToString(";") { it.hash.hex })
-                if (performers.isNotEmpty()) {
+                store.setMetadata("user_function_hashes", newHashes)
+                if (result.performerRecords.isNotEmpty()) {
                     store.setMetadata("performer_records",
-                        performers.joinToString(";") { it.joinToString(",") })
+                        result.performerRecords.joinToString(";") { it.joinToString(",") })
                 }
-            } catch (_: Exception) {}
-        } else {
-            // Fresh — load from cache.sqlite
-            val cachedHashes = store.getMetadata("user_function_hashes")
-            if (cachedHashes == null || cachedHashes.isEmpty()) {
-                printError("Error", "No cached functions. Delete .mz/ and retry.")
-                return
+            } catch (e: Exception) {
+                System.err.println("[DevRunner] Store write failed: ${e.message}")
             }
-            functions = cachedHashes.split(";").mapNotNull { hex ->
-                if (hex.isEmpty()) return@mapNotNull null
-                val irBytes = store.getIR(Hash(hex)) ?: return@mapNotNull null
-                CodebaseSerialization.deserializeFunctionIR(irBytes)
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println("[DevRunner] Stored ${result.loweredFunctions.size} functions, hashes start: ${newHashes.take(32)}...")
             }
-            val performerData = store.getMetadata("performer_records")
-            performers = if (performerData != null && performerData.isNotEmpty()) {
-                performerData.split(";").map { it.split(",").toTypedArray() }
-            } else emptyList()
+        }
+
+        // ALWAYS load from cache.sqlite — single source of truth
+        val functions = loadFunctions(store)
+        val performers = loadPerformerRecords(store)
+        if (System.getenv("MEZZE_DEBUG") != null) {
+            System.err.println("[DevRunner] Loaded ${functions.size} functions from store, first: ${functions.firstOrNull()?.name}/${functions.firstOrNull()?.hash?.hex?.take(16)}")
+        }
+
+        if (functions.isEmpty()) {
+            printError("Error", "No functions in cache. Delete .mz/ and retry.")
+            return
         }
 
         // Execute
