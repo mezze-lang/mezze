@@ -237,7 +237,7 @@ class InitCommand {
 
     private fun createAppFile(file: File, packageName: String) {
         val content = """
-            use std::effects::log::{println, Log, Console}
+            use std::effects::log::{println, Console}
 
             let main = {} -> perform Console in do
                 println { msg = "Hello from $packageName!" }

@@ -53,6 +53,7 @@ object DevRunner {
         val appName = parsed["app-name"] ?: modulePath
         val inspect = parsed.containsKey("inspect")
         val inspectBrk = parsed.containsKey("inspect-brk")
+        val noWatch = parsed.containsKey("no-watch")
 
         System.setProperty("mezze.project.root", projectRoot.absolutePath)
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
@@ -74,8 +75,33 @@ object DevRunner {
             .option("engine.WarnInterpreterOnly", "false")
             .build()
 
-        // Watch mode is the only mode — JVM stays alive, recompiles on file changes
-        runWatchMode(store, engine, projectRoot, entryFile, entryName, modulePath, appName, inspect, inspectBrk)
+        if (noWatch) {
+            runOnce(store, engine, projectRoot, entryFile, entryName, modulePath, appName, inspect, inspectBrk)
+        } else {
+            // Watch mode — JVM stays alive, recompiles on file changes.
+            runWatchMode(store, engine, projectRoot, entryFile, entryName, modulePath, appName, inspect, inspectBrk)
+        }
+    }
+
+    /**
+     * Compile + execute once, then exit. Used by `mez dev --no-watch` (or
+     * `--nw`) for CI smoke tests, scripting, and "I just want to run this
+     * and not have my terminal taken over."
+     */
+    private fun runOnce(
+        store: SQLiteMezzeStore, engine: Engine,
+        projectRoot: File, entryFile: String, entryName: String, modulePath: String,
+        appName: String, inspect: Boolean, inspectBrk: Boolean
+    ) {
+        val sourceFile = File(projectRoot, entryFile)
+        if (!sourceFile.exists()) {
+            System.err.println("Error: Source file not found: ${sourceFile.absolutePath}")
+            System.exit(1)
+        }
+        compileStoreExecute(
+            store, engine, sourceFile, projectRoot, entryName, modulePath,
+            appName, inspect, inspectBrk, ReloadMode.COLD_START
+        )
     }
 
     private fun runWatchMode(

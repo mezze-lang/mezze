@@ -15,6 +15,7 @@ class DevCommand {
     fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
         val inspect = args.contains("--inspect")
         val inspectBrk = args.contains("--inspect-brk")
+        val noWatch = args.contains("--no-watch") || args.contains("--nw")
         val mezzeToml = File(currentDir, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
@@ -81,6 +82,7 @@ class DevCommand {
         )
         if (inspect) programArgs.add("--inspect")
         if (inspectBrk) programArgs.add("--inspect-brk")
+        if (noWatch) programArgs.add("--no-watch")
 
         val exitCode = com.mezze.language.cli.JvmLauncher.spawn(
             mainClass = "com.mezze.language.cli.commands.DevRunner",

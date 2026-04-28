@@ -3,7 +3,7 @@
 # Abilities define interfaces. Types implement them.
 # Operators like +, ==, < desugar to ability method calls.
 
-use std::effects::log::{Log, Console, println}
+use std::effects::log::{Console, println}
 
 # Define a custom ability
 ability Printable for 'a where {

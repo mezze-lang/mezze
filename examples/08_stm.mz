@@ -4,7 +4,7 @@
 # inside atomic transactions. No locks, no deadlocks.
 
 use std::effects::stm::{STM, OptimisticSTM, TVar, tvar, deref}
-use std::effects::log::{Log, Console, println}
+use std::effects::log::{Console, println}
 
 # Transfer between two accounts atomically
 let transfer = {from, to, amount} -> do

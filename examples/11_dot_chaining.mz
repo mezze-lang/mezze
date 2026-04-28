@@ -5,7 +5,7 @@
 #   x == y ->  x.eq {r = y}
 # Types can also have inherent impls that add .method {} calls.
 
-use std::effects::log::{Log, Console, println}
+use std::effects::log::{Console, println}
 use std::str
 use std::collections::seq
 

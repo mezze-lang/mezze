@@ -3,7 +3,7 @@
 # SeededRandom provides deterministic randomness — same seed, same results.
 # Multiple effects compose by nesting perform blocks.
 
-use std::effects::log::{Log, Console, println}
+use std::effects::log::{Console, println}
 use std::effects::random::{Random, SeededRandom, random_int, random_float}
 use std::collections::seq
 

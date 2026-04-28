@@ -9,7 +9,7 @@ use std::effects::mutation::{
     get, set, swap, len,
     int_to_mut, read_int, incr, while
 }
-use std::effects::log::{Log, Console, println}
+use std::effects::log::{Console, println}
 
 let partition = {arr, low, high} -> do
     let pivot_val = match get {seq = arr, i = high} is

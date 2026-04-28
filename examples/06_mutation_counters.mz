@@ -8,7 +8,7 @@ use std::effects::mutation::{
     map_to_mut, map_to_immut, map_put, map_get,
     for_range, while
 }
-use std::effects::log::{Log, Console, println}
+use std::effects::log::{Console, println}
 use std::collections::seq
 use std::collections::map
 

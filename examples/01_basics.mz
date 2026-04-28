@@ -2,7 +2,7 @@
 #
 # Mezze is a functional language. Everything is immutable by default.
 # Functions take record-style named parameters: {x, y} -> x + y
-use std::effects::log::{ Log, Console, println }
+use std::effects::log::{ Console, println }
 use std::collections::seq
 # Let bindings
 # Let bindings

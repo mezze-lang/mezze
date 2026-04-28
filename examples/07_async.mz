@@ -4,7 +4,7 @@
 # Async.await collects results. Async.join runs two tasks concurrently.
 
 use std::effects::async::{Async, LoomAsync, Promise}
-use std::effects::log::{Log, Console, println}
+use std::effects::log::{Console, println}
 use std::collections::seq
 
 # Simulate work by summing 1..n

@@ -5,7 +5,7 @@
 
 use std::effects::early_return::{Return, EarlyReturn}
 use std::effects::exception::{Exception, ExceptionToResult}
-use std::effects::log::{Log, Console, println}
+use std::effects::log::{Console, println}
 
 # Exception: wrap happy path in Ok {val = ...}
 let safe_div = {a, b} ->

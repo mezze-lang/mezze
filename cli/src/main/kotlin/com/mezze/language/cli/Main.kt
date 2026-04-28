@@ -120,21 +120,17 @@ fun main(args: Array<String>) {
 
     try {
         when (command) {
-            "parse" -> handleParseCommand(remainingArgs)
             "check" -> handleCheckCommand(remainingArgs)
-            "exec" -> handleExecCommand(remainingArgs)
-            "compile" -> handleCompileCommand(remainingArgs)
             "dev" -> handleDevCommand(remainingArgs)
             "build" -> handleBuildCommand(remainingArgs)
-            // Package management commands
             "init" -> handleInitCommand(remainingArgs)
-            "add" -> handleAddCommand(remainingArgs)
-            "remove" -> handleRemoveCommand(remainingArgs)
-            "sync" -> handleSyncCommand(remainingArgs)
-            // Developer tools
-            "test" -> com.mezze.language.cli.commands.TestCommand().execute(remainingArgs)
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
+            // Package management (add/remove/sync) is unwired pending #108.
+            // The implementations exist but the dependency-resolution backend
+            // (deps.sqlite, mezze_packages/) isn't connected to the rest of
+            // the pipeline, so users would see misleading "success" messages.
+            // Re-enable in dispatcher + showUsage when #108 lands.
             else -> {
                 println("Error: Unknown command: $command")
                 println()
@@ -160,38 +156,27 @@ private fun showHelp() {
     println()
     showUsage()
     println()
-    println("FILE-BASED COMMANDS (no Mezze.toml needed):")
-    println("  parse     Parse Mezze code and show AST")
-    println("  check     Type check Mezze code and show inferred types")
-    println("  exec      Execute a .mz file directly")
-    println("  compile   Compile a .mz file to standalone JAR")
-    println()
-    println("PACKAGE-BASED COMMANDS (requires Mezze.toml):")
-    println("  dev       Run app from Mezze.toml (for development)")
-    println("  build     Compile app from Mezze.toml to JAR (for production)")
-    println()
-    println("PACKAGE MANAGEMENT:")
+    println("PROJECT COMMANDS (requires Mezze.toml):")
     println("  init      Create a new Mezze package")
-    println("  add       Add a dependency to Mezze.toml")
-    println("  remove    Remove a dependency from Mezze.toml")
-    println("  sync      Download and install all dependencies")
+    println("  dev       Run app — watches files and hot-reloads (--no-watch to run once)")
+    println("  build     Build app to a standalone JAR")
+    println("  check     Type check the project")
     println()
-    println("DEVELOPER TOOLS:")
-    println("  lsp       Start Language Server Protocol server")
+    println("EDITOR / FORMATTING:")
     println("  fmt       Format Mezze source code")
+    println("  lsp       Start Language Server Protocol server")
     println()
     println("GLOBAL OPTIONS:")
     println("  -h, --help     Show this help message")
     println("  -v, --version  Show version information")
     println()
     println("EXAMPLES:")
-    println("  mezze init --app                      # Create an app package")
-    println("  mezze dev                             # Run app from Mezze.toml")
-    println("  mezze build                           # Build app to JAR")
-    println("  mezze exec program.mz               # Execute a file")
-    println("  mezze compile program.mz            # Compile file to JAR")
+    println("  mez init my_app --app           # Create an app package")
+    println("  cd my_app && mez dev            # Run app, hot-reload on save")
+    println("  mez dev --no-watch              # Run once and exit")
+    println("  mez build                       # Build app to JAR")
     println()
-    println("For command-specific help: mezze <command> --help")
+    println("For command-specific help: mez <command> --help")
 }
 
 /**
@@ -214,15 +199,13 @@ private fun showVersion() {
  */
 private fun showUsage() {
     println("USAGE:")
-    println("  mezze <command> [options] [file]")
+    println("  mez <command> [options]")
     println()
     println("COMMANDS:")
-    println("  File-based:    parse, check, exec, compile")
-    println("  Package-based: dev, build")
-    println("  Packages:      init, add, remove, sync")
-    println("  Tools:         lsp, fmt")
+    println("  Project:  init, dev, build, check")
+    println("  Tools:    fmt, lsp")
     println()
-    println("For command-specific help: mezze <command> --help")
+    println("For command-specific help: mez <command> --help")
 }
 
 /**
@@ -230,19 +213,6 @@ private fun showUsage() {
  */
 private fun showCommandHelp(command: String) {
     when (command) {
-        "parse" -> {
-            println("USAGE: mezze parse [file]")
-            println()
-            println("Parse Mezze source code and display the Abstract Syntax Tree")
-            println()
-            println("OPTIONS:")
-            println("  -h, --help         Show this help message")
-            println()
-            println("EXAMPLES:")
-            println("  mezze parse program.mz       # Parse a file")
-            println("  echo 'let x = 5' | mezze parse # Parse from stdin")
-        }
-        
         "check" -> {
             println("USAGE: mezze check [options] [file]")
             println()
@@ -265,50 +235,6 @@ private fun showCommandHelp(command: String) {
             println("  mezze check --app server       # Check specific app")
         }
         
-        "exec" -> {
-            println("USAGE: mezze exec [file]")
-            println()
-            println("Execute Mezze source code directly without compilation")
-            println("Fast startup, direct execution with full Truffle JIT optimization")
-            println()
-            println("REQUIREMENTS:")
-            println("  Program must define 'main' with type: {} -> {} <*>")
-            println("  - Takes no arguments: {}")
-            println("  - Returns unit: {}")
-            println("  - Performs effects: <*> (use 'perform Handler in')")
-            println()
-            println("OPTIONS:")
-            println("  -h, --help         Show this help message")
-            println()
-            println("EXAMPLE:")
-            println("  use std::effects::log::{println, Log, Console}")
-            println()
-            println("  let main = {} -> perform Console in")
-            println("    println { msg = \"Hello, World!\" }")
-        }
-        
-        "compile" -> {
-            println("USAGE: mezze compile <file> [output]")
-            println()
-            println("Compile Mezze source code to a standalone JAR")
-            println()
-            println("ARGUMENTS:")
-            println("  <file>             Input Mezze source file")
-            println("  [output]           Output JAR name (default: same as input with .jar)")
-            println()
-            println("OPTIONS:")
-            println("  -h, --help         Show this help message")
-            println()
-            println("EXAMPLES:")
-            println("  mezze compile program.mz                # Creates program.jar")
-            println("  mezze compile program.mz myapp.jar      # Creates myapp.jar")
-            println()
-            println("OUTPUT:")
-            println("  Pre-compiled AST + Interpreter + Truffle runtime")
-            println("  Smaller size, faster startup than full JIT builds")
-            println()
-        }
-
         "init" -> {
             println("USAGE: mezze init [options]")
             println()
@@ -328,99 +254,44 @@ private fun showCommandHelp(command: String) {
             println()
         }
 
-        "add" -> {
-            println("USAGE: mezze add [options] <url>")
-            println()
-            println("Add a dependency to Mezze.toml")
-            println()
-            println("ARGUMENTS:")
-            println("  <url>              Full URL with SHA-256 checksum")
-            println()
-            println("OPTIONS:")
-            println("  --dev              Add to [dev-dependencies]")
-            println("  -h, --help         Show this help message")
-            println()
-            println("EXAMPLES:")
-            println("  mezze add \"https://github.com/user/pkg/releases/download/v1.0.0/pkg.tar.gz#sha256:abc123...\"")
-            println("  mezze add --dev \"https://github.com/user/test/releases/download/v0.1.0/test.tar.gz#sha256:def456...\"")
-            println()
-            println("Hint: After adding dependencies, run 'mezze sync' to download them")
-            println()
-        }
-
-        "remove" -> {
-            println("USAGE: mezze remove <package_name>")
-            println()
-            println("Remove a dependency from Mezze.toml")
-            println()
-            println("ARGUMENTS:")
-            println("  <package_name>     Name of the package to remove")
-            println()
-            println("EXAMPLES:")
-            println("  mezze remove json")
-            println("  mezze remove test_framework")
-            println()
-        }
-
-        "sync" -> {
-            println("USAGE: mezze sync [options]")
-            println()
-            println("Download and install all dependencies from Mezze.toml")
-            println()
-            println("OPTIONS:")
-            println("  --clean            Delete and re-download all packages")
-            println("  -h, --help         Show this help message")
-            println()
-            println("EXAMPLES:")
-            println("  mezze sync                       # Download missing packages")
-            println("  mezze sync --clean               # Re-download everything")
-            println()
-            println("Packages are installed to: ./mezze_packages/")
-            println("🔒 Lock file is generated: ./Mezze.lock")
-            println()
-        }
-
         "dev" -> {
-            println("USAGE: mezze dev [options]")
+            println("USAGE: mez dev [options]")
             println()
-            println("Execute app from Mezze.toml (for development)")
+            println("Run the app defined in Mezze.toml.")
             println()
-            println("Reads [[app]] entries from Mezze.toml and executes the specified app.")
-            println("Auto-calls the main function. For quick iteration during development.")
+            println("Default mode is watch: compile, execute, then watch source files and")
+            println("hot-reload on save. Press 'r' to re-run, 'q' to quit, 'h' for help.")
             println()
             println("OPTIONS:")
-            println("  --app <name>       Run a specific app by name")
+            println("  --no-watch, --nw   Run once and exit (skip the file watcher).")
+            println("  --app <name>       Pick a specific [[app]] entry.")
+            println("  --inspect          Attach Chrome DevTools (waits at first line).")
+            println("  --inspect-brk      Same as --inspect, but breaks before main.")
             println("  -h, --help         Show this help message")
             println()
             println("EXAMPLES:")
-            println("  mezze dev                        # Run default app (first [[app]])")
-            println("  mezze dev --app server           # Run specific app")
-            println()
-            println("Hint: For file-based execution, use: mezze exec <file>")
+            println("  mez dev                        # Watch + hot-reload")
+            println("  mez dev --no-watch             # Run once and exit")
+            println("  mez dev --app server           # Run a specific app")
             println()
         }
 
         "build" -> {
-            println("USAGE: mezze build [options]")
+            println("USAGE: mez build [options]")
             println()
-            println("Compile app from Mezze.toml to standalone JAR (for production)")
-            println()
-            println("Reads [[app]] entries from Mezze.toml and compiles to a JAR.")
-            println("Includes dependencies and Truffle runtime for deployment.")
+            println("Compile the app defined in Mezze.toml to a standalone JAR.")
             println()
             println("OPTIONS:")
             println("  --app <name>       Build a specific app by name")
             println("  -h, --help         Show this help message")
             println()
             println("EXAMPLES:")
-            println("  mezze build                      # Build default app")
-            println("  mezze build --app server         # Build specific app")
+            println("  mez build                      # Build default app")
+            println("  mez build --app server         # Build a specific app")
             println()
             println("OUTPUT:")
-            println("  Single app:    <package-name>.jar")
-            println("  Multiple apps: <app-name>.jar")
-            println()
-            println("Hint: For file-based compilation, use: mezze compile <file>")
+            println("  Single app:    target/<package-name>.jar")
+            println("  Multiple apps: target/<app-name>.jar")
             println()
         }
 
@@ -485,51 +356,6 @@ private fun showCommandHelp(command: String) {
             println()
             showUsage()
         }
-    }
-}
-
-private fun handleParseCommand(args: List<String>) {
-    val source = when {
-        args.isEmpty() -> {
-            // Read from stdin
-            readStdin()
-        }
-        args.size == 1 -> {
-            // Read from file
-            val file = File(args[0])
-            if (!file.exists()) {
-                println("Error: File not found at '${args[0]}'")
-                return
-            }
-            file.readText()
-        }
-        else -> {
-            println("Error: parse command takes at most 1 argument (filename)")
-            showUsage()
-            return
-        }
-    }
-
-    val fileName = if (args.size == 1) args[0] else null
-
-    try {
-        val startTime = System.nanoTime()
-        val parser = MezzeParser()
-        val module = parser.parseParsedModule(source, file = fileName ?: "<stdin>")
-        val parseTime = (System.nanoTime() - startTime) / 1_000_000.0
-
-        println(prettyPrintParsedModule(module))
-        println()
-        println("Parsed in ${String.format("%.2f", parseTime)}ms")
-    } catch (e: com.mezze.language.parser.ParseException) {
-        println("Error: Parse Error")
-        println("-".repeat(50))
-        println(e.message)
-        kotlin.system.exitProcess(1)
-    } catch (e: Exception) {
-        println("Error: Error:")
-        println(e.message ?: "Unknown error")
-        kotlin.system.exitProcess(1)
     }
 }
 
@@ -722,255 +548,6 @@ private fun printTypedModuleSuccess(module: com.mezze.language.typedast.TypedMod
     }
 }
 
-private fun handleExecCommand(args: List<String>) {
-    val showTiming = System.getenv("MEZZE_TIMING") != null
-    val totalStart = System.nanoTime()
-
-    val (source, filePath) = when {
-        args.isEmpty() -> {
-            // Read from stdin
-            Pair(readStdin(), null)
-        }
-        args.size == 1 -> {
-            // Read from file
-            val file = File(args[0])
-            if (!file.exists()) {
-                println("Error: File not found at '${args[0]}'")
-                return
-            }
-            Pair(file.readText(), file.toPath())
-        }
-        else -> {
-            println("Error: exec command takes at most 1 argument (filename)")
-            showUsage()
-            return
-        }
-    }
-
-    // Parse the source
-    val parseStart = System.nanoTime()
-    val parser = MezzeParser()
-    val fileName = filePath?.fileName?.toString()
-    val ast = parser.parseParsedModule(source, file = fileName ?: "<unknown>")
-    val parseTime = (System.nanoTime() - parseStart) / 1_000_000
-
-    // Use the source file's directory for module resolution
-    // This allows the ModuleResolver to find Mezze.toml in parent directories
-    // Note: mezze.project.root is for stdlib location, NOT for user module resolution
-    val typeCheckProjectRoot = if (filePath != null) {
-        filePath.toAbsolutePath().parent ?: filePath.toAbsolutePath()
-    } else {
-        java.nio.file.Paths.get(".").toAbsolutePath()
-    }
-
-    // Type-check with main validation: main must be {} -> {} <*>
-    val typeCheckStart = System.nanoTime()
-    val typeChecker = TypeChecker()
-    val typeCheckResult = try {
-        typeChecker.typeCheck(ast, typeCheckProjectRoot, enablePrelude = true)
-    } catch (e: TypeCheckError) {
-        // Format error with source location and code snippet
-        val formattedError = SourceContext.formatError(
-            errorType = "Type Error",
-            message = e.message ?: "Unknown error",
-            location = e.loc?.let { loc ->
-                if (loc.file.isEmpty() && fileName != null) {
-                    com.mezze.language.parsedast.Loc(fileName, loc.startLine, loc.startCol, loc.endLine, loc.endCol)
-                } else {
-                    loc
-                }
-            },
-            sourceCode = source
-        )
-        println(formattedError)
-        kotlin.system.exitProcess(1)
-    } catch (e: com.mezze.language.typechecker.module.ModuleError.PrivateExport) {
-        // Pretty-print private export error with source context
-        println("Error: Module Error [Private Item]")
-        println("-".repeat(50))
-        e.loc?.let { loc ->
-            println("   --> ${loc.file.ifEmpty { fileName ?: "<input>" }}:${loc.startLine}:${loc.startCol}")
-            val lines = source.lines()
-            if (loc.startLine > 0 && loc.startLine <= lines.size) {
-                val lineNum = loc.startLine
-                val lineContent = lines[lineNum - 1]
-                println("    |")
-                println("${lineNum.toString().padStart(3)} | $lineContent")
-                val underlineLen = if (loc.startLine == loc.endLine && loc.endCol > loc.startCol) loc.endCol - loc.startCol else 1
-                println("    | ${" ".repeat(maxOf(0, loc.startCol - 1))}${"^".repeat(maxOf(1, underlineLen))}")
-            }
-            println()
-        }
-        println("Error: '${e.exportName}' exists in '${e.modulePath}' but is not public")
-        println()
-        println("Hint: To fix this, add 'pub' to the definition in ${e.modulePath}:")
-        println()
-        println("   pub let ${e.exportName} = ...")
-        println()
-        kotlin.system.exitProcess(1)
-    } catch (e: com.mezze.language.typechecker.module.ModuleError.ExportNotFound) {
-        // Pretty-print export not found error with source context
-        println("Error: Module Error [Export Not Found]")
-        println("-".repeat(50))
-        e.loc?.let { loc ->
-            println("   --> ${loc.file.ifEmpty { fileName ?: "<input>" }}:${loc.startLine}:${loc.startCol}")
-            // Show source code snippet
-            val lines = source.lines()
-            if (loc.startLine > 0 && loc.startLine <= lines.size) {
-                val lineNum = loc.startLine
-                val lineContent = lines[lineNum - 1]
-                println("    |")
-                println("${lineNum.toString().padStart(3)} | $lineContent")
-                val underlineLen = if (loc.startLine == loc.endLine && loc.endCol > loc.startCol) loc.endCol - loc.startCol else 1
-                println("    | ${" ".repeat(maxOf(0, loc.startCol - 1))}${"^".repeat(maxOf(1, underlineLen))}")
-            }
-            println()
-        }
-        println("Error: Export '${e.exportName}' not found in module '${e.modulePath}'")
-        println()
-
-        // Find similar exports using Levenshtein distance
-        val similarExports = e.availableExports
-            .map { it to levenshteinDistance(e.exportName.lowercase(), it.lowercase()) }
-            .filter { it.second <= 3 }  // Max distance of 3
-            .sortedBy { it.second }
-            .take(5)
-            .map { it.first }
-
-        if (similarExports.isNotEmpty()) {
-            println("Hint: Did you mean:")
-            similarExports.forEach { println("   • $it") }
-            println()
-        }
-
-        if (e.availableExports.isNotEmpty()) {
-            println("Available exports from '${e.modulePath}':")
-            val displayExports = if (e.availableExports.size > 10) {
-                e.availableExports.take(10) + listOf("... and ${e.availableExports.size - 10} more")
-            } else {
-                e.availableExports
-            }
-            displayExports.forEach { println("   • $it") }
-        } else {
-            println("Hint: Suggestions:")
-            println("   - Check the export name spelling")
-            println("   - Verify the module exports this item with 'pub'")
-        }
-        kotlin.system.exitProcess(1)
-    } catch (e: com.mezze.language.typechecker.module.ModuleError) {
-        // Handle other module errors with source location if available
-        println("Error: Module Error")
-        println("-".repeat(50))
-        println("Error: ${e.message ?: "Unknown module error"}")
-        kotlin.system.exitProcess(1)
-    }
-
-    val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000
-
-    // Use TruffleIR (loweredFunctions) — all modules are already included via monomorphization.
-    // The compileFromIR path finds "main" or "__entry__" and executes its body directly,
-    // so no need to append a main() call.
-    val functions = typeCheckResult.loweredFunctions
-
-    try {
-        // Suppress verbose Truffle logging (JIT compilation is enabled via truffle-runtime)
-        System.setProperty("polyglot.log.level", "OFF")
-
-        // Use the source file's directory for module resolution
-        val projectRootPath = if (filePath != null) {
-            filePath.toAbsolutePath().parent ?: filePath.toAbsolutePath()
-        } else {
-            java.nio.file.Paths.get(".").toAbsolutePath()
-        }
-
-        // Execute using V2 interpreter with TruffleIR
-        val execStart = System.nanoTime()
-        executeWithV2Interpreter(functions, projectRootPath)
-        val execTime = (System.nanoTime() - execStart) / 1_000_000
-        val totalTime = (System.nanoTime() - totalStart) / 1_000_000
-
-        // Print timing if enabled
-        if (showTiming) {
-            System.err.println("\nTiming: Timing breakdown:")
-            System.err.println("   Parse:      ${parseTime}ms")
-            System.err.println("   TypeCheck:  ${typeCheckTime}ms")
-            System.err.println("   Execute:    ${execTime}ms")
-            System.err.println("   Total:      ${totalTime}ms")
-        }
-
-        // Program should return {}, so we don't print the result
-        // Execution completed silently
-
-    } catch (e: TypeCheckError) {
-        // Pass source code and file for enhanced error messages with code snippets
-        println(ErrorFormatter.format(e, source))
-        kotlin.system.exitProcess(1)
-    } catch (e: com.mezze.language.parser.ParseException) {
-        println("Error: Parse Error")
-        println("-".repeat(50))
-        println(e.message)
-        kotlin.system.exitProcess(1)
-    } catch (e: PolyglotException) {
-        println("Error: Runtime Error:")
-        println(e.message ?: "Unknown runtime error")
-        kotlin.system.exitProcess(1)
-    } catch (e: Exception) {
-        println("Error: Error:")
-        println(e.message ?: "Unknown error")
-        kotlin.system.exitProcess(1)
-    }
-}
-
-/**
- * Execute pre-lowered TruffleIR using the V2 interpreter (optimized Truffle implementation).
- * V2 uses shape-cached record access, typed frame slots, and jump table dispatch.
- * All modules are already included in the FunctionIR list via monomorphization.
- */
-private fun executeWithV2Interpreter(
-    functions: List<com.mezze.language.truffleir.FunctionIR>,
-    projectRoot: java.nio.file.Path
-) {
-    // Set up V2 context
-    val context = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.runtime.MezzeLanguage.ID)
-        .allowAllAccess(true)
-        .allowCreateThread(true)
-        .build()
-
-    try {
-        // Store TruffleIR functions for direct execution (bypasses parsing)
-        com.mezze.interpreter.runtime.MezzeLanguage.setFunctionsForDirectExecution(functions, projectRoot)
-
-        // Create a dummy source to trigger MezzeLanguage.parse()
-        val source = org.graalvm.polyglot.Source.newBuilder(
-            com.mezze.interpreter.runtime.MezzeLanguage.ID,
-            "# Direct TruffleIR execution",
-            "__direct_execution__.mz"
-        ).buildLiteral()
-
-        // Execute via polyglot API
-        context.eval(source)
-
-        // Result is stored in MezzeLanguage.getLastExecutionResult() if needed
-    } finally {
-        // Use cancelIfExecuting=true for Go/Rust-style semantics:
-        // When main exits, any fire-and-forget tasks (unawaited spawns) are cancelled.
-        // This matches Go (goroutines die when main exits) and Rust (tokio tasks cancelled).
-        // See: https://www.graalvm.org/truffle/javadoc/org/graalvm/polyglot/Context.html
-        context.close(true)
-    }
-}
-
-private fun handleCompileCommand(args: List<String>) {
-    println("'mez compile' has been replaced by 'mez build'.")
-    println()
-    println("To compile a project to a standalone JAR:")
-    println("  1. Create a Mezze.toml with 'mez init --app'")
-    println("  2. Run 'mez build'")
-    println()
-    println("See 'mez build --help' for details.")
-}
-
-
 private fun handleDevCommand(args: List<String>) {
     com.mezze.language.cli.commands.DevCommand().execute(args)
 }
@@ -986,17 +563,9 @@ private fun handleInitCommand(args: List<String>) {
     com.mezze.language.cli.commands.InitCommand().execute(args)
 }
 
-private fun handleAddCommand(args: List<String>) {
-    com.mezze.language.cli.commands.AddCommand().executeAdd(args)
-}
-
-private fun handleRemoveCommand(args: List<String>) {
-    com.mezze.language.cli.commands.AddCommand().executeRemove(args)
-}
-
-private fun handleSyncCommand(args: List<String>) {
-    com.mezze.language.cli.commands.SyncCommand().execute(args)
-}
+// AddCommand / SyncCommand classes remain in tree — re-wire here when the
+// dependency-resolution backend (#108) lands: deps.sqlite + Mezze.lock +
+// pipeline reads from mezze_packages/.
 
 /**
  * Start the Language Server Protocol server
