@@ -16,6 +16,16 @@ class DevCommand {
         val inspect = args.contains("--inspect")
         val inspectBrk = args.contains("--inspect-brk")
         val noWatch = args.contains("--no-watch") || args.contains("--nw")
+        val profile = args.contains("--profile")
+        val coverage = args.contains("--coverage")
+        val traceJit = args.contains("--trace-jit")
+        // --insight=<path> attaches a JS probe; capture the path arg.
+        val insightFile = args.firstNotNullOfOrNull { arg ->
+            when {
+                arg.startsWith("--insight=") -> arg.substringAfter("=")
+                else -> null
+            }
+        }
         val mezzeToml = File(currentDir, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
@@ -83,6 +93,10 @@ class DevCommand {
         if (inspect) programArgs.add("--inspect")
         if (inspectBrk) programArgs.add("--inspect-brk")
         if (noWatch) programArgs.add("--no-watch")
+        if (profile) programArgs.add("--profile")
+        if (coverage) programArgs.add("--coverage")
+        if (traceJit) programArgs.add("--trace-jit")
+        if (insightFile != null) programArgs.add("--insight=$insightFile")
 
         val exitCode = com.mezze.language.cli.JvmLauncher.spawn(
             mainClass = "com.mezze.language.cli.commands.DevRunner",

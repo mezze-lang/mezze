@@ -55,6 +55,14 @@ object DevRunner {
         val inspectBrk = parsed.containsKey("inspect-brk")
         val noWatch = parsed.containsKey("no-watch")
 
+        // Profiling / diagnostics flags. Each maps to a polyglot Engine
+        // option below. After P0 (#173), all of these produce useful output;
+        // statement-level granularity awaits #187 (per-node @GenerateWrapper).
+        val profile = parsed.containsKey("profile")
+        val coverage = parsed.containsKey("coverage")
+        val traceJit = parsed.containsKey("trace-jit")
+        val insightFile = parsed["insight"]
+
         System.setProperty("mezze.project.root", projectRoot.absolutePath)
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
         System.setProperty("polyglot.log.level", "OFF")
@@ -70,14 +78,55 @@ object DevRunner {
         // ModuleTypeChecker.globalCache); cold start drops by hundreds of ms.
         hydrateTypedModulesFromStore(store, projectRoot)
 
-        // Shared Truffle Engine — JIT stays warm across runs
-        val engine = Engine.newBuilder()
-            // Allow experimental options on the Engine too. Some Truffle
-            // engine.* options (TraceCompilation, multi-tier knobs) are
-            // experimental and silently no-op without this.
+        // Shared Truffle Engine — JIT stays warm across runs.
+        // Instrument options (cpusampler, coverage, insight, JIT trace) are
+        // registered on the Engine so they survive watch reloads — each run
+        // appends to the same profile/coverage output.
+        val engineBuilder = Engine.newBuilder()
+            // Required for any Truffle instrumentation tool — these options
+            // are all "experimental" and silently no-op without this.
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
-            .build()
+
+        if (profile) {
+            // CPU sampler. Function-granularity by default (low overhead);
+            // use --cpusampler.* options on java -jar for finer settings.
+            val out = File(projectRoot, ".mz/profile.txt")
+            out.parentFile?.mkdirs()
+            engineBuilder
+                .option("cpusampler", "true")
+                .option("cpusampler.OutputFile", out.absolutePath)
+            System.err.println("${ANSI_GRAY}profile → ${out.absolutePath}${ANSI_RESET}")
+        }
+        if (coverage) {
+            val out = File(projectRoot, ".mz/coverage.txt")
+            out.parentFile?.mkdirs()
+            engineBuilder
+                .option("coverage", "true")
+                .option("coverage.OutputFile", out.absolutePath)
+            System.err.println("${ANSI_GRAY}coverage → ${out.absolutePath}${ANSI_RESET}")
+        }
+        if (traceJit) {
+            // GraalVM 24.x dropped `engine.TraceCompilation` from the polyglot
+            // option layer — these flags now live under the Graal compiler
+            // namespace and only work as JVM system properties set on the
+            // command line, not via Engine.option(). Show the user how:
+            System.err.println("${ANSI_GRAY}--trace-jit not yet wired in this Truffle build.${ANSI_RESET}")
+            System.err.println("${ANSI_GRAY}For JIT diagnostics, run with these JVM flags:${ANSI_RESET}")
+            System.err.println("${ANSI_GRAY}  java -Dgraal.TraceTruffleCompilation=true \\${ANSI_RESET}")
+            System.err.println("${ANSI_GRAY}       -Dgraal.TraceTruffleTransferToInterpreter=true \\${ANSI_RESET}")
+            System.err.println("${ANSI_GRAY}       -jar mezze.jar dev --nw${ANSI_RESET}")
+        }
+        if (insightFile != null) {
+            val f = File(insightFile)
+            if (!f.exists()) {
+                System.err.println("Error: --insight=$insightFile: file not found")
+                System.exit(1)
+            }
+            engineBuilder.option("insight", f.absolutePath)
+        }
+
+        val engine = engineBuilder.build()
 
         if (noWatch) {
             runOnce(store, engine, projectRoot, entryFile, entryName, modulePath, appName, inspect, inspectBrk)
