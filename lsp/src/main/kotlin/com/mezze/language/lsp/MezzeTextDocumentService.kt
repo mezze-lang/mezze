@@ -530,6 +530,25 @@ class MezzeTextDocumentService(
                 }
                 is TypedAstLookup.LookupResult.NotFound -> {} // Fall through to word-based lookup
             }
+
+            // Local-binding hover (#124): when the cursor is on a NAME token —
+            // either a let-binding's declared name (`let x = …` ← here), or
+            // the param name in `{ x } -> …`, or a use of `x` further down —
+            // search the scope at this position for a matching local. If we
+            // get a hit, show its type; otherwise fall through to the
+            // top-level / import paths below.
+            val localScope = TypedAstScopeWalker.bindingsAtPosition(typedModule, line, col)
+            // Iterate in reverse so innermost (shadowing) wins.
+            val localHit = localScope.asReversed().firstOrNull { it.name == word }
+            if (localHit != null) {
+                val kindLabel = when (localHit.kind) {
+                    TypedAstScopeWalker.ScopeBinding.Kind.LAMBDA_PARAM -> "param"
+                    TypedAstScopeWalker.ScopeBinding.Kind.LET_LOCAL -> "let"
+                    TypedAstScopeWalker.ScopeBinding.Kind.MATCH_BINDING -> "match"
+                    TypedAstScopeWalker.ScopeBinding.Kind.IF_LET_BINDING -> "if let"
+                }
+                return codeBlock("$kindLabel ${localHit.name} : ${formatType(localHit.type)}")
+            }
         }
 
         // If we have type check result, use it for full type info
@@ -1391,16 +1410,30 @@ class MezzeTextDocumentService(
     }
 
     /**
-     * Get local variable completions — variables in scope at the current
-     * position. Stubbed: blocked on the typed-AST loc-span bug. Lambdas,
-     * blocks and many other binders report single-token locs (the `{` for
-     * a lambda, etc.) instead of full-span, so position-based descent into
-     * the typed tree never reaches the binder. Hover-on-uses for local
-     * vars hits the same wall via TypedAstLookup.findAtPosition. Will be
-     * unblocked once parser+typechecker emit full-span locs.
+     * Get local variable completions — every binding in scope at the cursor:
+     * lambda params, do-block lets, match-bound names, if-let bindings.
+     * (Top-level decls and imports are added separately by [getBindingCompletions].)
      */
     private fun getLocalVariableCompletions(state: DocumentState, position: Position): List<CompletionItem> {
-        return emptyList()
+        val typedModule = state.typeCheckResult?.typedModule
+            ?: lastSuccessfulResult[state.uri]?.typedModule
+            ?: return emptyList()
+        val line = position.line + 1
+        val col = position.character + 1
+        val scope = TypedAstScopeWalker.bindingsAtPosition(typedModule, line, col)
+        if (scope.isEmpty()) return emptyList()
+
+        // Inner-most shadow wins: build a Map keyed by name, later writes
+        // overwrite earlier ones (the walker emits outer-first).
+        val byName = LinkedHashMap<String, TypedAstScopeWalker.ScopeBinding>()
+        for (b in scope) byName[b.name] = b
+
+        return byName.values.map { b ->
+            CompletionItem(b.name).apply {
+                kind = CompletionItemKind.Variable
+                detail = prettyPrintTypeWithAliases(b.type, state.typeAliases)
+            }
+        }
     }
 
     /**
