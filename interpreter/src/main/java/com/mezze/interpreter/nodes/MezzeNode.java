@@ -3,21 +3,47 @@ package com.mezze.interpreter.nodes;
 import com.mezze.interpreter.MezzeTypes;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.runtime.MezzeLanguage;
+import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.dsl.TypeSystemReference;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
+import com.oracle.truffle.api.source.SourceSection;
 
 /**
  * Base class for all Mezze AST nodes.
  *
  * Uses Truffle DSL TypeSystemReference for automatic type coercion
  * and specialization support.
+ *
+ * Carries an optional {@link SourceSection} for instrumentation:
+ * Chrome Inspector breakpoints, CPU sampler line attribution, coverage,
+ * JFR frame names, etc. Set by {@code TruffleCompiler} from each
+ * NodeIR's {@code SourceInfo}. Marked {@code @CompilationFinal} so PE
+ * folds it as a constant — zero runtime cost.
  */
 @TypeSystemReference(MezzeTypes.class)
 @NodeInfo(language = "mezze", description = "Base Mezze node")
 public abstract class MezzeNode extends Node {
+
+    @CompilationFinal
+    private SourceSection sourceSection;
+
+    /** Override Truffle's default null-returning getSourceSection. */
+    @Override
+    public SourceSection getSourceSection() {
+        return sourceSection;
+    }
+
+    /**
+     * Set the source section for this node. Called once during compilation;
+     * the field is {@code @CompilationFinal} so further changes invalidate
+     * compiled code (which we never do — set-once after construction).
+     */
+    public void setSourceSection(SourceSection section) {
+        this.sourceSection = section;
+    }
 
     /**
      * Execute this node and return the result.

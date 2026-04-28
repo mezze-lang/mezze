@@ -96,6 +96,12 @@ object StandaloneHelper {
         val context = Context.newBuilder(MezzeLanguage.ID)
             .allowAllAccess(true)
             .allowCreateThread(true)
+            // Allow users to enable Truffle instrumentation (cpusampler,
+            // coverage, memtracer, insight, engine.Trace*) on the deployed
+            // jar via system properties:
+            //   java -Dpolyglot.cpusampler=true -jar app.jar
+            // Without this, every -Dpolyglot.* option silently no-ops.
+            .allowExperimentalOptions(true)
             .build()
 
         try {

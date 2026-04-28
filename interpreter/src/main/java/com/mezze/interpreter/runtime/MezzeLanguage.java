@@ -6,6 +6,8 @@ import com.mezze.language.truffleir.FunctionIR;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.TruffleLanguage;
+import com.oracle.truffle.api.instrumentation.ProvidedTags;
+import com.oracle.truffle.api.instrumentation.StandardTags;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.source.Source;
 
@@ -34,6 +36,19 @@ import java.util.concurrent.atomic.AtomicReference;
     characterMimeTypes = MezzeLanguage.MIME_TYPE,
     contextPolicy = TruffleLanguage.ContextPolicy.SHARED
 )
+@ProvidedTags({
+    // Tags advertised to Truffle instruments (debugger, sampler, coverage,
+    // tracer, Insight, JFR). Per-node `hasTag(...)` is implemented by
+    // InstrumentableNode subclasses (separate task). Without these tags,
+    // every Truffle tool silently no-ops.
+    StandardTags.RootTag.class,
+    StandardTags.RootBodyTag.class,
+    StandardTags.StatementTag.class,
+    StandardTags.ExpressionTag.class,
+    StandardTags.CallTag.class,
+    StandardTags.ReadVariableTag.class,
+    StandardTags.WriteVariableTag.class
+})
 public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 
     public static final String ID = "mezze";

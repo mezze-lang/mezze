@@ -29,6 +29,16 @@ dependencies {
     implementation("org.graalvm.sdk:graal-sdk:24.2.2")
     implementation("org.graalvm.polyglot:polyglot:24.2.2")
 
+    // Truffle instrumentation tools — Chrome Inspector (CDP), DAP (VS Code
+    // debug protocol), CPU sampler / tracer / memtracer, coverage, Insight.
+    // Without these on the classpath, Truffle reports "Could not find option"
+    // for cpusampler / coverage / inspect / etc.
+    implementation("org.graalvm.tools:profiler-tool:24.2.2")
+    implementation("org.graalvm.tools:chromeinspector-tool:24.2.2")
+    implementation("org.graalvm.tools:dap-tool:24.2.2")
+    implementation("org.graalvm.tools:coverage-tool:24.2.2")
+    implementation("org.graalvm.tools:insight-tool:24.2.2")
+
     // HTTP client - Vert.x for async HTTP requests
     implementation("io.vertx:vertx-core:4.5.1")
     implementation("io.vertx:vertx-web-client:4.5.1")

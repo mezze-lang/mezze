@@ -72,6 +72,10 @@ object DevRunner {
 
         // Shared Truffle Engine — JIT stays warm across runs
         val engine = Engine.newBuilder()
+            // Allow experimental options on the Engine too. Some Truffle
+            // engine.* options (TraceCompilation, multi-tier knobs) are
+            // experimental and silently no-op without this.
+            .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
             .build()
 
@@ -538,6 +542,10 @@ object DevRunner {
             .engine(engine)
             .allowAllAccess(true)
             .allowCreateThread(true)
+            // Required for any of Truffle's instrumentation tools — inspect,
+            // cpusampler, coverage, memtracer, insight, engine.Trace*. Without
+            // this, every option flag silently no-ops.
+            .allowExperimentalOptions(true)
 
         if (inspect || inspectBrk) {
             builder.option("inspect", "true")

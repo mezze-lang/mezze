@@ -107,9 +107,23 @@ class TruffleCompiler(
     }
 
     /**
-     * Compile a NodeIR to a MezzeNode.
+     * Compile a NodeIR to a MezzeNode and attach its source section.
+     *
+     * Every NodeIR carries `src: SourceInfo` (file, line, col span). We
+     * convert that to a Truffle [SourceSection] and stamp it on the
+     * resulting MezzeNode so Chrome Inspector breakpoints, the CPU
+     * sampler, coverage, and JFR can all attribute work to the right
+     * source line. Without this, every Truffle tool sees Mezze code as
+     * one undifferentiated blob.
      */
     fun compileNode(node: NodeIR, source: Source): MezzeNode {
+        val mezzeNode = compileNodeImpl(node, source)
+        val section = createSourceSection(source, node.src)
+        if (section != null) mezzeNode.setSourceSection(section)
+        return mezzeNode
+    }
+
+    private fun compileNodeImpl(node: NodeIR, source: Source): MezzeNode {
         return when (node) {
             // === Literals ===
             is LongLitIR -> IntLiteralNode(node.value)
