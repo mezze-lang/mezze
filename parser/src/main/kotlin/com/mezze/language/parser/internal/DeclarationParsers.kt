@@ -123,7 +123,10 @@ internal fun MezzeParser.parseLetBindingWithVisibility(stream: TokenStream, visi
 
                                 when (expr) {
                                     is ParseResult.Success -> {
-                                        val loc = spanLoc(letToken.value, assign.value, file)
+                                        // Span the entire decl: `let name = expr` covers from `let`
+                                        // through the RHS so workspace-symbol clicks land on the
+                                        // whole binding, and hover/find-decl can scope-walk inside.
+                                        val loc = spanLocTo(letToken.value, expr.remaining, file)
                                         ParseResult.Success(
                                             ParsedLetDecl(
                                                 pattern = pattern,
@@ -452,7 +455,7 @@ internal fun MezzeParser.parseTypeDeclaration(stream: TokenStream, visibility: V
                                 when (typeDef) {
                                     is ParseResult.Success -> {
                                         val file = currentFile ?: "<unknown>"
-                                        val loc = tokenLoc(typeToken.value, file)
+                                        val loc = spanLocTo(typeToken.value, typeDef.remaining, file)
                                         ParseResult.Success(
                                             ParsedTypeDecl(
                                                 name = name.value.text,
@@ -518,7 +521,7 @@ internal fun MezzeParser.parseNewtypeDeclaration(stream: TokenStream, visibility
                                         when (wrappedType) {
                                             is ParseResult.Success -> {
                                                 val file = currentFile ?: "<unknown>"
-                                                val loc = tokenLoc(newtypeToken.value, file)
+                                                val loc = spanLocTo(newtypeToken.value, wrappedType.remaining, file)
                                                 val defLoc = spanLocTo(constructor.value, wrappedType.remaining, file)
                                                 ParseResult.Success(
                                                     ParsedTypeDecl(

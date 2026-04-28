@@ -102,7 +102,7 @@ internal val MezzeParser.ifLetPostfixExpression: Parser<ParsedExpr>
                                         ParsedVariantConstruct(
                                             constructor = expr.localName,
                                             value = args.value,
-                                            loc = expr.loc
+                                            loc = expr.loc.spanTo(args.value.loc)
                                         ),
                                         args.remaining
                                     )
@@ -113,7 +113,7 @@ internal val MezzeParser.ifLetPostfixExpression: Parser<ParsedExpr>
                                         ParsedFunctionCall(
                                             result.value,
                                             args.value,
-                                            loc = result.value.loc
+                                            loc = result.value.loc.spanTo(args.value.loc)
                                         ),
                                         args.remaining
                                     )
@@ -128,14 +128,17 @@ internal val MezzeParser.ifLetPostfixExpression: Parser<ParsedExpr>
                     val dotStream = currentStream.advance()
                     val member = memberIdentifierParser(dotStream)
                     result = when (member) {
-                        is ParseResult.Success -> ParseResult.Success(
-                            ParsedMemberAccess(
-                                result.value,
-                                member.value.text,
-                                loc = result.value.loc
-                            ),
-                            member.remaining
-                        )
+                        is ParseResult.Success -> {
+                            val file = currentFile ?: "<unknown>"
+                            ParseResult.Success(
+                                ParsedMemberAccess(
+                                    result.value,
+                                    member.value.text,
+                                    loc = result.value.loc.spanTo(tokenLoc(member.value, file))
+                                ),
+                                member.remaining
+                            )
+                        }
                         is ParseResult.Failure -> break
                     }
                 }
@@ -182,7 +185,7 @@ internal val MezzeParser.lambdaExpression: Parser<ParsedExpr>
             is ParseResult.Failure -> return@parser lbrace
             is ParseResult.Success -> {
                 val file = currentFile ?: "<unknown>"
-                val lambdaLoc = tokenLoc(lbrace.value, file)
+                val lbraceTok = lbrace.value
                 val stream1 = skipNewlines(lbrace.remaining)
 
                 // Parse parameters - could be typed or untyped
@@ -203,10 +206,16 @@ internal val MezzeParser.lambdaExpression: Parser<ParsedExpr>
                                         val stream4 = skipNewlines(arrow.remaining)
                                         when (val body = expression(stream4)) {
                                             is ParseResult.Failure -> return@parser body
-                                            is ParseResult.Success -> ParseResult.Success(
-                                                ParsedLambda(paramsResult.value, body.value, returnType = null, abilityConstraints = emptyList(), loc = lambdaLoc),
-                                                body.remaining
-                                            )
+                                            is ParseResult.Success -> {
+                                                // Span from the opening brace through the body — covers
+                                                // the whole `{ params } -> body` expression so the LSP
+                                                // can find this lambda for any position inside.
+                                                val lambdaLoc = spanLocTo(lbraceTok, body.remaining, file)
+                                                ParseResult.Success(
+                                                    ParsedLambda(paramsResult.value, body.value, returnType = null, abilityConstraints = emptyList(), loc = lambdaLoc),
+                                                    body.remaining
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -658,13 +667,12 @@ internal val MezzeParser.ifExpression: Parser<ParsedExpr>
     get() = parser@{ stream ->
         // Parse: if <condition> then <thenBranch> else <elseBranch>
         val file = currentFile ?: "<unknown>"
-        val ifToken0 = stream.current()
 
         // Parse 'if' keyword
         when (val ifToken = tok(TokenType.IF)(stream)) {
             is ParseResult.Failure -> return@parser ifToken
             is ParseResult.Success -> {
-                val ifLoc = tokenLoc(ifToken.value, file)
+                val ifTok = ifToken.value
                 // Parse condition
                 val stream1 = skipNewlines(ifToken.remaining)
                 when (val condition = expression(stream1)) {
@@ -694,7 +702,7 @@ internal val MezzeParser.ifExpression: Parser<ParsedExpr>
                                                             condition.value,
                                                             thenBranch.value,
                                                             elseBranch.value,
-                                                            loc = ifLoc
+                                                            loc = spanLocTo(ifTok, elseBranch.remaining, file)
                                                         ),
                                                         elseBranch.remaining
                                                     )
@@ -769,7 +777,7 @@ internal val MezzeParser.performExpression: Parser<ParsedExpr>
         val performToken = tok(TokenType.PERFORM)(stream)
         when (performToken) {
             is ParseResult.Success -> {
-                val performLoc = tokenLoc(performToken.value, file)
+                val performTok = performToken.value
                 val stream1 = skipNewlines(performToken.remaining)
 
                 // Parse first handler/operation reference (can be qualified, e.g., log::Console)
@@ -836,7 +844,7 @@ internal val MezzeParser.performExpression: Parser<ParsedExpr>
                                         val expr = expression(stream6)
                                         when (expr) {
                                             is ParseResult.Success -> ParseResult.Success(
-                                                ParsedPerform(handlers, expr.value, loc = performLoc),
+                                                ParsedPerform(handlers, expr.value, loc = spanLocTo(performTok, expr.remaining, file)),
                                                 expr.remaining
                                             )
                                             is ParseResult.Failure -> expr
@@ -854,7 +862,7 @@ internal val MezzeParser.performExpression: Parser<ParsedExpr>
                                     ParsedEffectCall(
                                         operation = firstQualifiedRef,
                                         arguments = argsResult.value,
-                                        loc = performLoc
+                                        loc = spanLocTo(performTok, argsResult.remaining, file)
                                     ),
                                     argsResult.remaining
                                 )
@@ -877,7 +885,7 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
         val doToken = tok(TokenType.DO)(stream)
         when (doToken) {
             is ParseResult.Success -> {
-                val doLoc = tokenLoc(doToken.value, file)
+                val doTok = doToken.value
                 val stream1 = skipNewlines(doToken.remaining)
 
                 // Parse statements (let statements and expression statements) and final result expression
@@ -940,7 +948,10 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
 
                                         when (expr) {
                                             is ParseResult.Success -> {
-                                                val stmtLoc = tokenLoc(letToken.value, file)
+                                                // Span the entire statement: `let x = expr` covers
+                                                // from `let` through the RHS so position lookup
+                                                // can hit the binding from any column.
+                                                val stmtLoc = spanLocTo(letToken.value, expr.remaining, file)
                                                 statements.add(
                                                     ParsedStatement.Let(
                                                         pattern,
@@ -1008,7 +1019,7 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                 // Use the final result expression we found
                 if (finalResult != null) {
                     ParseResult.Success(
-                        ParsedDo(statements, finalResult.first, loc = doLoc),
+                        ParsedDo(statements, finalResult.first, loc = spanLocTo(doTok, finalResult.second, file)),
                         finalResult.second
                     )
                 } else {
@@ -1063,7 +1074,7 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
         val matchToken = tok(TokenType.MATCH)(stream)
         when (matchToken) {
             is ParseResult.Success -> {
-                val matchLoc = tokenLoc(matchToken.value, file)
+                val matchTok = matchToken.value
                 val stream1 = skipNewlines(matchToken.remaining)
                 val expr = expression(stream1)
 
@@ -1118,7 +1129,7 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
                                             ParsedMatch(
                                                 expr.value,
                                                 cases,
-                                                loc = matchLoc
+                                                loc = spanLocTo(matchTok, currentStream, file)
                                             ),
                                             currentStream
                                         )
@@ -1604,8 +1615,6 @@ internal val MezzeParser.pipeExpression: Parser<ParsedExpr>
             val op = currentStream.current()
 
             if (op?.type == TokenType.PIPE_OP) {
-                val file = currentFile ?: "<unknown>"
-                val pipeLoc = tokenLoc(op, file)
                 val opStream = currentStream.advance()
                 val right = comparisonExpression(opStream)
                 result = when (right) {
@@ -1657,7 +1666,7 @@ internal val MezzeParser.pipeExpression: Parser<ParsedExpr>
                                     ParsedPipe(
                                         left = result.value,
                                         right = right.value,
-                                        loc = pipeLoc
+                                        loc = result.value.loc.spanTo(right.value.loc)
                                     ),
                                     right.remaining
                                 )
@@ -1936,7 +1945,7 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                                             ParsedVariantConstruct(
                                                 constructor = expr.localName,
                                                 value = args.value,
-                                                loc = expr.loc  // Use identifier's location
+                                                loc = expr.loc.spanTo(args.value.loc)
                                             ),
                                             args.remaining
                                         )
@@ -1944,7 +1953,7 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                                     expr is ParsedVariantConstruct -> {
                                         // Already parsed as variant construction (uppercase id), now add the payload
                                         ParseResult.Success(
-                                            expr.copy(value = args.value),
+                                            expr.copy(value = args.value, loc = expr.loc.spanTo(args.value.loc)),
                                             args.remaining
                                         )
                                     }
@@ -1954,7 +1963,7 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                                             ParsedFunctionCall(
                                                 result.value,
                                                 args.value,
-                                                loc = result.value.loc  // Use function expr's location
+                                                loc = result.value.loc.spanTo(args.value.loc)
                                             ),
                                             args.remaining
                                         )
@@ -1972,14 +1981,17 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                     val dotStream = currentStream.advance()
                     val member = memberIdentifierParser(dotStream)
                     result = when (member) {
-                        is ParseResult.Success -> ParseResult.Success(
-                            ParsedMemberAccess(
-                                result.value,
-                                member.value.text,
-                                loc = result.value.loc  // Use receiver's location
-                            ),
-                            member.remaining
-                        )
+                        is ParseResult.Success -> {
+                            val file = currentFile ?: "<unknown>"
+                            ParseResult.Success(
+                                ParsedMemberAccess(
+                                    result.value,
+                                    member.value.text,
+                                    loc = result.value.loc.spanTo(tokenLoc(member.value, file))
+                                ),
+                                member.remaining
+                            )
+                        }
                         is ParseResult.Failure -> break  // Not a member access
                     }
                 }
@@ -1994,14 +2006,17 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                         val dotStream = ahead.advance()
                         val member = memberIdentifierParser(dotStream)
                         result = when (member) {
-                            is ParseResult.Success -> ParseResult.Success(
-                                ParsedMemberAccess(
-                                    result.value,
-                                    member.value.text,
-                                    loc = result.value.loc
-                                ),
-                                member.remaining
-                            )
+                            is ParseResult.Success -> {
+                                val file = currentFile ?: "<unknown>"
+                                ParseResult.Success(
+                                    ParsedMemberAccess(
+                                        result.value,
+                                        member.value.text,
+                                        loc = result.value.loc.spanTo(tokenLoc(member.value, file))
+                                    ),
+                                    member.remaining
+                                )
+                            }
                             is ParseResult.Failure -> break
                         }
                     } else {
