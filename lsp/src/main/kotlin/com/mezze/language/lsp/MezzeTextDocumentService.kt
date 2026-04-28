@@ -1391,8 +1391,13 @@ class MezzeTextDocumentService(
     }
 
     /**
-     * Get local variable completions - variables in scope at the current position.
-     * Stubbed — needs ParsedExpr tree walking to find variables in scope at cursor.
+     * Get local variable completions — variables in scope at the current
+     * position. Stubbed: blocked on the typed-AST loc-span bug. Lambdas,
+     * blocks and many other binders report single-token locs (the `{` for
+     * a lambda, etc.) instead of full-span, so position-based descent into
+     * the typed tree never reaches the binder. Hover-on-uses for local
+     * vars hits the same wall via TypedAstLookup.findAtPosition. Will be
+     * unblocked once parser+typechecker emit full-span locs.
      */
     private fun getLocalVariableCompletions(state: DocumentState, position: Position): List<CompletionItem> {
         return emptyList()
