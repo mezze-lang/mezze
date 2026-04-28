@@ -66,6 +66,13 @@ class MezzeTextDocumentService(
      *  Null if Mezze.toml has no [[app]] block. */
     private var entryFilePath: String? = null
 
+    /** Read-only accessor for the workspace service. Null until [connect] runs
+     *  with a project that has Mezze.toml. */
+    fun getProjectStore(): MezzeStore? = projectStore
+
+    /** Read-only accessor for the workspace service. Null until [connect] runs. */
+    fun getProjectRoot(): File? = projectRootDir
+
     /**
      * State for an open document.
      */
