@@ -58,8 +58,12 @@ interface MezzeStore : AutoCloseable {
     // MODULES — source file tracking for incremental compilation
     // ====================================================================
 
-    /** Register a module (source file). */
-    fun putModule(path: String, filePath: String?, sourceHash: String)
+    /**
+     * Register a module (source file). Category tells consumers whether
+     * this row is user code, stdlib, or library — replaces path-prefix
+     * matching as the canonical "where did this come from" check.
+     */
+    fun putModule(path: String, filePath: String?, sourceHash: String, category: ModuleCategory)
 
     /** Get module info. */
     fun getModule(path: String): ModuleRow?
@@ -109,17 +113,20 @@ interface MezzeStore : AutoCloseable {
     fun getEffectPerformers(effectHash: Hash): List<EffectPerformerRow>
 
     // ====================================================================
-    // REFERENCES — LSP source locations (only table that gets cleared per-file)
+    // USAGES — LSP cross-file find-references index
     // ====================================================================
+    // Renamed from v6's "references" (table was references_ to dodge the SQL
+    // keyword). Functionally identical: where in the source code is this hash
+    // referenced from. Cleared per-file when a file is re-typechecked.
 
     /** Record a source location that references a hash. */
-    fun putReference(targetHash: Hash, filePath: String, startLine: Int, startCol: Int, endLine: Int, endCol: Int)
+    fun putUsage(targetHash: Hash, filePath: String, startLine: Int, startCol: Int, endLine: Int, endCol: Int)
 
     /** Find all source locations referencing a hash. For LSP find-references. */
-    fun getReferences(targetHash: Hash): List<ReferenceRow>
+    fun getUsages(targetHash: Hash): List<UsageRow>
 
-    /** Clear all references from a file. Called before re-indexing a changed file. */
-    fun clearReferencesForFile(filePath: String)
+    /** Clear all usages recorded from a file. Called before re-indexing a changed file. */
+    fun clearUsagesForFile(filePath: String)
 
     // ====================================================================
     // METADATA — key-value pairs for schema version, project info, etc.
@@ -234,8 +241,35 @@ data class NameRow(
 data class ModuleRow(
     val path: String,
     val filePath: String?,
-    val sourceHash: String
+    val sourceHash: String,
+    val category: ModuleCategory
 )
+
+/**
+ * Where a module came from. Stored as the modules.category column.
+ *
+ * - USER: written by the project author. Lives in the project directory.
+ * - STDLIB: shipped with the Mezze CLI. Source extracted to a temp dir.
+ * - LIBRARY: pulled in via `mez sync` (when #108 ships). Lives in
+ *   mezze_packages/<libname>/.
+ *
+ * Cheap to filter on (`WHERE category='user'`); replaces the older
+ * path-prefix check (`WHERE path NOT LIKE 'std::%'`).
+ */
+enum class ModuleCategory(val dbValue: String) {
+    USER("user"),
+    STDLIB("stdlib"),
+    LIBRARY("library");
+
+    companion object {
+        fun fromDb(s: String): ModuleCategory = when (s) {
+            "user" -> USER
+            "stdlib" -> STDLIB
+            "library" -> LIBRARY
+            else -> error("unknown ModuleCategory in db: $s")
+        }
+    }
+}
 
 data class EdgeRow(
     val fromHash: Hash,
@@ -257,7 +291,7 @@ data class EffectPerformerRow(
     val module: String?
 )
 
-data class ReferenceRow(
+data class UsageRow(
     val targetHash: Hash,
     val filePath: String,
     val startLine: Int,

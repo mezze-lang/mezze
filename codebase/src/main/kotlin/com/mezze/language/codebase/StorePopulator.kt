@@ -66,7 +66,7 @@ object StorePopulator {
 
         store.transaction {
             // Register the module — always update (file may have new sourceHash)
-            store.putModule(modulePath, filePath, sourceHash)
+            store.putModule(modulePath, filePath, sourceHash, ModuleCategory.USER)
 
             val typedModule = result.typedModule
             if (typedModule != null) {
@@ -95,7 +95,7 @@ object StorePopulator {
                 val src = result.loadedModuleSources[loadedPath] ?: continue
                 val file = File(src.filePath).takeIf { it.exists() } ?: continue
                 val sha256 = sha256Hex(file.readText())
-                store.putModule(loadedPath, src.filePath, sha256)
+                store.putModule(loadedPath, src.filePath, sha256, ModuleCategory.USER)
                 val blob = CodebaseSerialization.serializeTypedModule(loadedTyped)
                 store.putTypedModule(loadedPath, sha256, blob)
             }

@@ -18,6 +18,17 @@ class SQLiteMezzeStoreTest {
         store.close()
     }
 
+    /**
+     * Insert a stub blob so FK-constrained tables (names, edges, ability_impls,
+     * effect_performers, decls, imports, usages, app_*) can reference it.
+     * v7 enforces FKs; tests that synthesize hashes need to register a blob
+     * row first. Returns the same hash for chaining.
+     */
+    private fun stubBlob(hash: Hash, kind: BlobKind = BlobKind.FUNCTION): Hash {
+        store.putBlob(hash, kind, Visibility.PUBLIC, null, null)
+        return hash
+    }
+
     // ====================================================================
     // BLOBS
     // ====================================================================
@@ -101,6 +112,7 @@ class SQLiteMezzeStoreTest {
     fun `registerName and resolveName round-trip`() {
         val hash = Hash("a".repeat(64))
         store.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
+        store.putModule("mymodule", "src/m.mz", "h", ModuleCategory.USER)
         store.registerName("mymodule", "add", hash)
 
         assertEquals(hash, store.resolveName("mymodule", "add"))
@@ -113,7 +125,9 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `getNamesForHash returns all names`() {
-        val hash = Hash("a".repeat(64))
+        val hash = stubBlob(Hash("a".repeat(64)))
+        store.putModule("mod1", "1.mz", "h", ModuleCategory.USER)
+        store.putModule("mod2", "2.mz", "h", ModuleCategory.USER)
         store.registerName("mod1", "foo", hash)
         store.registerName("mod2", "bar", hash)
 
@@ -129,6 +143,7 @@ class SQLiteMezzeStoreTest {
         val privHash = Hash("b".repeat(64))
         store.putBlob(pubHash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
         store.putBlob(privHash, BlobKind.FUNCTION, Visibility.PRIVATE, null, null)
+        store.putModule("mod", "m.mz", "h", ModuleCategory.USER)
         store.registerName("mod", "pub_fn", pubHash)
         store.registerName("mod", "priv_fn", privHash)
 
@@ -141,6 +156,7 @@ class SQLiteMezzeStoreTest {
     fun `searchExportsByName finds by prefix`() {
         val hash = Hash("a".repeat(64))
         store.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
+        store.putModule("std::str", "/tmp/str.mz", "h", ModuleCategory.STDLIB)
         store.registerName("std::str", "starts_with", hash)
         store.registerName("std::str", "split", hash)
 
@@ -158,24 +174,25 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `putModule and getModule round-trip`() {
-        store.putModule("myapp::utils", "src/utils.mz", "abc123")
+        store.putModule("myapp::utils", "src/utils.mz", "abc123", ModuleCategory.USER)
 
         val row = store.getModule("myapp::utils")
         assertNotNull(row)
         assertEquals("myapp::utils", row!!.path)
         assertEquals("src/utils.mz", row.filePath)
         assertEquals("abc123", row.sourceHash)
+        assertEquals(ModuleCategory.USER, row.category)
     }
 
     @Test
     fun `isFileStale returns true when source hash differs`() {
-        store.putModule("mod", "src/mod.mz", "old_hash")
+        store.putModule("mod", "src/mod.mz", "old_hash", ModuleCategory.USER)
         assertTrue(store.isFileStale("src/mod.mz", "new_hash"))
     }
 
     @Test
     fun `isFileStale returns false when source hash matches`() {
-        store.putModule("mod", "src/mod.mz", "same_hash")
+        store.putModule("mod", "src/mod.mz", "same_hash", ModuleCategory.USER)
         assertFalse(store.isFileStale("src/mod.mz", "same_hash"))
     }
 
@@ -186,9 +203,18 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `getAllModules returns all registered modules`() {
-        store.putModule("a", "a.mz", "h1")
-        store.putModule("b", "b.mz", "h2")
+        store.putModule("a", "a.mz", "h1", ModuleCategory.USER)
+        store.putModule("b", "b.mz", "h2", ModuleCategory.STDLIB)
         assertEquals(2, store.getAllModules().size)
+    }
+
+    @Test
+    fun `module category persists`() {
+        store.putModule("std::list", "/tmp/list.mz", "h1", ModuleCategory.STDLIB)
+        store.putModule("myapp", "src/app.mz", "h2", ModuleCategory.USER)
+        val all = store.getAllModules().associateBy { it.path }
+        assertEquals(ModuleCategory.STDLIB, all["std::list"]?.category)
+        assertEquals(ModuleCategory.USER, all["myapp"]?.category)
     }
 
     // ====================================================================
@@ -197,8 +223,8 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `addEdge and getEdgesFrom`() {
-        val a = Hash("a".repeat(64))
-        val b = Hash("b".repeat(64))
+        val a = stubBlob(Hash("a".repeat(64)))
+        val b = stubBlob(Hash("b".repeat(64)))
         store.addEdge(a, b, EdgeKind.CALLS)
 
         val edges = store.getEdgesFrom(a)
@@ -209,9 +235,9 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `getEdgesTo returns incoming edges`() {
-        val a = Hash("a".repeat(64))
-        val b = Hash("b".repeat(64))
-        val c = Hash("c".repeat(64))
+        val a = stubBlob(Hash("a".repeat(64)))
+        val b = stubBlob(Hash("b".repeat(64)))
+        val c = stubBlob(Hash("c".repeat(64)))
         store.addEdge(a, c, EdgeKind.CALLS)
         store.addEdge(b, c, EdgeKind.REFERENCES)
 
@@ -221,8 +247,8 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `addEdge is idempotent — INSERT OR IGNORE`() {
-        val a = Hash("a".repeat(64))
-        val b = Hash("b".repeat(64))
+        val a = stubBlob(Hash("a".repeat(64)))
+        val b = stubBlob(Hash("b".repeat(64)))
         store.addEdge(a, b, EdgeKind.CALLS)
         store.addEdge(a, b, EdgeKind.CALLS) // duplicate
 
@@ -231,10 +257,10 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `getTransitiveClosure walks full graph`() {
-        val a = Hash("a".repeat(64))
-        val b = Hash("b".repeat(64))
-        val c = Hash("c".repeat(64))
-        val d = Hash("d".repeat(64))
+        val a = stubBlob(Hash("a".repeat(64)))
+        val b = stubBlob(Hash("b".repeat(64)))
+        val c = stubBlob(Hash("c".repeat(64)))
+        val d = stubBlob(Hash("d".repeat(64)))
 
         store.addEdge(a, b, EdgeKind.CALLS)
         store.addEdge(b, c, EdgeKind.CALLS)
@@ -246,8 +272,8 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `getTransitiveClosure handles cycles`() {
-        val a = Hash("a".repeat(64))
-        val b = Hash("b".repeat(64))
+        val a = stubBlob(Hash("a".repeat(64)))
+        val b = stubBlob(Hash("b".repeat(64)))
         store.addEdge(a, b, EdgeKind.CALLS)
         store.addEdge(b, a, EdgeKind.CALLS) // cycle
 
@@ -257,7 +283,7 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `getTransitiveClosure single node no edges`() {
-        val a = Hash("a".repeat(64))
+        val a = stubBlob(Hash("a".repeat(64)))
         assertEquals(setOf(a), store.getTransitiveClosure(a))
     }
 
@@ -267,9 +293,9 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `putAbilityImpl and getAbilityImpls`() {
-        val implHash = Hash("a".repeat(64))
-        val abilityHash = Hash("b".repeat(64))
-        store.putAbilityImpl(implHash, abilityHash, "Int", "std::int")
+        val implHash = stubBlob(Hash("a".repeat(64)), BlobKind.ABILITY_IMPL)
+        val abilityHash = stubBlob(Hash("b".repeat(64)), BlobKind.ABILITY)
+        store.putAbilityImpl(implHash, abilityHash, "Int", null)
 
         val impls = store.getAbilityImpls(abilityHash)
         assertEquals(1, impls.size)
@@ -279,9 +305,9 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `getAbilityImplForType returns specific impl`() {
-        val implInt = Hash("a".repeat(64))
-        val implStr = Hash("b".repeat(64))
-        val abilityHash = Hash("c".repeat(64))
+        val implInt = stubBlob(Hash("a".repeat(64)), BlobKind.ABILITY_IMPL)
+        val implStr = stubBlob(Hash("b".repeat(64)), BlobKind.ABILITY_IMPL)
+        val abilityHash = stubBlob(Hash("c".repeat(64)), BlobKind.ABILITY)
         store.putAbilityImpl(implInt, abilityHash, "Int", null)
         store.putAbilityImpl(implStr, abilityHash, "Str", null)
 
@@ -292,9 +318,9 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `putEffectPerformer and getEffectPerformers`() {
-        val perfHash = Hash("a".repeat(64))
-        val effectHash = Hash("b".repeat(64))
-        store.putEffectPerformer(perfHash, effectHash, "LocalConsole", "std::io")
+        val perfHash = stubBlob(Hash("a".repeat(64)), BlobKind.PERFORMER)
+        val effectHash = stubBlob(Hash("b".repeat(64)), BlobKind.EFFECT)
+        store.putEffectPerformer(perfHash, effectHash, "LocalConsole", null)
 
         val perfs = store.getEffectPerformers(effectHash)
         assertEquals(1, perfs.size)
@@ -302,28 +328,28 @@ class SQLiteMezzeStoreTest {
     }
 
     // ====================================================================
-    // REFERENCES
+    // USAGES (LSP cross-file find-references)
     // ====================================================================
 
     @Test
-    fun `putReference and getReferences`() {
-        val hash = Hash("a".repeat(64))
-        store.putReference(hash, "src/main.mz", 10, 5, 10, 8)
-        store.putReference(hash, "src/utils.mz", 20, 1, 20, 4)
+    fun `putUsage and getUsages`() {
+        val hash = stubBlob(Hash("a".repeat(64)))
+        store.putUsage(hash, "src/main.mz", 10, 5, 10, 8)
+        store.putUsage(hash, "src/utils.mz", 20, 1, 20, 4)
 
-        val refs = store.getReferences(hash)
+        val refs = store.getUsages(hash)
         assertEquals(2, refs.size)
     }
 
     @Test
-    fun `clearReferencesForFile removes only that file`() {
-        val hash = Hash("a".repeat(64))
-        store.putReference(hash, "src/main.mz", 1, 1, 1, 5)
-        store.putReference(hash, "src/utils.mz", 2, 1, 2, 5)
+    fun `clearUsagesForFile removes only that file`() {
+        val hash = stubBlob(Hash("a".repeat(64)))
+        store.putUsage(hash, "src/main.mz", 1, 1, 1, 5)
+        store.putUsage(hash, "src/utils.mz", 2, 1, 2, 5)
 
-        store.clearReferencesForFile("src/main.mz")
+        store.clearUsagesForFile("src/main.mz")
 
-        val refs = store.getReferences(hash)
+        val refs = store.getUsages(hash)
         assertEquals(1, refs.size)
         assertEquals("src/utils.mz", refs[0].filePath)
     }
@@ -345,7 +371,7 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `schema_version is set`() {
-        assertEquals("6", store.getMetadata("schema_version"))
+        assertEquals("7", store.getMetadata("schema_version"))
     }
 
     // ====================================================================
@@ -354,6 +380,7 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `putTypedModule and getTypedModule round-trip`() {
+        store.putModule("myapp::utils", "u.mz", "abc123", ModuleCategory.USER)
         val blob = byteArrayOf(0x01, 0x02, 0x03, 0x04)
         store.putTypedModule("myapp::utils", "abc123", blob)
         val got = store.getTypedModule("myapp::utils", "abc123")
@@ -368,6 +395,7 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `same path different sourceHash coexist`() {
+        store.putModule("myapp::utils", "u.mz", "v1", ModuleCategory.USER)
         store.putTypedModule("myapp::utils", "v1", byteArrayOf(0x01))
         store.putTypedModule("myapp::utils", "v2", byteArrayOf(0x02))
         assertArrayEquals(byteArrayOf(0x01), store.getTypedModule("myapp::utils", "v1")!!)
@@ -376,6 +404,8 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `clearTypedModulesForPath drops all versions`() {
+        store.putModule("myapp::utils", "u.mz", "v1", ModuleCategory.USER)
+        store.putModule("myapp::other", "o.mz", "v1", ModuleCategory.USER)
         store.putTypedModule("myapp::utils", "v1", byteArrayOf(0x01))
         store.putTypedModule("myapp::utils", "v2", byteArrayOf(0x02))
         store.putTypedModule("myapp::other", "v1", byteArrayOf(0x03))
@@ -387,6 +417,7 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `putTypedModule is idempotent`() {
+        store.putModule("p", "p.mz", "h", ModuleCategory.USER)
         val blob = byteArrayOf(0x05, 0x06)
         store.putTypedModule("p", "h", blob)
         store.putTypedModule("p", "h", blob)
@@ -402,6 +433,7 @@ class SQLiteMezzeStoreTest {
         val hash = Hash("a".repeat(64))
         store.transaction {
             store.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
+            store.putModule("mod", "m.mz", "h", ModuleCategory.USER)
             store.registerName("mod", "fn", hash)
         }
 

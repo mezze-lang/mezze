@@ -26,14 +26,25 @@ class SQLiteMezzeStore private constructor(
     companion object {
         /**
          * Current schema version. Each bump must be accompanied by a
-         * `migrateVN(stmt)` function below that applies the diff from
-         * the previous version. Migrations run in order, never destructively.
+         * `applyVN(stmt)` function below.
          *
          * Bump history:
          *  - v5: apps + app_functions + app_performers tables.
          *  - v6: typed_modules table — caches v2 TypedModule per (path, sourceHash).
+         *  - v7: unified cache + incremental compile.
+         *        - foreign_keys=ON, declared everywhere, ON DELETE CASCADE
+         *        - CHECK constraints on enum columns
+         *        - NEW tables: parsed_modules, decls, imports
+         *        - RENAME: references_ → usages
+         *        - ADD column: modules.category, blobs.created_at
+         *        - decls PK includes decl_kind; decls.hash matches blobs.hash
+         *        - app_functions UNIQUE(app_name, ord)
+         *
+         * v7 is a clean break — no migration code from v6. Existing caches
+         * get wiped + rebuilt on first open. See
+         * docs/architecture/16-unified-cache-and-incremental-compile.md.
          */
-        const val SCHEMA_VERSION = 6
+        const val SCHEMA_VERSION = 7
         const val PROJECT_DIR = ".mz"
         const val CACHE_FILE = "cache.sqlite"
         const val DEPS_FILE = "deps.sqlite"
@@ -121,7 +132,10 @@ class SQLiteMezzeStore private constructor(
             s.executeUpdate("PRAGMA temp_store=MEMORY")
             s.executeUpdate("PRAGMA cache_size=-64000")   // 64MB
             s.executeUpdate("PRAGMA mmap_size=268435456")  // 256MB
-            s.executeUpdate("PRAGMA foreign_keys=OFF")
+            // FKs ON (v7+): every hash-pointing column has REFERENCES
+            // declared. Orphan rows can't sneak in; ON DELETE CASCADE
+            // does natural cleanup when modules / apps are dropped.
+            s.executeUpdate("PRAGMA foreign_keys=ON")
             // Wait up to 5s for a contended write lock instead of failing
             // immediately with SQLITE_BUSY. Required when LSP and `mez dev`
             // write to the same cache.sqlite concurrently.
@@ -144,16 +158,24 @@ class SQLiteMezzeStore private constructor(
 
         val currentVersion = readSchemaVersion()
 
-        if (currentVersion == 0) {
-            // Fresh DB — create the full schema in one shot, mark it at the
-            // current version. This is the fast path for new projects.
-            createV1ThroughCurrent()
-        } else if (currentVersion < SCHEMA_VERSION) {
-            // Existing DB at an older version — apply migrations one at a time
-            // so old data is preserved.
-            for (target in (currentVersion + 1)..SCHEMA_VERSION) {
-                conn.createStatement().use { s -> applyMigration(target, s) }
+        when {
+            currentVersion == 0 -> {
+                // Fresh DB — create v7 schema in one shot.
+                applyV7Schema()
             }
+            currentVersion < 7 -> {
+                // v1..v6 → v7: clean break. Drop everything and rebuild.
+                // No migration code; data is downstream of source files,
+                // so re-typecheck on next mez dev rebuilds it.
+                dropV6Schema()
+                applyV7Schema()
+            }
+            currentVersion > SCHEMA_VERSION -> {
+                error("cache.sqlite is at schema v$currentVersion but this " +
+                      "build only supports up to v$SCHEMA_VERSION. Delete the " +
+                      "cache to continue.")
+            }
+            // currentVersion == SCHEMA_VERSION: nothing to do.
         }
 
         writeSchemaVersion(SCHEMA_VERSION)
@@ -174,156 +196,282 @@ class SQLiteMezzeStore private constructor(
     }
 
     /**
-     * Apply the migration that takes the schema from version [target]-1 to
-     * [target]. Each branch is the diff from the previous version — additive
-     * only (CREATE TABLE / ADD COLUMN / CREATE INDEX). Never DROP / ALTER
-     * destructively; preserve old data.
+     * Drop every v6 table. Called when migrating an existing v6 (or earlier)
+     * cache to v7. v7 is a clean break — no data migration. The cache is
+     * downstream of source files; mez dev rebuilds it on next run.
+     *
+     * Order matters: drop FK referrers before referents. But since v6 had
+     * `foreign_keys=OFF`, no enforcement happened anyway and order doesn't
+     * matter on the way out.
      */
-    private fun applyMigration(target: Int, s: java.sql.Statement) {
-        when (target) {
-            // v1-v5 are folded into createV1ThroughCurrent for fresh DBs.
-            // For an old DB at v < 5 we don't have explicit migration steps
-            // recorded; the safe move is to apply the v5 schema additively.
-            1, 2, 3, 4, 5 -> applyV5BaseSchema(s)
-            6 -> applyV6TypedModules(s)
-            else -> error("No migration registered for schema v$target")
+    private fun dropV6Schema() {
+        conn.createStatement().use { s ->
+            // Temporarily disable FKs while we drop in arbitrary order.
+            s.executeUpdate("PRAGMA foreign_keys=OFF")
+            for (table in listOf(
+                "app_performers", "app_functions", "apps",
+                "references_",  // renamed to `usages` in v7
+                "effect_performers", "ability_impls",
+                "edges", "names",
+                "typed_modules", "modules", "blobs"
+                // metadata kept; we'll write the new schema_version into it
+            )) {
+                s.executeUpdate("DROP TABLE IF EXISTS $table")
+            }
+            s.executeUpdate("PRAGMA foreign_keys=ON")
         }
     }
 
     /**
-     * Apply v5 base schema: blobs, names, modules, edges, ability_impls,
-     * effect_performers, references_, apps, app_functions, app_performers.
-     * All CREATE IF NOT EXISTS — idempotent and safe on partial schemas.
+     * Create the full v7 schema from scratch. See the design doc for the
+     * shape and rationale of every table:
+     *   docs/architecture/16-unified-cache-and-incremental-compile.md
+     *
+     * Highlights:
+     *  - foreign_keys=ON; every hash-pointing column has REFERENCES declared
+     *  - CHECK constraints on every enum-like column
+     *  - ON DELETE CASCADE on natural-cleanup paths
+     *  - parsed_modules + decls + imports are NEW (vs v6)
+     *  - usages was `references_` in v6
+     *  - modules.category, blobs.created_at are NEW
      */
-    private fun applyV5BaseSchema(s: java.sql.Statement) {
-        s.executeUpdate("""
-            CREATE TABLE IF NOT EXISTS blobs (
-                hash TEXT PRIMARY KEY,
-                kind TEXT NOT NULL,
-                visibility TEXT NOT NULL DEFAULT 'PRIVATE',
-                typed BLOB,
-                ir BLOB
-            ) WITHOUT ROWID
-        """.trimIndent())
-
-        s.executeUpdate("""
-            CREATE TABLE IF NOT EXISTS names (
-                module TEXT NOT NULL,
-                name TEXT NOT NULL,
-                hash TEXT NOT NULL,
-                PRIMARY KEY (module, name)
-            ) WITHOUT ROWID
-        """.trimIndent())
-        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_names_hash ON names(hash)")
-
-        s.executeUpdate("""
-            CREATE TABLE IF NOT EXISTS modules (
-                path TEXT PRIMARY KEY,
-                file_path TEXT,
-                source_hash TEXT NOT NULL
-            ) WITHOUT ROWID
-        """.trimIndent())
-
-        s.executeUpdate("""
-            CREATE TABLE IF NOT EXISTS edges (
-                from_hash TEXT NOT NULL,
-                to_hash TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                PRIMARY KEY (from_hash, to_hash, kind)
-            ) WITHOUT ROWID
-        """.trimIndent())
-        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_hash)")
-
-        s.executeUpdate("""
-            CREATE TABLE IF NOT EXISTS ability_impls (
-                hash TEXT PRIMARY KEY,
-                ability_hash TEXT NOT NULL,
-                target_type TEXT NOT NULL,
-                module TEXT
-            ) WITHOUT ROWID
-        """.trimIndent())
-        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_ability_impls_ability ON ability_impls(ability_hash)")
-        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_ability_impls_type ON ability_impls(target_type)")
-
-        s.executeUpdate("""
-            CREATE TABLE IF NOT EXISTS effect_performers (
-                hash TEXT PRIMARY KEY,
-                effect_hash TEXT NOT NULL,
-                performer_name TEXT NOT NULL,
-                module TEXT
-            ) WITHOUT ROWID
-        """.trimIndent())
-        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_effect_performers_effect ON effect_performers(effect_hash)")
-
-        s.executeUpdate("""
-            CREATE TABLE IF NOT EXISTS references_ (
-                target_hash TEXT NOT NULL,
-                file_path TEXT NOT NULL,
-                start_line INTEGER NOT NULL,
-                start_col INTEGER NOT NULL,
-                end_line INTEGER NOT NULL,
-                end_col INTEGER NOT NULL
-            )
-        """.trimIndent())
-        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_references_target ON references_(target_hash)")
-        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_references_file ON references_(file_path)")
-
-        s.executeUpdate("""
-            CREATE TABLE IF NOT EXISTS apps (
-                name TEXT PRIMARY KEY,
-                entry_name TEXT NOT NULL,
-                entry_module TEXT NOT NULL,
-                source_file TEXT
-            ) WITHOUT ROWID
-        """.trimIndent())
-
-        s.executeUpdate("""
-            CREATE TABLE IF NOT EXISTS app_functions (
-                app_name TEXT NOT NULL,
-                hash TEXT NOT NULL,
-                ord INTEGER NOT NULL,
-                PRIMARY KEY (app_name, hash)
-            ) WITHOUT ROWID
-        """.trimIndent())
-        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_app_functions_app_ord ON app_functions(app_name, ord)")
-
-        s.executeUpdate("""
-            CREATE TABLE IF NOT EXISTS app_performers (
-                app_name TEXT NOT NULL,
-                record_idx INTEGER NOT NULL,
-                position INTEGER NOT NULL,
-                hash TEXT NOT NULL,
-                PRIMARY KEY (app_name, record_idx, position)
-            ) WITHOUT ROWID
-        """.trimIndent())
-    }
-
-    /**
-     * v6: Cache typed v2 TypedModule per (module_path, source_hash). Hydrating
-     * from this on JVM start lets us skip whole-module re-typecheck when source
-     * hasn't changed. typed_at is unix-millis for diagnostics / GC pressure.
-     */
-    private fun applyV6TypedModules(s: java.sql.Statement) {
-        s.executeUpdate("""
-            CREATE TABLE IF NOT EXISTS typed_modules (
-                module_path TEXT NOT NULL,
-                source_hash TEXT NOT NULL,
-                typed_blob BLOB NOT NULL,
-                typed_at INTEGER NOT NULL,
-                PRIMARY KEY (module_path, source_hash)
-            ) WITHOUT ROWID
-        """.trimIndent())
-        s.executeUpdate("CREATE INDEX IF NOT EXISTS idx_typed_modules_path ON typed_modules(module_path)")
-    }
-
-    /**
-     * Fast path for fresh DBs: apply every migration in order. Equivalent to
-     * applying v1..v6 sequentially, but skips the per-version dance.
-     */
-    private fun createV1ThroughCurrent() {
+    private fun applyV7Schema() {
         conn.createStatement().use { s ->
-            applyV5BaseSchema(s)
-            applyV6TypedModules(s)
+            // ----------------------------------------------------------------
+            // FILES & MODULES
+            // ----------------------------------------------------------------
+            s.executeUpdate("""
+                -- modules: every Mezze source file the project knows about.
+                -- Keyed by namespaced module path (not raw filename).
+                CREATE TABLE modules (
+                    path        TEXT PRIMARY KEY,
+                    file_path   TEXT,
+                    source_hash TEXT NOT NULL,
+                    category    TEXT NOT NULL CHECK (category IN ('user','stdlib','library'))
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_modules_category ON modules(category)")
+
+            // ----------------------------------------------------------------
+            // BLOBS — content-addressed storage for typed AST and lowered IR
+            // ----------------------------------------------------------------
+            s.executeUpdate("""
+                -- blobs: two cells share one row — `typed` holds the per-decl
+                -- TypedDecl, `ir` holds the lowered FunctionIR. The hash is
+                -- the same identity across both forms.
+                CREATE TABLE blobs (
+                    hash       TEXT PRIMARY KEY,
+                    kind       TEXT NOT NULL CHECK (kind IN ('FUNCTION','TYPE','ABILITY','ABILITY_IMPL','EFFECT','PERFORMER')),
+                    visibility TEXT NOT NULL CHECK (visibility IN ('PUBLIC','PRIVATE')),
+                    typed      BLOB,
+                    ir         BLOB,
+                    created_at INTEGER NOT NULL DEFAULT 0
+                ) WITHOUT ROWID
+            """.trimIndent())
+
+            // ----------------------------------------------------------------
+            // AST CACHES — parsed_modules, typed_modules
+            // ----------------------------------------------------------------
+            s.executeUpdate("""
+                -- parsed_modules: cached ParsedAST per file. The CBOR blob
+                -- includes ALL comments — leading, trailing, orphan, both
+                -- regular # and doc ##. LSP and mez fmt skip parse on cold
+                -- cache.
+                CREATE TABLE parsed_modules (
+                    module_path TEXT NOT NULL REFERENCES modules(path) ON DELETE CASCADE,
+                    source_hash TEXT NOT NULL,
+                    parsed_blob BLOB NOT NULL,
+                    parsed_at   INTEGER NOT NULL,
+                    PRIMARY KEY (module_path, source_hash)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_parsed_modules_path ON parsed_modules(module_path)")
+
+            s.executeUpdate("""
+                -- typed_modules: cached TypedAST per file. Skips whole-module
+                -- typecheck on cold start when source hasn't changed.
+                CREATE TABLE typed_modules (
+                    module_path TEXT NOT NULL REFERENCES modules(path) ON DELETE CASCADE,
+                    source_hash TEXT NOT NULL,
+                    typed_blob  BLOB NOT NULL,
+                    typed_at    INTEGER NOT NULL,
+                    PRIMARY KEY (module_path, source_hash)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_typed_modules_path ON typed_modules(module_path)")
+
+            // ----------------------------------------------------------------
+            // DECLS — per-declaration index; the keystone for incremental
+            // typecheck and the symbol index for LSP.
+            // ----------------------------------------------------------------
+            s.executeUpdate("""
+                -- decls: per-decl source ranges + content hash. source_hash is
+                -- the SHA-256 of THIS decl's source-text range (distinct from
+                -- the file-level source_hash). `hash` matches blobs.hash —
+                -- joins read naturally as `decls JOIN blobs USING (hash)`.
+                -- hash not FK'd; the decl row may be registered before the
+                -- blob is fully written (typed first, then IR).
+                CREATE TABLE decls (
+                    module_path TEXT NOT NULL REFERENCES modules(path) ON DELETE CASCADE,
+                    decl_name   TEXT NOT NULL,
+                    decl_kind   TEXT NOT NULL CHECK (decl_kind IN ('let','type','ability','effect','performer','impl')),
+                    source_hash TEXT NOT NULL,
+                    hash        TEXT NOT NULL,
+                    start_line  INTEGER NOT NULL,
+                    start_col   INTEGER NOT NULL,
+                    end_line    INTEGER NOT NULL,
+                    end_col     INTEGER NOT NULL,
+                    PRIMARY KEY (module_path, decl_kind, decl_name)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_decls_source_hash ON decls(source_hash)")
+            s.executeUpdate("CREATE INDEX idx_decls_hash ON decls(hash)")
+            s.executeUpdate("CREATE INDEX idx_decls_kind_name ON decls(decl_kind, decl_name)")
+
+            // ----------------------------------------------------------------
+            // LOOKUPS & CROSS-REFS
+            // ----------------------------------------------------------------
+            s.executeUpdate("""
+                -- names: module-qualified name -> blob hash.
+                -- hash not FK'd: a name registration may precede the blob
+                -- write within the same transaction (StorePopulator orders
+                -- this way for typed-only-then-IR), and FK enforcement runs
+                -- per-statement.
+                CREATE TABLE names (
+                    module TEXT NOT NULL REFERENCES modules(path) ON DELETE CASCADE,
+                    name   TEXT NOT NULL,
+                    hash   TEXT NOT NULL,
+                    PRIMARY KEY (module, name)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_names_hash ON names(hash)")
+
+            s.executeUpdate("""
+                -- edges: dependency graph between decls. Used for invalidation
+                -- propagation and `mez build` reachability.
+                -- edges: dependency graph between decls. Used for invalidation
+                -- propagation and `mez build` reachability.
+                --
+                -- FK on from_hash but NOT on to_hash. Reason: edges may reference
+                -- a target blob that hasn't been written yet (e.g., user code calls
+                -- a stdlib function before stdlib is fully scattered, or two files
+                -- compile in parallel). Dangling to_hash values are tolerated and
+                -- "snap" into validity when the target eventually appears.
+                CREATE TABLE edges (
+                    from_hash TEXT NOT NULL REFERENCES blobs(hash) ON DELETE CASCADE,
+                    to_hash   TEXT NOT NULL,
+                    kind      TEXT NOT NULL CHECK (kind IN ('CALLS','REFERENCES','IMPLEMENTS')),
+                    PRIMARY KEY (from_hash, to_hash, kind)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_edges_to ON edges(to_hash)")
+
+            s.executeUpdate("""
+                -- imports: every `use` declaration across the project.
+                -- target_hash is NOT a FK; the imported decl may live in
+                -- another file/module not yet scattered.
+                CREATE TABLE imports (
+                    module_path   TEXT NOT NULL REFERENCES modules(path) ON DELETE CASCADE,
+                    local_name    TEXT NOT NULL,
+                    target_module TEXT NOT NULL,
+                    target_name   TEXT NOT NULL,
+                    target_hash   TEXT NOT NULL,
+                    start_line    INTEGER NOT NULL,
+                    start_col     INTEGER NOT NULL,
+                    end_line      INTEGER NOT NULL,
+                    end_col       INTEGER NOT NULL,
+                    PRIMARY KEY (module_path, local_name)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_imports_target ON imports(target_module, target_name)")
+
+            s.executeUpdate("""
+                -- usages: every place a hash is referenced from another decl.
+                -- Powers LSP textDocument/references in O(1). target_hash is
+                -- NOT a FK because the target may be cross-module / not yet
+                -- in the cache. clearUsagesForFile handles cleanup.
+                CREATE TABLE usages (
+                    target_hash TEXT NOT NULL,
+                    file_path   TEXT NOT NULL,
+                    start_line  INTEGER NOT NULL,
+                    start_col   INTEGER NOT NULL,
+                    end_line    INTEGER NOT NULL,
+                    end_col     INTEGER NOT NULL
+                )
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_usages_target ON usages(target_hash)")
+            s.executeUpdate("CREATE INDEX idx_usages_file ON usages(file_path)")
+
+            // ----------------------------------------------------------------
+            // DISPATCH REGISTRIES — ability impls, effect performers
+            // ----------------------------------------------------------------
+            s.executeUpdate("""
+                -- ability_impls: ability impl registry for runtime dispatch.
+                -- ability_hash is NOT a FK because the ability decl may live in
+                -- another file/module not yet scattered. Same pattern as edges.
+                CREATE TABLE ability_impls (
+                    hash         TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE CASCADE,
+                    ability_hash TEXT NOT NULL,
+                    target_type  TEXT NOT NULL,
+                    module       TEXT
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_ability_impls_ability ON ability_impls(ability_hash)")
+            s.executeUpdate("CREATE INDEX idx_ability_impls_type ON ability_impls(target_type)")
+
+            s.executeUpdate("""
+                -- effect_performers: performer registry per effect.
+                -- effect_hash is NOT a FK; same reasoning as edges.
+                CREATE TABLE effect_performers (
+                    hash           TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE CASCADE,
+                    effect_hash    TEXT NOT NULL,
+                    performer_name TEXT NOT NULL,
+                    module         TEXT
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_effect_performers_effect ON effect_performers(effect_hash)")
+
+            // ----------------------------------------------------------------
+            // APP MANIFESTS — entry points for `mez build`
+            // ----------------------------------------------------------------
+            s.executeUpdate("""
+                -- apps: declared entry points from Mezze.toml.
+                -- entry_module not FK'd; the module may be registered later.
+                CREATE TABLE apps (
+                    name         TEXT PRIMARY KEY,
+                    entry_name   TEXT NOT NULL,
+                    entry_module TEXT NOT NULL,
+                    source_file  TEXT
+                ) WITHOUT ROWID
+            """.trimIndent())
+
+            s.executeUpdate("""
+                -- app_functions: ordered list of reachable function hashes
+                -- per app. UNIQUE(app_name, ord) ensures no two functions
+                -- share the same position in the manifest.
+                -- hash not FK'd; populated by `mez build` from a transitive
+                -- closure that may include hashes not yet in blobs.
+                CREATE TABLE app_functions (
+                    app_name TEXT NOT NULL REFERENCES apps(name) ON DELETE CASCADE,
+                    hash     TEXT NOT NULL,
+                    ord      INTEGER NOT NULL,
+                    PRIMARY KEY (app_name, hash),
+                    UNIQUE (app_name, ord)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_app_functions_app_ord ON app_functions(app_name, ord)")
+
+            s.executeUpdate("""
+                -- app_performers: performer records per app for dispatch.
+                -- hash not FK'd; same reasoning as app_functions.
+                CREATE TABLE app_performers (
+                    app_name   TEXT NOT NULL REFERENCES apps(name) ON DELETE CASCADE,
+                    record_idx INTEGER NOT NULL,
+                    position   INTEGER NOT NULL,
+                    hash       TEXT NOT NULL,
+                    PRIMARY KEY (app_name, record_idx, position)
+                ) WITHOUT ROWID
+            """.trimIndent())
         }
     }
 
@@ -482,20 +630,21 @@ class SQLiteMezzeStore private constructor(
     // ====================================================================
 
     private val putModuleStmt: PreparedStatement by lazy {
-        conn.prepareStatement("INSERT OR REPLACE INTO modules (path, file_path, source_hash) VALUES (?, ?, ?)")
+        conn.prepareStatement("INSERT OR REPLACE INTO modules (path, file_path, source_hash, category) VALUES (?, ?, ?, ?)")
     }
 
-    override fun putModule(path: String, filePath: String?, sourceHash: String) {
+    override fun putModule(path: String, filePath: String?, sourceHash: String, category: ModuleCategory) {
         putModuleStmt.apply {
             setString(1, path)
             setString(2, filePath)
             setString(3, sourceHash)
+            setString(4, category.dbValue)
             executeUpdate()
         }
     }
 
     private val getModuleStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT path, file_path, source_hash FROM modules WHERE path = ?")
+        conn.prepareStatement("SELECT path, file_path, source_hash, category FROM modules WHERE path = ?")
     }
 
     override fun getModule(path: String): ModuleRow? {
@@ -504,7 +653,8 @@ class SQLiteMezzeStore private constructor(
             if (rs.next()) ModuleRow(
                 path = rs.getString("path"),
                 filePath = rs.getString("file_path"),
-                sourceHash = rs.getString("source_hash")
+                sourceHash = rs.getString("source_hash"),
+                category = ModuleCategory.fromDb(rs.getString("category"))
             ) else null
         }
     }
@@ -521,10 +671,15 @@ class SQLiteMezzeStore private constructor(
 
     override fun getAllModules(): List<ModuleRow> {
         return conn.createStatement().use { s ->
-            s.executeQuery("SELECT path, file_path, source_hash FROM modules").use { rs ->
+            s.executeQuery("SELECT path, file_path, source_hash, category FROM modules").use { rs ->
                 val list = mutableListOf<ModuleRow>()
                 while (rs.next()) {
-                    list.add(ModuleRow(rs.getString("path"), rs.getString("file_path"), rs.getString("source_hash")))
+                    list.add(ModuleRow(
+                        rs.getString("path"),
+                        rs.getString("file_path"),
+                        rs.getString("source_hash"),
+                        ModuleCategory.fromDb(rs.getString("category"))
+                    ))
                 }
                 list
             }
@@ -668,18 +823,18 @@ class SQLiteMezzeStore private constructor(
     }
 
     // ====================================================================
-    // REFERENCES (LSP)
+    // USAGES (LSP cross-file find-references)
     // ====================================================================
 
-    private val putReferenceStmt: PreparedStatement by lazy {
+    private val putUsageStmt: PreparedStatement by lazy {
         conn.prepareStatement("""
-            INSERT INTO references_ (target_hash, file_path, start_line, start_col, end_line, end_col)
+            INSERT INTO usages (target_hash, file_path, start_line, start_col, end_line, end_col)
             VALUES (?, ?, ?, ?, ?, ?)
         """.trimIndent())
     }
 
-    override fun putReference(targetHash: Hash, filePath: String, startLine: Int, startCol: Int, endLine: Int, endCol: Int) {
-        putReferenceStmt.apply {
+    override fun putUsage(targetHash: Hash, filePath: String, startLine: Int, startCol: Int, endLine: Int, endCol: Int) {
+        putUsageStmt.apply {
             setString(1, targetHash.hex)
             setString(2, filePath)
             setInt(3, startLine)
@@ -690,16 +845,16 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
-    private val getReferencesStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT target_hash, file_path, start_line, start_col, end_line, end_col FROM references_ WHERE target_hash = ?")
+    private val getUsagesStmt: PreparedStatement by lazy {
+        conn.prepareStatement("SELECT target_hash, file_path, start_line, start_col, end_line, end_col FROM usages WHERE target_hash = ?")
     }
 
-    override fun getReferences(targetHash: Hash): List<ReferenceRow> {
-        getReferencesStmt.setString(1, targetHash.hex)
-        return getReferencesStmt.executeQuery().use { rs ->
-            val list = mutableListOf<ReferenceRow>()
+    override fun getUsages(targetHash: Hash): List<UsageRow> {
+        getUsagesStmt.setString(1, targetHash.hex)
+        return getUsagesStmt.executeQuery().use { rs ->
+            val list = mutableListOf<UsageRow>()
             while (rs.next()) {
-                list.add(ReferenceRow(
+                list.add(UsageRow(
                     targetHash = Hash(rs.getString("target_hash")),
                     filePath = rs.getString("file_path"),
                     startLine = rs.getInt("start_line"),
@@ -712,13 +867,13 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
-    private val clearReferencesStmt: PreparedStatement by lazy {
-        conn.prepareStatement("DELETE FROM references_ WHERE file_path = ?")
+    private val clearUsagesStmt: PreparedStatement by lazy {
+        conn.prepareStatement("DELETE FROM usages WHERE file_path = ?")
     }
 
-    override fun clearReferencesForFile(filePath: String) {
-        clearReferencesStmt.setString(1, filePath)
-        clearReferencesStmt.executeUpdate()
+    override fun clearUsagesForFile(filePath: String) {
+        clearUsagesStmt.setString(1, filePath)
+        clearUsagesStmt.executeUpdate()
     }
 
     // ====================================================================

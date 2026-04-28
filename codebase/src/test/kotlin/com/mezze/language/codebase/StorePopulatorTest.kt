@@ -166,6 +166,9 @@ class StorePopulatorTest {
         val fnB = makeHash('b')
         val src = SourceInfo(0, 1, 1, 1, 10)
 
+        // FK requires fnB exists in blobs before edges can reference it.
+        store.putBlob(fnB, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
+
         val functionIR = FunctionIR(
             hash = fnA,
             name = "a",
@@ -195,6 +198,11 @@ class StorePopulatorTest {
     fun `populate stores ability impls with index`() {
         val implHash = makeHash('a')
         val abilityHash = makeHash('b')
+
+        // FK requires abilityHash exists in blobs before edges/impls
+        // reference it. In production the ability decl is registered
+        // alongside the impl; here we stub it.
+        store.putBlob(abilityHash, BlobKind.ABILITY, Visibility.PUBLIC, null, null)
 
         val typedModule = TypedModule(
             path = "mod",
