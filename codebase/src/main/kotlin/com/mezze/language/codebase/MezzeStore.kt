@@ -158,6 +158,36 @@ interface MezzeStore : AutoCloseable {
     fun getAppPerformerRecords(name: String): List<Array<String>>
 
     // ====================================================================
+    // DECLS — per-decl index (kind, name, source range, hashes).
+    //
+    // Powers (a) LSP workspace symbol search without iterating typed_modules
+    // and (b) the slice F per-decl typecheck-skip: when a file's bytes change,
+    // diff per-decl source_hash to find which decls actually changed.
+    // ====================================================================
+
+    /** Insert or replace a decl row. Idempotent on (modulePath, declKind, declName). */
+    fun putDecl(
+        modulePath: String,
+        declName: String,
+        declKind: DeclKind,
+        sourceHash: String,
+        hash: Hash,
+        startLine: Int,
+        startCol: Int,
+        endLine: Int,
+        endCol: Int
+    )
+
+    /** Drop all decls registered to [modulePath]. Called before re-emitting on recompile. */
+    fun clearDeclsForModule(modulePath: String)
+
+    /** Get all decls for a module, in insertion order isn't guaranteed — sort by source pos if needed. */
+    fun getDeclsForModule(modulePath: String): List<DeclRow>
+
+    /** Search decls by name prefix across the whole project. For LSP workspace symbol. */
+    fun searchDeclsByName(query: String): List<DeclRow>
+
+    // ====================================================================
     // PARSED MODULES — cached ParsedModule per (modulePath, sourceHash)
     //
     // Lets tools skip the parser on JVM start when the source file's bytes
@@ -230,6 +260,24 @@ enum class EdgeKind {
     CALLS,        // function A calls function B
     REFERENCES,   // definition A references definition B (type, variable)
     IMPLEMENTS    // impl X implements ability/effect Y
+}
+
+/**
+ * Kind of top-level declaration. Stored as the lowercase string in
+ * `decls.decl_kind`; the schema CHECK constraint enforces this set.
+ */
+enum class DeclKind(val dbValue: String) {
+    LET("let"),
+    TYPE("type"),
+    ABILITY("ability"),
+    EFFECT("effect"),
+    PERFORMER("performer"),
+    IMPL("impl");
+
+    companion object {
+        fun fromDb(s: String): DeclKind = entries.firstOrNull { it.dbValue == s }
+            ?: error("unknown DeclKind in db: $s")
+    }
 }
 
 data class BlobRow(
@@ -312,6 +360,20 @@ data class EffectPerformerRow(
 data class UsageRow(
     val targetHash: Hash,
     val filePath: String,
+    val startLine: Int,
+    val startCol: Int,
+    val endLine: Int,
+    val endCol: Int
+)
+
+data class DeclRow(
+    val modulePath: String,
+    val declName: String,
+    val declKind: DeclKind,
+    /** SHA-256 of just this decl's source-text range (NOT the file). */
+    val sourceHash: String,
+    /** Content hash of the typed decl (matches blobs.hash). */
+    val hash: Hash,
     val startLine: Int,
     val startCol: Int,
     val endLine: Int,

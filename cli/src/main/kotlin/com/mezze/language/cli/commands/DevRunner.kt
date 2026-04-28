@@ -497,6 +497,7 @@ object DevRunner {
         val depParsedModules = com.mezze.language.typechecker.ModuleResolver.getAllParsedModules()
         val delta = StorePopulator.populate(
             store, result, modulePath, filePath, sourceHash,
+            entrySource = source,
             parsedModule = ast,
             loadedParsedModules = depParsedModules
         )

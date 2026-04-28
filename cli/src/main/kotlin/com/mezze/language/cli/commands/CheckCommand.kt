@@ -136,6 +136,7 @@ class CheckCommand {
             StorePopulator.populate(
                 store, typeCheckResult, manifest.`package`.name,
                 appFile.absolutePath, sourceHash,
+                entrySource = source,
                 parsedModule = ast,
                 loadedParsedModules = depParsedModules
             )

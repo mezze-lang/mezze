@@ -41,6 +41,11 @@ object StorePopulator {
      * @param modulePath The module path (e.g., "myapp::utils")
      * @param filePath The source file path (e.g., "src/utils.mz")
      * @param sourceHash The SHA-256 hash of the source file contents
+     * @param entrySource Optional raw source text of the entry file. When
+     *   provided, per-decl source ranges are sliced from it and written to
+     *   `decls` along with their per-decl SHA-256. Without it we can't
+     *   compute per-decl hashes, so we skip the decls write for the entry
+     *   (transitive deps still get decls — we can read their source from disk).
      * @param parsedModule The entry ParsedModule (optional). When provided,
      *   it's persisted to `parsed_modules` so the parser can be skipped on
      *   the next cold start.
@@ -54,6 +59,7 @@ object StorePopulator {
         modulePath: String,
         filePath: String?,
         sourceHash: String,
+        entrySource: String? = null,
         parsedModule: com.mezze.language.parsedast.ParsedModule? = null,
         loadedParsedModules: Map<String, com.mezze.language.parsedast.ParsedModule> = emptyMap()
     ): PopulateDelta {
@@ -93,6 +99,14 @@ object StorePopulator {
                 // Idempotent: same (path, hash) → same bytes → INSERT OR REPLACE no-op.
                 val typedBlob = CodebaseSerialization.serializeTypedModule(typedModule)
                 store.putTypedModule(modulePath, sourceHash, typedBlob)
+
+                // Per-decl index. Slice F will diff source_hash to skip
+                // typecheck per-decl; LSP workspace symbol uses the name
+                // index. We need source bytes to compute per-decl ranges,
+                // so the entry's decls only land if `entrySource` was passed.
+                if (entrySource != null) {
+                    scatterDecls(store, typedModule, modulePath, entrySource)
+                }
             }
 
             // Cache typed bytes for every transitively-loaded project module
@@ -110,7 +124,8 @@ object StorePopulator {
                 }
                 val src = result.loadedModuleSources[loadedPath] ?: continue
                 val file = File(src.filePath).takeIf { it.exists() } ?: continue
-                val sha256 = sha256Hex(file.readText())
+                val depSource = file.readText()
+                val sha256 = sha256Hex(depSource)
                 store.putModule(loadedPath, src.filePath, sha256, ModuleCategory.USER)
                 val blob = CodebaseSerialization.serializeTypedModule(loadedTyped)
                 store.putTypedModule(loadedPath, sha256, blob)
@@ -121,6 +136,9 @@ object StorePopulator {
                     val parsedBlob = CodebaseSerialization.serializeParsedModule(pm)
                     store.putParsedModule(loadedPath, sha256, parsedBlob)
                 }
+
+                // Per-decl index for the dep too. We have its source in hand.
+                scatterDecls(store, loadedTyped, loadedPath, depSource)
             }
 
             val functions = result.loweredFunctions
@@ -130,6 +148,103 @@ object StorePopulator {
         }
 
         return PopulateDelta(newHashes = newHashes, unchangedHashes = existing)
+    }
+
+    /**
+     * Write per-decl rows into the `decls` index. Replaces any prior rows for
+     * this module first — ranges and names move when code is edited, and we'd
+     * rather not chase a partial overlap.
+     *
+     * Per-decl `source_hash` is SHA-256 of the source bytes inside the decl's
+     * Loc range. Slice F diffs these on recompile to find which decls actually
+     * changed; today's slice just lays the rows down.
+     */
+    private fun scatterDecls(
+        store: MezzeStore,
+        module: TypedModule,
+        modulePath: String,
+        source: String
+    ) {
+        store.clearDeclsForModule(modulePath)
+        val lineStarts = LineIndex(source)
+
+        for (decl in module.decls.filterIsInstance<TypedLetDecl>()) {
+            writeDecl(store, modulePath, decl.name, DeclKind.LET, decl.hash, decl.loc, source, lineStarts)
+        }
+        for (decl in module.decls.filterIsInstance<TypedTypeDecl>()) {
+            writeDecl(store, modulePath, decl.name, DeclKind.TYPE, decl.hash, decl.loc, source, lineStarts)
+        }
+        for (decl in module.abilityDecls) {
+            writeDecl(store, modulePath, decl.name, DeclKind.ABILITY, decl.hash, decl.loc, source, lineStarts)
+        }
+        for (decl in module.effectDecls) {
+            writeDecl(store, modulePath, decl.name, DeclKind.EFFECT, decl.hash, decl.loc, source, lineStarts)
+        }
+        for (decl in module.performerDecls) {
+            writeDecl(store, modulePath, decl.name, DeclKind.PERFORMER, decl.hash, decl.loc, source, lineStarts)
+        }
+        // Ability impls have no user-facing name; synthesize one from the
+        // hash so the (module, kind, name) primary key stays unique.
+        for (impl in module.abilityImpls) {
+            val synthName = "impl_${impl.hash.hex.take(12)}"
+            writeDecl(store, modulePath, synthName, DeclKind.IMPL, impl.hash, impl.loc, source, lineStarts)
+        }
+    }
+
+    private fun writeDecl(
+        store: MezzeStore,
+        modulePath: String,
+        name: String,
+        kind: DeclKind,
+        hash: Hash,
+        loc: com.mezze.language.parsedast.Loc,
+        source: String,
+        lineStarts: LineIndex
+    ) {
+        val sliced = lineStarts.slice(source, loc)
+        val perDeclSourceHash = sha256Hex(sliced)
+        store.putDecl(
+            modulePath = modulePath,
+            declName = name,
+            declKind = kind,
+            sourceHash = perDeclSourceHash,
+            hash = hash,
+            startLine = loc.startLine,
+            startCol = loc.startCol,
+            endLine = loc.endLine,
+            endCol = loc.endCol
+        )
+    }
+
+    /**
+     * Cheap line-start index. Built once per source string; lookups are O(1)
+     * because `lineStarts[line - 1]` is the offset of that line's first byte.
+     * Loc is 1-indexed for both line and column; we convert at the boundary.
+     */
+    private class LineIndex(source: String) {
+        private val starts: IntArray = run {
+            val list = ArrayList<Int>(source.length / 40 + 1)
+            list.add(0)
+            for (i in source.indices) {
+                if (source[i] == '\n') list.add(i + 1)
+            }
+            list.toIntArray()
+        }
+
+        /**
+         * Slice the source covered by [loc]. End is inclusive (matches Loc
+         * docs). Defensive against off-by-one: clamps to source bounds so
+         * a one-past-the-end col doesn't crash if the parser ever drifts.
+         */
+        fun slice(source: String, loc: com.mezze.language.parsedast.Loc): String {
+            val startLineIdx = (loc.startLine - 1).coerceIn(0, starts.size - 1)
+            val endLineIdx = (loc.endLine - 1).coerceIn(0, starts.size - 1)
+            val startOffset = (starts[startLineIdx] + (loc.startCol - 1)).coerceIn(0, source.length)
+            // endCol is inclusive of the last character of the decl, so add 1
+            // to land on the half-open offset for substring().
+            val endOffset = (starts[endLineIdx] + loc.endCol).coerceIn(startOffset, source.length)
+            return source.substring(startOffset, endOffset)
+        }
     }
 
     /**

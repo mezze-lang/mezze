@@ -241,6 +241,121 @@ class StorePopulatorTest {
     }
 
     @Test
+    fun `populate writes decls index when entrySource provided`() {
+        val letHash = makeHash('a')
+        val typeHash = makeHash('b')
+        val letLoc = Loc("u.mz", 1, 1, 1, 25)    // line 1, cols 1..25 inclusive
+        val typeLoc = Loc("u.mz", 2, 1, 2, 30)   // line 2
+
+        val typedModule = TypedModule(
+            path = "myapp::utils",
+            hash = makeHash('0'),
+            imports = emptyList(),
+            exports = emptyMap(),
+            decls = listOf(
+                TypedLetDecl(
+                    hash = letHash,
+                    name = "add",
+                    typeParams = emptyList(),
+                    value = TypedIntLit(42, MezzeType.IntType, letLoc),
+                    scheme = TypeScheme(emptyList(), emptyList(), MezzeType.IntType),
+                    isPublic = true,
+                    loc = letLoc
+                ),
+                TypedTypeDecl(
+                    hash = typeHash,
+                    name = "Point",
+                    typeParams = emptyList(),
+                    definition = TypedRecordDef(emptyMap(), isOpen = false),
+                    isPublic = true,
+                    loc = typeLoc
+                )
+            ),
+            abilityDecls = emptyList(),
+            abilityImpls = emptyList(),
+            effectDecls = emptyList(),
+            performerDecls = emptyList(),
+            dependencies = emptyList()
+        )
+
+        // Source bytes that match the locs above.
+        val source = "let add = { l: Int } -> 42\n" +
+                     "type Point = { x: Int, y: Int }\n"
+
+        StorePopulator.populate(
+            store,
+            TypeCheckResult(typedModule = typedModule),
+            modulePath = "myapp::utils",
+            filePath = "src/utils.mz",
+            sourceHash = "sh",
+            entrySource = source
+        )
+
+        val rows = store.getDeclsForModule("myapp::utils").associateBy { it.declName }
+        assertEquals(2, rows.size)
+
+        val add = rows["add"] ?: error("missing add")
+        assertEquals(DeclKind.LET, add.declKind)
+        assertEquals(letHash, add.hash)
+        assertEquals(1, add.startLine)
+        assertEquals(25, add.endCol)
+        assertTrue(add.sourceHash.length == 64, "source_hash should be 64 hex chars")
+
+        val point = rows["Point"] ?: error("missing Point")
+        assertEquals(DeclKind.TYPE, point.declKind)
+        assertEquals(typeHash, point.hash)
+
+        // sourceHash differs between the two decls (different bytes).
+        assertNotEquals(add.sourceHash, point.sourceHash)
+    }
+
+    @Test
+    fun `searchDeclsByName returns prefix matches across modules`() {
+        val hashA = makeHash('a')
+        val hashB = makeHash('b')
+        val loc = Loc("a.mz", 1, 1, 1, 10)
+
+        val source1 = "let add_one = {} -> 1\n"
+        val source2 = "let other = {} -> 2\n"
+
+        val mod1 = TypedModule(
+            path = "m1", hash = makeHash('0'),
+            imports = emptyList(), exports = emptyMap(),
+            decls = listOf(TypedLetDecl(
+                hash = hashA, name = "add_one", typeParams = emptyList(),
+                value = TypedIntLit(1, MezzeType.IntType, loc),
+                scheme = TypeScheme(emptyList(), emptyList(), MezzeType.IntType),
+                isPublic = true, loc = loc
+            )),
+            abilityDecls = emptyList(), abilityImpls = emptyList(),
+            effectDecls = emptyList(), performerDecls = emptyList(),
+            dependencies = emptyList()
+        )
+
+        val mod2 = TypedModule(
+            path = "m2", hash = makeHash('1'),
+            imports = emptyList(), exports = emptyMap(),
+            decls = listOf(TypedLetDecl(
+                hash = hashB, name = "other", typeParams = emptyList(),
+                value = TypedIntLit(2, MezzeType.IntType, loc),
+                scheme = TypeScheme(emptyList(), emptyList(), MezzeType.IntType),
+                isPublic = true, loc = loc
+            )),
+            abilityDecls = emptyList(), abilityImpls = emptyList(),
+            effectDecls = emptyList(), performerDecls = emptyList(),
+            dependencies = emptyList()
+        )
+
+        StorePopulator.populate(store, TypeCheckResult(typedModule = mod1), "m1", "m1.mz", "sh1", entrySource = source1)
+        StorePopulator.populate(store, TypeCheckResult(typedModule = mod2), "m2", "m2.mz", "sh2", entrySource = source2)
+
+        val results = store.searchDeclsByName("add")
+        assertEquals(1, results.size)
+        assertEquals("add_one", results[0].declName)
+        assertEquals("m1", results[0].modulePath)
+    }
+
+    @Test
     fun `populate is idempotent`() {
         val hash = makeHash('a')
         val typedModule = TypedModule(

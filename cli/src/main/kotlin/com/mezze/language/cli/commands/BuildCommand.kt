@@ -104,6 +104,7 @@ class BuildCommand {
             StorePopulator.populate(
                 store, typeCheckResult, modulePath,
                 appFile.absolutePath, sourceHash,
+                entrySource = source,
                 parsedModule = ast,
                 loadedParsedModules = depParsedModules
             )

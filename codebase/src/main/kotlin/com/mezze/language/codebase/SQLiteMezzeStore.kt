@@ -1006,6 +1006,97 @@ class SQLiteMezzeStore private constructor(
     }
 
     // ====================================================================
+    // DECLS
+    // ====================================================================
+
+    private val putDeclStmt: PreparedStatement by lazy {
+        conn.prepareStatement("""
+            INSERT OR REPLACE INTO decls
+                (module_path, decl_name, decl_kind, source_hash, hash,
+                 start_line, start_col, end_line, end_col)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """.trimIndent())
+    }
+
+    override fun putDecl(
+        modulePath: String,
+        declName: String,
+        declKind: DeclKind,
+        sourceHash: String,
+        hash: Hash,
+        startLine: Int,
+        startCol: Int,
+        endLine: Int,
+        endCol: Int
+    ) {
+        putDeclStmt.apply {
+            setString(1, modulePath)
+            setString(2, declName)
+            setString(3, declKind.dbValue)
+            setString(4, sourceHash)
+            setString(5, hash.hex)
+            setInt(6, startLine)
+            setInt(7, startCol)
+            setInt(8, endLine)
+            setInt(9, endCol)
+            executeUpdate()
+        }
+    }
+
+    override fun clearDeclsForModule(modulePath: String) {
+        conn.prepareStatement("DELETE FROM decls WHERE module_path = ?").use { stmt ->
+            stmt.setString(1, modulePath)
+            stmt.executeUpdate()
+        }
+    }
+
+    private fun ResultSet.toDeclRow(): DeclRow = DeclRow(
+        modulePath = getString("module_path"),
+        declName = getString("decl_name"),
+        declKind = DeclKind.fromDb(getString("decl_kind")),
+        sourceHash = getString("source_hash"),
+        hash = Hash(getString("hash")),
+        startLine = getInt("start_line"),
+        startCol = getInt("start_col"),
+        endLine = getInt("end_line"),
+        endCol = getInt("end_col")
+    )
+
+    private val getDeclsForModuleStmt: PreparedStatement by lazy {
+        conn.prepareStatement("""
+            SELECT module_path, decl_name, decl_kind, source_hash, hash,
+                   start_line, start_col, end_line, end_col
+            FROM decls
+            WHERE module_path = ?
+        """.trimIndent())
+    }
+
+    override fun getDeclsForModule(modulePath: String): List<DeclRow> {
+        getDeclsForModuleStmt.setString(1, modulePath)
+        return getDeclsForModuleStmt.executeQuery().use { rs ->
+            buildList { while (rs.next()) add(rs.toDeclRow()) }
+        }
+    }
+
+    private val searchDeclsByNameStmt: PreparedStatement by lazy {
+        conn.prepareStatement("""
+            SELECT module_path, decl_name, decl_kind, source_hash, hash,
+                   start_line, start_col, end_line, end_col
+            FROM decls
+            WHERE decl_name LIKE ? || '%'
+            ORDER BY decl_name
+            LIMIT 200
+        """.trimIndent())
+    }
+
+    override fun searchDeclsByName(query: String): List<DeclRow> {
+        searchDeclsByNameStmt.setString(1, query)
+        return searchDeclsByNameStmt.executeQuery().use { rs ->
+            buildList { while (rs.next()) add(rs.toDeclRow()) }
+        }
+    }
+
+    // ====================================================================
     // PARSED MODULES
     // ====================================================================
 

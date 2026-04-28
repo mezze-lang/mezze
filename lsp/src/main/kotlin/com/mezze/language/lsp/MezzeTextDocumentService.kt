@@ -332,6 +332,7 @@ class MezzeTextDocumentService(
                                     modulePath = derived,
                                     filePath = filePath.toString(),
                                     sourceHash = sourceHash,
+                                    entrySource = content,
                                     parsedModule = parsedModule,
                                     loadedParsedModules = depParsedModules
                                 )
