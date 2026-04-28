@@ -105,6 +105,13 @@ class MezzeTextDocumentService(
                 try {
                     projectStore = SQLiteMezzeStore.forProject(projectRoot)
                     projectRootDir = projectRoot
+
+                    // Install parsed-modules cache hook so ModuleResolver skips
+                    // the parser when the store has a row matching this file's
+                    // bytes. Falls through to a fresh parse on miss.
+                    com.mezze.language.parser.ParsedModuleCacheHolder.set(
+                        com.mezze.language.codebase.StoreParsedModuleCache(projectStore!!)
+                    )
                     val (pkg, entry) = readMezzeTomlEntries(projectRoot)
                     packageName = pkg
                     entryFilePath = entry?.let { File(projectRoot, it).absolutePath }
@@ -155,8 +162,9 @@ class MezzeTextDocumentService(
 
         server.logInfo("Document opened: $uri")
 
-        // Analyze the document
-        val state = analyzeDocument(uri, content, version)
+        // didOpen's `content` is the on-disk file (the editor just loaded
+        // it), so persisting matches the "cache reflects files" rule.
+        val state = analyzeDocument(uri, content, version, persistToStore = true)
         documents[uri] = state
 
         // Publish diagnostics
@@ -170,8 +178,11 @@ class MezzeTextDocumentService(
         // For full sync, we get the entire content
         val content = params.contentChanges.firstOrNull()?.text ?: return
 
-        // Re-analyze the document
-        val state = analyzeDocument(uri, content, version)
+        // didChange ships the in-memory edit buffer — these bytes have
+        // NOT been written to disk yet. Diagnostics, hover, completions
+        // all run from the in-memory result; the store stays untouched
+        // until the user saves.
+        val state = analyzeDocument(uri, content, version, persistToStore = false)
         documents[uri] = state
 
         // Publish diagnostics
@@ -193,11 +204,13 @@ class MezzeTextDocumentService(
         val uri = params.textDocument.uri
         server.logInfo("Document saved: $uri")
 
-        // Re-analyze on save if content provided
+        // Re-analyze on save if content provided. didSave's `content` is
+        // what just landed on disk — safe to persist into the store so
+        // `mez dev` and the next LSP cold-open share rows.
         params.text?.let { content ->
             val state = documents[uri]
             if (state != null) {
-                val newState = analyzeDocument(uri, content, state.version)
+                val newState = analyzeDocument(uri, content, state.version, persistToStore = true)
                 documents[uri] = newState
                 publishDiagnostics(uri, newState.diagnostics)
             }
@@ -211,8 +224,14 @@ class MezzeTextDocumentService(
      *
      * Uses multi-error recovery to collect ALL errors and provide
      * partial type information even when there are errors.
+     *
+     * @param persistToStore when true, write the parsed/typed result into
+     *   `cache.sqlite`. Only safe when [content] matches what's on disk —
+     *   i.e. didSave (and didOpen, where the editor's initial buffer is the
+     *   on-disk file). Mid-edit didChange events MUST pass false; otherwise
+     *   the cache holds rows for source bytes that never existed on disk.
      */
-    private fun analyzeDocument(uri: String, content: String, version: Int): DocumentState {
+    private fun analyzeDocument(uri: String, content: String, version: Int, persistToStore: Boolean = false): DocumentState {
         val diagnostics = mutableListOf<Diagnostic>()
         var typeCheckResult: TypeCheckResult? = null
         var typeAliases: Map<String, TypeAliasInfo> = emptyMap()
@@ -284,7 +303,7 @@ class MezzeTextDocumentService(
                     val typedMod = result.typedModule
                     val rootDir = projectRootDir
                     val pkgName = packageName
-                    if (store != null && typedMod != null && filePath != null && rootDir != null && pkgName != null) {
+                    if (persistToStore && store != null && typedMod != null && filePath != null && rootDir != null && pkgName != null) {
                         // Use ModulePath.derive so the modulePath we write
                         // matches what `mez dev` writes for the same file —
                         // `(modulePath, sourceHash)` rows are then shared.
@@ -306,12 +325,15 @@ class MezzeTextDocumentService(
                                     typedModule = typedMod,
                                     performerRecords = result.loweredPerformers
                                 )
+                                val depParsedModules = com.mezze.language.typechecker.ModuleResolver.getAllParsedModules()
                                 StorePopulator.populate(
                                     store,
                                     publicResult,
                                     modulePath = derived,
                                     filePath = filePath.toString(),
-                                    sourceHash = sourceHash
+                                    sourceHash = sourceHash,
+                                    parsedModule = parsedModule,
+                                    loadedParsedModules = depParsedModules
                                 )
                             } catch (e: Exception) {
                                 // Non-fatal: store write failures shouldn't block diagnostics.

@@ -116,6 +116,9 @@ class CheckCommand {
 
         val source = appFile.readText()
         val store = SQLiteMezzeStore.forProject(currentDir)
+        com.mezze.language.parser.ParsedModuleCacheHolder.set(
+            com.mezze.language.codebase.StoreParsedModuleCache(store)
+        )
 
         try {
             val startTime = System.nanoTime()
@@ -127,9 +130,15 @@ class CheckCommand {
             val typeCheckResult = typeChecker.typeCheck(ast, currentDir.toPath())
             val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
-            // Scatter into store
+            // Scatter into store, including the entry + per-import ParsedModules.
             val sourceHash = sha256(source)
-            StorePopulator.populate(store, typeCheckResult, manifest.`package`.name, appFile.absolutePath, sourceHash)
+            val depParsedModules = com.mezze.language.typechecker.ModuleResolver.getAllParsedModules()
+            StorePopulator.populate(
+                store, typeCheckResult, manifest.`package`.name,
+                appFile.absolutePath, sourceHash,
+                parsedModule = ast,
+                loadedParsedModules = depParsedModules
+            )
 
             if (quiet) {
                 println("OK (${String.format("%.1f", totalTime)}ms)")

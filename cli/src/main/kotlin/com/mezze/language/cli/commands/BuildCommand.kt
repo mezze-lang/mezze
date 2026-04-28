@@ -66,6 +66,9 @@ class BuildCommand {
         }
 
         val store = SQLiteMezzeStore.forProject(currentDir)
+        com.mezze.language.parser.ParsedModuleCacheHolder.set(
+            com.mezze.language.codebase.StoreParsedModuleCache(store)
+        )
 
         try {
             val startTime = System.nanoTime()
@@ -97,7 +100,13 @@ class BuildCommand {
 
             // 2. Scatter into store. populate() returns a delta — only blobs
             //    whose hashes aren't already present get written.
-            StorePopulator.populate(store, typeCheckResult, modulePath, appFile.absolutePath, sourceHash)
+            val depParsedModules = com.mezze.language.typechecker.ModuleResolver.getAllParsedModules()
+            StorePopulator.populate(
+                store, typeCheckResult, modulePath,
+                appFile.absolutePath, sourceHash,
+                parsedModule = ast,
+                loadedParsedModules = depParsedModules
+            )
 
             // Store the user's lowered function manifest for standalone JAR loading.
             // (StorePopulator already stored the FunctionIRs by hash — manifest links

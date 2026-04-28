@@ -41,13 +41,21 @@ object StorePopulator {
      * @param modulePath The module path (e.g., "myapp::utils")
      * @param filePath The source file path (e.g., "src/utils.mz")
      * @param sourceHash The SHA-256 hash of the source file contents
+     * @param parsedModule The entry ParsedModule (optional). When provided,
+     *   it's persisted to `parsed_modules` so the parser can be skipped on
+     *   the next cold start.
+     * @param loadedParsedModules Per-import ParsedModule keyed by module path.
+     *   Each entry is persisted to `parsed_modules`. Only project files —
+     *   stdlib and other namespaced modules are filtered out.
      */
     fun populate(
         store: MezzeStore,
         result: TypeCheckResult,
         modulePath: String,
         filePath: String?,
-        sourceHash: String
+        sourceHash: String,
+        parsedModule: com.mezze.language.parsedast.ParsedModule? = null,
+        loadedParsedModules: Map<String, com.mezze.language.parsedast.ParsedModule> = emptyMap()
     ): PopulateDelta {
         // Collect all hashes we might write so we can do one bulk existence check.
         val candidateHashes = mutableSetOf<Hash>()
@@ -67,6 +75,14 @@ object StorePopulator {
         store.transaction {
             // Register the module — always update (file may have new sourceHash)
             store.putModule(modulePath, filePath, sourceHash, ModuleCategory.USER)
+
+            // Persist the entry ParsedModule first so reads can skip the parser
+            // even if typecheck/lower below fails. Comments are part of the
+            // serialized blob (they're fields on ParsedDecl).
+            if (parsedModule != null) {
+                val parsedBlob = CodebaseSerialization.serializeParsedModule(parsedModule)
+                store.putParsedModule(modulePath, sourceHash, parsedBlob)
+            }
 
             val typedModule = result.typedModule
             if (typedModule != null) {
@@ -98,6 +114,13 @@ object StorePopulator {
                 store.putModule(loadedPath, src.filePath, sha256, ModuleCategory.USER)
                 val blob = CodebaseSerialization.serializeTypedModule(loadedTyped)
                 store.putTypedModule(loadedPath, sha256, blob)
+
+                // Cache the dep's ParsedModule too, if the caller provided it.
+                // Same (path, sourceHash) keying as typed_modules.
+                loadedParsedModules[loadedPath]?.let { pm ->
+                    val parsedBlob = CodebaseSerialization.serializeParsedModule(pm)
+                    store.putParsedModule(loadedPath, sha256, parsedBlob)
+                }
             }
 
             val functions = result.loweredFunctions

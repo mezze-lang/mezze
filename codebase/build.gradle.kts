@@ -9,6 +9,7 @@ repositories {
 
 dependencies {
     implementation(project(":ast"))
+    implementation(project(":parser"))
     implementation(project(":typechecker"))
 
     implementation("org.jetbrains.kotlin:kotlin-stdlib")

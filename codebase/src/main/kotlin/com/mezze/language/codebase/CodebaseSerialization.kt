@@ -49,6 +49,21 @@ object CodebaseSerialization {
     }
 
     /**
+     * Serialize a ParsedModule to CBOR bytes. Includes all comments
+     * (leading, trailing, orphan, doc-comments) — they're part of the AST.
+     */
+    fun serializeParsedModule(module: com.mezze.language.parsedast.ParsedModule): ByteArray {
+        return cbor.encodeToByteArray(module)
+    }
+
+    /**
+     * Deserialize a ParsedModule from CBOR bytes.
+     */
+    fun deserializeParsedModule(bytes: ByteArray): com.mezze.language.parsedast.ParsedModule {
+        return cbor.decodeFromByteArray(bytes)
+    }
+
+    /**
      * Serialize a FunctionIR to CBOR bytes.
      */
     fun serializeFunctionIR(fn: com.mezze.language.truffleir.FunctionIR): ByteArray {

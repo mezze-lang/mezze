@@ -70,6 +70,13 @@ object DevRunner {
         // Open project store — stays open for the lifetime of the process
         val store = SQLiteMezzeStore.forProject(projectRoot)
 
+        // Install the parsed-modules cache hook so ModuleResolver and any
+        // other parser caller skips the parser when the store already has
+        // a matching row (slice A). Cleared in the watch-mode shutdown hook.
+        com.mezze.language.parser.ParsedModuleCacheHolder.set(
+            com.mezze.language.codebase.StoreParsedModuleCache(store)
+        )
+
         // Load stdlib into store if not already
         ensureStdlibLoaded(store)
 
@@ -485,7 +492,14 @@ object DevRunner {
         }
 
         // Write to cache.sqlite — delta tells us what actually changed.
-        val delta = StorePopulator.populate(store, result, modulePath, filePath, sourceHash)
+        // Pass `ast` (entry parsed module) and the per-import parsed modules
+        // so they're persisted to `parsed_modules` for cold-start reads.
+        val depParsedModules = com.mezze.language.typechecker.ModuleResolver.getAllParsedModules()
+        val delta = StorePopulator.populate(
+            store, result, modulePath, filePath, sourceHash,
+            parsedModule = ast,
+            loadedParsedModules = depParsedModules
+        )
         store.transaction {
             store.putApp(appName, entryName, modulePath, filePath)
             store.setAppFunctionHashes(appName, result.loweredFunctions.map { it.hash })

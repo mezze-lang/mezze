@@ -158,6 +158,24 @@ interface MezzeStore : AutoCloseable {
     fun getAppPerformerRecords(name: String): List<Array<String>>
 
     // ====================================================================
+    // PARSED MODULES — cached ParsedModule per (modulePath, sourceHash)
+    //
+    // Lets tools skip the parser on JVM start when the source file's bytes
+    // match what was parsed before. Comments come along for free (they're
+    // part of ParsedDecl). Keyed by (path, sourceHash) so the same module
+    // can have multiple in-flight versions cached (LSP edit vs. saved file).
+    // ====================================================================
+
+    /** Cache a parsed module. Idempotent: same (path, sourceHash) → same blob. */
+    fun putParsedModule(modulePath: String, sourceHash: String, parsedBlob: ByteArray)
+
+    /** Look up a cached parsed module by (path, sourceHash). Null if not present. */
+    fun getParsedModule(modulePath: String, sourceHash: String): ByteArray?
+
+    /** Drop all cached parsed-module entries for [modulePath]. */
+    fun clearParsedModulesForPath(modulePath: String)
+
+    // ====================================================================
     // TYPED MODULES — cached v2 TypedModule per (modulePath, sourceHash)
     //
     // Lets tools skip whole-module re-typecheck on JVM start when the source

@@ -1006,6 +1006,48 @@ class SQLiteMezzeStore private constructor(
     }
 
     // ====================================================================
+    // PARSED MODULES
+    // ====================================================================
+
+    private val putParsedModuleStmt: PreparedStatement by lazy {
+        conn.prepareStatement("""
+            INSERT OR REPLACE INTO parsed_modules (module_path, source_hash, parsed_blob, parsed_at)
+            VALUES (?, ?, ?, ?)
+        """.trimIndent())
+    }
+
+    override fun putParsedModule(modulePath: String, sourceHash: String, parsedBlob: ByteArray) {
+        putParsedModuleStmt.apply {
+            setString(1, modulePath)
+            setString(2, sourceHash)
+            setBytes(3, parsedBlob)
+            setLong(4, System.currentTimeMillis())
+            executeUpdate()
+        }
+    }
+
+    private val getParsedModuleStmt: PreparedStatement by lazy {
+        conn.prepareStatement(
+            "SELECT parsed_blob FROM parsed_modules WHERE module_path = ? AND source_hash = ?"
+        )
+    }
+
+    override fun getParsedModule(modulePath: String, sourceHash: String): ByteArray? {
+        getParsedModuleStmt.setString(1, modulePath)
+        getParsedModuleStmt.setString(2, sourceHash)
+        return getParsedModuleStmt.executeQuery().use { rs ->
+            if (rs.next()) rs.getBytes(1) else null
+        }
+    }
+
+    override fun clearParsedModulesForPath(modulePath: String) {
+        conn.prepareStatement("DELETE FROM parsed_modules WHERE module_path = ?").use { stmt ->
+            stmt.setString(1, modulePath)
+            stmt.executeUpdate()
+        }
+    }
+
+    // ====================================================================
     // TYPED MODULES
     // ====================================================================
 

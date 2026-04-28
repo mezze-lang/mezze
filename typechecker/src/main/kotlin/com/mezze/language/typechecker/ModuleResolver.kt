@@ -652,9 +652,16 @@ class ModuleResolver(
             loadingStack.add(modulePath)
 
             try {
-                // Parse module directly to v2 ParsedModule — no v1 Program needed
-                val parser = MezzeParser()
-                val parsedModule = parser.parseParsedModule(source, file = filePath.toString())
+                // Try the parsed-modules cache before invoking the parser.
+                // The hook (set by CLI/LSP at startup) returns null if the
+                // store is missing this file or its source_hash is stale,
+                // so we always fall through to a clean parse on miss.
+                val cached = com.mezze.language.parser.ParsedModuleCacheHolder
+                    .get(filePath.toString(), sourceHash)
+                val parsedModule = cached ?: run {
+                    val parser = MezzeParser()
+                    parser.parseParsedModule(source, file = filePath.toString())
+                }
 
                 // Extract exports from ParsedModule (v2 path)
                 val parsedExports = extractExportsFromParsedModule(parsedModule, modulePath)
