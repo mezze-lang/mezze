@@ -1,10 +1,15 @@
 package com.mezze.language.cli
 
 import com.mezze.language.codebase.CodebaseSerialization
+import com.mezze.language.codebase.ModuleCategory
 import com.mezze.language.codebase.SQLiteMezzeStore
 import com.mezze.language.codebase.BlobKind
+import com.mezze.language.codebase.StorePopulator
 import com.mezze.language.codebase.Visibility
+import com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX
+import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.PrecompiledStdlib
+import com.mezze.language.typechecker.TypeCheckResult
 import com.mezze.language.typedast.Hash
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.cbor.Cbor
@@ -30,6 +35,11 @@ fun main(args: Array<String>) {
     val projectRoot = args.getOrElse(1) { "." }
 
     System.setProperty("mezze.project.root", projectRoot)
+    // Force slow path so PrecompiledStdlib retains stdlibTypedModules /
+    // loadedModules for the v7-row scatter below. Without this, an
+    // existing ~/.mezze/cache/stdlib.sqlite would let the fast path win
+    // and clear those maps to emptyMap() before we get to walk them.
+    System.setProperty("mezze.stdlib.force-recompile", "1")
 
     val startTime = System.nanoTime()
 
@@ -48,11 +58,55 @@ fun main(args: Array<String>) {
 
     val store = SQLiteMezzeStore.forFile(outputFile)
     try {
+        // Slice C: write proper v7 rows per stdlib module so the project
+        // cache seed pulls in modules / names / decls / typed_modules /
+        // parsed_modules / imports / usages all keyed by category='stdlib'.
+        // Loops StorePopulator over each loaded stdlib module — same scatter
+        // path user code goes through, but with category=STDLIB and reading
+        // from PrecompiledStdlib's already-loaded TypedModules instead of
+        // re-typechecking.
+        val stdlibParsed = ModuleResolver.getAllParsedModules()
+            .filterKeys { it.startsWith(STDLIB_NAMESPACE_PREFIX) }
+        // Iterate every cached typechecker module so we capture both the
+        // 18 prelude-loaded ones and the ~5 effects/abilities pulled in
+        // transitively. PrecompiledStdlib.loadedModules only has the
+        // first set; ModuleTypeChecker.getAllCachedModules sees all.
+        // Each entry's key IS the canonical module path (e.g. "std::int").
+        val allCached = com.mezze.language.typechecker.module.ModuleTypeChecker
+            .getAllCachedModules()
+            .filterKeys { it.startsWith(STDLIB_NAMESPACE_PREFIX) }
+        for ((modPath, v1) in allCached) {
+            val typedMod = v1.typedModule ?: continue
+            val source = readModuleSource(v1.filePath)
+            val sourceHash = source?.let { sha256Hex(it) } ?: ""
+            val parsed = stdlibParsed[modPath] ?: v1.parsedModule
+
+            StorePopulator.populate(
+                store,
+                TypeCheckResult(typedModule = typedMod),
+                modulePath = modPath,
+                filePath = v1.filePath,
+                sourceHash = sourceHash,
+                entrySource = source,
+                parsedModule = parsed,
+                category = ModuleCategory.STDLIB
+            )
+        }
+
         store.transaction {
-            // Store all FunctionIRs
+            // Merge IR bytes into the typed-only blobs StorePopulator just
+            // wrote. Each function lookup updates ir on the existing row,
+            // matching the user-code merge path in scatterFunctionIRs.
             for ((hash, fn) in functions) {
+                val existing = store.getBlob(Hash(hash))
                 val irBytes = CodebaseSerialization.serializeFunctionIR(fn)
-                store.putBlob(Hash(hash), BlobKind.FUNCTION, Visibility.PUBLIC, null, irBytes)
+                store.putBlob(
+                    Hash(hash),
+                    existing?.kind ?: BlobKind.FUNCTION,
+                    existing?.visibility ?: Visibility.PUBLIC,
+                    existing?.typed,
+                    irBytes
+                )
             }
 
             // Store performer records
@@ -113,4 +167,22 @@ fun main(args: Array<String>) {
     } finally {
         store.close()
     }
+}
+
+/**
+ * Read a stdlib module's source. The filePath PrecompiledStdlib carries
+ * is a classpath-relative `stdlib/<...>.mz` (extracted via
+ * `ModuleResolver.readStdlibFile`). When PrecompiledStdlib loads from
+ * disk during build, it's an absolute filesystem path — try both.
+ */
+private fun readModuleSource(filePath: String?): String? {
+    if (filePath == null) return null
+    val asFile = File(filePath)
+    if (asFile.exists()) return asFile.readText()
+    return ModuleResolver.readStdlibFile(filePath)
+}
+
+private fun sha256Hex(s: String): String {
+    val digest = java.security.MessageDigest.getInstance("SHA-256")
+    return digest.digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 }

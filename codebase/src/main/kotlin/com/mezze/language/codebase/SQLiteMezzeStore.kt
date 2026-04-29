@@ -23,6 +23,14 @@ class SQLiteMezzeStore private constructor(
     private val readOnly: Boolean = false
 ) : MezzeStore {
 
+    /**
+     * Run a block with the underlying JDBC connection. Internal seam used
+     * by `StdlibSeed.copyFrom` to issue ATTACH DATABASE / multi-table
+     * INSERT-SELECT batches that don't fit the typed API. Public callers
+     * should always go through the typed methods.
+     */
+    internal fun <T> executeRaw(block: (Connection) -> T): T = block(conn)
+
     companion object {
         /**
          * Current schema version. Each bump must be accompanied by a

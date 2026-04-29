@@ -554,21 +554,14 @@ object DevRunner {
     }
 
     private fun ensureStdlibLoaded(store: SQLiteMezzeStore) {
-        if (store.getMetadata("stdlib_loaded") != null) return
         try {
-            val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
-            store.transaction {
-                for ((hash, fnIR) in precompiled.preloweredFunctions) {
-                    val irBytes = CodebaseSerialization.serializeFunctionIR(fnIR)
-                    store.putBlob(Hash(hash),
-                        com.mezze.language.codebase.BlobKind.FUNCTION,
-                        com.mezze.language.codebase.Visibility.PUBLIC, null, irBytes)
-                }
-                store.setMetadata("stdlib_loaded", "true")
-            }
+            // Slice C: copy the bundled stdlib seed (modules + names +
+            // blobs + decls + parsed/typed_modules + metadata) into the
+            // project cache. Idempotent — skips when stdlib rows already
+            // present. Falls back silently if no seed is shipped; the
+            // PrecompiledStdlib runtime path still works without it.
+            com.mezze.language.codebase.StdlibSeed.seedIfNeeded(store)
         } catch (e: Exception) {
-            // Non-fatal: stdlib will fall back to PrecompiledStdlib at runtime.
-            // But surface the cause so cache.sqlite issues don't hide.
             System.err.println("${ANSI_RED}warning:${ANSI_RESET} failed to seed stdlib into cache.sqlite: ${e.message}")
         }
     }

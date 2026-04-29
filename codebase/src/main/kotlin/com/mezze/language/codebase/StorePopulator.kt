@@ -61,7 +61,13 @@ object StorePopulator {
         sourceHash: String,
         entrySource: String? = null,
         parsedModule: com.mezze.language.parsedast.ParsedModule? = null,
-        loadedParsedModules: Map<String, com.mezze.language.parsedast.ParsedModule> = emptyMap()
+        loadedParsedModules: Map<String, com.mezze.language.parsedast.ParsedModule> = emptyMap(),
+        /**
+         * Module category. Used by StdlibPrecompiler to write stdlib rows
+         * with `category='stdlib'`. Default is `USER` so the existing
+         * project-compile path is unchanged.
+         */
+        category: ModuleCategory = ModuleCategory.USER
     ): PopulateDelta {
         // Collect all hashes we might write so we can do one bulk existence check.
         val candidateHashes = mutableSetOf<Hash>()
@@ -80,7 +86,7 @@ object StorePopulator {
 
         store.transaction {
             // Register the module — always update (file may have new sourceHash)
-            store.putModule(modulePath, filePath, sourceHash, ModuleCategory.USER)
+            store.putModule(modulePath, filePath, sourceHash, category)
 
             // Persist the entry ParsedModule first so reads can skip the parser
             // even if typecheck/lower below fails. Comments are part of the
@@ -127,14 +133,18 @@ object StorePopulator {
             // so both tools share the same `(modulePath, sourceHash)` keys.
             for ((loadedPath, loadedTyped) in result.loadedModules) {
                 if (loadedPath == modulePath) continue
-                if (loadedPath.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) {
-                    continue  // stdlib handled by PrecompiledStdlib
+                // Skip stdlib when populating user code — that data comes
+                // from the seed copy. Don't skip when WE are the stdlib
+                // populator (category=STDLIB).
+                if (category == ModuleCategory.USER &&
+                    loadedPath.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) {
+                    continue
                 }
                 val src = result.loadedModuleSources[loadedPath] ?: continue
                 val file = File(src.filePath).takeIf { it.exists() } ?: continue
                 val depSource = file.readText()
                 val sha256 = sha256Hex(depSource)
-                store.putModule(loadedPath, src.filePath, sha256, ModuleCategory.USER)
+                store.putModule(loadedPath, src.filePath, sha256, category)
                 val blob = CodebaseSerialization.serializeTypedModule(loadedTyped)
                 store.putTypedModule(loadedPath, sha256, blob)
 

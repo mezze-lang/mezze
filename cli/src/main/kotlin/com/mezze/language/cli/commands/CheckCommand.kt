@@ -116,6 +116,7 @@ class CheckCommand {
 
         val source = appFile.readText()
         val store = SQLiteMezzeStore.forProject(currentDir)
+        com.mezze.language.codebase.StdlibSeed.seedIfNeeded(store)
         com.mezze.language.parser.ParsedModuleCacheHolder.set(
             com.mezze.language.codebase.StoreParsedModuleCache(store)
         )
