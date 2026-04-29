@@ -158,6 +158,37 @@ interface MezzeStore : AutoCloseable {
     fun getAppPerformerRecords(name: String): List<Array<String>>
 
     // ====================================================================
+    // IMPORTS — every `use` clause, with target + source range.
+    //
+    // Powers (a) LSP "auto-import this name" code action — query
+    // `imports` to suggest a target_module, (b) "remove unused import"
+    // quick-fix (cross-check against usages), and (c) reverse "who
+    // imports me" lookups when refactoring exports.
+    // ====================================================================
+
+    /** Insert or replace an imports row. Idempotent on (modulePath, localName). */
+    fun putImport(
+        modulePath: String,
+        localName: String,
+        targetModule: String,
+        targetName: String,
+        targetHash: Hash?,
+        startLine: Int,
+        startCol: Int,
+        endLine: Int,
+        endCol: Int
+    )
+
+    /** Drop all imports rows for [modulePath]. Called before re-emitting on recompile. */
+    fun clearImportsForModule(modulePath: String)
+
+    /** Get all imports declared in [modulePath]. */
+    fun getImportsForModule(modulePath: String): List<ImportRow>
+
+    /** Find every module that imports [targetModule]::[targetName]. For "find imports of this export". */
+    fun getImportersOf(targetModule: String, targetName: String): List<ImportRow>
+
+    // ====================================================================
     // DECLS — per-decl index (kind, name, source range, hashes).
     //
     // Powers (a) LSP workspace symbol search without iterating typed_modules
@@ -374,6 +405,25 @@ data class DeclRow(
     val sourceHash: String,
     /** Content hash of the typed decl (matches blobs.hash). */
     val hash: Hash,
+    val startLine: Int,
+    val startCol: Int,
+    val endLine: Int,
+    val endCol: Int
+)
+
+/**
+ * One row per `use` import. `targetHash` may be null in memory if the
+ * imported decl wasn't resolved to a hash at write time (e.g. forward
+ * reference to a module that hasn't been scattered yet); the column is
+ * non-null in storage and we use the empty string as the on-disk
+ * sentinel.
+ */
+data class ImportRow(
+    val modulePath: String,
+    val localName: String,
+    val targetModule: String,
+    val targetName: String,
+    val targetHash: Hash?,
     val startLine: Int,
     val startCol: Int,
     val endLine: Int,

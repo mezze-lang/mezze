@@ -1006,6 +1006,101 @@ class SQLiteMezzeStore private constructor(
     }
 
     // ====================================================================
+    // IMPORTS
+    // ====================================================================
+
+    private val putImportStmt: PreparedStatement by lazy {
+        conn.prepareStatement("""
+            INSERT OR REPLACE INTO imports
+                (module_path, local_name, target_module, target_name, target_hash,
+                 start_line, start_col, end_line, end_col)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """.trimIndent())
+    }
+
+    override fun putImport(
+        modulePath: String,
+        localName: String,
+        targetModule: String,
+        targetName: String,
+        targetHash: Hash?,
+        startLine: Int,
+        startCol: Int,
+        endLine: Int,
+        endCol: Int
+    ) {
+        putImportStmt.apply {
+            setString(1, modulePath)
+            setString(2, localName)
+            setString(3, targetModule)
+            setString(4, targetName)
+            // Schema says NOT NULL but the column isn't FK'd; use empty string
+            // when the target hasn't been scattered yet.
+            setString(5, targetHash?.hex ?: "")
+            setInt(6, startLine)
+            setInt(7, startCol)
+            setInt(8, endLine)
+            setInt(9, endCol)
+            executeUpdate()
+        }
+    }
+
+    override fun clearImportsForModule(modulePath: String) {
+        conn.prepareStatement("DELETE FROM imports WHERE module_path = ?").use { stmt ->
+            stmt.setString(1, modulePath)
+            stmt.executeUpdate()
+        }
+    }
+
+    private fun ResultSet.toImportRow(): ImportRow {
+        val rawHash = getString("target_hash")
+        return ImportRow(
+            modulePath = getString("module_path"),
+            localName = getString("local_name"),
+            targetModule = getString("target_module"),
+            targetName = getString("target_name"),
+            targetHash = if (rawHash.isNullOrEmpty()) null else Hash(rawHash),
+            startLine = getInt("start_line"),
+            startCol = getInt("start_col"),
+            endLine = getInt("end_line"),
+            endCol = getInt("end_col")
+        )
+    }
+
+    private val getImportsForModuleStmt: PreparedStatement by lazy {
+        conn.prepareStatement("""
+            SELECT module_path, local_name, target_module, target_name, target_hash,
+                   start_line, start_col, end_line, end_col
+            FROM imports
+            WHERE module_path = ?
+        """.trimIndent())
+    }
+
+    override fun getImportsForModule(modulePath: String): List<ImportRow> {
+        getImportsForModuleStmt.setString(1, modulePath)
+        return getImportsForModuleStmt.executeQuery().use { rs ->
+            buildList { while (rs.next()) add(rs.toImportRow()) }
+        }
+    }
+
+    private val getImportersOfStmt: PreparedStatement by lazy {
+        conn.prepareStatement("""
+            SELECT module_path, local_name, target_module, target_name, target_hash,
+                   start_line, start_col, end_line, end_col
+            FROM imports
+            WHERE target_module = ? AND target_name = ?
+        """.trimIndent())
+    }
+
+    override fun getImportersOf(targetModule: String, targetName: String): List<ImportRow> {
+        getImportersOfStmt.setString(1, targetModule)
+        getImportersOfStmt.setString(2, targetName)
+        return getImportersOfStmt.executeQuery().use { rs ->
+            buildList { while (rs.next()) add(rs.toImportRow()) }
+        }
+    }
+
+    // ====================================================================
     // DECLS
     // ====================================================================
 

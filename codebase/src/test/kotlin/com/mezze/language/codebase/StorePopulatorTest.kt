@@ -356,6 +356,84 @@ class StorePopulatorTest {
     }
 
     @Test
+    fun `populate writes imports when ParsedModule has selective use clauses`() {
+        // Build a ParsedModule with a `use std::int::{add, multiply as mul}`
+        // by hand. The typechecker would normally produce this, but we want
+        // to test scatterImports without dragging in the whole pipeline.
+        val pkgPath = com.mezze.language.parsedast.ParsedModulePath(listOf("std", "int"))
+        val useLoc = Loc("u.mz", 1, 1, 1, 30)
+        val itemAdd = com.mezze.language.parsedast.ParsedImportItem(
+            name = "add",
+            alias = null,
+            loc = Loc("u.mz", 1, 16, 1, 18)
+        )
+        val itemMul = com.mezze.language.parsedast.ParsedImportItem(
+            name = "multiply",
+            alias = "mul",
+            loc = Loc("u.mz", 1, 21, 1, 31)
+        )
+        val useDecl = com.mezze.language.parsedast.ParsedUseDecl(
+            path = com.mezze.language.parsedast.ParsedUsePath.Selective(
+                modulePath = pkgPath,
+                items = listOf(itemAdd, itemMul),
+                loc = useLoc
+            ),
+            loc = useLoc
+        )
+        val parsed = com.mezze.language.parsedast.ParsedModule(
+            path = "myapp",
+            decls = listOf(useDecl)
+        )
+
+        val typedModule = TypedModule(
+            path = "myapp",
+            hash = makeHash('0'),
+            imports = emptyList(),
+            exports = emptyMap(),
+            decls = emptyList(),
+            abilityDecls = emptyList(),
+            abilityImpls = emptyList(),
+            effectDecls = emptyList(),
+            performerDecls = emptyList(),
+            dependencies = emptyList()
+        )
+
+        // Pre-register std::int::add so the writer picks up its hash.
+        // multiply stays unresolved → null targetHash on that row.
+        val addHash = makeHash('a')
+        store.putBlob(addHash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
+        store.putModule("std::int", null, "sh", ModuleCategory.STDLIB)
+        store.registerName("std::int", "add", addHash)
+
+        StorePopulator.populate(
+            store,
+            TypeCheckResult(typedModule = typedModule),
+            modulePath = "myapp",
+            filePath = "src/u.mz",
+            sourceHash = "sh",
+            parsedModule = parsed
+        )
+
+        val rows = store.getImportsForModule("myapp").associateBy { it.localName }
+        assertEquals(2, rows.size)
+
+        val addRow = rows["add"] ?: error("missing add")
+        assertEquals("std::int", addRow.targetModule)
+        assertEquals("add", addRow.targetName)
+        assertEquals(addHash, addRow.targetHash)
+
+        val mulRow = rows["mul"] ?: error("missing mul")
+        assertEquals("std::int", mulRow.targetModule)
+        assertEquals("multiply", mulRow.targetName)  // original name preserved
+        assertNull(mulRow.targetHash, "multiply was never registered, hash should be null")
+
+        // Reverse lookup: who imports std::int::add?
+        val importers = store.getImportersOf("std::int", "add")
+        assertEquals(1, importers.size)
+        assertEquals("myapp", importers[0].modulePath)
+    }
+
+    @Test
     fun `populate is idempotent`() {
         val hash = makeHash('a')
         val typedModule = TypedModule(

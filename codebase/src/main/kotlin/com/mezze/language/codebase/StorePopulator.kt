@@ -108,6 +108,9 @@ object StorePopulator {
                     scatterDecls(store, typedModule, modulePath, entrySource)
                 }
             }
+            // The entry's `imports` rows are written AFTER the dep loop below
+            // — the loop scatters dep `names`, which scatterImports needs to
+            // resolve `target_hash`. Ordering matters here.
 
             // Cache typed bytes for every transitively-loaded project module
             // (skip stdlib — its modulePath starts with "std::" and lives
@@ -130,15 +133,36 @@ object StorePopulator {
                 val blob = CodebaseSerialization.serializeTypedModule(loadedTyped)
                 store.putTypedModule(loadedPath, sha256, blob)
 
+                // Scatter dep decls into per-decl blobs + register names.
+                // Without this, cross-file imports that resolveName() into
+                // dep modules can't find a target hash, and per-decl
+                // executor lookups against cache.sqlite always miss.
+                scatterTypedModule(store, loadedTyped, loadedPath, existing)
+
                 // Cache the dep's ParsedModule too, if the caller provided it.
                 // Same (path, sourceHash) keying as typed_modules.
-                loadedParsedModules[loadedPath]?.let { pm ->
-                    val parsedBlob = CodebaseSerialization.serializeParsedModule(pm)
+                val depParsed = loadedParsedModules[loadedPath]
+                if (depParsed != null) {
+                    val parsedBlob = CodebaseSerialization.serializeParsedModule(depParsed)
                     store.putParsedModule(loadedPath, sha256, parsedBlob)
                 }
 
                 // Per-decl index for the dep too. We have its source in hand.
                 scatterDecls(store, loadedTyped, loadedPath, depSource)
+
+                // Imports for the dep — only if we have its ParsedModule.
+                // Without the ParsedModule we don't have the use-decl source
+                // ranges, and the index is uninteresting without them.
+                if (depParsed != null) {
+                    scatterImports(store, depParsed, loadedPath)
+                }
+            }
+
+            // Now that all deps have scattered their `names`, write the
+            // entry's imports — `resolveName` lookups inside scatterImports
+            // can now hit cross-module targets.
+            if (parsedModule != null) {
+                scatterImports(store, parsedModule, modulePath)
             }
 
             val functions = result.loweredFunctions
@@ -148,6 +172,64 @@ object StorePopulator {
         }
 
         return PopulateDelta(newHashes = newHashes, unchangedHashes = existing)
+    }
+
+    /**
+     * Write per-import rows into the `imports` index. Walks the parsed
+     * `use` declarations because TypedImport has no Loc / target_module
+     * path — only `moduleHash` and `declHash`.
+     *
+     * Only selective imports (`use std::int::{add, multiply}`) produce
+     * rows. Wildcard / module-bag imports (`use std::int`) are skipped —
+     * they don't bind a single local name, so they don't fit the
+     * `(module_path, local_name)` primary key, and the consumers (auto-
+     * import code action, unused-import check) only need named items.
+     */
+    private fun scatterImports(
+        store: MezzeStore,
+        parsed: com.mezze.language.parsedast.ParsedModule,
+        modulePath: String
+    ) {
+        store.clearImportsForModule(modulePath)
+
+        for (decl in parsed.decls) {
+            val (path, items) = when (decl) {
+                is com.mezze.language.parsedast.ParsedUseDecl ->
+                    decl.path to selectiveItems(decl.path)
+                is com.mezze.language.parsedast.ParsedPubUseDecl ->
+                    decl.path to selectiveItems(decl.path)
+                else -> continue
+            }
+            if (items == null) continue  // module-bag import; skip
+            val targetModule = (path as com.mezze.language.parsedast.ParsedUsePath.Selective)
+                .modulePath.toString()
+
+            for (item in items) {
+                val localName = item.alias ?: item.name
+                // Lookup the target hash if the source module's names were
+                // already scattered (deps land before the entry's imports).
+                // Misses are written as null so future runs can fill them in.
+                val targetHash = store.resolveName(targetModule, item.name)
+                store.putImport(
+                    modulePath = modulePath,
+                    localName = localName,
+                    targetModule = targetModule,
+                    targetName = item.name,
+                    targetHash = targetHash,
+                    startLine = item.loc.startLine,
+                    startCol = item.loc.startCol,
+                    endLine = item.loc.endLine,
+                    endCol = item.loc.endCol
+                )
+            }
+        }
+    }
+
+    private fun selectiveItems(
+        path: com.mezze.language.parsedast.ParsedUsePath
+    ): List<com.mezze.language.parsedast.ParsedImportItem>? = when (path) {
+        is com.mezze.language.parsedast.ParsedUsePath.Selective -> path.items
+        is com.mezze.language.parsedast.ParsedUsePath.Module -> null
     }
 
     /**
