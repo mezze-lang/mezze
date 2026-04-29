@@ -80,10 +80,12 @@ object DevRunner {
         // Load stdlib into store if not already
         ensureStdlibLoaded(store)
 
-        // Hydrate any cached typed-modules whose source on disk still matches.
-        // These are skipped during the next typecheck (cache hit in
-        // ModuleTypeChecker.globalCache); cold start drops by hundreds of ms.
-        hydrateTypedModulesFromStore(store, projectRoot)
+        // Hydrate cached typed-modules into the typechecker cache. Slice G:
+        // restrict to the entry module's transitive import closure plus
+        // stdlib (any decl in any imported module may reference stdlib).
+        // Modules outside the closure stay on disk and load on demand if
+        // ever needed.
+        hydrateTypedModulesFromStore(store, modulePath)
 
         // Shared Truffle Engine — JIT stays warm across runs.
         // Instrument options (cpusampler, coverage, insight, JIT trace) are
@@ -569,19 +571,31 @@ object DevRunner {
      * passes a lambda that deserializes the blob and pushes it into
      * ModuleTypeChecker.globalCache.
      */
-    private fun hydrateTypedModulesFromStore(store: SQLiteMezzeStore, projectRoot: File) {
-        val stats = com.mezze.language.codebase.StoreHydration.hydrateTypedModules(store) { modulePath, blob ->
-            try {
-                val v2Module = CodebaseSerialization.deserializeTypedModule(blob)
-                com.mezze.language.typechecker.module.ModuleTypeChecker
-                    .hydrateFromV2Module(modulePath, v2Module)
-                true
-            } catch (_: Exception) {
-                false
+    private fun hydrateTypedModulesFromStore(store: SQLiteMezzeStore, entryModulePath: String) {
+        // Compute the entry's transitive imports up-front. Always include
+        // stdlib — typechecker / executor cross-reference stdlib decls
+        // even when the entry doesn't directly `use std::*`.
+        val closure = com.mezze.language.codebase.StoreHydration
+            .computeImportClosure(store, entryModulePath)
+        val stats = com.mezze.language.codebase.StoreHydration.hydrateTypedModules(
+            store,
+            hydrate = { modulePath, blob ->
+                try {
+                    val v2Module = CodebaseSerialization.deserializeTypedModule(blob)
+                    com.mezze.language.typechecker.module.ModuleTypeChecker
+                        .hydrateFromV2Module(modulePath, v2Module)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            },
+            include = { mod ->
+                mod.category == com.mezze.language.codebase.ModuleCategory.STDLIB ||
+                    mod.path in closure
             }
-        }
+        )
         if (System.getenv("MEZZE_TIMING") != null) {
-            System.err.println("[${stats.elapsedMs}ms] hydrated typed modules: ${stats.hits} hit, ${stats.misses} miss")
+            System.err.println("[${stats.elapsedMs}ms] hydrated typed modules: ${stats.hits} hit, ${stats.misses} miss (closure=${closure.size})")
         }
     }
 
@@ -668,12 +682,15 @@ object DevRunner {
         store.getAppPerformerRecords(appName)
 
     /**
-     * True if any module recorded in the store has a source file on disk
-     * whose SHA-256 differs from the stored sourceHash. Returns true also
-     * if a recorded source file is missing (treat as stale → recompile).
+     * True if any USER project file has changed on disk since it was
+     * cached. Stdlib modules are excluded — their `filePath` is a
+     * JVM-temp directory from build time that doesn't exist at
+     * runtime, and stdlib version mismatch is handled separately by
+     * `StdlibSeed.seedIfNeeded` checking `stdlib_module_hashes`.
      */
     private fun anyProjectFileStale(store: SQLiteMezzeStore): Boolean {
         for (mod in store.getAllModules()) {
+            if (mod.category == com.mezze.language.codebase.ModuleCategory.STDLIB) continue
             val filePath = mod.filePath ?: continue
             val file = File(filePath)
             if (!file.exists()) return true

@@ -21,40 +21,65 @@ object StoreHydration {
     data class Stats(val hits: Int, val misses: Int, val elapsedMs: Long)
 
     /**
-     * Walk every module recorded in [store]. For each one, hash its source
-     * file on disk and look up a cached typed module at that hash. If the
-     * source on disk matches what was typed before, the [hydrate] callback
-     * is invoked with the deserialized blob bytes and the module path.
+     * Walk a filtered set of modules in [store] and pre-load their typed
+     * AST blobs into the typechecker's in-memory cache via [hydrate].
      *
-     * Bad blobs (failed deserialization) are pruned to prevent infinite retry.
+     * Slice G change: callers pass an explicit [include] predicate so we
+     * don't eagerly walk every module on JVM start. DevRunner passes the
+     * entry's transitive import closure; LSP passes "no modules yet" and
+     * lazy-loads on didOpen.
+     *
+     * For each included module:
+     *  - User modules (category=USER, LIBRARY) verify that the source on
+     *    disk still hashes to `modules.source_hash`. If it doesn't, mark
+     *    a miss and skip — the on-demand path will re-typecheck.
+     *  - Stdlib modules (category=STDLIB) skip the disk check; their
+     *    source files are temp-extracted JAR resources that disappear
+     *    across JVM runs, but the cached typed blob is still trustable
+     *    because slice C re-seeds whenever stdlib_module_hashes shifts.
+     *
+     * Bad blobs (failed deserialization) are pruned to prevent infinite
+     * retry.
      *
      * @param store the project store to walk
      * @param hydrate callback that takes (modulePath, typedBlob); should
-     *                deserialize and put into the in-memory cache. Returning
-     *                false signals a deserialization error (treated as miss
-     *                + prune).
+     *                deserialize and put into the in-memory cache.
+     *                Returning false signals a deserialization error
+     *                (treated as miss + prune).
+     * @param include predicate deciding whether to attempt to hydrate a
+     *                given module. Default: every module.
      * @return statistics for diagnostic logging
      */
     fun hydrateTypedModules(
         store: MezzeStore,
-        hydrate: (modulePath: String, typedBlob: ByteArray) -> Boolean
+        hydrate: (modulePath: String, typedBlob: ByteArray) -> Boolean,
+        include: (ModuleRow) -> Boolean = { true }
     ): Stats {
         val start = System.nanoTime()
         var hits = 0
         var misses = 0
 
         for (mod in store.getAllModules()) {
-            val filePath = mod.filePath ?: continue
-            val file = File(filePath).takeIf { it.exists() } ?: continue
-            val onDiskHash = sha256(file.readText())
-            if (onDiskHash != mod.sourceHash) {
+            if (!include(mod)) continue
+
+            val cachedHash = when (mod.category) {
+                ModuleCategory.STDLIB -> mod.sourceHash  // trust the seed
+                else -> {
+                    val filePath = mod.filePath ?: run { misses++; continue }
+                    val file = File(filePath).takeIf { it.exists() } ?: run { misses++; continue }
+                    val onDiskHash = sha256(file.readText())
+                    if (onDiskHash != mod.sourceHash) {
+                        misses++
+                        continue
+                    }
+                    onDiskHash
+                }
+            }
+
+            val blob = store.getTypedModule(mod.path, cachedHash) ?: run {
                 misses++
                 continue
             }
-            val blob = store.getTypedModule(mod.path, onDiskHash) ?: run {
-                misses++
-                null
-            } ?: continue
 
             val ok = try {
                 hydrate(mod.path, blob)
@@ -70,6 +95,32 @@ object StoreHydration {
         }
 
         return Stats(hits, misses, (System.nanoTime() - start) / 1_000_000)
+    }
+
+    /**
+     * Compute the transitive import closure of [entryModulePath] using the
+     * `imports` table. Result includes [entryModulePath] itself and every
+     * module reachable through chains of imports. Stops at modules that
+     * have no imports row in the store (typically stdlib leaves).
+     *
+     * BFS, deduped via a visited set. Cheap — `getImportsForModule` is one
+     * indexed query per module, and project import graphs are usually
+     * shallow. Caller passes the result as the [include] filter to
+     * [hydrateTypedModules] so we only pre-load what the entry actually
+     * needs.
+     */
+    fun computeImportClosure(store: MezzeStore, entryModulePath: String): Set<String> {
+        val visited = mutableSetOf<String>()
+        val queue = ArrayDeque<String>()
+        queue.add(entryModulePath)
+        while (queue.isNotEmpty()) {
+            val cur = queue.removeFirst()
+            if (!visited.add(cur)) continue
+            for (imp in store.getImportsForModule(cur)) {
+                if (imp.targetModule !in visited) queue.add(imp.targetModule)
+            }
+        }
+        return visited
     }
 
     private fun sha256(content: String): String {

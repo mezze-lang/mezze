@@ -122,23 +122,31 @@ class MezzeTextDocumentService(
                     entryFilePath = entry?.let { File(projectRoot, it).absolutePath }
                     server.logInfo("Using project store at ${SQLiteMezzeStore.resolveCacheFile(projectRoot).absolutePath} (package=$packageName, entry=$entry)")
 
-                    // Hydrate typechecker cache from the shared store. If
-                    // `mez dev` (or a previous LSP session) typed modules
-                    // here, we get them for free — the next typecheck call
-                    // hits cache instead of re-typechecking.
+                    // Slice G: at workspace open we don't yet know which file
+                    // the user will edit, so only pre-warm stdlib (always
+                    // needed for any typecheck). User modules hydrate
+                    // lazily — `ModuleResolver.resolveModule` consults
+                    // `parsed_modules` (slice A) and `typed_modules` on
+                    // demand when a typecheck imports them.
                     val store = projectStore!!
-                    val stats = StoreHydration.hydrateTypedModules(store) { modulePath, blob ->
-                        try {
-                            val v2 = CodebaseSerialization.deserializeTypedModule(blob)
-                            com.mezze.language.typechecker.module.ModuleTypeChecker
-                                .hydrateFromV2Module(modulePath, v2)
-                            true
-                        } catch (_: Exception) {
-                            false
+                    val stats = StoreHydration.hydrateTypedModules(
+                        store,
+                        hydrate = { modulePath, blob ->
+                            try {
+                                val v2 = CodebaseSerialization.deserializeTypedModule(blob)
+                                com.mezze.language.typechecker.module.ModuleTypeChecker
+                                    .hydrateFromV2Module(modulePath, v2)
+                                true
+                            } catch (_: Exception) {
+                                false
+                            }
+                        },
+                        include = { mod ->
+                            mod.category == com.mezze.language.codebase.ModuleCategory.STDLIB
                         }
-                    }
+                    )
                     server.logInfo(
-                        "Hydrated typed modules from store: ${stats.hits} hit, ${stats.misses} miss (${stats.elapsedMs}ms)"
+                        "Hydrated stdlib typed modules: ${stats.hits} hit, ${stats.misses} miss (${stats.elapsedMs}ms)"
                     )
                 } catch (e: Exception) {
                     server.logError("Failed to create store: ${e.message}")
