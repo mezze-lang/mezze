@@ -434,6 +434,62 @@ class StorePopulatorTest {
     }
 
     @Test
+    fun `populate writes usages for ByHash references in decl bodies`() {
+        // Build a TypedLetDecl whose body is `add` (a TypedVar referring
+        // to another decl by hash). The walker should record one usages
+        // row pointing at the TypedVar's loc.
+        val targetHash = makeHash('a')
+        val callerHash = makeHash('b')
+        val callerLoc = Loc("u.mz", 1, 1, 1, 30)
+        val varLoc = Loc("u.mz", 1, 14, 1, 17)
+
+        val typedModule = TypedModule(
+            path = "myapp",
+            hash = makeHash('0'),
+            imports = emptyList(),
+            exports = emptyMap(),
+            decls = listOf(
+                TypedLetDecl(
+                    hash = callerHash,
+                    name = "use_add",
+                    typeParams = emptyList(),
+                    value = TypedVar(
+                        name = "add",
+                        binding = BindingRef.ByHash(targetHash),
+                        type = MezzeType.IntType,
+                        loc = varLoc
+                    ),
+                    scheme = TypeScheme(emptyList(), emptyList(), MezzeType.IntType),
+                    isPublic = true,
+                    loc = callerLoc
+                )
+            ),
+            abilityDecls = emptyList(),
+            abilityImpls = emptyList(),
+            effectDecls = emptyList(),
+            performerDecls = emptyList(),
+            dependencies = emptyList()
+        )
+
+        StorePopulator.populate(
+            store,
+            TypeCheckResult(typedModule = typedModule),
+            modulePath = "myapp",
+            filePath = "src/u.mz",
+            sourceHash = "sh"
+        )
+
+        val rows = store.getUsages(targetHash)
+        assertEquals(1, rows.size)
+        val row = rows[0]
+        assertEquals("src/u.mz", row.filePath)
+        assertEquals(varLoc.startLine, row.startLine)
+        assertEquals(varLoc.startCol, row.startCol)
+        assertEquals(varLoc.endLine, row.endLine)
+        assertEquals(varLoc.endCol, row.endCol)
+    }
+
+    @Test
     fun `populate is idempotent`() {
         val hash = makeHash('a')
         val typedModule = TypedModule(

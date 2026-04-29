@@ -107,6 +107,11 @@ object StorePopulator {
                 if (entrySource != null) {
                     scatterDecls(store, typedModule, modulePath, entrySource)
                 }
+
+                // Cross-file find-references index. Walks every TypedExpr
+                // in the entry's decls + impl/performer bodies and writes
+                // one row per BindingRef.ByHash use site.
+                scatterUsages(store, typedModule, filePath)
             }
             // The entry's `imports` rows are written AFTER the dep loop below
             // — the loop scatters dep `names`, which scatterImports needs to
@@ -156,6 +161,9 @@ object StorePopulator {
                 if (depParsed != null) {
                     scatterImports(store, depParsed, loadedPath)
                 }
+
+                // Usages for the dep — same walk, attributed to its file.
+                scatterUsages(store, loadedTyped, src.filePath)
             }
 
             // Now that all deps have scattered their `names`, write the
@@ -172,6 +180,152 @@ object StorePopulator {
         }
 
         return PopulateDelta(newHashes = newHashes, unchangedHashes = existing)
+    }
+
+    /**
+     * Walk every decl in [module] and record one `usages` row per
+     * `TypedVar` whose binding is `BindingRef.ByHash`. Each row carries
+     * the source loc of the *use site* (the TypedVar.loc), not the
+     * definition. LSP textDocument/references reads this in O(1) by
+     * filtering on `target_hash`.
+     *
+     * Also records cross-decl hash references: `TypedHandlerRef`'s
+     * effect/performer hashes, `TypedPerformOp.effectHash`, and the
+     * `AbilityImplRef` hashes inside a `TypedCall.instantiation`. These
+     * don't have their own Loc fields, so we attribute them to their
+     * containing expression's loc.
+     *
+     * Cleared per-file before the walk — re-typechecking the file
+     * reproduces all its usage rows; nothing else should ever write
+     * usages for that file.
+     */
+    private fun scatterUsages(
+        store: MezzeStore,
+        module: TypedModule,
+        filePath: String?
+    ) {
+        if (filePath == null) return
+        store.clearUsagesForFile(filePath)
+
+        val collect: (com.mezze.language.typedast.Hash, com.mezze.language.parsedast.Loc) -> Unit = { h, loc ->
+            store.putUsage(h, filePath, loc.startLine, loc.startCol, loc.endLine, loc.endCol)
+        }
+
+        for (decl in module.decls) {
+            when (decl) {
+                is TypedLetDecl -> walkExpr(decl.value, collect)
+                is TypedTypeDecl -> Unit  // type defs hold MezzeType, no exprs
+                else -> Unit
+            }
+        }
+        for (impl in module.abilityImpls) {
+            // Cross-ref: impl → ability
+            collect(impl.abilityHash, impl.loc)
+            for (body in impl.operations.values) walkExpr(body, collect)
+        }
+        for (decl in module.performerDecls) {
+            collect(decl.effectHash, decl.loc)
+            for (body in decl.operations.values) walkExpr(body, collect)
+        }
+        // ability/effect decls have no exec bodies in TypedAst (operations
+        // are signatures only).
+    }
+
+    private fun walkExpr(
+        expr: com.mezze.language.typedast.TypedExpr,
+        collect: (com.mezze.language.typedast.Hash, com.mezze.language.parsedast.Loc) -> Unit
+    ) {
+        when (expr) {
+            is com.mezze.language.typedast.TypedVar -> {
+                val ref = expr.binding
+                if (ref is com.mezze.language.typedast.BindingRef.ByHash) {
+                    collect(ref.hash, expr.loc)
+                }
+            }
+            is com.mezze.language.typedast.TypedCall -> {
+                walkExpr(expr.function, collect)
+                walkExpr(expr.arg, collect)
+                expr.instantiation?.abilityImpls?.forEach { ref ->
+                    // No per-impl loc on AbilityImplRef; attribute to the call site.
+                    collect(ref.implHash, expr.loc)
+                    collect(ref.abilityHash, expr.loc)
+                }
+            }
+            is com.mezze.language.typedast.TypedLambda -> {
+                walkExpr(expr.body, collect)
+                // Captures of ByHash bindings count as uses too.
+                for (cap in expr.captures) {
+                    val src = cap.source
+                    if (src is com.mezze.language.typedast.BindingRef.ByHash) {
+                        // No loc on a TypedCapture; attribute to the lambda.
+                        collect(src.hash, expr.loc)
+                    }
+                }
+            }
+            is com.mezze.language.typedast.TypedRecord -> for (e in expr.entries) when (e) {
+                is com.mezze.language.typedast.TypedRecordEntry.Field -> walkExpr(e.value, collect)
+                is com.mezze.language.typedast.TypedRecordEntry.Spread -> walkExpr(e.expr, collect)
+            }
+            is com.mezze.language.typedast.TypedFieldAccess -> walkExpr(expr.record, collect)
+            is com.mezze.language.typedast.TypedRecordUpdate -> {
+                walkExpr(expr.record, collect)
+                for (e in expr.updates) when (e) {
+                    is com.mezze.language.typedast.TypedRecordEntry.Field -> walkExpr(e.value, collect)
+                    is com.mezze.language.typedast.TypedRecordEntry.Spread -> walkExpr(e.expr, collect)
+                }
+            }
+            is com.mezze.language.typedast.TypedVariantConstruct -> expr.payload?.let { walkExpr(it, collect) }
+            is com.mezze.language.typedast.TypedMatch -> {
+                walkExpr(expr.scrutinee, collect)
+                for (case in expr.cases) {
+                    case.guard?.let { walkExpr(it, collect) }
+                    walkExpr(case.body, collect)
+                    for (ilb in case.ifLetBindings) walkExpr(ilb.expr, collect)
+                }
+            }
+            is com.mezze.language.typedast.TypedIf -> {
+                walkExpr(expr.condition, collect)
+                walkExpr(expr.thenBranch, collect)
+                walkExpr(expr.elseBranch, collect)
+            }
+            is com.mezze.language.typedast.TypedBlock -> {
+                for (stmt in expr.statements) when (stmt) {
+                    is com.mezze.language.typedast.TypedStatement.Let -> walkExpr(stmt.value, collect)
+                    is com.mezze.language.typedast.TypedStatement.Expr -> walkExpr(stmt.expr, collect)
+                }
+                walkExpr(expr.result, collect)
+            }
+            is com.mezze.language.typedast.TypedSeq -> for (el in expr.elements) when (el) {
+                is com.mezze.language.typedast.TypedSeqElement.Regular -> walkExpr(el.expr, collect)
+                is com.mezze.language.typedast.TypedSeqElement.Spread -> walkExpr(el.expr, collect)
+            }
+            is com.mezze.language.typedast.TypedPerform -> {
+                for (h in expr.handlers) {
+                    collect(h.performerHash, h.loc)
+                    collect(h.effectHash, h.loc)
+                    h.params?.let { walkExpr(it, collect) }
+                }
+                walkExpr(expr.body, collect)
+            }
+            is com.mezze.language.typedast.TypedPerformOp -> {
+                collect(expr.effectHash, expr.loc)
+                walkExpr(expr.arg, collect)
+            }
+            is com.mezze.language.typedast.TypedPipe -> {
+                walkExpr(expr.left, collect)
+                walkExpr(expr.right, collect)
+            }
+            is com.mezze.language.typedast.TypedStringLit -> for (part in expr.parts) {
+                if (part is com.mezze.language.typedast.TypedStringPart.Interpolation) walkExpr(part.expr, collect)
+            }
+            // Leaves — no sub-expressions, no hash refs.
+            is com.mezze.language.typedast.TypedIntLit,
+            is com.mezze.language.typedast.TypedNatLit,
+            is com.mezze.language.typedast.TypedFloatLit,
+            is com.mezze.language.typedast.TypedFracLit,
+            is com.mezze.language.typedast.TypedBoolLit,
+            is com.mezze.language.typedast.TypedCharLit -> Unit
+        }
     }
 
     /**
