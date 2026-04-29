@@ -452,6 +452,38 @@ object DevRunner {
         }
         if (timing) System.err.println("[${ms()}ms] parsed")
 
+        // Slice F: incremental skip. On WATCH_RELOAD, before running the
+        // typechecker, ask the project cache whether anything actually
+        // changed since the last compile. If file-hash, decl-set,
+        // per-decl source_hash, dep file hashes, and stdlib version all
+        // match, we hydrate the previous TypeCheckResult straight from
+        // typed_modules + IR blobs and execute. ~700ms of typecheck +
+        // lowering avoided per save.
+        if (mode == ReloadMode.WATCH_RELOAD) {
+            val skip = com.mezze.language.codebase.IncrementalSkip.maybeSkip(
+                store = store,
+                entryParsed = ast,
+                entrySource = source,
+                entrySourceHash = sourceHash,
+                modulePath = modulePath,
+                entryFilePath = filePath,
+                appName = appName
+            )
+            if (skip is com.mezze.language.codebase.IncrementalSkip.Result.Skip) {
+                if (timing) System.err.println("[${ms()}ms] incremental skip — no decl changed")
+                val elapsed = ms()
+                System.err.println()
+                System.err.println("${ANSI_GRAY}no changes · ${ANSI_GREEN}${elapsed}ms${ANSI_RESET}${ANSI_GRAY} (press ${ANSI_BOLD}r${ANSI_RESET}${ANSI_GRAY} to re-run)${ANSI_RESET}")
+                lastDelta = com.mezze.language.codebase.PopulateDelta(
+                    newHashes = emptySet(),
+                    unchangedHashes = skip.hit.loweredFunctions.map { it.hash }.toSet()
+                )
+                return
+            } else if (timing && skip is com.mezze.language.codebase.IncrementalSkip.Result.Miss) {
+                System.err.println("[${ms()}ms] skip miss: ${skip.reason}${skip.detail?.let { " ($it)" } ?: ""}")
+            }
+        }
+
         // Surgically invalidate the entry module's typed cache so the new
         // source is re-typechecked. Stdlib + unchanged dep modules stay cached;
         // if a dep file changed, we evict it on the next sync via the watcher
