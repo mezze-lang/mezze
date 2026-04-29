@@ -67,18 +67,10 @@ object DevRunner {
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
         System.setProperty("polyglot.log.level", "OFF")
 
-        // Open project store — stays open for the lifetime of the process
-        val store = SQLiteMezzeStore.forProject(projectRoot)
-
-        // Install the parsed-modules cache hook so ModuleResolver and any
-        // other parser caller skips the parser when the store already has
-        // a matching row (slice A). Cleared in the watch-mode shutdown hook.
-        com.mezze.language.parser.ParsedModuleCacheHolder.set(
-            com.mezze.language.codebase.StoreParsedModuleCache(store)
-        )
-
-        // Load stdlib into store if not already
-        ensureStdlibLoaded(store)
+        // Open project store. `openProject` handles stdlib seeding +
+        // parser-cache hook install in one call; stays open for the
+        // lifetime of the process.
+        val store = SQLiteMezzeStore.openProject(projectRoot)
 
         // Hydrate cached typed-modules into the typechecker cache. Slice G:
         // restrict to the entry module's transitive import closure plus
@@ -596,19 +588,6 @@ object DevRunner {
         )
         if (System.getenv("MEZZE_TIMING") != null) {
             System.err.println("[${stats.elapsedMs}ms] hydrated typed modules: ${stats.hits} hit, ${stats.misses} miss (closure=${closure.size})")
-        }
-    }
-
-    private fun ensureStdlibLoaded(store: SQLiteMezzeStore) {
-        try {
-            // Slice C: copy the bundled stdlib seed (modules + names +
-            // blobs + decls + parsed/typed_modules + metadata) into the
-            // project cache. Idempotent — skips when stdlib rows already
-            // present. Falls back silently if no seed is shipped; the
-            // PrecompiledStdlib runtime path still works without it.
-            com.mezze.language.codebase.StdlibSeed.seedIfNeeded(store)
-        } catch (e: Exception) {
-            System.err.println("${ANSI_RED}warning:${ANSI_RESET} failed to seed stdlib into cache.sqlite: ${e.message}")
         }
     }
 

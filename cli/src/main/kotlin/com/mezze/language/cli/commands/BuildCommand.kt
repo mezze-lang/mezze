@@ -65,11 +65,7 @@ class BuildCommand {
             return
         }
 
-        val store = SQLiteMezzeStore.forProject(currentDir)
-        com.mezze.language.codebase.StdlibSeed.seedIfNeeded(store)
-        com.mezze.language.parser.ParsedModuleCacheHolder.set(
-            com.mezze.language.codebase.StoreParsedModuleCache(store)
-        )
+        val store = SQLiteMezzeStore.openProject(currentDir)
 
         try {
             val startTime = System.nanoTime()

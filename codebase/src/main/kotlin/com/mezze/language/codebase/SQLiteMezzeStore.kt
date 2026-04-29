@@ -89,6 +89,34 @@ class SQLiteMezzeStore private constructor(
             }
         }
 
+        /**
+         * Single canonical entry point for opening a project store.
+         *
+         * Replaces the scattered "forProject + seedIfNeeded + install cache
+         * hook" sequence that every command (mez dev / check / build / LSP)
+         * used to repeat. Today this is a thin wrapper; once the three-file
+         * split lands it grows to handle ATTACH / schema validation / view
+         * creation across cache.sqlite, stdlib.sqlite, deps.sqlite. Public
+         * API stays the same so call sites don't change again at that
+         * point.
+         *
+         * Steps:
+         *  1. Open (or create) the project's cache file.
+         *  2. Seed stdlib into it if not already present (idempotent —
+         *     skips when category=STDLIB rows are found).
+         *  3. Install the [com.mezze.language.parser.ParsedModuleCache]
+         *     hook so `ModuleResolver` consults the parsed_modules cache
+         *     before invoking the parser (slice A).
+         */
+        fun openProject(projectRoot: File): SQLiteMezzeStore {
+            val store = forProject(projectRoot)
+            StdlibSeed.seedIfNeeded(store)
+            com.mezze.language.parser.ParsedModuleCacheHolder.set(
+                StoreParsedModuleCache(store)
+            )
+            return store
+        }
+
         /** Open read-write store at a specific file path. */
         fun forFile(path: File): SQLiteMezzeStore {
             path.parentFile?.mkdirs()

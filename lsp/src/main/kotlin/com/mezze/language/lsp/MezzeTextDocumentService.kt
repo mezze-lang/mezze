@@ -103,20 +103,8 @@ class MezzeTextDocumentService(
             val projectRoot = SQLiteMezzeStore.findProjectRoot(rootFile)
             if (projectRoot != null) {
                 try {
-                    projectStore = SQLiteMezzeStore.forProject(projectRoot)
+                    projectStore = SQLiteMezzeStore.openProject(projectRoot)
                     projectRootDir = projectRoot
-
-                    // Slice C: copy bundled stdlib seed into project cache
-                    // so LSP queries (workspace symbols, find-references)
-                    // see stdlib uniformly. Idempotent on subsequent opens.
-                    com.mezze.language.codebase.StdlibSeed.seedIfNeeded(projectStore!!)
-
-                    // Install parsed-modules cache hook so ModuleResolver skips
-                    // the parser when the store has a row matching this file's
-                    // bytes. Falls through to a fresh parse on miss.
-                    com.mezze.language.parser.ParsedModuleCacheHolder.set(
-                        com.mezze.language.codebase.StoreParsedModuleCache(projectStore!!)
-                    )
                     val (pkg, entry) = readMezzeTomlEntries(projectRoot)
                     packageName = pkg
                     entryFilePath = entry?.let { File(projectRoot, it).absolutePath }
