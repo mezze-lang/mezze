@@ -301,24 +301,20 @@ object PrecompiledStdlib {
     )
 
     /**
-     * Try loading everything from stdlib.sqlite v2 (has prelude context).
+     * Try loading everything from the bundled `stdlib.sqlite` JAR
+     * resource (has prelude context). The legacy filesystem path
+     * `~/.mezze/cache/stdlib.sqlite` is no longer consulted — the
+     * JAR is the single source of truth.
      */
     @OptIn(ExperimentalSerializationApi::class)
     private fun tryLoadFullFromSqlite(): FullCacheData? {
         return try {
-            // Try filesystem first (native binary, installed via install.sh)
-            val fsPath = java.io.File(System.getProperty("user.home"), ".mezze/cache/stdlib.sqlite")
-            val sqlitePath = if (fsPath.exists()) {
-                fsPath.absolutePath
-            } else {
-                // Fall back to JAR classpath resource
-                val stream = PrecompiledStdlib::class.java.classLoader
-                    .getResourceAsStream(STDLIB_SQLITE_RESOURCE) ?: return null
-                val tempFile = java.io.File.createTempFile("mezze-stdlib-full", ".sqlite")
-                tempFile.deleteOnExit()
-                tempFile.writeBytes(stream.readAllBytes())
-                tempFile.absolutePath
-            }
+            val stream = PrecompiledStdlib::class.java.classLoader
+                .getResourceAsStream(STDLIB_SQLITE_RESOURCE) ?: return null
+            val tempFile = java.io.File.createTempFile("mezze-stdlib-full", ".sqlite")
+            tempFile.deleteOnExit()
+            tempFile.writeBytes(stream.readAllBytes())
+            val sqlitePath = tempFile.absolutePath
 
             try {
                 val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:$sqlitePath")

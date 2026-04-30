@@ -54,14 +54,12 @@ cp "$SHADOW_JAR" "$MEZZE_HOME/lib/mezze-lang.jar"
 SIZE=$(du -h "$MEZZE_HOME/lib/mezze-lang.jar" | cut -f1)
 echo -e "${GREEN}  ✓ ~/.mezze/lib/mezze-lang.jar (${SIZE})${NC}"
 
-# 2. Stdlib sqlite — refresh too. Built as part of compileStdlib.
-STDLIB_SQLITE="$REPO_ROOT/cli/build/generated/resources/stdlib.sqlite"
-if [ -f "$STDLIB_SQLITE" ]; then
-    mkdir -p "$MEZZE_HOME/cache"
-    cp "$STDLIB_SQLITE" "$MEZZE_HOME/cache/stdlib.sqlite"
-    SIZE=$(du -h "$MEZZE_HOME/cache/stdlib.sqlite" | cut -f1)
-    echo -e "${GREEN}  ✓ ~/.mezze/cache/stdlib.sqlite (${SIZE})${NC}"
-fi
+# 2. (Removed) The bundled stdlib.sqlite ships inside mezze-lang.jar as a
+#    classpath resource. PrecompiledStdlib reads it from there directly.
+#    The legacy `~/.mezze/cache/stdlib.sqlite` install path is gone.
+#    `mez dev` extracts the JAR resource into the project's
+#    `.mz/stdlib.sqlite` on first open. Safe to delete an existing
+#    `~/.mezze/cache/stdlib.sqlite` if you have one — nothing reads it.
 
 # 3. Native binary — only on request. ~3 minutes; usually not needed for
 #    runtime changes since the native binary is just a CLI shell that
