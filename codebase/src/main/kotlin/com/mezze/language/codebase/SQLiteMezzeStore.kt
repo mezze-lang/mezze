@@ -31,6 +31,27 @@ class SQLiteMezzeStore private constructor(
      */
     internal fun <T> executeRaw(block: (Connection) -> T): T = block(conn)
 
+    /**
+     * Build a UNION ALL across all three attached databases for a single
+     * select template. The placeholder `<DB>` is substituted with each of
+     * `main`, `stdlib`, `deps` in turn.
+     *
+     * Example:
+     *   unionAll("SELECT * FROM <DB>.modules WHERE path = ?")
+     * yields:
+     *   SELECT * FROM main.modules WHERE path = ?
+     *   UNION ALL
+     *   SELECT * FROM stdlib.modules WHERE path = ?
+     *   UNION ALL
+     *   SELECT * FROM deps.modules WHERE path = ?
+     *
+     * Caller is responsible for binding `paramCount * 3` parameters.
+     */
+    private fun unionAll(template: String): String =
+        listOf("main", DB_STDLIB, DB_DEPS).joinToString(" UNION ALL ") {
+            template.replace("<DB>", it)
+        }
+
     companion object {
         /**
          * Schema version. We've reset to baseline alongside the three-file
@@ -188,8 +209,9 @@ class SQLiteMezzeStore private constructor(
 
         /**
          * Open read-write store at a specific file path. Used by tooling
-         * (StdlibPrecompiler) that writes a self-contained sqlite — no
-         * stdlib/deps ATTACH needed because the file IS the stdlib.
+         * (StdlibPrecompiler) that writes a self-contained sqlite. We
+         * attach in-memory empty stdlib + deps so that the UNION ALL
+         * read paths still work — they just hit empty aux tables.
          */
         fun forFile(path: File): SQLiteMezzeStore {
             path.parentFile?.mkdirs()
@@ -197,6 +219,7 @@ class SQLiteMezzeStore private constructor(
             return SQLiteMezzeStore(conn, readOnly = false).also {
                 it.configurePragmas()
                 it.initSchema()
+                it.attachInMemoryAux()
             }
         }
 
@@ -747,35 +770,44 @@ class SQLiteMezzeStore private constructor(
     }
 
     private val getBlobStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT hash, kind, visibility, typed, ir FROM blobs WHERE hash = ?")
+        conn.prepareStatement(
+            unionAll("SELECT hash, kind, visibility, typed, ir FROM <DB>.blobs WHERE hash = ?") + " LIMIT 1"
+        )
     }
 
     override fun getBlob(hash: Hash): BlobRow? {
-        getBlobStmt.setString(1, hash.hex)
+        for (i in 0..2) getBlobStmt.setString(i + 1, hash.hex)
         return getBlobStmt.executeQuery().use { rs ->
             if (rs.next()) rs.toBlobRow() else null
         }
     }
 
     private val blobExistsStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT 1 FROM blobs WHERE hash = ? LIMIT 1")
+        conn.prepareStatement(
+            unionAll("SELECT 1 FROM <DB>.blobs WHERE hash = ?") + " LIMIT 1"
+        )
     }
 
     override fun blobExists(hash: Hash): Boolean {
-        blobExistsStmt.setString(1, hash.hex)
+        for (i in 0..2) blobExistsStmt.setString(i + 1, hash.hex)
         return blobExistsStmt.executeQuery().use { it.next() }
     }
 
     override fun blobsExist(hashes: Collection<Hash>): Set<Hash> {
         if (hashes.isEmpty()) return emptySet()
         val present = HashSet<Hash>(hashes.size)
-        // SQLite default SQLITE_MAX_VARIABLE_NUMBER is 999 (older builds) / 32766 (newer).
-        // Stay safe with a chunk size of 500.
+        // Stay safe with a chunk size of 500. Three UNIONed clauses each
+        // bind `chunk.size` placeholders, so total params per query is
+        // `3 * chunk.size` — well under the SQLite limit.
         for (chunk in hashes.chunked(500)) {
             val placeholders = chunk.joinToString(",") { "?" }
-            val sql = "SELECT hash FROM blobs WHERE hash IN ($placeholders)"
+            val sql = unionAll("SELECT hash FROM <DB>.blobs WHERE hash IN ($placeholders)")
             conn.prepareStatement(sql).use { stmt ->
-                chunk.forEachIndexed { i, h -> stmt.setString(i + 1, h.hex) }
+                for (db in 0..2) {
+                    chunk.forEachIndexed { i, h ->
+                        stmt.setString(db * chunk.size + i + 1, h.hex)
+                    }
+                }
                 stmt.executeQuery().use { rs ->
                     while (rs.next()) present.add(Hash(rs.getString(1)))
                 }
@@ -785,11 +817,11 @@ class SQLiteMezzeStore private constructor(
     }
 
     private val getIRStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT ir FROM blobs WHERE hash = ?")
+        conn.prepareStatement(unionAll("SELECT ir FROM <DB>.blobs WHERE hash = ?") + " LIMIT 1")
     }
 
     override fun getIR(hash: Hash): ByteArray? {
-        getIRStmt.setString(1, hash.hex)
+        for (i in 0..2) getIRStmt.setString(i + 1, hash.hex)
         return getIRStmt.executeQuery().use { rs ->
             if (rs.next()) rs.getBytes("ir") else null
         }
@@ -826,50 +858,55 @@ class SQLiteMezzeStore private constructor(
     }
 
     private val resolveNameStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT hash FROM names WHERE module = ? AND name = ?")
+        conn.prepareStatement(
+            unionAll("SELECT hash FROM <DB>.names WHERE module = ? AND name = ?") + " LIMIT 1"
+        )
     }
 
     override fun resolveName(module: String, name: String): Hash? {
-        resolveNameStmt.setString(1, module)
-        resolveNameStmt.setString(2, name)
+        for (i in 0..2) {
+            resolveNameStmt.setString(i * 2 + 1, module)
+            resolveNameStmt.setString(i * 2 + 2, name)
+        }
         return resolveNameStmt.executeQuery().use { rs ->
             if (rs.next()) Hash(rs.getString(1)) else null
         }
     }
 
     private val getNamesForHashStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT module, name, hash FROM names WHERE hash = ?")
+        conn.prepareStatement(unionAll("SELECT module, name, hash FROM <DB>.names WHERE hash = ?"))
     }
 
     override fun getNamesForHash(hash: Hash): List<NameRow> {
-        getNamesForHashStmt.setString(1, hash.hex)
+        for (i in 0..2) getNamesForHashStmt.setString(i + 1, hash.hex)
         return getNamesForHashStmt.executeQuery().use { rs -> rs.collectNameRows() }
     }
 
     private val getModuleExportsStmt: PreparedStatement by lazy {
-        conn.prepareStatement("""
-            SELECT n.module, n.name, n.hash FROM names n
-            JOIN blobs b ON n.hash = b.hash
+        // JOIN blobs needs to look in the same DB as names, since blobs
+        // and names of stdlib live in stdlib.sqlite (not main.blobs).
+        conn.prepareStatement(unionAll("""
+            SELECT n.module, n.name, n.hash FROM <DB>.names n
+            JOIN <DB>.blobs b ON n.hash = b.hash
             WHERE n.module = ? AND b.visibility = 'PUBLIC'
-        """.trimIndent())
+        """.trimIndent()))
     }
 
     override fun getModuleExports(module: String): List<NameRow> {
-        getModuleExportsStmt.setString(1, module)
+        for (i in 0..2) getModuleExportsStmt.setString(i + 1, module)
         return getModuleExportsStmt.executeQuery().use { rs -> rs.collectNameRows() }
     }
 
     private val searchExportsStmt: PreparedStatement by lazy {
-        conn.prepareStatement("""
-            SELECT n.module, n.name, n.hash FROM names n
-            JOIN blobs b ON n.hash = b.hash
+        conn.prepareStatement(unionAll("""
+            SELECT n.module, n.name, n.hash FROM <DB>.names n
+            JOIN <DB>.blobs b ON n.hash = b.hash
             WHERE n.name LIKE ? AND b.visibility = 'PUBLIC'
-            LIMIT 50
-        """.trimIndent())
+        """.trimIndent()) + " LIMIT 50")
     }
 
     override fun searchExportsByName(query: String): List<NameRow> {
-        searchExportsStmt.setString(1, "$query%")
+        for (i in 0..2) searchExportsStmt.setString(i + 1, "$query%")
         return searchExportsStmt.executeQuery().use { rs -> rs.collectNameRows() }
     }
 
@@ -974,20 +1011,20 @@ class SQLiteMezzeStore private constructor(
     }
 
     private val getEdgesFromStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT from_hash, to_hash, kind FROM edges WHERE from_hash = ?")
+        conn.prepareStatement(unionAll("SELECT from_hash, to_hash, kind FROM <DB>.edges WHERE from_hash = ?"))
     }
 
     override fun getEdgesFrom(hash: Hash): List<EdgeRow> {
-        getEdgesFromStmt.setString(1, hash.hex)
+        for (i in 0..2) getEdgesFromStmt.setString(i + 1, hash.hex)
         return getEdgesFromStmt.executeQuery().use { rs -> rs.collectEdgeRows() }
     }
 
     private val getEdgesToStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT from_hash, to_hash, kind FROM edges WHERE to_hash = ?")
+        conn.prepareStatement(unionAll("SELECT from_hash, to_hash, kind FROM <DB>.edges WHERE to_hash = ?"))
     }
 
     override fun getEdgesTo(hash: Hash): List<EdgeRow> {
-        getEdgesToStmt.setString(1, hash.hex)
+        for (i in 0..2) getEdgesToStmt.setString(i + 1, hash.hex)
         return getEdgesToStmt.executeQuery().use { rs -> rs.collectEdgeRows() }
     }
 
@@ -1027,11 +1064,13 @@ class SQLiteMezzeStore private constructor(
     }
 
     private val getAbilityImplsStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT hash, ability_hash, target_type, module FROM ability_impls WHERE ability_hash = ?")
+        conn.prepareStatement(unionAll(
+            "SELECT hash, ability_hash, target_type, module FROM <DB>.ability_impls WHERE ability_hash = ?"
+        ))
     }
 
     override fun getAbilityImpls(abilityHash: Hash): List<AbilityImplRow> {
-        getAbilityImplsStmt.setString(1, abilityHash.hex)
+        for (i in 0..2) getAbilityImplsStmt.setString(i + 1, abilityHash.hex)
         return getAbilityImplsStmt.executeQuery().use { rs ->
             val list = mutableListOf<AbilityImplRow>()
             while (rs.next()) {
@@ -1047,12 +1086,16 @@ class SQLiteMezzeStore private constructor(
     }
 
     private val getAbilityImplForTypeStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT hash FROM ability_impls WHERE ability_hash = ? AND target_type = ? LIMIT 1")
+        conn.prepareStatement(
+            unionAll("SELECT hash FROM <DB>.ability_impls WHERE ability_hash = ? AND target_type = ?") + " LIMIT 1"
+        )
     }
 
     override fun getAbilityImplForType(abilityHash: Hash, targetType: String): Hash? {
-        getAbilityImplForTypeStmt.setString(1, abilityHash.hex)
-        getAbilityImplForTypeStmt.setString(2, targetType)
+        for (i in 0..2) {
+            getAbilityImplForTypeStmt.setString(i * 2 + 1, abilityHash.hex)
+            getAbilityImplForTypeStmt.setString(i * 2 + 2, targetType)
+        }
         return getAbilityImplForTypeStmt.executeQuery().use { rs ->
             if (rs.next()) Hash(rs.getString("hash")) else null
         }
@@ -1073,11 +1116,13 @@ class SQLiteMezzeStore private constructor(
     }
 
     private val getEffectPerformersStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT hash, effect_hash, performer_name, module FROM effect_performers WHERE effect_hash = ?")
+        conn.prepareStatement(unionAll(
+            "SELECT hash, effect_hash, performer_name, module FROM <DB>.effect_performers WHERE effect_hash = ?"
+        ))
     }
 
     override fun getEffectPerformers(effectHash: Hash): List<EffectPerformerRow> {
-        getEffectPerformersStmt.setString(1, effectHash.hex)
+        for (i in 0..2) getEffectPerformersStmt.setString(i + 1, effectHash.hex)
         return getEffectPerformersStmt.executeQuery().use { rs ->
             val list = mutableListOf<EffectPerformerRow>()
             while (rs.next()) {
@@ -1338,33 +1383,35 @@ class SQLiteMezzeStore private constructor(
     }
 
     private val getImportsForModuleStmt: PreparedStatement by lazy {
-        conn.prepareStatement("""
+        conn.prepareStatement(unionAll("""
             SELECT module_path, local_name, target_module, target_name, target_hash,
                    start_line, start_col, end_line, end_col
-            FROM imports
+            FROM <DB>.imports
             WHERE module_path = ?
-        """.trimIndent())
+        """.trimIndent()))
     }
 
     override fun getImportsForModule(modulePath: String): List<ImportRow> {
-        getImportsForModuleStmt.setString(1, modulePath)
+        for (i in 0..2) getImportsForModuleStmt.setString(i + 1, modulePath)
         return getImportsForModuleStmt.executeQuery().use { rs ->
             buildList { while (rs.next()) add(rs.toImportRow()) }
         }
     }
 
     private val getImportersOfStmt: PreparedStatement by lazy {
-        conn.prepareStatement("""
+        conn.prepareStatement(unionAll("""
             SELECT module_path, local_name, target_module, target_name, target_hash,
                    start_line, start_col, end_line, end_col
-            FROM imports
+            FROM <DB>.imports
             WHERE target_module = ? AND target_name = ?
-        """.trimIndent())
+        """.trimIndent()))
     }
 
     override fun getImportersOf(targetModule: String, targetName: String): List<ImportRow> {
-        getImportersOfStmt.setString(1, targetModule)
-        getImportersOfStmt.setString(2, targetName)
+        for (i in 0..2) {
+            getImportersOfStmt.setString(i * 2 + 1, targetModule)
+            getImportersOfStmt.setString(i * 2 + 2, targetName)
+        }
         return getImportersOfStmt.executeQuery().use { rs ->
             buildList { while (rs.next()) add(rs.toImportRow()) }
         }
@@ -1428,34 +1475,32 @@ class SQLiteMezzeStore private constructor(
     )
 
     private val getDeclsForModuleStmt: PreparedStatement by lazy {
-        conn.prepareStatement("""
+        conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
                    start_line, start_col, end_line, end_col
-            FROM decls
+            FROM <DB>.decls
             WHERE module_path = ?
-        """.trimIndent())
+        """.trimIndent()))
     }
 
     override fun getDeclsForModule(modulePath: String): List<DeclRow> {
-        getDeclsForModuleStmt.setString(1, modulePath)
+        for (i in 0..2) getDeclsForModuleStmt.setString(i + 1, modulePath)
         return getDeclsForModuleStmt.executeQuery().use { rs ->
             buildList { while (rs.next()) add(rs.toDeclRow()) }
         }
     }
 
     private val searchDeclsByNameStmt: PreparedStatement by lazy {
-        conn.prepareStatement("""
+        conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
                    start_line, start_col, end_line, end_col
-            FROM decls
+            FROM <DB>.decls
             WHERE decl_name LIKE ? || '%'
-            ORDER BY decl_name
-            LIMIT 200
-        """.trimIndent())
+        """.trimIndent()) + " ORDER BY decl_name LIMIT 200")
     }
 
     override fun searchDeclsByName(query: String): List<DeclRow> {
-        searchDeclsByNameStmt.setString(1, query)
+        for (i in 0..2) searchDeclsByNameStmt.setString(i + 1, query)
         return searchDeclsByNameStmt.executeQuery().use { rs ->
             buildList { while (rs.next()) add(rs.toDeclRow()) }
         }
@@ -1484,13 +1529,15 @@ class SQLiteMezzeStore private constructor(
 
     private val getParsedModuleStmt: PreparedStatement by lazy {
         conn.prepareStatement(
-            "SELECT parsed_blob FROM parsed_modules WHERE module_path = ? AND source_hash = ?"
+            unionAll("SELECT parsed_blob FROM <DB>.parsed_modules WHERE module_path = ? AND source_hash = ?") + " LIMIT 1"
         )
     }
 
     override fun getParsedModule(modulePath: String, sourceHash: String): ByteArray? {
-        getParsedModuleStmt.setString(1, modulePath)
-        getParsedModuleStmt.setString(2, sourceHash)
+        for (i in 0..2) {
+            getParsedModuleStmt.setString(i * 2 + 1, modulePath)
+            getParsedModuleStmt.setString(i * 2 + 2, sourceHash)
+        }
         return getParsedModuleStmt.executeQuery().use { rs ->
             if (rs.next()) rs.getBytes(1) else null
         }
@@ -1525,14 +1572,23 @@ class SQLiteMezzeStore private constructor(
     }
 
     private val getTypedModuleStmt: PreparedStatement by lazy {
-        conn.prepareStatement(
-            "SELECT typed_blob FROM typed_modules WHERE module_path = ? AND source_hash = ?"
-        )
+        // UNION across cache + stdlib + deps. Module paths are scope-
+        // unique so at most one hit; LIMIT 1 short-circuits the scan.
+        conn.prepareStatement("""
+            SELECT typed_blob FROM main.typed_modules   WHERE module_path = ? AND source_hash = ?
+            UNION ALL
+            SELECT typed_blob FROM stdlib.typed_modules WHERE module_path = ? AND source_hash = ?
+            UNION ALL
+            SELECT typed_blob FROM deps.typed_modules   WHERE module_path = ? AND source_hash = ?
+            LIMIT 1
+        """.trimIndent())
     }
 
     override fun getTypedModule(modulePath: String, sourceHash: String): ByteArray? {
-        getTypedModuleStmt.setString(1, modulePath)
-        getTypedModuleStmt.setString(2, sourceHash)
+        for (i in 0..2) {
+            getTypedModuleStmt.setString(i * 2 + 1, modulePath)
+            getTypedModuleStmt.setString(i * 2 + 2, sourceHash)
+        }
         return getTypedModuleStmt.executeQuery().use { rs ->
             if (rs.next()) rs.getBytes(1) else null
         }

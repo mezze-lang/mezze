@@ -129,6 +129,14 @@ sourceSets.main {
     resources.srcDir(layout.buildDirectory.dir("generated/resources"))
 }
 
+// processResources copies the generated stdlib.sqlite into resources/main/.
+// It must run AFTER compileStdlib produces the file; otherwise it copies an
+// empty (or stale) version. Without this, shadowJar bundles the wrong bytes
+// and the project's `.mz/stdlib.sqlite` ends up empty on first open.
+tasks.processResources {
+    dependsOn("compileStdlib")
+}
+
 // shadowJar depends on compileStdlib so stdlib.db is always fresh in the JAR
 tasks.shadowJar {
     dependsOn("compileStdlib")
