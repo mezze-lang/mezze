@@ -1,11 +1,7 @@
 package com.mezze.language.lsp
 
-import com.mezze.language.codebase.CodebaseSerialization
-import com.mezze.language.parsedast.Loc
+import com.mezze.language.codebase.DeclKind
 import com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX
-import com.mezze.language.typedast.TypedLetDecl
-import com.mezze.language.typedast.TypedModule
-import com.mezze.language.typedast.TypedTypeDecl
 import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.services.LanguageClient
@@ -37,17 +33,15 @@ class MezzeWorkspaceService(
     /**
      * Search for symbols across the workspace.
      *
-     * Source of truth: the project's `cache.sqlite`. We walk every module
-     * in the `modules` table, load its serialized [TypedModule] from
-     * `typed_modules`, and emit one [SymbolInformation] per top-level decl
-     * (let bindings, types, abilities, effects, performers).
+     * Backed by the v7 `decls` index. Single SQL query over
+     * `searchDeclsByName(prefix)` returns up to 200 matching rows
+     * across cache + stdlib + deps; we filter stdlib client-side so
+     * project symbols don't get drowned out, then format each row as a
+     * [SymbolInformation].
      *
-     * Stdlib modules (`std::*`) are skipped — they're not user-editable and
-     * including them would drown out project symbols.
-     *
-     * Filtering: case-insensitive substring match on the symbol name.
-     * Empty query → return everything. Hard-cap to 500 results so a wide
-     * project doesn't blow up the editor.
+     * Replaces the old "walk every module, deserialize TypedModule
+     * blobs, scan decls" path — that was O(modules × decls)
+     * deserialisation per query. Now it's one indexed lookup.
      */
     override fun symbol(params: WorkspaceSymbolParams): CompletableFuture<Either<List<SymbolInformation>, List<WorkspaceSymbol>>> {
         return CompletableFuture.supplyAsync {
@@ -55,62 +49,48 @@ class MezzeWorkspaceService(
                 ?: return@supplyAsync Either.forLeft<List<SymbolInformation>, List<WorkspaceSymbol>>(emptyList())
             val store = tds.getProjectStore() ?: return@supplyAsync Either.forLeft(emptyList())
 
+            // Resolve module → file_path via the modules table. One read,
+            // cached for this query. Stdlib modules' filePaths point at
+            // build-time temp dirs; we skip them anyway.
+            val moduleFilePaths = store.getAllModules()
+                .filterNot { it.path.startsWith(STDLIB_NAMESPACE_PREFIX) }
+                .associate { it.path to it.filePath }
+
             val query = params.query.trim()
-            val needle = query.lowercase()
             val results = mutableListOf<SymbolInformation>()
             val limit = 500
 
-            for (mod in store.getAllModules()) {
+            // searchDeclsByName does a `decl_name LIKE ? || '%'` lookup.
+            // Empty query string matches all (' || '%' = '%').
+            for (row in store.searchDeclsByName(query)) {
                 if (results.size >= limit) break
-                if (mod.path.startsWith(STDLIB_NAMESPACE_PREFIX)) continue
-                val filePath = mod.filePath ?: continue
-                val blob = store.getTypedModule(mod.path, mod.sourceHash) ?: continue
-                val typed = try {
-                    CodebaseSerialization.deserializeTypedModule(blob)
-                } catch (_: Exception) {
-                    continue
-                }
-                collectSymbols(typed, mod.path, filePath, needle, results, limit)
+                if (row.modulePath.startsWith(STDLIB_NAMESPACE_PREFIX)) continue
+                val filePath = moduleFilePaths[row.modulePath] ?: continue
+                val uri = File(filePath).toURI().toString()
+                val location = Location(uri, Range(
+                    Position(row.startLine - 1, row.startCol - 1),
+                    Position(row.endLine - 1, row.endCol)
+                ))
+                @Suppress("DEPRECATION")
+                results.add(SymbolInformation(
+                    row.declName,
+                    declKindToSymbolKind(row.declKind),
+                    location,
+                    row.modulePath
+                ))
             }
 
             Either.forLeft<List<SymbolInformation>, List<WorkspaceSymbol>>(results)
         }
     }
 
-    private fun collectSymbols(
-        typed: TypedModule,
-        modulePath: String,
-        filePath: String,
-        needle: String,
-        out: MutableList<SymbolInformation>,
-        limit: Int
-    ) {
-        // The module's filePath comes from the modules table (always
-        // absolute). Loc.file inside TypedDecls can be relative on the
-        // entry-file path, so we trust the modules row for the URI and
-        // only use Loc for line/col.
-        val uri = File(filePath).toURI().toString()
-
-        @Suppress("DEPRECATION") // SymbolInformation is the form most editors render
-        fun emit(name: String, kind: SymbolKind, loc: Loc) {
-            if (out.size >= limit) return
-            if (needle.isNotEmpty() && !name.lowercase().contains(needle)) return
-            val location = Location(uri, Range(
-                Position(loc.startLine - 1, loc.startCol - 1),
-                Position(loc.endLine - 1, loc.endCol)
-            ))
-            out.add(SymbolInformation(name, kind, location, modulePath))
-        }
-
-        for (decl in typed.decls) {
-            when (decl) {
-                is TypedLetDecl -> emit(decl.name, SymbolKind.Function, decl.loc)
-                is TypedTypeDecl -> emit(decl.name, SymbolKind.Class, decl.loc)
-            }
-        }
-        for (a in typed.abilityDecls) emit(a.name, SymbolKind.Interface, a.loc)
-        for (e in typed.effectDecls) emit(e.name, SymbolKind.Event, e.loc)
-        for (p in typed.performerDecls) emit(p.name, SymbolKind.Operator, p.loc)
+    private fun declKindToSymbolKind(kind: DeclKind): SymbolKind = when (kind) {
+        DeclKind.LET -> SymbolKind.Function
+        DeclKind.TYPE -> SymbolKind.Class
+        DeclKind.ABILITY -> SymbolKind.Interface
+        DeclKind.EFFECT -> SymbolKind.Event
+        DeclKind.PERFORMER -> SymbolKind.Operator
+        DeclKind.IMPL -> SymbolKind.Method
     }
 
     /**

@@ -2,7 +2,10 @@ package com.mezze.language.cli.commands
 
 import com.mezze.language.cli.`package`.validatePackageName
 import com.mezze.language.cli.`package`.validateVersion
+import com.mezze.language.codebase.SQLiteMezzeStore
+import com.mezze.language.codebase.StorePopulator
 import java.io.File
+import java.security.MessageDigest
 
 /**
  * Handle `mezze init` command to create a new Mezze package
@@ -173,6 +176,24 @@ class InitCommand {
             println("  ✅ Created .gitignore")
         }
 
+        // Materialise the project's `.mz/` store with stdlib seeded in.
+        // openProject creates cache.sqlite + stdlib.sqlite + deps.sqlite,
+        // attaches them, and installs the parser-cache hook. If
+        // createApp, also pre-typecheck the entry so the first
+        // `mez dev` hits the warm-cache fast path.
+        val store = SQLiteMezzeStore.openProject(projectDir)
+        try {
+            if (createApp) {
+                val appFile = File(srcDir, "app.mz")
+                if (appFile.exists()) {
+                    val appName = packageName  // matches what createMezzeToml writes for [[app]].name
+                    runInitialCompile(store, projectDir, appFile, appName, packageName)
+                }
+            }
+        } finally {
+            store.close()
+        }
+
         println()
         println("🎉 Package '$packageName' initialized successfully!")
         println()
@@ -244,6 +265,62 @@ class InitCommand {
         """.trimIndent()
 
         file.writeText(content)
+    }
+
+    /**
+     * Parse + typecheck the freshly-created template entry and populate
+     * the project's `.mz/cache.sqlite`. The first `mez dev` is then
+     * warm: COLD_START's fast path matches because the cached typed
+     * modules + IR are already there.
+     *
+     * Failures are swallowed (template typecheck error → just skip the
+     * pre-warm; project is still usable, first `mez dev` will surface
+     * the error). We don't want a flaky template stack to block init.
+     */
+    private fun runInitialCompile(
+        store: SQLiteMezzeStore,
+        projectDir: File,
+        appFile: File,
+        appName: String,
+        modulePath: String
+    ) {
+        try {
+            val source = appFile.readText()
+            val ast = com.mezze.language.parser.MezzeParser()
+                .parseParsedModule(source, file = appFile.name)
+
+            val typeChecker = com.mezze.language.typechecker.TypeChecker()
+            val result = typeChecker.typeCheck(ast, projectDir.toPath())
+            if (result.loweredFunctions.isEmpty()) return  // template didn't compile cleanly; skip silently
+
+            val depParsed = com.mezze.language.typechecker.ModuleResolver
+                .getAllParsedModules()
+            val sourceHash = sha256(source)
+            StorePopulator.populate(
+                store, result, modulePath, appFile.absolutePath, sourceHash,
+                entrySource = source,
+                parsedModule = ast,
+                loadedParsedModules = depParsed
+            )
+            store.transaction {
+                store.putApp(appName, "main", modulePath, appFile.absolutePath)
+                store.setAppFunctionHashes(appName, result.loweredFunctions.map { it.hash })
+                store.setAppPerformerRecords(appName, result.performerRecords)
+            }
+            println("  ✅ Pre-typechecked entry (cache populated)")
+        } catch (e: Exception) {
+            // Don't fail `mez init` on a template type error; the user
+            // can still edit and re-run. But surface in MEZZE_DEBUG so
+            // template breakage doesn't go silent.
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println("[init] pre-typecheck skipped: ${e.javaClass.simpleName}: ${e.message}")
+            }
+        }
+    }
+
+    private fun sha256(content: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 
     private fun createGitignore(file: File) {

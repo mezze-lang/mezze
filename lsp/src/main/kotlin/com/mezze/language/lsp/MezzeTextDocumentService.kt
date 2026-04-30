@@ -1867,13 +1867,55 @@ class MezzeTextDocumentService(
 
             val locations = mutableListOf<Location>()
 
-            // Try semantic references via TypedAST — find all TypedVar with same name
+            // Resolve the hash of the decl under cursor. Two paths:
+            // (a) on a TypedVar.ByHash use site → use that hash.
+            // (b) on a TypedLetDecl definition → use TypedLetDecl.hash.
             val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
-            if (typedModule != null) {
+            val targetHash: com.mezze.language.typedast.Hash? = run {
+                if (typedModule == null) return@run null
+                val lookupLine = position.line + 1
+                val lookupCol = position.character + 1
+                when (val r = TypedAstLookup.findAtPosition(typedModule, lookupLine, lookupCol)) {
+                    is TypedAstLookup.LookupResult.Expr -> {
+                        val e = r.expr
+                        if (e is com.mezze.language.typedast.TypedVar) {
+                            (e.binding as? com.mezze.language.typedast.BindingRef.ByHash)?.hash
+                        } else null
+                    }
+                    else -> null
+                }
+            } ?: typedModule?.decls
+                ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+                ?.firstOrNull { it.name == word }
+                ?.hash
+
+            // Cross-file find-references via the v7 usages index. One
+            // SELECT WHERE target_hash=? returns every use site across
+            // the project (slice E populates this on every compile).
+            val store = projectStore
+            if (targetHash != null && store != null) {
+                if (params.context?.isIncludeDeclaration != false) {
+                    // Add the definition's own loc as the first hit.
+                    val defDecl = typedModule?.decls
+                        ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+                        ?.firstOrNull { it.hash == targetHash }
+                    if (defDecl != null) locations.add(locToLocation(uri, defDecl.loc))
+                }
+                for (row in store.getUsages(targetHash)) {
+                    val rowUri = File(row.filePath).toURI().toString()
+                    locations.add(Location(rowUri, Range(
+                        Position(row.startLine - 1, row.startCol - 1),
+                        Position(row.endLine - 1, row.endCol)
+                    )))
+                }
+            }
+
+            // Fallback: in-file TypedVar walk (for locals with no hash).
+            if (locations.isEmpty() && typedModule != null) {
                 collectReferencesInModule(typedModule, word, uri, locations)
             }
 
-            // If TypedAST didn't find anything, fall back to text search
+            // Last resort: text search if everything else came up empty.
             if (locations.isEmpty()) {
                 lines.forEachIndexed { lineIndex, lineContent ->
                     var index = 0
