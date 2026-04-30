@@ -1,7 +1,6 @@
 package com.mezze.language.cli
 
 import com.mezze.language.codebase.CodebaseSerialization
-import com.mezze.language.codebase.ModuleCategory
 import com.mezze.language.codebase.SQLiteMezzeStore
 import com.mezze.language.codebase.BlobKind
 import com.mezze.language.codebase.StorePopulator
@@ -88,8 +87,7 @@ fun main(args: Array<String>) {
                 filePath = v1.filePath,
                 sourceHash = sourceHash,
                 entrySource = source,
-                parsedModule = parsed,
-                category = ModuleCategory.STDLIB
+                parsedModule = parsed
             )
         }
 

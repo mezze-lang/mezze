@@ -33,52 +33,55 @@ class SQLiteMezzeStore private constructor(
 
     companion object {
         /**
-         * Current schema version. Each bump must be accompanied by a
-         * `applyVN(stmt)` function below.
-         *
-         * Bump history:
-         *  - v5: apps + app_functions + app_performers tables.
-         *  - v6: typed_modules table — caches v2 TypedModule per (path, sourceHash).
-         *  - v7: unified cache + incremental compile.
-         *        - foreign_keys=ON, declared everywhere, ON DELETE CASCADE
-         *        - CHECK constraints on enum columns
-         *        - NEW tables: parsed_modules, decls, imports
-         *        - RENAME: references_ → usages
-         *        - ADD column: modules.category, blobs.created_at
-         *        - decls PK includes decl_kind; decls.hash matches blobs.hash
-         *        - app_functions UNIQUE(app_name, ord)
-         *
-         * v7 is a clean break — no migration code from v6. Existing caches
-         * get wiped + rebuilt on first open. See
-         * docs/architecture/16-unified-cache-and-incremental-compile.md.
+         * Schema version. We've reset to baseline alongside the three-file
+         * split — pre-1.0, the v0..v7 migration ladder doesn't carry users
+         * forward; old caches get detected as version-mismatched, dropped,
+         * and regenerated from source. See
+         * `docs/architecture/17-three-file-cache.md`.
          */
-        const val SCHEMA_VERSION = 7
+        const val SCHEMA_VERSION = 1
         const val PROJECT_DIR = ".mz"
         const val CACHE_FILE = "cache.sqlite"
+        const val STDLIB_FILE = "stdlib.sqlite"
         const val DEPS_FILE = "deps.sqlite"
         const val CACHE_DIR_ENV = "MEZZE_CACHE_DIR"
 
+        /** SQLite ATTACH aliases. `main` is cache; stdlib + deps attach over it. */
+        const val DB_STDLIB = "stdlib"
+        const val DB_DEPS = "deps"
+
         /**
-         * Resolve where this project's cache.sqlite lives.
+         * Resolve where this project's `.mz/` directory lives.
          *
          * Priority:
-         *   1. `MEZZE_CACHE_DIR` env var → `<MEZZE_CACHE_DIR>/cache.sqlite`
-         *      (CI runners, shared mounts, Docker volumes can override.)
-         *   2. Default → `<projectRoot>/.mz/cache.sqlite`
+         *   1. `MEZZE_CACHE_DIR` env var (CI / shared mounts / Docker
+         *      volumes can override).
+         *   2. Default → `<projectRoot>/.mz/`.
          *
-         * Single source of truth — every caller goes through `forProject` /
-         * `hasCache`, so they all pick this up automatically.
+         * Single source of truth — every file lookup ([resolveCacheFile],
+         * [resolveStdlibFile], [resolveDepsFile]) routes through here.
          */
-        fun resolveCacheFile(projectRoot: File): File {
+        fun resolveProjectDir(projectRoot: File): File {
             val override = System.getenv(CACHE_DIR_ENV)?.takeIf { it.isNotBlank() }
-            return if (override != null) {
-                File(override, CACHE_FILE)
-            } else {
-                File(File(projectRoot, PROJECT_DIR), CACHE_FILE)
-            }
+            return if (override != null) File(override) else File(projectRoot, PROJECT_DIR)
         }
 
-        /** Open or create project cache (location resolved via [resolveCacheFile]). */
+        fun resolveCacheFile(projectRoot: File): File =
+            File(resolveProjectDir(projectRoot), CACHE_FILE)
+
+        fun resolveStdlibFile(projectRoot: File): File =
+            File(resolveProjectDir(projectRoot), STDLIB_FILE)
+
+        fun resolveDepsFile(projectRoot: File): File =
+            File(resolveProjectDir(projectRoot), DEPS_FILE)
+
+        /**
+         * Open or create project cache. Note: this does NOT attach
+         * stdlib / deps. For the full three-file flow use [openProject].
+         * `forProject` is only used by tooling that needs raw access to
+         * a single sqlite (StdlibPrecompiler writes to one isolated
+         * file, the bundled JAR target stores its data in another).
+         */
         fun forProject(projectRoot: File): SQLiteMezzeStore {
             val dbFile = resolveCacheFile(projectRoot)
             dbFile.parentFile?.mkdirs()
@@ -86,38 +89,108 @@ class SQLiteMezzeStore private constructor(
             return SQLiteMezzeStore(conn, readOnly = false).also {
                 it.configurePragmas()
                 it.initSchema()
+                it.attachInMemoryAux()
             }
         }
 
         /**
          * Single canonical entry point for opening a project store.
          *
-         * Replaces the scattered "forProject + seedIfNeeded + install cache
-         * hook" sequence that every command (mez dev / check / build / LSP)
-         * used to repeat. Today this is a thin wrapper; once the three-file
-         * split lands it grows to handle ATTACH / schema validation / view
-         * creation across cache.sqlite, stdlib.sqlite, deps.sqlite. Public
-         * API stays the same so call sites don't change again at that
-         * point.
-         *
-         * Steps:
-         *  1. Open (or create) the project's cache file.
-         *  2. Seed stdlib into it if not already present (idempotent —
-         *     skips when category=STDLIB rows are found).
-         *  3. Install the [com.mezze.language.parser.ParsedModuleCache]
-         *     hook so `ModuleResolver` consults the parsed_modules cache
-         *     before invoking the parser (slice A).
+         * Three-file design (see docs/architecture/17-three-file-cache.md):
+         *  1. Ensure the `.mz/` directory exists.
+         *  2. Materialise stdlib.sqlite by copying the bundled JAR resource
+         *     if missing or version-mismatched. Read-only after.
+         *  3. Materialise an empty deps.sqlite if missing (`mez sync` is
+         *     the only writer; until then it's a placeholder so ATTACH
+         *     and UNION ALL never fail).
+         *  4. Open cache.sqlite as the primary connection, apply baseline
+         *     schema if missing.
+         *  5. ATTACH stdlib.sqlite AS stdlib, deps.sqlite AS deps.
+         *  6. Install the parser-cache hook so ModuleResolver consults
+         *     parsed_modules before invoking the parser (slice A).
          */
         fun openProject(projectRoot: File): SQLiteMezzeStore {
-            val store = forProject(projectRoot)
-            StdlibSeed.seedIfNeeded(store)
+            val cacheFile = resolveCacheFile(projectRoot)
+            val stdlibFile = resolveStdlibFile(projectRoot)
+            val depsFile = resolveDepsFile(projectRoot)
+
+            cacheFile.parentFile?.mkdirs()
+            ensureStdlibFile(stdlibFile)
+            ensureDepsFile(depsFile)
+
+            val conn = DriverManager.getConnection("jdbc:sqlite:${cacheFile.absolutePath}")
+            val store = SQLiteMezzeStore(conn, readOnly = false)
+            store.configurePragmas()
+            store.initSchema()
+            store.attachAuxDb(DB_STDLIB, stdlibFile)
+            store.attachAuxDb(DB_DEPS, depsFile)
+            // Both attached files were created in advance by ensureStdlib /
+            // ensureDeps, but defensive schema apply ensures they have the
+            // expected tables — important when a stale or partially-written
+            // file is on disk.
+            store.applyBaselineSchemaTo(DB_STDLIB)
+            store.applyBaselineSchemaTo(DB_DEPS)
+
             com.mezze.language.parser.ParsedModuleCacheHolder.set(
                 StoreParsedModuleCache(store)
             )
             return store
         }
 
-        /** Open read-write store at a specific file path. */
+        /**
+         * Copy the bundled stdlib seed into the project's `.mz/`
+         * directory if the file is missing. The bundle is shipped as a
+         * JAR classpath resource; we extract it once per project.
+         *
+         * Replaces today's INSERT-SELECT seed copy. The bundled file IS
+         * the project's stdlib.sqlite from second one — same schema,
+         * same blobs, same metadata.
+         */
+        private fun ensureStdlibFile(stdlibFile: File) {
+            if (stdlibFile.exists()) return
+            stdlibFile.parentFile?.mkdirs()
+            val stream = SQLiteMezzeStore::class.java.classLoader
+                .getResourceAsStream(STDLIB_FILE)
+            if (stream == null) {
+                // No bundled seed — create an empty stdlib.sqlite with
+                // the schema applied so ATTACH + UNION ALL still work.
+                // Happens in dev builds before the stdlib precompile has
+                // run; PrecompiledStdlib's runtime path covers the gap.
+                createEmptyDb(stdlibFile)
+                return
+            }
+            stream.use { it.copyTo(stdlibFile.outputStream()) }
+        }
+
+        /**
+         * Ensure `deps.sqlite` exists so ATTACH and UNION ALL queries
+         * work even when the project has no external dependencies.
+         * `mez sync` is the only writer; until then this stays as an
+         * empty schema'd file.
+         */
+        private fun ensureDepsFile(depsFile: File) {
+            if (depsFile.exists()) return
+            depsFile.parentFile?.mkdirs()
+            createEmptyDb(depsFile)
+        }
+
+        /** Materialise an empty SQLite file with our baseline schema. */
+        private fun createEmptyDb(file: File) {
+            val conn = DriverManager.getConnection("jdbc:sqlite:${file.absolutePath}")
+            try {
+                val store = SQLiteMezzeStore(conn, readOnly = false)
+                store.configurePragmas()
+                store.initSchema()
+            } finally {
+                conn.close()
+            }
+        }
+
+        /**
+         * Open read-write store at a specific file path. Used by tooling
+         * (StdlibPrecompiler) that writes a self-contained sqlite — no
+         * stdlib/deps ATTACH needed because the file IS the stdlib.
+         */
         fun forFile(path: File): SQLiteMezzeStore {
             path.parentFile?.mkdirs()
             val conn = DriverManager.getConnection("jdbc:sqlite:${path.absolutePath}")
@@ -133,12 +206,19 @@ class SQLiteMezzeStore private constructor(
             return SQLiteMezzeStore(conn, readOnly = true)
         }
 
-        /** Create in-memory store (for tests). */
+        /**
+         * Create in-memory store (for tests). Always attaches in-memory
+         * stdlib + deps databases too, so UNION ALL queries against the
+         * three scopes don't fail with "no such table." Tests that need
+         * stdlib data can write into `stdlib.tablename` directly via
+         * the typed API (writes still default to `main`).
+         */
         fun inMemory(): SQLiteMezzeStore {
             val conn = DriverManager.getConnection("jdbc:sqlite::memory:")
             return SQLiteMezzeStore(conn, readOnly = false).also {
                 it.configurePragmas()
                 it.initSchema()
+                it.attachInMemoryAux()
             }
         }
 
@@ -180,9 +260,9 @@ class SQLiteMezzeStore private constructor(
     }
 
     private fun initSchema() {
-        // The metadata table holds schema_version; we have to ensure it exists
-        // before we can read the current version. (CREATE TABLE IF NOT EXISTS
-        // is idempotent; safe to run on every open.)
+        // The metadata table holds schema_version; we have to ensure it
+        // exists before we can read the current version. (CREATE TABLE
+        // IF NOT EXISTS is idempotent; safe to run on every open.)
         conn.createStatement().use { s ->
             s.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS metadata (
@@ -193,28 +273,164 @@ class SQLiteMezzeStore private constructor(
         }
 
         val currentVersion = readSchemaVersion()
-
         when {
-            currentVersion == 0 -> {
-                // Fresh DB — create v7 schema in one shot.
-                applyV7Schema()
+            currentVersion == 0 -> applyBaselineSchema()
+            currentVersion != SCHEMA_VERSION -> {
+                // Any mismatch — older OR newer — is a wipe-and-rebuild.
+                // Caches are downstream of source; the next mez dev
+                // re-typechecks. No migration ladder.
+                dropAllTables()
+                applyBaselineSchema()
             }
-            currentVersion < 7 -> {
-                // v1..v6 → v7: clean break. Drop everything and rebuild.
-                // No migration code; data is downstream of source files,
-                // so re-typecheck on next mez dev rebuilds it.
-                dropV6Schema()
-                applyV7Schema()
-            }
-            currentVersion > SCHEMA_VERSION -> {
-                error("cache.sqlite is at schema v$currentVersion but this " +
-                      "build only supports up to v$SCHEMA_VERSION. Delete the " +
-                      "cache to continue.")
-            }
-            // currentVersion == SCHEMA_VERSION: nothing to do.
+            // currentVersion == SCHEMA_VERSION: schema is current.
         }
-
         writeSchemaVersion(SCHEMA_VERSION)
+    }
+
+    /**
+     * ATTACH an auxiliary SQLite database (stdlib or deps) over the open
+     * cache connection. Once attached, `<alias>.tablename` lets us read
+     * across files via UNION ALL queries.
+     */
+    private fun attachAuxDb(alias: String, file: File) {
+        val safePath = file.absolutePath.replace("'", "''")
+        conn.createStatement().use { s ->
+            s.executeUpdate("ATTACH DATABASE '$safePath' AS $alias")
+        }
+    }
+
+    /**
+     * Attach in-memory empty stdlib + deps databases. Used by tests
+     * (`inMemory()`) and any caller that opens a project store
+     * without the full three-file setup. Each gets its own schema
+     * applied so UNION ALL across `main`, `stdlib`, `deps` always
+     * resolves cleanly even when the auxiliary DBs are empty.
+     */
+    private fun attachInMemoryAux() {
+        for (alias in listOf(DB_STDLIB, DB_DEPS)) {
+            conn.createStatement().use { s ->
+                s.executeUpdate("ATTACH DATABASE ':memory:' AS $alias")
+            }
+            applyBaselineSchemaTo(alias)
+        }
+    }
+
+    /**
+     * Apply baseline schema to an attached database (other than the
+     * primary `main`). Mirrors [applyBaselineSchema] but writes every
+     * table with the `<alias>.` prefix.
+     */
+    private fun applyBaselineSchemaTo(alias: String) {
+        conn.createStatement().use { s ->
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                ) WITHOUT ROWID
+            """.trimIndent())
+            // Modules
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.modules (
+                    path TEXT PRIMARY KEY,
+                    file_path TEXT,
+                    source_hash TEXT NOT NULL
+                ) WITHOUT ROWID
+            """.trimIndent())
+            // Blobs
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.blobs (
+                    hash TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    visibility TEXT NOT NULL,
+                    typed BLOB,
+                    ir BLOB,
+                    created_at INTEGER NOT NULL DEFAULT 0
+                ) WITHOUT ROWID
+            """.trimIndent())
+            // Names — no FKs across attached DBs.
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.names (
+                    module TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    hash TEXT NOT NULL,
+                    PRIMARY KEY (module, name)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            // Decls
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.decls (
+                    module_path TEXT NOT NULL,
+                    decl_name TEXT NOT NULL,
+                    decl_kind TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    hash TEXT NOT NULL,
+                    start_line INTEGER NOT NULL,
+                    start_col INTEGER NOT NULL,
+                    end_line INTEGER NOT NULL,
+                    end_col INTEGER NOT NULL,
+                    PRIMARY KEY (module_path, decl_kind, decl_name)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            // Imports
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.imports (
+                    module_path TEXT NOT NULL,
+                    local_name TEXT NOT NULL,
+                    target_module TEXT NOT NULL,
+                    target_name TEXT NOT NULL,
+                    target_hash TEXT NOT NULL,
+                    start_line INTEGER NOT NULL,
+                    start_col INTEGER NOT NULL,
+                    end_line INTEGER NOT NULL,
+                    end_col INTEGER NOT NULL,
+                    PRIMARY KEY (module_path, local_name)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            // typed_modules + parsed_modules
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.typed_modules (
+                    module_path TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    typed_blob BLOB NOT NULL,
+                    typed_at INTEGER NOT NULL,
+                    PRIMARY KEY (module_path, source_hash)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.parsed_modules (
+                    module_path TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    parsed_blob BLOB NOT NULL,
+                    parsed_at INTEGER NOT NULL,
+                    PRIMARY KEY (module_path, source_hash)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            // edges + ability_impls + effect_performers
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.edges (
+                    from_hash TEXT NOT NULL,
+                    to_hash TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    PRIMARY KEY (from_hash, to_hash, kind)
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.ability_impls (
+                    hash TEXT PRIMARY KEY,
+                    ability_hash TEXT NOT NULL,
+                    target_type TEXT NOT NULL,
+                    module TEXT
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.effect_performers (
+                    hash TEXT PRIMARY KEY,
+                    effect_hash TEXT NOT NULL,
+                    performer_name TEXT NOT NULL,
+                    module TEXT
+                ) WITHOUT ROWID
+            """.trimIndent())
+        }
     }
 
     private fun readSchemaVersion(): Int = try {
@@ -232,25 +448,26 @@ class SQLiteMezzeStore private constructor(
     }
 
     /**
-     * Drop every v6 table. Called when migrating an existing v6 (or earlier)
-     * cache to v7. v7 is a clean break — no data migration. The cache is
-     * downstream of source files; mez dev rebuilds it on next run.
+     * Drop every non-metadata table. Called when the schema_version
+     * doesn't match the current baseline. Caches are downstream of
+     * source files; mez dev rebuilds them on next run.
      *
-     * Order matters: drop FK referrers before referents. But since v6 had
-     * `foreign_keys=OFF`, no enforcement happened anyway and order doesn't
-     * matter on the way out.
+     * FKs disabled during the drop because the v7 schema declared
+     * REFERENCES; turning them off lets us drop in arbitrary order.
+     * The catch-all list below covers every table we've ever created
+     * — older legacy names included so v6/v7 caches both go away.
      */
-    private fun dropV6Schema() {
+    private fun dropAllTables() {
         conn.createStatement().use { s ->
-            // Temporarily disable FKs while we drop in arbitrary order.
             s.executeUpdate("PRAGMA foreign_keys=OFF")
             for (table in listOf(
                 "app_performers", "app_functions", "apps",
-                "references_",  // renamed to `usages` in v7
+                "usages", "references_",
+                "imports", "decls", "edges", "names",
                 "effect_performers", "ability_impls",
-                "edges", "names",
-                "typed_modules", "modules", "blobs"
-                // metadata kept; we'll write the new schema_version into it
+                "parsed_modules", "typed_modules",
+                "modules", "blobs"
+                // metadata kept — schema_version write follows.
             )) {
                 s.executeUpdate("DROP TABLE IF EXISTS $table")
             }
@@ -259,34 +476,29 @@ class SQLiteMezzeStore private constructor(
     }
 
     /**
-     * Create the full v7 schema from scratch. See the design doc for the
-     * shape and rationale of every table:
-     *   docs/architecture/16-unified-cache-and-incremental-compile.md
+     * Create the full schema from scratch. Same DDL applied to all three
+     * files (cache, stdlib, deps); each owns its own scope, so there's
+     * no `category` column — the file you're querying IS the scope.
      *
      * Highlights:
      *  - foreign_keys=ON; every hash-pointing column has REFERENCES declared
      *  - CHECK constraints on every enum-like column
      *  - ON DELETE CASCADE on natural-cleanup paths
-     *  - parsed_modules + decls + imports are NEW (vs v6)
-     *  - usages was `references_` in v6
-     *  - modules.category, blobs.created_at are NEW
      */
-    private fun applyV7Schema() {
+    private fun applyBaselineSchema() {
         conn.createStatement().use { s ->
             // ----------------------------------------------------------------
             // FILES & MODULES
             // ----------------------------------------------------------------
             s.executeUpdate("""
-                -- modules: every Mezze source file the project knows about.
+                -- modules: every Mezze source file this DB knows about.
                 -- Keyed by namespaced module path (not raw filename).
                 CREATE TABLE modules (
                     path        TEXT PRIMARY KEY,
                     file_path   TEXT,
-                    source_hash TEXT NOT NULL,
-                    category    TEXT NOT NULL CHECK (category IN ('user','stdlib','library'))
+                    source_hash TEXT NOT NULL
                 ) WITHOUT ROWID
             """.trimIndent())
-            s.executeUpdate("CREATE INDEX idx_modules_category ON modules(category)")
 
             // ----------------------------------------------------------------
             // BLOBS — content-addressed storage for typed AST and lowered IR
@@ -666,31 +878,41 @@ class SQLiteMezzeStore private constructor(
     // ====================================================================
 
     private val putModuleStmt: PreparedStatement by lazy {
-        conn.prepareStatement("INSERT OR REPLACE INTO modules (path, file_path, source_hash, category) VALUES (?, ?, ?, ?)")
+        conn.prepareStatement("INSERT OR REPLACE INTO modules (path, file_path, source_hash) VALUES (?, ?, ?)")
     }
 
-    override fun putModule(path: String, filePath: String?, sourceHash: String, category: ModuleCategory) {
+    override fun putModule(path: String, filePath: String?, sourceHash: String) {
         putModuleStmt.apply {
             setString(1, path)
             setString(2, filePath)
             setString(3, sourceHash)
-            setString(4, category.dbValue)
             executeUpdate()
         }
     }
 
     private val getModuleStmt: PreparedStatement by lazy {
-        conn.prepareStatement("SELECT path, file_path, source_hash, category FROM modules WHERE path = ?")
+        // UNION across all three attached DBs. Module paths don't
+        // overlap (std::* in stdlib, dep prefixes in deps, else cache),
+        // so the result is at most one row.
+        conn.prepareStatement("""
+            SELECT path, file_path, source_hash FROM main.modules WHERE path = ?
+            UNION ALL
+            SELECT path, file_path, source_hash FROM stdlib.modules WHERE path = ?
+            UNION ALL
+            SELECT path, file_path, source_hash FROM deps.modules WHERE path = ?
+            LIMIT 1
+        """.trimIndent())
     }
 
     override fun getModule(path: String): ModuleRow? {
         getModuleStmt.setString(1, path)
+        getModuleStmt.setString(2, path)
+        getModuleStmt.setString(3, path)
         return getModuleStmt.executeQuery().use { rs ->
             if (rs.next()) ModuleRow(
                 path = rs.getString("path"),
                 filePath = rs.getString("file_path"),
                 sourceHash = rs.getString("source_hash"),
-                category = ModuleCategory.fromDb(rs.getString("category"))
             ) else null
         }
     }
@@ -705,22 +927,34 @@ class SQLiteMezzeStore private constructor(
         return !isFileStaleStmt.executeQuery().use { it.next() }
     }
 
+    /**
+     * Walk every module across cache + stdlib + deps. UNION ALL works
+     * because module paths don't overlap across DBs (std::* lives in
+     * stdlib, dep prefixes in deps, everything else in cache).
+     */
     override fun getAllModules(): List<ModuleRow> {
+        val sql = """
+            SELECT path, file_path, source_hash FROM main.modules
+            UNION ALL
+            SELECT path, file_path, source_hash FROM stdlib.modules
+            UNION ALL
+            SELECT path, file_path, source_hash FROM deps.modules
+        """.trimIndent()
         return conn.createStatement().use { s ->
-            s.executeQuery("SELECT path, file_path, source_hash, category FROM modules").use { rs ->
+            s.executeQuery(sql).use { rs ->
                 val list = mutableListOf<ModuleRow>()
                 while (rs.next()) {
                     list.add(ModuleRow(
                         rs.getString("path"),
                         rs.getString("file_path"),
                         rs.getString("source_hash"),
-                        ModuleCategory.fromDb(rs.getString("category"))
                     ))
                 }
                 list
             }
         }
     }
+
 
     // ====================================================================
     // EDGES

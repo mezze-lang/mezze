@@ -59,11 +59,12 @@ interface MezzeStore : AutoCloseable {
     // ====================================================================
 
     /**
-     * Register a module (source file). Category tells consumers whether
-     * this row is user code, stdlib, or library — replaces path-prefix
-     * matching as the canonical "where did this come from" check.
+     * Register a module (source file). The DB this row lands in is the
+     * canonical "where did this come from" — cache.sqlite holds user
+     * code, stdlib.sqlite holds stdlib, deps.sqlite holds dependencies.
+     * No `category` column needed; the file IS the scope.
      */
-    fun putModule(path: String, filePath: String?, sourceHash: String, category: ModuleCategory)
+    fun putModule(path: String, filePath: String?, sourceHash: String)
 
     /** Get module info. */
     fun getModule(path: String): ModuleRow?
@@ -338,35 +339,8 @@ data class NameRow(
 data class ModuleRow(
     val path: String,
     val filePath: String?,
-    val sourceHash: String,
-    val category: ModuleCategory
+    val sourceHash: String
 )
-
-/**
- * Where a module came from. Stored as the modules.category column.
- *
- * - USER: written by the project author. Lives in the project directory.
- * - STDLIB: shipped with the Mezze CLI. Source extracted to a temp dir.
- * - LIBRARY: pulled in via `mez sync` (when #108 ships). Lives in
- *   mezze_packages/<libname>/.
- *
- * Cheap to filter on (`WHERE category='user'`); replaces the older
- * path-prefix check (`WHERE path NOT LIKE 'std::%'`).
- */
-enum class ModuleCategory(val dbValue: String) {
-    USER("user"),
-    STDLIB("stdlib"),
-    LIBRARY("library");
-
-    companion object {
-        fun fromDb(s: String): ModuleCategory = when (s) {
-            "user" -> USER
-            "stdlib" -> STDLIB
-            "library" -> LIBRARY
-            else -> error("unknown ModuleCategory in db: $s")
-        }
-    }
-}
 
 data class EdgeRow(
     val fromHash: Hash,

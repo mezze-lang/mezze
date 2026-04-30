@@ -173,7 +173,7 @@ class IncrementalSkipTest {
             val depSource = "pub let helper = {} -> 1\n"
             depFile.writeText(depSource)
             val depHash = sha256(depSource)
-            store.putModule("dep", depFile.absolutePath, depHash, ModuleCategory.USER)
+            store.putModule("dep", depFile.absolutePath, depHash)
 
             val source = "let main = {} -> 42\n"
             val (parsed, sh) = seedHappyPath(source)

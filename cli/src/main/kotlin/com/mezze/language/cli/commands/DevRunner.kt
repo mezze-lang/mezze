@@ -582,8 +582,10 @@ object DevRunner {
                 }
             },
             include = { mod ->
-                mod.category == com.mezze.language.codebase.ModuleCategory.STDLIB ||
-                    mod.path in closure
+                // Stdlib (std::*) lives in stdlib.sqlite — always pre-warm
+                // since most code references it. User modules: only what
+                // the entry's import closure reaches.
+                mod.path.startsWith("std::") || mod.path in closure
             }
         )
         if (System.getenv("MEZZE_TIMING") != null) {
@@ -662,14 +664,15 @@ object DevRunner {
 
     /**
      * True if any USER project file has changed on disk since it was
-     * cached. Stdlib modules are excluded — their `filePath` is a
-     * JVM-temp directory from build time that doesn't exist at
-     * runtime, and stdlib version mismatch is handled separately by
-     * `StdlibSeed.seedIfNeeded` checking `stdlib_module_hashes`.
+     * cached. Stdlib modules are excluded — they live in their own
+     * attached `stdlib.sqlite` and their `file_path` is a JVM-temp
+     * directory from build time that doesn't exist at runtime.
+     * Stdlib drift is handled by the seed copy comparing
+     * `stdlib_module_hashes`.
      */
     private fun anyProjectFileStale(store: SQLiteMezzeStore): Boolean {
         for (mod in store.getAllModules()) {
-            if (mod.category == com.mezze.language.codebase.ModuleCategory.STDLIB) continue
+            if (mod.path.startsWith("std::")) continue
             val filePath = mod.filePath ?: continue
             val file = File(filePath)
             if (!file.exists()) return true

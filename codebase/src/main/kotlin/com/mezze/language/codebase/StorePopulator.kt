@@ -61,13 +61,7 @@ object StorePopulator {
         sourceHash: String,
         entrySource: String? = null,
         parsedModule: com.mezze.language.parsedast.ParsedModule? = null,
-        loadedParsedModules: Map<String, com.mezze.language.parsedast.ParsedModule> = emptyMap(),
-        /**
-         * Module category. Used by StdlibPrecompiler to write stdlib rows
-         * with `category='stdlib'`. Default is `USER` so the existing
-         * project-compile path is unchanged.
-         */
-        category: ModuleCategory = ModuleCategory.USER
+        loadedParsedModules: Map<String, com.mezze.language.parsedast.ParsedModule> = emptyMap()
     ): PopulateDelta {
         // Collect all hashes we might write so we can do one bulk existence check.
         val candidateHashes = mutableSetOf<Hash>()
@@ -86,7 +80,7 @@ object StorePopulator {
 
         store.transaction {
             // Register the module — always update (file may have new sourceHash)
-            store.putModule(modulePath, filePath, sourceHash, category)
+            store.putModule(modulePath, filePath, sourceHash)
 
             // Persist the entry ParsedModule first so reads can skip the parser
             // even if typecheck/lower below fails. Comments are part of the
@@ -133,18 +127,19 @@ object StorePopulator {
             // so both tools share the same `(modulePath, sourceHash)` keys.
             for ((loadedPath, loadedTyped) in result.loadedModules) {
                 if (loadedPath == modulePath) continue
-                // Skip stdlib when populating user code — that data comes
-                // from the seed copy. Don't skip when WE are the stdlib
-                // populator (category=STDLIB).
-                if (category == ModuleCategory.USER &&
-                    loadedPath.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) {
+                // Skip stdlib here. Stdlib lives in its own attached
+                // `.mz/stdlib.sqlite`, materialised once at openProject
+                // from the bundled JAR resource. The stdlib precompiler
+                // tool writes to a separate file (not a project store),
+                // so this filter doesn't affect it.
+                if (loadedPath.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) {
                     continue
                 }
                 val src = result.loadedModuleSources[loadedPath] ?: continue
                 val file = File(src.filePath).takeIf { it.exists() } ?: continue
                 val depSource = file.readText()
                 val sha256 = sha256Hex(depSource)
-                store.putModule(loadedPath, src.filePath, sha256, category)
+                store.putModule(loadedPath, src.filePath, sha256)
                 val blob = CodebaseSerialization.serializeTypedModule(loadedTyped)
                 store.putTypedModule(loadedPath, sha256, blob)
 

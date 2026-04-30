@@ -179,7 +179,7 @@ class MezzeExecutorTest {
     fun `resolveEntry finds main in store`() {
         val hash = makeHash('a')
         store.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
-        store.putModule("myapp", "app.mz", "h", ModuleCategory.USER)
+        store.putModule("myapp", "app.mz", "h")
         store.registerName("myapp", "main", hash)
 
         assertEquals(hash, executor.resolveEntry("myapp"))
@@ -189,7 +189,7 @@ class MezzeExecutorTest {
     fun `resolveEntry falls back to __entry__`() {
         val hash = makeHash('a')
         store.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
-        store.putModule("myapp", "app.mz", "h", ModuleCategory.USER)
+        store.putModule("myapp", "app.mz", "h")
         store.registerName("myapp", "__entry__", hash)
 
         assertEquals(hash, executor.resolveEntry("myapp"))
@@ -207,7 +207,7 @@ class MezzeExecutorTest {
 
         val hash = makeHash('a')
         store2.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
-        store2.putModule("myapp", "app.mz", "h", ModuleCategory.USER)
+        store2.putModule("myapp", "app.mz", "h")
         store2.registerName("myapp", "main", hash)
 
         assertEquals(hash, multiExecutor.resolveEntry("myapp"))

@@ -402,7 +402,7 @@ class StorePopulatorTest {
         // multiply stays unresolved → null targetHash on that row.
         val addHash = makeHash('a')
         store.putBlob(addHash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
-        store.putModule("std::int", null, "sh", ModuleCategory.STDLIB)
+        store.putModule("std::int", null, "sh")
         store.registerName("std::int", "add", addHash)
 
         StorePopulator.populate(

@@ -130,7 +130,10 @@ class MezzeTextDocumentService(
                             }
                         },
                         include = { mod ->
-                            mod.category == com.mezze.language.codebase.ModuleCategory.STDLIB
+                            // Stdlib modules live in stdlib.sqlite; identify
+                            // them by path prefix (the file is the scope, no
+                            // category column any more).
+                            mod.path.startsWith("std::")
                         }
                     )
                     server.logInfo(

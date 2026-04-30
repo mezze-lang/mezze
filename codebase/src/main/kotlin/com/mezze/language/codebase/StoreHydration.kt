@@ -62,18 +62,21 @@ object StoreHydration {
         for (mod in store.getAllModules()) {
             if (!include(mod)) continue
 
-            val cachedHash = when (mod.category) {
-                ModuleCategory.STDLIB -> mod.sourceHash  // trust the seed
-                else -> {
-                    val filePath = mod.filePath ?: run { misses++; continue }
-                    val file = File(filePath).takeIf { it.exists() } ?: run { misses++; continue }
-                    val onDiskHash = sha256(file.readText())
-                    if (onDiskHash != mod.sourceHash) {
-                        misses++
-                        continue
-                    }
-                    onDiskHash
+            val cachedHash = if (mod.path.startsWith("std::")) {
+                // Stdlib modules: trust the cached source_hash. Their
+                // file_path is a JVM-temp path from build time that's
+                // gone at runtime; the seed copy guarantees the blob
+                // matches modules.source_hash.
+                mod.sourceHash
+            } else {
+                val filePath = mod.filePath ?: run { misses++; continue }
+                val file = File(filePath).takeIf { it.exists() } ?: run { misses++; continue }
+                val onDiskHash = sha256(file.readText())
+                if (onDiskHash != mod.sourceHash) {
+                    misses++
+                    continue
                 }
+                onDiskHash
             }
 
             val blob = store.getTypedModule(mod.path, cachedHash) ?: run {
