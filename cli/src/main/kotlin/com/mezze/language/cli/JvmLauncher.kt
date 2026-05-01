@@ -66,7 +66,7 @@ object JvmLauncher {
      * Build the classpath for the JVM subprocess.
      *
      * Always includes mezze-lang.jar. Adds polyglot JARs if declared.
-     * Falls back to development build output if ~/.mez/lib/ doesn't exist.
+     * Falls back to development build output if ~/.mezze/lib/ doesn't exist.
      */
     fun buildClasspath(polyglotDeps: Map<String, String> = emptyMap()): String {
         val jars = mutableListOf<String>()
@@ -80,8 +80,8 @@ object JvmLauncher {
             return System.getProperty("java.class.path") ?: ""
         }
 
-        // Add polyglot JARs from ~/.mez/lib/
-        val mezLib = File(System.getProperty("user.home"), ".mez/lib")
+        // Add polyglot JARs from ~/.mezze/lib/
+        val mezLib = File(System.getProperty("user.home"), ".mezze/lib")
         for ((language, version) in polyglotDeps) {
             val jarName = when (language) {
                 "python" -> "graalpy-$version.jar"
@@ -144,8 +144,10 @@ object JvmLauncher {
     }
 
     private fun findMezzeLangJar(): File? {
-        // 1. ~/.mez/lib/mezze-lang.jar (installed)
-        val installed = File(System.getProperty("user.home"), ".mez/lib/mezze-lang.jar")
+        // 1. ~/.mezze/lib/mezze-lang.jar (installed by `gradle :cli:installNative`
+        //    or `:cli:installRuntime`). Single source of truth — see
+        //    cli/build.gradle.kts.
+        val installed = File(System.getProperty("user.home"), ".mezze/lib/mezze-lang.jar")
         if (installed.exists()) return installed
 
         // 2. Development: cli/build/libs/mezze.jar (shadow JAR output)

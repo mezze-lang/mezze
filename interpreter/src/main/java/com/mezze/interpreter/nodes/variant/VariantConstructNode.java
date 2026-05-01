@@ -1,10 +1,12 @@
 package com.mezze.interpreter.nodes.variant;
 
 import com.mezze.interpreter.nodes.MezzeNode;
+import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.mezze.interpreter.values.MezzeVariant.TagRegistry;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.instrumentation.AllocationReporter;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeInfo;
 
@@ -77,24 +79,33 @@ public final class VariantConstructNode extends MezzeNode {
     @Override
     @ExplodeLoop
     public Object execute(VirtualFrame frame) {
-        // Fast path: no payload
+        AllocationReporter reporter = MezzeContext.get(this).getAllocationReporter();
+
+        // Fast path: no payload (e.g., None, True, False).
         if (payloadCount == 0) {
-            return MezzeVariant.noPayload(registry, tag);
+            reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+            MezzeVariant result = MezzeVariant.noPayload(registry, tag);
+            reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+            return result;
         }
 
-        // Fast path: single payload (common case)
+        // Fast path: single payload (e.g., Some(x)).
         if (payloadCount == 1) {
             Object value = payloadNodes[0].execute(frame);
-            return MezzeVariant.singlePayload(registry, tag, value);
+            reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+            MezzeVariant result = MezzeVariant.singlePayload(registry, tag, value);
+            reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+            return result;
         }
 
-        // General path: multiple payload values
-        // @ExplodeLoop unrolls based on payloadCount
+        // General path: multiple payload values.
         Object[] payload = new Object[payloadCount];
         for (int i = 0; i < payloadCount; i++) {
             payload[i] = payloadNodes[i].execute(frame);
         }
-
-        return new MezzeVariant(registry, tag, payload);
+        reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+        MezzeVariant result = new MezzeVariant(registry, tag, payload);
+        reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+        return result;
     }
 }

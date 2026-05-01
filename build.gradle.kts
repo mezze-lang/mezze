@@ -1,3 +1,6 @@
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+
 plugins {
     kotlin("jvm") version "2.2.0" apply false
     kotlin("plugin.serialization") version "2.2.0" apply false
@@ -5,9 +8,15 @@ plugins {
     java // Needed for java { toolchain { ... } } in root project
 }
 
+// Project version: pre-1.0 nightly tag. Format: nightly-YYYYMMDDHHMM,
+// computed at configure time so every build is uniquely identifiable.
+// Override with -Pversion=1.2.3 on the gradle command line for a release.
+val mezzeVersion: String = (findProperty("version") as? String)?.takeIf { it != "unspecified" }
+    ?: "nightly-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"))
+
 allprojects {
     group = "com.mezze.language"
-    version = "1.0.0"
+    version = mezzeVersion
 
     repositories {
         mavenCentral()

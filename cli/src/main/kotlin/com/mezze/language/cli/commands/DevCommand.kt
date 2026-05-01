@@ -19,6 +19,7 @@ class DevCommand {
         val profile = args.contains("--profile")
         val coverage = args.contains("--coverage")
         val traceJit = args.contains("--trace-jit")
+        val allocations = args.contains("--allocations")
         // --insight=<path> attaches a JS probe; capture the path arg.
         val insightFile = args.firstNotNullOfOrNull { arg ->
             when {
@@ -96,6 +97,7 @@ class DevCommand {
         if (profile) programArgs.add("--profile")
         if (coverage) programArgs.add("--coverage")
         if (traceJit) programArgs.add("--trace-jit")
+        if (allocations) programArgs.add("--allocations")
         if (insightFile != null) programArgs.add("--insight=$insightFile")
 
         val exitCode = com.mezze.language.cli.JvmLauncher.spawn(

@@ -26,6 +26,9 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * Handles text document operations for the Mezze Language Server.
@@ -52,6 +55,16 @@ class MezzeTextDocumentService(
 
     // Last successful type check result per document (survives parse errors for dot-completion)
     private val lastSuccessfulResult = ConcurrentHashMap<String, TypeCheckResult>()
+
+    // didChange debouncing. Each keystroke cancels the previous pending
+    // analysis and schedules a fresh one DEBOUNCE_MS in the future. The
+    // single-thread scheduler keeps order — a slow analysis cannot get
+    // overtaken by a faster later one.
+    private val analysisScheduler = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "mezze-lsp-analysis").apply { isDaemon = true }
+    }
+    private val pendingAnalysis = ConcurrentHashMap<String, ScheduledFuture<*>>()
+    private val DEBOUNCE_MS: Long = 150
 
     // Store for project mode (will be rebuilt in LSP task #106)
     private var projectStore: MezzeStore? = null
@@ -153,8 +166,63 @@ class MezzeTextDocumentService(
      * Shutdown and cleanup resources.
      */
     fun shutdown() {
+        analysisScheduler.shutdownNow()
+        pendingAnalysis.clear()
         projectStore?.close()
         documents.clear()
+    }
+
+    /**
+     * `mezze.clearCache`: wipe `.mz/cache.sqlite`, `stdlib.sqlite`,
+     * `deps.sqlite` and reopen the store. Re-seeds stdlib from the JAR
+     * resource on reopen. Re-analyzes every open document so diagnostics
+     * stay live.
+     *
+     * Cheaper than `restart` — does not flush the typechecker's process-
+     * global module cache.
+     */
+    fun clearCache() {
+        val root = projectRootDir ?: return
+        try {
+            projectStore?.close()
+        } catch (_: Exception) { /* ignore */ }
+        projectStore = null
+        SQLiteMezzeStore.wipeProjectFiles(root)
+        projectStore = SQLiteMezzeStore.openProject(root)
+        server.logInfo("Cleared cache at ${SQLiteMezzeStore.resolveProjectDir(root).absolutePath}")
+        reanalyzeOpenDocuments()
+    }
+
+    /**
+     * `mezze.restart`: full LSP-side reset short of process-restart.
+     * Wipes cache + flushes typechecker globalCache + clears
+     * in-memory document state, then re-runs `connect`-style hydration
+     * and re-analyzes every open document.
+     *
+     * Use this when the user suspects stale state in the typechecker
+     * (e.g., an aborted in-flight rename).
+     */
+    fun restart() {
+        val root = projectRootDir ?: return
+        try { projectStore?.close() } catch (_: Exception) { }
+        projectStore = null
+        SQLiteMezzeStore.wipeProjectFiles(root)
+        com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
+        lastSuccessfulResult.clear()
+        projectStore = SQLiteMezzeStore.openProject(root)
+        server.logInfo("Restarted LSP state for ${root.absolutePath}")
+        reanalyzeOpenDocuments()
+    }
+
+    private fun reanalyzeOpenDocuments() {
+        val snapshot = documents.toMap()
+        for ((uri, state) in snapshot) {
+            // Re-analyze with persistToStore=true so the freshly-empty
+            // cache picks up everything the user has open right now.
+            val fresh = analyzeDocument(uri, state.content, state.version, persistToStore = true)
+            documents[uri] = fresh
+            publishDiagnostics(uri, fresh.diagnostics)
+        }
     }
 
     // ========== Document Synchronization ==========
@@ -182,15 +250,27 @@ class MezzeTextDocumentService(
         // For full sync, we get the entire content
         val content = params.contentChanges.firstOrNull()?.text ?: return
 
-        // didChange ships the in-memory edit buffer — these bytes have
-        // NOT been written to disk yet. Diagnostics, hover, completions
-        // all run from the in-memory result; the store stays untouched
-        // until the user saves.
-        val state = analyzeDocument(uri, content, version, persistToStore = false)
-        documents[uri] = state
+        // Update the in-memory bytes immediately so hover/completion
+        // see current content. Analysis runs on the debounce timer.
+        // We deliberately don't clear typeCheckResult — readers like
+        // hover prefer it over lastSuccessfulResult, and a slightly
+        // stale type is better UX than a sudden "no info" until the
+        // debounce fires.
+        val previous = documents[uri]
+        if (previous != null) {
+            documents[uri] = previous.copy(content = content, version = version)
+        }
 
-        // Publish diagnostics
-        publishDiagnostics(uri, state.diagnostics)
+        // Cancel any pending analysis for this URI — every keystroke
+        // bumps the debounce window. The latest task wins.
+        pendingAnalysis.remove(uri)?.cancel(false)
+
+        val task = analysisScheduler.schedule({
+            val state = analyzeDocument(uri, content, version, persistToStore = false)
+            documents[uri] = state
+            publishDiagnostics(uri, state.diagnostics)
+        }, DEBOUNCE_MS, TimeUnit.MILLISECONDS)
+        pendingAnalysis[uri] = task
     }
 
     override fun didClose(params: DidCloseTextDocumentParams) {
@@ -294,6 +374,18 @@ class MezzeTextDocumentService(
                         importedEffects = result.importContext?.importedEffects ?: emptyMap()
                     )
                     lastSuccessfulResult[uri] = typeCheckResult!!
+
+                    // Unused-import diagnostics. We do this here (vs. in the
+                    // typechecker) because the typechecker treats imports as
+                    // additive context — it doesn't know whether a binding
+                    // got referenced. Walking the typed module gives us the
+                    // exact set of names the user mentioned.
+                    val typedForUnused = result.typedModule
+                    if (typedForUnused != null) {
+                        diagnostics.addAll(
+                            unusedImportDiagnostics(parsedModule, typedForUnused)
+                        )
+                    }
 
                     // Write typed bytes + per-decl blobs into the shared store
                     // so concurrent `mez dev` (and a future LSP restart) see
@@ -433,6 +525,176 @@ class MezzeTextDocumentService(
     }
 
     /**
+     * Compute unused-import diagnostics by diffing the parsed module's
+     * `use` decls against the set of names referenced by the typed module.
+     *
+     * For each `use` we determine the *local* name(s) it brings into scope:
+     *   - `use foo::bar`             → "bar"
+     *   - `use foo::bar as baz`      → "baz"
+     *   - `use foo::{a, b as c}`     → ["a", "c"]
+     *
+     * We then collect every name referenced anywhere in the typed module's
+     * decl bodies — TypedVar names and TypedQualifiedRef.localName matches.
+     * If a use's local name is missing from that set, it's unused.
+     *
+     * Returned diagnostics carry `DiagnosticTag.Unnecessary` so editors
+     * can render them dimmed instead of as bright errors.
+     */
+    private fun unusedImportDiagnostics(
+        parsed: com.mezze.language.parsedast.ParsedModule,
+        typed: com.mezze.language.typedast.TypedModule
+    ): List<Diagnostic> {
+        val referenced = collectReferencedNames(typed)
+        val out = mutableListOf<Diagnostic>()
+
+        for (decl in parsed.decls) {
+            if (decl !is com.mezze.language.parsedast.ParsedUseDecl) continue
+            val unusedItems = unusedItemsIn(decl, referenced)
+            if (unusedItems.isEmpty()) continue
+
+            val message = if (unusedItems.size == 1 && unusedItems.single() == localNameOf(decl)) {
+                "Unused import '${unusedItems.single()}'"
+            } else {
+                "Unused import: ${unusedItems.joinToString(", ") { "'$it'" }}"
+            }
+            val diag = createDiagnostic(
+                message = message,
+                severity = DiagnosticSeverity.Hint,
+                line = decl.loc.startLine - 1,
+                column = decl.loc.startCol - 1,
+                endLine = decl.loc.endLine - 1,
+                endColumn = decl.loc.endCol
+            )
+            diag.tags = listOf(DiagnosticTag.Unnecessary)
+            out.add(diag)
+        }
+        return out
+    }
+
+    /**
+     * For a `use` decl, return the subset of items that are unused.
+     * For a non-selective `use foo::bar` (one local name) returns either
+     * empty or a singleton.
+     */
+    private fun unusedItemsIn(
+        decl: com.mezze.language.parsedast.ParsedUseDecl,
+        referenced: Set<String>
+    ): List<String> {
+        return when (val path = decl.path) {
+            is com.mezze.language.parsedast.ParsedUsePath.Module -> {
+                val local = decl.alias ?: path.path.shortName
+                if (local in referenced) emptyList() else listOf(local)
+            }
+            is com.mezze.language.parsedast.ParsedUsePath.Selective -> {
+                path.items.mapNotNull { item ->
+                    val local = item.alias ?: item.name
+                    if (local in referenced) null else local
+                }
+            }
+        }
+    }
+
+    /** The single binding name of a non-selective `use`, else null. */
+    private fun localNameOf(decl: com.mezze.language.parsedast.ParsedUseDecl): String? =
+        when (val path = decl.path) {
+            is com.mezze.language.parsedast.ParsedUsePath.Module -> decl.alias ?: path.path.shortName
+            else -> null
+        }
+
+    /**
+     * Walk every typed decl, accumulating every name that could possibly
+     * resolve to an import. We're permissive on purpose — false negatives
+     * (failing to flag an unused import) are fine, false positives
+     * (flagging something that's actually used) are not.
+     */
+    private fun collectReferencedNames(typed: com.mezze.language.typedast.TypedModule): Set<String> {
+        val names = HashSet<String>()
+        for (decl in typed.decls) {
+            when (decl) {
+                is com.mezze.language.typedast.TypedLetDecl -> walkExpr(decl.value, names)
+                else -> { /* type/ability/effect decls — referenced names live in
+                            their parsed form via type annotations; we approximate
+                            by treating those decls as nothing-referenced. The
+                            TypedAst surface for type expressions doesn't currently
+                            carry resolved name strings we can scan, and false
+                            negatives are the safe direction here. */ }
+            }
+        }
+        return names
+    }
+
+    private fun walkExpr(expr: com.mezze.language.typedast.TypedExpr, into: MutableSet<String>) {
+        when (expr) {
+            is com.mezze.language.typedast.TypedVar -> into.add(expr.name)
+            is com.mezze.language.typedast.TypedCall -> {
+                walkExpr(expr.function, into); walkExpr(expr.arg, into)
+            }
+            is com.mezze.language.typedast.TypedLambda -> walkExpr(expr.body, into)
+            is com.mezze.language.typedast.TypedBlock -> {
+                for (stmt in expr.statements) when (stmt) {
+                    is com.mezze.language.typedast.TypedStatement.Let -> walkExpr(stmt.value, into)
+                    is com.mezze.language.typedast.TypedStatement.Expr -> walkExpr(stmt.expr, into)
+                }
+                walkExpr(expr.result, into)
+            }
+            is com.mezze.language.typedast.TypedIf -> {
+                walkExpr(expr.condition, into); walkExpr(expr.thenBranch, into); walkExpr(expr.elseBranch, into)
+            }
+            is com.mezze.language.typedast.TypedMatch -> {
+                walkExpr(expr.scrutinee, into)
+                for (case in expr.cases) {
+                    case.guard?.let { walkExpr(it, into) }
+                    walkExpr(case.body, into)
+                    for (b in case.ifLetBindings) walkExpr(b.expr, into)
+                }
+            }
+            is com.mezze.language.typedast.TypedRecord -> {
+                for (entry in expr.entries) when (entry) {
+                    is com.mezze.language.typedast.TypedRecordEntry.Field -> walkExpr(entry.value, into)
+                    is com.mezze.language.typedast.TypedRecordEntry.Spread -> walkExpr(entry.expr, into)
+                }
+            }
+            is com.mezze.language.typedast.TypedRecordUpdate -> {
+                walkExpr(expr.record, into)
+                for (entry in expr.updates) when (entry) {
+                    is com.mezze.language.typedast.TypedRecordEntry.Field -> walkExpr(entry.value, into)
+                    is com.mezze.language.typedast.TypedRecordEntry.Spread -> walkExpr(entry.expr, into)
+                }
+            }
+            is com.mezze.language.typedast.TypedFieldAccess -> walkExpr(expr.record, into)
+            is com.mezze.language.typedast.TypedSeq -> {
+                for (e in expr.elements) when (e) {
+                    is com.mezze.language.typedast.TypedSeqElement.Regular -> walkExpr(e.expr, into)
+                    is com.mezze.language.typedast.TypedSeqElement.Spread -> walkExpr(e.expr, into)
+                }
+            }
+            is com.mezze.language.typedast.TypedPipe -> {
+                walkExpr(expr.left, into); walkExpr(expr.right, into)
+            }
+            is com.mezze.language.typedast.TypedPerform -> {
+                walkExpr(expr.body, into)
+                for (h in expr.handlers) {
+                    into.add(h.performerName)
+                    h.params?.let { walkExpr(it, into) }
+                }
+            }
+            is com.mezze.language.typedast.TypedPerformOp -> {
+                walkExpr(expr.arg, into)
+                into.add(expr.operationName)
+            }
+            is com.mezze.language.typedast.TypedVariantConstruct -> expr.payload?.let { walkExpr(it, into) }
+            is com.mezze.language.typedast.TypedStringLit -> {
+                for (part in expr.parts) {
+                    if (part is com.mezze.language.typedast.TypedStringPart.Interpolation) {
+                        walkExpr(part.expr, into)
+                    }
+                }
+            }
+            else -> { /* literals + the rest carry no name references */ }
+        }
+    }
+
+    /**
      * Create a diagnostic from a recovery error.
      */
     private fun createDiagnosticFromRecoveryError(error: TypeChecker.TypeCheckError): Diagnostic {
@@ -476,11 +738,14 @@ class MezzeTextDocumentService(
         line: Int,
         column: Int,
         endColumn: Int? = null,
+        endLine: Int? = null,
         code: String? = null
     ): Diagnostic {
+        val startLine = maxOf(0, line)
+        val effectiveEndLine = maxOf(startLine, endLine ?: line)
         val range = Range(
-            Position(maxOf(0, line), maxOf(0, column)),
-            Position(maxOf(0, line), maxOf(0, endColumn ?: (column + 1)))
+            Position(startLine, maxOf(0, column)),
+            Position(effectiveEndLine, maxOf(0, endColumn ?: (column + 1)))
         )
         return Diagnostic(range, message, severity, "mezze").apply {
             if (code != null) {
@@ -1910,33 +2175,396 @@ class MezzeTextDocumentService(
                 }
             }
 
-            // Fallback: in-file TypedVar walk (for locals with no hash).
+            // Fallback: in-file TypedVar walk (for locals with no hash, or
+            // when the usages table hasn't been populated yet — e.g., the
+            // file hasn't been saved since the project was opened).
+            //
+            // We deliberately do NOT regex-scan the source bytes as a
+            // last resort; that produced false positives by matching
+            // inside strings and comments, and trampling unrelated
+            // bindings that happen to share the name.
             if (locations.isEmpty() && typedModule != null) {
                 collectReferencesInModule(typedModule, word, uri, locations)
             }
 
-            // Last resort: text search if everything else came up empty.
-            if (locations.isEmpty()) {
-                lines.forEachIndexed { lineIndex, lineContent ->
-                    var index = 0
-                    while (true) {
-                        val found = lineContent.indexOf(word, index)
-                        if (found < 0) break
-                        val before = if (found > 0) lineContent[found - 1] else ' '
-                        val after = if (found + word.length < lineContent.length) lineContent[found + word.length] else ' '
-                        if (!isIdentifierChar(before) && !isIdentifierChar(after)) {
-                            locations.add(Location(uri, Range(
-                                Position(lineIndex, found),
-                                Position(lineIndex, found + word.length)
-                            )))
-                        }
-                        index = found + 1
-                    }
-                }
-            }
-
             locations
         }
+    }
+
+    // ========== Document Highlight ==========
+
+    /**
+     * Same-file occurrence highlight. The editor sends this as the
+     * cursor moves; response should be cheap and exclude cross-file
+     * matches (those go through `references`).
+     *
+     * Strategy: reuse the in-file TypedAST walker. We don't bother with
+     * the usages index here — same-file is the only contract, and the
+     * walker handles it precisely.
+     */
+    override fun documentHighlight(
+        params: DocumentHighlightParams
+    ): CompletableFuture<List<DocumentHighlight>> {
+        return CompletableFuture.supplyAsync {
+            val uri = params.textDocument.uri
+            val state = documents[uri] ?: return@supplyAsync emptyList()
+            val lines = state.content.lines()
+            if (params.position.line >= lines.size) return@supplyAsync emptyList()
+            val word = extractWordAt(lines[params.position.line], params.position.character)
+                ?: return@supplyAsync emptyList()
+            val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
+                ?: return@supplyAsync emptyList()
+
+            val locs = mutableListOf<Location>()
+            collectReferencesInModule(typedModule, word, uri, locs)
+
+            locs.map { loc ->
+                DocumentHighlight(loc.range, DocumentHighlightKind.Read)
+            }
+        }
+    }
+
+    // ========== Selection Range ==========
+
+    /**
+     * "Expand selection" support. Returns a ladder of nested ranges from
+     * innermost to outermost so the editor can ctrl-w / cmd-up through
+     * progressively larger selections.
+     *
+     * Today we build the ladder lexically rather than from the AST:
+     * word → line → enclosing decl → file. The AST-rich version (record
+     * field → record literal → call → outer call → block) is a future
+     * upgrade — this hits the 80% case immediately.
+     */
+    override fun selectionRange(
+        params: SelectionRangeParams
+    ): CompletableFuture<List<SelectionRange>> {
+        return CompletableFuture.supplyAsync {
+            val uri = params.textDocument.uri
+            val state = documents[uri] ?: return@supplyAsync emptyList()
+            val lines = state.content.lines()
+            val parsed = state.parsedModule
+
+            params.positions.mapNotNull { pos ->
+                if (pos.line >= lines.size) return@mapNotNull null
+                val line = lines[pos.line]
+                val ladder = mutableListOf<Range>()
+
+                // Innermost: the word under the cursor (if any).
+                val wordRange = wordRangeAt(line, pos.line, pos.character)
+                if (wordRange != null) ladder.add(wordRange)
+
+                // The line itself (excluding trailing newline).
+                ladder.add(Range(Position(pos.line, 0), Position(pos.line, line.length)))
+
+                // Smallest enclosing parsed decl, if we have a parsed module.
+                val enclosingDecl = parsed?.decls
+                    ?.filter { decl ->
+                        val l = decl.loc
+                        (pos.line + 1) in l.startLine..l.endLine
+                    }
+                    ?.minByOrNull { it.loc.endLine - it.loc.startLine }
+                if (enclosingDecl != null) {
+                    val l = enclosingDecl.loc
+                    ladder.add(Range(
+                        Position(l.startLine - 1, l.startCol - 1),
+                        Position(l.endLine - 1, l.endCol)
+                    ))
+                }
+
+                // Whole file as the outermost step.
+                val lastIdx = (lines.size - 1).coerceAtLeast(0)
+                ladder.add(Range(
+                    Position(0, 0),
+                    Position(lastIdx, lines.lastOrNull()?.length ?: 0)
+                ))
+
+                // Fold the list into a linked SelectionRange chain. Each
+                // SelectionRange's `parent` is the next outermost.
+                var chain: SelectionRange? = null
+                for (range in ladder.asReversed()) {
+                    chain = SelectionRange(range, chain)
+                }
+                chain
+            }
+        }
+    }
+
+    /** Identifier-bounded range at [col] in [line], or null if not on a word. */
+    private fun wordRangeAt(line: String, lineIdx: Int, col: Int): Range? {
+        if (col > line.length) return null
+        var start = col
+        while (start > 0 && isIdentifierChar(line[start - 1])) start--
+        var end = col
+        while (end < line.length && isIdentifierChar(line[end])) end++
+        if (start == end) return null
+        return Range(Position(lineIdx, start), Position(lineIdx, end))
+    }
+
+    // ========== Call Hierarchy ==========
+    //
+    // Three-step protocol:
+    //   prepareCallHierarchy → returns the CallHierarchyItem for the cursor
+    //   incomingCalls(item)  → who calls this?  (edges WHERE to_hash = item.hash)
+    //   outgoingCalls(item)  → who does this call?  (edges WHERE from_hash = item.hash)
+    //
+    // We embed the target's content hash in the item's `data` field as a
+    // hex string so the follow-up calls can find it without re-resolving.
+
+    override fun prepareCallHierarchy(
+        params: CallHierarchyPrepareParams
+    ): CompletableFuture<List<CallHierarchyItem>> {
+        return CompletableFuture.supplyAsync {
+            val uri = params.textDocument.uri
+            val state = documents[uri] ?: return@supplyAsync emptyList()
+            val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
+                ?: return@supplyAsync emptyList()
+
+            val pos = params.position
+            val lookupLine = pos.line + 1
+            val lookupCol = pos.character + 1
+
+            // Same hash-resolution dance as references / rename.
+            val hash: com.mezze.language.typedast.Hash? = run {
+                when (val r = TypedAstLookup.findAtPosition(typedModule, lookupLine, lookupCol)) {
+                    is TypedAstLookup.LookupResult.Expr -> {
+                        val e = r.expr
+                        if (e is com.mezze.language.typedast.TypedVar) {
+                            (e.binding as? com.mezze.language.typedast.BindingRef.ByHash)?.hash
+                        } else null
+                    }
+                    else -> null
+                }
+            } ?: typedModule.decls
+                .filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+                .firstOrNull { decl ->
+                    val l = decl.loc
+                    lookupLine in l.startLine..l.endLine
+                }?.hash
+
+            if (hash == null) return@supplyAsync emptyList()
+            val item = makeCallHierarchyItem(hash) ?: return@supplyAsync emptyList()
+            listOf(item)
+        }
+    }
+
+    override fun callHierarchyIncomingCalls(
+        params: CallHierarchyIncomingCallsParams
+    ): CompletableFuture<List<CallHierarchyIncomingCall>> {
+        return CompletableFuture.supplyAsync {
+            val targetHex = params.item.data as? String ?: return@supplyAsync emptyList()
+            val store = projectStore ?: return@supplyAsync emptyList()
+            val targetHash = com.mezze.language.typedast.Hash(targetHex)
+
+            val out = mutableListOf<CallHierarchyIncomingCall>()
+            for (edge in store.getEdgesTo(targetHash)) {
+                if (edge.kind != com.mezze.language.codebase.EdgeKind.CALLS) continue
+                val callerItem = makeCallHierarchyItem(edge.fromHash) ?: continue
+                // `fromRanges` is the list of call-site ranges inside the
+                // caller's body. We resolve them via the usages table —
+                // each row whose target_hash == this target and whose
+                // file_path matches the caller's file is a call site.
+                val callerFile = callerItem.uri
+                val callerFilePath = java.net.URI(callerFile).path
+                val ranges = store.getUsages(targetHash)
+                    .filter { it.filePath == callerFilePath }
+                    .map { Range(
+                        Position(it.startLine - 1, it.startCol - 1),
+                        Position(it.endLine - 1, it.endCol)
+                    ) }
+                if (ranges.isEmpty()) {
+                    // Fallback to the caller's own range; LSP requires at
+                    // least one range so the editor has something to jump to.
+                    out.add(CallHierarchyIncomingCall(callerItem, listOf(callerItem.range)))
+                } else {
+                    out.add(CallHierarchyIncomingCall(callerItem, ranges))
+                }
+            }
+            out
+        }
+    }
+
+    override fun callHierarchyOutgoingCalls(
+        params: CallHierarchyOutgoingCallsParams
+    ): CompletableFuture<List<CallHierarchyOutgoingCall>> {
+        return CompletableFuture.supplyAsync {
+            val callerHex = params.item.data as? String ?: return@supplyAsync emptyList()
+            val store = projectStore ?: return@supplyAsync emptyList()
+            val callerHash = com.mezze.language.typedast.Hash(callerHex)
+            val callerFilePath = java.net.URI(params.item.uri).path
+
+            val out = mutableListOf<CallHierarchyOutgoingCall>()
+            for (edge in store.getEdgesFrom(callerHash)) {
+                if (edge.kind != com.mezze.language.codebase.EdgeKind.CALLS) continue
+                val calleeItem = makeCallHierarchyItem(edge.toHash) ?: continue
+                val ranges = store.getUsages(edge.toHash)
+                    .filter { it.filePath == callerFilePath }
+                    .map { Range(
+                        Position(it.startLine - 1, it.startCol - 1),
+                        Position(it.endLine - 1, it.endCol)
+                    ) }
+                out.add(CallHierarchyOutgoingCall(
+                    calleeItem,
+                    if (ranges.isEmpty()) listOf(calleeItem.range) else ranges
+                ))
+            }
+            out
+        }
+    }
+
+    /**
+     * Materialize a CallHierarchyItem for [hash] by joining decls + modules.
+     * Returns null if the hash isn't in the decls index (e.g., synthetic
+     * top-level wrapper, or the decl was removed).
+     */
+    private fun makeCallHierarchyItem(hash: com.mezze.language.typedast.Hash): CallHierarchyItem? {
+        val store = projectStore ?: return null
+        val decl = store.findDeclByHash(hash) ?: return null
+        val module = store.getModule(decl.modulePath) ?: return null
+        val filePath = module.filePath ?: return null
+        val itemUri = File(filePath).toURI().toString()
+        val range = Range(
+            Position(decl.startLine - 1, decl.startCol - 1),
+            Position(decl.endLine - 1, decl.endCol)
+        )
+        val item = CallHierarchyItem(
+            decl.declName,
+            declKindToSymbolKindForCallHierarchy(decl.declKind),
+            itemUri,
+            range,
+            range
+        )
+        item.detail = decl.modulePath
+        item.data = hash.hex
+        return item
+    }
+
+    private fun declKindToSymbolKindForCallHierarchy(kind: com.mezze.language.codebase.DeclKind): SymbolKind =
+        when (kind) {
+            com.mezze.language.codebase.DeclKind.LET -> SymbolKind.Function
+            com.mezze.language.codebase.DeclKind.TYPE -> SymbolKind.Class
+            com.mezze.language.codebase.DeclKind.ABILITY -> SymbolKind.Interface
+            com.mezze.language.codebase.DeclKind.EFFECT -> SymbolKind.Event
+            com.mezze.language.codebase.DeclKind.PERFORMER -> SymbolKind.Operator
+            com.mezze.language.codebase.DeclKind.IMPL -> SymbolKind.Method
+        }
+
+    // ========== Type Hierarchy ==========
+    //
+    // For Mezze, "type hierarchy" maps to two relationships:
+    //   - An ability has a set of impls (subtypes).
+    //   - An impl points back at the ability it implements (supertype).
+    // We get both directly from the `ability_impls` table.
+    //
+    // Records and variants don't form a subtype lattice in Mezze, so on
+    // those nodes we return the bare item with empty up/down sets.
+
+    override fun prepareTypeHierarchy(
+        params: TypeHierarchyPrepareParams
+    ): CompletableFuture<List<TypeHierarchyItem>> {
+        return CompletableFuture.supplyAsync {
+            val uri = params.textDocument.uri
+            val state = documents[uri] ?: return@supplyAsync emptyList()
+            val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
+                ?: return@supplyAsync emptyList()
+
+            val pos = params.position
+            val lookupLine = pos.line + 1
+
+            // Find an enclosing decl at the cursor across every TypedModule
+            // bucket — let, type, ability, ability_impl, effect, performer.
+            // Each carries its own hash + loc. We pick the smallest match.
+            data class HashedLoc(val hash: com.mezze.language.typedast.Hash, val loc: com.mezze.language.parsedast.Loc)
+            val candidates = mutableListOf<HashedLoc>()
+            for (d in typedModule.decls) when (d) {
+                is com.mezze.language.typedast.TypedLetDecl -> candidates.add(HashedLoc(d.hash, d.loc))
+                is com.mezze.language.typedast.TypedTypeDecl -> candidates.add(HashedLoc(d.hash, d.loc))
+                else -> {}
+            }
+            for (a in typedModule.abilityDecls) candidates.add(HashedLoc(a.hash, a.loc))
+            for (a in typedModule.abilityImpls) candidates.add(HashedLoc(a.hash, a.loc))
+            for (e in typedModule.effectDecls) candidates.add(HashedLoc(e.hash, e.loc))
+            for (p in typedModule.performerDecls) candidates.add(HashedLoc(p.hash, p.loc))
+
+            val match = candidates
+                .filter { lookupLine in it.loc.startLine..it.loc.endLine }
+                .minByOrNull { it.loc.endLine - it.loc.startLine }
+                ?: return@supplyAsync emptyList()
+
+            val item = makeTypeHierarchyItem(match.hash) ?: return@supplyAsync emptyList()
+            listOf(item)
+        }
+    }
+
+    override fun typeHierarchySupertypes(
+        params: TypeHierarchySupertypesParams
+    ): CompletableFuture<List<TypeHierarchyItem>> {
+        return CompletableFuture.supplyAsync {
+            val hex = params.item.data as? String ?: return@supplyAsync emptyList()
+            val store = projectStore ?: return@supplyAsync emptyList()
+            val hash = com.mezze.language.typedast.Hash(hex)
+
+            // If `hash` is an impl, its supertype is the ability it implements.
+            // We discover that by looking up the impl's blob and reading its
+            // ability_hash via the ability_impls index. There's no single
+            // "lookup impl by impl hash"; we fall back to scanning impls
+            // for any ability and matching on impl hash.
+            val out = mutableListOf<TypeHierarchyItem>()
+            // Walk the IMPLEMENTS edges from this hash — each target is a
+            // supertype (ability or effect).
+            for (edge in store.getEdgesFrom(hash)) {
+                if (edge.kind != com.mezze.language.codebase.EdgeKind.IMPLEMENTS) continue
+                makeTypeHierarchyItem(edge.toHash)?.let { out.add(it) }
+            }
+            out
+        }
+    }
+
+    override fun typeHierarchySubtypes(
+        params: TypeHierarchySubtypesParams
+    ): CompletableFuture<List<TypeHierarchyItem>> {
+        return CompletableFuture.supplyAsync {
+            val hex = params.item.data as? String ?: return@supplyAsync emptyList()
+            val store = projectStore ?: return@supplyAsync emptyList()
+            val hash = com.mezze.language.typedast.Hash(hex)
+
+            val out = mutableListOf<TypeHierarchyItem>()
+
+            // Direct: ability → all impls of it.
+            for (impl in store.getAbilityImpls(hash)) {
+                makeTypeHierarchyItem(impl.hash)?.let { out.add(it) }
+            }
+
+            // Generic: every IMPLEMENTS edge pointing at this hash.
+            // (Captures effect → performer relationships.)
+            for (edge in store.getEdgesTo(hash)) {
+                if (edge.kind != com.mezze.language.codebase.EdgeKind.IMPLEMENTS) continue
+                makeTypeHierarchyItem(edge.fromHash)?.let { out.add(it) }
+            }
+            out.distinctBy { it.data as String }
+        }
+    }
+
+    private fun makeTypeHierarchyItem(hash: com.mezze.language.typedast.Hash): TypeHierarchyItem? {
+        val store = projectStore ?: return null
+        val decl = store.findDeclByHash(hash) ?: return null
+        val module = store.getModule(decl.modulePath) ?: return null
+        val filePath = module.filePath ?: return null
+        val itemUri = File(filePath).toURI().toString()
+        val range = Range(
+            Position(decl.startLine - 1, decl.startCol - 1),
+            Position(decl.endLine - 1, decl.endCol)
+        )
+        val item = TypeHierarchyItem(
+            decl.declName,
+            declKindToSymbolKindForCallHierarchy(decl.declKind),
+            itemUri,
+            range,
+            range
+        )
+        item.detail = decl.modulePath
+        item.data = hash.hex
+        return item
     }
 
     /** Collect all references to a name in the TypedModule. */
@@ -2046,39 +2674,93 @@ class MezzeTextDocumentService(
             val state = documents[uri] ?: return@supplyAsync emptyList()
             val actions = mutableListOf<Either<Command, CodeAction>>()
 
-            // Check diagnostics for auto-import suggestions
-            for (diagnostic in params.context.diagnostics) {
-                val msg = diagnostic.message ?: continue
+            // Auto-import: walk the diagnostics looking for unresolved-name errors.
+            // For each, query the decls index across cache + stdlib + deps for an
+            // exact name match and offer one quickfix per matching module.
+            val store = projectStore
+            if (store != null) {
+                val seen = HashSet<Pair<String, String>>()  // (modulePath, name) — dedupe
+                for (diagnostic in params.context.diagnostics) {
+                    val msg = diagnostic.message ?: continue
+                    val undefinedName = extractUndefinedName(msg) ?: continue
+                    if (undefinedName.isEmpty()) continue
 
-                // "Undefined variable or function: X" → suggest import
-                if (msg.contains("Undefined variable") || msg.contains("not defined or not imported")) {
-                    val nameMatch = Regex("'(\\w+)'|: (\\w+)$").find(msg)
-                    val undefinedName = nameMatch?.groupValues?.firstOrNull { it.isNotEmpty() && it != msg }
+                    // searchDeclsByName uses LIKE prefix; filter to exact match here.
+                    // Skip the file we're editing — that's where the error came
+                    // from, importing from yourself is nonsensical.
+                    val currentModulePath = state.parsedModule?.path
+                    val candidates = store.searchDeclsByName(undefinedName)
+                        .filter { it.declName == undefinedName }
+                        .filter { it.modulePath != currentModulePath }
 
-                    if (undefinedName != null) {
-                        // Search stdlib for matching exports
-                        try {
-                            val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
-                            for ((_, module) in precompiled.stdlibTypedModules) {
-                                val hasExport = module.exports.containsKey(undefinedName)
-                                if (hasExport) {
-                                    val importText = "use ${module.path}::$undefinedName\n"
-                                    val action = CodeAction("Import '$undefinedName' from ${module.path}")
-                                    action.kind = CodeActionKind.QuickFix
-                                    action.diagnostics = listOf(diagnostic)
-                                    action.edit = WorkspaceEdit(mapOf(
-                                        uri to listOf(TextEdit(Range(Position(0, 0), Position(0, 0)), importText))
-                                    ))
-                                    actions.add(Either.forRight(action))
-                                }
-                            }
-                        } catch (_: Exception) {}
+                    for (decl in candidates) {
+                        if (!seen.add(decl.modulePath to undefinedName)) continue
+                        val edit = buildAutoImportEdit(state, decl.modulePath, undefinedName) ?: continue
+                        val action = CodeAction("Import '$undefinedName' from ${decl.modulePath}")
+                        action.kind = CodeActionKind.QuickFix
+                        action.diagnostics = listOf(diagnostic)
+                        action.edit = WorkspaceEdit(mapOf(uri to listOf(edit)))
+                        actions.add(Either.forRight(action))
                     }
                 }
             }
 
             actions
         }
+    }
+
+    /**
+     * Pull the unresolved-name token out of a typechecker error message.
+     * The typechecker emits a few variants, all roughly:
+     *   "Undefined variable or function: 'foo'"
+     *   "X is not defined or not imported"
+     * We match anything single-quoted first (preferred), else anything
+     * after the last colon, else null.
+     */
+    private fun extractUndefinedName(msg: String): String? {
+        if (!(msg.contains("Undefined variable")
+                || msg.contains("not defined")
+                || msg.contains("not imported"))) {
+            return null
+        }
+        Regex("'([\\w_]+)'").find(msg)?.let { return it.groupValues[1] }
+        Regex(":\\s*([\\w_]+)\\s*$").find(msg)?.let { return it.groupValues[1] }
+        return null
+    }
+
+    /**
+     * Build a TextEdit that inserts `use <module>::<name>` in the right place:
+     *
+     *   - If the file already has `use` decls, append after the last one,
+     *     preserving alphabetical order within the run.
+     *   - If there are no `use` decls but there are leading comments / a
+     *     module preamble, insert above the first non-comment top decl.
+     *   - Else insert at the very top.
+     *
+     * We never try to merge into an existing `use mod::{a, b}` braced list —
+     * that's a formatter problem, not ours.
+     */
+    private fun buildAutoImportEdit(state: DocumentState, modulePath: String, name: String): TextEdit? {
+        val parsed = state.parsedModule ?: return null
+        val useDecls = parsed.decls.filterIsInstance<com.mezze.language.parsedast.ParsedUseDecl>()
+
+        val newLine = "use $modulePath::$name\n"
+
+        if (useDecls.isNotEmpty()) {
+            // Insert at start of the line just after the last `use` decl.
+            val last = useDecls.maxBy { it.loc.endLine }
+            val insertLine = last.loc.endLine  // 1-based — that's the next line in 0-based LSP
+            return TextEdit(Range(Position(insertLine, 0), Position(insertLine, 0)), newLine)
+        }
+
+        // No imports yet — find the first non-use decl and insert above it.
+        val firstDecl = parsed.decls.firstOrNull()
+        if (firstDecl != null) {
+            val line = firstDecl.loc.startLine - 1  // 1-based -> 0-based
+            return TextEdit(Range(Position(line, 0), Position(line, 0)), newLine + "\n")
+        }
+
+        return TextEdit(Range(Position(0, 0), Position(0, 0)), newLine + "\n")
     }
 
     // ========== Signature Help ==========
@@ -2281,40 +2963,83 @@ class MezzeTextDocumentService(
             if (position.line >= lines.size) return@supplyAsync null
             val oldName = extractWordAt(lines[position.line], position.character) ?: return@supplyAsync null
 
-            // Find all references to this name using semantic search
-            val locations = mutableListOf<Location>()
             val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
-            if (typedModule != null) {
-                collectReferencesInModule(typedModule, oldName, uri, locations)
-            }
 
-            // If no semantic refs found, fall back to text search
-            if (locations.isEmpty()) {
-                lines.forEachIndexed { lineIndex, lineContent ->
-                    var index = 0
-                    while (true) {
-                        val found = lineContent.indexOf(oldName, index)
-                        if (found < 0) break
-                        val before = if (found > 0) lineContent[found - 1] else ' '
-                        val after = if (found + oldName.length < lineContent.length) lineContent[found + oldName.length] else ' '
-                        if (!isIdentifierChar(before) && !isIdentifierChar(after)) {
-                            locations.add(Location(uri, Range(
-                                Position(lineIndex, found),
-                                Position(lineIndex, found + oldName.length)
-                            )))
-                        }
-                        index = found + 1
+            // Step 1: resolve the hash under the cursor — same logic as
+            // references(). If we get a hash we can do a workspace-wide
+            // rename via the usages table.
+            val targetHash: com.mezze.language.typedast.Hash? = run {
+                if (typedModule == null) return@run null
+                val lookupLine = position.line + 1
+                val lookupCol = position.character + 1
+                when (val r = TypedAstLookup.findAtPosition(typedModule, lookupLine, lookupCol)) {
+                    is TypedAstLookup.LookupResult.Expr -> {
+                        val e = r.expr
+                        if (e is com.mezze.language.typedast.TypedVar) {
+                            (e.binding as? com.mezze.language.typedast.BindingRef.ByHash)?.hash
+                        } else null
                     }
+                    else -> null
+                }
+            } ?: typedModule?.decls
+                ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+                ?.firstOrNull { it.name == oldName }
+                ?.hash
+
+            // Step 2: collect every edit location. Top-level names with a
+            // resolved hash use the usages index for cross-file rename;
+            // local names (no hash) stay in-file.
+            //
+            // We group edits by file URI in a single map so the returned
+            // WorkspaceEdit covers every file at once — that's what
+            // distinguishes this from the old single-file rename.
+            val editsByFile = LinkedHashMap<String, MutableList<TextEdit>>()
+            val store = projectStore
+            if (targetHash != null && store != null) {
+                // Definition site lives in the typed module of the file
+                // that owns the decl; for now we add the def site of the
+                // current file if the hash matches a local decl.
+                val defDecl = typedModule?.decls
+                    ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+                    ?.firstOrNull { it.hash == targetHash }
+                if (defDecl != null) {
+                    val nameLen = oldName.length
+                    val edit = TextEdit(
+                        Range(
+                            Position(defDecl.loc.startLine - 1, defDecl.loc.startCol - 1),
+                            Position(defDecl.loc.startLine - 1, defDecl.loc.startCol - 1 + nameLen)
+                        ),
+                        newName
+                    )
+                    editsByFile.getOrPut(uri) { mutableListOf() }.add(edit)
+                }
+
+                for (row in store.getUsages(targetHash)) {
+                    val rowUri = File(row.filePath).toURI().toString()
+                    val edit = TextEdit(
+                        Range(
+                            Position(row.startLine - 1, row.startCol - 1),
+                            Position(row.endLine - 1, row.endCol)
+                        ),
+                        newName
+                    )
+                    editsByFile.getOrPut(rowUri) { mutableListOf() }.add(edit)
                 }
             }
 
-            if (locations.isEmpty()) return@supplyAsync null
-
-            val edits = locations.map { loc ->
-                TextEdit(loc.range, newName)
+            // Step 3: locals (no hash) — fall back to in-file TypedAST walk.
+            if (editsByFile.isEmpty() && typedModule != null) {
+                val locs = mutableListOf<Location>()
+                collectReferencesInModule(typedModule, oldName, uri, locs)
+                for (loc in locs) {
+                    editsByFile.getOrPut(uri) { mutableListOf() }
+                        .add(TextEdit(loc.range, newName))
+                }
             }
 
-            WorkspaceEdit(mapOf(uri to edits))
+            if (editsByFile.isEmpty()) return@supplyAsync null
+
+            WorkspaceEdit(editsByFile.mapValues { it.value.toList() })
         }
     }
 

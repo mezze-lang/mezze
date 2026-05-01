@@ -1,3 +1,6 @@
+import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
+
 plugins {
     kotlin("jvm")
     kotlin("plugin.serialization")
@@ -65,6 +68,63 @@ dependencies {
 
     // Codebase module for content-addressed storage
     implementation(project(":codebase"))
+}
+
+// ----------------------------------------------------------------------------
+// Generated BuildInfo
+//
+// Single source of truth for the version string baked into the binary.
+// Reading project.version from the running code is unreliable across the
+// JVM jar / native image paths, so we materialize it as Kotlin source at
+// build time and let it follow the normal compileKotlin pipeline.
+// ----------------------------------------------------------------------------
+val generatedSrcDir = layout.buildDirectory.dir("generated/source/buildinfo/main/kotlin")
+
+val generateBuildInfo by tasks.registering {
+    description = "Generate BuildInfo.kt with version + git SHA pulled from gradle."
+    val outputDir = generatedSrcDir
+    val versionString = project.version.toString()
+    val timestamp = OffsetDateTime.now()
+        .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+    val gitSha = try {
+        val proc = ProcessBuilder("git", "rev-parse", "--short", "HEAD")
+            .directory(rootDir)
+            .redirectErrorStream(true)
+            .start()
+        proc.inputStream.bufferedReader().readLine()?.trim() ?: "unknown"
+    } catch (_: Exception) { "unknown" }
+
+    inputs.property("version", versionString)
+    inputs.property("timestamp", timestamp)
+    inputs.property("gitSha", gitSha)
+    outputs.dir(outputDir)
+
+    doLast {
+        val pkgDir = outputDir.get().asFile.resolve("com/mezze/language/cli")
+        pkgDir.mkdirs()
+        pkgDir.resolve("BuildInfo.kt").writeText("""
+            // Generated. Do not edit. Source of truth: cli/build.gradle.kts.
+            package com.mezze.language.cli
+
+            object BuildInfo {
+                const val VERSION: String = "$versionString"
+                const val BUILD_TIMESTAMP: String = "$timestamp"
+                const val GIT_SHA: String = "$gitSha"
+            }
+        """.trimIndent())
+    }
+}
+
+kotlin {
+    sourceSets["main"].kotlin.srcDir(generatedSrcDir)
+}
+
+// Wire up the generator into both Kotlin compile + kapt's stub generator.
+// kapt's task is registered lazily, so use tasks.matching {} rather than
+// named() to avoid "task not found" at config time.
+tasks.named("compileKotlin") { dependsOn(generateBuildInfo) }
+tasks.matching { it.name == "kaptGenerateStubsKotlin" }.configureEach {
+    dependsOn(generateBuildInfo)
 }
 
 // Include stdlib mezze files as resources in the JAR
@@ -338,11 +398,17 @@ tasks.register<Copy>("installRuntime") {
 /**
  * Install the native binary to ~/.mezze/bin/mez. ~3 minutes the first
  * time; faster on subsequent runs thanks to incremental compile.
+ *
+ * Also depends on `installRuntime` because the native binary is NOT
+ * self-contained — `mez dev` shells out to a JVM subprocess that loads
+ * `~/.mezze/lib/mezze-lang.jar`, and `mez build` templates user app jars
+ * from the same file. Installing one without the other gives users a
+ * broken setup, so we couple them at the gradle layer.
  */
 tasks.register<Copy>("installNative") {
     group = "install"
-    description = "Install native `mez` binary into ~/.mezze/bin/"
-    dependsOn("nativeCompile")
+    description = "Install native `mez` binary + runtime jar into ~/.mezze/"
+    dependsOn("installRuntime", "nativeCompile")
     from(layout.buildDirectory.file("native/nativeCompile/mezze"))
     into(mezzeHome.map { File(it, "bin") })
     rename { "mez" }

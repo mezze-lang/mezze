@@ -219,6 +219,14 @@ interface MezzeStore : AutoCloseable {
     /** Search decls by name prefix across the whole project. For LSP workspace symbol. */
     fun searchDeclsByName(query: String): List<DeclRow>
 
+    /**
+     * Resolve a content hash back to its decl row (module, name, kind,
+     * source range). Used by call hierarchy to render an edge target as
+     * a clickable item. Returns null if no decl row exists for [hash] —
+     * the row may have been removed or not yet populated.
+     */
+    fun findDeclByHash(hash: Hash): DeclRow?
+
     // ====================================================================
     // PARSED MODULES — cached ParsedModule per (modulePath, sourceHash)
     //

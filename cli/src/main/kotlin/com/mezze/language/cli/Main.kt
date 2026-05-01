@@ -148,10 +148,20 @@ fun main(args: Array<String>) {
 }
 
 /**
+ * Render the version for human display. Prepends `v` only when the
+ * version begins with a digit (semver-style); leaves nightly /
+ * dev / branch tags as-is, since `vnightly-...` reads oddly.
+ */
+private fun displayVersion(): String {
+    val v = BuildInfo.VERSION
+    return if (v.firstOrNull()?.isDigit() == true) "v$v" else v
+}
+
+/**
  * Show main help information
  */
 private fun showHelp() {
-    println("Mezze Language v1.0.0")
+    println("Mezze Language ${displayVersion()}")
     println("A modern functional programming language with full Truffle support")
     println()
     showUsage()
@@ -183,7 +193,7 @@ private fun showHelp() {
  * Show version information
  */
 private fun showVersion() {
-    println("Mezze Language v1.0.0")
+    println("Mezze Language ${displayVersion()} (${BuildInfo.GIT_SHA})")
     println("Built with Oracle GraalVM 24.0.2")
     println()
     println("Features:")
@@ -271,6 +281,7 @@ private fun showCommandHelp(command: String) {
             println("  --inspect-brk      Same as --inspect, but breaks before main.")
             println("  --profile          CPU sampler → .mz/profile.txt")
             println("  --coverage         Line coverage → .mz/coverage.txt")
+            println("  --allocations      Allocation tracer (records, seqs, variants) → .mz/allocations.txt")
             println("  --trace-jit        Trace Graal compilation + deopts to stderr.")
             println("  --insight=<file>   Attach a GraalVM Insight JS probe.")
             println()
@@ -583,12 +594,14 @@ private fun handleInitCommand(args: List<String>) {
 private fun handleLspCommand(args: List<String>) {
     // Handle version flag
     if (args.contains("--version") || args.contains("-v")) {
-        println("Mezze Language Server v1.0.0")
+        println("Mezze Language Server ${displayVersion()}")
         return
     }
 
-    // Start the LSP server (communicates via stdin/stdout)
-    com.mezze.language.lsp.startServer(System.`in`, System.out)
+    // Start the LSP server (communicates via stdin/stdout). Pass
+    // BuildInfo.VERSION so the version reported via LSP `initialize`'s
+    // ServerInfo matches `mez --version`.
+    com.mezze.language.lsp.startServer(System.`in`, System.out, BuildInfo.VERSION)
 }
 
 /**

@@ -130,17 +130,22 @@ class MezzeWorkspaceService(
 
     /**
      * Execute a workspace command.
+     *
+     * Both supported commands route into [MezzeTextDocumentService] —
+     * that's where the project store, open documents, and diagnostics
+     * publication live. We just dispatch.
      */
     override fun executeCommand(params: ExecuteCommandParams): CompletableFuture<Any> {
         return CompletableFuture.supplyAsync {
+            val tds = server.textDocumentService as? MezzeTextDocumentService
             when (params.command) {
                 "mezze.clearCache" -> {
                     server.logInfo("Clearing cache...")
-                    // TODO: Clear codebase and re-analyze
+                    tds?.clearCache()
                 }
                 "mezze.restart" -> {
                     server.logInfo("Restarting server...")
-                    // TODO: Implement restart
+                    tds?.restart()
                 }
                 else -> {
                     server.logWarning("Unknown command: ${params.command}")

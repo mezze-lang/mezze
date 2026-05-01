@@ -97,6 +97,25 @@ class SQLiteMezzeStore private constructor(
             File(resolveProjectDir(projectRoot), DEPS_FILE)
 
         /**
+         * Wipe all three sqlite files (and their `-wal`/`-shm` siblings)
+         * for a project. Caller must have closed any open store first.
+         *
+         * Used by `mezze.clearCache` in the LSP and as the user-facing
+         * escape hatch when a cache file is corrupted. Next `openProject`
+         * recreates everything from scratch (and re-seeds stdlib from
+         * the JAR resource).
+         */
+        fun wipeProjectFiles(projectRoot: File) {
+            val dir = resolveProjectDir(projectRoot)
+            if (!dir.isDirectory) return
+            for (base in listOf(CACHE_FILE, STDLIB_FILE, DEPS_FILE)) {
+                for (suffix in listOf("", "-wal", "-shm", "-journal")) {
+                    File(dir, base + suffix).delete()
+                }
+            }
+        }
+
+        /**
          * Open or create project cache. Note: this does NOT attach
          * stdlib / deps. For the full three-file flow use [openProject].
          * `forProject` is only used by tooling that needs raw access to
@@ -1503,6 +1522,24 @@ class SQLiteMezzeStore private constructor(
         for (i in 0..2) searchDeclsByNameStmt.setString(i + 1, query)
         return searchDeclsByNameStmt.executeQuery().use { rs ->
             buildList { while (rs.next()) add(rs.toDeclRow()) }
+        }
+    }
+
+    private val findDeclByHashStmt: PreparedStatement by lazy {
+        // Hits idx_decls_hash. UNION ALL across all three so hashes
+        // resolve regardless of which file owns the decl.
+        conn.prepareStatement(unionAll("""
+            SELECT module_path, decl_name, decl_kind, source_hash, hash,
+                   start_line, start_col, end_line, end_col
+            FROM <DB>.decls
+            WHERE hash = ?
+        """.trimIndent()) + " LIMIT 1")
+    }
+
+    override fun findDeclByHash(hash: Hash): DeclRow? {
+        for (i in 0..2) findDeclByHashStmt.setString(i + 1, hash.hex)
+        return findDeclByHashStmt.executeQuery().use { rs ->
+            if (rs.next()) rs.toDeclRow() else null
         }
     }
 

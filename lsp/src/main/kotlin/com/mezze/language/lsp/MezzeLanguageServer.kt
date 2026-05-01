@@ -16,7 +16,15 @@ import java.util.concurrent.CompletableFuture
  * - Code completion
  * - Document symbols
  */
-class MezzeLanguageServer : LanguageServer, LanguageClientAware {
+class MezzeLanguageServer(
+    /**
+     * Version reported in [ServerInfo] during `initialize`. The CLI
+     * passes its `BuildInfo.VERSION` so editor-visible version matches
+     * `mez --version`. Falls back to "dev" when launched directly
+     * without going through the CLI.
+     */
+    private val serverVersion: String = "dev"
+) : LanguageServer, LanguageClientAware {
 
     private lateinit var client: LanguageClient
     private val textDocumentService = MezzeTextDocumentService(this)
@@ -76,6 +84,18 @@ class MezzeLanguageServer : LanguageServer, LanguageClientAware {
             // Find references
             referencesProvider = Either.forLeft(true)
 
+            // Document highlight (cursor-on-symbol same-file occurrence highlight)
+            documentHighlightProvider = Either.forLeft(true)
+
+            // Call hierarchy (incoming + outgoing call exploration via the v7 edges table)
+            callHierarchyProvider = Either.forLeft(true)
+
+            // Selection range (smart "expand selection" — nested ranges from innermost out)
+            selectionRangeProvider = Either.forLeft(true)
+
+            // Type hierarchy (ability ↔ impl exploration)
+            typeHierarchyProvider = Either.forLeft(true)
+
             // Document symbols (outline)
             documentSymbolProvider = Either.forLeft(true)
 
@@ -128,9 +148,16 @@ class MezzeLanguageServer : LanguageServer, LanguageClientAware {
                 )
                 full = Either.forLeft(true)
             }
+
+            // Workspace commands. Clients invoke via workspace/executeCommand.
+            // Both wipe state and re-analyze; restart additionally flushes the
+            // typechecker's process-global module cache and reloads stdlib.
+            executeCommandProvider = ExecuteCommandOptions(
+                listOf("mezze.clearCache", "mezze.restart")
+            )
         }
 
-        val serverInfo = ServerInfo("Mezze Language Server", "1.0.0")
+        val serverInfo = ServerInfo("Mezze Language Server", serverVersion)
 
         return CompletableFuture.completedFuture(
             InitializeResult(capabilities, serverInfo)

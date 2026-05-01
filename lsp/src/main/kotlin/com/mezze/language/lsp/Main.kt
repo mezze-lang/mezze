@@ -58,9 +58,13 @@ private fun printHelp() {
 
 /**
  * Start the language server with the given input/output streams.
+ *
+ * [version] is reported back to the editor via `initialize`'s ServerInfo.
+ * Callers from the CLI pass `BuildInfo.VERSION` so it matches
+ * `mez --version`; tests / direct main() default to "dev".
  */
-fun startServer(input: InputStream, output: OutputStream) {
-    val server = MezzeLanguageServer()
+fun startServer(input: InputStream, output: OutputStream, version: String = "dev") {
+    val server = MezzeLanguageServer(version)
 
     val executor = Executors.newCachedThreadPool { runnable ->
         Thread(runnable, "mezze-lsp-worker").apply {

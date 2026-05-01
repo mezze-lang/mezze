@@ -1,9 +1,11 @@
 package com.mezze.interpreter.nodes.seq;
 
 import com.mezze.interpreter.nodes.MezzeNode;
+import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.instrumentation.AllocationReporter;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeInfo;
 
@@ -35,30 +37,42 @@ public final class SeqLiteralNode extends MezzeNode {
     @Override
     @ExplodeLoop
     public Object execute(VirtualFrame frame) {
-        // Fast path: empty sequence
+        // Fast path: empty sequence — MezzeSeq.empty() returns a shared
+        // singleton, so we don't report it as an allocation.
         if (elementCount == 0) {
             return MezzeSeq.empty();
         }
 
-        // Fast path: single element
+        // For non-empty seqs, evaluate elements first (their own nodes
+        // may allocate and report), then bracket the seq construction
+        // call with onEnter/onReturnValue.
+        AllocationReporter reporter = MezzeContext.get(this).getAllocationReporter();
+
         if (elementCount == 1) {
             Object value = elementNodes[0].execute(frame);
-            return MezzeSeq.of(value);
+            reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+            MezzeSeq result = MezzeSeq.of(value);
+            reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+            return result;
         }
 
-        // Fast path: two elements
         if (elementCount == 2) {
             Object v0 = elementNodes[0].execute(frame);
             Object v1 = elementNodes[1].execute(frame);
-            return MezzeSeq.of(v0, v1);
+            reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+            MezzeSeq result = MezzeSeq.of(v0, v1);
+            reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+            return result;
         }
 
-        // Fast path: three elements
         if (elementCount == 3) {
             Object v0 = elementNodes[0].execute(frame);
             Object v1 = elementNodes[1].execute(frame);
             Object v2 = elementNodes[2].execute(frame);
-            return MezzeSeq.of(v0, v1, v2);
+            reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+            MezzeSeq result = MezzeSeq.of(v0, v1, v2);
+            reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+            return result;
         }
 
         // General path: evaluate all elements
@@ -66,7 +80,10 @@ public final class SeqLiteralNode extends MezzeNode {
         for (int i = 0; i < elementCount; i++) {
             values[i] = elementNodes[i].execute(frame);
         }
-        return MezzeSeq.of(values);
+        reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+        MezzeSeq result = MezzeSeq.of(values);
+        reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+        return result;
     }
 
     /**

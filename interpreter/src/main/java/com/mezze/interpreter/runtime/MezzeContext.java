@@ -5,6 +5,7 @@ import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.TruffleLanguage.Env;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.instrumentation.AllocationReporter;
 import com.oracle.truffle.api.nodes.Node;
 
 import java.util.ArrayDeque;
@@ -105,6 +106,30 @@ public final class MezzeContext {
 
     public Env getEnv() {
         return env;
+    }
+
+    // Cached AllocationReporter — Env.lookup() is not free, and this gets
+    // called from every record / seq / variant allocation. Looking it up
+    // once and stashing the reference matches the Truffle examples.
+    private volatile AllocationReporter allocationReporter;
+
+    /**
+     * The Truffle AllocationReporter for this context. Always non-null —
+     * Truffle returns a no-op reporter when no instrument is listening,
+     * so allocation sites can call it unconditionally.
+     */
+    public AllocationReporter getAllocationReporter() {
+        AllocationReporter r = allocationReporter;
+        if (r == null) {
+            synchronized (this) {
+                r = allocationReporter;
+                if (r == null) {
+                    r = env.lookup(AllocationReporter.class);
+                    allocationReporter = r;
+                }
+            }
+        }
+        return r;
     }
 
     // ========================

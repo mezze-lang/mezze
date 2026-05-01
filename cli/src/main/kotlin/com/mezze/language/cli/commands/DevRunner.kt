@@ -60,6 +60,7 @@ object DevRunner {
         // statement-level granularity awaits #187 (per-node @GenerateWrapper).
         val profile = parsed.containsKey("profile")
         val coverage = parsed.containsKey("coverage")
+        val allocations = parsed.containsKey("allocations")
         val traceJit = parsed.containsKey("trace-jit")
         val insightFile = parsed["insight"]
 
@@ -106,6 +107,23 @@ object DevRunner {
                 .option("coverage", "true")
                 .option("coverage.OutputFile", out.absolutePath)
             System.err.println("${ANSI_GRAY}coverage → ${out.absolutePath}${ANSI_RESET}")
+        }
+        if (allocations) {
+            // Truffle's `memtracer` instrument tallies allocations reported
+            // via AllocationReporter. RecordLiteralNode / SeqLiteralNode /
+            // VariantConstructNode call onEnter/onReturnValue around every
+            // value they construct.
+            //
+            // memtracer writes its histogram to the engine's `out` stream
+            // on engine close. We redirect that stream into a file inside
+            // .mz/. User `println` writes directly to `System.out` from the
+            // Console effect handler, so it's unaffected by this.
+            val out = File(projectRoot, ".mz/allocations.txt")
+            out.parentFile?.mkdirs()
+            engineBuilder
+                .option("memtracer", "true")
+                .out(java.io.PrintStream(out.outputStream(), true))
+            System.err.println("${ANSI_GRAY}allocations → ${out.absolutePath}${ANSI_RESET}")
         }
         if (traceJit) {
             // GraalVM 24.x dropped `engine.TraceCompilation` from the polyglot
