@@ -1,83 +1,41 @@
 #!/bin/bash
-# Fast refresh of the installed mez runtime artifacts after code changes.
-#
-# What this does (and what it skips):
-#   ✅ Rebuilds the shadow jar (cli/build/libs/mezze.jar)
-#   ✅ Copies it to ~/.mezze/lib/mezze-lang.jar (where `mez build` reads from)
-#   ✅ Optionally rebuilds the native binary if --native is passed
-#   ❌ Does NOT touch shell config / PATH (the full installer handles that)
+# Thin wrapper around the gradle install + clean tasks. Keeps the
+# script the same for muscle memory; all real work happens in the
+# build files.
 #
 # Usage:
-#   ./scripts/refresh.sh           # Just refresh the runtime jar (~10s)
-#   ./scripts/refresh.sh --native  # Also rebuild native binary (~3 min)
-#   ./scripts/refresh.sh --all     # Same as --native
-#
-# When to use:
-#   After any change to the interpreter, typechecker, parser, or stdlib.
-#   The shadow jar is what `mez build` copies into standalone JARs, so if
-#   you don't refresh, your standalone jars run yesterday's code.
+#   ./scripts/refresh.sh                    # gradle :cli:installRuntime
+#   ./scripts/refresh.sh --native           # also installs native binary
+#   ./scripts/refresh.sh --clean            # cleanInstall + reinstall
+#   ./scripts/refresh.sh --clean --native   # full reset + native rebuild
+#   ./scripts/refresh.sh --all              # same as --clean --native
 
 set -e
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-MEZZE_HOME="$HOME/.mezze"
 
 REBUILD_NATIVE=false
-case "${1:-}" in
-    --native|--all) REBUILD_NATIVE=true ;;
-    "") ;;
-    *) echo "Usage: $0 [--native]"; exit 1 ;;
-esac
+CLEAN=false
+for arg in "$@"; do
+    case "$arg" in
+        --native) REBUILD_NATIVE=true ;;
+        --clean)  CLEAN=true ;;
+        --all)    REBUILD_NATIVE=true; CLEAN=true ;;
+        "") ;;
+        *) echo "Usage: $0 [--native] [--clean] [--all]"; exit 1 ;;
+    esac
+done
 
 cd "$REPO_ROOT"
 
-echo -e "${BLUE}refreshing mez runtime${NC}"
-
-# 1. Shadow jar — always rebuild. This is what mez build embeds.
-echo -e "${YELLOW}  building shadow jar...${NC}"
-./gradlew :cli:shadowJar -q
-
-SHADOW_JAR="$REPO_ROOT/cli/build/libs/mezze.jar"
-if [ ! -f "$SHADOW_JAR" ]; then
-    echo "  shadow jar missing at $SHADOW_JAR" >&2
-    exit 1
+TASKS=()
+if [ "$CLEAN" = "true" ]; then
+    TASKS+=(":cli:cleanInstall")
 fi
-
-mkdir -p "$MEZZE_HOME/lib"
-cp "$SHADOW_JAR" "$MEZZE_HOME/lib/mezze-lang.jar"
-SIZE=$(du -h "$MEZZE_HOME/lib/mezze-lang.jar" | cut -f1)
-echo -e "${GREEN}  ✓ ~/.mezze/lib/mezze-lang.jar (${SIZE})${NC}"
-
-# 2. (Removed) The bundled stdlib.sqlite ships inside mezze-lang.jar as a
-#    classpath resource. PrecompiledStdlib reads it from there directly.
-#    The legacy `~/.mezze/cache/stdlib.sqlite` install path is gone.
-#    `mez dev` extracts the JAR resource into the project's
-#    `.mz/stdlib.sqlite` on first open. Safe to delete an existing
-#    `~/.mezze/cache/stdlib.sqlite` if you have one — nothing reads it.
-
-# 3. Native binary — only on request. ~3 minutes; usually not needed for
-#    runtime changes since the native binary is just a CLI shell that
-#    spawns a JVM with mezze-lang.jar.
+TASKS+=(":cli:installRuntime")
 if [ "$REBUILD_NATIVE" = "true" ]; then
-    echo -e "${YELLOW}  building native binary (this takes a few minutes)...${NC}"
-    ./gradlew :cli:nativeCompile -q
-
-    NATIVE_BINARY="$REPO_ROOT/cli/build/native/nativeCompile/mezze"
-    if [ -f "$NATIVE_BINARY" ]; then
-        rm -f "$MEZZE_HOME/bin/mez"
-        cp "$NATIVE_BINARY" "$MEZZE_HOME/bin/mez"
-        chmod +x "$MEZZE_HOME/bin/mez"
-        echo -e "${GREEN}  ✓ ~/.mezze/bin/mez (native)${NC}"
-    else
-        echo "  native binary missing at $NATIVE_BINARY" >&2
-        exit 1
-    fi
+    TASKS+=(":cli:installNative")
 fi
 
-echo -e "${GREEN}done${NC}"
+./gradlew "${TASKS[@]}"

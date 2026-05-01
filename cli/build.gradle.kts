@@ -124,17 +124,15 @@ val compileStdlib by tasks.registering(JavaExec::class) {
     systemProperty("mezze.project.root", stdlibDir.absolutePath)
 }
 
-// Include pre-compiled stdlib.sqlite as a JAR resource
+// Include pre-compiled stdlib.sqlite as a JAR resource via the
+// generated/resources srcDir. We DON'T wire processResources to depend
+// on compileStdlib because compileStdlib already needs the cli's
+// runtime classpath (which transitively depends on processResources)
+// — that would be circular. Instead, shadowJar adds the generated
+// file directly into the JAR root via `from(...)`, bypassing
+// processResources entirely.
 sourceSets.main {
     resources.srcDir(layout.buildDirectory.dir("generated/resources"))
-}
-
-// processResources copies the generated stdlib.sqlite into resources/main/.
-// It must run AFTER compileStdlib produces the file; otherwise it copies an
-// empty (or stale) version. Without this, shadowJar bundles the wrong bytes
-// and the project's `.mz/stdlib.sqlite` ends up empty on first open.
-tasks.processResources {
-    dependsOn("compileStdlib")
 }
 
 // shadowJar depends on compileStdlib so stdlib.db is always fresh in the JAR
@@ -312,4 +310,70 @@ tasks.named("jar") {
 }
 tasks.named("nativeCompile") {
     dependsOn("compileStdlib")
+}
+
+// ============================================================================
+// Install / clean tasks
+//
+// Single source of truth for putting build outputs into ~/.mezze/. The
+// scripts/refresh.sh wrapper just invokes these. CI / docs / tooling should
+// also call these gradle tasks rather than re-implementing the logic.
+// ============================================================================
+
+val mezzeHome = providers.systemProperty("user.home").map { File(it, ".mezze") }
+
+/**
+ * Install the freshly-built shadow jar to ~/.mezze/lib/mezze-lang.jar.
+ * Depends on shadowJar so the artifact is up-to-date.
+ */
+tasks.register<Copy>("installRuntime") {
+    group = "install"
+    description = "Install mezze-lang.jar into ~/.mezze/lib/"
+    dependsOn("shadowJar")
+    from(layout.buildDirectory.file("libs/mezze.jar"))
+    into(mezzeHome.map { File(it, "lib") })
+    rename { "mezze-lang.jar" }
+}
+
+/**
+ * Install the native binary to ~/.mezze/bin/mez. ~3 minutes the first
+ * time; faster on subsequent runs thanks to incremental compile.
+ */
+tasks.register<Copy>("installNative") {
+    group = "install"
+    description = "Install native `mez` binary into ~/.mezze/bin/"
+    dependsOn("nativeCompile")
+    from(layout.buildDirectory.file("native/nativeCompile/mezze"))
+    into(mezzeHome.map { File(it, "bin") })
+    rename { "mez" }
+    doLast {
+        val target = File(mezzeHome.get(), "bin/mez")
+        if (target.exists()) target.setExecutable(true, false)
+    }
+}
+
+/**
+ * Wipe everything: build outputs that gradle's incremental sometimes
+ * keeps stale, plus the previously-installed runtime. Use when you
+ * suspect a build artifact is carrying forward (e.g. the empty
+ * stdlib.sqlite issue we hit during the three-file migration).
+ *
+ * Lives next to `clean` so `gradle clean cleanInstall` is the obvious
+ * full reset.
+ */
+tasks.register<Delete>("cleanInstall") {
+    group = "install"
+    description = "Wipe ~/.mezze/lib, ~/.mezze/cache, ~/.mezze/bin/mez and the cli build outputs"
+    delete(
+        // Repo-side: stale gradle outputs.
+        layout.buildDirectory.dir("libs"),
+        layout.buildDirectory.dir("native"),
+        layout.buildDirectory.file("resources/main/stdlib.sqlite"),
+        layout.buildDirectory.file("generated/resources/stdlib.sqlite"),
+        // User-side: previously-installed runtime + the legacy stdlib
+        // sidecar (no longer read by anything; safe to remove).
+        mezzeHome.map { File(it, "lib") },
+        mezzeHome.map { File(it, "cache") },
+        mezzeHome.map { File(it, "bin/mez") }
+    )
 }
