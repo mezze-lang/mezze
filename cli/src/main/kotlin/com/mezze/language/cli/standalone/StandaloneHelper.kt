@@ -4,7 +4,10 @@ import com.mezze.interpreter.runtime.MezzeLanguage
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.codebase.CodebaseSerialization
 import org.graalvm.polyglot.Context
+import org.graalvm.polyglot.Engine
 import org.graalvm.polyglot.Source
+import java.io.File
+import java.io.PrintStream
 
 /**
  * Helper for standalone JAR execution.
@@ -16,9 +19,15 @@ object StandaloneHelper {
     /**
      * Execute from a blobs.sqlite byte array.
      * The SQLite DB contains: blobs table (hash → ir), names table, metadata (entry_hash).
+     *
+     * [args] are the CLI args from `java -jar app.jar ...`. Recognized
+     * flags: --profile, --coverage, --allocations, --insight=<file>,
+     * --inspect, --inspect-brk. Unknown args are ignored — they're
+     * available to user code via System args (TODO when Mezze supports
+     * argv).
      */
     @JvmStatic
-    fun executeFromBlobsSqlite(sqliteBytes: ByteArray) {
+    fun executeFromBlobsSqlite(sqliteBytes: ByteArray, args: List<String> = emptyList()) {
         // Write to temp file so SQLite can open it
         val tempFile = java.io.File.createTempFile("mezze-blobs", ".sqlite")
         try {
@@ -73,7 +82,7 @@ object StandaloneHelper {
                 val performers = byRecord.toSortedMap().values.map { it.toTypedArray() }.toMutableList()
 
                 // Execute via Truffle
-                executeWithTruffle(functions, performers, entryName)
+                executeWithTruffle(functions, performers, entryName, args)
             }
         } finally {
             tempFile.delete()
@@ -89,19 +98,91 @@ object StandaloneHelper {
         return null
     }
 
-    private fun executeWithTruffle(functions: List<FunctionIR>, performers: List<Array<String>> = emptyList(), entryName: String? = null) {
+    /**
+     * Resolve where profile / coverage / allocation output goes. Defaults
+     * to the current directory; override with MEZZE_OUTPUT_DIR env var.
+     */
+    private fun outputDir(): File {
+        val override = System.getenv("MEZZE_OUTPUT_DIR")
+        return if (override != null && override.isNotBlank()) File(override) else File(".")
+    }
+
+    private fun executeWithTruffle(
+        functions: List<FunctionIR>,
+        performers: List<Array<String>> = emptyList(),
+        entryName: String? = null,
+        args: List<String> = emptyList()
+    ) {
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
         System.setProperty("polyglot.log.level", "OFF")
 
+        // Build an explicit Engine so we can attach instruments. Same
+        // pattern as DevRunner — keeps the two execution surfaces (dev
+        // and standalone) in sync.
+        val engineBuilder = Engine.newBuilder()
+            .allowExperimentalOptions(true)
+            .option("engine.WarnInterpreterOnly", "false")
+
+        val profile = args.contains("--profile")
+        val coverage = args.contains("--coverage")
+        val allocations = args.contains("--allocations")
+        val inspect = args.contains("--inspect")
+        val inspectBrk = args.contains("--inspect-brk")
+        val insightFile = args.firstNotNullOfOrNull { a ->
+            if (a.startsWith("--insight=")) a.substringAfter("=") else null
+        }
+
+        if (profile) {
+            val out = File(outputDir(), "mezze-profile.txt")
+            out.parentFile?.mkdirs()
+            engineBuilder.option("cpusampler", "true")
+                         .option("cpusampler.OutputFile", out.absolutePath)
+            System.err.println("[mezze] profile → ${out.absolutePath}")
+        }
+        if (coverage) {
+            val out = File(outputDir(), "mezze-coverage.txt")
+            out.parentFile?.mkdirs()
+            engineBuilder.option("coverage", "true")
+                         .option("coverage.OutputFile", out.absolutePath)
+            System.err.println("[mezze] coverage → ${out.absolutePath}")
+        }
+        if (allocations) {
+            // Custom Mezze allocations instrument; output goes to the
+            // engine `out` stream on dispose. Redirect that to a file —
+            // user `println` writes to System.out via Console effect
+            // handler, so it doesn't collide.
+            val out = File(outputDir(), "mezze-allocations.txt")
+            out.parentFile?.mkdirs()
+            engineBuilder.option("mezze-allocations", "true")
+                         .out(PrintStream(out.outputStream(), true))
+            System.err.println("[mezze] allocations → ${out.absolutePath}")
+        }
+        if (insightFile != null) {
+            val f = File(insightFile)
+            if (!f.exists()) {
+                System.err.println("Error: --insight=$insightFile: file not found")
+                kotlin.system.exitProcess(1)
+            }
+            engineBuilder.option("insight", f.absolutePath)
+        }
+        if (inspect || inspectBrk) {
+            engineBuilder.option("inspect", "4242")
+            if (inspectBrk) engineBuilder.option("inspect.Suspend", "true")
+            System.err.println("[mezze] devtools listening on chrome://inspect — port 4242")
+        }
+
+        val engine = engineBuilder.build()
+
+        // Close engine on JVM exit so onDispose flushes profile / coverage /
+        // allocation output. Without this, those files stay empty.
+        Runtime.getRuntime().addShutdownHook(Thread {
+            try { engine.close() } catch (_: Throwable) { /* best-effort */ }
+        })
+
         val context = Context.newBuilder(MezzeLanguage.ID)
+            .engine(engine)
             .allowAllAccess(true)
             .allowCreateThread(true)
-            // Allow users to enable Truffle instrumentation (cpusampler,
-            // coverage, memtracer, insight, engine.Trace*) on the deployed
-            // jar via system properties:
-            //   java -Dpolyglot.cpusampler=true -jar app.jar
-            // Without this, every -Dpolyglot.* option silently no-ops.
-            .allowExperimentalOptions(true)
             .build()
 
         try {
