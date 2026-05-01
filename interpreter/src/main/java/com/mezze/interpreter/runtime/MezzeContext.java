@@ -132,6 +132,25 @@ public final class MezzeContext {
         return r;
     }
 
+    /**
+     * Allocation-reporter accessor that's safe to call from a Node.execute()
+     * even when no polyglot context is active (e.g., from unit tests that
+     * exercise nodes directly without spinning up a full Engine).
+     *
+     * Returns null when there's no active context. Allocation-site callers
+     * should null-check and skip reporting in that case — there's no
+     * instrument listening anyway, so skipping is observationally identical.
+     */
+    public static AllocationReporter tryGetAllocationReporter(Node node) {
+        try {
+            return get(node).getAllocationReporter();
+        } catch (Throwable t) {
+            // No polyglot context entered — happens in unit tests that
+            // construct + execute nodes outside Engine.create().
+            return null;
+        }
+    }
+
     // ========================
     // User function state (per-context, cleared between tests)
     // ========================

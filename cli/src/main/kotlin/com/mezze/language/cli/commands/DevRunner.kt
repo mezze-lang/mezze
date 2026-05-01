@@ -109,19 +109,21 @@ object DevRunner {
             System.err.println("${ANSI_GRAY}coverage → ${out.absolutePath}${ANSI_RESET}")
         }
         if (allocations) {
-            // Truffle's `memtracer` instrument tallies allocations reported
-            // via AllocationReporter. RecordLiteralNode / SeqLiteralNode /
-            // VariantConstructNode call onEnter/onReturnValue around every
-            // value they construct.
+            // Custom Mezze allocations instrument (interpreter/instrumentation/
+            // MezzeAllocationsInstrument). Tallies AllocationReporter events by
+            // Java class (MezzeRecord, MezzeSeq, MezzeVariant) and prints a
+            // histogram to the engine's `out` stream on dispose.
             //
-            // memtracer writes its histogram to the engine's `out` stream
-            // on engine close. We redirect that stream into a file inside
-            // .mz/. User `println` writes directly to `System.out` from the
-            // Console effect handler, so it's unaffected by this.
+            // We use a custom instrument instead of Truffle's built-in
+            // memtracer because memtracer needs shadow-stack-tagged nodes
+            // (task #187) to report anything; ours just counts allocations.
+            //
+            // User `println` goes through System.out via the Console effect
+            // handler, so redirecting the engine `out` here is safe.
             val out = File(projectRoot, ".mz/allocations.txt")
             out.parentFile?.mkdirs()
             engineBuilder
-                .option("memtracer", "true")
+                .option("mezze-allocations", "true")
                 .out(java.io.PrintStream(out.outputStream(), true))
             System.err.println("${ANSI_GRAY}allocations → ${out.absolutePath}${ANSI_RESET}")
         }
@@ -146,6 +148,14 @@ object DevRunner {
         }
 
         val engine = engineBuilder.build()
+
+        // Close the engine on JVM exit so instrument onDispose() runs.
+        // Without this, the allocations / coverage / profile output files
+        // stay empty: the JVM exits, the engine is never closed, the
+        // instruments never get a chance to flush their data.
+        Runtime.getRuntime().addShutdownHook(Thread {
+            try { engine.close() } catch (_: Throwable) { /* best-effort */ }
+        })
 
         if (noWatch) {
             runOnce(store, engine, projectRoot, entryFile, entryName, modulePath, appName, inspect, inspectBrk)

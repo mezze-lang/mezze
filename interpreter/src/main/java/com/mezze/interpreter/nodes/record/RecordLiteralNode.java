@@ -127,13 +127,14 @@ public final class RecordLiteralNode extends MezzeNode {
             }
         }
 
-        // Allocation tracking. Reporter is a no-op when no memtracer is
-        // attached, so the cost on a hot path is one volatile read + a
-        // pair of empty method calls — JIT folds it away.
-        AllocationReporter reporter = MezzeContext.get(this).getAllocationReporter();
-        reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+        // Allocation tracking. Reporter is null when no polyglot context
+        // is active (unit tests that exercise nodes directly); otherwise
+        // it's a no-op when no memtracer is attached. The JIT folds the
+        // null-check + reporter calls away when no instrument is listening.
+        AllocationReporter reporter = MezzeContext.tryGetAllocationReporter(this);
+        if (reporter != null) reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
         MezzeRecord result = new MezzeRecord(shape, longFields, doubleFields, objectFields);
-        reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+        if (reporter != null) reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
         return result;
     }
 }

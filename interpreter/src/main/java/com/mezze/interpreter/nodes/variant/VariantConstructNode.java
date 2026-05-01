@@ -79,22 +79,25 @@ public final class VariantConstructNode extends MezzeNode {
     @Override
     @ExplodeLoop
     public Object execute(VirtualFrame frame) {
-        AllocationReporter reporter = MezzeContext.get(this).getAllocationReporter();
+        // Reporter is null in unit-test contexts (nodes executed outside
+        // an Engine); JIT folds the null-check away when no instrument
+        // is attached.
+        AllocationReporter reporter = MezzeContext.tryGetAllocationReporter(this);
 
         // Fast path: no payload (e.g., None, True, False).
         if (payloadCount == 0) {
-            reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+            if (reporter != null) reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
             MezzeVariant result = MezzeVariant.noPayload(registry, tag);
-            reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+            if (reporter != null) reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
             return result;
         }
 
         // Fast path: single payload (e.g., Some(x)).
         if (payloadCount == 1) {
             Object value = payloadNodes[0].execute(frame);
-            reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+            if (reporter != null) reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
             MezzeVariant result = MezzeVariant.singlePayload(registry, tag, value);
-            reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+            if (reporter != null) reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
             return result;
         }
 
@@ -103,9 +106,9 @@ public final class VariantConstructNode extends MezzeNode {
         for (int i = 0; i < payloadCount; i++) {
             payload[i] = payloadNodes[i].execute(frame);
         }
-        reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+        if (reporter != null) reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
         MezzeVariant result = new MezzeVariant(registry, tag, payload);
-        reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+        if (reporter != null) reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
         return result;
     }
 }

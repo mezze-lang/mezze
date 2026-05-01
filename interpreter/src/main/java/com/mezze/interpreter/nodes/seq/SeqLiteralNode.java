@@ -45,23 +45,25 @@ public final class SeqLiteralNode extends MezzeNode {
 
         // For non-empty seqs, evaluate elements first (their own nodes
         // may allocate and report), then bracket the seq construction
-        // call with onEnter/onReturnValue.
-        AllocationReporter reporter = MezzeContext.get(this).getAllocationReporter();
+        // call with onEnter/onReturnValue. Reporter is null in unit-test
+        // contexts that exercise nodes outside an Engine; null-checks are
+        // JIT-folded when no instrument is attached.
+        AllocationReporter reporter = MezzeContext.tryGetAllocationReporter(this);
 
         if (elementCount == 1) {
             Object value = elementNodes[0].execute(frame);
-            reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+            if (reporter != null) reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
             MezzeSeq result = MezzeSeq.of(value);
-            reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+            if (reporter != null) reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
             return result;
         }
 
         if (elementCount == 2) {
             Object v0 = elementNodes[0].execute(frame);
             Object v1 = elementNodes[1].execute(frame);
-            reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+            if (reporter != null) reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
             MezzeSeq result = MezzeSeq.of(v0, v1);
-            reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+            if (reporter != null) reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
             return result;
         }
 
@@ -69,9 +71,9 @@ public final class SeqLiteralNode extends MezzeNode {
             Object v0 = elementNodes[0].execute(frame);
             Object v1 = elementNodes[1].execute(frame);
             Object v2 = elementNodes[2].execute(frame);
-            reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+            if (reporter != null) reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
             MezzeSeq result = MezzeSeq.of(v0, v1, v2);
-            reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+            if (reporter != null) reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
             return result;
         }
 
@@ -80,9 +82,9 @@ public final class SeqLiteralNode extends MezzeNode {
         for (int i = 0; i < elementCount; i++) {
             values[i] = elementNodes[i].execute(frame);
         }
-        reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
+        if (reporter != null) reporter.onEnter(null, 0, AllocationReporter.SIZE_UNKNOWN);
         MezzeSeq result = MezzeSeq.of(values);
-        reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
+        if (reporter != null) reporter.onReturnValue(result, 0, AllocationReporter.SIZE_UNKNOWN);
         return result;
     }
 
