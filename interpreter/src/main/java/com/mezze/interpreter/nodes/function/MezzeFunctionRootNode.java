@@ -1,13 +1,18 @@
 package com.mezze.interpreter.nodes.function;
 
+import com.mezze.interpreter.instrumentation.MezzeDebugScope;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.frame.Frame;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.interop.NodeLibrary;
+import com.oracle.truffle.api.library.ExportLibrary;
+import com.oracle.truffle.api.library.ExportMessage;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.RootNode;
@@ -30,6 +35,7 @@ import com.oracle.truffle.api.source.SourceSection;
  * Slot layout: [closure0, closure1, ..., param0, param1, ...]
  */
 @NodeInfo(language = "mezze", description = "Mezze function with record unpacking")
+@ExportLibrary(value = NodeLibrary.class, useForAOT = false)
 public final class MezzeFunctionRootNode extends RootNode {
 
     private final String name;
@@ -327,5 +333,27 @@ public final class MezzeFunctionRootNode extends RootNode {
 
     public MezzeNode getBodyNode() {
         return bodyNode;
+    }
+
+    // ========================================================================
+    // NodeLibrary export — surfaces the current frame's named slots to the
+    // debugger. Chrome DevTools / VS Code calls these when paused so the
+    // user sees local bindings in the variables panel.
+    //
+    // hasScope/getScope are evaluated lazily by the debugger; cost on the
+    // normal execution path (no debugger attached) is zero — neither method
+    // is reached without an Instrumenter probe.
+    // ========================================================================
+
+    @ExportMessage
+    @SuppressWarnings("static-method")
+    boolean hasScope(@SuppressWarnings("unused") Frame frame) {
+        return true;
+    }
+
+    @ExportMessage
+    @SuppressWarnings("static-method")
+    Object getScope(Frame frame, @SuppressWarnings("unused") boolean nodeEnter) {
+        return new MezzeDebugScope(frame);
     }
 }
