@@ -328,7 +328,13 @@ graalvmNative {
                 // Include stdlib as resources (embedded in native binary)
                 "-H:IncludeResources=stdlib/.*\\.mz",
                 "-H:IncludeResources=stdlib/MANIFEST.txt",
-                "-H:IncludeResources=stdlib\\.db",  // Pre-compiled stdlib SQLite
+                // stdlib.sqlite is the pre-compiled stdlib (FunctionIRs +
+                // TypedModule blobs). PrecompiledStdlib reads it via
+                // `getResourceAsStream("stdlib.sqlite")`. The previous
+                // glob `stdlib\.db` was a typo — no such resource exists,
+                // so the native binary shipped without stdlib and any
+                // file using `use std::...` failed to typecheck silently.
+                "-H:IncludeResources=stdlib\\.sqlite",
 
                 // Include all charsets for language support
                 "-H:+AddAllCharsets",
