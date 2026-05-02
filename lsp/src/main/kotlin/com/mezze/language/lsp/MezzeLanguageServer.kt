@@ -159,9 +159,26 @@ class MezzeLanguageServer(
 
         val serverInfo = ServerInfo("Mezze Language Server", serverVersion)
 
+        // Open the project store now that workspaceRoot is known. The lsp4j
+        // launcher calls connect() before initialize(), so the text doc
+        // service couldn't open the store during connect — do it here.
+        textDocumentService.initializeProjectStore()
+
         return CompletableFuture.completedFuture(
             InitializeResult(capabilities, serverInfo)
         )
+    }
+
+    /**
+     * `$/setTrace` notification from the client.
+     *
+     * Default lsp4j 0.21.x impl throws UnsupportedOperationException — every
+     * trace toggle would dump a stack trace into the client's log. We don't
+     * differentiate trace levels (all logging is logInfo/logError), so make
+     * this a quiet no-op.
+     */
+    override fun setTrace(params: SetTraceParams) {
+        // intentionally empty
     }
 
     /**

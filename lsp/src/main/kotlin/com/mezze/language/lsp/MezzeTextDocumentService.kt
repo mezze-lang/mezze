@@ -101,64 +101,80 @@ class MezzeTextDocumentService(
 
     /**
      * Connect to the language client.
+     *
+     * The lsp4j launcher calls this *before* the client sends `initialize`,
+     * so server.getWorkspaceRoot() is null here. We can't open the project
+     * store yet — defer that to [initializeProjectStore], called from
+     * MezzeLanguageServer.initialize() once workspaceRoot is populated.
      */
     fun connect(client: LanguageClient) {
         this.client = client
+    }
 
-        // Initialize codebase if in project mode
+    /**
+     * Open the project store now that workspaceRoot is known. Idempotent —
+     * second call is a no-op once the store is open.
+     *
+     * Called from MezzeLanguageServer.initialize() after the InitializeParams
+     * have been parsed.
+     */
+    fun initializeProjectStore() {
+        if (projectStore != null) return  // already opened
         val workspaceRoot = server.getWorkspaceRoot()
         server.logInfo("Workspace root for codebase: $workspaceRoot")
-        if (workspaceRoot != null) {
-            val rootFile = File(workspaceRoot)
-            server.logInfo("Root file exists: ${rootFile.exists()}, isDirectory: ${rootFile.isDirectory}")
-            server.logInfo("Looking for Mezze.toml at: ${File(rootFile, "Mezze.toml").absolutePath}")
-            server.logInfo("Mezze.toml exists: ${File(rootFile, "Mezze.toml").exists()}")
-            val projectRoot = SQLiteMezzeStore.findProjectRoot(rootFile)
-            if (projectRoot != null) {
-                try {
-                    projectStore = SQLiteMezzeStore.openProject(projectRoot)
-                    projectRootDir = projectRoot
-                    val (pkg, entry) = readMezzeTomlEntries(projectRoot)
-                    packageName = pkg
-                    entryFilePath = entry?.let { File(projectRoot, it).absolutePath }
-                    server.logInfo("Using project store at ${SQLiteMezzeStore.resolveCacheFile(projectRoot).absolutePath} (package=$packageName, entry=$entry)")
+        if (workspaceRoot == null) {
+            server.logInfo("No workspace root — running in-memory only.")
+            return
+        }
+        val rootFile = File(workspaceRoot)
+        server.logInfo("Root file exists: ${rootFile.exists()}, isDirectory: ${rootFile.isDirectory}")
+        server.logInfo("Looking for Mezze.toml at: ${File(rootFile, "Mezze.toml").absolutePath}")
+        server.logInfo("Mezze.toml exists: ${File(rootFile, "Mezze.toml").exists()}")
+        val projectRoot = SQLiteMezzeStore.findProjectRoot(rootFile)
+        if (projectRoot == null) {
+            server.logInfo("No Mezze.toml found, using in-memory mode")
+            return
+        }
+        try {
+            projectStore = SQLiteMezzeStore.openProject(projectRoot)
+            projectRootDir = projectRoot
+            val (pkg, entry) = readMezzeTomlEntries(projectRoot)
+            packageName = pkg
+            entryFilePath = entry?.let { File(projectRoot, it).absolutePath }
+            server.logInfo("Using project store at ${SQLiteMezzeStore.resolveCacheFile(projectRoot).absolutePath} (package=$packageName, entry=$entry)")
 
-                    // Slice G: at workspace open we don't yet know which file
-                    // the user will edit, so only pre-warm stdlib (always
-                    // needed for any typecheck). User modules hydrate
-                    // lazily — `ModuleResolver.resolveModule` consults
-                    // `parsed_modules` (slice A) and `typed_modules` on
-                    // demand when a typecheck imports them.
-                    val store = projectStore!!
-                    val stats = StoreHydration.hydrateTypedModules(
-                        store,
-                        hydrate = { modulePath, blob ->
-                            try {
-                                val v2 = CodebaseSerialization.deserializeTypedModule(blob)
-                                com.mezze.language.typechecker.module.ModuleTypeChecker
-                                    .hydrateFromV2Module(modulePath, v2)
-                                true
-                            } catch (_: Exception) {
-                                false
-                            }
-                        },
-                        include = { mod ->
-                            // Stdlib modules live in stdlib.sqlite; identify
-                            // them by path prefix (the file is the scope, no
-                            // category column any more).
-                            mod.path.startsWith("std::")
-                        }
-                    )
-                    server.logInfo(
-                        "Hydrated stdlib typed modules: ${stats.hits} hit, ${stats.misses} miss (${stats.elapsedMs}ms)"
-                    )
-                } catch (e: Exception) {
-                    server.logError("Failed to create store: ${e.message}")
-                    e.printStackTrace()
+            // Slice G: at workspace open we don't yet know which file
+            // the user will edit, so only pre-warm stdlib (always
+            // needed for any typecheck). User modules hydrate
+            // lazily — `ModuleResolver.resolveModule` consults
+            // `parsed_modules` (slice A) and `typed_modules` on
+            // demand when a typecheck imports them.
+            val store = projectStore!!
+            val stats = StoreHydration.hydrateTypedModules(
+                store,
+                hydrate = { modulePath, blob ->
+                    try {
+                        val v2 = CodebaseSerialization.deserializeTypedModule(blob)
+                        com.mezze.language.typechecker.module.ModuleTypeChecker
+                            .hydrateFromV2Module(modulePath, v2)
+                        true
+                    } catch (_: Exception) {
+                        false
+                    }
+                },
+                include = { mod ->
+                    // Stdlib modules live in stdlib.sqlite; identify
+                    // them by path prefix (the file is the scope, no
+                    // category column any more).
+                    mod.path.startsWith("std::")
                 }
-            } else {
-                server.logInfo("No Mezze.toml found, using in-memory mode")
-            }
+            )
+            server.logInfo(
+                "Hydrated stdlib typed modules: ${stats.hits} hit, ${stats.misses} miss (${stats.elapsedMs}ms)"
+            )
+        } catch (e: Exception) {
+            server.logError("Failed to create store: ${e.message}")
+            e.printStackTrace()
         }
     }
 
