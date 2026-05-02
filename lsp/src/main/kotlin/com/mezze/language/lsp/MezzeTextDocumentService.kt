@@ -387,7 +387,16 @@ class MezzeTextDocumentService(
                     typeCheckResult = TypeCheckResult(
                         resolvedImports = buildResolvedImports(result.importContext),
                         importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
-                        importedEffects = result.importContext?.importedEffects ?: emptyMap()
+                        importedEffects = result.importContext?.importedEffects ?: emptyMap(),
+                        // Critical: hover, inlay hints, find-references, rename and
+                        // every other position-based feature read typedModule from
+                        // this object. Without it, the entire LSP appears to "work"
+                        // but produces no type info.
+                        typedModule = result.typedModule,
+                        loweredFunctions = result.loweredFunctions ?: emptyList(),
+                        warnings = result.warnings.map {
+                            com.mezze.language.typechecker.TypeCheckWarning(it.message, it.loc)
+                        }
                     )
                     lastSuccessfulResult[uri] = typeCheckResult!!
 
