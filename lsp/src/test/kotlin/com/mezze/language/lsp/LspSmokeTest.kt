@@ -148,7 +148,7 @@ class LspSmokeTest {
         // Wait for the publishDiagnostics notification (debounced — give it time).
         val diags = client.awaitDiagnostics(mzFile.toURI().toString(), timeoutMs = 5000)
         assertNotNull(diags, "expected diagnostics for malformed file within timeout")
-        assertTrue(diags.diagnostics.isNotEmpty(),
+        assertTrue(diags!!.diagnostics.isNotEmpty(),
             "expected at least one diagnostic for broken file, got empty")
     }
 
@@ -156,14 +156,15 @@ class LspSmokeTest {
     fun `workspace symbol query returns results after didOpen`() {
         val workspace = makeMezzeProject()
         val mzFile = workspace.resolve("src/app.mz").toFile()
-        mzFile.writeText("""
-            use std::effects::log::{println, Console}
-
-            let greet = { name = "world" } -> "Hello \${name}"
-
-            let main = {} -> perform Console in do
-                println { msg = greet { name = "world" } }
-        """.trimIndent())
+        // Note: not using a kotlin triple-quoted string-template here because
+        // Mezze's `${...}` interpolation collides with kotlin's. Build the
+        // file content from a plain String so kotlin doesn't try to resolve
+        // `name` in its own scope.
+        val mzSource = "use std::effects::log::{println, Console}\n\n" +
+            "let greet = { name = \"world\" } -> \"Hello \" \n\n" +
+            "let main = {} -> perform Console in do\n" +
+            "    println { msg = greet { name = \"world\" } }\n"
+        mzFile.writeText(mzSource)
 
         server.initialize(InitializeParams().apply {
             workspaceFolders = listOf(WorkspaceFolder(workspace.toUri().toString(), "test"))
@@ -183,14 +184,19 @@ class LspSmokeTest {
         val sym = server.workspaceService
             .symbol(WorkspaceSymbolParams("greet"))
             .get(5, TimeUnit.SECONDS)
-        val syms = if (sym.isLeft) sym.left else sym.right.map { ws ->
-            @Suppress("DEPRECATION")
-            SymbolInformation(ws.name, ws.kind, Location("", Range(Position(0,0), Position(0,0))))
+        // Server returns Either<List<SymbolInformation>, List<WorkspaceSymbol>>.
+        // We only need names for the assertion — pull them out of whichever branch.
+        // (lsp4j WorkspaceSymbol uses a Java field named `name`; calling
+        // getName() explicitly avoids Kotlin's accessor-synth ambiguity.)
+        val names: List<String> = if (sym.isLeft) {
+            sym.left.map { it.name }
+        } else {
+            sym.right.map { it.getName() }
         }
-        assertTrue(syms.isNotEmpty(),
+        assertTrue(names.isNotEmpty(),
             "workspace symbol search for 'greet' returned empty — is projectStore open?")
-        assertTrue(syms.any { it.name == "greet" },
-            "expected a symbol named 'greet', got: ${syms.map { it.name }}")
+        assertTrue(names.any { it == "greet" },
+            "expected a symbol named 'greet', got: $names")
     }
 
     // ===== Helpers =====================================================
