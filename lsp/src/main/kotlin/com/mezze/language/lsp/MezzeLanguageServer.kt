@@ -60,8 +60,9 @@ class MezzeLanguageServer(
             ?: params.rootUri?.removePrefix("file://")
             ?: params.rootPath
 
-        // Log initialization
-        logInfo("Mezze Language Server initializing...")
+        // Log initialization. Version goes first so it's easy to spot
+        // when verifying which build the editor's running.
+        logInfo("Mezze Language Server $serverVersion initializing...")
         logInfo("Workspace root: $workspaceRoot")
 
         // Define server capabilities

@@ -64,6 +64,11 @@ private fun printHelp() {
  * `mez --version`; tests / direct main() default to "dev".
  */
 fun startServer(input: InputStream, output: OutputStream, version: String = "dev") {
+    // Echo version + git sha to stderr at boot. Useful when an editor
+    // (Cursor / VS Code / Neovim) doesn't surface the LSP-channel
+    // logInfo() messages prominently — stderr typically lands in the
+    // editor's "Output" panel under the LSP server name.
+    System.err.println("[mezze-lsp] booting $version")
     val server = MezzeLanguageServer(version)
 
     val executor = Executors.newCachedThreadPool { runnable ->
