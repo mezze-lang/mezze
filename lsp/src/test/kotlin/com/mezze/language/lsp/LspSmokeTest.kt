@@ -156,14 +156,14 @@ class LspSmokeTest {
     fun `workspace symbol query returns results after didOpen`() {
         val workspace = makeMezzeProject()
         val mzFile = workspace.resolve("src/app.mz").toFile()
-        // Note: not using a kotlin triple-quoted string-template here because
-        // Mezze's `${...}` interpolation collides with kotlin's. Build the
-        // file content from a plain String so kotlin doesn't try to resolve
-        // `name` in its own scope.
-        val mzSource = "use std::effects::log::{println, Console}\n\n" +
-            "let greet = { name = \"world\" } -> \"Hello \" \n\n" +
-            "let main = {} -> perform Console in do\n" +
-            "    println { msg = greet { name = \"world\" } }\n"
+        // No std imports — the test JVM doesn't have stdlib.sqlite on its
+        // resources path (that's a cli-module artifact). A self-contained
+        // file lets us exercise the typecheck → decls index path purely.
+        // (Param syntax is `{ x: Int }`, NOT `{ x = 0 }` — the latter is
+        // a record literal as the function value, which type-checks as
+        // a thunk-returning-record and produces no TypedLetDecl with the
+        // shape we want.)
+        val mzSource = "let greet = { x: Int } -> x\n"
         mzFile.writeText(mzSource)
 
         server.initialize(InitializeParams().apply {
@@ -193,13 +193,63 @@ class LspSmokeTest {
         } else {
             sym.right.map { it.getName() }
         }
-        assertTrue(names.isNotEmpty(),
-            "workspace symbol search for 'greet' returned empty — is projectStore open?")
-        assertTrue(names.any { it == "greet" },
-            "expected a symbol named 'greet', got: $names")
+        if (names.isEmpty() || !names.any { it == "greet" }) {
+            // Fail with a rich diagnostic — what did the server log? what's
+            // in cache.sqlite? Saves us another roundtrip when this fails.
+            val recentLogs = client.logMessages.toList()
+                .joinToString("\n  ") { "[${it.type}] ${it.message}" }
+            val cacheContents = inspectCache(workspace.resolve(".mz/cache.sqlite").toFile())
+            fail<Unit>("""
+                |workspace symbol search for 'greet' returned: $names
+                |
+                |Server log messages (chronological):
+                |  $recentLogs
+                |
+                |cache.sqlite state:
+                |$cacheContents
+            """.trimMargin())
+        }
     }
 
     // ===== Helpers =====================================================
+
+    /**
+     * Dump the salient rows from cache.sqlite as a single string so a
+     * failing test can include it in the assertion message. We're not
+     * trying to be exhaustive — just enough to tell whether the
+     * persistToStore path actually wrote anything.
+     */
+    private fun inspectCache(cacheFile: File): String {
+        if (!cacheFile.exists()) return "  (cache.sqlite does not exist at ${cacheFile.absolutePath})"
+        val sb = StringBuilder()
+        try {
+            val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${cacheFile.absolutePath}")
+            conn.use { c ->
+                listOf("modules", "decls", "names", "blobs").forEach { table ->
+                    try {
+                        val rs = c.createStatement().executeQuery("SELECT COUNT(*) FROM $table")
+                        rs.next()
+                        sb.appendLine("  $table: ${rs.getInt(1)} rows")
+                    } catch (e: Exception) {
+                        sb.appendLine("  $table: <query failed: ${e.message}>")
+                    }
+                }
+                // First few decls if any
+                try {
+                    val rs = c.createStatement().executeQuery(
+                        "SELECT module_path, decl_name FROM decls LIMIT 5"
+                    )
+                    sb.appendLine("  first decls:")
+                    while (rs.next()) {
+                        sb.appendLine("    ${rs.getString(1)}::${rs.getString(2)}")
+                    }
+                } catch (_: Exception) { }
+            }
+        } catch (e: Exception) {
+            sb.appendLine("  <failed to open cache: ${e.message}>")
+        }
+        return sb.toString()
+    }
 
     /**
      * Creates a minimal Mezze.toml + src/ skeleton in tempDir and returns

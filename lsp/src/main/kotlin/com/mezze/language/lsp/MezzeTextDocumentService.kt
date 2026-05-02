@@ -415,6 +415,17 @@ class MezzeTextDocumentService(
                     val typedMod = result.typedModule
                     val rootDir = projectRootDir
                     val pkgName = packageName
+                    // Diagnose silent typecheck failures: when typedMod is null but
+                    // we still got a Success branch, the typechecker swallowed an
+                    // error (e.g. stdlib import didn't resolve). Surface that loudly
+                    // so the editor's user knows their hover/inlay aren't working.
+                    if (persistToStore && typedMod == null) {
+                        server.logError(
+                            "Typecheck produced no TypedModule (typedModule is null on Success branch). " +
+                            "Hover/inlay/symbols will be empty. Likely cause: a `use` import didn't resolve, " +
+                            "or stdlib failed to load. Check earlier log lines for stdlib hydration counts."
+                        )
+                    }
                     if (persistToStore && store != null && typedMod != null && filePath != null && rootDir != null && pkgName != null) {
                         // Use ModulePath.derive so the modulePath we write
                         // matches what `mez dev` writes for the same file —
@@ -423,6 +434,12 @@ class MezzeTextDocumentService(
                         // (caller is editing a scratch file; not our concern).
                         val derived = com.mezze.language.codebase.ModulePath
                             .derive(rootDir, filePath.toFile(), pkgName, entryFilePath)
+                        if (derived == null) {
+                            server.logInfo(
+                                "persistToStore: file is outside project src/ — skipping store write. " +
+                                "rootDir=${rootDir.absolutePath} file=$filePath pkg=$pkgName entry=$entryFilePath"
+                            )
+                        }
                         if (derived != null) {
                             try {
                                 val sourceHash = sha256Hex(content)
