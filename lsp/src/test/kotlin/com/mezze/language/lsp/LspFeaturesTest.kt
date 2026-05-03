@@ -223,6 +223,62 @@ class LspFeaturesTest {
         )
     }
 
+    // ===== Cross-module go-to-definition (in-memory fallback) =========
+
+    // Disabled for the same reason as
+    // GotoDefinitionTest.`cmd-click on cross-module import …`: the LSP test
+    // JVM lacks stdlib.sqlite, so even a sibling-module `use foo::bar`
+    // fails to typecheck (the import resolver chains through prelude
+    // setup). Verified manually against ~/.mezze/bin/mez:
+    // cmd-click on `println` from `std::effects::log::println` now lands
+    // on log.mz line 82 instead of the local `use` line.
+    @org.junit.jupiter.api.Disabled("requires stdlib on test classpath")
+    @Test
+    fun `cmd-click on cross-module use lands in the other module's source`() {
+        // Regression: cmd-click on a name imported from another module
+        // (`println` from `std::effects::log` in real usage) used to fall
+        // through to the import line because the name's hash wasn't in
+        // the project store's decls table. The in-memory ModuleTypeChecker
+        // cache always has it though — that's the path under test here.
+        // Two-file user-defined project stands in for the stdlib case
+        // since the LSP test JVM has no stdlib.sqlite on classpath.
+        val ws = mkProject(
+            "app.mz" to """
+                use math::id_int
+                let main = {} -> id_int { n = 4 }
+            """.trimIndent(),
+            "math.mz" to """
+                pub let id_int = {n: Int} -> n
+            """.trimIndent()
+        )
+        openProject(ws)
+        val appUri = ws.resolve("src/app.mz").toUri().toString()
+        val mathUri = ws.resolve("src/math.mz").toUri().toString()
+        // Open both files so the typechecker sees math.mz too.
+        openFile(mathUri, ws.resolve("src/math.mz").toFile().readText())
+        openFile(appUri, ws.resolve("src/app.mz").toFile().readText())
+
+        // Position on `id_int` use site (line 1, char ~17).
+        // 0         1         2
+        // 0123456789012345678901
+        // let main = {} -> id_int { n = 4 }
+        //                  ^ char 17
+        val locs = server.textDocumentService.definition(DefinitionParams().apply {
+            textDocument = TextDocumentIdentifier(appUri)
+            position = Position(1, 17)
+        }).get(5, TimeUnit.SECONDS).let { e ->
+            if (e.isLeft) e.left else e.right.map { Location(it.targetUri, it.targetRange) }
+        }
+
+        assertTrue(locs.isNotEmpty(), "expected at least one Location for cross-module use")
+        val loc = locs.first()
+        assertEquals(
+            mathUri, loc.uri,
+            "expected URI to be math.mz (the source module), not the use line in app.mz. " +
+            "Got URI=${loc.uri} range=${loc.range}"
+        )
+    }
+
     // ===== Selection range =============================================
 
     @Test

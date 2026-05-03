@@ -1398,6 +1398,19 @@ class MezzeTextDocumentService(
                             is com.mezze.language.typedast.BindingRef.ByHash -> {
                                 val target = findCrossModuleDefLocation(binding.hash)
                                 if (target != null) return listOf(target)
+                                // Hash wasn't in the decls table (decls only
+                                // covers prelude-transitively-loaded stdlib
+                                // modules — effects/codecs/etc. miss). Fall
+                                // back to the in-memory ModuleTypeChecker
+                                // cache, which has every transitively
+                                // imported module already parsed and typed.
+                                // We need a (modulePath, name) — recover it
+                                // from the resolved-imports map.
+                                val import = result?.resolvedImports?.find { it.localName == expr.name }
+                                if (import != null) {
+                                    val mem = findCrossModuleDefInMemory(import.modulePath, import.originalName)
+                                    if (mem != null) return listOf(mem)
+                                }
                                 val importLoc = findImportLoc(state, expr.name)
                                 if (importLoc != null) return listOf(importLoc)
                             }
@@ -1439,12 +1452,15 @@ class MezzeTextDocumentService(
         }
 
         // 3. Check imports — try the actual decl in its source module
-        // first (via store), fall back to the import line.
+        // first (via store), then the in-memory typechecker cache, and
+        // only as a last resort fall back to the import line.
         if (result != null) {
             val import = result.resolvedImports.find { it.localName == word }
             if (import != null) {
                 val target = findCrossModuleDefLocationByName(import.modulePath, import.originalName)
                 if (target != null) return listOf(target)
+                val mem = findCrossModuleDefInMemory(import.modulePath, import.originalName)
+                if (mem != null) return listOf(mem)
                 val importLoc = findImportLoc(state, word)
                 if (importLoc != null) return listOf(importLoc)
             }
@@ -1483,6 +1499,64 @@ class MezzeTextDocumentService(
             Position(row.startLine - 1, row.startCol - 1),
             Position(row.endLine - 1, row.endCol)
         ))
+    }
+
+    /**
+     * Last-resort lookup against the typechecker's in-memory module cache.
+     * The decls/usages tables only cover what StdlibPrecompiler eagerly
+     * walked (prelude-transitive set — about 24 modules); effect modules,
+     * codec/concurrent helpers etc. never made it in. But once the LSP has
+     * typechecked the user's file, every transitive import — including
+     * `std::effects::log` for a `use std::effects::log::println` — sits in
+     * `ModuleTypeChecker.getAllCachedModules()` already parsed and typed.
+     * Just walk it. No disk read, no re-parse.
+     *
+     * Returns null if the module isn't cached (the user hasn't actually
+     * imported anything from there yet) or no decl with that name exists.
+     */
+    private fun findCrossModuleDefInMemory(modulePath: String, declName: String): Location? {
+        val cached = com.mezze.language.typechecker.module.ModuleTypeChecker
+            .getAllCachedModules()[modulePath] ?: return null
+        // Prefer the parsed module's locs (full source spans) when available.
+        // Fall back to v2 typed decls' locs when parsedModule is null
+        // (hydrated-from-cache path skips parsing).
+        val uri = resolveModulePathToUri(modulePath) ?: return null
+        val parsed = cached.parsedModule
+        if (parsed != null) {
+            for (decl in parsed.decls) {
+                val (name, loc) = when (decl) {
+                    is ParsedLetDecl -> if (decl.isSimpleBinding) Pair(decl.variableName, decl.loc) else continue
+                    is ParsedTypeDecl -> Pair(decl.name, decl.loc)
+                    is ParsedAbilityDecl -> Pair(decl.name, decl.loc)
+                    is ParsedEffectDecl -> Pair(decl.name, decl.loc)
+                    else -> continue
+                }
+                if (name == declName) {
+                    return Location(uri, Range(
+                        Position(loc.startLine - 1, loc.startCol - 1),
+                        Position(loc.endLine - 1, loc.endCol)
+                    ))
+                }
+            }
+        }
+        // Hydrated-cache fallback: walk the v2 TypedModule's decls.
+        val v2 = cached.typedModule ?: return null
+        for (decl in v2.decls) {
+            val (name, loc) = when (decl) {
+                is com.mezze.language.typedast.TypedLetDecl -> Pair(decl.name, decl.loc)
+                is com.mezze.language.typedast.TypedTypeDecl -> Pair(decl.name, decl.loc)
+                is com.mezze.language.typedast.TypedAbilityDecl -> Pair(decl.name, decl.loc)
+                is com.mezze.language.typedast.TypedEffectDecl -> Pair(decl.name, decl.loc)
+                else -> continue
+            }
+            if (name == declName) {
+                return Location(uri, Range(
+                    Position(loc.startLine - 1, loc.startCol - 1),
+                    Position(loc.endLine - 1, loc.endCol)
+                ))
+            }
+        }
+        return null
     }
 
     /**
