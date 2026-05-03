@@ -351,6 +351,38 @@ class LspFeaturesTest {
         )
     }
 
+    // ===== Resource hygiene ============================================
+
+    @Test
+    fun `didClose evicts document state and the cached typecheck`() {
+        // Reproduces the leak fix — before this patch, `lastSuccessfulResult`
+        // kept the closed file's TypedModule alive forever and `documents`
+        // was the only thing evicted. After: hover/definition/etc. on a
+        // closed file return nothing instead of serving stale cached state.
+        val (uri, _) = openSingleFile("""
+            let helper = {x: Int} -> x + 1
+        """.trimIndent())
+
+        // Sanity: hover works while the file is open.
+        val before = hoverAt(uri, line = 0, character = 4)
+        assertNotNull(before, "precondition: hover must work on an open file")
+
+        // Close the file.
+        server.textDocumentService.didClose(DidCloseTextDocumentParams(
+            TextDocumentIdentifier(uri)
+        ))
+        // Give the close handler time to run and the publishDiagnostics
+        // notification to settle.
+        Thread.sleep(150)
+
+        // After close, the LSP must not serve cached state for this URI.
+        val after = hoverAt(uri, line = 0, character = 4)
+        assertNull(
+            after,
+            "expected hover to return null after didClose (would indicate cached state leaked)"
+        )
+    }
+
     // ===== Helpers =====================================================
 
     private fun mkProject(vararg files: Pair<String, String>): Path {

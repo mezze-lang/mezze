@@ -53,8 +53,23 @@ class MezzeTextDocumentService(
     // Document state
     private val documents = ConcurrentHashMap<String, DocumentState>()
 
-    // Last successful type check result per document (survives parse errors for dot-completion)
-    private val lastSuccessfulResult = ConcurrentHashMap<String, TypeCheckResult>()
+    // Last successful type check result per document (survives parse errors
+    // for dot-completion). Bounded LRU so a long editing session that hops
+    // across many files doesn't pin every TypedModule (each entry can be
+    // multi-MB once stdlib imports get pulled in).
+    //
+    // Eviction order: insertion-by-access. The map is wrapped in a
+    // synchronizedMap because LinkedHashMap isn't thread-safe; access is
+    // infrequent enough that contention is fine. Reads through `[uri]` go
+    // through `get`, which we override to also bump access order.
+    private val LAST_SUCCESSFUL_LRU_CAP = 32
+    private val lastSuccessfulResult = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, TypeCheckResult>(16, 0.75f, /* accessOrder = */ true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, TypeCheckResult>?
+            ): Boolean = size > LAST_SUCCESSFUL_LRU_CAP
+        }
+    )
 
     // didChange debouncing. Each keystroke cancels the previous pending
     // analysis and schedules a fresh one DEBOUNCE_MS in the future. The
@@ -273,20 +288,40 @@ class MezzeTextDocumentService(
         // bumps the debounce window. The latest task wins.
         pendingAnalysis.remove(uri)?.cancel(false)
 
-        val task = analysisScheduler.schedule({
-            val state = analyzeDocument(uri, content, version, persistToStore = false)
-            documents[uri] = state
-            publishDiagnostics(uri, state.diagnostics)
+        // Capture the slot reference so the running task can self-evict
+        // even if a later didChange overwrites the entry. Without this,
+        // completed ScheduledFutures pin their captured `content` String
+        // and the analyzeDocument closure forever — a real leak across
+        // long editing sessions.
+        lateinit var taskRef: ScheduledFuture<*>
+        taskRef = analysisScheduler.schedule({
+            try {
+                val state = analyzeDocument(uri, content, version, persistToStore = false)
+                documents[uri] = state
+                publishDiagnostics(uri, state.diagnostics)
+            } finally {
+                pendingAnalysis.remove(uri, taskRef)
+            }
         }, DEBOUNCE_MS, TimeUnit.MILLISECONDS)
-        pendingAnalysis[uri] = task
+        pendingAnalysis[uri] = taskRef
     }
 
     override fun didClose(params: DidCloseTextDocumentParams) {
         val uri = params.textDocument.uri
         server.logInfo("Document closed: $uri")
 
+        // Cancel any in-flight analysis for this URI so its captured
+        // content + closure can be GC'd promptly.
+        pendingAnalysis.remove(uri)?.cancel(false)
+
         // Remove document state
         documents.remove(uri)
+
+        // Drop the cached TypeCheckResult too — it pins a whole
+        // TypedModule (multi-MB once stdlib imports are resolved) and was
+        // the largest source of LSP-side memory growth across long
+        // editing sessions.
+        lastSuccessfulResult.remove(uri)
 
         // Clear diagnostics
         publishDiagnostics(uri, emptyList())
