@@ -189,7 +189,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let xs = seq::insert_at { xs = [1, 2, 3], i = 1, x = 5 }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
             """);
         assertEquals(4L, result);
     }
@@ -239,7 +239,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             match seq::remove_at { xs = [1, 2, 3], i = 1 } is
-                Some { val } -> seq::length { xs = val }
+                Some { val } -> seq::size { xs = val }
                 None -> -1
             """);
         assertEquals(2L, result);
@@ -473,7 +473,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let parts = seq::split { xs = [1, 0, 2, 0, 3], sep = 0 }
-            seq::length { xs = parts }
+            seq::size { xs = parts }
             """);
         assertEquals(3L, result);
     }
@@ -497,7 +497,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let parts = seq::split { xs = [1, 2, 3], sep = 0 }
-            seq::length { xs = parts }
+            seq::size { xs = parts }
             """);
         assertEquals(1L, result);
     }
@@ -507,7 +507,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let parts = seq::split { xs = [1, 0, 0, 2], sep = 0 }
-            seq::length { xs = parts }
+            seq::size { xs = parts }
             """);
         assertEquals(3L, result);
     }
@@ -524,7 +524,7 @@ class SeqAdvancedOperationsTest {
     //     Object result = MezzeTestHelper.run("""
     //         use std::collections::seq
     //         let joined = seq::join { xss = [[1, 2], [3, 4]], sep = 0 }
-    //         seq::length { xs = joined }
+    //         seq::size { xs = joined }
     //         """);
     //     assertEquals(5L, result);
     // }
@@ -767,7 +767,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let perms = seq::permutations { xs = [1, 2, 3] }
-            seq::length { xs = perms }
+            seq::size { xs = perms }
             """);
         assertEquals(6L, result);  // 3! = 6
     }
@@ -777,7 +777,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let perms = seq::permutations { xs = [1, 2] }
-            seq::length { xs = perms }
+            seq::size { xs = perms }
             """);
         assertEquals(2L, result);  // 2! = 2
     }
@@ -787,7 +787,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let perms = seq::permutations { xs = [1] }
-            seq::length { xs = perms }
+            seq::size { xs = perms }
             """);
         assertEquals(1L, result);  // 1! = 1
     }
@@ -798,7 +798,7 @@ class SeqAdvancedOperationsTest {
             use std::collections::seq
             let xs: [Int] = []
             let perms = seq::permutations { xs = xs }
-            seq::length { xs = perms }
+            seq::size { xs = perms }
             """);
         assertEquals(1L, result);  // Empty permutation
     }
@@ -812,7 +812,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let combs = seq::combinations { xs = [1, 2, 3, 4], k = 2 }
-            seq::length { xs = combs }
+            seq::size { xs = combs }
             """);
         assertEquals(6L, result);  // C(4,2) = 6
     }
@@ -822,7 +822,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let combs = seq::combinations { xs = [1, 2, 3], k = 3 }
-            seq::length { xs = combs }
+            seq::size { xs = combs }
             """);
         assertEquals(1L, result);  // C(3,3) = 1
     }
@@ -832,7 +832,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let combs = seq::combinations { xs = [1, 2, 3], k = 1 }
-            seq::length { xs = combs }
+            seq::size { xs = combs }
             """);
         assertEquals(3L, result);  // C(3,1) = 3
     }
@@ -842,7 +842,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let combs = seq::combinations { xs = [1, 2, 3], k = 0 }
-            seq::length { xs = combs }
+            seq::size { xs = combs }
             """);
         // C(n, 0) = 1 mathematically (the empty combination)
         assertEquals(1L, result);
@@ -857,7 +857,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let subs = seq::subsequences { xs = [1, 2, 3] }
-            seq::length { xs = subs }
+            seq::size { xs = subs }
             """);
         assertEquals(8L, result);  // 2^3 = 8
     }
@@ -867,7 +867,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let subs = seq::subsequences { xs = [1, 2] }
-            seq::length { xs = subs }
+            seq::size { xs = subs }
             """);
         assertEquals(4L, result);  // 2^2 = 4
     }
@@ -1156,7 +1156,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let zipped = seq::zip3 { xs = [1, 2], ys = ["a", "b"], zs = [True, False] }
-            seq::length { xs = zipped }
+            seq::size { xs = zipped }
             """);
         assertEquals(2L, result);
     }
@@ -1166,7 +1166,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let zipped = seq::zip3 { xs = [1, 2, 3], ys = ["a", "b"], zs = [True, False, True, False] }
-            seq::length { xs = zipped }
+            seq::size { xs = zipped }
             """);
         assertEquals(2L, result);
     }
@@ -1216,7 +1216,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let zipped = seq::zip4 { xs = [1, 2], ys = ["a", "b"], zs = [True, False], ws = [1.0, 2.0] }
-            seq::length { xs = zipped }
+            seq::size { xs = zipped }
             """);
         assertEquals(2L, result);
     }
@@ -1226,7 +1226,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let zipped = seq::zip4 { xs = [1], ys = ["a", "b"], zs = [True, False], ws = [1.0, 2.0, 3.0] }
-            seq::length { xs = zipped }
+            seq::size { xs = zipped }
             """);
         assertEquals(1L, result);
     }
@@ -1276,7 +1276,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let zipped = seq::zip_with { xs = [1, 2], ys = [10, 20, 30, 40], f = { a, b } -> a + b }
-            seq::length { xs = zipped }
+            seq::size { xs = zipped }
             """);
         assertEquals(2L, result);
     }
@@ -1290,7 +1290,7 @@ class SeqAdvancedOperationsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let product = seq::cartesian_product { xs = [1, 2], ys = ["a", "b", "c"] }
-            seq::length { xs = product }
+            seq::size { xs = product }
             """);
         assertEquals(6L, result);  // 2 * 3 = 6
     }

@@ -470,7 +470,7 @@ class CoopAsyncTest {
                 let p1 = Async.spawn {f = {} -> 1}
                 let p2 = Async.spawn {f = {} -> 2}
                 let results = Async.settle {ps = [p1, p2]}
-                seq::length { xs = results }
+                seq::size { xs = results }
         """.trimIndent()
 
         val result = eval(source)

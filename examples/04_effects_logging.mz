@@ -1,32 +1,18 @@
-# 04 — Effects: the core idea
-#
-# Effects are how Mezze handles side effects. Functions declare which
-# effects they use in their type: {} -> Str <Log>.
-# A `perform Handler in ...` block provides the implementation at runtime.
-
-use std::effects::log::{Log, Console, QuietConsole, println, info, warn, debug}
+use std::effects::log::{ Log, Console, QuietConsole, println, info, warn, debug }
 
 # This function uses the Log effect
-let process_order = {id, amount} -> do
-    info {msg = "Processing order #$(id.to_dbg_str {})"}
-    if amount > 1000 then
-        warn {msg = "Large order: $(amount.to_dbg_str {})"}
-    else
-        debug {msg = "Normal order: $(amount.to_dbg_str {})"}
-    info {msg = "Order #$(id.to_dbg_str {}) complete"}
-    amount
+let process_order = { id, amount } -> do
+  info { msg = "Processing order #$(id.to_dbg_str {})" }
+  if amount > 1000 then warn { msg = "Large order: $(amount.to_dbg_str {})" } else debug { msg = "Normal order: $(amount.to_dbg_str {})" }
+  info { msg = "Order #$(id.to_dbg_str {}) complete" }
+  amount
 
-let main = {} ->
-    perform Console in do
-        # Console handler prints to stdout
-        println {msg = "--- With Console handler ---"}
-        let r1 = perform Console in do
-            process_order {id = 1, amount = 500}
-            process_order {id = 2, amount = 1500}
-
-        # QuietConsole suppresses all output
-        println {msg = "--- With QuietConsole handler (silent) ---"}
-        let r2 = perform QuietConsole in do
-            process_order {id = 3, amount = 9999}
-
-        println {msg = "Done"}
+let main = {} -> perform Console in do
+  println { msg = "--- With Console handler ---" }
+  let r1 = perform Console in do
+    process_order { id = 1, amount = 500 }
+    process_order { id = 2, amount = 1500 }
+  println { msg = "--- With QuietConsole handler (silent) ---" }
+  let r2 = perform QuietConsole in do
+    process_order { id = 3, amount = 9999 }
+  println { msg = "Done" }

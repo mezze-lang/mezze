@@ -271,7 +271,7 @@ class AnonymousImplMethodTest {
     fun `Str length`() {
         assertEquals(5L, eval("""
             use std::str
-            "hello".length {}
+            "hello".size {}
         """))
     }
 
@@ -413,7 +413,7 @@ class AnonymousImplMethodTest {
             use std::str
             use std::collections::seq
             let parts = str::split {s = "a,b,c", delimiter = ","}
-            seq::length {xs = parts}
+            seq::size {xs = parts}
         """))
     }
 
@@ -423,7 +423,7 @@ class AnonymousImplMethodTest {
             use std::str
             use std::collections::seq
             let parts = "a\nb\nc".lines {}
-            seq::length {xs = parts}
+            seq::size {xs = parts}
         """))
     }
 
@@ -433,7 +433,7 @@ class AnonymousImplMethodTest {
             use std::str
             use std::collections::seq
             let parts = "hello   world  test".words {}
-            seq::length {xs = parts}
+            seq::size {xs = parts}
         """))
     }
 
@@ -443,7 +443,7 @@ class AnonymousImplMethodTest {
             use std::str
             use std::collections::seq
             let cs = "abc".chars {}
-            seq::length {xs = cs}
+            seq::size {xs = cs}
         """))
     }
 
@@ -1102,7 +1102,7 @@ class AnonymousImplMethodTest {
     fun `Seq length`() {
         assertEquals(3L, eval("""
             use std::collections::seq
-            [1, 2, 3].length {}
+            [1, 2, 3].size {}
         """))
     }
 
@@ -1110,7 +1110,7 @@ class AnonymousImplMethodTest {
     fun `Seq map and length chain`() {
         assertEquals(3L, eval("""
             use std::collections::seq
-            [1, 2, 3].map {f = {x} -> x * 2}.length {}
+            [1, 2, 3].map {f = {x} -> x * 2}.size {}
         """))
     }
 
@@ -1118,7 +1118,7 @@ class AnonymousImplMethodTest {
     fun `Seq filter and length chain`() {
         assertEquals(2L, eval("""
             use std::collections::seq
-            [1, 2, 3, 4].filter {p = {x} -> x > 2}.length {}
+            [1, 2, 3, 4].filter {p = {x} -> x > 2}.size {}
         """))
     }
 
@@ -1126,7 +1126,7 @@ class AnonymousImplMethodTest {
     fun `Seq push and length chain`() {
         assertEquals(4L, eval("""
             use std::collections::seq
-            [1, 2, 3].push {x = 4}.length {}
+            [1, 2, 3].push {x = 4}.size {}
         """))
     }
 
@@ -1213,7 +1213,7 @@ class AnonymousImplMethodTest {
         assertEquals(3L, eval("""
             use std::collections::list
             let xs = list::cons {head = 1, tail = list::cons {head = 2, tail = list::cons {head = 3, tail = list::empty {}}}}
-            xs.map {f = {x} -> x * 2}.length {}
+            xs.map {f = {x} -> x * 2}.size {}
         """))
     }
 

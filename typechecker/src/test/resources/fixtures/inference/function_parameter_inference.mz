@@ -1,8 +1,9 @@
-# Function parameter type inference from usage
 use std::int
 
-let add = {x, y} -> x + y # expected: add : { x: 'a, y: 'a } with NumAdd 'a -> 'a
-let getAge = {person} -> person.age # expected: getAge : { person: { age: Int } } -> Int
-let processUser = {user} -> "$(user.name) is $(int::to_str {n = user.age})" # expected: processUser : { user: { name: Str, age: Int } } -> Str
+let add = { x, y } -> x + y  # expected: add : { x: 'a, y: 'a } with NumAdd 'a -> 'a
+
+let getAge = { person } -> person.age  # expected: getAge : { person: { age: Int } } -> Int
+
+let processUser = { user } -> "$(user.name) is $(int::to_str { n = user.age })"  # expected: processUser : { user: { name: Str, age: Int } } -> Str
 
 add

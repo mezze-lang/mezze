@@ -34,7 +34,7 @@ class SimpleSeqTest {
 
             let double = {x} -> x * 2
             let result = seq::map {f = double, xs = [1, 2, 3]}
-            seq::length {xs = result}
+            seq::size {xs = result}
         """
         val result = eval(code)
         assertEquals(3L, result)

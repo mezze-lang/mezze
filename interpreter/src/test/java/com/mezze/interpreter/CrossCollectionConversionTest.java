@@ -32,7 +32,7 @@ class CrossCollectionConversionTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
             let l = list::cons { head = 1, tail = list::cons { head = 2, tail = list::cons { head = 3, tail = list::empty {} } } }
-            list::length { xs = l }
+            list::size { xs = l }
             """);
         assertEquals(3L, result);
     }
@@ -55,7 +55,7 @@ class CrossCollectionConversionTest {
             use std::collections::list
             let l = list::cons { head = 1, tail = list::cons { head = 2, tail = list::empty {} } }
             match list::tail { xs = l } is
-                Some { val } -> list::length { xs = val }
+                Some { val } -> list::size { xs = val }
                 None -> -1
             """);
         assertEquals(1L, result);
@@ -131,7 +131,7 @@ class CrossCollectionConversionTest {
             let d2 = deque::push_back { d = d, x = 1 }
             let d3 = deque::push_back { d = d2, x = 2 }
             let d4 = deque::push_back { d = d3, x = 3 }
-            deque::length { d = d4 }
+            deque::size { d = d4 }
             """);
         assertEquals(3L, result);
     }
@@ -243,7 +243,7 @@ class CrossCollectionConversionTest {
     void seqLengthWorks() {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
-            seq::length { xs = [1, 2, 3, 4, 5] }
+            seq::size { xs = [1, 2, 3, 4, 5] }
             """);
         assertEquals(5L, result);
     }
@@ -266,7 +266,7 @@ class CrossCollectionConversionTest {
             let xs = [1, 2]
             let ys = [3, 4, 5]
             let zs = seq::concat { xs = xs, ys = ys }
-            seq::length { xs = zs }
+            seq::size { xs = zs }
             """);
         assertEquals(5L, result);
     }
@@ -290,7 +290,7 @@ class CrossCollectionConversionTest {
             use std::collections::seq
             let xs = [1, 2, 3, 4, 5, 6]
             let evens = seq::filter { xs = xs, p = {x} -> x % 2 == 0 }
-            seq::length { xs = evens }
+            seq::size { xs = evens }
             """);
         assertEquals(3L, result);
     }
@@ -313,7 +313,7 @@ class CrossCollectionConversionTest {
     void emptyListLength() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
-            list::length { xs = list::empty {} }
+            list::size { xs = list::empty {} }
             """);
         assertEquals(0L, result);
     }
@@ -331,7 +331,7 @@ class CrossCollectionConversionTest {
     void emptyDequeLength() {
         Object result = MezzeTestHelper.run("""
             use std::collections::deque
-            deque::length { d = deque::empty {} }
+            deque::size { d = deque::empty {} }
             """);
         assertEquals(0L, result);
     }
@@ -349,7 +349,7 @@ class CrossCollectionConversionTest {
     void emptySeqLength() {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
-            seq::length { xs = [] }
+            seq::size { xs = [] }
             """);
         assertEquals(0L, result);
     }

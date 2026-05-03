@@ -1,12 +1,11 @@
-# std/effects/filesystem.mezze - File system effects (async by default)
 use std::str::{ split, join }
 use std::collections::seq
 use std::int
-# FileSystem error types (exported for pattern matching)
-# FileSystem error types (exported for pattern matching)
-# FileSystem error types (exported for pattern matching)
-# FileSystem error types (exported for pattern matching)
 
+# FileSystem error types (exported for pattern matching)
+# FileSystem error types (exported for pattern matching)
+# FileSystem error types (exported for pattern matching)
+# FileSystem error types (exported for pattern matching)
 pub type FileSystemError = |
   FileNotFound { path: Str },
   PermissionDenied { path: Str, operation: Str },
@@ -34,8 +33,8 @@ effect FileSystem where {
   copy_file: { src: Str, dest: Str } -> Result {} FileSystemError <FileSystem>,
   move_file: { src: Str, dest: Str } -> Result {} FileSystemError <FileSystem>
 }
-# Local disk implementation (runs in virtual threads transparently)
 
+# Local disk implementation (runs in virtual threads transparently)
 impl FileSystem for LocalDisk where {
   read_file = { path } -> __native_fs_read_file { path = path },
   write_file = { path, content } -> __native_fs_write_file { path = path, content = content },
@@ -52,8 +51,8 @@ impl FileSystem for LocalDisk where {
   copy_file = { src, dest } -> __native_fs_copy_file { src = src, dest = dest },
   move_file = { src, dest } -> __native_fs_move_file { src = src, dest = dest },
 }
-# Memory-based file system (for testing)
 
+# Memory-based file system (for testing)
 impl FileSystem for MemoryFS where {
   read_file = { path } -> __native_memfs_read_file { path = path },
   write_file = { path, content } -> __native_memfs_write_file { path = path, content = content },
@@ -70,70 +69,62 @@ impl FileSystem for MemoryFS where {
   copy_file = { src, dest } -> __native_memfs_copy_file { src = src, dest = dest },
   move_file = { src, dest } -> __native_memfs_move_file { src = src, dest = dest },
 }
+
 # =========================================================================
 # Path Helper Functions (pure, no effects needed)
 # =========================================================================
 # Join path components with separator
+pub let path_join : { parts: [Str] } -> Str = { parts } ->
+  join { strings = parts, separator = "/" }
 
-pub let path_join: { parts: [Str] } -> Str = { parts } -> join { strings = parts, separator = "/" }
 # Get the file name from a path (last component)
-
-pub let file_name: { path: Str } -> Str = { path } -> do
+pub let file_name : { path: Str } -> Str = { path } -> do
   let parts = split { s = path, delimiter = "/" }
-  let len = seq::length { xs = parts }
+  let len = seq::size { xs = parts }
   match len > 0 is
     True -> match seq::get { xs = parts, i = len - 1 } is
       Some { val } -> val
       None -> ""
     False -> ""
 
-# Get the parent directory of a path
 
-pub let parent: { path: Str } -> Str = { path } -> do
+pub let parent : { path: Str } -> Str = { path } -> do
   let parts = split { s = path, delimiter = "/" }
-  let len = seq::length { xs = parts }
+  let len = seq::size { xs = parts }
   match len > 1 is
     True -> do
       let init_parts = seq::slice { xs = parts, start = 0, end = len - 1 }
       join { strings = init_parts, separator = "/" }
     False -> "/"
 
-# Get file extension (without the dot) - returns Option since file may have no extension
 
-pub let extension: { path: Str } -> Option Str = { path } -> do
+pub let extension : { path: Str } -> Option Str = { path } -> do
   let name = file_name { path = path }
   let parts = split { s = name, delimiter = "." }
-  let len = seq::length { xs = parts }
+  let len = seq::size { xs = parts }
   match len > 1 is
     True -> seq::get { xs = parts, i = len - 1 }
     False -> None
 
-# Check if path has given extension
 
-pub let has_extension: { path: Str, ext: Str } -> Bool = { path, ext } -> match extension { path = path } is
+pub let has_extension : { path: Str, ext: Str } -> Bool = { path, ext } -> match extension { path = path } is
   Some { val } -> val == ext
   None -> False
 
-# =========================================================================
-# Convenience Functions (effectful helpers)
-# =========================================================================
-# Read file with default value if not found
 
-pub let read_file_or: { path: Str, default: Str } -> Str <FileSystem> = { path, default } ->
+pub let read_file_or : { path: Str, default: Str } -> Str <FileSystem> = { path, default } ->
   match FileSystem.read_file { path = path } is
     Ok { val } -> val
     Err { error } -> default
 
-# Write file, creating parent directories if needed
 
-pub let write_file_mkdirs: { path: Str, content: Str } -> Result {} FileSystemError <FileSystem> = { path, content } ->
+pub let write_file_mkdirs : { path: Str, content: Str } -> Result {} FileSystemError <FileSystem> = { path, content } ->
   do
     let parent_path = parent { path = path }
     let _ = FileSystem.create_directories { path = parent_path }
     FileSystem.write_file { path = path, content = content }
-# Check if a path exists and is a directory, create if not
 
-pub let ensure_directory: { path: Str } -> Result {} FileSystemError <FileSystem> = { path } ->
+pub let ensure_directory : { path: Str } -> Result {} FileSystemError <FileSystem> = { path } ->
   match FileSystem.exists { path = path } is
     Ok { val = exists } -> match exists is
       True -> match FileSystem.is_directory { path = path } is

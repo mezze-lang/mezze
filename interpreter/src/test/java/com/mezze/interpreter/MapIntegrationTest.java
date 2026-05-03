@@ -177,7 +177,7 @@ class MapIntegrationTest {
             let m1 = map::insert { m = map::empty {}, k = "a", v = 1 }
             let m2 = map::insert { m = m1, k = "b", v = 2 }
             let ks = map::keys { m = m2 }
-            list::length { xs = ks }
+            list::size { xs = ks }
             """);
         assertEquals(2L, result);
     }
@@ -190,7 +190,7 @@ class MapIntegrationTest {
             let m1 = map::insert { m = map::empty {}, k = "a", v = 1 }
             let m2 = map::insert { m = m1, k = "b", v = 2 }
             let vs = map::values { m = m2 }
-            list::length { xs = vs }
+            list::size { xs = vs }
             """);
         assertEquals(2L, result);
     }

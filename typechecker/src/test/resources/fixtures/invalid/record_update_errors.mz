@@ -1,11 +1,12 @@
 # Record Spread Tests - Invalid Cases (Restrictive Semantics)
-
 # Trying to add non-existent field (restrictive semantics)
-let person = {name = "Alice", age = 30}
-let invalidField = {...person, salary = 50000}
-# This should fail: Cannot add new field 'salary' to record type
+let person = { name = "Alice", age = 30 }
 
+let invalidField = { ...person, salary = 50000 }
+
+# This should fail: Cannot add new field 'salary' to record type
 # Trying to spread non-record
 let notRecord = 42
-let invalidBase = {...notRecord, x = 10}
+
+let invalidBase = { ...notRecord, x = 10 }
 # This should fail: Cannot spread non-record value

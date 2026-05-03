@@ -14,19 +14,19 @@
 # Log Level - Open variant type for extensibility
 # =============================================================================
 pub type LogLevel = | Error, Warn, Info, Debug, Trace, Print, ... |
+
 # =============================================================================
 # Log Effect - Single operation with open variant levels
 # =============================================================================
-
 effect Log where {
   log: { level: LogLevel, msg: Str } -> {} <Log>
 }
+
 # =============================================================================
 # Formatters - Users can use these or create their own
 # =============================================================================
 # Default formatter - adds prefix for known levels, unknown pass through as-is
-
-pub let default_formatter: { level: LogLevel, msg: Str } -> Str = { level, msg } ->
+pub let default_formatter : { level: LogLevel, msg: Str } -> Str = { level, msg } ->
   match level is
     Error -> "[ERROR] $(msg)\n"
     Warn -> "[WARN] $(msg)\n"
@@ -35,9 +35,8 @@ pub let default_formatter: { level: LogLevel, msg: Str } -> Str = { level, msg }
     Trace -> "[TRACE] $(msg)\n"
     _ -> msg
 
-# Color formatter - ANSI colors for terminal output
 
-pub let color_formatter: { level: LogLevel, msg: Str } -> Str = { level, msg } ->
+pub let color_formatter : { level: LogLevel, msg: Str } -> Str = { level, msg } ->
   match level is
     Error -> "\\x1b[31m[ERROR]\\x1b[0m $(msg)\n"
     Warn -> "\\x1b[33m[WARN]\\x1b[0m $(msg)\n"
@@ -46,40 +45,38 @@ pub let color_formatter: { level: LogLevel, msg: Str } -> Str = { level, msg } -
     Trace -> "\\x1b[90m[TRACE]\\x1b[0m $(msg)\n"
     _ -> msg
 
-# =============================================================================
-# Implementations
-# =============================================================================
-# Console - default implementation using default_formatter
 
 impl Log for Console where {
-  log = { level, msg } -> __native_console_print { msg = default_formatter { level = level, msg = msg } }
+  log = { level, msg } ->
+    __native_console_print { msg = default_formatter { level = level, msg = msg } }
 }
+
 # ConsoleWith - customizable formatter
-
 impl Log for ConsoleWith { formatter: { level: LogLevel, msg: Str } -> Str } where {
-  log = { level, msg } -> __native_console_print { msg = formatter { level = level, msg = msg } }
+  log = { level, msg } ->
+    __native_console_print { msg = formatter { level = level, msg = msg } }
 }
-# QuietConsole - for testing, suppresses all output
 
+# QuietConsole - for testing, suppresses all output
 impl Log for QuietConsole where {
   log = { level, msg } -> {}
 }
+
 # =============================================================================
 # Helper Functions - Convenient wrappers
 # =============================================================================
 # Level-specific helpers
+pub let error : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Error, msg = msg }
 
-pub let error: { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Error, msg = msg }
+pub let warn : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Warn, msg = msg }
 
-pub let warn: { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Warn, msg = msg }
+pub let info : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Info, msg = msg }
 
-pub let info: { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Info, msg = msg }
+pub let debug : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Debug, msg = msg }
 
-pub let debug: { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Debug, msg = msg }
+pub let trace : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Trace, msg = msg }
 
-pub let trace: { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Trace, msg = msg }
 # Print helpers - use Print level (falls through to raw message in default_formatter)
+pub let print : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Print, msg = msg }
 
-pub let print: { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Print, msg = msg }
-
-pub let println: { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Print, msg = "$(msg)\n" }
+pub let println : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Print, msg = "$(msg)\n" }

@@ -159,10 +159,10 @@ class NativeParameterNamingTest {
 
     @Test
     fun `test string length operation`() {
-        // Tests str::length with 's' parameter
+        // Tests str::size with 's' parameter
         val result = eval("""
             use std::str
-            str::length { s = "hello" }
+            str::size { s = "hello" }
         """.trimIndent())
         assertEquals(5L, result)
     }

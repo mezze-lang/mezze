@@ -1,19 +1,20 @@
 # Record Spread Tests - Valid Cases (Restrictive Semantics)
-
 # Basic record spread with field overrides
-let person = {name = "Alice", age = 30, city = "London"}
-let updatedPerson = {...person, age = 31, city = "Paris"}
+let person = { name = "Alice", age = 30, city = "London" }
+
+let updatedPerson = { ...person, age = 31, city = "Paris" }
+
 # expected: updatedPerson : { name: Str, age: Int, city: Str }
-
 # Single field override
-let singleUpdate = {...person, name = "Bob"}
+let singleUpdate = { ...person, name = "Bob" }
+
 # expected: singleUpdate : { name: Str, age: Int, city: Str }
-
 # Spread without any overrides (copy)
-let copyPerson = {...person}
-# expected: copyPerson : { name: Str, age: Int, city: Str }
+let copyPerson = { ...person }
 
+# expected: copyPerson : { name: Str, age: Int, city: Str }
 # Record spread with expressions
-let calc = {a = 10, b = 20}
-let calcUpdate = {...calc, a = calc.b * 2, b = calc.a + calc.b}
+let calc = { a = 10, b = 20 }
+
+let calcUpdate = { ...calc, a = calc.b * 2, b = calc.a + calc.b }
 # expected: calcUpdate : { a: Int, b: Int }

@@ -349,6 +349,8 @@ internal val MezzeParser.untypedLambdaParams: Parser<ParsedLambdaParams>
                 }
 
                 val names = tokens.map { it.text }
+                val file = currentFile ?: "<unknown>"
+                val nameLocs = tokens.map { tokenLoc(it, file) }
                 val stream1 = params.remaining
 
                 // Check for optional comma before ellipsis (same logic as recordPatternParser)
@@ -367,7 +369,7 @@ internal val MezzeParser.untypedLambdaParams: Parser<ParsedLambdaParams>
                     afterComma
                 }
 
-                ParseResult.Success(ParsedLambdaParams.Untyped(names, isOpen), stream2)
+                ParseResult.Success(ParsedLambdaParams.Untyped(names, isOpen, nameLocs), stream2)
             }
             is ParseResult.Failure -> params
         }
@@ -1612,11 +1614,37 @@ internal val MezzeParser.pipeExpression: Parser<ParsedExpr>
 
         while (result is ParseResult.Success) {
             val currentStream = result.remaining
-            val op = currentStream.current()
+            // Multi-line pipe support: mirror dot-chain handling at
+            // postfixExpression. After parsing the LHS, peek past
+            // any newlines — if the next significant token is `|>`,
+            // we keep going. Without this, a pipe like
+            //
+            //   [1, 2, 3]
+            //     |> filter { p = @ }
+            //     |> map { f = @ }
+            //
+            // would terminate the expression at the newline. The
+            // continuation rule matches what dot chains already do
+            // (see TokenType.NEWLINE branch in postfixExpression).
+            val (probe, opAfterNewlines) = run {
+                if (currentStream.current()?.type == TokenType.NEWLINE) {
+                    var ahead = currentStream
+                    while (ahead.current()?.type == TokenType.NEWLINE) {
+                        ahead = ahead.advance()
+                    }
+                    val a = ahead.current()
+                    if (a?.type == TokenType.PIPE_OP) ahead to a else currentStream to currentStream.current()
+                } else currentStream to currentStream.current()
+            }
+            val op = opAfterNewlines
 
             if (op?.type == TokenType.PIPE_OP) {
-                val opStream = currentStream.advance()
-                val right = comparisonExpression(opStream)
+                val opStream = probe.advance()
+                // Allow newlines after `|>` too — same UX as a `.method`
+                // chain where the receiver line ends and the next line
+                // starts with the operator continuation.
+                val rhsStream = skipNewlines(opStream)
+                val right = comparisonExpression(rhsStream)
                 result = when (right) {
                     is ParseResult.Success -> {
                         // Validate: exactly one @ in the right-hand side

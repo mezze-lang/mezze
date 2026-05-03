@@ -1,9 +1,14 @@
 # Basic type inference from literals and operations
 let x = 42
+
 let y = 3.14
+
 let name = "Alice"
+
 let flag = True
+
 let sum = x + 10
+
 let greeting = "Hello $(name)"
 
 sum

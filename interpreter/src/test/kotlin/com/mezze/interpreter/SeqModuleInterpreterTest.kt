@@ -19,7 +19,7 @@ class SeqModuleInterpreterTest {
     fun `length returns array length`() {
         val code = """
             use std::collections::seq
-            seq::length { xs = [1, 2, 3, 4, 5] }
+            seq::size { xs = [1, 2, 3, 4, 5] }
         """
         val result = eval(code)
         assertEquals(5L, result)
@@ -92,7 +92,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let xs = seq::filter { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -255,7 +255,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let result = seq::partition { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
-            seq::length { xs = result.pass }
+            seq::size { xs = result.pass }
         """
         val result = eval(code)
         assertEquals(3L, result)  // 3, 4, 5
@@ -266,7 +266,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let result = seq::partition { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
-            seq::length { xs = result.fail }
+            seq::size { xs = result.fail }
         """
         val result = eval(code)
         assertEquals(2L, result)  // 1, 2
@@ -282,7 +282,7 @@ class SeqModuleInterpreterTest {
             use std::collections::seq
             let nested = [[1, 2], [3, 4], [5]]
             let flat = seq::flatten { xss = nested }
-            seq::length { xs = flat }
+            seq::size { xs = flat }
         """
         val result = eval(code)
         assertEquals(5L, result)
@@ -348,7 +348,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let xs = seq::init { xs = [1, 2, 3, 4] }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -359,7 +359,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let xs = seq::tail { xs = [1, 2, 3, 4] }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -374,7 +374,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let xs = seq::slice { xs = [1, 2, 3, 4, 5], start = 1, end = 4 }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -385,7 +385,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let xs = seq::take { xs = [1, 2, 3, 4, 5], n = 3 }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -396,7 +396,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let xs = seq::drop { xs = [1, 2, 3, 4, 5], n = 2 }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -411,7 +411,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let zipped = seq::zip { xs = [1, 2, 3], ys = ["a", "b", "c"] }
-            seq::length { xs = zipped }
+            seq::size { xs = zipped }
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -422,7 +422,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let zipped = seq::zip { xs = [1, 2], ys = ["a", "b", "c", "d"] }
-            seq::length { xs = zipped }
+            seq::size { xs = zipped }
         """
         val result = eval(code)
         assertEquals(2L, result)
@@ -434,7 +434,7 @@ class SeqModuleInterpreterTest {
             use std::collections::seq
             let pairs = [{ fst = 1, snd = "a" }, { fst = 2, snd = "b" }]
             let result = seq::unzip { xs = pairs }
-            seq::length { xs = result.fsts }
+            seq::size { xs = result.fsts }
         """
         val result = eval(code)
         assertEquals(2L, result)
@@ -449,7 +449,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let xs = seq::unique { xs = [1, 2, 1, 3, 2, 4, 1] }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(4L, result)
@@ -503,7 +503,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let xs = seq::concat { xs = [1, 2], ys = [3, 4] }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(4L, result)
@@ -514,7 +514,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             let xs = seq::add { xs = [1, 2], x = 3 }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -539,7 +539,7 @@ class SeqModuleInterpreterTest {
         val code = """
             use std::collections::seq
             match seq::remove { xs = [1, 2, 3], i = 1 } is
-                Some { val } -> seq::length { xs = val }
+                Some { val } -> seq::size { xs = val }
                 None -> -1
         """
         val result = eval(code)

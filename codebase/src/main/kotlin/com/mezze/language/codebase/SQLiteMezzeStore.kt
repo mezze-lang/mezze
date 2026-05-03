@@ -1525,6 +1525,22 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    private val getDeclsByKindStmt: PreparedStatement by lazy {
+        conn.prepareStatement(unionAll("""
+            SELECT module_path, decl_name, decl_kind, source_hash, hash,
+                   start_line, start_col, end_line, end_col
+            FROM <DB>.decls
+            WHERE decl_kind = ?
+        """.trimIndent()))
+    }
+
+    override fun getDeclsByKind(kind: DeclKind): List<DeclRow> {
+        for (i in 0..2) getDeclsByKindStmt.setString(i + 1, kind.dbValue)
+        return getDeclsByKindStmt.executeQuery().use { rs ->
+            buildList { while (rs.next()) add(rs.toDeclRow()) }
+        }
+    }
+
     private val findDeclByHashStmt: PreparedStatement by lazy {
         // Hits idx_decls_hash. UNION ALL across all three so hashes
         // resolve regardless of which file owns the decl.

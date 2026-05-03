@@ -111,10 +111,10 @@ object NonEmptyListTypes {
             )
         }
 
-        // __native_nel_length: {xs: NonEmptyList 'a} -> Int
+        // __native_nel_size: {xs: NonEmptyList 'a} -> Int
         run {
             val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_length"] = MezzeType.FunctionType(
+            context["__native_nel_size"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to nelType(a))),
                 MezzeType.IntType
             )

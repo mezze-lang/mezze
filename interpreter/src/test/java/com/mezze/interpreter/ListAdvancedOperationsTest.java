@@ -148,7 +148,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5] }
             let sliced = list::slice { xs = xs, start = 1, end = 4 }
-            list::length { xs = sliced }
+            list::size { xs = sliced }
             """);
         assertEquals(3L, result);
     }
@@ -187,7 +187,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5] }
             let chunks = list::chunk { xs = xs, size = 2 }
-            list::length { xs = chunks }
+            list::size { xs = chunks }
             """);
         assertEquals(3L, result);  // [[1,2], [3,4], [5]]
     }
@@ -199,7 +199,7 @@ class ListAdvancedOperationsTest {
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5] }
             let chunks = list::chunk { xs = xs, size = 2 }
             match list::head { xs = chunks } is
-                Some { val } -> list::length { xs = val }
+                Some { val } -> list::size { xs = val }
                 None -> -1
             """);
         assertEquals(2L, result);
@@ -212,7 +212,7 @@ class ListAdvancedOperationsTest {
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5] }
             let chunks = list::chunk { xs = xs, size = 2 }
             match list::last { xs = chunks } is
-                Some { val } -> list::length { xs = val }
+                Some { val } -> list::size { xs = val }
                 None -> -1
             """);
         assertEquals(1L, result);  // [5]
@@ -228,7 +228,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 3, 4] }
             let windows = list::windows { xs = xs, size = 2 }
-            list::length { xs = windows }
+            list::size { xs = windows }
             """);
         assertEquals(3L, result);  // [[1,2], [2,3], [3,4]]
     }
@@ -275,7 +275,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5, 6] }
             let windows = list::sliding { xs = xs, size = 2, step = 2 }
-            list::length { xs = windows }
+            list::size { xs = windows }
             """);
         assertEquals(3L, result);  // [[1,2], [3,4], [5,6]]
     }
@@ -286,7 +286,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5, 6] }
             let windows = list::sliding { xs = xs, size = 2, step = 3 }
-            list::length { xs = windows }
+            list::size { xs = windows }
             """);
         assertEquals(2L, result);  // [[1,2], [4,5]]
     }
@@ -317,7 +317,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5] }
             let chunks = list::chunks_exact { xs = xs, size = 2 }
-            list::length { xs = chunks }
+            list::size { xs = chunks }
             """);
         assertEquals(2L, result);  // [[1,2], [3,4]] - drops [5]
     }
@@ -328,7 +328,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5, 6] }
             let chunks = list::chunks_exact { xs = xs, size = 3 }
-            let allSizeThree = list::all { xs = chunks, p = { x } -> list::length { xs = x } == 3 }
+            let allSizeThree = list::all { xs = chunks, p = { x } -> list::size { xs = x } == 3 }
             allSizeThree
             """);
         assertEquals(true, result);
@@ -340,7 +340,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5, 6] }
             let chunks = list::chunks_exact { xs = xs, size = 2 }
-            list::length { xs = chunks }
+            list::size { xs = chunks }
             """);
         assertEquals(3L, result);  // [[1,2], [3,4], [5,6]]
     }
@@ -368,7 +368,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [{v = 3}, {v = 1}, {v = 2}] }
             let sorted = list::sort_by_key { xs = xs, f = { x } -> x.v }
-            list::length { xs = sorted }
+            list::size { xs = sorted }
             """);
         assertEquals(3L, result);
     }
@@ -409,7 +409,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5] }
             let rotated = list::rotate_left { xs = xs, n = 2 }
-            list::length { xs = rotated }
+            list::size { xs = rotated }
             """);
         assertEquals(5L, result);
     }
@@ -450,7 +450,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let xs = list::from_seq { xs = [1, 2, 3, 4, 5] }
             let rotated = list::rotate_right { xs = xs, n = 2 }
-            list::length { xs = rotated }
+            list::size { xs = rotated }
             """);
         assertEquals(5L, result);
     }
@@ -477,7 +477,7 @@ class ListAdvancedOperationsTest {
             use std::collections::seq
             let xs = list::from_seq { xs = [1, 2, 3] }
             let arr = list::to_seq { xs = xs }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
             """);
         assertEquals(3L, result);
     }
@@ -488,7 +488,7 @@ class ListAdvancedOperationsTest {
             use std::collections::list
             let arr = [1, 2, 3, 4, 5]
             let xs = list::from_seq { xs = arr }
-            list::length { xs = xs }
+            list::size { xs = xs }
             """);
         assertEquals(5L, result);
     }
@@ -527,7 +527,7 @@ class ListAdvancedOperationsTest {
             use std::collections::set
             let s = set::from_seq { xs = [3, 1, 2] }
             let xs = list::from_set { xs = s }
-            list::length { xs = xs }
+            list::size { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -555,7 +555,7 @@ class ListAdvancedOperationsTest {
             use std::collections::deque
             let xs = list::from_seq { xs = [1, 2, 3] }
             let d = list::to_deque { xs = xs }
-            deque::length { d = d }
+            deque::size { d = d }
             """);
         assertEquals(3L, result);
     }
@@ -567,7 +567,7 @@ class ListAdvancedOperationsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3, 4] }
             let xs = list::from_deque { xs = d }
-            list::length { xs = xs }
+            list::size { xs = xs }
             """);
         assertEquals(4L, result);
     }
@@ -1114,7 +1114,7 @@ class ListAdvancedOperationsTest {
             let xs = list::from_seq { xs = [3, 1, 2, 1, 3, 2] }
             let s = list::to_set { xs = xs }
             let back = list::from_set { xs = s }
-            list::length { xs = back }
+            list::size { xs = back }
             """);
         assertEquals(3L, result);  // Duplicates removed
     }

@@ -17,7 +17,7 @@ class SeqIntegrationTest {
     void lengthReturnsArrayLength() {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
-            seq::length { xs = [1, 2, 3, 4, 5] }
+            seq::size { xs = [1, 2, 3, 4, 5] }
             """);
         assertEquals(5L, result);
     }
@@ -84,7 +84,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let xs = seq::filter { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -224,7 +224,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let result = seq::partition { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
-            seq::length { xs = result.pass }
+            seq::size { xs = result.pass }
             """);
         assertEquals(3L, result);  // 3, 4, 5
     }
@@ -234,7 +234,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let result = seq::partition { xs = [1, 2, 3, 4, 5], p = { x } -> x > 2 }
-            seq::length { xs = result.fail }
+            seq::size { xs = result.fail }
             """);
         assertEquals(2L, result);  // 1, 2
     }
@@ -249,7 +249,7 @@ class SeqIntegrationTest {
             use std::collections::seq
             let nested = [[1, 2], [3, 4], [5]]
             let flat = seq::flatten { xss = nested }
-            seq::length { xs = flat }
+            seq::size { xs = flat }
             """);
         assertEquals(5L, result);
     }
@@ -310,7 +310,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let xs = seq::init { xs = [1, 2, 3, 4] }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -320,7 +320,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let xs = seq::tail { xs = [1, 2, 3, 4] }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -334,7 +334,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let xs = seq::slice { xs = [1, 2, 3, 4, 5], start = 1, end = 4 }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -344,7 +344,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let xs = seq::take { xs = [1, 2, 3, 4, 5], n = 3 }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -354,7 +354,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let xs = seq::drop { xs = [1, 2, 3, 4, 5], n = 2 }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -368,7 +368,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let zipped = seq::zip { xs = [1, 2, 3], ys = ["a", "b", "c"] }
-            seq::length { xs = zipped }
+            seq::size { xs = zipped }
             """);
         assertEquals(3L, result);
     }
@@ -378,7 +378,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let zipped = seq::zip { xs = [1, 2], ys = ["a", "b", "c", "d"] }
-            seq::length { xs = zipped }
+            seq::size { xs = zipped }
             """);
         assertEquals(2L, result);
     }
@@ -389,7 +389,7 @@ class SeqIntegrationTest {
             use std::collections::seq
             let pairs = [{ fst = 1, snd = "a" }, { fst = 2, snd = "b" }]
             let result = seq::unzip { xs = pairs }
-            seq::length { xs = result.fsts }
+            seq::size { xs = result.fsts }
             """);
         assertEquals(2L, result);
     }
@@ -403,7 +403,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let xs = seq::unique { xs = [1, 2, 1, 3, 2, 4, 1] }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
             """);
         assertEquals(4L, result);
     }
@@ -453,7 +453,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let xs = seq::concat { xs = [1, 2], ys = [3, 4] }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
             """);
         assertEquals(4L, result);
     }
@@ -463,7 +463,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             let xs = seq::add { xs = [1, 2], x = 3 }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -486,7 +486,7 @@ class SeqIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
             match seq::remove { xs = [1, 2, 3], i = 1 } is
-                Some { val } -> seq::length { xs = val }
+                Some { val } -> seq::size { xs = val }
                 None -> -1
             """);
         assertEquals(2L, result);

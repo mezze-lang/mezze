@@ -206,12 +206,32 @@ class ImportResolver(
                 val exportsToUse = typedModule?.exports?.takeIf { it.isNotEmpty() } ?: module.exports
 
                 // Build import context from all exports
-                val context = buildContextFromExports(
+                var context = buildContextFromExports(
                     exports = exportsToUse,
                     modulePath = modulePath,
                     alias = qualifierName,
                     isQualified = true  // Module imports are always qualified
                 )
+
+                // Harvest inferred return types for inherent-impl operations
+                // from the home module's TypedAbilityImpl. Without this, the
+                // importer rebuilds InherentMethodInfo with fresh TypeVars and
+                // the body's solved return type is lost — calls like
+                // `xs.length {}` render as `'a`. (See issue #213.)
+                val v2Module = typedModule?.typedModule
+                if (v2Module != null) {
+                    val opTypes = harvestInherentImplOpReturnTypes(v2Module, exportsToUse)
+                    if (opTypes.isNotEmpty()) {
+                        context = context.copy(inherentImplOpReturnTypes = opTypes)
+                    }
+                    // Same harvest, but for param-record types (#230). Without
+                    // this, `nums.all { p = 5 }` typechecks because `p` was
+                    // registered as a free TypeVar — anything unifies.
+                    val opParamTypes = harvestInherentImplOpParamTypes(v2Module, exportsToUse)
+                    if (opParamTypes.isNotEmpty()) {
+                        context = context.copy(inherentImplOpParamTypes = opParamTypes)
+                    }
+                }
 
                 ProcessResult.Success(
                     context = context,
@@ -806,5 +826,123 @@ class ImportResolver(
         data class Failure(
             val errors: List<ModuleError>
         ) : ProcessResult()
+    }
+
+    /**
+     * Pull (implContentHash → opName → returnType) out of a typechecked
+     * module, restricted to inherent impls (those whose abilityHash is
+     * Hash.ZERO — see TypedAstBuilder.buildAbilityImpl). The returned map
+     * lets ContextBuilder reuse the home module's solved return type when
+     * registering the impl across the module boundary, instead of giving
+     * each operation a fresh unbound TypeVar.
+     */
+    private fun harvestInherentImplOpReturnTypes(
+        v2Module: com.mezze.language.typedast.TypedModule,
+        exports: Map<String, ExportedItem>
+    ): Map<String, Map<String, com.mezze.language.ast.MezzeType>> {
+        val result = mutableMapOf<String, Map<String, com.mezze.language.ast.MezzeType>>()
+        for (impl in v2Module.abilityImpls) {
+            // Inherent impls use abilityHash = Hash.ZERO.
+            if (impl.abilityHash != com.mezze.language.typedast.Hash.ZERO) continue
+            val opMap = mutableMapOf<String, com.mezze.language.ast.MezzeType>()
+            for ((opName, opExpr) in impl.operations) {
+                // Stdlib impl operations are typically thin wrappers around a
+                // same-named top-level let (e.g. `length = { it } -> length {
+                // xs = it }`). The exported binding's MezzeType carries the
+                // full polymorphic signature (incl. TypeApplication args),
+                // while the impl body's stored type may have args stripped at
+                // TypedAstBuilder time (see issue #215). When the op name
+                // matches an exported function, prefer the export's return
+                // type as the source of truth.
+                val exportedFn = exports[opName]
+                val exportType = exportedFn?.mezzeType
+                val exportReturnType = if (exportType is com.mezze.language.ast.MezzeType.FunctionType) {
+                    exportType.returnType
+                } else null
+
+                // Otherwise fall back to the impl op's body type.
+                val bodyReturnType: com.mezze.language.ast.MezzeType =
+                    if (opExpr is com.mezze.language.typedast.TypedLambda) {
+                        opExpr.body.type
+                    } else when (val t = opExpr.type) {
+                        is com.mezze.language.ast.MezzeType.FunctionType -> t.returnType
+                        else -> t
+                    }
+
+                val rawReturnType = exportReturnType ?: bodyReturnType
+
+                // Skip placeholder TypeVars that are not informative (e.g. "ret",
+                // "op_*"). Only keep concrete types or quote-prefixed type vars
+                // that have actual meaning (like 'a in a generic impl).
+                val isPlaceholder = rawReturnType is com.mezze.language.ast.MezzeType.VarType &&
+                    !rawReturnType.variable.name.startsWith("'")
+                if (isPlaceholder) continue
+
+                opMap[opName] = rawReturnType
+            }
+            if (opMap.isNotEmpty()) {
+                result[impl.hash.hex] = opMap
+            }
+        }
+        return result
+    }
+
+    /**
+     * Issue #230: harvest the post-solve PARAM-record type for each inherent
+     * impl operation. The op's param record carries fully-typed fields by the
+     * time the home module finished checking — including callback fields like
+     * `p: { x: 'a } -> Bool`. Importer registration (without this harvest)
+     * substitutes a fresh TypeVar for each field, so callers can pass any
+     * value where a function was expected.
+     *
+     * Same shape rules as harvestInherentImplOpReturnTypes — including
+     * preferring the exported binding's signature over the impl op's body
+     * when both are available (the export carries the un-stripped
+     * polymorphic record; #215 may have stripped TypeApplication args from
+     * the body's stored type).
+     */
+    private fun harvestInherentImplOpParamTypes(
+        v2Module: com.mezze.language.typedast.TypedModule,
+        exports: Map<String, ExportedItem>
+    ): Map<String, Map<String, com.mezze.language.ast.MezzeType>> {
+        val result = mutableMapOf<String, Map<String, com.mezze.language.ast.MezzeType>>()
+        for (impl in v2Module.abilityImpls) {
+            // Inherent impls use abilityHash = Hash.ZERO.
+            if (impl.abilityHash != com.mezze.language.typedast.Hash.ZERO) continue
+            val opMap = mutableMapOf<String, com.mezze.language.ast.MezzeType>()
+            for ((opName, opExpr) in impl.operations) {
+                // Use the impl op's body shape — its params are the
+                // ones the call-site sees.
+                val rawParamType: com.mezze.language.ast.MezzeType =
+                    if (opExpr is com.mezze.language.typedast.TypedLambda) {
+                        com.mezze.language.ast.MezzeType.RecordType(
+                            fields = opExpr.params.associate { it.name to it.type },
+                            rowVar = null
+                        )
+                    } else when (val t = opExpr.type) {
+                        is com.mezze.language.ast.MezzeType.FunctionType -> t.paramType
+                        else -> continue
+                    }
+
+                // Skip when the harvested record is *all* uninformative
+                // TypeVars — gives the importer nothing better than what it
+                // would synthesize itself, and risks crashing the alignment
+                // pass with cross-instance var identity.
+                val record = rawParamType as? com.mezze.language.ast.MezzeType.RecordType
+                if (record != null) {
+                    val anyInformative = record.fields.values.any { v ->
+                        v !is com.mezze.language.ast.MezzeType.VarType ||
+                            v.variable.name.startsWith("'")
+                    }
+                    if (!anyInformative) continue
+                }
+
+                opMap[opName] = rawParamType
+            }
+            if (opMap.isNotEmpty()) {
+                result[impl.hash.hex] = opMap
+            }
+        }
+        return result
     }
 }

@@ -212,7 +212,7 @@ class SortedMapIntegrationTest {
             let m3 = sorted_map::insert { m = m2, k = 1, v = "a" }
             let m4 = sorted_map::insert { m = m3, k = 2, v = "b" }
             let keys = sorted_map::keys { m = m4 }
-            list::length { xs = keys }
+            list::size { xs = keys }
             """);
         assertEquals(3L, result);
     }
@@ -226,7 +226,7 @@ class SortedMapIntegrationTest {
             let m2 = sorted_map::insert { m = m, k = 1, v = 10 }
             let m3 = sorted_map::insert { m = m2, k = 2, v = 20 }
             let values = sorted_map::values { m = m3 }
-            list::length { xs = values }
+            list::size { xs = values }
             """);
         assertEquals(2L, result);
     }
@@ -240,7 +240,7 @@ class SortedMapIntegrationTest {
             let m2 = sorted_map::insert { m = m, k = 1, v = "one" }
             let m3 = sorted_map::insert { m = m2, k = 2, v = "two" }
             let entries = sorted_map::entries { m = m3 }
-            list::length { xs = entries }
+            list::size { xs = entries }
             """);
         assertEquals(2L, result);
     }

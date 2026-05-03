@@ -393,7 +393,7 @@ class AbilityImplementationBodyValidationTest {
               length = {it} -> it + it
             }
 
-            let len = {s} -> s.length {}
+            let len = {s} -> s.size {}
 
             len {s = "hello"}
         """.trimIndent()

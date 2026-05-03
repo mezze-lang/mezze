@@ -219,6 +219,10 @@ interface MezzeStore : AutoCloseable {
     /** Search decls by name prefix across the whole project. For LSP workspace symbol. */
     fun searchDeclsByName(query: String): List<DeclRow>
 
+    /** List every decl of a given kind across the whole project (incl. stdlib + deps).
+     *  Used by LSP dot-completion to surface unimported abilities. */
+    fun getDeclsByKind(kind: DeclKind): List<DeclRow>
+
     /**
      * Resolve a content hash back to its decl row (module, name, kind,
      * source range). Used by call hierarchy to render an edge target as

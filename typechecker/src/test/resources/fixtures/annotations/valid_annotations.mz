@@ -1,6 +1,9 @@
-let x: Int = 42
-let y: Str = "hello"
-let z: Bool = True
-let f: {n: Int} -> Int = {n} -> n + 1
+let x : Int = 42
 
-f {n = x}
+let y : Str = "hello"
+
+let z : Bool = True
+
+let f : { n: Int } -> Int = { n } -> n + 1
+
+f { n = x }

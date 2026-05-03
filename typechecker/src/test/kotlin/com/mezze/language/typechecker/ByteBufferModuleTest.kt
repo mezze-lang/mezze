@@ -138,7 +138,7 @@ class ByteBufferModuleTest {
             let buf = buffer::empty {}
             let buf2 = buffer::write_string { buf = buf, s = "Hello" }
             let data = buffer::to_bytes { buf = buf2 }
-            let len = bytes::length { b = data }
+            let len = bytes::size { b = data }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

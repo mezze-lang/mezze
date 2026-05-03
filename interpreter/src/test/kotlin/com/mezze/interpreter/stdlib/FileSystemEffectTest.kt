@@ -177,7 +177,7 @@ class FileSystemEffectTest {
                 let _ = FileSystem.write_file {path = "/listdir/file2.txt", content = "b"}
                 let list_result = FileSystem.list_directory {path = "/listdir"}
                 match list_result is
-                    Ok {val} -> list::length {xs = val}
+                    Ok {val} -> list::size {xs = val}
                     Err {error} -> 0
         """)
         assertEquals(2L, result)

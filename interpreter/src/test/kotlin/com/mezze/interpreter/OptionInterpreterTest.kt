@@ -248,7 +248,7 @@ class OptionInterpreterTest {
             use std::collections::seq
             let opt: (Option Int) = Some { val = 42 }
             let arr = option::to_list { opt = opt }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
         """
         val result = eval(code)
         assertEquals(1L, result)
@@ -261,7 +261,7 @@ class OptionInterpreterTest {
             use std::collections::seq
             let opt: (Option Int) = None
             let arr = option::to_list { opt = opt }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
         """
         val result = eval(code)
         assertEquals(0L, result)

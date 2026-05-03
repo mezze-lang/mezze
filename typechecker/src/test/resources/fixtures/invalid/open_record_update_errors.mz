@@ -1,16 +1,18 @@
 # Record Spread Tests - Invalid Cases (Restrictive Semantics)
-
 # Trying to add field to any record should fail (restrictive semantics)
-let closedRecord = {name = "Alice", age = 30}
-let invalidAddition = {...closedRecord, salary = 50000}
+let closedRecord = { name = "Alice", age = 30 }
+
+let invalidAddition = { ...closedRecord, salary = 50000 }
+
 # This should fail: Cannot add new field 'salary' to record type
-
 # Trying to add field to open record should also fail (restrictive semantics)
-let openRecord = {name = "Bob", age = 25, ...}
-let invalidOpenAddition = {...openRecord, department = "Engineering"}
-# This should fail: Cannot add new field 'department' to record type
+let openRecord = { name = "Bob", age = 25 }
 
+let invalidOpenAddition = { ...openRecord, department = "Engineering" }
+
+# This should fail: Cannot add new field 'department' to record type
 # Spreading non-record should fail
 let notRecord = 42
-let invalidBase = {...notRecord, x = 10}
+
+let invalidBase = { ...notRecord, x = 10 }
 # This should fail: Cannot spread non-record value

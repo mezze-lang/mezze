@@ -196,7 +196,7 @@ class MutexModuleTest {
 
             let m = mutex {}
             let list = with_lock {mutex = m, f = {} -> [1, 2, 3]}
-            seq::length {xs = list}
+            seq::size {xs = list}
         """)
         assertEquals(3L, result)
     }

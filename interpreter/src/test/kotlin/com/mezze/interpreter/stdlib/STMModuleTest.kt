@@ -422,16 +422,16 @@ class STMModuleTest {
     }
 
     @Test
-    fun `test tqueue length_tqueue`() {
+    fun `test tqueue size_tqueue`() {
         val result = eval("""
-            use std::effects::stm::{STM, SequentialSTM, tqueue, write_tqueue, length_tqueue}
+            use std::effects::stm::{STM, SequentialSTM, tqueue, write_tqueue, size_tqueue}
 
             let q = tqueue {}
             perform SequentialSTM in do
                 write_tqueue {q = q, val = 1}
                 write_tqueue {q = q, val = 2}
                 write_tqueue {q = q, val = 3}
-                length_tqueue {q = q}
+                size_tqueue {q = q}
         """)
         assertEquals(3L, result)
     }
@@ -616,7 +616,7 @@ class STMModuleTest {
             let c = tvar {init = 3}
             perform SequentialSTM in do
                 let values = read_all {vars = [a, b, c]}
-                seq::length {xs = values}
+                seq::size {xs = values}
         """)
         assertEquals(3L, result)
     }

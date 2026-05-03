@@ -159,11 +159,19 @@ sealed interface ParsedLambdaParams {
 
     /**
      * Untyped parameters: `{ x, y }` or `{ x, y, ... }`
+     *
+     * `nameLocs` carries per-name source locations. Older serialized
+     * forms / hand-built ASTs may leave it empty — consumers that need
+     * positions must tolerate `nameLocs.size != names.size` and fall
+     * back to the lambda's own `loc`. Populated by the parser; used by
+     * TypedAstBuilder to give each TypedParam its own narrow loc so
+     * hover/go-to-definition land on the right param token.
      */
     @Serializable
     data class Untyped(
         val names: List<String>,
-        val isOpen: Boolean = false
+        val isOpen: Boolean = false,
+        val nameLocs: List<Loc> = emptyList()
     ) : ParsedLambdaParams
 }
 

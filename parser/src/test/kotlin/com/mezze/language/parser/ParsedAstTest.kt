@@ -201,12 +201,12 @@ impl Eq for Int where { eq = {it, r} -> it == r, neq = {it, r} -> it != r }
 
     @Test
     fun `inherent impl`() {
-        val source = "impl Str where { length = {it} -> __native_string_length { s = it } }"
+        val source = "impl Str where { size = {it} -> __native_string_size { s = it } }"
         val module = parser.parseParsedModule(source, file = "test.mz")
         val decl = module.decls[0] as ParsedImplAbilityDecl
         assertTrue(decl.isInherent)
         assertEquals(1, decl.operations.size)
-        assertEquals("length", decl.operations[0].name)
+        assertEquals("size", decl.operations[0].name)
     }
 
     @Test

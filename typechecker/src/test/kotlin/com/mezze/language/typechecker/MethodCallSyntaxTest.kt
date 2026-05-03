@@ -91,7 +91,7 @@ class MethodCallSyntaxTest {
                 length = {it} -> 0
             }
 
-            let result = "hello".length {}
+            let result = "hello".size {}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")

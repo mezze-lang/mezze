@@ -468,7 +468,7 @@ class OptionModuleTest {
             use std::collections::seq
             let opt = Some { val = 42 }
             let xs = option::to_list { opt = opt }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """.trimIndent()
 
         assertEquals(1L, eval(source))
@@ -481,7 +481,7 @@ class OptionModuleTest {
             use std::collections::seq
             let opt: Option Int = None
             let xs = option::to_list { opt = opt }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """.trimIndent()
 
         assertEquals(0L, eval(source))

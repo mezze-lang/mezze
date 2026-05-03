@@ -88,7 +88,7 @@ class BuildCommand {
 
             val typeChecker = TypeChecker()
             val typeCheckResult = try {
-                typeChecker.typeCheck(ast, currentDir.toPath())
+                typeChecker.typeCheck(ast, currentDir.toPath(), enablePrelude = true)
             } catch (e: TypeCheckError) {
                 println(ErrorFormatter.format(e, source))
                 kotlin.system.exitProcess(4)

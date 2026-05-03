@@ -18,33 +18,33 @@
 # === Construction ===
 # Create a new buffer with the specified initial capacity
 pub let new = { capacity } -> __native_buffer_new { capacity = capacity }
-# Create an empty buffer with default capacity
 
+# Create an empty buffer with default capacity
 pub let empty = {} -> __native_buffer_empty {}
+
 # === Writing ===
 # Write bytes to the buffer
-
 pub let write = { buf, bytes } -> __native_buffer_write { buf = buf, bytes = bytes }
+
 # Write a single byte (0-255) to the buffer
-
 pub let write_byte = { buf, b } -> __native_buffer_write_byte { buf = buf, b = b }
-# Write a UTF-8 string to the buffer
 
+# Write a UTF-8 string to the buffer
 pub let write_string = { buf, s } -> __native_buffer_write_string { buf = buf, s = s }
+
 # === Conversion ===
 # Convert buffer contents to immutable Bytes
 # This copies the data - the buffer can continue to be used
-
 pub let to_bytes = { buf } -> __native_buffer_to_bytes { buf = buf }
+
 # === Query ===
 # Get the current size of the buffer in bytes
-
 pub let size = { buf } -> __native_buffer_size { buf = buf }
-# Check if the buffer is empty
 
+# Check if the buffer is empty
 pub let is_empty = { buf } -> __native_buffer_is_empty { buf = buf }
+
 # === Mutation ===
 # Clear the buffer (reset to empty state)
 # The buffer can be reused after clearing
-
 pub let clear = { buf } -> __native_buffer_clear { buf = buf }

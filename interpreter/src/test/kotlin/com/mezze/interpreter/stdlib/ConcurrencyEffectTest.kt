@@ -143,7 +143,7 @@ class ConcurrencyEffectTest {
             perform Loom in do
                 let p = Concurrency.spawn {computation = {} -> [1, 2, 3, 4, 5]}
                 let arr = Concurrency.await {promise = p}
-                seq::length {xs = arr}
+                seq::size {xs = arr}
         """)
         assertEquals(5L, result)
     }
@@ -291,7 +291,7 @@ class ConcurrencyEffectTest {
 
             perform Loom in do
                 let results = all {computations = []}
-                seq::length {xs = results}
+                seq::size {xs = results}
         """)
         assertEquals(0L, result)
     }
@@ -306,7 +306,7 @@ class ConcurrencyEffectTest {
                 let results = all {computations = [
                     {} -> 42
                 ]}
-                seq::length {xs = results} == 1
+                seq::size {xs = results} == 1
         """)
         assertEquals(true, result)
     }

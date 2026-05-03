@@ -1,13 +1,15 @@
-# Explicit closed record type annotations
 use std::int
 
-let processPoint: { point: { x: Int, y: Int } } -> Int = {point} -> point.x + point.y
-let formatPerson: { person: { name: Str, age: Int } } -> Str = {person} -> "$(person.name) is $(int::to_str {n = person.age})"
+let processPoint : { point: { x: Int, y: Int } } -> Int = { point } -> point.x + point.y
 
-let point1 = {x = 10, y = 20}
-let person1 = {name = "Bob", age = 25}
+let formatPerson : { person: { name: Str, age: Int } } -> Str = { person } -> "$(person.name) is $(int::to_str { n = person.age })"
 
-let result1 = processPoint {point = point1}
-let result2 = formatPerson {person = person1}
+let point1 = { x = 10, y = 20 }
+
+let person1 = { name = "Bob", age = 25 }
+
+let result1 = processPoint { point = point1 }
+
+let result2 = formatPerson { person = person1 }
 
 result1

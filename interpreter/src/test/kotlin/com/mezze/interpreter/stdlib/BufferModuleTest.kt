@@ -126,7 +126,7 @@ class BufferModuleTest {
             let buf = buffer::empty {}
             let buf2 = buffer::write_string { buf = buf, s = "Test" }
             let b = buffer::to_bytes { buf = buf2 }
-            bytes::length { b = b }
+            bytes::size { b = b }
         """)
         assertEquals(4L, result)
     }

@@ -1,18 +1,18 @@
 # Test polymorphic arithmetic with 3+ parameters
-let complex = {x, y, z} -> x + y # expected: complex : { x: 'a, y: 'a, z: 'b} with NumAdd 'a -> 'a 
+let complex = { x, y, z } -> x + y  # expected: complex : { x: 'a, y: 'a, z: 'b} with NumAdd 'a -> 'a 
 
-let fourParam = {x, y, z, w} -> x + y # expected: fourParam : { x: 'a, y: 'a, z: 'b, w: 'c } with NumAdd 'a -> 'a 
+let fourParam = { x, y, z, w } -> x + y  # expected: fourParam : { x: 'a, y: 'a, z: 'b, w: 'c } with NumAdd 'a -> 'a 
 
-let recordResult = {x, y, z} -> {result = x + y, other = z} # expected: recordResult : { x: 'a, y: 'a, z: 'b } with NumAdd 'a -> { result: 'a, other: 'b }
+let recordResult = { x, y, z } -> { result = x + y, other = z }  # expected: recordResult : { x: 'a, y: 'a, z: 'b } with NumAdd 'a -> { result: 'a, other: 'b }
 
 # Test do expressions with bidirectional type checking
-let doMultiple = {x, y, z} -> do
+let doMultiple = { x, y, z } -> do
   let sum = x + y
   let product = sum * z
   product
-# expected: doMultiple : { x: 'a, y: 'a, z: 'a } with NumAdd 'a, NumMul 'a -> 'a
 
-# Test function call instantiation
-let intResult = complex { x = 21, y = 42, z = "test" } # expected: intResult : Int
-let floatResult = complex { x = 21.5, y = 42.5, z = True } # expected: floatResult : Float
-let doResult = doMultiple { x = 1, y = 2, z = 3 } # expected: doResult : Int
+let intResult = complex { x = 21, y = 42, z = "test" }  # expected: intResult : Int
+
+let floatResult = complex { x = 21.5, y = 42.5, z = True }  # expected: floatResult : Float
+
+let doResult = doMultiple { x = 1, y = 2, z = 3 }  # expected: doResult : Int

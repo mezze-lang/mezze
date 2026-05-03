@@ -262,7 +262,17 @@ data class ConstraintResult(
     val unusedVariables: List<UnusedVariable> = emptyList(),  // Unused pattern bindings (warnings)
     val patternWarnings: List<String> = emptyList(),  // Warnings from pattern analysis (e.g., float literal patterns)
     val referencedBindings: Set<DefinitionRef.ByName> = emptySet(),  // Module-qualified references for dependency tracking
-    val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo> = emptyMap()  // Method call resolutions keyed by (ParsedFunctionCall loc, methodName)
+    val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo> = emptyMap(),  // Method call resolutions keyed by (ParsedFunctionCall loc, methodName)
+    // Per-call-site return type — keyed by the ParsedFunctionCall's loc.
+    // Set by the constraint generator to the fresh type var that gets unified
+    // with the call's actual return type. After the substitution is applied
+    // this carries the monomorphized return type that the TypedAstBuilder can
+    // stamp on `TypedCall.type`. Without this, qualified-import calls (like
+    // `seq::filter { ... }`) only know the generic scheme of their function
+    // reference (`{xs:[a], p: a->Bool} -> [a]`) and the call's `.type` falls
+    // back to the surrounding contextType (`unknown`) — which then breaks LSP
+    // per-segment chain inlay hints in pipe / dot-chain expressions.
+    val callReturnTypes: Map<Loc, MezzeType> = emptyMap()
 ) {
     /**
      * Information about a resolved method call (ability method or inherent method).
@@ -279,7 +289,12 @@ data class ConstraintResult(
         val implContentHash: String? = null,  // Content hash of the impl declaration (for inherent methods)
         val implStartLine: Int = 0,      // Loc of impl declaration — for computing TypedAbilityImpl hash
         val implStartCol: Int = 0,
-        val implSourceFile: String = ""  // Source file of impl declaration — disambiguates same line/col in different files
+        val implSourceFile: String = "",  // Source file of impl declaration — disambiguates same line/col in different files
+        // The function type at the call site so TypedAstBuilder can stamp it on
+        // the TypedCall (otherwise the call's `.type` falls back to the
+        // surrounding contextType — `unknown` for chained method calls). LSP
+        // chain-segment inlay hints rely on this being set.
+        val methodFunctionType: com.mezze.language.ast.MezzeType? = null
     )
     /**
      * Information about an undefined variable.
@@ -339,7 +354,8 @@ data class ConstraintResult(
                 unusedVariables = results.flatMap { it.unusedVariables },
                 patternWarnings = results.flatMap { it.patternWarnings },
                 referencedBindings = results.flatMap { it.referencedBindings }.toSet(),
-                methodCallResolutions = results.fold(emptyMap()) { acc, r -> acc + r.methodCallResolutions }
+                methodCallResolutions = results.fold(emptyMap()) { acc, r -> acc + r.methodCallResolutions },
+                callReturnTypes = results.fold(emptyMap()) { acc, r -> acc + r.callReturnTypes }
             )
         }
 

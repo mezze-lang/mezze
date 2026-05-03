@@ -26,7 +26,7 @@ class StringIntegrationTest {
     void lengthReturnsStringLength() {
         Object result = MezzeTestHelper.run("""
             use std::str
-            str::length { s = "hello" }
+            str::size { s = "hello" }
             """);
         assertEquals(5L, result);
     }
@@ -242,7 +242,7 @@ class StringIntegrationTest {
             use std::str
             use std::collections::seq
             let parts = str::split { s = "a,b,c", delimiter = "," }
-            seq::length { xs = parts }
+            seq::size { xs = parts }
             """);
         assertEquals(3L, result);
     }
@@ -262,7 +262,7 @@ class StringIntegrationTest {
             use std::str
             use std::collections::seq
             let parts = str::lines { s = "a\\nb\\nc" }
-            seq::length { xs = parts }
+            seq::size { xs = parts }
             """);
         assertEquals(3L, result);
     }
@@ -273,7 +273,7 @@ class StringIntegrationTest {
             use std::str
             use std::collections::seq
             let parts = str::words { s = "hello   world  test" }
-            seq::length { xs = parts }
+            seq::size { xs = parts }
             """);
         assertEquals(3L, result);
     }
@@ -311,7 +311,7 @@ class StringIntegrationTest {
             use std::str
             use std::collections::seq
             let cs = str::chars { s = "abc" }
-            seq::length { xs = cs }
+            seq::size { xs = cs }
             """);
         assertEquals(3L, result);
     }

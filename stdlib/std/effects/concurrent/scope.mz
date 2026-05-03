@@ -1,41 +1,27 @@
-# std/effects/concurrent/scope.mezze - Structured concurrency with scopes
-#
-# Provides structured concurrency where spawned tasks are automatically
-# awaited when the scope exits, and cancellation propagates to all children.
-#
-# This builds on the Concurrency effect to provide automatic lifecycle management.
-#
-# Usage:
-#   use std::effects::concurrent::scope::{Scope, AutoScope}
-#
-#   perform AutoScope in do
-#       Scope.fork { task = {} -> expensive_computation_1 {} }
-#       Scope.fork { task = {} -> expensive_computation_2 {} }
-#       # Both tasks are automatically awaited when scope exits
 use std::effects::concurrency::{ Concurrency, Loom }
 use std::collections::seq
-# Scope effect - structured concurrency with automatic awaiting
-# Scope effect - structured concurrency with automatic awaiting
-# Scope effect - structured concurrency with automatic awaiting
-# Scope effect - structured concurrency with automatic awaiting
 
+# Scope effect - structured concurrency with automatic awaiting
+# Scope effect - structured concurrency with automatic awaiting
+# Scope effect - structured concurrency with automatic awaiting
+# Scope effect - structured concurrency with automatic awaiting
 effect Scope where {
   fork: { task: {} -> 'a } -> {} <Scope, Concurrency>
 }
+
 # Fork a task within this scope
 # The task will be automatically awaited when the scope exits
 # AutoScope impl - automatically awaits all forked tasks on scope exit
 # Uses Concurrency effect internally for spawning
-
 impl Scope for AutoScope where {
   fork = { task } -> do
     let _ = Concurrency.spawn { computation = task }
     {}
 }
+
 # Spawn the task using Concurrency effect
 # Run a scoped computation with automatic structured concurrency
 # All forked tasks are awaited before this function returns
-
-pub let with_scope: { computation: {} -> 'a <Scope, Concurrency> } -> 'a <Concurrency> = { computation } ->
+pub let with_scope : { computation: {} -> 'a <Scope, Concurrency> } -> 'a <Concurrency> = { computation } ->
   perform AutoScope in do
     computation {}

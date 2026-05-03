@@ -32,7 +32,7 @@ class BytesModuleTest {
         val result = eval("""
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello" }
-            bytes::length { b = b }
+            bytes::size { b = b }
         """)
         assertEquals(5L, result)
     }
@@ -42,7 +42,7 @@ class BytesModuleTest {
         val result = eval("""
             use std::collections::bytes
             let b = bytes::from_seq { arr = [72, 105] }
-            bytes::length { b = b }
+            bytes::size { b = b }
         """)
         assertEquals(2L, result)
     }
@@ -52,7 +52,7 @@ class BytesModuleTest {
         val result = eval("""
             use std::collections::bytes
             match bytes::from_hex { s = "48656c6c6f" } is
-                Some { val } -> bytes::length { b = val }
+                Some { val } -> bytes::size { b = val }
                 None -> 0
         """)
         assertEquals(5L, result)
@@ -74,7 +74,7 @@ class BytesModuleTest {
         val result = eval("""
             use std::collections::bytes
             match bytes::from_base64 { s = "SGVsbG8=" } is
-                Some { val } -> bytes::length { b = val }
+                Some { val } -> bytes::size { b = val }
                 None -> 0
         """)
         assertEquals(5L, result)
@@ -98,7 +98,7 @@ class BytesModuleTest {
         val result = eval("""
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello World" }
-            bytes::length { b = b }
+            bytes::size { b = b }
         """)
         assertEquals(11L, result)
     }
@@ -154,7 +154,7 @@ class BytesModuleTest {
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello World" }
             let s = bytes::slice { b = b, start = 0, end = 5 }
-            bytes::length { b = s }
+            bytes::size { b = s }
         """)
         assertEquals(5L, result)
     }
@@ -165,7 +165,7 @@ class BytesModuleTest {
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello World" }
             let t = bytes::take { b = b, n = 5 }
-            bytes::length { b = t }
+            bytes::size { b = t }
         """)
         assertEquals(5L, result)
     }
@@ -176,7 +176,7 @@ class BytesModuleTest {
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello World" }
             let d = bytes::drop { b = b, n = 6 }
-            bytes::length { b = d }
+            bytes::size { b = d }
         """)
         assertEquals(5L, result)
     }
@@ -190,7 +190,7 @@ class BytesModuleTest {
             let b1 = bytes::from_string { s = "Hello" }
             let b2 = bytes::from_string { s = "World" }
             let b3 = bytes::concat { b1 = b1, b2 = b2 }
-            bytes::length { b = b3 }
+            bytes::size { b = b3 }
         """)
         assertEquals(10L, result)
     }
@@ -204,7 +204,7 @@ class BytesModuleTest {
             let b3 = bytes::from_string { s = "C" }
             let bs = [b1, b2, b3]
             let combined = bytes::concat_all { bs = bs }
-            bytes::length { b = combined }
+            bytes::size { b = combined }
         """)
         assertEquals(3L, result)
     }
@@ -215,7 +215,7 @@ class BytesModuleTest {
             use std::collections::bytes
             let b = bytes::from_string { s = "Hi" }
             let r = bytes::repeat { b = b, n = 3 }
-            bytes::length { b = r }
+            bytes::size { b = r }
         """)
         assertEquals(6L, result)
     }
@@ -373,7 +373,7 @@ class BytesModuleTest {
             use std::collections::seq
             let b = bytes::from_string { s = "Hi" }
             let arr = bytes::to_seq { b = b }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
         """)
         assertEquals(2L, result)
     }

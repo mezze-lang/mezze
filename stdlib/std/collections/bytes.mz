@@ -1,4 +1,5 @@
 use std::abilities::compare::{ Eq, Ord }
+use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
 use std::int
 
@@ -17,6 +18,7 @@ impl Ord for Bytes where {
   gt = { it, r } -> __native_bytes_compare { b1 = it, b2 = r } == 1,
   ge = { it, r } -> __native_bytes_compare { b1 = it, b2 = r } != (0 - 1),
 }
+
 # std/collections/bytes.mezze - Binary data operations
 #
 # Bytes is a built-in type for efficient binary data handling.
@@ -29,90 +31,89 @@ impl Ord for Bytes where {
 # - Binary serialization/deserialization
 # === Construction ===
 # Create an empty byte sequence
-
 pub let empty = {} -> __native_bytes_empty {}
+
 # Create bytes from a UTF-8 string
-
 pub let from_string = { s } -> __native_bytes_from_string { s = s }
+
 # Create bytes from a seq of integers (0-255)
-
 pub let from_seq = { arr } -> __native_bytes_from_seq { arr = arr }
+
 # Create bytes from a hex string (e.g., "48656c6c6f"), returns Option
-
 pub let from_hex = { s } -> __native_bytes_from_hex { s = s }
+
 # Create bytes from a base64-encoded string, returns Option
-
 pub let from_base64 = { s } -> __native_bytes_from_base64 { s = s }
+
 # === Basic Operations ===
-# Get the length of the byte sequence
+# Get the size (number of bytes)
+pub let size = { b } -> __native_bytes_size { b = b }
 
-pub let length = { b } -> __native_bytes_length { b = b }
 # Check if the byte sequence is empty
-
 pub let is_empty = { b } -> __native_bytes_is_empty { b = b }
-# Get the byte at an index as an unsigned int (0-255), returns Option
 
+# Get the byte at an index as an unsigned int (0-255), returns Option
 pub let get = { b, i } -> __native_bytes_get { b = b, i = i }
+
 # === Slicing ===
 # Get a slice from start (inclusive) to end (exclusive)
-
 pub let slice = { b, start, end } -> __native_bytes_slice { b = b, start = start, end = end }
+
 # Take the first n bytes
-
 pub let take = { b, n } -> __native_bytes_take { b = b, n = n }
-# Drop the first n bytes
 
+# Drop the first n bytes
 pub let drop = { b, n } -> __native_bytes_drop { b = b, n = n }
+
 # === Combining ===
 # Concatenate two byte sequences
-
 pub let concat = { b1, b2 } -> __native_bytes_concat { b1 = b1, b2 = b2 }
+
 # Concatenate multiple byte sequences efficiently (single allocation)
-
 pub let concat_all = { bs } -> __native_bytes_concat_all { bs = bs }
-# Repeat bytes n times
 
+# Repeat bytes n times
 pub let repeat = { b, n } -> __native_bytes_repeat { b = b, n = n }
+
 # === Searching ===
 # Find the index of a pattern, returns Option Int
-
 pub let index_of = { b, pattern } -> __native_bytes_index_of { b = b, pattern = pattern }
+
 # Check if bytes contains a pattern
-
 pub let contains = { b, pattern } -> __native_bytes_contains { b = b, pattern = pattern }
+
 # Check if bytes starts with a prefix
-
 pub let starts_with = { b, prefix } -> __native_bytes_starts_with { b = b, prefix = prefix }
-# Check if bytes ends with a suffix
 
+# Check if bytes ends with a suffix
 pub let ends_with = { b, suffix } -> __native_bytes_ends_with { b = b, suffix = suffix }
+
 # === Transformations ===
 # Reverse the byte order
-
 pub let reverse = { b } -> __native_bytes_reverse { b = b }
-# Map a function over each byte (function receives/returns 0-255 int)
 
+# Map a function over each byte (function receives/returns 0-255 int)
 pub let map = { b, f } -> __native_bytes_map { b = b, f = f }
+
 # Fold over bytes from left to right
 # f receives { acc: 'a, byte: Int } and returns 'a
-
 pub let fold = { b, init, f } -> __native_bytes_fold { b = b, init = init, f = f }
+
 # === Conversions ===
 # Convert to a UTF-8 string, returns Result Str String
-
 pub let to_str = { b } -> __native_bytes_to_str { b = b }
+
 # Convert to a seq of integers (0-255)
-
 pub let to_seq = { b } -> __native_bytes_to_seq { b = b }
+
 # Convert to a hexadecimal string (lowercase)
-
 pub let to_hex = { b } -> __native_bytes_to_hex { b = b }
-# Convert to a base64-encoded string
 
+# Convert to a base64-encoded string
 pub let to_base64 = { b } -> __native_bytes_to_base64 { b = b }
 
 impl Bytes where {
-  length = { it } -> length { b = it },
+  size = { it } -> size { b = it },
   is_empty = { it } -> is_empty { b = it },
   get = { it, i } -> get { b = it, i = i },
   slice = { it, start, end } -> slice { b = it, start = start, end = end },
@@ -127,4 +128,9 @@ impl Bytes where {
   to_seq = { it } -> to_seq { b = it },
   to_hex = { it } -> to_hex { b = it },
   to_base64 = { it } -> to_base64 { b = it },
+}
+
+impl Sized for Bytes where {
+  size = { it } -> size { b = it },
+  is_empty = { it } -> is_empty { b = it },
 }

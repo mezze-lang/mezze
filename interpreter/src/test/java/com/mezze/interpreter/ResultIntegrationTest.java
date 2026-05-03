@@ -237,7 +237,7 @@ class ResultIntegrationTest {
             use std::collections::seq
             let res: (Result Int Str) = Ok { val = 42 }
             let arr = result::to_list { result = res }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
             """);
         assertEquals(1L, result);
     }
@@ -249,7 +249,7 @@ class ResultIntegrationTest {
             use std::collections::seq
             let res: (Result Int Str) = Err { error = "failed" }
             let arr = result::to_list { result = res }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
             """);
         assertEquals(0L, result);
     }
@@ -308,7 +308,7 @@ class ResultIntegrationTest {
             let res: (Result Int Str) = Err { error = "failed" }
             result::fold {
                 result = res,
-                on_err = { error } -> str::length { s = error },
+                on_err = { error } -> str::size { s = error },
                 on_ok = { val } -> val
             }
             """);

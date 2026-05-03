@@ -80,11 +80,11 @@ object ListTypes {
             )
         }
 
-        // __native_list_length: {xs: List 'a} -> Int
+        // __native_list_size: {xs: List 'a} -> Int
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val listType = MezzeType.ListType(elemType)
-            context["__native_list_length"] = MezzeType.FunctionType(
+            context["__native_list_size"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to listType)),
                 MezzeType.IntType
             )

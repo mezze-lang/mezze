@@ -394,7 +394,7 @@ public class STMScopedEffectsTest {
                     STM.write {var = list_var, val = new_list}
 
                 let final = deref {var = list_var}
-                seq::length {xs = final}
+                seq::size {xs = final}
 
             test {}
             """;

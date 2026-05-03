@@ -31,11 +31,11 @@ class NonEmptyListTest {
     fun testFromHeadTail() {
         val code = """
             use std::collections::list::{empty}
-            use std::collections::nonemptylist::{from_head_tail, head, length}
+            use std::collections::nonemptylist::{from_head_tail, head, size}
 
             let xs = from_head_tail { head = 1, tail = empty {} }
             let h = head { xs = xs }
-            let len = length { xs = xs }
+            let len = size { xs = xs }
 
             if h == 1 && len == 1 then 1 else 0
         """
@@ -46,12 +46,12 @@ class NonEmptyListTest {
     @DisplayName("NonEmptyList cons")
     fun testCons() {
         val code = """
-            use std::collections::nonemptylist::{singleton, cons, head, length}
+            use std::collections::nonemptylist::{singleton, cons, head, size}
 
             let xs = singleton { x = 2 }
             let ys = cons { x = 1, xs = xs }
             let h = head { xs = ys }
-            let len = length { xs = ys }
+            let len = size { xs = ys }
 
             if h == 1 && len == 2 then 1 else 0
         """
@@ -62,13 +62,13 @@ class NonEmptyListTest {
     @DisplayName("NonEmptyList append")
     fun testAppend() {
         val code = """
-            use std::collections::nonemptylist::{singleton, append, length}
+            use std::collections::nonemptylist::{singleton, append, size}
 
             let xs = singleton { x = 1 }
             let ys = singleton { x = 2 }
             let zs = append { xs = xs, ys = ys }
 
-            length { xs = zs }
+            size { xs = zs }
         """
         assertEquals(2L, eval(code))
     }
@@ -132,12 +132,12 @@ class NonEmptyListTest {
     fun testToList() {
         val code = """
             use std::collections::nonemptylist::{singleton, to_list}
-            use std::collections::list::{length}
+            use std::collections::list::{size}
 
             let nel = singleton { x = 42 }
             let xs = to_list { xs = nel }
 
-            length { xs = xs }
+            size { xs = xs }
         """
         assertEquals(1L, eval(code))
     }

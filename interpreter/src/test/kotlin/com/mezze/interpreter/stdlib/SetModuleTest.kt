@@ -218,7 +218,7 @@ class SetModuleTest {
             use std::collections::seq
             let s = set::insert { s = set::insert { s = set::empty {}, x = 1 }, x = 2 }
             let arr = set::to_seq { s = s }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
         """)
         assertEquals(2L, result)
     }

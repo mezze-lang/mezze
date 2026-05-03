@@ -638,7 +638,10 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
                     val fieldResult = unify(appliedType1, appliedType2, typeDeclarations)
                     if (fieldResult is UnificationResult.Failure) {
                         return UnificationResult.Failure(
-                            message = "Field '$fieldName' type mismatch: ${fieldResult.message}",
+                            // type2 is the "expected" side (callee's param shape)
+                            // and type1 is "actual" (caller's arg). Match unify
+                            // convention used elsewhere in this file.
+                            message = formatFieldMismatch(fieldName, appliedType2, appliedType1, fieldResult.message),
                             type1 = rec1,
                             type2 = rec2
                         )
@@ -657,19 +660,24 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
 
     // CASE 2: Both records are CLOSED
     // For closed records, fields must match EXACTLY
-    // Unlike open records, closed records don't allow extra fields
+    // Unlike open records, closed records don't allow extra fields.
+    //
+    // Convention used elsewhere in this file: rec1 is the "got" side
+    // (caller's actual), rec2 is the "expected" side (callee's
+    // signature). Phrase the error in those terms — "first/second" is
+    // meaningless to a user reading a diagnostic.
     if (fields1 != fields2) {
-        val extraIn1 = fields1 - fields2
-        val extraIn2 = fields2 - fields1
-        val mismatchParts = mutableListOf<String>()
-        if (extraIn1.isNotEmpty()) {
-            mismatchParts.add("extra fields in first: ${extraIn1.joinToString()}")
+        val missing = fields2 - fields1   // expected has, got doesn't
+        val extra   = fields1 - fields2   // got has, expected doesn't
+        val parts = mutableListOf<String>()
+        if (missing.isNotEmpty()) {
+            parts.add("missing ${missing.joinToString(", ") { "'$it'" }}")
         }
-        if (extraIn2.isNotEmpty()) {
-            mismatchParts.add("extra fields in second: ${extraIn2.joinToString()}")
+        if (extra.isNotEmpty()) {
+            parts.add("unexpected ${extra.joinToString(", ") { "'$it'" }}")
         }
         return UnificationResult.Failure(
-            message = "Closed record field mismatch: {${fields1.joinToString()}} vs {${fields2.joinToString()}}. ${mismatchParts.joinToString("; ")}",
+            message = "record fields don't match: ${parts.joinToString("; ")}",
             type1 = rec1,
             type2 = rec2
         )
@@ -686,7 +694,7 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
         val fieldResult = unify(fieldType1, fieldType2, typeDeclarations)
         if (fieldResult is UnificationResult.Failure) {
             return UnificationResult.Failure(
-                message = "Field '$fieldName' type mismatch: ${fieldResult.message}",
+                message = formatFieldMismatch(fieldName, fieldType2, fieldType1, fieldResult.message),
                 type1 = rec1,
                 type2 = rec2
             )
@@ -1120,6 +1128,36 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
  * Delegates to prettyPrintType from TypePrinter.kt.
  */
 private fun formatType(type: MezzeType): String = prettyPrintType(type)
+
+/**
+ * Build a focused error message when a record field's type fails to unify
+ * against an expected shape. Avoids the doubled "Field 'x' type mismatch:
+ * Type mismatch:" phrasing — strips the inner generic prefix and, when the
+ * expected field type is a closed record (the shape produced by issue #216's
+ * method-call inference), foregrounds the shape so the user sees what they
+ * needed to pass.
+ */
+private fun formatFieldMismatch(
+    fieldName: String,
+    expectedFieldType: MezzeType,
+    actualFieldType: MezzeType,
+    innerMessage: String
+): String {
+    val expectedStr = formatType(expectedFieldType)
+    val actualStr = formatType(actualFieldType)
+    // The inner message is the recursive unification failure for the field's
+    // own type. When we can name the expected vs got types directly, that
+    // alone is clearer than the doubled "Field 'x' type mismatch: Type
+    // mismatch: <X> not compatible with <Y>" form. Inner detail is only
+    // surfaced if the field's own types themselves had a deeper sub-mismatch
+    // (nested records, function types, etc.).
+    val baseMessage = "Field '$fieldName' type mismatch: expected $expectedStr, got $actualStr"
+    val cleanedInner = innerMessage.removePrefix("Type mismatch: ").trim()
+    // Inner message is "shallow" if it just restates the same expected/got
+    // pair we already named (any of the standard unification phrasings).
+    val isShallow = cleanedInner.contains(expectedStr) && cleanedInner.contains(actualStr)
+    return if (isShallow) baseMessage else "$baseMessage ($cleanedInner)"
+}
 
 /**
  * Expand a TypeApplication to a RecordType.

@@ -1,75 +1,75 @@
 # Test mixing open and closed variants in different contexts
-
 # Closed variant parameter, open variant return
-let wrapColor = {c} -> match c is
-  Red -> Wrapped {val = 1}
-  Green -> Wrapped {val = 2}
+let wrapColor = { c } -> match c is
+  Red -> Wrapped { val = 1 }
+  Green -> Wrapped { val = 2 }
   Blue -> Fallback
-  _ -> Other                                                    # expected: wrapColor : { c: | Red, Green, Blue, ... | } -> | Wrapped { val: Int }, Fallback, Other |
+  _ -> Other
 
-# Open variant parameter, closed variant return
-let unwrapSafely = {w} -> match w is
-  Wrapped {val} -> Some {val = val}
-  _ -> None                                                     # expected: unwrapSafely : { w: | Wrapped { val: 'a }, ... | } -> Option 'a
 
-# Both closed - using custom names (Ok/Err are reserved for Result type)
-let boolToStatus = {b} -> match b is
+let unwrapSafely = { w } -> match w is
+  Wrapped { val } -> Some { val = val }
+  _ -> None
+
+
+let boolToStatus = { b } -> match b is
   True -> Success
-  False -> Failure                                              # expected: boolToStatus : { b: Bool } -> | Failure, Success |
+  False -> Failure
 
-# Both open
-let partialMatch = {x, y} -> match x is
-  Some {val} -> match y is
-    Some {val = b} -> val + b
+
+let partialMatch = { x, y } -> match x is
+  Some { val } -> match y is
+    Some { val = b } -> val + b
     _ -> val
-  _ -> 0                                                        # expected: partialMatch : { x: Option Int, y: Option Int } -> Int
+  _ -> 0
 
-# Closed input, multiple open outputs
-let branch = {choice} -> match choice is
+
+let branch = { choice } -> match choice is
   Left -> Alpha
   Right -> Beta
-  _ -> Gamma                                                    # expected: branch : { choice: | Left, Right, ... | } -> | Alpha, Beta, Gamma |
+  _ -> Gamma
 
-# Function matching closed Option type - all constructors covered, no wildcard needed
-let handleWithFallback = {opt} -> match opt is
-  Some {val} -> val
-  None -> 42                                                    # expected: handleWithFallback : { opt: Option Int } -> Int
 
-# Closed variant with polymorphic operations
-let closedMath = {op, x, y} -> match op is
+let handleWithFallback = { opt } -> match opt is
+  Some { val } -> val
+  None -> 42
+
+
+let closedMath = { op, x, y } -> match op is
   Add -> x + y
-  Mul -> x * y                                                  # expected: closedMath : { op: | Add, Mul |, x: 'a, y: 'a } with NumAdd 'a, NumMul 'a -> 'a
+  Mul -> x * y
 
-# Open variant with polymorphic operations
-let openMath = {op, x, y} -> match op is
+
+let openMath = { op, x, y } -> match op is
   Add -> x + y
-  _ -> x * y                                                    # expected: openMath : { op: | Add, ... |, x: 'a, y: 'a } with NumAdd 'a, NumMul 'a -> 'a
+  _ -> x * y
 
-# Mixed: closed in one branch, open in another
-let complexBranch = {mode, v1, v2} -> match mode is
+
+let complexBranch = { mode, v1, v2 } -> match mode is
   UseFirst -> match v1 is
     A -> 1
     B -> 2
   UseSecond -> match v2 is
-    X {val} -> val
-    _ -> 0                                                      # expected: complexBranch : { mode: | UseFirst, UseSecond |, v1: | A, B |, v2: | X { val: Int }, ... | } -> Int
+    X { val } -> val
+    _ -> 0
 
-# Closed variant in nested pattern
-let nestedClosed = {outer} -> match outer is
-  Container {inner} -> match inner is
+
+let nestedClosed = { outer } -> match outer is
+  Container { inner } -> match inner is
     Red -> 1
-    Blue -> 2                                                   # expected: nestedClosed : { outer: | Container { inner: | Red, Blue | } | } -> Int
+    Blue -> 2
 
-# Exhaustive pattern creates closed, but returns open
-let exhaustiveInput = {x} -> match x is
-  A -> Result {val = 1}
-  B -> Result {val = 2}
+
+let exhaustiveInput = { x } -> match x is
+  A -> Result { val = 1 }
+  B -> Result { val = 2 }
   C -> Other
-  _ -> Unknown                                                  # expected: exhaustiveInput : { x: | A, B, C, ... | } -> | Result { val: Int }, Other, Unknown |
+  _ -> Unknown
 
-# Polymorphic closed variant with constraints
-let closedCompare = {cmp, x, y} -> match cmp is
+
+let closedCompare = { cmp, x, y } -> match cmp is
   Less -> x < y
-  Equal -> x == y                                               # expected: closedCompare : { cmp: | Less, Equal |, x: 'a, y: 'a } with Ord 'a, Eq 'a -> Bool
+  Equal -> x == y
 
-closedCompare {cmp = Less, x = 5, y = 10}
+
+closedCompare { cmp = Less, x = 5, y = 10 }

@@ -670,8 +670,19 @@ class ConstraintGenerator(
 
                             // ParsedImplAbilityDecl has no contentHash — use loc-based key
                             val opKey = "_inherent_${item.loc}_${op.name}"
+                            // Stash the full FunctionType so TypedAstBuilder
+                            // can recover post-solve PARAM types too — issue
+                            // #230. The body type alone (used by #213 for
+                            // returns) doesn't include the impl's lambda
+                            // param TypeVars, which the solver populated
+                            // when the body's usage sites constrained them.
+                            val implParamRecord = MezzeType.RecordType(fields = paramTypes, rowVar = null)
+                            val implFunctionType = MezzeType.FunctionType(
+                                paramType = implParamRecord,
+                                returnType = bodyResult.type
+                            )
                             results[opKey] = ConstraintResult(
-                                type = bodyResult.type,
+                                type = implFunctionType,
                                 constraints = constraints,
                                 effects = bodyResult.effects,
                                 effectInstances = bodyResult.effectInstances,

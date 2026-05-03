@@ -134,7 +134,7 @@ class EffectHandlerRulesTest {
             impl Auth for DatabaseAuth where {
               check: { token: Str } -> Bool <Database> = { token } -> do
                 let results = Database.query { sql = "SELECT * FROM tokens" }
-                seq::length {xs = results} > 0
+                seq::size {xs = results} > 0
             }
 
             let authenticate = { token } -> Auth.check { token = token }

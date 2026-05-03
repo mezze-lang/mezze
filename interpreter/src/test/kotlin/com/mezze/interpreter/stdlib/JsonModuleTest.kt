@@ -94,7 +94,7 @@ class JsonModuleTest {
 
             let j: Json = JArray {items = [JInt {val = 1}, JInt {val = 2}, JInt {val = 3}]}
             match j is
-                JArray {items} -> seq::length {xs = items}
+                JArray {items} -> seq::size {xs = items}
                 _ -> 0
         """)
         assertEquals(3L, result)
@@ -111,7 +111,7 @@ class JsonModuleTest {
                 {key = "age", value = JInt {val = 30}}
             ]}
             match j is
-                JObject {fields} -> seq::length {xs = fields}
+                JObject {fields} -> seq::size {xs = fields}
                 _ -> 0
         """)
         assertEquals(2L, result)
@@ -282,7 +282,7 @@ class JsonModuleTest {
             let parsed = parse_str {s = "[1, 2, 3]"}
             match parsed is
                 Ok {val} -> match val is
-                    JArray {items} -> seq::length {xs = items}
+                    JArray {items} -> seq::size {xs = items}
                     _ -> 0
                 _ -> 0
         """)
@@ -298,7 +298,7 @@ class JsonModuleTest {
             let parsed = parse_str {s = "{\"name\": \"Alice\", \"age\": 30}"}
             match parsed is
                 Ok {val} -> match val is
-                    JObject {fields} -> seq::length {xs = fields}
+                    JObject {fields} -> seq::size {xs = fields}
                     _ -> 0
                 _ -> 0
         """)

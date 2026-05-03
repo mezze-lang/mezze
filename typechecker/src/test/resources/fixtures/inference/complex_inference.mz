@@ -1,11 +1,12 @@
 use std::int
 
 # Complex type inference with nested structures
-let calculator = {operation, x, y} -> match operation is
+let calculator = { operation, x, y } -> match operation is
   Add -> x + y
   Multiply -> x * y
   Divide -> if y == 0 then 0 else x / y
 
-let formatResult = {calc, op, a, b} -> "Result: $(int::to_str {n = calc {operation = op, x = a, y = b} })"
+
+let formatResult = { calc, op, a, b } -> "Result: $(int::to_str { n = calc { operation = op, x = a, y = b } })"
 
 formatResult

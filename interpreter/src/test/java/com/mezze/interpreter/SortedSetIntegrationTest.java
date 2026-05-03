@@ -239,7 +239,7 @@ class SortedSetIntegrationTest {
             let s3 = sorted_set::add { s = s2, x = 1 }
             let s4 = sorted_set::add { s = s3, x = 2 }
             let xs = sorted_set::to_list { s = s4 }
-            list::length { xs = xs }
+            list::size { xs = xs }
             """);
         assertEquals(3L, result);
     }

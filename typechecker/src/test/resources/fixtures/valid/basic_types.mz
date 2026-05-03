@@ -1,7 +1,10 @@
 # Basic literal types
-let x = 42        # expected: x : Int
-let y = 3.14      # expected: y : Float
-let name = "Alice" # expected: name : Str
-let flag = True   # expected: flag : Bool
+let x = 42  # expected: x : Int
+
+let y = 3.14  # expected: y : Float
+
+let name = "Alice"  # expected: name : Str
+
+let flag = True  # expected: flag : Bool
 
 x + 10

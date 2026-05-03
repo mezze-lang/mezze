@@ -32,7 +32,7 @@ class DequeModuleTest {
         val result = eval("""
             use std::collections::deque
             let d = deque::singleton { x = 42 }
-            deque::length { d = d }
+            deque::size { d = d }
         """)
         assertEquals(1L, result)
     }
@@ -43,7 +43,7 @@ class DequeModuleTest {
             use std::collections::deque
             let xs = Cons { head = 1, tail = Cons { head = 2, tail = Cons { head = 3, tail = Nil } } }
             let d = deque::from_list { xs = xs }
-            deque::length { d = d }
+            deque::size { d = d }
         """)
         assertEquals(3L, result)
     }
@@ -56,7 +56,7 @@ class DequeModuleTest {
             use std::collections::deque
             let d1 = deque::singleton { x = 2 }
             let d2 = deque::push_front { d = d1, x = 1 }
-            deque::length { d = d2 }
+            deque::size { d = d2 }
         """)
         assertEquals(2L, result)
     }
@@ -80,7 +80,7 @@ class DequeModuleTest {
             use std::collections::deque
             let d1 = deque::singleton { x = 1 }
             let d2 = deque::push_back { d = d1, x = 2 }
-            deque::length { d = d2 }
+            deque::size { d = d2 }
         """)
         assertEquals(2L, result)
     }
@@ -129,7 +129,7 @@ class DequeModuleTest {
             use std::collections::deque
             let d = deque::push_back { d = deque::push_back { d = deque::empty {}, x = 1 }, x = 2 }
             match deque::pop_front { d = d } is
-                Some { val } -> deque::length { d = val.tail }
+                Some { val } -> deque::size { d = val.tail }
                 None -> 0
         """)
         assertEquals(1L, result)
@@ -164,7 +164,7 @@ class DequeModuleTest {
             use std::collections::deque
             let d = deque::push_back { d = deque::push_back { d = deque::empty {}, x = 1 }, x = 2 }
             match deque::pop_back { d = d } is
-                Some { val } -> deque::length { d = val.init }
+                Some { val } -> deque::size { d = val.init }
                 None -> 0
         """)
         assertEquals(1L, result)
@@ -246,7 +246,7 @@ class DequeModuleTest {
             let d1 = deque::push_back { d = deque::empty {}, x = 1 }
             let d2 = deque::push_back { d = d1, x = 2 }
             let d3 = deque::push_back { d = d2, x = 3 }
-            deque::length { d = d3 }
+            deque::size { d = d3 }
         """)
         assertEquals(3L, result)
     }
@@ -273,7 +273,7 @@ class DequeModuleTest {
             use std::collections::seq
             let d = deque::push_back { d = deque::push_back { d = deque::empty {}, x = 1 }, x = 2 }
             let arr = deque::to_seq { d = d }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
         """)
         assertEquals(2L, result)
     }
@@ -313,7 +313,7 @@ class DequeModuleTest {
             use std::collections::deque
             let d1 = deque::push_back { d = deque::push_back { d = deque::push_back { d = deque::empty {}, x = 1 }, x = 2 }, x = 3 }
             let d2 = deque::filter { d = d1, p = {x} -> x > 1 }
-            deque::length { d = d2 }
+            deque::size { d = d2 }
         """)
         assertEquals(2L, result)
     }
@@ -350,7 +350,7 @@ class DequeModuleTest {
             let d1 = deque::push_back { d = deque::empty {}, x = 1 }
             let d2 = deque::push_back { d = deque::empty {}, x = 2 }
             let d3 = deque::concat { d1 = d1, d2 = d2 }
-            deque::length { d = d3 }
+            deque::size { d = d3 }
         """)
         assertEquals(2L, result)
     }
@@ -378,7 +378,7 @@ class DequeModuleTest {
             let d1 = deque::empty {}
             let d2 = deque::enqueue { d = d1, x = 1 }
             let d3 = deque::enqueue { d = d2, x = 2 }
-            deque::length { d = d3 }
+            deque::size { d = d3 }
         """)
         assertEquals(2L, result)
     }
@@ -422,7 +422,7 @@ class DequeModuleTest {
             let d1 = deque::empty {}
             let d2 = deque::push { d = d1, x = 1 }
             let d3 = deque::push { d = d2, x = 2 }
-            deque::length { d = d3 }
+            deque::size { d = d3 }
         """)
         assertEquals(2L, result)
     }

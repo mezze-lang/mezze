@@ -1,8 +1,8 @@
 # Record Spread Inference Tests - Simplified
-
 # Basic record spread
-let inferredBase = {x = 42, y = "hello"} # expected: inferredBase : { x: Int, y: Str }
-let inferredUpdate = {...inferredBase, x = 100} # expected: inferredUpdate : { x: Int, y: Str }
+let inferredBase = { x = 42, y = "hello" }  # expected: inferredBase : { x: Int, y: Str }
+
+let inferredUpdate = { ...inferredBase, x = 100 }  # expected: inferredUpdate : { x: Int, y: Str }
 
 # Simple function that creates a record with x field
-let updateFunc = {record} -> {x = 99} # expected: updateFunc : { record: 'a } -> { x: Int }
+let updateFunc = { record } -> { x = 99 }  # expected: updateFunc : { record: 'a } -> { x: Int }

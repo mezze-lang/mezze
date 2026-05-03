@@ -18,7 +18,7 @@ class BytesInterpreterTest {
     fun `empty bytes has length 0`() {
         val result = eval("""
             use std::collections::bytes
-            bytes::length { b = bytes::empty {} }
+            bytes::size { b = bytes::empty {} }
         """)
         assertEquals(0L, result)
     }
@@ -28,7 +28,7 @@ class BytesInterpreterTest {
         val result = eval("""
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello" }
-            bytes::length { b = b }
+            bytes::size { b = b }
         """)
         assertEquals(5L, result)
     }
@@ -38,7 +38,7 @@ class BytesInterpreterTest {
         val result = eval("""
             use std::collections::bytes
             let b = bytes::from_seq { arr = [72, 101, 108, 108, 111] }
-            bytes::length { b = b }
+            bytes::size { b = b }
         """)
         assertEquals(5L, result)
     }
@@ -99,7 +99,7 @@ class BytesInterpreterTest {
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello World" }
             let sliced = bytes::slice { b = b, start = 0, end = 5 }
-            bytes::length { b = sliced }
+            bytes::size { b = sliced }
         """)
         assertEquals(5L, result)
     }
@@ -121,7 +121,7 @@ class BytesInterpreterTest {
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello" }
             let dropped = bytes::drop { b = b, n = 2 }
-            bytes::length { b = dropped }
+            bytes::size { b = dropped }
         """)
         assertEquals(3L, result) // "llo" = 3 bytes
     }
@@ -137,7 +137,7 @@ class BytesInterpreterTest {
             let b1 = bytes::from_string { s = "Hello" }
             let b2 = bytes::from_string { s = " World" }
             let combined = bytes::concat { b1 = b1, b2 = b2 }
-            bytes::length { b = combined }
+            bytes::size { b = combined }
         """)
         assertEquals(11L, result)
     }
@@ -161,7 +161,7 @@ class BytesInterpreterTest {
         val result = eval("""
             use std::collections::bytes
             match bytes::from_hex { s = "48656c6c6f" } is
-                Some { val } -> bytes::length { b = val }
+                Some { val } -> bytes::size { b = val }
                 None -> -1
         """)
         assertEquals(5L, result)
@@ -197,7 +197,7 @@ class BytesInterpreterTest {
         val result = eval("""
             use std::collections::bytes
             match bytes::from_base64 { s = "SGVsbG8=" } is
-                Some { val } -> bytes::length { b = val }
+                Some { val } -> bytes::size { b = val }
                 None -> -1
         """)
         assertEquals(5L, result)
@@ -345,7 +345,7 @@ class BytesInterpreterTest {
             let original = bytes::from_string { s = "Test123" }
             let hex = bytes::to_hex { b = original }
             match bytes::from_hex { s = hex } is
-                Some { val } -> bytes::length { b = val }
+                Some { val } -> bytes::size { b = val }
                 None -> -1
         """)
         assertEquals(7L, result)
@@ -358,7 +358,7 @@ class BytesInterpreterTest {
             let original = bytes::from_string { s = "Binary Data!" }
             let encoded = bytes::to_base64 { b = original }
             match bytes::from_base64 { s = encoded } is
-                Some { val } -> bytes::length { b = val }
+                Some { val } -> bytes::size { b = val }
                 None -> -1
         """)
         assertEquals(12L, result)

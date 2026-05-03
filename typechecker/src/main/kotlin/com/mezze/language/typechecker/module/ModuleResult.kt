@@ -242,7 +242,18 @@ data class ModuleImportContext(
     val importedAbilityImpls: Map<String, com.mezze.language.parsedast.ParsedImplAbilityDecl>,  // Imported ability implementations (keyed by content hash)
     // Content-hash indexed maps for O(1) lookup without string parsing
     val effectsByHash: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),    // Effects keyed by content hash
-    val abilitiesByHash: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap()  // Abilities keyed by content hash
+    val abilitiesByHash: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap(),  // Abilities keyed by content hash
+    // Pre-inferred return types for inherent impl operations, harvested from the
+    // home module's TypedAbilityImpl. Keyed by impl content hash, then op name.
+    // ContextBuilder uses these instead of fresh TypeVars when registering an
+    // imported inherent impl whose operation has no return-type annotation.
+    val inherentImplOpReturnTypes: Map<String, Map<String, com.mezze.language.ast.MezzeType>> = emptyMap(),
+    // Pre-inferred PARAM-record types for inherent impl operations (issue #230).
+    // Keyed by impl content hash → op name → MezzeType (a RecordType of fields).
+    // Without this, callers like `nums.all {p = 5}` typecheck because the impl
+    // op registered a fresh TypeVar for `p` instead of the solver-discovered
+    // `{x: 'a} -> Bool`. Harvested same way as return types.
+    val inherentImplOpParamTypes: Map<String, Map<String, com.mezze.language.ast.MezzeType>> = emptyMap()
 ) {
     companion object {
         /**
@@ -257,7 +268,9 @@ data class ModuleImportContext(
                 importedImpls = emptyMap(),
                 importedAbilityImpls = emptyMap(),
                 effectsByHash = emptyMap(),
-                abilitiesByHash = emptyMap()
+                abilitiesByHash = emptyMap(),
+                inherentImplOpReturnTypes = emptyMap(),
+                inherentImplOpParamTypes = emptyMap()
             )
         }
     }
@@ -274,7 +287,9 @@ data class ModuleImportContext(
             importedImpls = importedImpls + other.importedImpls,
             importedAbilityImpls = importedAbilityImpls + other.importedAbilityImpls,
             effectsByHash = effectsByHash + other.effectsByHash,
-            abilitiesByHash = abilitiesByHash + other.abilitiesByHash
+            abilitiesByHash = abilitiesByHash + other.abilitiesByHash,
+            inherentImplOpReturnTypes = inherentImplOpReturnTypes + other.inherentImplOpReturnTypes,
+            inherentImplOpParamTypes = inherentImplOpParamTypes + other.inherentImplOpParamTypes
         )
     }
 

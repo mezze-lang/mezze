@@ -434,7 +434,7 @@ class StateMachineExecutionTest {
                 classify {n = 500}
             ]
 
-            seq::length { xs = results }
+            seq::size { xs = results }
         """.trimIndent()
         assertEquals(5L, eval(code))
     }

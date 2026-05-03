@@ -45,7 +45,7 @@ class ListModuleTest {
         val result = eval("""
             use std::collections::list
             let xs = list::range { start = 1, end = 6 }
-            list::length { xs = xs }
+            list::size { xs = xs }
         """)
         assertEquals(5L, result)
     }
@@ -80,7 +80,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 4 }
             match list::tail { xs = xs } is
-                Some { val } -> list::length { xs = val }
+                Some { val } -> list::size { xs = val }
                 None -> 999
         """)
         assertEquals(2L, result)
@@ -105,7 +105,7 @@ class ListModuleTest {
         val result = eval("""
             use std::collections::list
             let xs = list::singleton { x = 42 }
-            list::length { xs = xs }
+            list::size { xs = xs }
         """)
         assertEquals(1L, result)
     }
@@ -117,7 +117,7 @@ class ListModuleTest {
             let xs = list::range { start = 1, end = 3 }
             let ys = list::range { start = 3, end = 5 }
             let zs = list::append { xs = xs, ys = ys }
-            list::length { xs = zs }
+            list::size { xs = zs }
         """)
         assertEquals(4L, result)
     }
@@ -127,7 +127,7 @@ class ListModuleTest {
         val result = eval("""
             use std::collections::list
             let xs = list::range { start = 1, end = 5 }
-            list::length { xs = xs }
+            list::size { xs = xs }
         """)
         assertEquals(4L, result)
     }
@@ -153,7 +153,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 10 }
             let evens = list::filter { xs = xs, p = { x } -> x % 2 == 0 }
-            list::length { xs = evens }
+            list::size { xs = evens }
         """)
         assertEquals(4L, result)  // 2, 4, 6, 8
     }
@@ -264,7 +264,7 @@ class ListModuleTest {
             let xs = list::range { start = 1, end = 5 }
             let arr = list::to_seq { xs = xs }
             let ys = list::from_seq { xs = arr }
-            list::length { xs = ys }
+            list::size { xs = ys }
         """)
         assertEquals(4L, result)
     }
@@ -275,7 +275,7 @@ class ListModuleTest {
             use std::collections::list
             let arr = [1, 2, 3, 4, 5]
             let xs = list::of_seq { elements = arr }
-            list::length { xs = xs }
+            list::size { xs = xs }
         """)
         assertEquals(5L, result)
     }
@@ -338,7 +338,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 10 }
             let ys = list::take { xs = xs, n = 3 }
-            list::length { xs = ys }
+            list::size { xs = ys }
         """)
         assertEquals(3L, result)
     }
@@ -349,7 +349,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 4 }
             let ys = list::take { xs = xs, n = 10 }
-            list::length { xs = ys }
+            list::size { xs = ys }
         """)
         assertEquals(3L, result)
     }
@@ -360,7 +360,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 10 }
             let ys = list::drop { xs = xs, n = 3 }
-            list::length { xs = ys }
+            list::size { xs = ys }
         """)
         assertEquals(6L, result)
     }
@@ -393,7 +393,7 @@ class ListModuleTest {
             let xs = list::singleton { x = list::range { start = 1, end = 3 } }
             let ys = list::cons { head = list::range { start = 3, end = 5 }, tail = xs }
             let zs = list::concat { xss = ys }
-            list::length { xs = zs }
+            list::size { xs = zs }
         """)
         assertEquals(4L, result)
     }
@@ -404,7 +404,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 4 }
             let ys = list::flat_map { xs = xs, f = { x } -> list::range { start = 1, end = x + 1 } }
-            list::length { xs = ys }
+            list::size { xs = ys }
         """)
         assertEquals(6L, result)  // [1] ++ [1,2] ++ [1,2,3] = 1+2+3 = 6
     }
@@ -430,7 +430,7 @@ class ListModuleTest {
             let xs = list::range { start = 1, end = 10 }
             let ys = list::range { start = 10, end = 13 }
             let zipped = list::zip { xs = xs, ys = ys }
-            list::length { xs = zipped }
+            list::size { xs = zipped }
         """)
         assertEquals(3L, result)  // min(9, 3) = 3
     }
@@ -443,7 +443,7 @@ class ListModuleTest {
             let ys = list::range { start = 10, end = 13 }
             let zipped = list::zip { xs = xs, ys = ys }
             let unzipped = list::unzip { xs = zipped }
-            list::length { xs = unzipped.fsts }
+            list::size { xs = unzipped.fsts }
         """)
         assertEquals(3L, result)
     }
@@ -453,7 +453,7 @@ class ListModuleTest {
         val result = eval("""
             use std::collections::list
             let xs = list::repeat { x = 42, n = 5 }
-            list::length { xs = xs }
+            list::size { xs = xs }
         """)
         assertEquals(5L, result)
     }
@@ -474,7 +474,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 4 }
             let ys = list::intersperse { xs = xs, sep = 0 }
-            list::length { xs = ys }
+            list::size { xs = ys }
         """)
         assertEquals(5L, result)  // [1, 0, 2, 0, 3]
     }
@@ -485,7 +485,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::singleton { x = 42 }
             let ys = list::intersperse { xs = xs, sep = 0 }
-            list::length { xs = ys }
+            list::size { xs = ys }
         """)
         assertEquals(1L, result)  // [42] - no separator added
     }
@@ -591,7 +591,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 10 }
             let parts = list::partition { xs = xs, p = { x } -> x > 5 }
-            list::length { xs = parts.pass }
+            list::size { xs = parts.pass }
         """)
         assertEquals(4L, result)  // 6, 7, 8, 9
     }
@@ -602,7 +602,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 10 }
             let parts = list::partition { xs = xs, p = { x } -> x > 5 }
-            list::length { xs = parts.fail }
+            list::size { xs = parts.fail }
         """)
         assertEquals(5L, result)  // 1, 2, 3, 4, 5
     }
@@ -637,7 +637,7 @@ class ListModuleTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 6 }
             let ys = list::init { xs = xs }
-            list::length { xs = ys }
+            list::size { xs = ys }
         """)
         assertEquals(4L, result)  // [1, 2, 3, 4]
     }

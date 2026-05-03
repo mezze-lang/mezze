@@ -85,7 +85,7 @@ class AsyncModuleTest {
             let p2 = Async.spawn {f = {} -> 2}
             let p3 = Async.spawn {f = {} -> 3}
             let results = Async.all {ps = [p1, p2, p3]}
-            seq::length {xs = results}
+            seq::size {xs = results}
         """))
         assertEquals(3L, result)
     }
@@ -151,7 +151,7 @@ class AsyncModuleTest {
     fun `test map applies function concurrently`() {
         val result = eval(withCoopAsync("""
             let results = Async.map {xs = [1, 2, 3], f = {x} -> x * 2}
-            seq::length {xs = results}
+            seq::size {xs = results}
         """))
         assertEquals(3L, result)
     }
@@ -184,7 +184,7 @@ class AsyncModuleTest {
     fun `test filter keeps matching elements`() {
         val result = eval(withCoopAsync("""
             let results = Async.filter {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
-            seq::length {xs = results}
+            seq::size {xs = results}
         """))
         assertEquals(2L, result)
     }
@@ -294,7 +294,7 @@ class AsyncModuleTest {
             let p1 = Async.spawn {f = {} -> 1}
             let p2 = Async.spawn {f = {} -> 2}
             let results = Async.settle {ps = [p1, p2]}
-            seq::length {xs = results}
+            seq::size {xs = results}
         """))
         assertEquals(2L, result)
     }

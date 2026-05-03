@@ -412,7 +412,7 @@ public final class NativeDispatch extends MezzeNode {
         // String operations using PrimitiveNatives
         HANDLERS.put("__native_string_concat", (r, c) ->
             PrimitiveNatives.stringConcat(getString(r, "l"), getString(r, "r")));
-        HANDLERS.put("__native_string_length", (r, c) ->
+        HANDLERS.put("__native_string_size", (r, c) ->
             (long) PrimitiveNatives.stringLength(getString(r, "s")));
         HANDLERS.put("__native_string_to_upper", (r, c) ->
             PrimitiveNatives.stringToUpperCase(getString(r, "s")));
@@ -526,7 +526,7 @@ public final class NativeDispatch extends MezzeNode {
 
     private static void registerSeqHandlers() {
         HANDLERS.put("__native_seq_empty", (r, c) -> SeqNatives.empty());
-        HANDLERS.put("__native_seq_length", (r, c) ->
+        HANDLERS.put("__native_seq_size", (r, c) ->
             SeqNatives.length(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_is_empty", (r, c) ->
             SeqNatives.isEmpty(getSeq(r, "xs")));
@@ -828,7 +828,7 @@ public final class NativeDispatch extends MezzeNode {
 
     private static void registerListHandlers() {
         HANDLERS.put("__native_list_empty", (r, c) -> ListNatives.empty());
-        HANDLERS.put("__native_list_length", (r, c) ->
+        HANDLERS.put("__native_list_size", (r, c) ->
             ListNatives.length(getList(r, "xs")));
         HANDLERS.put("__native_list_is_empty", (r, c) ->
             ListNatives.isEmpty(getList(r, "xs")));
@@ -1540,7 +1540,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_deque_empty", (r, c) -> DequeNatives.empty());
         HANDLERS.put("__native_deque_singleton", (r, c) ->
             DequeNatives.singleton(getField(r, "x")));
-        HANDLERS.put("__native_deque_length", (r, c) ->
+        HANDLERS.put("__native_deque_size", (r, c) ->
             DequeNatives.length(getDeque(r, "d")));
         HANDLERS.put("__native_deque_is_empty", (r, c) ->
             DequeNatives.isEmpty(getDeque(r, "d")));
@@ -1703,7 +1703,7 @@ public final class NativeDispatch extends MezzeNode {
             NonEmptyListNatives.fromList(getList(r, "xs")));
         HANDLERS.put("__native_nel_from_seq", (r, c) ->
             NonEmptyListNatives.fromArray(getArray(r, "xs")));
-        HANDLERS.put("__native_nel_length", (r, c) ->
+        HANDLERS.put("__native_nel_size", (r, c) ->
             NonEmptyListNatives.length(getNonEmptyList(r, "xs")));
         HANDLERS.put("__native_nel_head", (r, c) ->
             NonEmptyListNatives.head(getNonEmptyList(r, "xs")));
@@ -1896,7 +1896,7 @@ public final class NativeDispatch extends MezzeNode {
             BytesNatives.fromHex(getString(r, "s")));
         HANDLERS.put("__native_bytes_from_base64", (r, c) ->
             BytesNatives.fromBase64(getString(r, "s")));
-        HANDLERS.put("__native_bytes_length", (r, c) ->
+        HANDLERS.put("__native_bytes_size", (r, c) ->
             BytesNatives.length(getBytes(r, "b")));
         HANDLERS.put("__native_bytes_is_empty", (r, c) ->
             BytesNatives.isEmpty(getBytes(r, "b")));

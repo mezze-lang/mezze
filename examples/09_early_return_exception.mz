@@ -1,38 +1,23 @@
-# 09 — Early Return & Exception effects
-#
-# EarlyReturn lets you exit a computation early (like `return` in imperative langs).
-# ExceptionToResult converts thrown errors into Result values.
-
-use std::effects::early_return::{Return, EarlyReturn}
-use std::effects::exception::{Exception, ExceptionToResult}
-use std::effects::log::{Console, println}
+use std::effects::early_return::{ Return, EarlyReturn }
+use std::effects::exception::{ Exception, ExceptionToResult }
+use std::effects::log::{ Console, println }
 
 # Exception: wrap happy path in Ok {val = ...}
-let safe_div = {a, b} ->
-    if b == 0 then Exception.throw {error = "division by zero"}
-    else a / b
+let safe_div = { a, b } -> if b == 0 then Exception.throw { error = "division by zero" } else a / b
 
-let main = {} ->
-    perform Console in do
-        # Early return: exit computation as soon as condition met
-        let result = perform EarlyReturn in do
-            let _ = if 3 > 10 then Return.return {val = "found 3"} else {}
-            let _ = if 7 > 10 then Return.return {val = "found 7"} else {}
-            let _ = if 15 > 10 then Return.return {val = "found 15"} else {}
-            "none found"
-        println {msg = "early return: $(result)"}
-
-        let result2 = perform EarlyReturn in do
-            let _ = if 1 > 100 then Return.return {val = "found"} else {}
-            let _ = if 2 > 100 then Return.return {val = "found"} else {}
-            "none found"
-        println {msg = "no early return: $(result2)"}
-
-        # Exception to Result — wrap happy path in Ok
-        let ok = perform ExceptionToResult in
-            Ok {val = safe_div {a = 10, b = 3}}
-        println {msg = "10 / 3 = $(ok.to_dbg_str {})"}
-
-        let err = perform ExceptionToResult in
-            Ok {val = safe_div {a = 10, b = 0}}
-        println {msg = "10 / 0 = $(err.to_dbg_str {})"}
+let main = {} -> perform Console in do
+  let result = perform EarlyReturn in do
+    let _ = if 3 > 10 then Return.return { val = "found 3" } else {}
+    let _ = if 7 > 10 then Return.return { val = "found 7" } else {}
+    let _ = if 15 > 10 then Return.return { val = "found 15" } else {}
+    "none found"
+  println { msg = "early return: $(result)" }
+  let result2 = perform EarlyReturn in do
+    let _ = if 1 > 100 then Return.return { val = "found" } else {}
+    let _ = if 2 > 100 then Return.return { val = "found" } else {}
+    "none found"
+  println { msg = "no early return: $(result2)" }
+  let ok = perform ExceptionToResult in Ok { val = safe_div { a = 10, b = 3 } }
+  println { msg = "10 / 3 = $(ok.to_dbg_str {})" }
+  let err = perform ExceptionToResult in Ok { val = safe_div { a = 10, b = 0 } }
+  println { msg = "10 / 0 = $(err.to_dbg_str {})" }

@@ -1,34 +1,15 @@
-# std/concurrent/cancellation.mezze - Cooperative Cancellation
-#
-# CancellationToken provides a way to signal and check for cancellation
-# in async operations. It supports:
-# - Checking if cancellation has been requested
-# - Registering callbacks to run on cancellation
-# - Creating child tokens that form a cancellation hierarchy
-# - Throwing exceptions at cancellation checkpoints
-#
-# Unlike thread interrupts, CancellationToken is cooperative - the code
-# being cancelled must explicitly check for cancellation and respond.
-#
-# Usage:
-#   use std::effects::concurrent::cancellation::{CancellationToken, token, cancel, is_cancelled}
-#
-#   let ct = token {}
-#   # Pass ct to async operations
-#   # In async code: check is_cancelled, or use check_cancelled
-#   # When done: cancel {token = ct, reason = "User requested"}
 use std::abilities::compare::{ Eq }
 
 pub newtype CancellationToken = CancellationToken __NativeCancellationToken
-# Opaque type wrapping the native CancellationToken
-# Opaque type wrapping the native CancellationToken
 
+# Opaque type wrapping the native CancellationToken
+# Opaque type wrapping the native CancellationToken
 impl Eq for CancellationToken where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
-# Inherent impls for CancellationToken — method syntax for common operations
 
+# Inherent impls for CancellationToken — method syntax for common operations
 impl CancellationToken where {
   cancel = { it, reason } -> cancel { token = it, reason = reason },
   cancel_default = { it } -> cancel_default { token = it },
@@ -40,6 +21,7 @@ impl CancellationToken where {
   create_child = { it } -> create_child { token = it },
   with_cancellation = { it, f } -> with_cancellation { token = it, f = f },
 }
+
 # =============================================================================
 # Creation
 # =============================================================================
@@ -47,11 +29,11 @@ impl CancellationToken where {
 #
 # Example:
 #   let ct = token {}
+pub let token : {} -> CancellationToken = {} -> __native_cancellation_token_new {}
 
-pub let token: {} -> CancellationToken = {} -> __native_cancellation_token_new {}
 # Create a new cancellation token (alias for token)
+pub let new : {} -> CancellationToken = token
 
-pub let new: {} -> CancellationToken = token
 # =============================================================================
 # Cancellation
 # =============================================================================
@@ -62,15 +44,16 @@ pub let new: {} -> CancellationToken = token
 #
 # Example:
 #   cancel {token = ct, reason = "Operation timed out"}
-
-pub let cancel: { token: CancellationToken, reason: Str } -> {} = { token, reason } ->
+pub let cancel : { token: CancellationToken, reason: Str } -> {} = { token, reason } ->
   __native_cancellation_token_cancel { token = token, reason = reason }
+
 # Cancel with a default reason
 #
 # Example:
 #   cancel_default {token = ct}
+pub let cancel_default : { token: CancellationToken } -> {} = { token } ->
+  cancel { token = token, reason = "Operation cancelled" }
 
-pub let cancel_default: { token: CancellationToken } -> {} = { token } -> cancel { token = token, reason = "Operation cancelled" }
 # =============================================================================
 # Checking Status
 # =============================================================================
@@ -81,8 +64,9 @@ pub let cancel_default: { token: CancellationToken } -> {} = { token } -> cancel
 #       cleanup {}
 #   else
 #       continue_work {}
+pub let is_cancelled : { token: CancellationToken } -> Bool = { token } ->
+  __native_cancellation_token_is_cancelled { token = token }
 
-pub let is_cancelled: { token: CancellationToken } -> Bool = { token } -> __native_cancellation_token_is_cancelled { token = token }
 # Get the cancellation reason if cancelled
 #
 # Returns Some with the reason if cancelled, None otherwise.
@@ -91,8 +75,9 @@ pub let is_cancelled: { token: CancellationToken } -> Bool = { token } -> __nati
 #   match get_reason {token = ct} is
 #       Some {val = reason} -> print {s = "Cancelled: " ++ reason},
 #       None -> print {s = "Still running"}
+pub let get_reason : { token: CancellationToken } -> Option Str = { token } ->
+  __native_cancellation_token_get_reason { token = token }
 
-pub let get_reason: { token: CancellationToken } -> Option Str = { token } -> __native_cancellation_token_get_reason { token = token }
 # =============================================================================
 # Checkpoints
 # =============================================================================
@@ -107,11 +92,12 @@ pub let get_reason: { token: CancellationToken } -> Option Str = { token } -> __
 #           check_cancelled {token = token}  # Checkpoint
 #           process {item = item}
 #       }
+pub let check_cancelled : { token: CancellationToken } -> {} = { token } ->
+  __native_cancellation_token_throw_if_cancelled { token = token }
 
-pub let check_cancelled: { token: CancellationToken } -> {} = { token } -> __native_cancellation_token_throw_if_cancelled { token = token }
 # Alias for check_cancelled
+pub let throw_if_cancelled : { token: CancellationToken } -> {} = check_cancelled
 
-pub let throw_if_cancelled: { token: CancellationToken } -> {} = check_cancelled
 # =============================================================================
 # Callbacks
 # =============================================================================
@@ -124,19 +110,19 @@ pub let throw_if_cancelled: { token: CancellationToken } -> {} = check_cancelled
 #   let id = on_cancel {token = ct, callback = {} -> cleanup_resources {}}
 #   # ... later ...
 #   remove_callback {token = ct, id = id}
-
-pub let on_cancel: { token: CancellationToken, callback: {} -> {} } -> Str = { token, callback } ->
+pub let on_cancel : { token: CancellationToken, callback: {} -> {} } -> Str = { token, callback } ->
   __native_cancellation_token_on_cancellation { token = token, callback = callback }
-# Alias for on_cancel
 
-pub let on_cancellation: { token: CancellationToken, callback: {} -> {} } -> Str = on_cancel
+# Alias for on_cancel
+pub let on_cancellation : { token: CancellationToken, callback: {} -> {} } -> Str = on_cancel
+
 # Remove a previously registered callback
 #
 # Example:
 #   remove_callback {token = ct, id = callback_id}
-
-pub let remove_callback: { token: CancellationToken, id: Str } -> {} = { token, id } ->
+pub let remove_callback : { token: CancellationToken, id: Str } -> {} = { token, id } ->
   __native_cancellation_token_remove_callback { token = token, id = id }
+
 # =============================================================================
 # Child Tokens
 # =============================================================================
@@ -150,9 +136,9 @@ pub let remove_callback: { token: CancellationToken, id: Str } -> {} = { token, 
 #   let child = create_child {token = parent}
 #   # If parent is cancelled, child is also cancelled
 #   # If child is cancelled, parent continues
-
-pub let create_child: { token: CancellationToken } -> CancellationToken = { token } ->
+pub let create_child : { token: CancellationToken } -> CancellationToken = { token } ->
   __native_cancellation_token_create_child { token = token }
+
 # =============================================================================
 # Combinators
 # =============================================================================
@@ -168,9 +154,7 @@ pub let create_child: { token: CancellationToken } -> CancellationToken = { toke
 #   match result is
 #       Some {val = value} -> use {value = value},
 #       None -> handle_cancellation {}
-
-pub let with_cancellation: { token: CancellationToken, f: {} -> 'a } -> Option 'a = { token, f } ->
+pub let with_cancellation : { token: CancellationToken, f: {} -> 'a } -> Option 'a = { token, f } ->
   if is_cancelled { token = token } then None else Some { val = f {} }
-
 # TODO: cancellable_map requires list pattern matching [head, ...tail] which is not yet supported
 # Will be added once parser supports this pattern

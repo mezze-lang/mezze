@@ -968,15 +968,55 @@ class ContextBuilder {
         ctx: TypingContext,
         implDecl: ParsedImplAbilityDecl,
         implKey: String,
-        file: String = "<import>"
+        file: String = "<import>",
+        // Pre-inferred return types harvested from the home module's
+        // TypedAbilityImpl.operations (issue #213). Keyed by op name. Used
+        // when the operation has no return-type annotation — we'd otherwise
+        // assign a fresh unbound TypeVar and lose the body's solved type.
+        opReturnTypes: Map<String, MezzeType> = emptyMap(),
+        // Pre-inferred param-record types — sibling of opReturnTypes for the
+        // arg side (issue #230). When the operation's lambda has untyped
+        // params, this map's record fields beat fresh TypeVars so callbacks
+        // like `Seq.all`'s `p: { x: 'a } -> Bool` reject `nums.all {p = 5}`.
+        opParamTypes: Map<String, MezzeType> = emptyMap()
     ): TypingContext {
         var result = ctx
         val targetTypeNames = implDecl.targetTypes.map { getTypeName(it) }
         val targetTypeName = targetTypeNames.firstOrNull() ?: return ctx
 
+        // Resolve the impl's target type once. Used to bind `it` in unannotated
+        // method signatures so generic impls (e.g. `impl Seq 'a where { first }`)
+        // share their type variables across `it` and the return type — without
+        // this, fresh-instantiation at the call site has nothing to unify the
+        // receiver's actual element type against.
+        //
+        // The TypeVars in `implTargetType` come from `convertParsedTypeAnnotation`
+        // (e.g. fresh `'a`), but the harvested `opReturnTypes` use TypeVars from
+        // the home module's solver run with potentially different identity.
+        val implTargetType: MezzeType? = implDecl.targetTypes.firstOrNull()?.let {
+            convertParsedTypeAnnotation(it)
+        }
+        // Build a name → TypeVar map from the impl target's annotation so we can
+        // align return-type TypeVars by name when they happen to match.
+        val targetTypeVarsByName: MutableMap<String, com.mezze.language.ast.TypeVar> = mutableMapOf()
+        if (implTargetType != null) collectVarTypesByName(implTargetType, targetTypeVarsByName)
+        // The impl target's free TypeVars in declaration order. Used for
+        // positional alignment when name-based lookup fails (the solver-side
+        // TypeVars in harvested return types often carry generated names that
+        // don't match the user-facing `'a`).
+        val targetVarsInOrder: List<com.mezze.language.ast.TypeVar> = if (implTargetType != null) {
+            collectVarTypesInOrder(implTargetType)
+        } else emptyList()
+
         for (op in implDecl.operations) {
-            // Build method type from annotations or lambda params
-            val paramType = op.paramType?.let { convertParsedTypeAnnotation(it) }
+            // Issue #230: prefer the harvested post-solve param-record type
+            // when available — that's the only place callback fields like
+            // `p: { x: 'a } -> Bool` survive. Falls back to annotations,
+            // then to a fresh-var record built from the lambda's untyped
+            // param names (the legacy behaviour, which under-constrained
+            // call sites).
+            val paramType = opParamTypes[op.name]
+                ?: op.paramType?.let { convertParsedTypeAnnotation(it) }
                 ?: run {
                     val lambda = op.implementation as? com.mezze.language.parsedast.ParsedLambda
                     if (lambda != null) {
@@ -989,7 +1029,13 @@ class ContextBuilder {
                             )
                             is com.mezze.language.parsedast.ParsedLambdaParams.Untyped -> MezzeType.RecordType(
                                 fields = if (params.names.isEmpty()) emptyMap()
-                                         else params.names.associateWith { MezzeType.VarType(TypeVar.fresh()) },
+                                         else params.names.associateWith { name ->
+                                             // Receiver param: bind to impl's target type so
+                                             // `it`'s shape (and any 'a vars in `Seq 'a`) is
+                                             // visible at the call site.
+                                             if (name == "it" && implTargetType != null) implTargetType
+                                             else MezzeType.VarType(TypeVar.fresh())
+                                         },
                                 rowVar = null
                             )
                         }
@@ -997,9 +1043,52 @@ class ContextBuilder {
                         MezzeType.RecordType(fields = emptyMap(), rowVar = null)
                     }
                 }
-            val returnType = op.returnType?.let { convertParsedTypeAnnotation(it) }
+            val rawReturnType = op.returnType?.let { convertParsedTypeAnnotation(it) }
+                ?: opReturnTypes[op.name]
                 ?: MezzeType.VarType(TypeVar.fresh())
-            val methodType = MezzeType.FunctionType(paramType = paramType, returnType = returnType)
+            // Align return-type TypeVars with the impl target's TypeVars so
+            // e.g. `'a` in `Option 'a` (return) is the *same* TypeVar instance
+            // as `'a` in `Seq 'a` (it). Fresh-instantiation at the call site
+            // then renames both consistently. We try name-based alignment
+            // first (works when both sides carry the same user-facing name);
+            // falls back to positional alignment when the harvested return
+            // type's vars are solver-generated names that don't match.
+            //
+            // Issue #230 also brings harvested PARAM types into the picture.
+            // Their TypeVars come from the same solver run as the return
+            // type's, so apply identical alignment to BOTH halves —
+            // otherwise the call-site receiver's `Seq Int` would unify with
+            // a different `'a` than `Option 'a` ever sees, and the return
+            // pin from #213/#215 silently breaks for first/last/etc.
+            val returnType = if (targetVarsInOrder.isNotEmpty()) {
+                val byName = alignVarTypesByName(rawReturnType, targetTypeVarsByName)
+                val freeAfterName = collectVarTypesInOrder(byName)
+                if (freeAfterName.size == targetVarsInOrder.size &&
+                    freeAfterName.zip(targetVarsInOrder).any { (a, b) -> a != b }) {
+                    val positional = freeAfterName.zip(targetVarsInOrder).toMap()
+                    alignVarTypesByMapping(byName, positional)
+                } else byName
+            } else rawReturnType
+
+            val alignedParamType = if (targetVarsInOrder.isNotEmpty() && paramType is MezzeType.RecordType) {
+                // First pass: align by user-facing name (`'a` in both sides).
+                val byName = alignVarTypesByName(paramType, targetTypeVarsByName) as MezzeType.RecordType
+                // Second pass: positional alignment for solver-generated
+                // names — but only when the param record's free vars line
+                // up positionally with the target's. If the harvested
+                // record uses a different number of free vars (e.g.
+                // multi-arg ops with extra fresh vars unrelated to the
+                // target), skip positional and trust whatever name-match
+                // gave us.
+                val freeAfterName = collectVarTypesInOrder(byName)
+                if (freeAfterName.size == targetVarsInOrder.size &&
+                    freeAfterName.zip(targetVarsInOrder).any { (a, b) -> a != b }) {
+                    val positional = freeAfterName.zip(targetVarsInOrder).toMap()
+                    alignVarTypesByMapping(byName, positional) as MezzeType.RecordType
+                } else byName
+            } else paramType
+
+            val methodType = MezzeType.FunctionType(paramType = alignedParamType, returnType = returnType)
 
             val methodInfo = TypingContext.InherentMethodInfo(
                 targetTypeName = targetTypeName,
@@ -1008,7 +1097,8 @@ class ContextBuilder {
                 implContentHash = implKey,
                 implStartLine = implDecl.loc.startLine,
                 implStartCol = implDecl.loc.startCol,
-                implSourceFile = implDecl.loc.file
+                implSourceFile = implDecl.loc.file,
+                isImported = true
             )
             result = result.extendWithAnonymousMethod(methodInfo)
         }
@@ -1352,5 +1442,163 @@ class ContextBuilder {
                 )
             }
         }
+    }
+
+    /**
+     * Walk a MezzeType collecting all distinct VarTypes in left-to-right
+     * order. Used for positional alignment between the impl target's
+     * declared type vars and a harvested return type whose vars carry
+     * solver-generated names.
+     */
+    private fun collectVarTypesInOrder(type: MezzeType): List<com.mezze.language.ast.TypeVar> {
+        val seen = LinkedHashSet<com.mezze.language.ast.TypeVar>()
+        fun walk(t: MezzeType) {
+            when (t) {
+                is MezzeType.VarType -> seen.add(t.variable)
+                is MezzeType.FunctionType -> { walk(t.paramType); walk(t.returnType) }
+                is MezzeType.RecordType -> t.fields.values.forEach { walk(it) }
+                is MezzeType.VariantType -> t.constructors.values.filterNotNull().forEach { walk(it) }
+                is MezzeType.SeqType -> walk(t.elementType)
+                is MezzeType.ListType -> walk(t.elementType)
+                is MezzeType.SortedSetType -> walk(t.elementType)
+                is MezzeType.SetType -> walk(t.elementType)
+                is MezzeType.MapType -> { walk(t.keyType); walk(t.valueType) }
+                is MezzeType.SortedMapType -> { walk(t.keyType); walk(t.valueType) }
+                is MezzeType.TypeApplication -> t.args.forEach { walk(it) }
+                is MezzeType.SuspendedType -> walk(t.valueType)
+                is MezzeType.NewtypeType -> walk(t.wrappedType)
+                else -> {}
+            }
+        }
+        walk(type)
+        return seen.toList()
+    }
+
+    /**
+     * Replace each VarType in `type` with the corresponding TypeVar from
+     * `mapping`. TypeVars not in the mapping are left untouched.
+     */
+    private fun alignVarTypesByMapping(
+        type: MezzeType,
+        mapping: Map<com.mezze.language.ast.TypeVar, com.mezze.language.ast.TypeVar>
+    ): MezzeType = when (type) {
+        is MezzeType.VarType -> mapping[type.variable]?.let { MezzeType.VarType(it) } ?: type
+        is MezzeType.FunctionType -> MezzeType.FunctionType(
+            paramType = alignVarTypesByMapping(type.paramType, mapping),
+            returnType = alignVarTypesByMapping(type.returnType, mapping),
+            effects = type.effects,
+            abilityConstraints = type.abilityConstraints
+        )
+        is MezzeType.RecordType -> MezzeType.RecordType(
+            fields = type.fields.mapValues { alignVarTypesByMapping(it.value, mapping) },
+            rowVar = type.rowVar
+        )
+        is MezzeType.VariantType -> MezzeType.VariantType(
+            constructors = type.constructors.mapValues { (_, v) -> v?.let { alignVarTypesByMapping(it, mapping) } }
+        )
+        is MezzeType.SeqType -> MezzeType.SeqType(alignVarTypesByMapping(type.elementType, mapping))
+        is MezzeType.ListType -> MezzeType.ListType(alignVarTypesByMapping(type.elementType, mapping))
+        is MezzeType.SetType -> MezzeType.SetType(alignVarTypesByMapping(type.elementType, mapping))
+        is MezzeType.SortedSetType -> MezzeType.SortedSetType(alignVarTypesByMapping(type.elementType, mapping))
+        is MezzeType.MapType -> MezzeType.MapType(
+            keyType = alignVarTypesByMapping(type.keyType, mapping),
+            valueType = alignVarTypesByMapping(type.valueType, mapping)
+        )
+        is MezzeType.SortedMapType -> MezzeType.SortedMapType(
+            keyType = alignVarTypesByMapping(type.keyType, mapping),
+            valueType = alignVarTypesByMapping(type.valueType, mapping)
+        )
+        is MezzeType.TypeApplication -> MezzeType.TypeApplication(
+            type.constructor,
+            type.args.map { alignVarTypesByMapping(it, mapping) },
+            type.typeHash
+        )
+        is MezzeType.SuspendedType -> MezzeType.SuspendedType(
+            valueType = alignVarTypesByMapping(type.valueType, mapping),
+            effects = type.effects
+        )
+        is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+            type.name, type.constructor, alignVarTypesByMapping(type.wrappedType, mapping)
+        )
+        else -> type
+    }
+
+    /**
+     * Walk a MezzeType collecting `name -> TypeVar` pairs for every VarType
+     * encountered. Used by `registerImportedInherentImpl` to align
+     * harvested return-type TypeVars with the impl target's TypeVars by
+     * name.
+     */
+    private fun collectVarTypesByName(
+        type: MezzeType,
+        out: MutableMap<String, com.mezze.language.ast.TypeVar>
+    ) {
+        when (type) {
+            is MezzeType.VarType -> { out.putIfAbsent(type.variable.name, type.variable) }
+            is MezzeType.FunctionType -> {
+                collectVarTypesByName(type.paramType, out); collectVarTypesByName(type.returnType, out)
+            }
+            is MezzeType.RecordType -> type.fields.values.forEach { collectVarTypesByName(it, out) }
+            is MezzeType.VariantType -> type.constructors.values.filterNotNull().forEach { collectVarTypesByName(it, out) }
+            is MezzeType.SeqType -> collectVarTypesByName(type.elementType, out)
+            is MezzeType.ListType -> collectVarTypesByName(type.elementType, out)
+            is MezzeType.SortedSetType -> collectVarTypesByName(type.elementType, out)
+            is MezzeType.SetType -> collectVarTypesByName(type.elementType, out)
+            is MezzeType.MapType -> { collectVarTypesByName(type.keyType, out); collectVarTypesByName(type.valueType, out) }
+            is MezzeType.SortedMapType -> { collectVarTypesByName(type.keyType, out); collectVarTypesByName(type.valueType, out) }
+            is MezzeType.TypeApplication -> type.args.forEach { collectVarTypesByName(it, out) }
+            is MezzeType.SuspendedType -> collectVarTypesByName(type.valueType, out)
+            is MezzeType.NewtypeType -> collectVarTypesByName(type.wrappedType, out)
+            else -> {}
+        }
+    }
+
+    /**
+     * Replace each VarType in `type` with the corresponding TypeVar from
+     * `byName` if their names match. Other VarTypes are left untouched.
+     */
+    private fun alignVarTypesByName(
+        type: MezzeType,
+        byName: Map<String, com.mezze.language.ast.TypeVar>
+    ): MezzeType = when (type) {
+        is MezzeType.VarType -> byName[type.variable.name]?.let { MezzeType.VarType(it) } ?: type
+        is MezzeType.FunctionType -> MezzeType.FunctionType(
+            paramType = alignVarTypesByName(type.paramType, byName),
+            returnType = alignVarTypesByName(type.returnType, byName),
+            effects = type.effects,
+            abilityConstraints = type.abilityConstraints
+        )
+        is MezzeType.RecordType -> MezzeType.RecordType(
+            fields = type.fields.mapValues { alignVarTypesByName(it.value, byName) },
+            rowVar = type.rowVar
+        )
+        is MezzeType.VariantType -> MezzeType.VariantType(
+            constructors = type.constructors.mapValues { (_, v) -> v?.let { alignVarTypesByName(it, byName) } }
+        )
+        is MezzeType.SeqType -> MezzeType.SeqType(alignVarTypesByName(type.elementType, byName))
+        is MezzeType.ListType -> MezzeType.ListType(alignVarTypesByName(type.elementType, byName))
+        is MezzeType.SetType -> MezzeType.SetType(alignVarTypesByName(type.elementType, byName))
+        is MezzeType.SortedSetType -> MezzeType.SortedSetType(alignVarTypesByName(type.elementType, byName))
+        is MezzeType.MapType -> MezzeType.MapType(
+            keyType = alignVarTypesByName(type.keyType, byName),
+            valueType = alignVarTypesByName(type.valueType, byName)
+        )
+        is MezzeType.SortedMapType -> MezzeType.SortedMapType(
+            keyType = alignVarTypesByName(type.keyType, byName),
+            valueType = alignVarTypesByName(type.valueType, byName)
+        )
+        is MezzeType.TypeApplication -> MezzeType.TypeApplication(
+            type.constructor,
+            type.args.map { alignVarTypesByName(it, byName) },
+            type.typeHash
+        )
+        is MezzeType.SuspendedType -> MezzeType.SuspendedType(
+            valueType = alignVarTypesByName(type.valueType, byName),
+            effects = type.effects
+        )
+        is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+            type.name, type.constructor, alignVarTypesByName(type.wrappedType, byName)
+        )
+        else -> type
     }
 }

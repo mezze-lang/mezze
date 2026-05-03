@@ -52,67 +52,68 @@ impl NumOne for Frac where {
 impl Default for Frac where {
   default = {} -> __native_int_to_frac { n = 0 }
 }
+
 # std/types/frac.mezze - Fraction type operations
 # Fraction type is implemented natively as a ratio of two integers
 # Fractions are automatically reduced to lowest terms
 # Built-in ability implementations (NumAdd, NumSub, NumMul, NumDiv, Eq, Inspect) are automatically available
 # === ARITHMETIC OPERATIONS ===
 # Add two fractions
-
 pub let add = { l, r } -> __native_frac_add { l = l, r = r }
+
 # Subtract two fractions
-
 pub let subtract = { l, r } -> __native_frac_subtract { l = l, r = r }
+
 # Multiply two fractions
-
 pub let multiply = { l, r } -> __native_frac_multiply { l = l, r = r }
-# Divide two fractions
 
+# Divide two fractions
 pub let divide = { l, r } -> __native_frac_divide { l = l, r = r }
+
 # === COMPARISON OPERATIONS ===
 # Check if two fractions are equal
-
 pub let equals = { l, r } -> __native_frac_equals { l = l, r = r }
+
 # Check if left fraction is less than right
-
 pub let less_than = { l, r } -> __native_frac_less_than { l = l, r = r }
+
 # Check if left fraction is greater than right
-
 pub let greater_than = { l, r } -> __native_frac_greater_than { l = l, r = r }
-# Compare two fractions, returns Ordering (LT, EQ, GT)
 
+# Compare two fractions, returns Ordering (LT, EQ, GT)
 pub let compare = { l, r } -> __native_frac_compare { l = l, r = r }
+
 # === CONVERSION OPERATIONS ===
 # Convert fraction to float
-
 pub let to_float = { n } -> __native_frac_to_float { n = n }
+
 # Convert fraction to string representation
-
 pub let to_str = { n } -> __native_frac_to_str { n = n }
+
 # Create fraction from two integers (numerator, denominator)
+pub let make = { numerator, denominator } ->
+  __native_make_frac { numerator = numerator, denominator = denominator }
 
-pub let make = { numerator, denominator } -> __native_make_frac { numerator = numerator, denominator = denominator }
 # Convert integer to fraction
-
 pub let from_int = { n } -> __native_int_to_frac { n = n }
-# Convert natural number to fraction
 
+# Convert natural number to fraction
 pub let from_nat = { n } -> __native_nat_to_frac { n = n }
+
 # === UTILITY OPERATIONS ===
 # Get numerator of fraction
-
 pub let numerator = { n } -> __native_frac_numerator { n = n }
+
 # Get denominator of fraction
-
 pub let denominator = { n } -> __native_frac_denominator { n = n }
+
 # Reduce fraction to lowest terms (fractions are automatically reduced, but this is explicit)
-
 pub let reduce = { n } -> __native_reduce_frac { n = n }
+
 # Get absolute value of fraction
-
 pub let abs = { n } -> __native_abs_frac { n = n }
-# Negate fraction
 
+# Negate fraction
 pub let negate = { n } -> __native_negate_frac { n = n }
 
 impl Frac where {
@@ -122,7 +123,8 @@ impl Frac where {
   numerator = { it } -> __native_frac_numerator { n = it },
   denominator = { it } -> __native_frac_denominator { n = it },
   is_zero = { it } -> __native_frac_equals { l = it, r = __native_int_to_frac { n = 0 } },
-  is_positive = { it } -> __native_frac_greater_than { l = it, r = __native_int_to_frac { n = 0 } },
+  is_positive = { it } ->
+    __native_frac_greater_than { l = it, r = __native_int_to_frac { n = 0 } },
   is_negative = { it } -> __native_frac_less_than { l = it, r = __native_int_to_frac { n = 0 } },
   reciprocal = { it } -> __native_frac_divide { l = __native_int_to_frac { n = 1 }, r = it },
 }

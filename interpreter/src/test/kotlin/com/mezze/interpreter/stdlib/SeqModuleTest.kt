@@ -25,7 +25,7 @@ class SeqModuleTest {
         val result = eval("""
             use std::collections::seq
             let xs = [1, 2, 3, 4, 5]
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """)
         assertEquals(5L, result)
     }
@@ -35,7 +35,7 @@ class SeqModuleTest {
         val result = eval("""
             use std::collections::seq
             let xs: [Int] = []
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """)
         assertEquals(0L, result)
     }
@@ -93,7 +93,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [1, 2, 3]
             let ys = seq::add { xs = xs, x = 4 }
-            seq::length { xs = ys }
+            seq::size { xs = ys }
         """)
         assertEquals(4L, result)
     }
@@ -105,7 +105,7 @@ class SeqModuleTest {
             let xs = [1, 2]
             let ys = [3, 4]
             let zs = seq::concat { xs = xs, ys = ys }
-            seq::length { xs = zs }
+            seq::size { xs = zs }
         """)
         assertEquals(4L, result)
     }
@@ -116,7 +116,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [1, 2, 3, 4, 5]
             match seq::remove { xs = xs, i = 2 } is
-                Some { val } -> seq::length { xs = val }
+                Some { val } -> seq::size { xs = val }
                 None -> -1
         """)
         assertEquals(4L, result)
@@ -139,7 +139,7 @@ class SeqModuleTest {
         val result = eval("""
             use std::collections::seq
             let xs = seq::of { x = 1, xs = [2, 3] }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """)
         assertEquals(3L, result)
     }
@@ -177,7 +177,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [1, 2, 3, 4, 5, 6]
             let evens = seq::filter { xs = xs, p = { x } -> x % 2 == 0 }
-            seq::length { xs = evens }
+            seq::size { xs = evens }
         """)
         assertEquals(3L, result)  // 2, 4, 6
     }
@@ -274,7 +274,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [3, 1, 4, 1, 5]
             let ys = seq::sort { xs = xs }
-            seq::length { xs = ys }
+            seq::size { xs = ys }
         """)
         assertEquals(5L, result)
     }
@@ -303,7 +303,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [1, 2, 3, 4, 5]
             let ys = seq::slice { xs = xs, start = 1, end = 4 }
-            seq::length { xs = ys }
+            seq::size { xs = ys }
         """)
         assertEquals(3L, result)  // [2, 3, 4]
     }
@@ -314,7 +314,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [1, 2, 3, 4, 5]
             let ys = seq::take { xs = xs, n = 3 }
-            seq::length { xs = ys }
+            seq::size { xs = ys }
         """)
         assertEquals(3L, result)  // [1, 2, 3]
     }
@@ -325,7 +325,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [1, 2, 3, 4, 5]
             let ys = seq::drop { xs = xs, n = 2 }
-            seq::length { xs = ys }
+            seq::size { xs = ys }
         """)
         assertEquals(3L, result)  // [3, 4, 5]
     }
@@ -386,7 +386,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [1, 2, 3, 4, 5]
             let ys = seq::tail { xs = xs }
-            seq::length { xs = ys }
+            seq::size { xs = ys }
         """)
         assertEquals(4L, result)  // [2, 3, 4, 5]
     }
@@ -450,7 +450,7 @@ class SeqModuleTest {
             let xs = [1, 2, 3]
             let ys = ["a", "b", "c"]
             let zipped = seq::zip { xs = xs, ys = ys }
-            seq::length { xs = zipped }
+            seq::size { xs = zipped }
         """)
         assertEquals(3L, result)
     }
@@ -462,7 +462,7 @@ class SeqModuleTest {
             let xs = [1, 2, 3, 4]
             let ys = ["a", "b"]
             let zipped = seq::zip { xs = xs, ys = ys }
-            seq::length { xs = zipped }
+            seq::size { xs = zipped }
         """)
         assertEquals(2L, result)
     }
@@ -475,7 +475,7 @@ class SeqModuleTest {
             use std::collections::seq
             let pairs = [{ fst = 1, snd = "a" }, { fst = 2, snd = "b" }]
             let result = seq::unzip { xs = pairs }
-            seq::length { xs = result.fsts }
+            seq::size { xs = result.fsts }
         """)
         assertEquals(2L, result)
     }
@@ -488,7 +488,7 @@ class SeqModuleTest {
             use std::collections::seq
             let nested = [[1, 2], [3, 4], [5]]
             let flat = seq::flatten { xss = nested }
-            seq::length { xs = flat }
+            seq::size { xs = flat }
         """)
         assertEquals(5L, result)
     }
@@ -545,7 +545,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [1, 2, 3, 4, 5, 6]
             let result = seq::partition { xs = xs, p = { x } -> x % 2 == 0 }
-            seq::length { xs = result.pass }
+            seq::size { xs = result.pass }
         """)
         assertEquals(3L, result)  // evens: 2, 4, 6
     }
@@ -610,7 +610,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [1, 2, 3, 4, 5]
             let result = seq::init { xs = xs }
-            seq::length { xs = result }
+            seq::size { xs = result }
         """)
         assertEquals(4L, result)
     }
@@ -621,7 +621,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [42]
             let result = seq::init { xs = xs }
-            seq::length { xs = result }
+            seq::size { xs = result }
         """)
         assertEquals(0L, result)
     }
@@ -634,7 +634,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [1, 2, 2, 3, 3, 3, 4]
             let result = seq::unique { xs = xs }
-            seq::length { xs = result }
+            seq::size { xs = result }
         """)
         assertEquals(4L, result)
     }
@@ -645,7 +645,7 @@ class SeqModuleTest {
             use std::collections::seq
             let xs = [1, 2, 3, 4]
             let result = seq::unique { xs = xs }
-            seq::length { xs = result }
+            seq::size { xs = result }
         """)
         assertEquals(4L, result)
     }

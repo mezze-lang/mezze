@@ -104,7 +104,7 @@ class ByteBufferInterpreterTest {
             let buf = buffer::empty {}
             let buf2 = buffer::write_string { buf = buf, s = "Hello" }
             let data = buffer::to_bytes { buf = buf2 }
-            bytes::length { b = data }
+            bytes::size { b = data }
         """.trimIndent()
 
         assertEquals(5L, eval(source))

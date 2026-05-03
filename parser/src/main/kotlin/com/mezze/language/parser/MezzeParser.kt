@@ -154,7 +154,22 @@ class MezzeParser {
 
             orphanComments.addAll(pendingComments)
 
-            val parsedModule = resolveParsedImplDeclarations(ParsedModule(file ?: "<unknown>", decls, orphanComments))
+            // Mirror parseParsedModule: resolve impl decls AND compute
+            // content hashes. The LSP path lives or dies by these hashes —
+            // ability impl lookup (NumMul, NumAdd, Eq, etc.) is keyed on
+            // ParsedImplAbilityDecl.contentHash, which is null until
+            // computeAllHashes runs. Without it, a file like
+            //   use std::collections::seq
+            //   let f = { x } -> x * 2
+            // typechecks fine via `mez check` (which calls
+            // parseParsedModule) but fails in the LSP with
+            //   "Cannot use '*' with Int. To enable this, implement:
+            //    impl NumMul for Int where { ... }"
+            // because the prelude's NumMul-for-Int impl has no hash to
+            // match against. (#233)
+            val parsedModule = com.mezze.language.parsedast.ParsedDeclHasher.computeAllHashes(
+                resolveParsedImplDeclarations(ParsedModule(file ?: "<unknown>", decls, orphanComments))
+            )
 
             return ParseResultWithRecovery(parsedModule, errors)
         } finally {

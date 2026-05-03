@@ -121,7 +121,14 @@ data class TypingContext(
         val targetTypeHash: String? = null,  // Content hash of the target type declaration (stable across renames)
         val implStartLine: Int = 0,     // Loc of the impl declaration — for computing TypedAbilityImpl hash
         val implStartCol: Int = 0,
-        val implSourceFile: String = "" // Source file of impl — disambiguates same line/col in different files
+        val implSourceFile: String = "", // Source file of impl — disambiguates same line/col in different files
+        // True for impls imported from another module — call sites should
+        // fresh-instantiate methodType so per-call unification doesn't bleed
+        // between sites of generic impls (e.g. `impl Seq 'a where { first }`
+        // imported from std::collections::seq). For same-module impls we keep
+        // the shared TypeVars so ConstraintGenerator's body↔method-return link
+        // can flow the inferred type to the call site.
+        val isImported: Boolean = false
     )
 
     /**

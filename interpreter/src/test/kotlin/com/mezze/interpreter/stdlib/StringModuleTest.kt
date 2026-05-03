@@ -32,7 +32,7 @@ class StringModuleTest {
     fun `test string length`() {
         val source = """
             use std::str
-            str::length { s = "hello" }
+            str::size { s = "hello" }
         """.trimIndent()
 
         assertEquals(5L, eval(source))
@@ -42,7 +42,7 @@ class StringModuleTest {
     fun `test string length - empty`() {
         val source = """
             use std::str
-            str::length { s = "" }
+            str::size { s = "" }
         """.trimIndent()
 
         assertEquals(0L, eval(source))
@@ -204,7 +204,7 @@ class StringModuleTest {
             use std::str
             use std::collections::seq
             let parts = str::split { s = "a,b,c", delimiter = "," }
-            seq::length { xs = parts }
+            seq::size { xs = parts }
         """.trimIndent()
 
         assertEquals(3L, eval(source))
@@ -216,7 +216,7 @@ class StringModuleTest {
             use std::str
             use std::collections::seq
             let parts = str::split { s = "hello", delimiter = "," }
-            seq::length { xs = parts }
+            seq::size { xs = parts }
         """.trimIndent()
 
         assertEquals(1L, eval(source))
@@ -228,7 +228,7 @@ class StringModuleTest {
             use std::str
             use std::collections::seq
             let parts = str::split { s = "", delimiter = "," }
-            seq::length { xs = parts }
+            seq::size { xs = parts }
         """.trimIndent()
 
         assertEquals(1L, eval(source))
@@ -431,7 +431,7 @@ class StringModuleTest {
             use std::collections::seq
             let s = "line1\nline2\nline3"
             let lines = str::lines { s = s }
-            seq::length { xs = lines }
+            seq::size { xs = lines }
         """.trimIndent()
 
         assertEquals(3L, eval(source))
@@ -444,7 +444,7 @@ class StringModuleTest {
             use std::collections::seq
             let s = "hello world foo"
             let words = str::words { s = s }
-            seq::length { xs = words }
+            seq::size { xs = words }
         """.trimIndent()
 
         assertEquals(3L, eval(source))
@@ -457,7 +457,7 @@ class StringModuleTest {
             use std::collections::seq
             let s = "hello"
             let chars = str::chars { s = s }
-            seq::length { xs = chars }
+            seq::size { xs = chars }
         """.trimIndent()
 
         assertEquals(5L, eval(source))

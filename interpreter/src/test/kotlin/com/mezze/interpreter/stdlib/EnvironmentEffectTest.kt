@@ -29,7 +29,7 @@ class EnvironmentEffectTest {
 
             perform SystemEnvironment in do
                 let dir = Environment.current_dir {}
-                str::length { s = dir } > 0
+                str::size { s = dir } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -42,7 +42,7 @@ class EnvironmentEffectTest {
 
             perform SystemEnvironment in do
                 let name = Environment.os_name {}
-                str::length { s = name } > 0
+                str::size { s = name } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -67,7 +67,7 @@ class EnvironmentEffectTest {
 
             perform SystemEnvironment in do
                 let arch = Environment.arch {}
-                str::length { s = arch } > 0
+                str::size { s = arch } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -80,7 +80,7 @@ class EnvironmentEffectTest {
 
             perform SystemEnvironment in do
                 let version = Environment.os_version {}
-                str::length { s = version } > 0
+                str::size { s = version } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -93,7 +93,7 @@ class EnvironmentEffectTest {
 
             perform SystemEnvironment in do
                 let args = Environment.process_args {}
-                seq::length { xs = args } >= 0
+                seq::size { xs = args } >= 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -106,7 +106,7 @@ class EnvironmentEffectTest {
 
             perform SystemEnvironment in do
                 let vars = Environment.get_all_env {}
-                seq::length { xs = vars } >= 0
+                seq::size { xs = vars } >= 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -145,7 +145,7 @@ class EnvironmentEffectTest {
 
             perform SystemEnvironment in do
                 let dir = current_dir {}
-                str::length { s = dir } > 0
+                str::size { s = dir } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
@@ -158,7 +158,7 @@ class EnvironmentEffectTest {
 
             perform SystemEnvironment in do
                 let info = os_info {}
-                str::length { s = info.name } > 0
+                str::size { s = info.name } > 0
         """.trimIndent())
         assertEquals(true, result)
     }

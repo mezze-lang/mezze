@@ -1,16 +1,15 @@
-use std::effects::mutation::{Mutation, DebugMut, seq_to_mut, seq_to_immut, sort, int_to_mut, incr, read_int, for_range}
-use std::effects::log::{println, Log, Console}
+use std::effects::mutation::{ Mutation, DebugMut, seq_to_mut, seq_to_immut, sort, int_to_mut, incr, read_int, for_range }
+use std::effects::log::{ println, Log, Console }
 
-let demo: {} -> [Int] = {} -> perform DebugMut in do
-    let nums = seq_to_mut {seq = [5, 2, 8, 1, 9, 3]}
-    sort {seq = nums}
-    let counter = int_to_mut {n = 0}
-    for_range {start = 0, end = 3, body = {i} -> do
-        incr {n = counter, delta = 1}
-    }
-    let final_count = read_int {n = counter}
-    seq_to_immut {seq = nums}
+let demo : {} -> [Int] = {} -> perform DebugMut in do
+  let nums = seq_to_mut { seq = [5, 2, 8, 1, 9, 3] }
+  sort { seq = nums }
+  let counter = int_to_mut { n = 0 }
+  for_range { start = 0, end = 3, body = { i } -> do
+    incr { n = counter, delta = 1 } }
+  let final_count = read_int { n = counter }
+  seq_to_immut { seq = nums }
 
 let main = {} -> perform Console in do
-    let result = demo {}
-    println {msg = "Done with mutation demo"}
+  let result = demo {}
+  println { msg = "Done with mutation demo" }

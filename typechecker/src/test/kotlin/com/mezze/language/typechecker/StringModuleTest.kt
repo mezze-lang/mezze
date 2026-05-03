@@ -44,7 +44,7 @@ class StringModuleTest {
     fun `test string length function`() {
         val source = """
             use std::str
-            let result = str::length { s = "Hello" }
+            let result = str::size { s = "Hello" }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -156,7 +156,7 @@ class StringModuleTest {
             use std::str
             let hello = "hello"
             let upper = str::to_upper { s = hello }
-            let len = str::length { s = upper }
+            let len = str::size { s = upper }
             let trimmed = str::trim { s = "  test  " }
         """.trimIndent()
 

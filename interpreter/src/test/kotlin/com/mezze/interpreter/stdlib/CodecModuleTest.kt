@@ -139,7 +139,7 @@ class CodecModuleTest {
                 path = ["user", "name"],
                 message = "Encoding failed"
             }
-            seq::length {xs = error.path}
+            seq::size {xs = error.path}
         """)
         assertEquals(2L, result)
     }
@@ -200,7 +200,7 @@ class CodecModuleTest {
             use std::collections::seq
 
             let path = append_path {path = empty_path, field = "user"}
-            seq::length {xs = path}
+            seq::size {xs = path}
         """)
         assertEquals(1L, result)
     }
@@ -213,7 +213,7 @@ class CodecModuleTest {
 
             let path1 = append_path {path = empty_path, field = "user"}
             let path2 = append_path {path = path1, field = "address"}
-            seq::length {xs = path2}
+            seq::size {xs = path2}
         """)
         assertEquals(2L, result)
     }
@@ -225,7 +225,7 @@ class CodecModuleTest {
             use std::collections::seq
 
             let path = append_index {path = empty_path, index = 0}
-            seq::length {xs = path}
+            seq::size {xs = path}
         """)
         assertEquals(1L, result)
     }

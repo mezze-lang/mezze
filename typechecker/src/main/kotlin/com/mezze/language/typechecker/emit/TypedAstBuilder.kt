@@ -48,7 +48,16 @@ class TypedAstBuilder(
     private val implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,
     private val tailCallLocations: Set<com.mezze.language.parsedast.Loc>,
     private val mustBeOpenRowVars: Set<RowVar> = emptySet(),
-    private val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo> = emptyMap()
+    private val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo> = emptyMap(),
+    // Per-call-site return types from the constraint solver. Keyed by the
+    // ParsedFunctionCall's loc; values are the fresh return-type vars that the
+    // constraint solver unified with the actual return type. Substituting
+    // through the global substitution gives the monomorphized return type at
+    // that specific call site — the type the TypedCall's `.type` should carry.
+    // Without this, qualified-import calls (`seq::filter { ... }`) only know
+    // their generic scheme, and the call's `.type` falls back to `unknown`,
+    // breaking LSP per-segment chain inlay hints.
+    private val callReturnTypes: Map<Loc, MezzeType> = emptyMap()
 ) {
 
     /**
@@ -366,9 +375,45 @@ class TypedAstBuilder(
             convertParsedTypeAnnotation(ann)
         }
 
-        // Build operation expressions
+        // Build operation expressions.
+        //
+        // For inherent impls (`impl Type where { ... }`), ConstraintGenerator stores
+        // the solved body type under the key `_inherent_<loc>_<opName>`. Pulling it
+        // out lets us push a real FunctionType down as the contextType, so the
+        // lambda-branch in buildExpr can return the post-substitution body type
+        // instead of bottoming out at the placeholder `'ret`. Without this,
+        // importers can't recover the operation's return type at the module
+        // boundary (issue #213).
         val ops = decl.operations.associate { op ->
-            val opExpr = buildExpr(op.implementation, file, MezzeType.VarType(TypeVar("op_${op.name}")))
+            val isInherent = decl.target is com.mezze.language.parsedast.ParsedImplTarget.Inherent
+            val targetTypeForOp = if (isInherent) {
+                decl.targetTypes.firstOrNull()?.let { convertParsedTypeAnnotation(it) }
+            } else null
+            // ConstraintGenerator now stashes the impl op's full function
+            // type (post-solve param record + return) under the same key
+            // (#230). Pull both halves out — return-only fallback below
+            // covers older cache rows / non-inherent paths.
+            val solvedFn: MezzeType.FunctionType? = if (isInherent) {
+                val key = "_inherent_${decl.loc}_${op.name}"
+                (constraintResults[key]?.type?.let { substitution.apply(it) }
+                    as? MezzeType.FunctionType)
+            } else null
+            val solvedReturn: MezzeType? = solvedFn?.returnType
+                ?: if (isInherent) {
+                    val key = "_inherent_${decl.loc}_${op.name}"
+                    constraintResults[key]?.type?.let { substitution.apply(it) }
+                } else null
+
+            val ctxType: MezzeType = when {
+                isInherent && solvedFn != null -> solvedFn
+                isInherent && targetTypeForOp != null && solvedReturn != null ->
+                    MezzeType.FunctionType(
+                        paramType = MezzeType.RecordType(mapOf("it" to targetTypeForOp)),
+                        returnType = solvedReturn
+                    )
+                else -> MezzeType.VarType(TypeVar("op_${op.name}"))
+            }
+            val opExpr = buildExpr(op.implementation, file, ctxType)
             op.name to opExpr
         }
 
@@ -645,6 +690,14 @@ class TypedAstBuilder(
                     val receiverExpr = buildExpr(memberAccess.receiver, file)
                     val argExpr = buildExpr(expr.arguments, file)
 
+                    // Prefer the constraint-solved methodFunctionType when
+                    // available — without it, contextType (often an `unknown`
+                    // placeholder) leaks through and the method-call's `.type`
+                    // ends up unresolved. That breaks LSP per-segment chain
+                    // hints and any downstream consumer that reads the call's
+                    // return type.
+                    val solvedFnType = methodInfo.methodFunctionType?.let { substitution.apply(it) }
+
                     // Build the function reference — use ByHash
                     val fn = if (methodInfo.methodHash != null) {
                         // Direct call by hash — no field access, no lambda wrapper
@@ -652,7 +705,7 @@ class TypedAstBuilder(
                         TypedVar(
                             name = methodInfo.methodName,
                             binding = BindingRef.ByHash(hash),
-                            type = substitution.apply(contextType),
+                            type = solvedFnType ?: substitution.apply(contextType),
                             loc = memberAccess.loc
                         )
                     } else if (methodInfo.isInherentMethod && methodInfo.implContentHash != null) {
@@ -661,7 +714,7 @@ class TypedAstBuilder(
                         TypedVar(
                             name = methodInfo.methodName,
                             binding = BindingRef.ByHash(opHash),
-                            type = substitution.apply(contextType),
+                            type = solvedFnType ?: substitution.apply(contextType),
                             loc = memberAccess.loc
                         )
                     } else {
@@ -710,11 +763,20 @@ class TypedAstBuilder(
                     val fn = buildExpr(expr.function, file)
                     val argExpr = buildExpr(expr.arguments, file)
 
-                    // Derive call return type from function type
-                    val callType = when (val ft = substitution.apply(fn.type)) {
-                        is MezzeType.FunctionType -> substitution.apply(ft.returnType)
-                        else -> substitution.apply(contextType)
-                    }
+                    // Derive call return type. Prefer the constraint-solved
+                    // per-call-site return type recorded by the constraint
+                    // generator (already unified with the call's actual
+                    // return at this site), falling back to the function's
+                    // own returnType. Without the per-site lookup, calls to
+                    // imported polymorphic functions (`seq::filter { ... }`)
+                    // would carry the generic scheme's returnType (e.g.
+                    // `[a]`) instead of the monomorphized one (`[Int]`).
+                    val solvedReturn = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
+                    val callType = solvedReturn
+                        ?: when (val ft = substitution.apply(fn.type)) {
+                            is MezzeType.FunctionType -> substitution.apply(ft.returnType)
+                            else -> substitution.apply(contextType)
+                        }
 
                     val isTailCall = isTailCallLocation(expr.loc)
 
@@ -1198,13 +1260,19 @@ class TypedAstBuilder(
                     is MezzeType.FunctionType -> resolvedContext.paramType
                     else -> null
                 }
-                params.names.map { name ->
+                // Per-name locs come from the parser (#232). Older inputs
+                // may not have them populated — fall back to the lambda's
+                // own loc in that case so behaviour is no worse than
+                // before.
+                val perNameLocs = params.nameLocs
+                params.names.mapIndexed { idx, name ->
                     val type = when (contextParamType) {
                         is MezzeType.RecordType -> contextParamType.fields[name]
                             ?: MezzeType.VarType(TypeVar(name))
                         else -> MezzeType.VarType(TypeVar(name))
                     }
-                    TypedParam(name, type, loc)
+                    val paramLoc = perNameLocs.getOrNull(idx) ?: loc
+                    TypedParam(name, type, paramLoc)
                 }
             }
         }
@@ -1262,15 +1330,24 @@ class TypedAstBuilder(
      * 4. Unknown fallback
      */
     private fun resolveIdentifierType(name: String, qualifier: ParsedModulePath?): MezzeType {
-        // For qualified identifiers, try to find via importContext
+        // For qualified identifiers, try to find via importContext.
+        // importedBindings is keyed by `<qualifier>::<name>` (e.g.
+        // `seq::filter`). Without this lookup the qualified-call's
+        // TypedVar.type stays `unknown`, which breaks downstream LSP
+        // per-segment chain inlay hints (the receiver-field's type ends
+        // up unresolved). The returned type is the binding's GENERIC
+        // scheme — we apply substitution but the polymorphic type vars
+        // stay free (they're instantiated per-call-site by the constraint
+        // solver, not stored back here). Inlay hints render `[a]` instead
+        // of `[Int]` for chain segments, which is acceptable: the chain
+        // shape is still visible. See #233.
         if (qualifier != null) {
-            val qualKey = BindingKey(qualifier.shortName, name)
-            val hash = identifierContentHashes[qualKey]
-            if (hash != null) {
-                // Try to look up type from import context
-                importContext?.importedBindings?.get(name)?.type?.let {
-                    return substitution.apply(it)
-                }
+            val qualifiedKey = "${qualifier.shortName}::$name"
+            importContext?.importedBindings?.get(qualifiedKey)?.type?.let {
+                return substitution.apply(it)
+            }
+            importContext?.importedBindings?.get(name)?.type?.let {
+                return substitution.apply(it)
             }
             return MezzeType.VarType(TypeVar("unknown"))
         }

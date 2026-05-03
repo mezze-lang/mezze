@@ -110,7 +110,7 @@ class ListInterpreterTest {
     fun `singleton creates single-element list`() {
         val code = """
             use std::collections::list
-            list::length { xs = list::singleton { x = 42 } }
+            list::size { xs = list::singleton { x = 42 } }
         """
         val result = eval(code)
         assertEquals(1L, result)
@@ -120,7 +120,7 @@ class ListInterpreterTest {
     fun `range creates list of integers`() {
         val code = """
             use std::collections::list
-            list::length { xs = list::range { start = 0, end = 5 } }
+            list::size { xs = list::range { start = 0, end = 5 } }
         """
         val result = eval(code)
         assertEquals(5L, result) // 0, 1, 2, 3, 4
@@ -161,7 +161,7 @@ class ListInterpreterTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 4 }
             match list::tail { xs = xs } is
-                Some { val } -> list::length { xs = val }
+                Some { val } -> list::size { xs = val }
                 None -> 0
         """
         val result = eval(code)
@@ -174,7 +174,7 @@ class ListInterpreterTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 4 }
             match list::uncons { xs = xs } is
-                Some { val } -> val.head + list::length { xs = val.tail }
+                Some { val } -> val.head + list::size { xs = val.tail }
                 None -> 0
         """
         val result = eval(code)
@@ -202,7 +202,7 @@ class ListInterpreterTest {
         val code = """
             use std::collections::list
             let xs = list::range { start = 0, end = 10 }
-            list::length { xs = xs }
+            list::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(10L, result)
@@ -254,7 +254,7 @@ class ListInterpreterTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 10 }
             let evens = list::filter { xs = xs, p = { x } -> x % 2 == 0 }
-            list::length { xs = evens }
+            list::size { xs = evens }
         """
         val result = eval(code)
         assertEquals(4L, result) // 2, 4, 6, 8
@@ -293,7 +293,7 @@ class ListInterpreterTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 3 }
             let ys = list::range { start = 3, end = 5 }
-            list::length { xs = list::append { xs = xs, ys = ys } }
+            list::size { xs = list::append { xs = xs, ys = ys } }
         """
         val result = eval(code)
         assertEquals(4L, result) // [1,2] + [3,4]
@@ -339,7 +339,7 @@ class ListInterpreterTest {
             use std::collections::seq
             let xs = list::range { start = 1, end = 4 }
             let arr = list::to_seq { xs = xs }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -351,7 +351,7 @@ class ListInterpreterTest {
             use std::collections::list
             let arr = [1, 2, 3]
             let xs = list::from_seq { xs = arr }
-            list::length { xs = xs }
+            list::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -362,7 +362,7 @@ class ListInterpreterTest {
         val code = """
             use std::collections::list
             let xs = list::of_seq { elements = [10, 20, 30] }
-            list::length { xs = xs }
+            list::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -377,7 +377,7 @@ class ListInterpreterTest {
         val code = """
             use std::collections::list
             let xs = list::repeat { x = 42, n = 3 }
-            list::length { xs = xs }
+            list::size { xs = xs }
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -486,7 +486,7 @@ class ListInterpreterTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 6 }
             let result = list::partition { xs = xs, p = { x } -> x > 3 }
-            list::length { xs = result.pass }
+            list::size { xs = result.pass }
         """
         val result = eval(code)
         assertEquals(2L, result)  // 4, 5
@@ -498,7 +498,7 @@ class ListInterpreterTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 6 }
             let result = list::partition { xs = xs, p = { x } -> x > 3 }
-            list::length { xs = result.fail }
+            list::size { xs = result.fail }
         """
         val result = eval(code)
         assertEquals(3L, result)  // 1, 2, 3
@@ -539,7 +539,7 @@ class ListInterpreterTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 5 }
             let inits = list::init { xs = xs }
-            list::length { xs = inits }
+            list::size { xs = inits }
         """
         val result = eval(code)
         assertEquals(3L, result)  // [1, 2, 3]

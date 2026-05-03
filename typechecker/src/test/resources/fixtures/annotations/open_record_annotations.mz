@@ -1,13 +1,20 @@
-# Explicit open record type annotations
 use std::int
 
-let processUser: { user: { name: Str, age: Int, ... } } -> Str = {user} -> "$(user.name) is $(int::to_str {n = user.age})"
-let getInfo: { obj: { id: Int, ... } } -> Int = {obj} -> obj.id
+let processUser : { user: { name: Str, age: Int, ... } } -> Str = { user } -> "$(user.name) is $(int::to_str { n = user.age })"
 
-let user1 = {name = "Alice", age = 30, city = "NYC", country = "USA"}
-let item1 = {id = 123, name = "Widget", price = 99.99}
+let getInfo : { obj: { id: Int, ... } } -> Int = { obj } -> obj.id
 
-let result1 = processUser {user = user1}
-let result2 = getInfo {obj = item1}
+let user1 = {
+  name = "Alice",
+  age = 30,
+  city = "NYC",
+  country = "USA",
+}
+
+let item1 = { id = 123, name = "Widget", price = 99.99 }
+
+let result1 = processUser { user = user1 }
+
+let result2 = getInfo { obj = item1 }
 
 result2

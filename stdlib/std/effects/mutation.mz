@@ -1,58 +1,38 @@
-# std/effects/mutation.mz - Safe Local Mutation Effect
-#
-# Provides safe in-place mutation with compile-time data race prevention.
-# The Mut effect is "hermetic" - it cannot coexist with any other effect.
-# This ensures mutations are always local and never leak across async boundaries.
-#
-# Usage:
-#   use std::effects::mutation::{Mut, LocalMut, MutSeq, seq_to_mut, seq_to_immut}
-#
-#   # Convert to mutable, mutate, convert back
-#   let sorted = perform LocalMut in do
-#       let arr = seq_to_mut {seq = [3, 1, 4, 1, 5]}
-#       sort {seq = arr}
-#       seq_to_immut {seq = arr}
-#
-# The hermetic rule ensures:
-# - No async/await inside mutation blocks
-# - No logging or other effects that could observe partial state
-# - No effects that could allow mutation to escape
-#
-# This is similar to Rust's &mut references - exclusive access guaranteed.
 use std::int
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# Mut Effect
-# Mut Effect
-# Mut Effect
-# Mut Effect
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# The Mut effect enables safe in-place mutation.
-# The Mut effect enables safe in-place mutation.
-# The Mut effect enables safe in-place mutation.
-# The Mut effect enables safe in-place mutation.
-# It has two operations:
-# It has two operations:
-# It has two operations:
-# It has two operations:
-# - mutate: wraps an act and returns its result, marking the effect
-# - mutate: wraps an act and returns its result, marking the effect
-# - mutate: wraps an act and returns its result, marking the effect
-# - mutate: wraps an act and returns its result, marking the effect
-# - loop: efficient imperative looping with condition and body (both can use Mut)
-# - loop: efficient imperative looping with condition and body (both can use Mut)
-# - loop: efficient imperative looping with condition and body (both can use Mut)
-# - loop: efficient imperative looping with condition and body (both can use Mut)
 
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# Mut Effect
+# Mut Effect
+# Mut Effect
+# Mut Effect
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# The Mut effect enables safe in-place mutation.
+# The Mut effect enables safe in-place mutation.
+# The Mut effect enables safe in-place mutation.
+# The Mut effect enables safe in-place mutation.
+# It has two operations:
+# It has two operations:
+# It has two operations:
+# It has two operations:
+# - mutate: wraps an act and returns its result, marking the effect
+# - mutate: wraps an act and returns its result, marking the effect
+# - mutate: wraps an act and returns its result, marking the effect
+# - mutate: wraps an act and returns its result, marking the effect
+# - loop: efficient imperative looping with condition and body (both can use Mut)
+# - loop: efficient imperative looping with condition and body (both can use Mut)
+# - loop: efficient imperative looping with condition and body (both can use Mut)
+# - loop: efficient imperative looping with condition and body (both can use Mut)
 effect Mut where {
   mutate: { act: {} -> 'a } -> 'a <Mut>,
   loop: { cond: {} -> Bool <Mut>, body: {} -> {} <Mut> } -> {} <Mut>
 }
+
 # Execute an act within the mutation context
 # The act is wrapped to enable interception by DebugLocalMut
 # Efficient looping construct - cond and body can perform mutations
@@ -62,11 +42,11 @@ effect Mut where {
 # LocalMut is the primary performer for Mut.
 # It's a trivial handler - mutations are done directly on memory.
 # Safety comes from the type system (hermetic rule), not runtime checks.
-
 impl Mut for LocalMut where {
   mutate = { act } -> act {},
   loop = { cond, body } -> __native_mutation_loop { cond = cond, body = body },
 }
+
 # =============================================================================
 # DebugLocalMut - Debug Handler (uses interpreter internals)
 # =============================================================================
@@ -76,90 +56,90 @@ impl Mut for LocalMut where {
 #
 # When enabled, DebugLocalMut will log mutation operations via content-hash
 # addressing - identifying functions by their unique hash rather than name.
-
 impl Mut for DebugLocalMut where {
   mutate = { act } -> __native_debug_mutation_mutate { act = act },
   loop = { cond, body } -> __native_debug_mutation_loop { cond = cond, body = body },
 }
-# =============================================================================
-# Mutable Newtypes - Wrappers for mutable collections
-# Mutable Newtypes - Wrappers for mutable collections
-# =============================================================================
-# =============================================================================
-# Mutable sequence - wraps native mutable array
-# Mutable sequence - wraps native mutable array
-# Mutable map - wraps native mutable hash map
-# Mutable map - wraps native mutable hash map
-# Mutable map - wraps native mutable hash map
-# Mutable map - wraps native mutable hash map
-# Mutable set - wraps native mutable hash set
-# Mutable set - wraps native mutable hash set
-# Mutable set - wraps native mutable hash set
-# Mutable set - wraps native mutable hash set
 
+# =============================================================================
+# Mutable Newtypes - Wrappers for mutable collections
+# Mutable Newtypes - Wrappers for mutable collections
+# =============================================================================
+# =============================================================================
+# Mutable sequence - wraps native mutable array
+# Mutable sequence - wraps native mutable array
+# Mutable map - wraps native mutable hash map
+# Mutable map - wraps native mutable hash map
+# Mutable map - wraps native mutable hash map
+# Mutable map - wraps native mutable hash map
+# Mutable set - wraps native mutable hash set
+# Mutable set - wraps native mutable hash set
+# Mutable set - wraps native mutable hash set
+# Mutable set - wraps native mutable hash set
 pub newtype MutSeq 'a = MutSeq __NativeMutSeq
-# Mutable bytes - wraps native mutable byte array
-# Mutable bytes - wraps native mutable byte array
-# Mutable bytes - wraps native mutable byte array
-# Mutable bytes - wraps native mutable byte array
-# Mutable deque - wraps native mutable deque
-# Mutable deque - wraps native mutable deque
-# Mutable deque - wraps native mutable deque
-# Mutable deque - wraps native mutable deque
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# Mutable Primitives - Single-value wrappers for primitives
-# Mutable Primitives - Single-value wrappers for primitives
-# Mutable Primitives - Single-value wrappers for primitives
-# Mutable Primitives - Single-value wrappers for primitives
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# Mutable Int - for incrementing counters etc.
-# Mutable Int - for incrementing counters etc.
 
+# Mutable bytes - wraps native mutable byte array
+# Mutable bytes - wraps native mutable byte array
+# Mutable bytes - wraps native mutable byte array
+# Mutable bytes - wraps native mutable byte array
+# Mutable deque - wraps native mutable deque
+# Mutable deque - wraps native mutable deque
+# Mutable deque - wraps native mutable deque
+# Mutable deque - wraps native mutable deque
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# Mutable Primitives - Single-value wrappers for primitives
+# Mutable Primitives - Single-value wrappers for primitives
+# Mutable Primitives - Single-value wrappers for primitives
+# Mutable Primitives - Single-value wrappers for primitives
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# Mutable Int - for incrementing counters etc.
+# Mutable Int - for incrementing counters etc.
 pub newtype MutMap 'k 'v = MutMap __NativeMutMap
-# Mutable Int - for incrementing counters etc.
-# Mutable Int - for incrementing counters etc.
-# Mutable Float - for accumulators etc.
-# Mutable Float - for accumulators etc.
-# Mutable Float - for accumulators etc.
-# Mutable Float - for accumulators etc.
-# Mutable Bool - for flags
-# Mutable Bool - for flags
-# Mutable Bool - for flags
-# Mutable Bool - for flags
-# Mutable String - for string building
-# Mutable String - for string building
-# Mutable String - for string building
-# Mutable String - for string building
-# Mutable Char - for character manipulation
-# Mutable Char - for character manipulation
-# Mutable Char - for character manipulation
-# Mutable Char - for character manipulation
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# Conversion Functions - to_mut / to_immut
-# Conversion Functions - to_mut / to_immut
-# Conversion Functions - to_mut / to_immut
-# Conversion Functions - to_mut / to_immut
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# Convert immutable sequence to mutable (creates a copy)
-# Convert immutable sequence to mutable (creates a copy)
-# Convert immutable sequence to mutable (creates a copy)
-# Convert immutable sequence to mutable (creates a copy)
-# Convert mutable sequence back to immutable (zero-copy, freezes the mutable)
-# Convert mutable sequence back to immutable (zero-copy, freezes the mutable)
 
+# Mutable Int - for incrementing counters etc.
+# Mutable Int - for incrementing counters etc.
+# Mutable Float - for accumulators etc.
+# Mutable Float - for accumulators etc.
+# Mutable Float - for accumulators etc.
+# Mutable Float - for accumulators etc.
+# Mutable Bool - for flags
+# Mutable Bool - for flags
+# Mutable Bool - for flags
+# Mutable Bool - for flags
+# Mutable String - for string building
+# Mutable String - for string building
+# Mutable String - for string building
+# Mutable String - for string building
+# Mutable Char - for character manipulation
+# Mutable Char - for character manipulation
+# Mutable Char - for character manipulation
+# Mutable Char - for character manipulation
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# Conversion Functions - to_mut / to_immut
+# Conversion Functions - to_mut / to_immut
+# Conversion Functions - to_mut / to_immut
+# Conversion Functions - to_mut / to_immut
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# Convert immutable sequence to mutable (creates a copy)
+# Convert immutable sequence to mutable (creates a copy)
+# Convert immutable sequence to mutable (creates a copy)
+# Convert immutable sequence to mutable (creates a copy)
+# Convert mutable sequence back to immutable (zero-copy, freezes the mutable)
+# Convert mutable sequence back to immutable (zero-copy, freezes the mutable)
 pub newtype MutSet 'a = MutSet __NativeMutSet
+
 # Alias for convenience
 # Alias for convenience
 # Map conversions
@@ -167,12 +147,11 @@ pub newtype MutSet 'a = MutSet __NativeMutSet
 # Set conversions
 # Bytes conversions
 # Deque conversions
-
 pub newtype MutBytes = MutBytes __NativeMutBytes
+
 # =============================================================================
 # Primitive Conversions
 # =============================================================================
-
 pub newtype MutDeque 'a = MutDeque __NativeMutDeque
 
 pub newtype MutInt = MutInt __NativeMutInt
@@ -185,419 +164,425 @@ pub newtype MutString = MutString __NativeMutString
 
 pub newtype MutChar = MutChar __NativeMutChar
 
-pub let seq_to_mut: { seq: ['a] } -> MutSeq 'a <Mut> = { seq } -> Mut.mutate { act = {} ->
-  __native_seq_to_mut { seq = seq } }
+pub let seq_to_mut : { seq: ['a] } -> MutSeq 'a <Mut> = { seq } ->
+  Mut.mutate { act = {} -> __native_seq_to_mut { seq = seq } }
 
-pub let seq_to_immut: { seq: MutSeq 'a } -> ['a] <Mut> = { seq } -> Mut.mutate { act = {} ->
-  __native_seq_to_immut { seq = seq } }
+pub let seq_to_immut : { seq: MutSeq 'a } -> ['a] <Mut> = { seq } ->
+  Mut.mutate { act = {} -> __native_seq_to_immut { seq = seq } }
 
 pub let to_mut = seq_to_mut
 
 pub let to_immut = seq_to_immut
 
-pub let map_to_mut: { map: Map 'k 'v } -> MutMap 'k 'v <Mut> = { map } -> Mut.mutate { act = {} ->
-  __native_map_to_mut { map = map } }
+pub let map_to_mut : { map: Map 'k 'v } -> MutMap 'k 'v <Mut> = { map } ->
+  Mut.mutate { act = {} -> __native_map_to_mut { map = map } }
 
-pub let map_to_immut: { map: MutMap 'k 'v } -> Map 'k 'v <Mut> = { map } -> Mut.mutate { act = {} ->
-  __native_map_to_immut { map = map } }
+pub let map_to_immut : { map: MutMap 'k 'v } -> Map 'k 'v <Mut> = { map } ->
+  Mut.mutate { act = {} -> __native_map_to_immut { map = map } }
 
-pub let set_to_mut: { set: Set 'a } -> MutSet 'a <Mut> = { set } -> Mut.mutate { act = {} ->
-  __native_set_to_mut { set = set } }
+pub let set_to_mut : { set: Set 'a } -> MutSet 'a <Mut> = { set } ->
+  Mut.mutate { act = {} -> __native_set_to_mut { set = set } }
 
-pub let set_to_immut: { set: MutSet 'a } -> Set 'a <Mut> = { set } -> Mut.mutate { act = {} ->
-  __native_set_to_immut { set = set } }
+pub let set_to_immut : { set: MutSet 'a } -> Set 'a <Mut> = { set } ->
+  Mut.mutate { act = {} -> __native_set_to_immut { set = set } }
 
-pub let bytes_to_mut: { bytes: Bytes } -> MutBytes <Mut> = { bytes } -> Mut.mutate { act = {} ->
-  __native_bytes_to_mut { bytes = bytes } }
+pub let bytes_to_mut : { bytes: Bytes } -> MutBytes <Mut> = { bytes } ->
+  Mut.mutate { act = {} -> __native_bytes_to_mut { bytes = bytes } }
 
-pub let bytes_to_immut: { bytes: MutBytes } -> Bytes <Mut> = { bytes } -> Mut.mutate { act = {} ->
-  __native_bytes_to_immut { bytes = bytes } }
+pub let bytes_to_immut : { bytes: MutBytes } -> Bytes <Mut> = { bytes } ->
+  Mut.mutate { act = {} -> __native_bytes_to_immut { bytes = bytes } }
 
-pub let deque_to_mut: { deque: Deque 'a } -> MutDeque 'a <Mut> = { deque } -> Mut.mutate { act = {} ->
-  __native_deque_to_mut { deque = deque } }
+pub let deque_to_mut : { deque: Deque 'a } -> MutDeque 'a <Mut> = { deque } ->
+  Mut.mutate { act = {} -> __native_deque_to_mut { deque = deque } }
 
-pub let deque_to_immut: { deque: MutDeque 'a } -> Deque 'a <Mut> = { deque } -> Mut.mutate { act = {} ->
-  __native_deque_to_immut { deque = deque } }
+pub let deque_to_immut : { deque: MutDeque 'a } -> Deque 'a <Mut> = { deque } ->
+  Mut.mutate { act = {} -> __native_deque_to_immut { deque = deque } }
 
-pub let int_to_mut: { n: Int } -> MutInt <Mut> = { n } -> Mut.mutate { act = {} ->
-  __native_int_to_mut { n = n } }
+pub let int_to_mut : { n: Int } -> MutInt <Mut> = { n } ->
+  Mut.mutate { act = {} -> __native_int_to_mut { n = n } }
 
-pub let int_to_immut: { n: MutInt } -> Int <Mut> = { n } -> Mut.mutate { act = {} ->
-  __native_int_to_immut { n = n } }
+pub let int_to_immut : { n: MutInt } -> Int <Mut> = { n } ->
+  Mut.mutate { act = {} -> __native_int_to_immut { n = n } }
 
-pub let float_to_mut: { n: Float } -> MutFloat <Mut> = { n } -> Mut.mutate { act = {} ->
-  __native_float_to_mut { n = n } }
+pub let float_to_mut : { n: Float } -> MutFloat <Mut> = { n } ->
+  Mut.mutate { act = {} -> __native_float_to_mut { n = n } }
 
-pub let float_to_immut: { n: MutFloat } -> Float <Mut> = { n } -> Mut.mutate { act = {} ->
-  __native_float_to_immut { n = n } }
+pub let float_to_immut : { n: MutFloat } -> Float <Mut> = { n } ->
+  Mut.mutate { act = {} -> __native_float_to_immut { n = n } }
 
-pub let bool_to_mut: { b: Bool } -> MutBool <Mut> = { b } -> Mut.mutate { act = {} ->
-  __native_bool_to_mut { b = b } }
+pub let bool_to_mut : { b: Bool } -> MutBool <Mut> = { b } ->
+  Mut.mutate { act = {} -> __native_bool_to_mut { b = b } }
 
-pub let bool_to_immut: { b: MutBool } -> Bool <Mut> = { b } -> Mut.mutate { act = {} ->
-  __native_bool_to_immut { b = b } }
+pub let bool_to_immut : { b: MutBool } -> Bool <Mut> = { b } ->
+  Mut.mutate { act = {} -> __native_bool_to_immut { b = b } }
 
-pub let string_to_mut: { s: Str } -> MutString <Mut> = { s } -> Mut.mutate { act = {} ->
-  __native_string_to_mut { s = s } }
+pub let string_to_mut : { s: Str } -> MutString <Mut> = { s } ->
+  Mut.mutate { act = {} -> __native_string_to_mut { s = s } }
 
-pub let string_to_immut: { s: MutString } -> Str <Mut> = { s } -> Mut.mutate { act = {} ->
-  __native_string_to_immut { s = s } }
+pub let string_to_immut : { s: MutString } -> Str <Mut> = { s } ->
+  Mut.mutate { act = {} -> __native_string_to_immut { s = s } }
 
-pub let char_to_mut: { c: Char } -> MutChar <Mut> = { c } -> Mut.mutate { act = {} ->
-  __native_char_to_mut { c = c } }
+pub let char_to_mut : { c: Char } -> MutChar <Mut> = { c } ->
+  Mut.mutate { act = {} -> __native_char_to_mut { c = c } }
 
-pub let char_to_immut: { c: MutChar } -> Char <Mut> = { c } -> Mut.mutate { act = {} ->
-  __native_char_to_immut { c = c } }
+pub let char_to_immut : { c: MutChar } -> Char <Mut> = { c } ->
+  Mut.mutate { act = {} -> __native_char_to_immut { c = c } }
+
 # =============================================================================
 # MutSeq Operations
 # =============================================================================
+pub let sort : { seq: MutSeq Int } -> {} <Mut> = { seq } ->
+  Mut.mutate { act = {} -> __native_mut_seq_sort { seq = seq } }
 
-pub let sort: { seq: MutSeq Int } -> {} <Mut> = { seq } -> Mut.mutate { act = {} ->
-  __native_mut_seq_sort { seq = seq } }
-
-pub let sort_by: { seq: MutSeq 'a, cmp: { a: 'a, b: 'a } -> Int } -> {} <Mut> = { seq, cmp } ->
+pub let sort_by : { seq: MutSeq 'a, cmp: { a: 'a, b: 'a } -> Int } -> {} <Mut> = { seq, cmp } ->
   Mut.mutate { act = {} -> __native_mut_seq_sort_by { seq = seq, cmp = cmp } }
 
-pub let reverse: { seq: MutSeq 'a } -> {} <Mut> = { seq } -> Mut.mutate { act = {} ->
-  __native_mut_seq_reverse { seq = seq } }
+pub let reverse : { seq: MutSeq 'a } -> {} <Mut> = { seq } ->
+  Mut.mutate { act = {} -> __native_mut_seq_reverse { seq = seq } }
 
-pub let fill: { seq: MutSeq 'a, v: 'a } -> {} <Mut> = { seq, v } -> Mut.mutate { act = {} ->
-  __native_mut_seq_fill { seq = seq, v = v } }
+pub let fill : { seq: MutSeq 'a, v: 'a } -> {} <Mut> = { seq, v } ->
+  Mut.mutate { act = {} -> __native_mut_seq_fill { seq = seq, v = v } }
 
-pub let fill_range: { seq: MutSeq 'a, start: Int, end: Int, v: 'a } -> {} <Mut> = { seq, start, end, v } ->
-  Mut.mutate { act = {} -> __native_mut_seq_fill_range { seq = seq, start = start, end = end, v = v } }
+pub let fill_range : { seq: MutSeq 'a, start: Int, end: Int, v: 'a } -> {} <Mut> = { seq, start, end, v } ->
+  Mut.mutate { act = {} ->
+    __native_mut_seq_fill_range { seq = seq, start = start, end = end, v = v } }
 
-pub let push: { seq: MutSeq 'a, v: 'a } -> {} <Mut> = { seq, v } -> Mut.mutate { act = {} ->
-  __native_mut_seq_push { seq = seq, v = v } }
+pub let push : { seq: MutSeq 'a, v: 'a } -> {} <Mut> = { seq, v } ->
+  Mut.mutate { act = {} -> __native_mut_seq_push { seq = seq, v = v } }
 
-pub let pop: { seq: MutSeq 'a } -> Option 'a <Mut> = { seq } -> Mut.mutate { act = {} ->
-  __native_mut_seq_pop { seq = seq } }
+pub let pop : { seq: MutSeq 'a } -> Option 'a <Mut> = { seq } ->
+  Mut.mutate { act = {} -> __native_mut_seq_pop { seq = seq } }
 
-pub let get: { seq: MutSeq 'a, i: Int } -> Option 'a <Mut> = { seq, i } -> Mut.mutate { act = {} ->
-  __native_mut_seq_get { seq = seq, i = i } }
+pub let get : { seq: MutSeq 'a, i: Int } -> Option 'a <Mut> = { seq, i } ->
+  Mut.mutate { act = {} -> __native_mut_seq_get { seq = seq, i = i } }
 
-pub let set: { seq: MutSeq 'a, i: Int, v: 'a } -> Bool <Mut> = { seq, i, v } -> Mut.mutate { act = {} ->
-  __native_mut_seq_set { seq = seq, i = i, v = v } }
+pub let set : { seq: MutSeq 'a, i: Int, v: 'a } -> Bool <Mut> = { seq, i, v } ->
+  Mut.mutate { act = {} -> __native_mut_seq_set { seq = seq, i = i, v = v } }
 
-pub let len: { seq: MutSeq 'a } -> Int <Mut> = { seq } -> Mut.mutate { act = {} ->
-  __native_mut_seq_len { seq = seq } }
+pub let len : { seq: MutSeq 'a } -> Int <Mut> = { seq } ->
+  Mut.mutate { act = {} -> __native_mut_seq_len { seq = seq } }
 
-pub let clear: { seq: MutSeq 'a } -> {} <Mut> = { seq } -> Mut.mutate { act = {} ->
-  __native_mut_seq_clear { seq = seq } }
+pub let clear : { seq: MutSeq 'a } -> {} <Mut> = { seq } ->
+  Mut.mutate { act = {} -> __native_mut_seq_clear { seq = seq } }
 
-pub let insert: { seq: MutSeq 'a, i: Int, v: 'a } -> Bool <Mut> = { seq, i, v } ->
+pub let insert : { seq: MutSeq 'a, i: Int, v: 'a } -> Bool <Mut> = { seq, i, v } ->
   Mut.mutate { act = {} -> __native_mut_seq_insert { seq = seq, i = i, v = v } }
 
-pub let remove: { seq: MutSeq 'a, i: Int } -> Option 'a <Mut> = { seq, i } -> Mut.mutate { act = {} ->
-  __native_mut_seq_remove { seq = seq, i = i } }
+pub let remove : { seq: MutSeq 'a, i: Int } -> Option 'a <Mut> = { seq, i } ->
+  Mut.mutate { act = {} -> __native_mut_seq_remove { seq = seq, i = i } }
 
-pub let swap: { seq: MutSeq 'a, i: Int, j: Int } -> Bool <Mut> = { seq, i, j } ->
+pub let swap : { seq: MutSeq 'a, i: Int, j: Int } -> Bool <Mut> = { seq, i, j } ->
   Mut.mutate { act = {} -> __native_mut_seq_swap { seq = seq, i = i, j = j } }
+
 # =============================================================================
 # MutInt Operations
 # =============================================================================
-
-pub let read_int: { n: MutInt } -> Int <Mut> = { n } -> Mut.mutate { act = {} ->
+pub let read_int : { n: MutInt } -> Int <Mut> = { n } -> Mut.mutate { act = {} ->
   __native_mut_int_read { n = n } }
 
-pub let write_int: { n: MutInt, v: Int } -> {} <Mut> = { n, v } -> Mut.mutate { act = {} ->
-  __native_mut_int_write { n = n, v = v } }
+pub let write_int : { n: MutInt, v: Int } -> {} <Mut> = { n, v } ->
+  Mut.mutate { act = {} -> __native_mut_int_write { n = n, v = v } }
 
-pub let incr: { n: MutInt, delta: Int } -> {} <Mut> = { n, delta } -> Mut.mutate { act = {} ->
-  __native_mut_int_incr { n = n, delta = delta } }
+pub let incr : { n: MutInt, delta: Int } -> {} <Mut> = { n, delta } ->
+  Mut.mutate { act = {} -> __native_mut_int_incr { n = n, delta = delta } }
 
-pub let decr: { n: MutInt, delta: Int } -> {} <Mut> = { n, delta } -> Mut.mutate { act = {} ->
-  __native_mut_int_decr { n = n, delta = delta } }
+pub let decr : { n: MutInt, delta: Int } -> {} <Mut> = { n, delta } ->
+  Mut.mutate { act = {} -> __native_mut_int_decr { n = n, delta = delta } }
 
-pub let mul_int: { n: MutInt, factor: Int } -> {} <Mut> = { n, factor } -> Mut.mutate { act = {} ->
-  __native_mut_int_mul { n = n, factor = factor } }
+pub let mul_int : { n: MutInt, factor: Int } -> {} <Mut> = { n, factor } ->
+  Mut.mutate { act = {} -> __native_mut_int_mul { n = n, factor = factor } }
 
-pub let div_int: { n: MutInt, divisor: Int } -> {} <Mut> = { n, divisor } -> Mut.mutate { act = {} ->
-  __native_mut_int_div { n = n, divisor = divisor } }
+pub let div_int : { n: MutInt, divisor: Int } -> {} <Mut> = { n, divisor } ->
+  Mut.mutate { act = {} -> __native_mut_int_div { n = n, divisor = divisor } }
 
-pub let mod_int: { n: MutInt, divisor: Int } -> {} <Mut> = { n, divisor } -> Mut.mutate { act = {} ->
-  __native_mut_int_mod { n = n, divisor = divisor } }
+pub let mod_int : { n: MutInt, divisor: Int } -> {} <Mut> = { n, divisor } ->
+  Mut.mutate { act = {} -> __native_mut_int_mod { n = n, divisor = divisor } }
 
-pub let compare_and_swap: { n: MutInt, expected: Int, new_val: Int } -> Bool <Mut> = { n, expected, new_val } ->
+pub let compare_and_swap : { n: MutInt, expected: Int, new_val: Int } -> Bool <Mut> = { n, expected, new_val } ->
   Mut.mutate { act = {} -> __native_mut_int_cas { n = n, expected = expected, new_val = new_val } }
+
 # Convenience: increment/decrement by 1
+pub let incr1 : { n: MutInt } -> {} <Mut> = { n } -> incr { n = n, delta = 1 }
 
-pub let incr1: { n: MutInt } -> {} <Mut> = { n } -> incr { n = n, delta = 1 }
+pub let decr1 : { n: MutInt } -> {} <Mut> = { n } -> decr { n = n, delta = 1 }
 
-pub let decr1: { n: MutInt } -> {} <Mut> = { n } -> decr { n = n, delta = 1 }
 # =============================================================================
 # MutFloat Operations
 # =============================================================================
+pub let read_float : { n: MutFloat } -> Float <Mut> = { n } ->
+  Mut.mutate { act = {} -> __native_mut_float_read { n = n } }
 
-pub let read_float: { n: MutFloat } -> Float <Mut> = { n } -> Mut.mutate { act = {} ->
-  __native_mut_float_read { n = n } }
+pub let write_float : { n: MutFloat, v: Float } -> {} <Mut> = { n, v } ->
+  Mut.mutate { act = {} -> __native_mut_float_write { n = n, v = v } }
 
-pub let write_float: { n: MutFloat, v: Float } -> {} <Mut> = { n, v } -> Mut.mutate { act = {} ->
-  __native_mut_float_write { n = n, v = v } }
+pub let add_float : { n: MutFloat, delta: Float } -> {} <Mut> = { n, delta } ->
+  Mut.mutate { act = {} -> __native_mut_float_add { n = n, delta = delta } }
 
-pub let add_float: { n: MutFloat, delta: Float } -> {} <Mut> = { n, delta } -> Mut.mutate { act = {} ->
-  __native_mut_float_add { n = n, delta = delta } }
+pub let sub_float : { n: MutFloat, delta: Float } -> {} <Mut> = { n, delta } ->
+  Mut.mutate { act = {} -> __native_mut_float_sub { n = n, delta = delta } }
 
-pub let sub_float: { n: MutFloat, delta: Float } -> {} <Mut> = { n, delta } -> Mut.mutate { act = {} ->
-  __native_mut_float_sub { n = n, delta = delta } }
-
-pub let mul_float: { n: MutFloat, factor: Float } -> {} <Mut> = { n, factor } ->
+pub let mul_float : { n: MutFloat, factor: Float } -> {} <Mut> = { n, factor } ->
   Mut.mutate { act = {} -> __native_mut_float_mul { n = n, factor = factor } }
 
-pub let div_float: { n: MutFloat, divisor: Float } -> {} <Mut> = { n, divisor } ->
+pub let div_float : { n: MutFloat, divisor: Float } -> {} <Mut> = { n, divisor } ->
   Mut.mutate { act = {} -> __native_mut_float_div { n = n, divisor = divisor } }
+
 # =============================================================================
 # MutBool Operations
 # =============================================================================
+pub let read_bool : { b: MutBool } -> Bool <Mut> = { b } ->
+  Mut.mutate { act = {} -> __native_mut_bool_read { b = b } }
 
-pub let read_bool: { b: MutBool } -> Bool <Mut> = { b } -> Mut.mutate { act = {} ->
-  __native_mut_bool_read { b = b } }
+pub let write_bool : { b: MutBool, v: Bool } -> {} <Mut> = { b, v } ->
+  Mut.mutate { act = {} -> __native_mut_bool_write { b = b, v = v } }
 
-pub let write_bool: { b: MutBool, v: Bool } -> {} <Mut> = { b, v } -> Mut.mutate { act = {} ->
-  __native_mut_bool_write { b = b, v = v } }
-
-pub let toggle: { b: MutBool } -> {} <Mut> = { b } -> Mut.mutate { act = {} -> __native_mut_bool_toggle { b = b } }
+pub let toggle : { b: MutBool } -> {} <Mut> = { b } -> Mut.mutate { act = {} ->
+  __native_mut_bool_toggle { b = b } }
 
 pub let toggle_bool = toggle
 
-pub let set_true: { b: MutBool } -> {} <Mut> = { b } -> Mut.mutate { act = {} ->
+pub let set_true : { b: MutBool } -> {} <Mut> = { b } -> Mut.mutate { act = {} ->
   __native_mut_bool_set_true { b = b } }
 
-pub let set_false: { b: MutBool } -> {} <Mut> = { b } -> Mut.mutate { act = {} ->
-  __native_mut_bool_set_false { b = b } }
+pub let set_false : { b: MutBool } -> {} <Mut> = { b } ->
+  Mut.mutate { act = {} -> __native_mut_bool_set_false { b = b } }
+
 # =============================================================================
 # MutString Operations
 # =============================================================================
+pub let read_string : { s: MutString } -> Str <Mut> = { s } ->
+  Mut.mutate { act = {} -> __native_mut_string_read { s = s } }
 
-pub let read_string: { s: MutString } -> Str <Mut> = { s } -> Mut.mutate { act = {} ->
-  __native_mut_string_read { s = s } }
+pub let write_string : { s: MutString, v: Str } -> {} <Mut> = { s, v } ->
+  Mut.mutate { act = {} -> __native_mut_string_write { s = s, v = v } }
 
-pub let write_string: { s: MutString, v: Str } -> {} <Mut> = { s, v } -> Mut.mutate { act = {} ->
-  __native_mut_string_write { s = s, v = v } }
+pub let string_len : { s: MutString } -> Int <Mut> = { s } ->
+  Mut.mutate { act = {} -> __native_mut_string_len { s = s } }
 
-pub let string_len: { s: MutString } -> Int <Mut> = { s } -> Mut.mutate { act = {} ->
-  __native_mut_string_len { s = s } }
+pub let string_is_empty : { s: MutString } -> Bool <Mut> = { s } ->
+  Mut.mutate { act = {} -> __native_mut_string_is_empty { s = s } }
 
-pub let string_is_empty: { s: MutString } -> Bool <Mut> = { s } -> Mut.mutate { act = {} ->
-  __native_mut_string_is_empty { s = s } }
-
-pub let string_append: { s: MutString, suffix: Str } -> {} <Mut> = { s, suffix } ->
+pub let string_append : { s: MutString, suffix: Str } -> {} <Mut> = { s, suffix } ->
   Mut.mutate { act = {} -> __native_mut_string_append { s = s, suffix = suffix } }
 
-pub let string_prepend: { s: MutString, prefix: Str } -> {} <Mut> = { s, prefix } ->
+pub let string_prepend : { s: MutString, prefix: Str } -> {} <Mut> = { s, prefix } ->
   Mut.mutate { act = {} -> __native_mut_string_prepend { s = s, prefix = prefix } }
 
-pub let string_clear: { s: MutString } -> {} <Mut> = { s } -> Mut.mutate { act = {} ->
-  __native_mut_string_clear { s = s } }
+pub let string_clear : { s: MutString } -> {} <Mut> = { s } ->
+  Mut.mutate { act = {} -> __native_mut_string_clear { s = s } }
 
-pub let string_reverse: { s: MutString } -> {} <Mut> = { s } -> Mut.mutate { act = {} ->
-  __native_mut_string_reverse { s = s } }
+pub let string_reverse : { s: MutString } -> {} <Mut> = { s } ->
+  Mut.mutate { act = {} -> __native_mut_string_reverse { s = s } }
 
-pub let string_insert: { s: MutString, i: Int, text: Str } -> {} <Mut> = { s, i, text } ->
+pub let string_insert : { s: MutString, i: Int, text: Str } -> {} <Mut> = { s, i, text } ->
   Mut.mutate { act = {} -> __native_mut_string_insert { s = s, i = i, text = text } }
 
-pub let string_delete: { s: MutString, start: Int, end: Int } -> {} <Mut> = { s, start, end } ->
+pub let string_delete : { s: MutString, start: Int, end: Int } -> {} <Mut> = { s, start, end } ->
   Mut.mutate { act = {} -> __native_mut_string_delete { s = s, start = start, end = end } }
 
-pub let string_char_at: { s: MutString, i: Int } -> Option Char <Mut> = { s, i } ->
+pub let string_char_at : { s: MutString, i: Int } -> Option Char <Mut> = { s, i } ->
   Mut.mutate { act = {} -> __native_mut_string_char_at { s = s, i = i } }
 
-pub let string_set_char_at: { s: MutString, i: Int, c: Char } -> {} <Mut> = { s, i, c } ->
+pub let string_set_char_at : { s: MutString, i: Int, c: Char } -> {} <Mut> = { s, i, c } ->
   Mut.mutate { act = {} -> __native_mut_string_set_char_at { s = s, i = i, c = c } }
 
-pub let string_with_capacity: { capacity: Int } -> MutString <Mut> = { capacity } ->
+pub let string_with_capacity : { capacity: Int } -> MutString <Mut> = { capacity } ->
   Mut.mutate { act = {} -> __native_string_with_capacity { capacity = capacity } }
+
 # =============================================================================
 # MutChar Operations
 # =============================================================================
+pub let read_char : { c: MutChar } -> Char <Mut> = { c } ->
+  Mut.mutate { act = {} -> __native_mut_char_read { c = c } }
 
-pub let read_char: { c: MutChar } -> Char <Mut> = { c } -> Mut.mutate { act = {} ->
-  __native_mut_char_read { c = c } }
+pub let write_char : { c: MutChar, v: Char } -> {} <Mut> = { c, v } ->
+  Mut.mutate { act = {} -> __native_mut_char_write { c = c, v = v } }
 
-pub let write_char: { c: MutChar, v: Char } -> {} <Mut> = { c, v } -> Mut.mutate { act = {} ->
-  __native_mut_char_write { c = c, v = v } }
+pub let char_to_upper : { c: MutChar } -> {} <Mut> = { c } ->
+  Mut.mutate { act = {} -> __native_mut_char_to_upper { c = c } }
 
-pub let char_to_upper: { c: MutChar } -> {} <Mut> = { c } -> Mut.mutate { act = {} ->
-  __native_mut_char_to_upper { c = c } }
+pub let char_to_lower : { c: MutChar } -> {} <Mut> = { c } ->
+  Mut.mutate { act = {} -> __native_mut_char_to_lower { c = c } }
 
-pub let char_to_lower: { c: MutChar } -> {} <Mut> = { c } -> Mut.mutate { act = {} ->
-  __native_mut_char_to_lower { c = c } }
+pub let char_is_digit : { c: MutChar } -> Bool <Mut> = { c } ->
+  Mut.mutate { act = {} -> __native_mut_char_is_digit { c = c } }
 
-pub let char_is_digit: { c: MutChar } -> Bool <Mut> = { c } -> Mut.mutate { act = {} ->
-  __native_mut_char_is_digit { c = c } }
+pub let char_is_letter : { c: MutChar } -> Bool <Mut> = { c } ->
+  Mut.mutate { act = {} -> __native_mut_char_is_letter { c = c } }
 
-pub let char_is_letter: { c: MutChar } -> Bool <Mut> = { c } -> Mut.mutate { act = {} ->
-  __native_mut_char_is_letter { c = c } }
+pub let char_is_whitespace : { c: MutChar } -> Bool <Mut> = { c } ->
+  Mut.mutate { act = {} -> __native_mut_char_is_whitespace { c = c } }
 
-pub let char_is_whitespace: { c: MutChar } -> Bool <Mut> = { c } -> Mut.mutate { act = {} ->
-  __native_mut_char_is_whitespace { c = c } }
 # =============================================================================
 # MutMap Operations
 # =============================================================================
-
-pub let map_get: { map: MutMap 'k 'v, key: 'k } -> Option 'v <Mut> = { map, key } ->
+pub let map_get : { map: MutMap 'k 'v, key: 'k } -> Option 'v <Mut> = { map, key } ->
   Mut.mutate { act = {} -> __native_mut_map_get { map = map, key = key } }
 
-pub let map_put: { map: MutMap 'k 'v, key: 'k, value: 'v } -> {} <Mut> = { map, key, value } ->
+pub let map_put : { map: MutMap 'k 'v, key: 'k, value: 'v } -> {} <Mut> = { map, key, value } ->
   Mut.mutate { act = {} -> __native_mut_map_put { map = map, key = key, value = value } }
 
-pub let map_remove: { map: MutMap 'k 'v, key: 'k } -> {} <Mut> = { map, key } ->
+pub let map_remove : { map: MutMap 'k 'v, key: 'k } -> {} <Mut> = { map, key } ->
   Mut.mutate { act = {} -> __native_mut_map_remove { map = map, key = key } }
 
-pub let map_contains: { map: MutMap 'k 'v, key: 'k } -> Bool <Mut> = { map, key } ->
+pub let map_contains : { map: MutMap 'k 'v, key: 'k } -> Bool <Mut> = { map, key } ->
   Mut.mutate { act = {} -> __native_mut_map_contains { map = map, key = key } }
 
-pub let map_size: { map: MutMap 'k 'v } -> Int <Mut> = { map } -> Mut.mutate { act = {} ->
-  __native_mut_map_size { map = map } }
+pub let map_size : { map: MutMap 'k 'v } -> Int <Mut> = { map } ->
+  Mut.mutate { act = {} -> __native_mut_map_size { map = map } }
 
-pub let map_clear: { map: MutMap 'k 'v } -> {} <Mut> = { map } -> Mut.mutate { act = {} ->
-  __native_mut_map_clear { map = map } }
+pub let map_clear : { map: MutMap 'k 'v } -> {} <Mut> = { map } ->
+  Mut.mutate { act = {} -> __native_mut_map_clear { map = map } }
 
-pub let map_keys: { map: MutMap 'k 'v } -> ['k] <Mut> = { map } -> Mut.mutate { act = {} ->
-  __native_mut_map_keys { map = map } }
+pub let map_keys : { map: MutMap 'k 'v } -> ['k] <Mut> = { map } ->
+  Mut.mutate { act = {} -> __native_mut_map_keys { map = map } }
 
-pub let map_values: { map: MutMap 'k 'v } -> ['v] <Mut> = { map } -> Mut.mutate { act = {} ->
-  __native_mut_map_values { map = map } }
+pub let map_values : { map: MutMap 'k 'v } -> ['v] <Mut> = { map } ->
+  Mut.mutate { act = {} -> __native_mut_map_values { map = map } }
 
-pub let map_entries: { map: MutMap 'k 'v } -> [{ key: 'k, value: 'v }] <Mut> = { map } ->
+pub let map_entries : { map: MutMap 'k 'v } -> [{ key: 'k, value: 'v }] <Mut> = { map } ->
   Mut.mutate { act = {} -> __native_mut_map_entries { map = map } }
 
-pub let map_with_capacity: { capacity: Int } -> MutMap 'k 'v <Mut> = { capacity } ->
+pub let map_with_capacity : { capacity: Int } -> MutMap 'k 'v <Mut> = { capacity } ->
   Mut.mutate { act = {} -> __native_mut_map_with_capacity { capacity = capacity } }
+
 # =============================================================================
 # MutSet Operations
 # =============================================================================
+pub let set_add : { set: MutSet 'a, elem: 'a } -> {} <Mut> = { set, elem } ->
+  Mut.mutate { act = {} -> __native_mut_set_add { set = set, elem = elem } }
 
-pub let set_add: { set: MutSet 'a, elem: 'a } -> {} <Mut> = { set, elem } -> Mut.mutate { act = {} ->
-  __native_mut_set_add { set = set, elem = elem } }
+pub let set_remove : { set: MutSet 'a, elem: 'a } -> {} <Mut> = { set, elem } ->
+  Mut.mutate { act = {} -> __native_mut_set_remove { set = set, elem = elem } }
 
-pub let set_remove: { set: MutSet 'a, elem: 'a } -> {} <Mut> = { set, elem } -> Mut.mutate { act = {} ->
-  __native_mut_set_remove { set = set, elem = elem } }
-
-pub let set_contains: { set: MutSet 'a, elem: 'a } -> Bool <Mut> = { set, elem } ->
+pub let set_contains : { set: MutSet 'a, elem: 'a } -> Bool <Mut> = { set, elem } ->
   Mut.mutate { act = {} -> __native_mut_set_contains { set = set, elem = elem } }
 
-pub let set_size: { set: MutSet 'a } -> Int <Mut> = { set } -> Mut.mutate { act = {} ->
-  __native_mut_set_size { set = set } }
+pub let set_size : { set: MutSet 'a } -> Int <Mut> = { set } ->
+  Mut.mutate { act = {} -> __native_mut_set_size { set = set } }
 
-pub let set_clear: { set: MutSet 'a } -> {} <Mut> = { set } -> Mut.mutate { act = {} ->
-  __native_mut_set_clear { set = set } }
+pub let set_clear : { set: MutSet 'a } -> {} <Mut> = { set } ->
+  Mut.mutate { act = {} -> __native_mut_set_clear { set = set } }
 
-pub let set_elements: { set: MutSet 'a } -> ['a] <Mut> = { set } -> Mut.mutate { act = {} ->
-  __native_mut_set_elements { set = set } }
+pub let set_elements : { set: MutSet 'a } -> ['a] <Mut> = { set } ->
+  Mut.mutate { act = {} -> __native_mut_set_elements { set = set } }
 
-pub let set_toggle: { set: MutSet 'a, elem: 'a } -> Bool <Mut> = { set, elem } ->
+pub let set_toggle : { set: MutSet 'a, elem: 'a } -> Bool <Mut> = { set, elem } ->
   Mut.mutate { act = {} -> __native_mut_set_toggle { set = set, elem = elem } }
 
-pub let set_with_capacity: { capacity: Int } -> MutSet 'a <Mut> = { capacity } ->
+pub let set_with_capacity : { capacity: Int } -> MutSet 'a <Mut> = { capacity } ->
   Mut.mutate { act = {} -> __native_mut_set_with_capacity { capacity = capacity } }
+
 # =============================================================================
 # MutBytes Operations
 # =============================================================================
-
-pub let bytes_get: { bytes: MutBytes, i: Int } -> Option Int <Mut> = { bytes, i } ->
+pub let bytes_get : { bytes: MutBytes, i: Int } -> Option Int <Mut> = { bytes, i } ->
   Mut.mutate { act = {} -> __native_mut_bytes_get { bytes = bytes, i = i } }
 
-pub let bytes_set: { bytes: MutBytes, i: Int, v: Int } -> Bool <Mut> = { bytes, i, v } ->
+pub let bytes_set : { bytes: MutBytes, i: Int, v: Int } -> Bool <Mut> = { bytes, i, v } ->
   Mut.mutate { act = {} -> __native_mut_bytes_set { bytes = bytes, i = i, v = v } }
 
-pub let bytes_len: { bytes: MutBytes } -> Int <Mut> = { bytes } -> Mut.mutate { act = {} ->
-  __native_mut_bytes_len { bytes = bytes } }
+pub let bytes_len : { bytes: MutBytes } -> Int <Mut> = { bytes } ->
+  Mut.mutate { act = {} -> __native_mut_bytes_len { bytes = bytes } }
 
-pub let bytes_fill: { bytes: MutBytes, v: Int } -> {} <Mut> = { bytes, v } -> Mut.mutate { act = {} ->
-  __native_mut_bytes_fill { bytes = bytes, v = v } }
+pub let bytes_fill : { bytes: MutBytes, v: Int } -> {} <Mut> = { bytes, v } ->
+  Mut.mutate { act = {} -> __native_mut_bytes_fill { bytes = bytes, v = v } }
 
-pub let bytes_fill_range: { bytes: MutBytes, start: Int, end: Int, v: Int } -> {} <Mut> = { bytes, start, end, v } ->
-  Mut.mutate { act = {} -> __native_mut_bytes_fill_range { bytes = bytes, start = start, end = end, v = v } }
+pub let bytes_fill_range : { bytes: MutBytes, start: Int, end: Int, v: Int } -> {} <Mut> = { bytes, start, end, v } ->
+  Mut.mutate { act = {} ->
+    __native_mut_bytes_fill_range { bytes = bytes, start = start, end = end, v = v } }
 
-pub let bytes_slice: { bytes: MutBytes, start: Int, end: Int } -> Bytes <Mut> = { bytes, start, end } ->
+pub let bytes_slice : { bytes: MutBytes, start: Int, end: Int } -> Bytes <Mut> = { bytes, start, end } ->
   Mut.mutate { act = {} -> __native_mut_bytes_slice { bytes = bytes, start = start, end = end } }
 
-pub let bytes_resize: { bytes: MutBytes, size: Int } -> {} <Mut> = { bytes, size } ->
+pub let bytes_resize : { bytes: MutBytes, size: Int } -> {} <Mut> = { bytes, size } ->
   Mut.mutate { act = {} -> __native_mut_bytes_resize { bytes = bytes, size = size } }
 
-pub let bytes_swap: { bytes: MutBytes, i: Int, j: Int } -> Bool <Mut> = { bytes, i, j } ->
+pub let bytes_swap : { bytes: MutBytes, i: Int, j: Int } -> Bool <Mut> = { bytes, i, j } ->
   Mut.mutate { act = {} -> __native_mut_bytes_swap { bytes = bytes, i = i, j = j } }
 
-pub let bytes_reverse: { bytes: MutBytes } -> {} <Mut> = { bytes } -> Mut.mutate { act = {} ->
-  __native_mut_bytes_reverse { bytes = bytes } }
+pub let bytes_reverse : { bytes: MutBytes } -> {} <Mut> = { bytes } ->
+  Mut.mutate { act = {} -> __native_mut_bytes_reverse { bytes = bytes } }
 
-pub let bytes_clear: { bytes: MutBytes } -> {} <Mut> = { bytes } -> Mut.mutate { act = {} ->
-  __native_mut_bytes_clear { bytes = bytes } }
+pub let bytes_clear : { bytes: MutBytes } -> {} <Mut> = { bytes } ->
+  Mut.mutate { act = {} -> __native_mut_bytes_clear { bytes = bytes } }
 
-pub let bytes_copy: { dest: MutBytes, src: MutBytes, src_offset: Int, dest_offset: Int, length: Int } -> {} <Mut> = { dest, src, src_offset, dest_offset, length } ->
-  Mut.mutate { act = {} -> __native_mut_bytes_copy {
-    dest = dest,
-    src = src,
-    src_offset = src_offset,
-    dest_offset = dest_offset,
-    length = length,
-  } }
+pub let bytes_copy : { dest: MutBytes, src: MutBytes, src_offset: Int, dest_offset: Int, length: Int } -> {} <Mut> = { dest, src, src_offset, dest_offset, length } ->
+  Mut.mutate { act = {} ->
+    __native_mut_bytes_copy {
+      dest = dest,
+      src = src,
+      src_offset = src_offset,
+      dest_offset = dest_offset,
+      length = length,
+    } }
+
 # =============================================================================
 # MutDeque Operations
 # =============================================================================
-
-pub let deque_push_front: { deque: MutDeque 'a, elem: 'a } -> {} <Mut> = { deque, elem } ->
+pub let deque_push_front : { deque: MutDeque 'a, elem: 'a } -> {} <Mut> = { deque, elem } ->
   Mut.mutate { act = {} -> __native_mut_deque_push_front { deque = deque, elem = elem } }
 
-pub let deque_push_back: { deque: MutDeque 'a, elem: 'a } -> {} <Mut> = { deque, elem } ->
+pub let deque_push_back : { deque: MutDeque 'a, elem: 'a } -> {} <Mut> = { deque, elem } ->
   Mut.mutate { act = {} -> __native_mut_deque_push_back { deque = deque, elem = elem } }
 
-pub let deque_pop_front: { deque: MutDeque 'a } -> Option 'a <Mut> = { deque } ->
+pub let deque_pop_front : { deque: MutDeque 'a } -> Option 'a <Mut> = { deque } ->
   Mut.mutate { act = {} -> __native_mut_deque_pop_front { deque = deque } }
 
-pub let deque_pop_back: { deque: MutDeque 'a } -> Option 'a <Mut> = { deque } ->
+pub let deque_pop_back : { deque: MutDeque 'a } -> Option 'a <Mut> = { deque } ->
   Mut.mutate { act = {} -> __native_mut_deque_pop_back { deque = deque } }
 
-pub let deque_peek_front: { deque: MutDeque 'a } -> Option 'a <Mut> = { deque } ->
+pub let deque_peek_front : { deque: MutDeque 'a } -> Option 'a <Mut> = { deque } ->
   Mut.mutate { act = {} -> __native_mut_deque_peek_front { deque = deque } }
 
-pub let deque_peek_back: { deque: MutDeque 'a } -> Option 'a <Mut> = { deque } ->
+pub let deque_peek_back : { deque: MutDeque 'a } -> Option 'a <Mut> = { deque } ->
   Mut.mutate { act = {} -> __native_mut_deque_peek_back { deque = deque } }
 
-pub let deque_size: { deque: MutDeque 'a } -> Int <Mut> = { deque } -> Mut.mutate { act = {} ->
-  __native_mut_deque_size { deque = deque } }
+pub let deque_size : { deque: MutDeque 'a } -> Int <Mut> = { deque } ->
+  Mut.mutate { act = {} -> __native_mut_deque_size { deque = deque } }
 
-pub let deque_is_empty: { deque: MutDeque 'a } -> Bool <Mut> = { deque } -> Mut.mutate { act = {} ->
-  __native_mut_deque_is_empty { deque = deque } }
+pub let deque_is_empty : { deque: MutDeque 'a } -> Bool <Mut> = { deque } ->
+  Mut.mutate { act = {} -> __native_mut_deque_is_empty { deque = deque } }
 
-pub let deque_clear: { deque: MutDeque 'a } -> {} <Mut> = { deque } -> Mut.mutate { act = {} ->
-  __native_mut_deque_clear { deque = deque } }
+pub let deque_clear : { deque: MutDeque 'a } -> {} <Mut> = { deque } ->
+  Mut.mutate { act = {} -> __native_mut_deque_clear { deque = deque } }
 
-pub let deque_reverse: { deque: MutDeque 'a } -> {} <Mut> = { deque } -> Mut.mutate { act = {} ->
-  __native_mut_deque_reverse { deque = deque } }
+pub let deque_reverse : { deque: MutDeque 'a } -> {} <Mut> = { deque } ->
+  Mut.mutate { act = {} -> __native_mut_deque_reverse { deque = deque } }
 
-pub let deque_to_seq: { deque: MutDeque 'a } -> ['a] <Mut> = { deque } -> Mut.mutate { act = {} ->
-  __native_mut_deque_to_seq { deque = deque } }
+pub let deque_to_seq : { deque: MutDeque 'a } -> ['a] <Mut> = { deque } ->
+  Mut.mutate { act = {} -> __native_mut_deque_to_seq { deque = deque } }
 
-pub let deque_with_capacity: { capacity: Int } -> MutDeque 'a <Mut> = { capacity } ->
+pub let deque_with_capacity : { capacity: Int } -> MutDeque 'a <Mut> = { capacity } ->
   Mut.mutate { act = {} -> __native_mut_deque_with_capacity { capacity = capacity } }
+
 # =============================================================================
 # Looping - Imperative loops for mutation
 # =============================================================================
 # Loop while condition is true - built on Mut.loop primitive
-
-pub let while: { cond: {} -> Bool <Mut>, body: {} -> {} <Mut> } -> {} <Mut> = { cond, body } ->
+pub let while : { cond: {} -> Bool <Mut>, body: {} -> {} <Mut> } -> {} <Mut> = { cond, body } ->
   Mut.loop { cond = cond, body = body }
+
 # Loop with index from start to end (exclusive) with step
 # Built on top of while using MutInt for the loop counter
-
-pub let for_range: { start: Int, end: Int, step: Int, body: { i: Int } -> {} <Mut> } -> {} <Mut> = { start, end, step, body } ->
+pub let for_range : { start: Int, end: Int, step: Int, body: { i: Int } -> {} <Mut> } -> {} <Mut> = { start, end, step, body } ->
   do
     let i = int_to_mut { n = start }
-    while { cond = {} -> do
-      let current = read_int { n = i }
-      if step > 0 then current < end else current > end, body = {} -> do
-      let current = read_int { n = i }
-      body { i = current }
-      incr { n = i, delta = step } }
-# Convenience: for_range with step = 1
+    while {
+      cond = {} -> do
+        let current = read_int { n = i }
+        if step > 0 then current < end else current > end,
+      body = {} -> do
+        let current = read_int { n = i }
+        body { i = current }
+        incr { n = i, delta = step },
+    }
 
-pub let for_range1: { start: Int, end: Int, body: { i: Int } -> {} <Mut> } -> {} <Mut> = { start, end, body } ->
+pub let for_range1 : { start: Int, end: Int, body: { i: Int } -> {} <Mut> } -> {} <Mut> = { start, end, body } ->
   for_range { start = start, end = end, step = 1, body = body }
+
 # =============================================================================
 # Convenience: Create with initial capacity
 # =============================================================================
-
-pub let seq_with_capacity: { capacity: Int } -> MutSeq 'a <Mut> = { capacity } ->
+pub let seq_with_capacity : { capacity: Int } -> MutSeq 'a <Mut> = { capacity } ->
   Mut.mutate { act = {} -> __native_mut_seq_with_capacity { capacity = capacity } }

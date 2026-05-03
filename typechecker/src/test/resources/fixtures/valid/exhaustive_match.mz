@@ -1,13 +1,13 @@
 # Test that exhaustive match works for closed variants
-
 type Color = | Red, Blue { val: Int }, Green |
 
 # This should PASS - all cases covered
-let processColor: {color: Color} -> Str = {color} -> match color is
+let processColor : { color: Color } -> Str = { color } -> match color is
   Red -> "red"
-  Blue {val} -> "blue"  
-  Green -> "green"                                                       # expected: processColor : { color: Color } -> Str
+  Blue { val } -> "blue"
+  Green -> "green"
 
-let result = processColor {color = Red}                 # expected: result : Str
+
+let result = processColor { color = Red }  # expected: result : Str
 
 result

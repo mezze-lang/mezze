@@ -100,7 +100,7 @@ class ListIntegrationTest {
     void singletonCreatesSingleElementList() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
-            list::length { xs = list::singleton { x = 42 } }
+            list::size { xs = list::singleton { x = 42 } }
             """);
         assertEquals(1L, result);
     }
@@ -109,7 +109,7 @@ class ListIntegrationTest {
     void rangeCreatesListOfIntegers() {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
-            list::length { xs = list::range { start = 0, end = 5 } }
+            list::size { xs = list::range { start = 0, end = 5 } }
             """);
         assertEquals(5L, result); // 0, 1, 2, 3, 4
     }
@@ -147,7 +147,7 @@ class ListIntegrationTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 4 }
             match list::tail { xs = xs } is
-                Some { val } -> list::length { xs = val }
+                Some { val } -> list::size { xs = val }
                 None -> 0
             """);
         assertEquals(2L, result); // tail of [1,2,3] is [2,3]
@@ -159,7 +159,7 @@ class ListIntegrationTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 4 }
             match list::uncons { xs = xs } is
-                Some { val } -> val.head + list::length { xs = val.tail }
+                Some { val } -> val.head + list::size { xs = val.tail }
                 None -> 0
             """);
         assertEquals(3L, result); // head (1) + tail length (2)
@@ -185,7 +185,7 @@ class ListIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
             let xs = list::range { start = 0, end = 10 }
-            list::length { xs = xs }
+            list::size { xs = xs }
             """);
         assertEquals(10L, result);
     }
@@ -233,7 +233,7 @@ class ListIntegrationTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 10 }
             let evens = list::filter { xs = xs, p = { x } -> x % 2 == 0 }
-            list::length { xs = evens }
+            list::size { xs = evens }
             """);
         assertEquals(4L, result); // 2, 4, 6, 8
     }
@@ -268,7 +268,7 @@ class ListIntegrationTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 3 }
             let ys = list::range { start = 3, end = 5 }
-            list::length { xs = list::append { xs = xs, ys = ys } }
+            list::size { xs = list::append { xs = xs, ys = ys } }
             """);
         assertEquals(4L, result); // [1,2] + [3,4]
     }
@@ -311,7 +311,7 @@ class ListIntegrationTest {
             use std::collections::seq
             let xs = list::range { start = 1, end = 4 }
             let arr = list::to_seq { xs = xs }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
             """);
         assertEquals(3L, result);
     }
@@ -322,7 +322,7 @@ class ListIntegrationTest {
             use std::collections::list
             let arr = [1, 2, 3]
             let xs = list::from_seq { xs = arr }
-            list::length { xs = xs }
+            list::size { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -332,7 +332,7 @@ class ListIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
             let xs = list::of_seq { elements = [10, 20, 30] }
-            list::length { xs = xs }
+            list::size { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -346,7 +346,7 @@ class ListIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::list
             let xs = list::repeat { x = 42, n = 3 }
-            list::length { xs = xs }
+            list::size { xs = xs }
             """);
         assertEquals(3L, result);
     }
@@ -447,7 +447,7 @@ class ListIntegrationTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 6 }
             let result = list::partition { xs = xs, p = { x } -> x > 3 }
-            list::length { xs = result.pass }
+            list::size { xs = result.pass }
             """);
         assertEquals(2L, result);  // 4, 5
     }
@@ -458,7 +458,7 @@ class ListIntegrationTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 6 }
             let result = list::partition { xs = xs, p = { x } -> x > 3 }
-            list::length { xs = result.fail }
+            list::size { xs = result.fail }
             """);
         assertEquals(3L, result);  // 1, 2, 3
     }
@@ -496,7 +496,7 @@ class ListIntegrationTest {
             use std::collections::list
             let xs = list::range { start = 1, end = 5 }
             let inits = list::init { xs = xs }
-            list::length { xs = inits }
+            list::size { xs = inits }
             """);
         assertEquals(3L, result);  // [1, 2, 3]
     }

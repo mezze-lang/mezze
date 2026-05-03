@@ -35,7 +35,7 @@ class NonEmptyListModuleTest {
         val result = eval("""
             use std::collections::nonemptylist
             let xs = nonemptylist::singleton { x = 1 }
-            nonemptylist::length { xs = xs }
+            nonemptylist::size { xs = xs }
         """)
         assertEquals(1L, result)
     }
@@ -46,7 +46,7 @@ class NonEmptyListModuleTest {
             use std::collections::nonemptylist
             let tail = Cons { head = 2, tail = Cons { head = 3, tail = Nil } }
             let xs = nonemptylist::from_head_tail { head = 1, tail = tail }
-            nonemptylist::length { xs = xs }
+            nonemptylist::size { xs = xs }
         """)
         assertEquals(3L, result)
     }
@@ -106,7 +106,7 @@ class NonEmptyListModuleTest {
             use std::collections::nonemptylist
             let xs = nonemptylist::singleton { x = 2 }
             let ys = nonemptylist::cons { x = 1, xs = xs }
-            nonemptylist::length { xs = ys }
+            nonemptylist::size { xs = ys }
         """)
         assertEquals(2L, result)
     }
@@ -118,7 +118,7 @@ class NonEmptyListModuleTest {
             let xs = nonemptylist::singleton { x = 1 }
             let ys = nonemptylist::singleton { x = 2 }
             let zs = nonemptylist::append { xs = xs, ys = ys }
-            nonemptylist::length { xs = zs }
+            nonemptylist::size { xs = zs }
         """)
         assertEquals(2L, result)
     }
@@ -153,7 +153,7 @@ class NonEmptyListModuleTest {
             let xs = nonemptylist::singleton { x = 1 }
             let tail = Cons { head = 2, tail = Cons { head = 3, tail = Nil } }
             let ys = nonemptylist::append_list { xs = xs, ys = tail }
-            nonemptylist::length { xs = ys }
+            nonemptylist::size { xs = ys }
         """)
         assertEquals(3L, result)
     }
@@ -221,7 +221,7 @@ class NonEmptyListModuleTest {
             use std::collections::nonemptylist
             let xs = nonemptylist::cons { x = 1, xs = nonemptylist::cons { x = 2, xs = nonemptylist::singleton { x = 3 } } }
             let ys = nonemptylist::map { xs = xs, f = {x} -> x * 2 }
-            nonemptylist::length { xs = ys }
+            nonemptylist::size { xs = ys }
         """)
         assertEquals(3L, result)
     }
@@ -232,7 +232,7 @@ class NonEmptyListModuleTest {
             use std::collections::nonemptylist
             let xs = nonemptylist::cons { x = 1, xs = nonemptylist::singleton { x = 2 } }
             let ys = nonemptylist::flat_map { xs = xs, f = {x} -> nonemptylist::cons { x = x, xs = nonemptylist::singleton { x = x * 10 } } }
-            nonemptylist::length { xs = ys }
+            nonemptylist::size { xs = ys }
         """)
         assertEquals(4L, result)
     }
@@ -349,7 +349,7 @@ class NonEmptyListModuleTest {
             use std::collections::nonemptylist
             let xs = nonemptylist::cons { x = 1, xs = nonemptylist::cons { x = 2, xs = nonemptylist::singleton { x = 3 } } }
             let ys = nonemptylist::reverse { xs = xs }
-            nonemptylist::length { xs = ys }
+            nonemptylist::size { xs = ys }
         """)
         assertEquals(3L, result)
     }
@@ -373,7 +373,7 @@ class NonEmptyListModuleTest {
             use std::collections::nonemptylist
             let xs = nonemptylist::cons { x = 1, xs = nonemptylist::cons { x = 2, xs = nonemptylist::singleton { x = 3 } } }
             let ys = nonemptylist::intersperse { xs = xs, sep = 0 }
-            nonemptylist::length { xs = ys }
+            nonemptylist::size { xs = ys }
         """)
         assertEquals(5L, result)
     }
@@ -384,7 +384,7 @@ class NonEmptyListModuleTest {
             use std::collections::nonemptylist
             let xs = nonemptylist::singleton { x = 42 }
             let ys = nonemptylist::intersperse { xs = xs, sep = 0 }
-            nonemptylist::length { xs = ys }
+            nonemptylist::size { xs = ys }
         """)
         assertEquals(1L, result)
     }
@@ -410,7 +410,7 @@ class NonEmptyListModuleTest {
             use std::collections::nonemptylist
             let list = Cons { head = 1, tail = Cons { head = 2, tail = Nil } }
             let xs = nonemptylist::from_list { xs = list }
-            nonemptylist::length { xs = xs }
+            nonemptylist::size { xs = xs }
         """)
         assertEquals(2L, result)
     }
@@ -422,7 +422,7 @@ class NonEmptyListModuleTest {
             use std::collections::seq
             let xs = nonemptylist::cons { x = 1, xs = nonemptylist::cons { x = 2, xs = nonemptylist::singleton { x = 3 } } }
             let arr = nonemptylist::to_seq { xs = xs }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
         """)
         assertEquals(3L, result)
     }
@@ -432,7 +432,7 @@ class NonEmptyListModuleTest {
         val result = eval("""
             use std::collections::nonemptylist
             let xs = nonemptylist::from_seq { xs = [1, 2, 3] }
-            nonemptylist::length { xs = xs }
+            nonemptylist::size { xs = xs }
         """)
         assertEquals(3L, result)
     }

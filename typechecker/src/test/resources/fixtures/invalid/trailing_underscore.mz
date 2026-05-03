@@ -1,7 +1,6 @@
 # Actually this is VALID - trailing underscores are stripped
 # Moving this to valid tests
 # This file intentionally causes an error to be categorized as invalid
-
-let x = undefined_variable          # Error: undefined variable
+let x = undefined_variable  # Error: undefined variable
 
 x

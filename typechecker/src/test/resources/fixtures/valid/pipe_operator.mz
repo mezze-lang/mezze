@@ -1,20 +1,23 @@
 # Pipe operator tests
-
 # Basic pipe operator
-let square = { x } -> x * x                                    # expected: square : { x: 'a } with NumMul 'a -> 'a
-let add_ten = { x } -> x + 10                                  # expected: add_ten : { x: Int } -> Int
+let square = { x } -> x * x  # expected: square : { x: 'a } with NumMul 'a -> 'a
 
-let result1 = 5 |> square { x = @ }                            # expected: result1 : Int
-let result2 = 5 |> add_ten { x = @ } |> square { x = @ }       # expected: result2 : Int
+let add_ten = { x } -> x + 10  # expected: add_ten : { x: Int } -> Int
+
+let result1 = 5 |> square { x = @ }  # expected: result1 : Int
+
+let result2 = 5 |> add_ten { x = @ } |> square { x = @ }  # expected: result2 : Int
 
 # Pipe with partial application
-let add = { x, y } -> x + y                                    # expected: add : { x: 'a, y: 'a } with NumAdd 'a -> 'a
-let multiply = { x, y } -> x * y                               # expected: multiply : { x: 'a, y: 'a } with NumMul 'a -> 'a
-let double = multiply { x = 2 }                                # expected: double : { y: Int } -> Int
+let add = { x, y } -> x + y  # expected: add : { x: 'a, y: 'a } with NumAdd 'a -> 'a
 
-let result3 = 7 |> add { x = @, y = 3 } |> double { y = @ }    # expected: result3 : Int
+let multiply = { x, y } -> x * y  # expected: multiply : { x: 'a, y: 'a } with NumMul 'a -> 'a
+
+let double = multiply { x = 2 }  # expected: double : { y: Int } -> Int
+
+let result3 = 7 |> add { x = @, y = 3 } |> double { y = @ }  # expected: result3 : Int
 
 # Pipe with arithmetic precedence
-let result4 = 5 + 3 |> square { x = @ }                        # expected: result4 : Int
+let result4 = 5 + 3 |> square { x = @ }  # expected: result4 : Int
 
 result1

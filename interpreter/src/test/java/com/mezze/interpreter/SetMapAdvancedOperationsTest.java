@@ -149,7 +149,7 @@ class SetMapAdvancedOperationsTest {
             use std::collections::list
             let s = set::from_seq { xs = [1, 2, 3, 4, 5, 6] }
             let groups = set::group_by { s = s, f = { val } -> val % 2 }
-            list::length { xs = groups }
+            list::size { xs = groups }
             """);
         assertEquals(2L, result);  // odd and even groups
     }
@@ -161,7 +161,7 @@ class SetMapAdvancedOperationsTest {
             use std::collections::list
             let s = set::from_seq { xs = [1, 2, 3, 4, 5, 6] }
             let groups = set::group_by { s = s, f = { val } -> val % 3 }
-            list::length { xs = groups }
+            list::size { xs = groups }
             """);
         assertEquals(3L, result);  // groups for 0, 1, 2
     }
@@ -235,7 +235,7 @@ class SetMapAdvancedOperationsTest {
             let result = set::collect_seq { set = s, f = { val } ->
                 if val > 2 then Some { val = val * 10 } else None
             }
-            seq::length { xs = result }
+            seq::size { xs = result }
             """);
         assertEquals(2L, result);  // [30, 40]
     }
@@ -281,7 +281,7 @@ class SetMapAdvancedOperationsTest {
             let result = set::collect_list { set = s, f = { val } ->
                 if val % 2 == 1 then Some { val = val } else None
             }
-            list::length { xs = result }
+            list::size { xs = result }
             """);
         assertEquals(3L, result);  // odd numbers: 1, 3, 5
     }
@@ -677,7 +677,7 @@ class SetMapAdvancedOperationsTest {
             let m3 = map::insert { m = m2, k = "c", v = 2 }
             let grouped = map::group_by_value { m = m3 }
             match map::get { m = grouped, k = 1 } is
-                Some { val } -> list::length { xs = val }
+                Some { val } -> list::size { xs = val }
                 None -> -1
             """);
         assertEquals(2L, result);  // "a" and "b" have value 1

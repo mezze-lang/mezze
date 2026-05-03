@@ -468,7 +468,7 @@ class ResultModuleTest {
             use std::collections::seq
             let res: Result Int Str = Ok { val = 42 }
             let xs = result::to_list { result = res }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """.trimIndent()
 
         assertEquals(1L, eval(source))
@@ -481,7 +481,7 @@ class ResultModuleTest {
             use std::collections::seq
             let res: Result Int Str = Err { error = "oops" }
             let xs = result::to_list { result = res }
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """.trimIndent()
 
         assertEquals(0L, eval(source))

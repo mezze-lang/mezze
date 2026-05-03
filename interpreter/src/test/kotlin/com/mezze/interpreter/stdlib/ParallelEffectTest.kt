@@ -45,7 +45,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let results = Parallel.map {xs = [], f = {x} -> x * 2}
-                seq::length {xs = results}
+                seq::size {xs = results}
         """)
         assertEquals(0L, result)
     }
@@ -58,7 +58,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let results = Parallel.map {xs = [3, 1, 4, 1, 5], f = {x} -> x + 10}
-                seq::length {xs = results}
+                seq::size {xs = results}
         """)
         assertEquals(5L, result)
     }
@@ -87,7 +87,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let results = Parallel.filter {xs = [1, 2, 3, 4, 5, 6], f = {x} -> x % 2 == 0}
-                seq::length {xs = results}
+                seq::size {xs = results}
         """)
         assertEquals(3L, result)
     }
@@ -100,7 +100,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let results = Parallel.filter {xs = [1, 3, 5], f = {x} -> x % 2 == 0}
-                seq::length {xs = results}
+                seq::size {xs = results}
         """)
         assertEquals(0L, result)
     }
@@ -113,7 +113,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let results = Parallel.filter {xs = [2, 4, 6], f = {x} -> x % 2 == 0}
-                seq::length {xs = results}
+                seq::size {xs = results}
         """)
         assertEquals(3L, result)
     }
@@ -365,7 +365,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let r = Parallel.partition {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
-                seq::length {xs = r.pass}
+                seq::size {xs = r.pass}
         """)
         assertEquals(2L, result) // [2, 4]
     }
@@ -378,7 +378,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let r = Parallel.partition {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
-                seq::length {xs = r.fail}
+                seq::size {xs = r.fail}
         """)
         assertEquals(3L, result) // [1, 3, 5]
     }
@@ -393,7 +393,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let groups = Parallel.group_by {xs = [1, 2, 3, 4, 5, 6], f = {x} -> x % 2}
-                seq::length {xs = groups}
+                seq::size {xs = groups}
         """)
         assertEquals(2L, result) // 2 groups: even and odd
     }
@@ -458,7 +458,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let results = flatten {xs = [[1, 2], [3], [4, 5, 6]]}
-                seq::length {xs = results}
+                seq::size {xs = results}
         """)
         assertEquals(6L, result)
     }
@@ -471,7 +471,7 @@ class ParallelEffectTest {
 
             perform Sequential in do
                 let results = flat_map {xs = [1, 2, 3], f = {x} -> [x, x * 10]}
-                seq::length {xs = results}
+                seq::size {xs = results}
         """)
         assertEquals(6L, result) // [1,10,2,20,3,30]
     }

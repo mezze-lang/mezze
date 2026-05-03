@@ -1,9 +1,10 @@
-# Test that imported values preserve their types
-use exported_module::{exported_int, exported_string, add_func, identity}
+use exported_module::{ exported_int, exported_string, add_func, identity }
 
 # These should infer correct types from imports
 let test_int = exported_int
+
 let test_string = exported_string
+
 let test_func = add_func
 
 # Using the imported function

@@ -78,10 +78,19 @@ data class CompiledModuleInterface(
 
         data class InherentImplRegistration(
             val implDecl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
-            val implKey: String
+            val implKey: String,
+            // Pre-inferred return types from the home module's typecheck.
+            // See ModuleImportContext.inherentImplOpReturnTypes / issue #213.
+            val opReturnTypes: Map<String, MezzeType> = emptyMap(),
+            // Sibling for param-record types — issue #230.
+            val opParamTypes: Map<String, MezzeType> = emptyMap()
         ) : ContextExtension {
             override fun apply(context: TypingContext): TypingContext {
-                return ContextBuilder().registerImportedInherentImpl(context, implDecl, implKey)
+                return ContextBuilder().registerImportedInherentImpl(
+                    context, implDecl, implKey,
+                    opReturnTypes = opReturnTypes,
+                    opParamTypes = opParamTypes
+                )
             }
         }
 
@@ -166,7 +175,11 @@ data class CompiledModuleInterface(
             val parserBridge = com.mezze.language.parser.MezzeParser
             for ((implKey, implDecl) in importContext.importedAbilityImpls) {
                 if (implDecl.isInherent) {
-                    extensions.add(ContextExtension.InherentImplRegistration(implDecl, implKey))
+                    val opReturnTypes = importContext.inherentImplOpReturnTypes[implKey].orEmpty()
+                    val opParamTypes = importContext.inherentImplOpParamTypes[implKey].orEmpty()
+                    extensions.add(ContextExtension.InherentImplRegistration(
+                        implDecl, implKey, opReturnTypes, opParamTypes
+                    ))
                 } else {
                     val implTypeVars = implDecl.abilityTypeArgs
                         .filterIsInstance<com.mezze.language.parsedast.ParsedNamedType>()

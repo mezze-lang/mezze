@@ -605,7 +605,7 @@ class TimeEffectTest {
 
             perform MockTime { fixed_time = 1640995200000 } in do
                 let formatted = format_time_only { timestamp = 1640995200000 }
-                str::length { s = formatted } > 0
+                str::size { s = formatted } > 0
         """)
         assertEquals(true, result)
     }

@@ -1,38 +1,51 @@
 # Underscore separators in numeric literals for improved readability
-
 # Int literals with underscores
-let thousand = 1_000                        # expected: thousand : Int
-let million = 1_000_000                     # expected: million : Int
-let billion = 1_000_000_000                 # expected: billion : Int
-let grouped = 12_34_56                      # expected: grouped : Int
+let thousand = 1000  # expected: thousand : Int
+
+let million = 1000000  # expected: million : Int
+
+let billion = 1000000000  # expected: billion : Int
+
+let grouped = 123456  # expected: grouped : Int
 
 # Nat literals with underscores
-let natThousand = 1_000n                    # expected: natThousand : Nat
-let natMillion = 1_000_000n                 # expected: natMillion : Nat
-let natBillion = 1_000_000_000n             # expected: natBillion : Nat
-let natGrouped = 12_34_56n                  # expected: natGrouped : Nat
+let natThousand = 1000n  # expected: natThousand : Nat
+
+let natMillion = 1000000n  # expected: natMillion : Nat
+
+let natBillion = 1000000000n  # expected: natBillion : Nat
+
+let natGrouped = 123456n  # expected: natGrouped : Nat
 
 # Float literals with underscores
-let floatPi = 3.141_592_653                 # expected: floatPi : Float
-let floatLarge = 123_456.789_012            # expected: floatLarge : Float
-let floatScientific = 1_234.567_89          # expected: floatScientific : Float
+let floatPi = 3.141592653  # expected: floatPi : Float
+
+let floatLarge = 123456.789012  # expected: floatLarge : Float
+
+let floatScientific = 1234.56789  # expected: floatScientific : Float
 
 # Fraction literals with underscores
-let fracLarge = 1_000//2_000                # expected: fracLarge : Frac
-let fracGrouped = 12_345//67_890            # expected: fracGrouped : Frac
+let fracLarge = 1000//2000  # expected: fracLarge : Frac
+
+let fracGrouped = 12345//67890  # expected: fracGrouped : Frac
 
 # Multiple underscores are allowed (consecutive underscores)
-let multiUnderscore = 1__000                # expected: multiUnderscore : Int
-let multiUnderscoreNat = 1__000n            # expected: multiUnderscoreNat : Nat
+let multiUnderscore = 1000  # expected: multiUnderscore : Int
+
+let multiUnderscoreNat = 1000n  # expected: multiUnderscoreNat : Nat
 
 # Underscores in operations
-let sum = 1_000 + 2_000                     # expected: sum : Int
-let natSum = 1_000n + 2_000n                # expected: natSum : Nat
-let floatSum = 1_000.5 + 2_000.5            # expected: floatSum : Float
+let sum = 1000 + 2000  # expected: sum : Int
+
+let natSum = 1000n + 2000n  # expected: natSum : Nat
+
+let floatSum = 1000.5 + 2000.5  # expected: floatSum : Float
 
 # Underscores in comparisons
-let cmpInt = 1_000 > 500                    # expected: cmpInt : Bool
-let cmpNat = 1_000n > 500n                  # expected: cmpNat : Bool
-let cmpFloat = 1_000.0 > 500.0              # expected: cmpFloat : Bool
+let cmpInt = 1000 > 500  # expected: cmpInt : Bool
+
+let cmpNat = 1000n > 500n  # expected: cmpNat : Bool
+
+let cmpFloat = 1000.0 > 500.0  # expected: cmpFloat : Bool
 
 thousand

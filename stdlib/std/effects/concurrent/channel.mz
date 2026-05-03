@@ -1,34 +1,19 @@
-# std/effects/concurrent/channel.mezze - Channels for concurrent communication
-#
-# Provides typed channels for communication between virtual threads.
-# Channels are thread-safe and block on send/recv when necessary.
-#
-# Chan is the value type (like TVar for STM)
-# Channel is the effect (like STM)
-#
-# Usage:
-#   use std::effects::concurrent::channel::{Chan, Channel, BlockingChannel}
-#
-#   let ch = chan {}
-#   perform BlockingChannel in do
-#       Channel.send { ch = ch, value = 42 }
-#       let received = Channel.recv { ch = ch }
 use std::abilities::compare::{ Eq }
 
 pub newtype Chan 'a = Chan __NativeChannel
-# Chan - the channel value type (opaque handle)
-# Chan - the channel value type (opaque handle)
-# Eq for Chan — reference identity (same channel object)
-# Eq for Chan — reference identity (same channel object)
-# Eq for Chan — reference identity (same channel object)
-# Eq for Chan — reference identity (same channel object)
 
+# Chan - the channel value type (opaque handle)
+# Chan - the channel value type (opaque handle)
+# Eq for Chan — reference identity (same channel object)
+# Eq for Chan — reference identity (same channel object)
+# Eq for Chan — reference identity (same channel object)
+# Eq for Chan — reference identity (same channel object)
 impl Eq 'a for Chan 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
-# Inherent impls for Chan — method syntax for common operations
 
+# Inherent impls for Chan — method syntax for common operations
 impl Chan 'a where {
   send = { it, value } -> Channel.send { ch = it, value = value },
   recv = { it } -> Channel.recv { ch = it },
@@ -37,8 +22,8 @@ impl Chan 'a where {
   close = { it } -> Channel.close { ch = it },
   is_closed = { it } -> Channel.is_closed { ch = it },
 }
-# Channel effect - typed channel communication operations
 
+# Channel effect - typed channel communication operations
 effect Channel where {
   send: { ch: Chan 'a, value: 'a } -> {} <Channel>,
   recv: { ch: Chan 'a } -> 'a <Channel>,
@@ -49,6 +34,7 @@ effect Channel where {
   recv_any: { channels: [Chan 'a] } -> { index: Int, value: 'a } <Channel>,
   recv_any_timeout: { channels: [Chan 'a], ms: Int } -> Option { index: Int, value: 'a } <Channel>
 }
+
 # Send a value to a channel (blocks if buffer full)
 # Receive a value from a channel (blocks if empty)
 # Try to send without blocking, returns true if sent
@@ -63,11 +49,12 @@ effect Channel where {
 # Channel Creation (pure functions, no effect needed)
 # =============================================================================
 # Create an unbounded channel
+pub let chan : {} -> Chan 'a = {} -> __native_channel_make {}
 
-pub let chan: {} -> Chan 'a = {} -> __native_channel_make {}
 # Create a bounded channel with specified capacity
+pub let chan_bounded : { cap: Int } -> Chan 'a = { cap } ->
+  __native_channel_make_buffered { capacity = cap }
 
-pub let chan_bounded: { cap: Int } -> Chan 'a = { cap } -> __native_channel_make_buffered { capacity = cap }
 # =============================================================================
 # BlockingChannel Implementation - Default using LinkedBlockingQueue
 # =============================================================================
@@ -82,7 +69,6 @@ pub let chan_bounded: { cap: Int } -> Chan 'a = { cap } -> __native_channel_make
 #   perform BlockingChannel in do
 #       Channel.send { ch = ch, value = 42 }
 #       Channel.recv { ch = ch }
-
 impl Channel for BlockingChannel where {
   send = { ch, value } -> __native_channel_send { ch = ch, value = value },
   recv = { ch } -> __native_channel_recv { ch = ch },
@@ -91,8 +77,10 @@ impl Channel for BlockingChannel where {
   close = { ch } -> __native_channel_close { ch = ch },
   is_closed = { ch } -> __native_channel_is_closed { ch = ch },
   recv_any = { channels } -> __native_channel_recv_any { channels = channels },
-  recv_any_timeout = { channels, ms } -> __native_channel_recv_any_timeout { channels = channels, ms = ms },
+  recv_any_timeout = { channels, ms } ->
+    __native_channel_recv_any_timeout { channels = channels, ms = ms },
 }
+
 # =============================================================================
 # MockChannel Implementation - For Testing
 # =============================================================================
@@ -107,7 +95,6 @@ impl Channel for BlockingChannel where {
 #       Channel.send { ch = ch, value = 42 }
 #       let v = Channel.recv { ch = ch }
 #       # v == 42
-
 impl Channel for MockChannel where {
   send = { ch, value } -> __native_mock_channel_send { ch = ch, value = value },
   recv = { ch } -> __native_mock_channel_recv { ch = ch },
@@ -116,5 +103,6 @@ impl Channel for MockChannel where {
   close = { ch } -> __native_mock_channel_close { ch = ch },
   is_closed = { ch } -> __native_mock_channel_is_closed { ch = ch },
   recv_any = { channels } -> __native_mock_channel_recv_any { channels = channels },
-  recv_any_timeout = { channels, ms } -> __native_mock_channel_recv_any_timeout { channels = channels, ms = ms },
+  recv_any_timeout = { channels, ms } ->
+    __native_mock_channel_recv_any_timeout { channels = channels, ms = ms },
 }

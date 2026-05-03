@@ -79,7 +79,7 @@ class CharInterpreterTest {
             use std::char
             use std::str
             match char::from_int { code = 65 } is
-                Some { val } -> str::length { s = char::to_str { c = val } }
+                Some { val } -> str::size { s = char::to_str { c = val } }
                 None -> -1
         """)
         assertEquals(1L, result)

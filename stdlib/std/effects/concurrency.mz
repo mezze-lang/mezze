@@ -1,55 +1,30 @@
-# std/effects/concurrency.mezze - Virtual thread concurrency using Promises
 use std::effects::async::{ Promise }
+
 # Concurrency effect - spawn computations on virtual threads
 # Note: Callback parameters use <...> for effect polymorphism - they accept any effects
-
 effect Concurrency where {
   spawn: { computation: {} -> 'a <...> } -> Promise 'a <Concurrency>,
   await: { promise: Promise 'a } -> 'a <Concurrency>
 }
+
 # Spawn computation on new virtual thread, returns Promise
 # The computation can have any effects (<...>)
 # Wait for Promise (blocks current thread until result ready)
 # Loom implementation - uses Project Loom virtual threads (Java 21+)
 # This is the primary implementation for concurrency in Mezze
-
 impl Concurrency for Loom where {
   spawn = { computation } -> __native_loom_spawn_cfg { f = computation, max_concurrent = 0 },
   await = { promise } -> __native_loom_await { p = promise },
 }
+
 # spawn - creates new virtual thread, returns Promise
 # await - blocks current thread until Promise resolves
 # Helper: spawn and immediately await (blocks until done)
+pub let run : { computation: {} -> 'a } -> 'a <Concurrency> = { computation } ->
+  do
+    let promise = Concurrency.spawn { computation = computation }
+    Concurrency.await { promise = promise }
 
-pub let run: { computation: {} -> 'a } -> 'a <Concurrency> = { computation } -> do
-  let promise = Concurrency.spawn { computation = computation }
-  Concurrency.await { promise = promise }
-# Helper: spawn multiple, await all
-# Uses native loom spawn_all which handles the concurrent spawning internally
-
-pub let all: { computations: [{} -> 'a] } -> ['a] <Concurrency> = { computations } ->
+pub let all : { computations: [{} -> 'a] } -> ['a] <Concurrency> = { computations } ->
   do
     __native_loom_spawn_all { fs = computations }
-
-# Native spawn_all spawns all computations and returns seq of results
-# Usage examples:
-#
-# Simple spawn/await:
-# perform Loom in do
-#   let promise = Concurrency.spawn {computation = {} ->
-#     perform LocalDisk in FileSystem.read_file {path = "large_file.txt"}
-#   }
-#   # Do other work while file is being read on virtual thread
-#   let other_result = some_other_computation {}
-#   # Now wait for file read to complete
-#   let file_content = Concurrency.await {promise = promise}
-#   {file_content, other_result}
-#
-# Multiple concurrent operations:
-# perform Loom in do
-#   let results = all {computations = [
-#     {} -> perform LocalDisk in FileSystem.read_file {path = "file1.txt"},
-#     {} -> perform LocalDisk in FileSystem.read_file {path = "file2.txt"},
-#     {} -> perform LocalDisk in FileSystem.read_file {path = "file3.txt"}
-#   ]}
-#   results

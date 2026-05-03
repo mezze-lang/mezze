@@ -1,3 +1,3 @@
-let f: {x: Int} -> Int = {x} -> "hello"
+let f : { x: Int } -> Int = { x } -> "hello"
 
-f {x = 5}
+f { x = 5 }

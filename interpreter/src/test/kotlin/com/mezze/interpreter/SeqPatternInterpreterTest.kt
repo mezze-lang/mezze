@@ -130,7 +130,7 @@ class SeqPatternInterpreterTest {
                   _ -> []
 
             let tail = get_tail {xs = [1, 2, 3, 4, 5]}
-            seq::length {xs = tail}
+            seq::size {xs = tail}
         """
         assertEquals(4L, eval(code))
     }
@@ -150,7 +150,7 @@ class SeqPatternInterpreterTest {
         val code = """
             use std::collections::seq
             match [1, 2, 3] is
-              [...all] -> seq::length {xs = all}
+              [...all] -> seq::size {xs = all}
         """
         assertEquals(3L, eval(code))
     }
@@ -196,7 +196,7 @@ class SeqPatternInterpreterTest {
 
             let double = {x: Int} -> x * 2
             let result = my_map {f = double, xs = [1, 2, 3]}
-            seq::length {xs = result}
+            seq::size {xs = result}
         """
         assertEquals(3L, eval(code))
     }
@@ -215,7 +215,7 @@ class SeqPatternInterpreterTest {
 
             let is_positive = {x: Int} -> x > 0
             let result = my_filter {pred = is_positive, xs = [-1, 2, -3, 4, 5]}
-            seq::length {xs = result}
+            seq::size {xs = result}
         """
         assertEquals(3L, eval(code))
     }
@@ -258,7 +258,7 @@ class SeqPatternInterpreterTest {
                   _ -> []
 
             let result = skip_first {xs = [1, 2, 3, 4]}
-            seq::length {xs = result}
+            seq::size {xs = result}
         """
         assertEquals(3L, eval(code))
     }
@@ -442,7 +442,7 @@ class SeqPatternInterpreterTest {
 
             let reverse = {xs: [Int]} -> reverse_helper {xs = xs, acc = []}
             let result = reverse {xs = [1, 2, 3, 4, 5]}
-            seq::length {xs = result}
+            seq::size {xs = result}
         """
         assertEquals(5L, eval(code))
     }
@@ -478,7 +478,7 @@ class SeqPatternInterpreterTest {
                     else seq::of {x = head, xs = my_take {n = n - 1, xs = tail}}
 
             let result = my_take {n = 3, xs = [1, 2, 3, 4, 5]}
-            seq::length {xs = result}
+            seq::size {xs = result}
         """
         assertEquals(3L, eval(code))
     }
@@ -496,7 +496,7 @@ class SeqPatternInterpreterTest {
                     else drop {n = n - 1, xs = tail}
 
             let result = drop {n = 2, xs = [1, 2, 3, 4, 5]}
-            seq::length {xs = result}
+            seq::size {xs = result}
         """
         assertEquals(3L, eval(code))
     }
@@ -516,7 +516,7 @@ class SeqPatternInterpreterTest {
 
             let is_even = {x: Int} -> x % 2 == 0
             let result = my_partition {pred = is_even, xs = [1, 2, 3, 4, 5, 6]}
-            seq::length {xs = result.yes}
+            seq::size {xs = result.yes}
         """
         assertEquals(3L, eval(code))
     }
@@ -536,7 +536,7 @@ class SeqPatternInterpreterTest {
 
             let is_even = {x: Int} -> x % 2 == 0
             let result = my_partition {pred = is_even, xs = [1, 2, 3, 4, 5, 6]}
-            seq::length {xs = result.no}
+            seq::size {xs = result.no}
         """
         assertEquals(3L, eval(code))
     }

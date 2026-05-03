@@ -1,34 +1,41 @@
 # Fraction arithmetic and type checking
 # Testing Frac type with exact rational arithmetic using // syntax
+let half = 1//2  # expected: half : Frac
 
-let half = 1//2                     # expected: half : Frac
-let quarter = 1//4                  # expected: quarter : Frac
-let third = 1//3                    # expected: third : Frac
+let quarter = 1//4  # expected: quarter : Frac
+
+let third = 1//3  # expected: third : Frac
 
 # Fraction arithmetic
-let sum = half + quarter           # expected: sum : Frac
-let difference = half - quarter    # expected: difference : Frac
-let product = half * quarter       # expected: product : Frac
-let quotient = half / quarter      # expected: quotient : Frac
+let sum = half + quarter  # expected: sum : Frac
+
+let difference = half - quarter  # expected: difference : Frac
+
+let product = half * quarter  # expected: product : Frac
+
+let quotient = half / quarter  # expected: quotient : Frac
 
 # Mixed arithmetic is not allowed - these would be type errors
 # let mixedSum = half + 1            # ERROR: Cannot mix Frac and Int
 # let mixedProduct = third * 3       # ERROR: Cannot mix Frac and Int
-
 # Instead, use explicit conversions or same-type operations
-let fracTwo: Frac = 2//1           # Convert integer to fraction
-let mixedSum = half + fracTwo      # expected: mixedSum : Frac
-let mixedProduct = third * fracTwo # expected: mixedProduct : Frac
+let fracTwo : Frac = 2//1  # Convert integer to fraction
+
+let mixedSum = half + fracTwo  # expected: mixedSum : Frac
+
+let mixedProduct = third * fracTwo  # expected: mixedProduct : Frac
 
 # Comparisons
-let isLarger = half > quarter      # expected: isLarger : Bool
-let isEqual = quarter == 1//4      # expected: isEqual : Bool
+let isLarger = half > quarter  # expected: isLarger : Bool
+
+let isEqual = quarter == 1//4  # expected: isEqual : Bool
 
 # Function with fraction parameter
-let doubleFrac = { f: Frac } -> f * (2//1)    # expected: doubleFrac : { f: Frac } -> Frac
-let doubled = doubleFrac { f = third }   # expected: doubled : Frac
+let doubleFrac = { f: Frac } -> f * (2//1)  # expected: doubleFrac : { f: Frac } -> Frac
+
+let doubled = doubleFrac { f = third }  # expected: doubled : Frac
 
 # Explicit type annotation
-let preciseFrac: Frac = 22//7      # expected: preciseFrac : Frac
+let preciseFrac : Frac = 22//7  # expected: preciseFrac : Frac
 
 half

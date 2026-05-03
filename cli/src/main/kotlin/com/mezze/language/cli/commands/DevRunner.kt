@@ -515,7 +515,7 @@ object DevRunner {
 
         val typeChecker = com.mezze.language.typechecker.TypeChecker()
         val result = try {
-            typeChecker.typeCheck(ast, projectRoot.toPath())
+            typeChecker.typeCheck(ast, projectRoot.toPath(), enablePrelude = true)
         } catch (e: com.mezze.language.typechecker.TypeCheckError) {
             val formatted = try {
                 com.mezze.language.typechecker.printing.ErrorFormatter.format(e, source)

@@ -60,16 +60,37 @@ class CheckCommand {
 
             val typeCheckStart = System.nanoTime()
             val typeChecker = TypeChecker()
-            val typedModule = typeChecker.checkParsedModuleToTyped(parsedModule, projectRoot)
+            // Use the lower-level result-returning API so we can report ALL
+            // type errors at once, not just the first. The previous
+            // checkParsedModuleToTyped path threw the first error and dropped
+            // the rest, hiding any independent errors in sibling decls.
+            val result = typeChecker.checkParsedModule(parsedModule, projectRoot, enablePrelude = true)
             val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000.0
             val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
-            if (quiet) {
-                println("OK (${String.format("%.1f", totalTime)}ms)")
-            } else {
-                printTypedModuleSummary(typedModule)
-                println()
-                println("Parse: ${String.format("%.1f", parseTime)}ms | Check: ${String.format("%.1f", typeCheckTime)}ms | Total: ${String.format("%.1f", totalTime)}ms")
+            when (result) {
+                is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success -> {
+                    val typedModule = result.typedModule
+                        ?: throw TypeCheckError("V2 pipeline did not emit a TypedModule")
+                    if (quiet) {
+                        println("OK (${String.format("%.1f", totalTime)}ms)")
+                    } else {
+                        printTypedModuleSummary(typedModule)
+                        println()
+                        println("Parse: ${String.format("%.1f", parseTime)}ms | Check: ${String.format("%.1f", typeCheckTime)}ms | Total: ${String.format("%.1f", totalTime)}ms")
+                    }
+                }
+                is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> {
+                    for ((idx, err) in result.errors.withIndex()) {
+                        if (idx > 0) println()
+                        println(ErrorFormatter.format(err, source))
+                    }
+                    if (result.errors.size > 1) {
+                        println()
+                        println("(${result.errors.size} type errors)")
+                    }
+                    kotlin.system.exitProcess(4)
+                }
             }
         } catch (e: TypeCheckError) {
             println(ErrorFormatter.format(e, source))
@@ -124,8 +145,52 @@ class CheckCommand {
             val ast = parser.parseParsedModule(source, file = appFile.name)
 
             val typeChecker = TypeChecker()
-            val typeCheckResult = typeChecker.typeCheck(ast, currentDir.toPath())
+            // Run via the result-returning lower-level API so we can show
+            // ALL collected errors (#218), not just the first one — sibling
+            // declarations with independent failures used to be hidden.
+            val rawResult = typeChecker.checkParsedModule(ast, currentDir.toPath(), enablePrelude = true)
             val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
+
+            when (rawResult) {
+                is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> {
+                    for ((idx, err) in rawResult.errors.withIndex()) {
+                        if (idx > 0) println()
+                        // Convert TypeChecker.TypeCheckError (data class) → exception
+                        // for ErrorFormatter (which expects the exception form).
+                        println(ErrorFormatter.format(
+                            TypeCheckError(err.message, err.loc),
+                            source
+                        ))
+                    }
+                    if (rawResult.errors.size > 1) {
+                        println()
+                        println("(${rawResult.errors.size} type errors)")
+                    }
+                    kotlin.system.exitProcess(4)
+                }
+                is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success -> { /* fall through */ }
+            }
+
+            // Convert Success to the TypeCheckOutput shape StorePopulator expects.
+            val success = rawResult as com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success
+            val typeCheckResult = com.mezze.language.typechecker.TypeCheckResult(
+                resolvedImports = buildList { /* populated below if needed */ },
+                warnings = success.warnings.map {
+                    com.mezze.language.typechecker.TypeCheckWarning(it.message, it.loc)
+                },
+                importedAbilities = success.importContext?.importedAbilities ?: emptyMap(),
+                importedEffects = success.importContext?.importedEffects ?: emptyMap(),
+                loweredFunctions = success.loweredFunctions ?: emptyList(),
+                typedModule = success.typedModule,
+                performerRecords = success.loweredPerformers,
+                loadedModules = success.loadedModules.mapValues { (_, m) -> m.typedModule }.filterValues { it != null }.mapValues { (_, v) -> v!! },
+                loadedModuleSources = success.loadedModules
+                    .mapNotNull { (path, m) ->
+                        val fp = m.filePath ?: return@mapNotNull null
+                        val sh = m.sourceHash ?: return@mapNotNull null
+                        path to com.mezze.language.typechecker.LoadedModuleSource(fp, sh)
+                    }.toMap()
+            )
 
             // Scatter into store, including the entry + per-import ParsedModules.
             val sourceHash = sha256(source)

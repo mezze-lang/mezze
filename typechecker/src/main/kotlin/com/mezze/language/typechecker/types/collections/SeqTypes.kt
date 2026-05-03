@@ -39,11 +39,11 @@ object SeqTypes {
             )
         }
 
-        // __native_seq_length: {xs: ['a]} -> Int
+        // __native_seq_size: {xs: ['a]} -> Int
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val seqType = MezzeType.SeqType(elemType)
-            context["__native_seq_length"] = MezzeType.FunctionType(
+            context["__native_seq_size"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to seqType)),
                 MezzeType.IntType
             )

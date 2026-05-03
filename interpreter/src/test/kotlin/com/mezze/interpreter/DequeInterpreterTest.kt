@@ -29,7 +29,7 @@ class DequeInterpreterTest {
     fun `singleton deque has length 1`() {
         val code = """
             use std::collections::deque
-            deque::length { d = deque::singleton { x = 42 } }
+            deque::size { d = deque::singleton { x = 42 } }
         """
         assertEquals(1L, eval(code))
     }
@@ -40,7 +40,7 @@ class DequeInterpreterTest {
             use std::collections::deque
             use std::collections::list
             let xs = list::cons { head = 1, tail = list::cons { head = 2, tail = list::cons { head = 3, tail = list::empty {} } } }
-            deque::length { d = deque::from_list { xs = xs } }
+            deque::size { d = deque::from_list { xs = xs } }
         """
         assertEquals(3L, eval(code))
     }
@@ -85,7 +85,7 @@ class DequeInterpreterTest {
             let d2 = deque::push_back { d = d, x = 1 }
             let d3 = deque::push_back { d = d2, x = 2 }
             let d4 = deque::push_back { d = d3, x = 3 }
-            deque::length { d = d4 }
+            deque::size { d = d4 }
         """
         assertEquals(3L, eval(code))
     }
@@ -152,7 +152,7 @@ class DequeInterpreterTest {
             let front = match deque::peek_front { d = d } is
                 Some { val } -> val
                 None -> 0
-            let stillSameLength = deque::length { d = d }
+            let stillSameLength = deque::size { d = d }
             front + stillSameLength
         """
         assertEquals(3L, eval(code)) // 1 (front) + 2 (length)
@@ -217,7 +217,7 @@ class DequeInterpreterTest {
             use std::collections::list
             let d = deque::push_back { d = deque::push_back { d = deque::empty {}, x = 1 }, x = 2 }
             let xs = deque::to_list { d = d }
-            # Check length using list::is_empty instead to avoid potential issues with list::length
+            # Check length using list::is_empty instead to avoid potential issues with list::size
             if list::is_empty { xs = xs } then 0 else 1
         """
         assertEquals(1L, eval(code)) // Not empty
@@ -230,7 +230,7 @@ class DequeInterpreterTest {
             use std::collections::seq
             let d = deque::push_back { d = deque::push_back { d = deque::empty {}, x = 1 }, x = 2 }
             let arr = deque::to_seq { d = d }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
         """
         assertEquals(2L, eval(code))
     }
@@ -258,7 +258,7 @@ class DequeInterpreterTest {
             use std::collections::deque
             let d = deque::push_back { d = deque::push_back { d = deque::push_back { d = deque::empty {}, x = 1 }, x = 2 }, x = 3 }
             let evens = deque::filter { d = d, p = { x } -> x % 2 == 0 }
-            deque::length { d = evens }
+            deque::size { d = evens }
         """
         assertEquals(1L, eval(code)) // Only 2 is even
     }
@@ -297,7 +297,7 @@ class DequeInterpreterTest {
             let d1 = deque::push_back { d = deque::empty {}, x = 1 }
             let d2 = deque::push_back { d = deque::empty {}, x = 2 }
             let combined = deque::concat { d1 = d1, d2 = d2 }
-            deque::length { d = combined }
+            deque::size { d = combined }
         """
         assertEquals(2L, eval(code))
     }

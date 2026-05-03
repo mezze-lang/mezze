@@ -1,7 +1,6 @@
 # Invalid underscore positions in numeric literals
 # These should all fail to parse
-
 # Underscore at the beginning
-let leadingUnderscore = _100        # Error: underscore at start
+let leadingUnderscore = _100  # Error: underscore at start
 
 leadingUnderscore

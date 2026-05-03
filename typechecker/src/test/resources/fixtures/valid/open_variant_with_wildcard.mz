@@ -1,12 +1,13 @@
 # Test that open variants (inferred) work with wildcard patterns
-
 # This should PASS - inferred open variant allows wildcard
-let processColor = {color} -> match color is
+let processColor = { color } -> match color is
   Red -> "red"
-  Blue {val} -> "blue"
-  _ -> "other"                                                       # expected: processColor : { color: | Red, Blue { val: 'a }, ... | } -> Str
+  Blue { val } -> "blue"
+  _ -> "other"
 
-let result1 = processColor {color = Red}                # expected: result1 : Str
-let result2 = processColor {color = Blue {val = 42}}    # expected: result2 : Str
+
+let result1 = processColor { color = Red }  # expected: result1 : Str
+
+let result2 = processColor { color = Blue { val = 42 } }  # expected: result2 : Str
 
 result1

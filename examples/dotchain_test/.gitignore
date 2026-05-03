@@ -1,0 +1,16 @@
+# Mezze build artifacts
+*.jar
+Mezze.lock
+mezze_packages/
+
+# Mezze codebase (generated)
+.mez/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db

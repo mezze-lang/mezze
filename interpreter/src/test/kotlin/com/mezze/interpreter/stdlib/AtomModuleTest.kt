@@ -267,7 +267,7 @@ class AtomModuleTest {
 
             let items = atom {value = [1, 2, 3]}
             let current = deref {atom = items}
-            seq::length {xs = current}
+            seq::size {xs = current}
         """)
         assertEquals(3L, result)
     }

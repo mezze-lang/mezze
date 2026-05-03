@@ -1,8 +1,8 @@
 # Should fail: closed record function called with extra fields
-let processUser = {user} -> "$(user.name) is $(user.age)"
+let processUser = { user } -> "$(user.name) is $(user.age)"
 
-let user1 = {name = "Alice", age = 30, city = "NYC"}
+let user1 = { name = "Alice", age = 30, city = "NYC" }
 
-let result = processUser {user = user1}
+let result = processUser { user = user1 }
 
 result

@@ -1,11 +1,14 @@
 # Variant types with pattern matching
-let addColor = {x, y, color} -> match color is
+let addColor = { x, y, color } -> match color is
   Red -> x + y
-  Blue {val} -> val * 2
+  Blue { val } -> val * 2
   _ -> 0
 
-let result1 = addColor {x = 4, y = 5, color = Red}
-let result2 = addColor {x = 4, y = 5, color = Blue {val = 10}}
-let result3 = addColor {x = 4, y = 5, color = Yellow}
+
+let result1 = addColor { x = 4, y = 5, color = Red }
+
+let result2 = addColor { x = 4, y = 5, color = Blue { val = 10 } }
+
+let result3 = addColor { x = 4, y = 5, color = Yellow }
 
 result1 + result2 + result3

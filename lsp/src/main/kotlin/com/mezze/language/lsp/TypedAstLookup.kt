@@ -41,6 +41,21 @@ object TypedAstLookup {
                 is TypedLetDecl -> {
                     // Check if position is on the binding name
                     if (containsPosition(decl.loc, line, col)) {
+                        // Nested-let name hit: when the cursor lands on
+                        // a `let name = …` inside a do-block (between the
+                        // statement start and its value's loc), report it
+                        // as a Binding for that name. Without this, the
+                        // recursive lookup falls through to the enclosing
+                        // TypedBlock/Lambda whose result type is e.g. `{}`,
+                        // making hover useless.
+                        val nestedLet = findNestedLetAtName(decl.value, line, col)
+                        if (nestedLet != null) return nestedLet
+                        // Lambda-param name hit: cursor on the `xs` token in
+                        // `{ xs } -> body` should hover as `param xs : T`,
+                        // not as the enclosing lambda's full type. Same idea
+                        // as findNestedLetAtName but for TypedLambda params.
+                        val paramHit = findLambdaParamAtName(decl.value, line, col)
+                        if (paramHit != null) return paramHit
                         val innerExpr = findInExpr(decl.value, line, col)
                         if (innerExpr != null) return LookupResult.Expr(innerExpr.first, innerExpr.second)
                         return LookupResult.Binding(decl.name, decl.scheme.type, decl.loc)
@@ -158,6 +173,121 @@ object TypedAstLookup {
 
         // If a child matched, return it (more specific). Otherwise return this node.
         return childResult ?: Pair(expr, parent)
+    }
+
+    /**
+     * Walk a typed expression looking for a TypedLambda whose param name
+     * region contains the cursor. Lets hover on `{ xs } ->` show
+     * `param xs : T` instead of the lambda's full type.
+     */
+    private fun findLambdaParamAtName(expr: TypedExpr, line: Int, col: Int): LookupResult.Binding? {
+        if (!containsPosition(expr.loc, line, col)) return null
+        return when (expr) {
+            is TypedLambda -> {
+                for (param in expr.params) {
+                    if (containsPosition(param.loc, line, col)) {
+                        return LookupResult.Binding(param.name, param.type, param.loc)
+                    }
+                }
+                findLambdaParamAtName(expr.body, line, col)
+            }
+            is TypedBlock -> {
+                for (stmt in expr.statements) {
+                    val hit = when (stmt) {
+                        is TypedStatement.Let -> findLambdaParamAtName(stmt.value, line, col)
+                        is TypedStatement.Expr -> findLambdaParamAtName(stmt.expr, line, col)
+                    }
+                    if (hit != null) return hit
+                }
+                findLambdaParamAtName(expr.result, line, col)
+            }
+            is TypedPerform -> findLambdaParamAtName(expr.body, line, col)
+            is TypedIf -> findLambdaParamAtName(expr.condition, line, col)
+                ?: findLambdaParamAtName(expr.thenBranch, line, col)
+                ?: findLambdaParamAtName(expr.elseBranch, line, col)
+            is TypedMatch -> {
+                findLambdaParamAtName(expr.scrutinee, line, col)
+                    ?: expr.cases.firstNotNullOfOrNull { case ->
+                        case.guard?.let { findLambdaParamAtName(it, line, col) }
+                            ?: findLambdaParamAtName(case.body, line, col)
+                    }
+            }
+            is TypedCall -> findLambdaParamAtName(expr.function, line, col)
+                ?: findLambdaParamAtName(expr.arg, line, col)
+            is TypedRecord -> expr.entries.firstNotNullOfOrNull { entry ->
+                when (entry) {
+                    is TypedRecordEntry.Field -> findLambdaParamAtName(entry.value, line, col)
+                    is TypedRecordEntry.Spread -> findLambdaParamAtName(entry.expr, line, col)
+                }
+            }
+            is TypedFieldAccess -> findLambdaParamAtName(expr.record, line, col)
+            is TypedPipe -> findLambdaParamAtName(expr.left, line, col)
+                ?: findLambdaParamAtName(expr.right, line, col)
+            else -> null
+        }
+    }
+
+    /**
+     * Walk a typed expression looking for a nested-let whose binding name
+     * region contains the cursor. The name region is approximated as
+     * `[stmt.loc.start, stmt.value.loc.start)` — i.e. everything in the
+     * Let statement that comes before the value expression. That covers
+     * `let foo` and `let foo = ` (the part the user clicks to query "what
+     * is foo's type").
+     *
+     * Used by hover so a click on the binding name shows `let foo : T`
+     * instead of falling through to the enclosing block's result type
+     * (which is often `{}`).
+     */
+    private fun findNestedLetAtName(expr: TypedExpr, line: Int, col: Int): LookupResult.Binding? {
+        if (!containsPosition(expr.loc, line, col)) return null
+        return when (expr) {
+            is TypedBlock -> {
+                for (stmt in expr.statements) {
+                    when (stmt) {
+                        is TypedStatement.Let -> {
+                            // Binding-name region: cursor is inside the
+                            // statement's loc, and BEFORE the value's start.
+                            val inStmt = containsPosition(stmt.loc, line, col)
+                            val beforeValue = line < stmt.value.loc.startLine ||
+                                (line == stmt.value.loc.startLine && col < stmt.value.loc.startCol)
+                            if (inStmt && beforeValue) {
+                                return LookupResult.Binding(stmt.name, stmt.type, stmt.loc)
+                            }
+                            findNestedLetAtName(stmt.value, line, col)?.let { return it }
+                        }
+                        is TypedStatement.Expr -> {
+                            findNestedLetAtName(stmt.expr, line, col)?.let { return it }
+                        }
+                    }
+                }
+                findNestedLetAtName(expr.result, line, col)
+            }
+            is TypedLambda -> findNestedLetAtName(expr.body, line, col)
+            is TypedPerform -> findNestedLetAtName(expr.body, line, col)
+            is TypedIf -> findNestedLetAtName(expr.condition, line, col)
+                ?: findNestedLetAtName(expr.thenBranch, line, col)
+                ?: findNestedLetAtName(expr.elseBranch, line, col)
+            is TypedMatch -> {
+                findNestedLetAtName(expr.scrutinee, line, col)
+                    ?: expr.cases.firstNotNullOfOrNull { case ->
+                        case.guard?.let { findNestedLetAtName(it, line, col) }
+                            ?: findNestedLetAtName(case.body, line, col)
+                    }
+            }
+            is TypedCall -> findNestedLetAtName(expr.function, line, col)
+                ?: findNestedLetAtName(expr.arg, line, col)
+            is TypedRecord -> expr.entries.firstNotNullOfOrNull { entry ->
+                when (entry) {
+                    is TypedRecordEntry.Field -> findNestedLetAtName(entry.value, line, col)
+                    is TypedRecordEntry.Spread -> findNestedLetAtName(entry.expr, line, col)
+                }
+            }
+            is TypedFieldAccess -> findNestedLetAtName(expr.record, line, col)
+            is TypedPipe -> findNestedLetAtName(expr.left, line, col)
+                ?: findNestedLetAtName(expr.right, line, col)
+            else -> null
+        }
     }
 
     /**

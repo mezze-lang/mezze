@@ -1,8 +1,7 @@
 # Test that closed records reject extra fields (strict type safety)
-
-let processUser = {user} -> user.name                      # infers closed: { user: { name: Str } }
+let processUser = { user } -> user.name  # infers closed: { user: { name: Str } }
 
 # This should FAIL - passing extra fields to closed record
-let result = processUser {user = {name = "Alice", age = 30, city = "NYC"}}
+let result = processUser { user = { name = "Alice", age = 30, city = "NYC" } }
 
 result

@@ -1,4 +1,5 @@
 use std::abilities::compare::{ Eq, Ord }
+use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
 use std::int
 
@@ -17,6 +18,7 @@ impl Ord 'a for List 'a where {
   gt = { it, r } -> __native_list_compare { xs = it, ys = r } == 1,
   ge = { it, r } -> __native_list_compare { xs = it, ys = r } != (0 - 1),
 }
+
 # std/collections/list.mezze - Immutable linked list operations
 #
 # List 'a is a built-in type conceptually defined as:
@@ -25,480 +27,509 @@ impl Ord 'a for List 'a where {
 # Implementation uses native JVM List for performance with Truffle
 # Lists are immutable - all operations return new lists
 # Basic list operations
+pub let empty : {} -> List 'a = {} -> __native_list_empty {}
 
-pub let empty: {} -> List 'a = {} -> __native_list_empty {}
+pub let cons : { head: 'a, tail: List 'a } -> List 'a = { head, tail } ->
+  __native_list_cons { head = head, tail = tail }
 
-pub let cons: { head: 'a, tail: List 'a } -> List 'a = { head, tail } -> __native_list_cons { head = head, tail = tail }
+pub let push : { x: 'a, xs: List 'a } -> List 'a = { x, xs } ->
+  __native_list_cons { head = x, tail = xs }
 
-pub let push: { x: 'a, xs: List 'a } -> List 'a = { x, xs } -> __native_list_cons { head = x, tail = xs }
+pub let is_empty : { xs: List 'a } -> Bool = { xs } -> __native_list_is_empty { xs = xs }
 
-pub let is_empty: { xs: List 'a } -> Bool = { xs } -> __native_list_is_empty { xs = xs }
+pub let head : { xs: List 'a } -> Option 'a = { xs } -> __native_list_head { xs = xs }
 
-pub let head: { xs: List 'a } -> Option 'a = { xs } -> __native_list_head { xs = xs }
+pub let tail : { xs: List 'a } -> Option (List 'a) = { xs } -> __native_list_tail { xs = xs }
 
-pub let tail: { xs: List 'a } -> Option (List 'a) = { xs } -> __native_list_tail { xs = xs }
+pub let size : { xs: List 'a } -> Int = { xs } -> __native_list_size { xs = xs }
 
-pub let length: { xs: List 'a } -> Int = { xs } -> __native_list_length { xs = xs }
 # Deconstruction - returns Option { head: 'a, tail: List 'a }
-
-pub let uncons: { xs: List 'a } -> Option { head: 'a, tail: List 'a } = { xs } ->
+pub let uncons : { xs: List 'a } -> Option { head: 'a, tail: List 'a } = { xs } ->
   __native_list_uncons { xs = xs }
+
 # List construction
+pub let singleton : { x: 'a } -> List 'a = { x } -> cons { head = x, tail = empty {} }
 
-pub let singleton: { x: 'a } -> List 'a = { x } -> cons { head = x, tail = empty {} }
+pub let prepend : { x: 'a, xs: List 'a } -> List 'a = { x, xs } -> cons { head = x, tail = xs }
 
-pub let prepend: { x: 'a, xs: List 'a } -> List 'a = { x, xs } -> cons { head = x, tail = xs }
+pub let append : { xs: List 'a, ys: List 'a } -> List 'a = { xs, ys } ->
+  __native_list_append { xs = xs, ys = ys }
 
-pub let append: { xs: List 'a, ys: List 'a } -> List 'a = { xs, ys } -> __native_list_append { xs = xs, ys = ys }
 # List access
+pub let get : { xs: List 'a, index: Int } -> Option 'a = { xs, index } ->
+  __native_list_get { xs = xs, index = index }
 
-pub let get: { xs: List 'a, index: Int } -> Option 'a = { xs, index } -> __native_list_get { xs = xs, index = index }
+pub let take : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+  __native_list_take { xs = xs, n = n }
 
-pub let take: { xs: List 'a, n: Int } -> List 'a = { xs, n } -> __native_list_take { xs = xs, n = n }
+pub let drop : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+  __native_list_drop { xs = xs, n = n }
 
-pub let drop: { xs: List 'a, n: Int } -> List 'a = { xs, n } -> __native_list_drop { xs = xs, n = n }
 # Higher-order functions
-
-pub let map: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'b <...> = { xs, f } ->
+pub let map : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'b <...> = { xs, f } ->
   __native_list_map { xs = xs, f = f }
 
-pub let filter: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
+pub let filter : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
   __native_list_filter { xs = xs, p = p }
 
-pub let fold_left: { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
+pub let fold_left : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
   __native_list_fold_left { xs = xs, init = init, f = f }
 
-pub let fold_right: { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
+pub let fold_right : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { xs, init, f } ->
   __native_list_fold_right { xs = xs, init = init, f = f }
 
-pub let reduce: { xs: List 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { xs, f } ->
+pub let reduce : { xs: List 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { xs, f } ->
   __native_list_reduce { xs = xs, f = f }
-# List predicates
 
-pub let any: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+# List predicates
+pub let any : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   __native_list_any { xs = xs, p = p }
 
-pub let all: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+pub let all : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   __native_list_all { xs = xs, p = p }
 
-pub let contains: { xs: List 'a, x: 'a } -> Bool = { xs, x } -> __native_list_contains { xs = xs, x = x }
+pub let contains : { xs: List 'a, x: 'a } -> Bool = { xs, x } ->
+  __native_list_contains { xs = xs, x = x }
+
 # List transformations
+pub let reverse : { xs: List 'a } -> List 'a = { xs } -> __native_list_reverse { xs = xs }
 
-pub let reverse: { xs: List 'a } -> List 'a = { xs } -> __native_list_reverse { xs = xs }
+pub let concat : { xss: List (List 'a) } -> List 'a = { xss } ->
+  __native_list_concat { xss = xss }
 
-pub let concat: { xss: List (List 'a) } -> List 'a = { xss } -> __native_list_concat { xss = xss }
-
-pub let flat_map: { xs: List 'a, f: { x: 'a } -> List 'b <...> } -> List 'b <...> = { xs, f } ->
+pub let flat_map : { xs: List 'a, f: { x: 'a } -> List 'b <...> } -> List 'b <...> = { xs, f } ->
   concat { xss = map { xs = xs, f = f } }
 
-pub let zip: { xs: List 'a, ys: List 'b } -> List { fst: 'a, snd: 'b } = { xs, ys } ->
+pub let zip : { xs: List 'a, ys: List 'b } -> List { fst: 'a, snd: 'b } = { xs, ys } ->
   __native_list_zip { xs = xs, ys = ys }
 
-pub let unzip: { xs: List { fst: 'a, snd: 'b } } -> { fsts: List 'a, snds: List 'b } = { xs } ->
+pub let unzip : { xs: List { fst: 'a, snd: 'b } } -> { fsts: List 'a, snds: List 'b } = { xs } ->
   __native_list_unzip { xs = xs }
+
 # Conversion functions
+pub let to_seq : { xs: List 'a } -> ['a] = { xs } -> __native_list_to_seq { xs = xs }
 
-pub let to_seq: { xs: List 'a } -> ['a] = { xs } -> __native_list_to_seq { xs = xs }
+pub let from_seq : { xs: ['a] } -> List 'a = { xs } -> __native_list_from_seq { xs = xs }
 
-pub let from_seq: { xs: ['a] } -> List 'a = { xs } -> __native_list_from_seq { xs = xs }
 # Alias for from_seq - creates list from seq elements
 # Note: Named 'of_seq' instead of 'of' to avoid name collision with seq::of
+pub let of_seq : { elements: ['a] } -> List 'a = { elements } ->
+  __native_list_from_seq { xs = elements }
 
-pub let of_seq: { elements: ['a] } -> List 'a = { elements } -> __native_list_from_seq { xs = elements }
 # List utilities
+pub let range : { start: Int, end: Int } -> List Int = { start, end } ->
+  __native_list_range { start = start, end = end }
 
-pub let range: { start: Int, end: Int } -> List Int = { start, end } -> __native_list_range { start = start, end = end }
+pub let repeat : { x: 'a, n: Int } -> List 'a = { x, n } -> __native_list_repeat { x = x, n = n }
 
-pub let repeat: { x: 'a, n: Int } -> List 'a = { x, n } -> __native_list_repeat { x = x, n = n }
+pub let intersperse : { xs: List 'a, sep: 'a } -> List 'a = { xs, sep } ->
+  __native_list_intersperse { xs = xs, sep = sep }
 
-pub let intersperse: { xs: List 'a, sep: 'a } -> List 'a = { xs, sep } -> __native_list_intersperse { xs = xs, sep = sep }
 # Sorting
+pub let sort : { xs: List 'a } -> List 'a = { xs } -> __native_list_sort { xs = xs }
 
-pub let sort: { xs: List 'a } -> List 'a = { xs } -> __native_list_sort { xs = xs }
-
-pub let sort_by: { xs: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> List 'a <...> = { xs, cmp } ->
+pub let sort_by : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> List 'a <...> = { xs, cmp } ->
   __native_list_sort_by { xs = xs, cmp = cmp }
+
 # =============================================================================
 # Search and Find
 # =============================================================================
 # Find first element matching predicate
 # Example: find {xs = [1, 2, 3], p = {x} -> x > 1} -> Some {val = 2}
-
-pub let find: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option 'a <...> = { xs, p } ->
+pub let find : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option 'a <...> = { xs, p } ->
   __native_list_find { xs = xs, p = p }
+
 # Find index of first element matching predicate
 # Example: find_index {xs = [1, 2, 3], p = {x} -> x > 1} -> Some {val = 1}
-
-pub let find_index: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option Int <...> = { xs, p } ->
+pub let find_index : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Option Int <...> = { xs, p } ->
   __native_list_find_index { xs = xs, p = p }
+
 # =============================================================================
 # Partition
 # =============================================================================
 # Partition list into matching and non-matching elements
 # Example: partition {xs = [1, 2, 3, 4], p = {x} -> x > 2} -> {pass = [3, 4], fail = [1, 2]}
-
-pub let partition: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { pass: List 'a, fail: List 'a } <...> = { xs, p } ->
+pub let partition : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { pass: List 'a, fail: List 'a } <...> = { xs, p } ->
   __native_list_partition { xs = xs, p = p }
+
 # =============================================================================
 # Additional Accessors
 # =============================================================================
 # Get last element of list
 # Example: last {xs = [1, 2, 3]} -> Some {val = 3}
+pub let last : { xs: List 'a } -> Option 'a = { xs } -> __native_list_last { xs = xs }
 
-pub let last: { xs: List 'a } -> Option 'a = { xs } -> __native_list_last { xs = xs }
 # Get all elements except the last
 # Example: init {xs = [1, 2, 3]} -> [1, 2]
+pub let init : { xs: List 'a } -> List 'a = { xs } -> __native_list_init { xs = xs }
 
-pub let init: { xs: List 'a } -> List 'a = { xs } -> __native_list_init { xs = xs }
 # =============================================================================
 # Min/Max Operations
 # =============================================================================
 # Find minimum element (returns Option)
 # Example: min { xs = [3, 1, 2] } -> Some { val = 1 }
+pub let min : { xs: List 'a } -> Option 'a = { xs } -> __native_list_min { xs = xs }
 
-pub let min: { xs: List 'a } -> Option 'a = { xs } -> __native_list_min { xs = xs }
 # Find maximum element (returns Option)
 # Example: max { xs = [3, 1, 2] } -> Some { val = 3 }
+pub let max : { xs: List 'a } -> Option 'a = { xs } -> __native_list_max { xs = xs }
 
-pub let max: { xs: List 'a } -> Option 'a = { xs } -> __native_list_max { xs = xs }
 # Find minimum element using a key function (returns Option)
 # Example: min_by { xs = [{age = 30}, {age = 25}], f = {x} -> x.age } -> Some { val = {age = 25} }
-
-pub let min_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> Option 'a <...> = { xs, f } ->
+pub let min_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> Option 'a <...> = { xs, f } ->
   __native_list_min_by { xs = xs, f = f }
+
 # Find maximum element using a key function (returns Option)
 # Example: max_by { xs = [{age = 30}, {age = 25}], f = {x} -> x.age } -> Some { val = {age = 30} }
-
-pub let max_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> Option 'a <...> = { xs, f } ->
+pub let max_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> Option 'a <...> = { xs, f } ->
   __native_list_max_by { xs = xs, f = f }
+
 # =============================================================================
 # Sum/Product Operations
 # =============================================================================
 # Sum all integer elements
 # Example: sum { xs = [1, 2, 3, 4] } -> 10
+pub let sum : { xs: List Int } -> Int = { xs } -> __native_list_sum { xs = xs }
 
-pub let sum: { xs: List Int } -> Int = { xs } -> __native_list_sum { xs = xs }
 # Sum all float elements
 # Example: sum_float { xs = [1.5, 2.5, 3.0] } -> 7.0
+pub let sum_float : { xs: List Float } -> Float = { xs } -> __native_list_sum_float { xs = xs }
 
-pub let sum_float: { xs: List Float } -> Float = { xs } -> __native_list_sum_float { xs = xs }
 # Product of all integer elements
 # Example: product { xs = [2, 3, 4] } -> 24
+pub let product : { xs: List Int } -> Int = { xs } -> __native_list_product { xs = xs }
 
-pub let product: { xs: List Int } -> Int = { xs } -> __native_list_product { xs = xs }
 # Product of all float elements
 # Example: product_float { xs = [2.0, 3.0, 4.0] } -> 24.0
+pub let product_float : { xs: List Float } -> Float = { xs } ->
+  __native_list_product_float { xs = xs }
 
-pub let product_float: { xs: List Float } -> Float = { xs } -> __native_list_product_float { xs = xs }
 # =============================================================================
 # Group By Operations
 # =============================================================================
 # Group elements by a key function
 # Example: group_by { xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 }
 #          -> [{ key = 1, values = [1, 3, 5] }, { key = 0, values = [2, 4] }]
-
-pub let group_by: { xs: List 'a, f: { x: 'a } -> 'k <...> } -> List { key: 'k, values: List 'a } <...> = { xs, f } ->
+pub let group_by : { xs: List 'a, f: { x: 'a } -> 'k <...> } -> List { key: 'k, values: List 'a } <...> = { xs, f } ->
   __native_list_group_by { xs = xs, f = f }
+
 # =============================================================================
 # Enumerate/ForEach/Scan Operations
 # =============================================================================
 # Enumerate with indices
 # Example: enumerate { xs = ["a", "b", "c"] }
 #          -> [{ value = "a", index = 0 }, { value = "b", index = 1 }, { value = "c", index = 2 }]
-
-pub let enumerate: { xs: List 'a } -> List { value: 'a, index: Int } = { xs } ->
+pub let enumerate : { xs: List 'a } -> List { value: 'a, index: Int } = { xs } ->
   __native_list_enumerate { xs = xs }
+
 # Zip with indices
 # Example: zip_with_index { xs = ["a", "b"] }
 #          -> [{ value = "a", index = 0 }, { value = "b", index = 1 }]
-
-pub let zip_with_index: { xs: List 'a } -> List { value: 'a, index: Int } = { xs } ->
+pub let zip_with_index : { xs: List 'a } -> List { value: 'a, index: Int } = { xs } ->
   __native_list_zip_with_index { xs = xs }
+
 # Execute a function for each element (for side effects)
 # Example: for_each { xs = [1, 2, 3], f = {x} -> print x }
-
-pub let for_each: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> {} <...> = { xs, f } ->
+pub let for_each : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> {} <...> = { xs, f } ->
   __native_list_for_each { xs = xs, f = f }
+
 # Scan (like fold but returns all intermediate results)
 # Example: scan { xs = [1, 2, 3], init = 0, f = {acc, x} -> acc + x } -> [0, 1, 3, 6]
-
-pub let scan: { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> List 'acc <...> = { xs, init, f } ->
+pub let scan : { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> List 'acc <...> = { xs, init, f } ->
   __native_list_scan { xs = xs, init = init, f = f }
+
 # =============================================================================
 # Split Operations
 # =============================================================================
 # Split at an index
 # Example: split_at { xs = [1, 2, 3, 4, 5], i = 2 } -> { l = [1, 2], r = [3, 4, 5] }
-
-pub let split_at: { xs: List 'a, i: Int } -> { l: List 'a, r: List 'a } = { xs, i } ->
+pub let split_at : { xs: List 'a, i: Int } -> { l: List 'a, r: List 'a } = { xs, i } ->
   __native_list_split_at { xs = xs, i = i }
+
 # Split while predicate holds (like take_while + drop_while combined)
 # Example: span { xs = [1, 2, 3, 4, 1], p = {x} -> x < 3 } -> { l = [1, 2], r = [3, 4, 1] }
-
-pub let span: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { l: List 'a, r: List 'a } <...> = { xs, p } ->
+pub let span : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> { l: List 'a, r: List 'a } <...> = { xs, p } ->
   __native_list_span { xs = xs, p = p }
+
 # =============================================================================
 # Dedup Operations
 # =============================================================================
 # Remove consecutive duplicate elements
 # Example: dedup { xs = [1, 1, 2, 2, 1, 3, 3] } -> [1, 2, 1, 3]
+pub let dedup : { xs: List 'a } -> List 'a = { xs } -> __native_list_dedup { xs = xs }
 
-pub let dedup: { xs: List 'a } -> List 'a = { xs } -> __native_list_dedup { xs = xs }
 # Remove consecutive duplicates using a key function
 # Example: dedup_by { xs = [1, 3, 2, 4, 5], f = {x} -> x % 2 } -> [1, 2, 5]
-
-pub let dedup_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'a <...> = { xs, f } ->
+pub let dedup_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'a <...> = { xs, f } ->
   __native_list_dedup_by { xs = xs, f = f }
+
 # =============================================================================
 # Singleton/Nth/Fill Operations
 # =============================================================================
 # Get nth element (alias for get)
 # Example: nth { xs = [1, 2, 3], i = 1 } -> Some { val = 2 }
+pub let nth : { xs: List 'a, i: Int } -> Option 'a = { xs, i } ->
+  __native_list_nth { xs = xs, i = i }
 
-pub let nth: { xs: List 'a, i: Int } -> Option 'a = { xs, i } -> __native_list_nth { xs = xs, i = i }
 # Create a list filled with a value
 # Example: fill { n = 3, x = 0 } -> [0, 0, 0]
+pub let fill : { n: Int, x: 'a } -> List 'a = { n, x } -> __native_list_fill { n = n, x = x }
 
-pub let fill: { n: Int, x: 'a } -> List 'a = { n, x } -> __native_list_fill { n = n, x = x }
 # Create a list filled using a generator function
 # Example: fill_with { n = 3, f = {i} -> i * 2 } -> [0, 2, 4]
-
-pub let fill_with: { n: Int, f: { i: Int } -> 'a <...> } -> List 'a <...> = { n, f } ->
+pub let fill_with : { n: Int, f: { i: Int } -> 'a <...> } -> List 'a <...> = { n, f } ->
   __native_list_fill_with { n = n, f = f }
+
 # =============================================================================
 # Group Consecutive Operations
 # =============================================================================
 # Group consecutive equal elements
 # Example: group_consecutive { xs = [1, 1, 2, 2, 2, 1] } -> [[1, 1], [2, 2, 2], [1]]
+pub let group_consecutive : { xs: List 'a } -> List (List 'a) = { xs } ->
+  __native_list_group_consecutive { xs = xs }
 
-pub let group_consecutive: { xs: List 'a } -> List (List 'a) = { xs } -> __native_list_group_consecutive { xs = xs }
 # Group consecutive elements by a key function
 # Example: group_consecutive_by { xs = [1, 3, 2, 4, 5], f = {x} -> x % 2 }
 #          -> [[1, 3], [2, 4], [5]]
-
-pub let group_consecutive_by: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List (List 'a) <...> = { xs, f } ->
+pub let group_consecutive_by : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List (List 'a) <...> = { xs, f } ->
   __native_list_group_consecutive_by { xs = xs, f = f }
+
 # =============================================================================
 # Take/Drop While Operations
 # =============================================================================
 # Take elements while predicate holds
 # Example: take_while { xs = [1, 2, 3, 1], p = {x} -> x < 3 } -> [1, 2]
-
-pub let take_while: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
+pub let take_while : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
   __native_list_take_while { xs = xs, p = p }
+
 # Drop elements while predicate holds
 # Example: drop_while { xs = [1, 2, 3, 1], p = {x} -> x < 3 } -> [3, 1]
-
-pub let drop_while: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
+pub let drop_while : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> List 'a <...> = { xs, p } ->
   __native_list_drop_while { xs = xs, p = p }
+
 # =============================================================================
 # None/Count Operations
 # =============================================================================
 # Check if no element matches predicate
 # Example: none { xs = [1, 2, 3], p = {x} -> x > 10 } -> True
-
-pub let none: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
+pub let none : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, p } ->
   __native_list_none { xs = xs, p = p }
+
 # Count elements matching predicate
 # Example: count { xs = [1, 2, 3, 4], p = {x} -> x % 2 == 0 } -> 2
-
-pub let count: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Int <...> = { xs, p } ->
+pub let count : { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Int <...> = { xs, p } ->
   __native_list_count { xs = xs, p = p }
+
 # =============================================================================
 # Unique/Distinct/Flatten Operations
 # =============================================================================
 # Remove duplicate elements (keeps first occurrence)
 # Example: unique { xs = [1, 2, 1, 3, 2] } -> [1, 2, 3]
+pub let unique : { xs: List 'a } -> List 'a = { xs } -> __native_list_unique { xs = xs }
 
-pub let unique: { xs: List 'a } -> List 'a = { xs } -> __native_list_unique { xs = xs }
 # Alias for unique
+pub let distinct : { xs: List 'a } -> List 'a = { xs } -> __native_list_distinct { xs = xs }
 
-pub let distinct: { xs: List 'a } -> List 'a = { xs } -> __native_list_distinct { xs = xs }
 # Flatten nested lists
 # Example: flatten { xss = [[1, 2], [3, 4]] } -> [1, 2, 3, 4]
+pub let flatten : { xss: List (List 'a) } -> List 'a = { xss } ->
+  __native_list_flatten { xss = xss }
 
-pub let flatten: { xss: List (List 'a) } -> List 'a = { xss } -> __native_list_flatten { xss = xss }
 # =============================================================================
 # Equality and Search
 # =============================================================================
 # Check if two lists are equal
 # Example: equals { xs = [1, 2, 3], ys = [1, 2, 3] } -> True
+pub let equals : { xs: List 'a, ys: List 'a } -> Bool = { xs, ys } ->
+  __native_list_equals { xs = xs, ys = ys }
 
-pub let equals: { xs: List 'a, ys: List 'a } -> Bool = { xs, ys } -> __native_list_equals { xs = xs, ys = ys }
 # Find index of first occurrence of element
 # Example: index_of { xs = [1, 2, 3, 2], x = 2 } -> Some 1
+pub let index_of : { xs: List 'a, x: 'a } -> Option Int = { xs, x } ->
+  __native_list_index_of { xs = xs, x = x }
 
-pub let index_of: { xs: List 'a, x: 'a } -> Option Int = { xs, x } -> __native_list_index_of { xs = xs, x = x }
 # Find index of last occurrence of element
 # Example: last_index_of { xs = [1, 2, 3, 2], x = 2 } -> Some 3
+pub let last_index_of : { xs: List 'a, x: 'a } -> Option Int = { xs, x } ->
+  __native_list_last_index_of { xs = xs, x = x }
 
-pub let last_index_of: { xs: List 'a, x: 'a } -> Option Int = { xs, x } -> __native_list_last_index_of { xs = xs, x = x }
 # Get slice of list from start (inclusive) to end (exclusive)
 # Example: slice { xs = [1, 2, 3, 4, 5], start = 1, end = 4 } -> [2, 3, 4]
-
-pub let slice: { xs: List 'a, start: Int, end: Int } -> List 'a = { xs, start, end } ->
+pub let slice : { xs: List 'a, start: Int, end: Int } -> List 'a = { xs, start, end } ->
   __native_list_slice { xs = xs, start = start, end = end }
+
 # =============================================================================
 # Windowing Operations
 # =============================================================================
 # Split list into chunks of given size (last chunk may be smaller)
 # Example: chunk { xs = [1, 2, 3, 4, 5], size = 2 } -> [[1, 2], [3, 4], [5]]
+pub let chunk : { xs: List 'a, size: Int } -> List (List 'a) = { xs, size } ->
+  __native_list_chunk { xs = xs, size = size }
 
-pub let chunk: { xs: List 'a, size: Int } -> List (List 'a) = { xs, size } -> __native_list_chunk { xs = xs, size = size }
 # Get all sliding windows of given size
 # Example: windows { xs = [1, 2, 3, 4], size = 2 } -> [[1, 2], [2, 3], [3, 4]]
+pub let windows : { xs: List 'a, size: Int } -> List (List 'a) = { xs, size } ->
+  __native_list_windows { xs = xs, size = size }
 
-pub let windows: { xs: List 'a, size: Int } -> List (List 'a) = { xs, size } -> __native_list_windows { xs = xs, size = size }
 # Get sliding windows with step
 # Example: sliding { xs = [1, 2, 3, 4, 5], size = 2, step = 2 } -> [[1, 2], [3, 4]]
-
-pub let sliding: { xs: List 'a, size: Int, step: Int } -> List (List 'a) = { xs, size, step } ->
+pub let sliding : { xs: List 'a, size: Int, step: Int } -> List (List 'a) = { xs, size, step } ->
   __native_list_sliding { xs = xs, size = size, step = step }
+
 # Split into exact chunks (drops incomplete final chunk)
 # Example: chunks_exact { xs = [1, 2, 3, 4, 5], size = 2 } -> [[1, 2], [3, 4]]
-
-pub let chunks_exact: { xs: List 'a, size: Int } -> List (List 'a) = { xs, size } ->
+pub let chunks_exact : { xs: List 'a, size: Int } -> List (List 'a) = { xs, size } ->
   __native_list_chunks_exact { xs = xs, size = size }
+
 # =============================================================================
 # Additional Transformation Operations
 # =============================================================================
 # Sort by key function
 # Example: sort_by_key { xs = [{age = 30}, {age = 20}], f = {x} -> x.age } -> [{age = 20}, {age = 30}]
-
-pub let sort_by_key: { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'a <...> = { xs, f } ->
+pub let sort_by_key : { xs: List 'a, f: { x: 'a } -> 'b <...> } -> List 'a <...> = { xs, f } ->
   __native_list_sort_by_key { xs = xs, f = f }
+
 # Rotate left by n positions
 # Example: rotate_left { xs = [1, 2, 3, 4, 5], n = 2 } -> [3, 4, 5, 1, 2]
+pub let rotate_left : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+  __native_list_rotate_left { xs = xs, n = n }
 
-pub let rotate_left: { xs: List 'a, n: Int } -> List 'a = { xs, n } -> __native_list_rotate_left { xs = xs, n = n }
 # Rotate right by n positions
 # Example: rotate_right { xs = [1, 2, 3, 4, 5], n = 2 } -> [4, 5, 1, 2, 3]
+pub let rotate_right : { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+  __native_list_rotate_right { xs = xs, n = n }
 
-pub let rotate_right: { xs: List 'a, n: Int } -> List 'a = { xs, n } -> __native_list_rotate_right { xs = xs, n = n }
 # =============================================================================
 # Cross-Collection Conversions
 # =============================================================================
 # Convert list to Set
 # Example: to_set { xs = cons { x = 1, xs = cons { x = 2, xs = empty {} } } } -> Set(1, 2)
+pub let to_set : { xs: List 'a } -> Set 'a = { xs } -> __native_list_to_set { xs = xs }
 
-pub let to_set: { xs: List 'a } -> Set 'a = { xs } -> __native_list_to_set { xs = xs }
 # Convert list to Deque
 # Example: to_deque { xs = cons { x = 1, xs = cons { x = 2, xs = empty {} } } } -> Deque(1, 2)
+pub let to_deque : { xs: List 'a } -> Deque 'a = { xs } -> __native_list_to_deque { xs = xs }
 
-pub let to_deque: { xs: List 'a } -> Deque 'a = { xs } -> __native_list_to_deque { xs = xs }
 # Convert list to SortedSet
 # Example: to_sorted_set { xs = cons { x = 3, xs = cons { x = 1, xs = empty {} } } } -> SortedSet(1, 3)
+pub let to_sorted_set : { xs: List 'a } -> SortedSet 'a = { xs } ->
+  __native_list_to_sorted_set { xs = xs }
 
-pub let to_sorted_set: { xs: List 'a } -> SortedSet 'a = { xs } -> __native_list_to_sorted_set { xs = xs }
 # Convert list of {key, value} records to Map
 # Example: to_map { xs = cons { x = {key = 1, value = "a"}, xs = empty {} } } -> Map(1 -> "a")
+pub let to_map : { xs: List { key: 'k, value: 'v } } -> Map 'k 'v = { xs } ->
+  __native_list_to_map { xs = xs }
 
-pub let to_map: { xs: List { key: 'k, value: 'v } } -> Map 'k 'v = { xs } -> __native_list_to_map { xs = xs }
 # Convert list of {key, value} records to SortedMap
 # Example: to_sorted_map { xs = cons { x = {key = 2, value = "b"}, xs = cons { x = {key = 1, value = "a"}, xs = empty {} } } }
-
-pub let to_sorted_map: { xs: List { key: 'k, value: 'v } } -> SortedMap 'k 'v = { xs } ->
+pub let to_sorted_map : { xs: List { key: 'k, value: 'v } } -> SortedMap 'k 'v = { xs } ->
   __native_list_to_sorted_map { xs = xs }
+
 # Convert Set to list
 # Example: from_set { xs = Set(1, 2, 3) } -> List(1, 2, 3)
+pub let from_set : { xs: Set 'a } -> List 'a = { xs } -> __native_list_from_set { xs = xs }
 
-pub let from_set: { xs: Set 'a } -> List 'a = { xs } -> __native_list_from_set { xs = xs }
 # Convert Deque to list
 # Example: from_deque { xs = Deque(1, 2, 3) } -> List(1, 2, 3)
+pub let from_deque : { xs: Deque 'a } -> List 'a = { xs } -> __native_list_from_deque { xs = xs }
 
-pub let from_deque: { xs: Deque 'a } -> List 'a = { xs } -> __native_list_from_deque { xs = xs }
 # Convert SortedSet to list (in sorted order)
 # Example: from_sorted_set { xs = SortedSet(3, 1, 2) } -> List(1, 2, 3)
+pub let from_sorted_set : { xs: SortedSet 'a } -> List 'a = { xs } ->
+  __native_list_from_sorted_set { xs = xs }
 
-pub let from_sorted_set: { xs: SortedSet 'a } -> List 'a = { xs } -> __native_list_from_sorted_set { xs = xs }
 # Convert Map to list of {key, value} records
 # Example: from_map { m = Map(1 -> "a") } -> List({key = 1, value = "a"})
+pub let from_map : { m: Map 'k 'v } -> List { key: 'k, value: 'v } = { m } ->
+  __native_list_from_map { m = m }
 
-pub let from_map: { m: Map 'k 'v } -> List { key: 'k, value: 'v } = { m } -> __native_list_from_map { m = m }
 # Convert SortedMap to list of {key, value} records (in sorted key order)
 # Example: from_sorted_map { m = SortedMap(2 -> "b", 1 -> "a") } -> List({key = 1, value = "a"}, {key = 2, value = "b"})
-
-pub let from_sorted_map: { m: SortedMap 'k 'v } -> List { key: 'k, value: 'v } = { m } ->
+pub let from_sorted_map : { m: SortedMap 'k 'v } -> List { key: 'k, value: 'v } = { m } ->
   __native_list_from_sorted_map { m = m }
+
 # =============================================================================
 # Numeric/Statistical Operations
 # =============================================================================
 # Calculate average of numeric list
 # Example: average {xs = cons {x = 1, xs = cons {x = 2, xs = cons {x = 3, xs = empty {}}}}} -> Some 2.0
-
 pub let average = { xs } -> __native_list_average { xs = xs }
+
 # Calculate population variance
 # Example: variance {xs = List(1, 2, 3, 4, 5)} -> Some 2.0
-
 pub let variance = { xs } -> __native_list_variance { xs = xs }
+
 # Calculate standard deviation
 # Example: stddev {xs = List(1, 2, 3, 4, 5)} -> Some 1.414...
-
 pub let stddev = { xs } -> __native_list_stddev { xs = xs }
+
 # Calculate median value
 # Example: median {xs = List(1, 2, 3, 4, 5)} -> Some 3.0
-
 pub let median = { xs } -> __native_list_median { xs = xs }
+
 # =============================================================================
 # Comparison Operations
 # =============================================================================
 # Lexicographic comparison of two lists
 # Returns -1 if xs < ys, 0 if xs == ys, 1 if xs > ys
+pub let compare : { xs: List 'a, ys: List 'a } -> Int = { xs, ys } ->
+  __native_list_compare { xs = xs, ys = ys }
 
-pub let compare: { xs: List 'a, ys: List 'a } -> Int = { xs, ys } -> __native_list_compare { xs = xs, ys = ys }
 # Lexicographic comparison with custom comparator
-
-pub let lexicographic_compare: { xs: List 'a, ys: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Int <...> = { xs, ys, cmp } ->
+pub let lexicographic_compare : { xs: List 'a, ys: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Int <...> = { xs, ys, cmp } ->
   __native_list_lexicographic_compare { xs = xs, ys = ys, cmp = cmp }
+
 # Check if list is sorted in ascending order
+pub let is_sorted : { xs: List 'a } -> Bool = { xs } -> __native_list_is_sorted { xs = xs }
 
-pub let is_sorted: { xs: List 'a } -> Bool = { xs } -> __native_list_is_sorted { xs = xs }
 # Check if list is sorted according to custom comparator
-
-pub let is_sorted_by: { xs: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Bool <...> = { xs, cmp } ->
+pub let is_sorted_by : { xs: List 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Bool <...> = { xs, cmp } ->
   __native_list_is_sorted_by { xs = xs, cmp = cmp }
-# Check if list is sorted in descending order
 
-pub let is_sorted_descending: { xs: List 'a } -> Bool = { xs } -> __native_list_is_sorted_descending { xs = xs }
+# Check if list is sorted in descending order
+pub let is_sorted_descending : { xs: List 'a } -> Bool = { xs } ->
+  __native_list_is_sorted_descending { xs = xs }
+
 # === Binary Search Operations ===
 # Binary search for an element in a sorted list
 # Returns Some(index) if found, None otherwise
 # List MUST be sorted
-
-pub let binary_search: { xs: List 'a, target: 'a } -> Option Int = { xs, target } ->
+pub let binary_search : { xs: List 'a, target: 'a } -> Option Int = { xs, target } ->
   __native_list_binary_search { xs = xs, target = target }
+
 # Find the insertion point to maintain sorted order
 # Returns leftmost position where target could be inserted
 # List MUST be sorted
-
-pub let binary_search_insert_point: { xs: List 'a, target: 'a } -> Int = { xs, target } ->
+pub let binary_search_insert_point : { xs: List 'a, target: 'a } -> Int = { xs, target } ->
   __native_list_binary_search_insert_point { xs = xs, target = target }
+
 # Find lower bound: first position where element >= target
 # List MUST be sorted
+pub let lower_bound : { xs: List 'a, target: 'a } -> Int = { xs, target } ->
+  __native_list_lower_bound { xs = xs, target = target }
 
-pub let lower_bound: { xs: List 'a, target: 'a } -> Int = { xs, target } -> __native_list_lower_bound { xs = xs, target = target }
 # Find upper bound: first position where element > target
 # List MUST be sorted
+pub let upper_bound : { xs: List 'a, target: 'a } -> Int = { xs, target } ->
+  __native_list_upper_bound { xs = xs, target = target }
 
-pub let upper_bound: { xs: List 'a, target: 'a } -> Int = { xs, target } -> __native_list_upper_bound { xs = xs, target = target }
 # Find equal range: both lower and upper bounds
 # Returns {lower: Int, upper: Int} representing [lower, upper) interval
 # List MUST be sorted
-
-pub let equal_range: { xs: List 'a, target: 'a } -> { lower: Int, upper: Int } = { xs, target } ->
+pub let equal_range : { xs: List 'a, target: 'a } -> { lower: Int, upper: Int } = { xs, target } ->
   __native_list_equal_range { xs = xs, target = target }
+
 # Binary search with custom comparator
 # Comparator returns Int: negative if a < b, 0 if equal, positive if a > b
 # List MUST be sorted according to comparator
-
-pub let binary_search_by: { xs: List 'a, target: 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Option Int <...> = { xs, target, cmp } ->
+pub let binary_search_by : { xs: List 'a, target: 'a, cmp: { a: 'a, b: 'a } -> Int <...> } -> Option Int <...> = { xs, target, cmp } ->
   __native_list_binary_search_by { xs = xs, target = target, cmp = cmp }
 
 impl List 'a where {
   is_empty = { it } -> is_empty { xs = it },
   head = { it } -> head { xs = it },
   tail = { it } -> tail { xs = it },
-  length = { it } -> length { xs = it },
+  size = { it } -> size { xs = it },
   push = { it, x } -> push { x = x, xs = it },
   append = { it, ys } -> append { xs = it, ys = ys },
   get = { it, index } -> get { xs = it, index = index },
@@ -528,4 +559,9 @@ impl List 'a where {
   sum = { it } -> sum { xs = it },
   to_seq = { it } -> to_seq { xs = it },
   to_set = { it } -> to_set { xs = it },
+}
+
+impl Sized 'a for List 'a where {
+  size = { it } -> size { xs = it },
+  is_empty = { it } -> is_empty { xs = it },
 }

@@ -105,7 +105,7 @@ class BytesModuleTest {
         val source = """
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello" }
-            let len: Int = bytes::length { b = b }
+            let len: Int = bytes::size { b = b }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -382,7 +382,7 @@ class BytesModuleTest {
     fun `test bytes length rejects non-bytes argument`() {
         val source = """
             use std::collections::bytes
-            let len = bytes::length { b = "not bytes" }
+            let len = bytes::size { b = "not bytes" }
         """.trimIndent()
 
         assertFails {
@@ -442,7 +442,7 @@ class BytesModuleTest {
             let hex = bytes::to_hex { b = original }
             let decoded = bytes::from_hex { s = hex }
             match decoded is
-                Some { val } -> bytes::length { b = val }
+                Some { val } -> bytes::size { b = val }
                 None -> 0
         """.trimIndent()
 

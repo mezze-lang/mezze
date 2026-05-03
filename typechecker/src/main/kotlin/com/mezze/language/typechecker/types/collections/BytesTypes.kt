@@ -66,8 +66,8 @@ object BytesTypes {
             MezzeType.BytesType
         )
 
-        // __native_bytes_length: {b: Bytes} -> Int
-        context["__native_bytes_length"] = MezzeType.FunctionType(
+        // __native_bytes_size: {b: Bytes} -> Int
+        context["__native_bytes_size"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("b" to MezzeType.BytesType)),
             MezzeType.IntType
         )

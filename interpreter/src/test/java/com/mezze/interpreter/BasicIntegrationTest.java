@@ -253,7 +253,7 @@ public class BasicIntegrationTest {
     void testSeqLength() {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
-            seq::length { xs = [1, 2, 3] }
+            seq::size { xs = [1, 2, 3] }
             """);
         assertEquals(3L, result);
     }
@@ -262,8 +262,8 @@ public class BasicIntegrationTest {
     void testSeqLengthViaFunction() {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
-            let length = {xs} -> seq::length { xs = xs }
-            length { xs = [1, 2, 3, 4] }
+            let my_size = {xs} -> seq::size { xs = xs }
+            my_size { xs = [1, 2, 3, 4] }
             """);
         assertEquals(4L, result);
     }
@@ -272,7 +272,7 @@ public class BasicIntegrationTest {
     void testStdlibSeqModule() {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
-            seq::length { xs = [1, 2, 3, 4, 5] }
+            seq::size { xs = [1, 2, 3, 4, 5] }
             """);
         assertEquals(5L, result);
     }
@@ -344,7 +344,7 @@ public class BasicIntegrationTest {
         // Test string length using stdlib
         Object result = MezzeTestHelper.run("""
             use std::str
-            str::length { s = "hello" }
+            str::size { s = "hello" }
             """);
         assertEquals(5L, result);
     }
@@ -389,7 +389,7 @@ public class BasicIntegrationTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
             let b = bytes::from_string { s = "Hello" }
-            bytes::length { b = b }
+            bytes::size { b = b }
             """);
         assertEquals(5L, result);
     }
@@ -399,8 +399,8 @@ public class BasicIntegrationTest {
         // Test - calling same function twice
         Object result = MezzeTestHelper.run("""
             use std::collections::bytes
-            let x = bytes::length { b = bytes::from_string { s = "Hello" } }
-            let y = bytes::length { b = bytes::from_string { s = "World" } }
+            let x = bytes::size { b = bytes::from_string { s = "Hello" } }
+            let y = bytes::size { b = bytes::from_string { s = "World" } }
             x + y
             """);
         assertEquals(10L, result);

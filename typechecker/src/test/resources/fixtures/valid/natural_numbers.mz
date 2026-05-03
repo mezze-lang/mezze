@@ -1,28 +1,34 @@
 # Natural number type checking and operations
 # Testing Nat type with explicit 'n' suffix syntax
+let count = 42n  # expected: count : Nat
 
-let count = 42n                    # expected: count : Nat
-let items = 0n                     # expected: items : Nat
-let total = 100n                   # expected: total : Nat
+let items = 0n  # expected: items : Nat
+
+let total = 100n  # expected: total : Nat
 
 # Arithmetic operations with Nat
-let product = count * 2n           # expected: product : Nat
-let quotient = total / 10n         # expected: quotient : Nat
+let product = count * 2n  # expected: product : Nat
+
+let quotient = total / 10n  # expected: quotient : Nat
 
 # Comparisons return Bool
-let hasItems = count > 0n          # expected: hasItems : Bool
-let isEqual = count == 42n         # expected: isEqual : Bool
+let hasItems = count > 0n  # expected: hasItems : Bool
+
+let isEqual = count == 42n  # expected: isEqual : Bool
 
 # Function parameters can constrain types
-let natFunction = { x: Nat } -> x + x          # Force x to be Nat
-let natResult = natFunction { x = 21n }        # 21n is Nat
+let natFunction = { x: Nat } -> x + x  # Force x to be Nat
+
+let natResult = natFunction { x = 21n }  # 21n is Nat
 
 # Default inference should prefer Int
-let defaultInt = 42                # expected: defaultInt : Int
-let intSum = defaultInt + 10       # expected: intSum : Int
+let defaultInt = 42  # expected: defaultInt : Int
+
+let intSum = defaultInt + 10  # expected: intSum : Int
 
 # Mixed operations require explicit types
-let natValue = 50n                 # expected: natValue : Nat
-let natSum = natValue + natValue   # expected: natSum : Nat
+let natValue = 50n  # expected: natValue : Nat
+
+let natSum = natValue + natValue  # expected: natSum : Nat
 
 count

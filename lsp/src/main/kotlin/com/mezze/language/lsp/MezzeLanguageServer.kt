@@ -60,6 +60,18 @@ class MezzeLanguageServer(
             ?: params.rootUri?.removePrefix("file://")
             ?: params.rootPath
 
+        // Mirror the CLI: set `mezze.project.root` so the typechecker's
+        // import-resolver knows which dir to resolve `use foo::bar`
+        // imports from. Without this, the LSP's checkParsedModule path
+        // falls back to "." (the JVM cwd, usually the editor's launch
+        // dir), which means no user modules resolve and prelude impl
+        // lookups (NumAdd, NumMul, etc.) miss — the LSP then surfaces
+        // bogus "Cannot use '*' with Int" errors that don't appear when
+        // the same file is checked via `mez check`. See #233.
+        if (workspaceRoot != null) {
+            System.setProperty("mezze.project.root", workspaceRoot!!)
+        }
+
         // Log initialization. Version goes first so it's easy to spot
         // when verifying which build the editor's running.
         logInfo("Mezze Language Server $serverVersion initializing...")

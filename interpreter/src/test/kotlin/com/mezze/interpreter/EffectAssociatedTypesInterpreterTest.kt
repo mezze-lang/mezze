@@ -105,7 +105,7 @@ class EffectAssociatedTypesInterpreterTest {
 
             let main = {} -> do
                 let xs = perform ListState in State.get {}
-                seq::length { xs = xs }
+                seq::size { xs = xs }
 
             main {}
         """.trimIndent()
@@ -417,7 +417,7 @@ class EffectAssociatedTypesInterpreterTest {
 
             let main = {} -> do
                 let xs = perform IntCollection in Collection.getAll {}
-                seq::length { xs = xs }
+                seq::size { xs = xs }
 
             main {}
         """.trimIndent()

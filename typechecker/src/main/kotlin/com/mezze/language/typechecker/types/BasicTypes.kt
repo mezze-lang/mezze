@@ -483,7 +483,7 @@ object BasicTypes {
             MezzeType.StringType
         )
 
-        context["__native_string_length"] = MezzeType.FunctionType(
+        context["__native_string_size"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
             MezzeType.IntType
         )

@@ -1,12 +1,13 @@
-# Open record types (structural typing)
 use std::int
 
-let processUser: {user: {name: Str, age: Int, ...}} -> Str = {user} -> "$(user.name) is $(int::to_str {n = user.age})" # expected: processUser : { user: { name: Str, age: Int, ... } } -> Str
+let processUser : { user: { name: Str, age: Int, ... } } -> Str = { user } -> "$(user.name) is $(int::to_str { n = user.age })"  # expected: processUser : { user: { name: Str, age: Int, ... } } -> Str
 
-let user1 = {name = "Alice", age = 30, city = "NYC"}        # expected: user1 : { name: Str, age: Int, city: Str }
-let user2 = {name = "Bob", age = 25, email = "bob@test.com"} # expected: user2 : { name: Str, age: Int, email: Str }
+let user1 = { name = "Alice", age = 30, city = "NYC" }  # expected: user1 : { name: Str, age: Int, city: Str }
 
-let result1 = processUser {user = user1}                    # expected: result1 : Str
-let result2 = processUser {user = user2}                    # expected: result2 : Str
+let user2 = { name = "Bob", age = 25, email = "bob@test.com" }  # expected: user2 : { name: Str, age: Int, email: Str }
+
+let result1 = processUser { user = user1 }  # expected: result1 : Str
+
+let result2 = processUser { user = user2 }  # expected: result2 : Str
 
 result1

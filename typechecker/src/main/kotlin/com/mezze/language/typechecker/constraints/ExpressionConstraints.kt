@@ -227,6 +227,7 @@ class ExpressionConstraintGenerator {
         val usedVars = mutableSetOf<String>()
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
         val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
+        val callReturnTypes = mutableMapOf<Loc, MezzeType>()
 
         var interpolationIndex = 0
         for (part in expr.parts) {
@@ -247,6 +248,7 @@ class ExpressionConstraintGenerator {
                     usedVars.addAll(exprResult.usedVariables)
                     referencedBindings.addAll(exprResult.referencedBindings)
                     methodCallResolutions.putAll(exprResult.methodCallResolutions)
+                    callReturnTypes.putAll(exprResult.callReturnTypes)
                     constraints.add(
                         Constraint.Equality(
                             left = exprResult.type,
@@ -270,7 +272,8 @@ class ExpressionConstraintGenerator {
             undefinedVariables = undefinedVars,
             usedVariables = usedVars,
             referencedBindings = referencedBindings,
-            methodCallResolutions = methodCallResolutions
+            methodCallResolutions = methodCallResolutions,
+            callReturnTypes = callReturnTypes
         )
     }
 
@@ -290,6 +293,7 @@ class ExpressionConstraintGenerator {
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         val effects = mutableSetOf<String>()
         val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
+        val callReturnTypes = mutableMapOf<Loc, MezzeType>()
 
         var elementIndex = 0
         for (element in expr.elements) {
@@ -302,6 +306,7 @@ class ExpressionConstraintGenerator {
                     associatedTypeConstraints.addAll(result.associatedTypeConstraints)
                     effects.addAll(result.effects)
                     methodCallResolutions.putAll(result.methodCallResolutions)
+                    callReturnTypes.putAll(result.callReturnTypes)
                     // Regular element must match element type
                     constraints.add(
                         Constraint.Equality(
@@ -322,6 +327,7 @@ class ExpressionConstraintGenerator {
                     associatedTypeConstraints.addAll(result.associatedTypeConstraints)
                     effects.addAll(result.effects)
                     methodCallResolutions.putAll(result.methodCallResolutions)
+                    callReturnTypes.putAll(result.callReturnTypes)
                     // Spread element must be a seq with matching element type
                     constraints.add(
                         Constraint.Equality(
@@ -344,7 +350,8 @@ class ExpressionConstraintGenerator {
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = undefinedVars,
-            methodCallResolutions = methodCallResolutions
+            methodCallResolutions = methodCallResolutions,
+            callReturnTypes = callReturnTypes
         )
     }
 
@@ -537,6 +544,7 @@ class ExpressionConstraintGenerator {
         val effects = mutableSetOf<String>()  // Collect effects from field expressions
         val effectInstances = mutableSetOf<MezzeType.EffectInstance>()  // Collect effect instances
         val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
+        val callReturnTypes = mutableMapOf<Loc, MezzeType>()
 
         // Pre-pass: collect ALL explicit field names upfront
         // This is needed because spread validation needs to know all field names,
@@ -583,6 +591,7 @@ class ExpressionConstraintGenerator {
                     effects.addAll(fieldResult.effects)  // Propagate effects from field expressions
                     effectInstances.addAll(fieldResult.effectInstances)  // Propagate effect instances
                     methodCallResolutions.putAll(fieldResult.methodCallResolutions)
+                    callReturnTypes.putAll(fieldResult.callReturnTypes)
                 }
                 is ParsedRecordEntry.Spread -> {
                     // Spread: {...baseRecord}
@@ -596,6 +605,7 @@ class ExpressionConstraintGenerator {
                     effects.addAll(spreadResult.effects)  // Propagate effects from spread expressions
                     effectInstances.addAll(spreadResult.effectInstances)  // Propagate effect instances
                     methodCallResolutions.putAll(spreadResult.methodCallResolutions)
+                    callReturnTypes.putAll(spreadResult.callReturnTypes)
 
                     // Extract fields from the spread type and merge into our record
                     // The spread expression must be a record type (or unify with one via constraints)
@@ -739,7 +749,8 @@ class ExpressionConstraintGenerator {
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
             usedVariables = usedVars,
-            methodCallResolutions = methodCallResolutions
+            methodCallResolutions = methodCallResolutions,
+            callReturnTypes = callReturnTypes
         )
     }
 
@@ -966,7 +977,8 @@ class ExpressionConstraintGenerator {
             type = fieldType,
             constraints = constraints,
             undefinedVariables = receiverResult.undefinedVariables,
-            methodCallResolutions = receiverResult.methodCallResolutions
+            methodCallResolutions = receiverResult.methodCallResolutions,
+            callReturnTypes = receiverResult.callReturnTypes
         )
     }
 
@@ -1038,9 +1050,42 @@ class ExpressionConstraintGenerator {
             return null // No matching ability or inherent method — fall through to field access
         }
 
-        // If ONLY inherent methods match (no ability methods), handle them directly
+        // If ONLY inherent methods match (no ability methods), handle them directly.
         if (matchingAbilities.isEmpty() && builtInMatches.isEmpty() && inherentMethods.isNotEmpty()) {
+            // Closed-record method-call inference (issue #216): when there are
+            // multiple candidate inherent methods AND the receiver's type is
+            // still a free TypeVar, DON'T speculatively pick by load order
+            // (the previous behaviour silently mis-dispatched, e.g. picking
+            // Str.length over Seq.length for `{ xs } -> xs.length {}`).
+            // Returning null here falls through to plain field-access
+            // constraint generation, which infers `xs.length` as access into
+            // a closed record `{ length: arg -> 'r }`.
+            //
+            // When there's exactly ONE candidate, there's no ambiguity even
+            // with an unresolved receiver — keep dispatching.
+            if (inherentMethods.size > 1 && isReceiverUnresolved(memberAccess.receiver, context)) {
+                return null
+            }
             return generateInherentMethodCall(expr, memberAccess, inherentMethods, context)
+        }
+
+        // Receiver-driven preference (issue #229): the operator-desugar
+        // built-in abilities (NumAdd, NumMul, …) share method names with
+        // collection inherent impls (Seq.add). When the receiver's concrete
+        // type has an inherent method but DOES NOT have an ability impl
+        // covering that name (the user-defined `matchingAbilities` would
+        // signal that), prefer the inherent. Without this, `nums.add {x=4}`
+        // (nums : [Int]) routes to NumAdd.add expecting `{r}` and fires a
+        // cascading "[Int] does not implement NumAdd" error.
+        if (inherentMethods.isNotEmpty() && matchingAbilities.isEmpty() && builtInMatches.isNotEmpty()) {
+            val concreteReceiver = getReceiverConcreteType(memberAccess.receiver, context)
+            if (concreteReceiver != null) {
+                val receiverTypeName = getReceiverTypeName(concreteReceiver)
+                val matchingInherent = inherentMethods.filter { it.targetTypeName == receiverTypeName }
+                if (matchingInherent.isNotEmpty()) {
+                    return generateInherentMethodCall(expr, memberAccess, matchingInherent, context)
+                }
+            }
         }
 
         // Generate constraints for the receiver expression
@@ -1306,8 +1351,56 @@ class ExpressionConstraintGenerator {
             associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
             usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
-            methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf((expr.loc to methodCallInfo.methodName) to methodCallInfo)
+            methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf((expr.loc to methodCallInfo.methodName) to methodCallInfo),
+            callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to resultType)
         )
+    }
+
+    /**
+     * Peek at a receiver expression's bound type WITHOUT generating
+     * constraints. Returns true when the receiver is a plain identifier
+     * bound to a free type variable in scope — i.e. the call site can't
+     * yet pick an inherent impl by receiver shape, and a speculative
+     * choice by load order would silently mis-dispatch (issue #216).
+     *
+     * Conservative by design: returns false for anything we can't read
+     * statically, so concrete receivers (literals, annotated params,
+     * already-typed identifiers) keep their existing inherent-dispatch
+     * behaviour.
+     */
+    private fun isReceiverUnresolved(receiver: ParsedExpr, context: ConstraintContext): Boolean {
+        return getReceiverConcreteType(receiver, context) == null
+    }
+
+    /**
+     * If the receiver has a known concrete type — either a literal (whose type
+     * is determined syntactically) or an identifier bound to a non-VarType —
+     * return it. Used to bias method-call dispatch toward inherent impls when
+     * the receiver is concrete. Returns null when the receiver type is still
+     * a free TypeVar so callers fall through to closed-record inference.
+     */
+    private fun getReceiverConcreteType(receiver: ParsedExpr, context: ConstraintContext): MezzeType? {
+        // Literals have a known concrete type directly from syntax.
+        when (receiver) {
+            is com.mezze.language.parsedast.ParsedIntLit -> return MezzeType.IntType
+            is com.mezze.language.parsedast.ParsedNatLit -> return MezzeType.NatType
+            is com.mezze.language.parsedast.ParsedFloatLit -> return MezzeType.FloatType
+            is com.mezze.language.parsedast.ParsedFracLit -> return MezzeType.FracType
+            is com.mezze.language.parsedast.ParsedStringLit -> return MezzeType.StringType
+            is com.mezze.language.parsedast.ParsedCharLit -> return MezzeType.CharType
+            is com.mezze.language.parsedast.ParsedSeqLit ->
+                return MezzeType.SeqType(MezzeType.VarType(TypeVar.fresh()))
+            else -> { /* fall through */ }
+        }
+        if (receiver !is ParsedIdentifier) return null
+        if (receiver.qualifier != null) return null
+        val lookup = context.typingContext.lookup(receiver.localName)
+        if (lookup !is TypingContext.LookupResult.Found) return null
+        val type = when (val binding = lookup.binding) {
+            is TypingContext.Binding.Monomorphic -> binding.type
+            is TypingContext.Binding.Polymorphic -> binding.scheme.instantiate().type
+        }
+        return if (type is MezzeType.VarType) null else type
     }
 
     /**
@@ -1361,20 +1454,52 @@ class ExpressionConstraintGenerator {
             inherentMethods.firstOrNull()
         }
 
-        if (methodInfo != null) {
-            // Re-instantiate the method type with fresh type variables.
-            // The type stored in InherentMethodInfo may have stale vars from context-building time.
-            val freshMethodType = instantiateTypeWithFreshVars(methodInfo.methodType)
+        // Imported (cross-module) impls: fresh-instantiate the method type so
+        // per-call unification of generic impls (e.g. `impl Seq 'a where {
+        // first }`) doesn't leak between call sites — `nums.first {}` on
+        // `[Int]` should pin `'a := Int` for that site only. Concrete bits
+        // (after issue #213 pinned non-generic returns to e.g. `Int`) survive.
+        //
+        // Same-module impls: use methodType directly so the registered
+        // method type's TypeVars stay shared with the constraint
+        // ConstraintGenerator added between method-return and body type
+        // (`Equality(methodType.returnType, body.type)`). Severing that
+        // link would leave call sites unable to recover the body's
+        // inferred return type.
+        val freshMethodType: MezzeType? = if (methodInfo != null) {
+            if (methodInfo.isImported) {
+                instantiateTypeWithFreshVars(methodInfo.methodType)
+            } else {
+                methodInfo.methodType
+            }
+        } else null
 
-            // No receiver type constraint needed — the inherent method was already matched
-            // by type name during lookup. The receiver's actual type flows through naturally
-            // from the receiver expression's constraint generation.
-
+        if (methodInfo != null && freshMethodType != null) {
             if (freshMethodType is MezzeType.FunctionType) {
                 // Strip receiver param from param type — method syntax passes receiver separately
                 val fullParams = (freshMethodType.paramType as? MezzeType.RecordType)?.fields ?: emptyMap()
                 val strippedParams = fullParams.filterKeys { it != Keywords.IT }
                 val strippedParamType = MezzeType.RecordType(fields = strippedParams, rowVar = null)
+
+                // For imported (cross-module) impls only: unify the receiver's
+                // actual type with the impl's `it` slot. For generic imports
+                // (e.g. `impl Seq 'a where { first }`) this is what lets `'a`
+                // get bound to the concrete element type at the call site —
+                // without it, `nums.first {}` on `[Int]` reports `Option 'a`
+                // instead of `Option Int`. Same-module impls don't need this:
+                // ConstraintGenerator already binds the impl's it slot via the
+                // body-context constraint pass.
+                if (methodInfo.isImported) {
+                    val itType = fullParams[Keywords.IT]
+                    if (itType != null) {
+                        constraints.add(Constraint.Equality(
+                            left = receiverType,
+                            right = itType,
+                            context = "Inherent method receiver for $methodName",
+                            loc = expr.loc
+                        ))
+                    }
+                }
 
                 // Constrain arguments (without it)
                 constraints.add(Constraint.Equality(
@@ -1405,7 +1530,8 @@ class ExpressionConstraintGenerator {
                 implContentHash = methodInfo.implContentHash,
                 implStartLine = methodInfo.implStartLine,
                 implStartCol = methodInfo.implStartCol,
-                implSourceFile = methodInfo.implSourceFile
+                implSourceFile = methodInfo.implSourceFile,
+                methodFunctionType = freshMethodType
             )
         } else null
 
@@ -1418,7 +1544,8 @@ class ExpressionConstraintGenerator {
             associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
             usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
-            methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf((expr.loc to inherentMethodCallInfo.methodName) to inherentMethodCallInfo) else emptyMap())
+            methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf((expr.loc to inherentMethodCallInfo.methodName) to inherentMethodCallInfo) else emptyMap()),
+            callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to resultType)
         )
     }
 
@@ -2409,7 +2536,8 @@ class ExpressionConstraintGenerator {
                 usedVariables = payloadResult.usedVariables,
                 abilityConstraints = payloadResult.abilityConstraints,
                 referencedBindings = payloadResult.referencedBindings,
-                methodCallResolutions = payloadResult.methodCallResolutions
+                methodCallResolutions = payloadResult.methodCallResolutions,
+                callReturnTypes = payloadResult.callReturnTypes
             )
         }
     }
@@ -2633,7 +2761,8 @@ class ExpressionConstraintGenerator {
             unusedVariables = bodyResult.unusedVariables,
             patternWarnings = bodyResult.patternWarnings,
             referencedBindings = bodyResult.referencedBindings,
-            methodCallResolutions = bodyResult.methodCallResolutions
+            methodCallResolutions = bodyResult.methodCallResolutions,
+            callReturnTypes = bodyResult.callReturnTypes
         )
     }
 
@@ -2970,7 +3099,8 @@ class ExpressionConstraintGenerator {
                         undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
                         usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
                         referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings,
-                        methodCallResolutions = functionResult.methodCallResolutions + argumentResult.methodCallResolutions
+                        methodCallResolutions = functionResult.methodCallResolutions + argumentResult.methodCallResolutions,
+                        callReturnTypes = functionResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to partialResult)
                     )
                 }
             }
@@ -3072,7 +3202,8 @@ class ExpressionConstraintGenerator {
                     usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
                     tailCalls = tailCalls,
                     referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings,
-                    methodCallResolutions = functionResult.methodCallResolutions + argumentResult.methodCallResolutions
+                    methodCallResolutions = functionResult.methodCallResolutions + argumentResult.methodCallResolutions,
+                    callReturnTypes = functionResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to resultType)
                 )
             }
         }
@@ -3161,7 +3292,8 @@ class ExpressionConstraintGenerator {
             usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
             tailCalls = tailCalls,
             referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings,
-            methodCallResolutions = functionResult.methodCallResolutions + argumentResult.methodCallResolutions
+            methodCallResolutions = functionResult.methodCallResolutions + argumentResult.methodCallResolutions,
+            callReturnTypes = functionResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to returnType)
         )
     }
 
@@ -3208,6 +3340,8 @@ class ExpressionConstraintGenerator {
         // Track method call resolutions from sub-expressions (scrutinee + case bodies)
         val methodCallResolutions = mutableMapOf<Pair<com.mezze.language.parsedast.Loc, String>, ConstraintResult.MethodCallInfo>()
         methodCallResolutions.putAll(scrutineeResult.methodCallResolutions)
+        val callReturnTypes = mutableMapOf<com.mezze.language.parsedast.Loc, MezzeType>()
+        callReturnTypes.putAll(scrutineeResult.callReturnTypes)
         // Track referenced bindings for dependency graph
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
         referencedBindings.addAll(scrutineeResult.referencedBindings)
@@ -3368,6 +3502,7 @@ class ExpressionConstraintGenerator {
             tailCalls.addAll(caseBodyResult.tailCalls)
             referencedBindings.addAll(caseBodyResult.referencedBindings)
             methodCallResolutions.putAll(caseBodyResult.methodCallResolutions)
+            callReturnTypes.putAll(caseBodyResult.callReturnTypes)
 
             // Check for unused pattern bindings
             // Variables starting with _ are intentionally unused (convention)
@@ -3423,7 +3558,8 @@ class ExpressionConstraintGenerator {
             unusedVariables = unusedVars,
             patternWarnings = patternWarnings,
             referencedBindings = referencedBindings,
-            methodCallResolutions = methodCallResolutions
+            methodCallResolutions = methodCallResolutions,
+            callReturnTypes = callReturnTypes
         )
     }
 
@@ -3458,6 +3594,7 @@ class ExpressionConstraintGenerator {
         val usedVars = mutableSetOf<String>()
         // Track method call resolutions from sub-expressions
         val methodCallResolutions = mutableMapOf<Pair<com.mezze.language.parsedast.Loc, String>, ConstraintResult.MethodCallInfo>()
+        val callReturnTypes = mutableMapOf<com.mezze.language.parsedast.Loc, MezzeType>()
 
         // Create pattern generator for handling destructuring in let statements
         val patternGenerator = PatternConstraintGenerator()
@@ -3490,6 +3627,7 @@ class ExpressionConstraintGenerator {
                     referencedBindings.addAll(exprResult.referencedBindings)
                     usedVars.addAll(exprResult.usedVariables)
                     methodCallResolutions.putAll(exprResult.methodCallResolutions)
+                    callReturnTypes.putAll(exprResult.callReturnTypes)
 
                     // CRITICAL: If there's a type annotation, add equality constraint to unify
                     // the expression type with the annotated type. This ensures type variables
@@ -3616,6 +3754,7 @@ class ExpressionConstraintGenerator {
                     referencedBindings.addAll(exprResult.referencedBindings)
                     usedVars.addAll(exprResult.usedVariables)
                     methodCallResolutions.putAll(exprResult.methodCallResolutions)
+                    callReturnTypes.putAll(exprResult.callReturnTypes)
                 }
             }
         }
@@ -3641,6 +3780,7 @@ class ExpressionConstraintGenerator {
         referencedBindings.addAll(resultResult.referencedBindings)
         usedVars.addAll(resultResult.usedVariables)
         methodCallResolutions.putAll(resultResult.methodCallResolutions)
+        callReturnTypes.putAll(resultResult.callReturnTypes)
 
         // CRITICAL: If do block has effects or performed effects, wrap the result in SuspendedType
         // This allows perform expressions to properly detect and handle effects
@@ -3674,7 +3814,8 @@ class ExpressionConstraintGenerator {
             tailCalls = tailCalls,
             usedVariables = usedVars,
             referencedBindings = referencedBindings,
-            methodCallResolutions = methodCallResolutions
+            methodCallResolutions = methodCallResolutions,
+            callReturnTypes = callReturnTypes
         )
     }
 
@@ -4022,7 +4163,8 @@ class ExpressionConstraintGenerator {
             undefinedVariables = exprResult.undefinedVariables,
             usedVariables = exprResult.usedVariables,
             referencedBindings = exprResult.referencedBindings,
-            methodCallResolutions = exprResult.methodCallResolutions
+            methodCallResolutions = exprResult.methodCallResolutions,
+            callReturnTypes = exprResult.callReturnTypes
         )
     }
 
@@ -4316,7 +4458,8 @@ class ExpressionConstraintGenerator {
             effects = setOf(effectName),
             effectInstances = effectInstances + argResult.effectInstances,  // Include effect instances!
             undefinedVariables = argResult.undefinedVariables,
-            methodCallResolutions = argResult.methodCallResolutions
+            methodCallResolutions = argResult.methodCallResolutions,
+            callReturnTypes = argResult.callReturnTypes
         )
     }
 

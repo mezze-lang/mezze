@@ -599,7 +599,7 @@ class StructuredConcurrencyTest {
 
             let final = deref {atom = results}
             # All should complete, order may vary but length should be 3
-            str::length {s = final}
+            str::size {s = final}
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -633,7 +633,7 @@ class StructuredConcurrencyTest {
             let _ = await {p = t3}
 
             let final = deref {atom = data}
-            list::length {xs = final}
+            list::size {xs = final}
         """
         val result = eval(code)
         assertEquals(3L, result)

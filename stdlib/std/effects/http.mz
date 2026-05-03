@@ -1,40 +1,3 @@
-# std/effects/http.mz - HTTP client effect
-#
-# Provides HTTP client functionality as an effect with a single core operation.
-# All convenience methods (get, post, etc.) are helper functions that build
-# Request records and call Http.request.
-#
-# Implementations:
-# - HttpClient: Scoped client using Vert.x WebClient. Creates connection pool
-#               once per perform block, reuses for all requests. Best for
-#               multiple requests.
-# - HttpClientWith { config }: Same as HttpClient but with custom HttpConfig.
-# - SimpleHttpClient: Creates and closes connection per request. No scope
-#                     management. Good for one-off requests.
-# - SimpleHttpClientWith { config }: Same as SimpleHttpClient with custom config.
-# - MockHttpClient { rules }: Testing implementation with configurable mock responses.
-#
-# Example (HttpClient - recommended for multiple requests):
-#   use std::effects::http::{Http, HttpClient, get, post_json}
-#
-#   perform HttpClient in do
-#       let resp = get { url = "https://api.example.com/users" }
-#       match resp is
-#           Ok { val } -> val.body
-#           Err { error } -> handle_error { error }
-#
-# Example (HttpClientWith - custom config):
-#   use std::effects::http::{Http, HttpClientWith, default_http_config, get}
-#
-#   let my_config = { ...default_http_config, timeout_ms = 5000 }
-#   perform HttpClientWith { config = my_config } in do
-#       get { url = "https://api.example.com/fast" }
-#
-# Example (SimpleHttpClient - for one-off requests):
-#   use std::effects::http::{Http, SimpleHttpClient, get}
-#
-#   perform SimpleHttpClient in do
-#       get { url = "https://api.example.com/status" }
 use std::codec::json::{ Json, JsonFmt, json_fmt, to_str, parse_str }
 use std::codec::core::{ EncodeRepr, Decode, DecodeError, EncodeError, CodecConfig, FieldTransform, default_config, Format, DecodeFormat }
 use std::collections::map
@@ -42,26 +5,26 @@ use std::collections::seq
 use std::collections::bytes
 use std::str
 use std::int
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# TYPES
-# TYPES
-# TYPES
-# TYPES
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# HTTP methods
-# HTTP methods
-# HTTP methods
-# HTTP methods
 
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# TYPES
+# TYPES
+# TYPES
+# TYPES
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# =============================================================================
+# HTTP methods
+# HTTP methods
+# HTTP methods
+# HTTP methods
 pub type Method = | Get, Post, Put, Delete, Patch, Head, Options |
-# HTTP configuration (comprehensive settings for production use)
 
+# HTTP configuration (comprehensive settings for production use)
 pub type HttpConfig = {
   timeout_ms: Int,
   connect_timeout_ms: Int,
@@ -71,9 +34,9 @@ pub type HttpConfig = {
   auto_decompress: Bool,
   keep_alive: Bool,
 }
-# Timeouts (in milliseconds)
 
-pub let default_http_config: HttpConfig = {
+# Timeouts (in milliseconds)
+pub let default_http_config : HttpConfig = {
   timeout_ms = 30000,
   connect_timeout_ms = 10000,
   follow_redirects = True,
@@ -123,11 +86,8 @@ impl Http for HttpClient where {
   finalize_scope = {} -> do
     __native_http_client_close { client = scope.client }
     {},
-  request = { req, config } -> __native_http_request {
-    req = req,
-    config = config,
-    client = scope.client,
-  },
+  request = { req, config } ->
+    __native_http_request { req = req, config = config, client = scope.client },
 }
 
 impl Http for HttpClientWith { config: HttpConfig } where {
@@ -137,11 +97,8 @@ impl Http for HttpClientWith { config: HttpConfig } where {
   finalize_scope = {} -> do
     __native_http_client_close { client = scope.client }
     {},
-  request = { req: 'req, config: default_config } -> __native_http_request {
-    req = req,
-    config = config,
-    client = scope.client,
-  },
+  request = { req: 'req, config: default_config } ->
+    __native_http_request { req = req, config = config, client = scope.client },
 }
 
 impl Http for SimpleHttpClient where {
@@ -164,7 +121,7 @@ impl Http for MockHttpClient { rules: [MockRule] } where {
   request = { req, config } -> __native_http_mock_request { req = req, rules = rules }
 }
 
-pub let make_request: { method: Method, url: Str } -> Request = { method, url } ->
+pub let make_request : { method: Method, url: Str } -> Request = { method, url } ->
   {
     method = method,
     url = url,
@@ -173,7 +130,7 @@ pub let make_request: { method: Method, url: Str } -> Request = { method, url } 
     timeout_ms = None,
   }
 
-pub let make_request_with_body: { method: Method, url: Str, body: Bytes } -> Request = { method, url, body } ->
+pub let make_request_with_body : { method: Method, url: Str, body: Bytes } -> Request = { method, url, body } ->
   {
     method = method,
     url = url,
@@ -182,7 +139,7 @@ pub let make_request_with_body: { method: Method, url: Str, body: Bytes } -> Req
     timeout_ms = None,
   }
 
-pub let make_request_with_headers: { method: Method, url: Str, headers: Map Str Str } -> Request = { method, url, headers } ->
+pub let make_request_with_headers : { method: Method, url: Str, headers: Map Str Str } -> Request = { method, url, headers } ->
   {
     method = method,
     url = url,
@@ -191,7 +148,7 @@ pub let make_request_with_headers: { method: Method, url: Str, headers: Map Str 
     timeout_ms = None,
   }
 
-pub let make_full_request: { method: Method, url: Str, headers: Map Str Str, body: Option Bytes, timeout_ms: Option Int } -> Request = { method, url, headers, body, timeout_ms } ->
+pub let make_full_request : { method: Method, url: Str, headers: Map Str Str, body: Option Bytes, timeout_ms: Option Int } -> Request = { method, url, headers, body, timeout_ms } ->
   {
     method = method,
     url = url,
@@ -200,7 +157,7 @@ pub let make_full_request: { method: Method, url: Str, headers: Map Str Str, bod
     timeout_ms = timeout_ms,
   }
 
-pub let with_header: { req: Request, key: Str, value: Str } -> Request = { req, key, value } ->
+pub let with_header : { req: Request, key: Str, value: Str } -> Request = { req, key, value } ->
   {
     method = req.method,
     url = req.url,
@@ -209,7 +166,7 @@ pub let with_header: { req: Request, key: Str, value: Str } -> Request = { req, 
     timeout_ms = req.timeout_ms,
   }
 
-pub let with_headers: { req: Request, headers: Map Str Str } -> Request = { req, headers } ->
+pub let with_headers : { req: Request, headers: Map Str Str } -> Request = { req, headers } ->
   {
     method = req.method,
     url = req.url,
@@ -218,7 +175,7 @@ pub let with_headers: { req: Request, headers: Map Str Str } -> Request = { req,
     timeout_ms = req.timeout_ms,
   }
 
-pub let with_body: { req: Request, body: Bytes } -> Request = { req, body } ->
+pub let with_body : { req: Request, body: Bytes } -> Request = { req, body } ->
   {
     method = req.method,
     url = req.url,
@@ -227,7 +184,7 @@ pub let with_body: { req: Request, body: Bytes } -> Request = { req, body } ->
     timeout_ms = req.timeout_ms,
   }
 
-pub let with_timeout: { req: Request, ms: Int } -> Request = { req, ms } ->
+pub let with_timeout : { req: Request, ms: Int } -> Request = { req, ms } ->
   {
     method = req.method,
     url = req.url,
@@ -236,85 +193,133 @@ pub let with_timeout: { req: Request, ms: Int } -> Request = { req, ms } ->
     timeout_ms = Some { val = ms },
   }
 
-pub let with_content_type: { req: Request, content_type: Str } -> Request = { req, content_type } ->
+pub let with_content_type : { req: Request, content_type: Str } -> Request = { req, content_type } ->
   with_header { req = req, key = "Content-Type", value = content_type }
 
-pub let with_accept: { req: Request, accept: Str } -> Request = { req, accept } ->
+pub let with_accept : { req: Request, accept: Str } -> Request = { req, accept } ->
   with_header { req = req, key = "Accept", value = accept }
 
-pub let with_auth: { req: Request, auth: Str } -> Request = { req, auth } -> with_header { req = req, key = "Authorization", value = auth }
+pub let with_auth : { req: Request, auth: Str } -> Request = { req, auth } ->
+  with_header { req = req, key = "Authorization", value = auth }
 
-pub let get: { url: Str } -> Result Response HttpError <Http> = { url } -> Http.request { req = make_request { method = Get, url = url }, config = default_http_config }
+pub let get : { url: Str } -> Result Response HttpError <Http> = { url } ->
+  Http.request {
+    req = make_request { method = Get, url = url },
+    config = default_http_config,
+  }
 
-pub let post: { url: Str, body: Bytes } -> Result Response HttpError <Http> = { url, body } ->
-  Http.request { req = make_request_with_body { method = Post, url = url, body = body }, config = default_http_config }
+pub let post : { url: Str, body: Bytes } -> Result Response HttpError <Http> = { url, body } ->
+  Http.request {
+    req = make_request_with_body { method = Post, url = url, body = body },
+    config = default_http_config,
+  }
 
-pub let put: { url: Str, body: Bytes } -> Result Response HttpError <Http> = { url, body } ->
-  Http.request { req = make_request_with_body { method = Put, url = url, body = body }, config = default_http_config }
+pub let put : { url: Str, body: Bytes } -> Result Response HttpError <Http> = { url, body } ->
+  Http.request {
+    req = make_request_with_body { method = Put, url = url, body = body },
+    config = default_http_config,
+  }
 
-pub let delete: { url: Str } -> Result Response HttpError <Http> = { url } -> Http.request { req = make_request { method = Delete, url = url }, config = default_http_config }
+pub let delete : { url: Str } -> Result Response HttpError <Http> = { url } ->
+  Http.request {
+    req = make_request { method = Delete, url = url },
+    config = default_http_config,
+  }
 
-pub let patch: { url: Str, body: Bytes } -> Result Response HttpError <Http> = { url, body } ->
-  Http.request { req = make_request_with_body { method = Patch, url = url, body = body }, config = default_http_config }
+pub let patch : { url: Str, body: Bytes } -> Result Response HttpError <Http> = { url, body } ->
+  Http.request {
+    req = make_request_with_body { method = Patch, url = url, body = body },
+    config = default_http_config,
+  }
 
-pub let head: { url: Str } -> Result Response HttpError <Http> = { url } -> Http.request { req = make_request { method = Head, url = url }, config = default_http_config }
+pub let head : { url: Str } -> Result Response HttpError <Http> = { url } ->
+  Http.request {
+    req = make_request { method = Head, url = url },
+    config = default_http_config,
+  }
 
-pub let options: { url: Str } -> Result Response HttpError <Http> = { url } -> Http.request { req = make_request { method = Options, url = url }, config = default_http_config }
+pub let options : { url: Str } -> Result Response HttpError <Http> = { url } ->
+  Http.request {
+    req = make_request { method = Options, url = url },
+    config = default_http_config,
+  }
 
-pub let get_with: { url: Str, config: HttpConfig } -> Result Response HttpError <Http> = { url, config } ->
-  Http.request { req = make_request { method = Get, url = url }, config = config }
+pub let get_with : { url: Str, config: HttpConfig } -> Result Response HttpError <Http> = { url, config } ->
+  Http.request {
+    req = make_request { method = Get, url = url },
+    config = config,
+  }
 
-pub let post_with: { url: Str, body: Bytes, config: HttpConfig } -> Result Response HttpError <Http> = { url, body, config } ->
-  Http.request { req = make_request_with_body { method = Post, url = url, body = body }, config = config }
+pub let post_with : { url: Str, body: Bytes, config: HttpConfig } -> Result Response HttpError <Http> = { url, body, config } ->
+  Http.request {
+    req = make_request_with_body { method = Post, url = url, body = body },
+    config = config,
+  }
 
-pub let put_with: { url: Str, body: Bytes, config: HttpConfig } -> Result Response HttpError <Http> = { url, body, config } ->
-  Http.request { req = make_request_with_body { method = Put, url = url, body = body }, config = config }
+pub let put_with : { url: Str, body: Bytes, config: HttpConfig } -> Result Response HttpError <Http> = { url, body, config } ->
+  Http.request {
+    req = make_request_with_body { method = Put, url = url, body = body },
+    config = config,
+  }
 
-pub let delete_with: { url: Str, config: HttpConfig } -> Result Response HttpError <Http> = { url, config } ->
-  Http.request { req = make_request { method = Delete, url = url }, config = config }
+pub let delete_with : { url: Str, config: HttpConfig } -> Result Response HttpError <Http> = { url, config } ->
+  Http.request {
+    req = make_request { method = Delete, url = url },
+    config = config,
+  }
 
-pub let patch_with: { url: Str, body: Bytes, config: HttpConfig } -> Result Response HttpError <Http> = { url, body, config } ->
-  Http.request { req = make_request_with_body { method = Patch, url = url, body = body }, config = config }
+pub let patch_with : { url: Str, body: Bytes, config: HttpConfig } -> Result Response HttpError <Http> = { url, body, config } ->
+  Http.request {
+    req = make_request_with_body { method = Patch, url = url, body = body },
+    config = config,
+  }
 
-pub let head_with: { url: Str, config: HttpConfig } -> Result Response HttpError <Http> = { url, config } ->
-  Http.request { req = make_request { method = Head, url = url }, config = config }
+pub let head_with : { url: Str, config: HttpConfig } -> Result Response HttpError <Http> = { url, config } ->
+  Http.request {
+    req = make_request { method = Head, url = url },
+    config = config,
+  }
 
-pub let options_with: { url: Str, config: HttpConfig } -> Result Response HttpError <Http> = { url, config } ->
-  Http.request { req = make_request { method = Options, url = url }, config = config }
+pub let options_with : { url: Str, config: HttpConfig } -> Result Response HttpError <Http> = { url, config } ->
+  Http.request {
+    req = make_request { method = Options, url = url },
+    config = config,
+  }
 
-pub let get_headers: { url: Str, headers: Map Str Str } -> Result Response HttpError <Http> = { url, headers } ->
+pub let get_headers : { url: Str, headers: Map Str Str } -> Result Response HttpError <Http> = { url, headers } ->
   do
     let req = make_request { method = Get, url = url }
     let req = with_headers { req = req, headers = headers }
     Http.request { req = req, config = default_http_config }
 
-pub let post_headers: { url: Str, body: Bytes, headers: Map Str Str } -> Result Response HttpError <Http> = { url, body, headers } ->
+pub let post_headers : { url: Str, body: Bytes, headers: Map Str Str } -> Result Response HttpError <Http> = { url, body, headers } ->
   do
     let req = make_request_with_body { method = Post, url = url, body = body }
     let req = with_headers { req = req, headers = headers }
     Http.request { req = req, config = default_http_config }
 
-pub let put_headers: { url: Str, body: Bytes, headers: Map Str Str } -> Result Response HttpError <Http> = { url, body, headers } ->
+pub let put_headers : { url: Str, body: Bytes, headers: Map Str Str } -> Result Response HttpError <Http> = { url, body, headers } ->
   do
     let req = make_request_with_body { method = Put, url = url, body = body }
     let req = with_headers { req = req, headers = headers }
     Http.request { req = req, config = default_http_config }
 
-pub let delete_headers: { url: Str, headers: Map Str Str } -> Result Response HttpError <Http> = { url, headers } ->
+pub let delete_headers : { url: Str, headers: Map Str Str } -> Result Response HttpError <Http> = { url, headers } ->
   do
     let req = make_request { method = Delete, url = url }
     let req = with_headers { req = req, headers = headers }
     Http.request { req = req, config = default_http_config }
 
-pub let patch_headers: { url: Str, body: Bytes, headers: Map Str Str } -> Result Response HttpError <Http> = { url, body, headers } ->
+pub let patch_headers : { url: Str, body: Bytes, headers: Map Str Str } -> Result Response HttpError <Http> = { url, body, headers } ->
   do
     let req = make_request_with_body { method = Patch, url = url, body = body }
     let req = with_headers { req = req, headers = headers }
     Http.request { req = req, config = default_http_config }
 
-pub let body_string: { resp: Response } -> Result Str Str = { resp } -> bytes::to_str { b = resp.body }
+pub let body_string : { resp: Response } -> Result Str Str = { resp } ->
+  bytes::to_str { b = resp.body }
 
-pub let body_json: { resp: Response } -> Result Json DecodeError = { resp } -> do
+pub let body_json : { resp: Response } -> Result Json DecodeError = { resp } -> do
   match body_string { resp = resp } is
     Ok { val } -> parse_str { s = val }
     Err { error } -> Err {
@@ -327,241 +332,234 @@ pub let body_json: { resp: Response } -> Result Json DecodeError = { resp } -> d
     }
 
 
-pub let is_success: { resp: Response } -> Bool = { resp } -> resp.status >= 200 && resp.status < 300
+pub let is_success : { resp: Response } -> Bool = { resp } ->
+  resp.status >= 200 && resp.status < 300
 
-pub let is_redirect: { resp: Response } -> Bool = { resp } -> resp.status >= 300 && resp.status < 400
+pub let is_redirect : { resp: Response } -> Bool = { resp } ->
+  resp.status >= 300 && resp.status < 400
 
-pub let is_client_error: { resp: Response } -> Bool = { resp } -> resp.status >= 400 && resp.status < 500
+pub let is_client_error : { resp: Response } -> Bool = { resp } ->
+  resp.status >= 400 && resp.status < 500
 
-pub let is_server_error: { resp: Response } -> Bool = { resp } -> resp.status >= 500 && resp.status < 600
+pub let is_server_error : { resp: Response } -> Bool = { resp } ->
+  resp.status >= 500 && resp.status < 600
 
-pub let get_header: { resp: Response, name: Str } -> Option Str = { resp, name } ->
+pub let get_header : { resp: Response, name: Str } -> Option Str = { resp, name } ->
   map::get { m = resp.headers, k = str::to_lower { s = name } }
 
-pub let get_content_type: { resp: Response } -> Option Str = { resp } -> get_header { resp = resp, name = "content-type" }
+pub let get_content_type : { resp: Response } -> Option Str = { resp } ->
+  get_header { resp = resp, name = "content-type" }
 
-pub let get_content_length: { resp: Response } -> Option Int = { resp } -> match get_header { resp = resp, name = "content-length" } is
+pub let get_content_length : { resp: Response } -> Option Int = { resp } -> match get_header { resp = resp, name = "content-length" } is
   Some { val } -> int::from_string { s = val }
   None -> None
 
 
-pub let json_headers: {} -> Map Str Str = {} -> do
+pub let json_headers : {} -> Map Str Str = {} -> do
   let m = map::empty {}
   let m = map::insert { m = m, k = "Content-Type", v = "application/json" }
   map::insert { m = m, k = "Accept", v = "application/json" }
 
-pub let get_json: { url: Str } -> Result Json HttpError <Http> = { url } -> do
+pub let get_json : { url: Str } -> Result Json HttpError <Http> = { url } -> do
   let resp = get { url = url }
   match resp is
     Ok { val } -> match body_json { resp = val } is
       Ok { val = json } -> Ok { val = json }
-      Err { error } -> Err { error = DecodeError { url = url, message = error.message } }
+      Err { error } -> Err {
+        error = DecodeError { url = url, message = error.message },
+      }
     Err { error } -> Err { error = error }
 
 
-pub let post_json: { url: Str, json: Json } -> Result Response HttpError <Http> = { url, json } ->
+pub let post_json : { url: Str, json: Json } -> Result Response HttpError <Http> = { url, json } ->
   do
     let body_str = to_str { json = json }
     let body_bytes = bytes::from_string { s = body_str }
-    let req = make_request_with_body {
-      method = Post,
-      url = url,
-      body = body_bytes,
-    }
+    let req = make_request_with_body { method = Post, url = url, body = body_bytes }
     let req = with_content_type { req = req, content_type = "application/json" }
     Http.request { req = req, config = default_http_config }
 
-pub let put_json: { url: Str, json: Json } -> Result Response HttpError <Http> = { url, json } ->
+pub let put_json : { url: Str, json: Json } -> Result Response HttpError <Http> = { url, json } ->
   do
     let body_str = to_str { json = json }
     let body_bytes = bytes::from_string { s = body_str }
-    let req = make_request_with_body {
-      method = Put,
-      url = url,
-      body = body_bytes,
-    }
+    let req = make_request_with_body { method = Put, url = url, body = body_bytes }
     let req = with_content_type { req = req, content_type = "application/json" }
     Http.request { req = req, config = default_http_config }
 
-pub let patch_json: { url: Str, json: Json } -> Result Response HttpError <Http> = { url, json } ->
+pub let patch_json : { url: Str, json: Json } -> Result Response HttpError <Http> = { url, json } ->
   do
     let body_str = to_str { json = json }
     let body_bytes = bytes::from_string { s = body_str }
-    let req = make_request_with_body {
-      method = Patch,
-      url = url,
-      body = body_bytes,
-    }
+    let req = make_request_with_body { method = Patch, url = url, body = body_bytes }
     let req = with_content_type { req = req, content_type = "application/json" }
     Http.request { req = req, config = default_http_config }
 
-pub let post_json_json: { url: Str, json: Json } -> Result Json HttpError <Http> = { url, json } ->
+pub let post_json_json : { url: Str, json: Json } -> Result Json HttpError <Http> = { url, json } ->
   do
     let resp = post_json { url = url, json = json }
     match resp is
       Ok { val } -> match body_json { resp = val } is
         Ok { val = json_resp } -> Ok { val = json_resp }
-        Err { error } -> Err { error = DecodeError { url = url, message = error.message } }
+        Err { error } -> Err {
+          error = DecodeError { url = url, message = error.message },
+        }
       Err { error } -> Err { error = error }
 
 
-pub let put_json_json: { url: Str, json: Json } -> Result Json HttpError <Http> = { url, json } ->
+pub let put_json_json : { url: Str, json: Json } -> Result Json HttpError <Http> = { url, json } ->
   do
     let resp = put_json { url = url, json = json }
     match resp is
       Ok { val } -> match body_json { resp = val } is
         Ok { val = json_resp } -> Ok { val = json_resp }
-        Err { error } -> Err { error = DecodeError { url = url, message = error.message } }
+        Err { error } -> Err {
+          error = DecodeError { url = url, message = error.message },
+        }
       Err { error } -> Err { error = error }
 
 
-pub let patch_json_json: { url: Str, json: Json } -> Result Json HttpError <Http> = { url, json } ->
+pub let patch_json_json : { url: Str, json: Json } -> Result Json HttpError <Http> = { url, json } ->
   do
     let resp = patch_json { url = url, json = json }
     match resp is
       Ok { val } -> match body_json { resp = val } is
         Ok { val = json_resp } -> Ok { val = json_resp }
-        Err { error } -> Err { error = DecodeError { url = url, message = error.message } }
+        Err { error } -> Err {
+          error = DecodeError { url = url, message = error.message },
+        }
       Err { error } -> Err { error = error }
 
 
-pub let get_json_with: { url: Str, config: HttpConfig } -> Result Json HttpError <Http> = { url, config } ->
+pub let get_json_with : { url: Str, config: HttpConfig } -> Result Json HttpError <Http> = { url, config } ->
   do
     let resp = get_with { url = url, config = config }
     match resp is
       Ok { val } -> match body_json { resp = val } is
         Ok { val = json } -> Ok { val = json }
-        Err { error } -> Err { error = DecodeError { url = url, message = error.message } }
+        Err { error } -> Err {
+          error = DecodeError { url = url, message = error.message },
+        }
       Err { error } -> Err { error = error }
 
 
-pub let post_json_with: { url: Str, json: Json, config: HttpConfig } -> Result Response HttpError <Http> = { url, json, config } ->
+pub let post_json_with : { url: Str, json: Json, config: HttpConfig } -> Result Response HttpError <Http> = { url, json, config } ->
   do
     let body_str = to_str { json = json }
     let body_bytes = bytes::from_string { s = body_str }
-    let req = make_request_with_body {
-      method = Post,
-      url = url,
-      body = body_bytes,
-    }
+    let req = make_request_with_body { method = Post, url = url, body = body_bytes }
     let req = with_content_type { req = req, content_type = "application/json" }
     Http.request { req = req, config = config }
 
-pub let post_json_json_with: { url: Str, json: Json, config: HttpConfig } -> Result Json HttpError <Http> = { url, json, config } ->
+pub let post_json_json_with : { url: Str, json: Json, config: HttpConfig } -> Result Json HttpError <Http> = { url, json, config } ->
   do
     let resp = post_json_with { url = url, json = json, config = config }
     match resp is
       Ok { val } -> match body_json { resp = val } is
         Ok { val = json_resp } -> Ok { val = json_resp }
-        Err { error } -> Err { error = DecodeError { url = url, message = error.message } }
+        Err { error } -> Err {
+          error = DecodeError { url = url, message = error.message },
+        }
       Err { error } -> Err { error = error }
 
 
-pub let post_body: { url: Str, body: 'a } with EncodeRepr 'a -> Result Response HttpError <Http> = { url, body } ->
+pub let post_body : { url: Str, body: 'a } with EncodeRepr 'a -> Result Response HttpError <Http> = { url, body } ->
   do
     match body.encode_repr { fmt = json_fmt, config = default_config } is
       Ok { val = json } -> do
         let body_str = to_str { json = json }
         let body_bytes = bytes::from_string { s = body_str }
-        let req = make_request_with_body {
-          method = Post,
-          url = url,
-          body = body_bytes,
-        }
+        let req = make_request_with_body { method = Post, url = url, body = body_bytes }
         let req = with_content_type { req = req, content_type = "application/json" }
         Http.request { req = req, config = default_http_config }
-      Err { error } -> Err { error = EncodeError { url = url, message = error.message } }
+      Err { error } -> Err {
+        error = EncodeError { url = url, message = error.message },
+      }
 
 
-pub let put_body: { url: Str, body: 'a } with EncodeRepr 'a -> Result Response HttpError <Http> = { url, body } ->
+pub let put_body : { url: Str, body: 'a } with EncodeRepr 'a -> Result Response HttpError <Http> = { url, body } ->
   do
     match body.encode_repr { fmt = json_fmt, config = default_config } is
       Ok { val = json } -> do
         let body_str = to_str { json = json }
         let body_bytes = bytes::from_string { s = body_str }
-        let req = make_request_with_body {
-          method = Put,
-          url = url,
-          body = body_bytes,
-        }
+        let req = make_request_with_body { method = Put, url = url, body = body_bytes }
         let req = with_content_type { req = req, content_type = "application/json" }
         Http.request { req = req, config = default_http_config }
-      Err { error } -> Err { error = EncodeError { url = url, message = error.message } }
+      Err { error } -> Err {
+        error = EncodeError { url = url, message = error.message },
+      }
 
 
-pub let patch_body: { url: Str, body: 'a } with EncodeRepr 'a -> Result Response HttpError <Http> = { url, body } ->
+pub let patch_body : { url: Str, body: 'a } with EncodeRepr 'a -> Result Response HttpError <Http> = { url, body } ->
   do
     match body.encode_repr { fmt = json_fmt, config = default_config } is
       Ok { val = json } -> do
         let body_str = to_str { json = json }
         let body_bytes = bytes::from_string { s = body_str }
-        let req = make_request_with_body {
-          method = Patch,
-          url = url,
-          body = body_bytes,
-        }
+        let req = make_request_with_body { method = Patch, url = url, body = body_bytes }
         let req = with_content_type { req = req, content_type = "application/json" }
         Http.request { req = req, config = default_http_config }
-      Err { error } -> Err { error = EncodeError { url = url, message = error.message } }
+      Err { error } -> Err {
+        error = EncodeError { url = url, message = error.message },
+      }
 
 
-pub let post_body_with: { url: Str, body: 'a, config: HttpConfig } with EncodeRepr 'a -> Result Response HttpError <Http> = { url, body, config } ->
+pub let post_body_with : { url: Str, body: 'a, config: HttpConfig } with EncodeRepr 'a -> Result Response HttpError <Http> = { url, body, config } ->
   do
     match body.encode_repr { fmt = json_fmt, config = default_config } is
       Ok { val = json } -> do
         let body_str = to_str { json = json }
         let body_bytes = bytes::from_string { s = body_str }
-        let req = make_request_with_body {
-          method = Post,
-          url = url,
-          body = body_bytes,
-        }
+        let req = make_request_with_body { method = Post, url = url, body = body_bytes }
         let req = with_content_type { req = req, content_type = "application/json" }
         Http.request { req = req, config = config }
-      Err { error } -> Err { error = EncodeError { url = url, message = error.message } }
+      Err { error } -> Err {
+        error = EncodeError { url = url, message = error.message },
+      }
 
 
-pub let put_body_with: { url: Str, body: 'a, config: HttpConfig } with EncodeRepr 'a -> Result Response HttpError <Http> = { url, body, config } ->
+pub let put_body_with : { url: Str, body: 'a, config: HttpConfig } with EncodeRepr 'a -> Result Response HttpError <Http> = { url, body, config } ->
   do
     match body.encode_repr { fmt = json_fmt, config = default_config } is
       Ok { val = json } -> do
         let body_str = to_str { json = json }
         let body_bytes = bytes::from_string { s = body_str }
-        let req = make_request_with_body {
-          method = Put,
-          url = url,
-          body = body_bytes,
-        }
+        let req = make_request_with_body { method = Put, url = url, body = body_bytes }
         let req = with_content_type { req = req, content_type = "application/json" }
         Http.request { req = req, config = config }
-      Err { error } -> Err { error = EncodeError { url = url, message = error.message } }
+      Err { error } -> Err {
+        error = EncodeError { url = url, message = error.message },
+      }
 
 
-pub let patch_body_with: { url: Str, body: 'a, config: HttpConfig } with EncodeRepr 'a -> Result Response HttpError <Http> = { url, body, config } ->
+pub let patch_body_with : { url: Str, body: 'a, config: HttpConfig } with EncodeRepr 'a -> Result Response HttpError <Http> = { url, body, config } ->
   do
     match body.encode_repr { fmt = json_fmt, config = default_config } is
       Ok { val = json } -> do
         let body_str = to_str { json = json }
         let body_bytes = bytes::from_string { s = body_str }
-        let req = make_request_with_body {
-          method = Patch,
-          url = url,
-          body = body_bytes,
-        }
+        let req = make_request_with_body { method = Patch, url = url, body = body_bytes }
         let req = with_content_type { req = req, content_type = "application/json" }
         Http.request { req = req, config = config }
-      Err { error } -> Err { error = EncodeError { url = url, message = error.message } }
+      Err { error } -> Err {
+        error = EncodeError { url = url, message = error.message },
+      }
 
 
-pub let bearer_auth: { token: Str } -> Map Str Str = { token } -> map::insert {
-  m = map::empty {},
-  k = "Authorization",
-  v = str::concat { l = "Bearer ", r = token },
-}
+pub let bearer_auth : { token: Str } -> Map Str Str = { token } ->
+  map::insert {
+    m = map::empty {},
+    k = "Authorization",
+    v = str::concat { l = "Bearer ", r = token },
+  }
 
-pub let basic_auth: { username: Str, password: Str } -> Map Str Str = { username, password } ->
+pub let basic_auth : { username: Str, password: Str } -> Map Str Str = { username, password } ->
   do
-    let credentials = str::concat { l = username, r = str::concat { l = ":", r = password } }
+    let credentials = str::concat {
+      l = username,
+      r = str::concat { l = ":", r = password },
+    }
     let encoded = __native_base64_encode { s = credentials }
     map::insert {
       m = map::empty {},
@@ -569,147 +567,154 @@ pub let basic_auth: { username: Str, password: Str } -> Map Str Str = { username
       v = str::concat { l = "Basic ", r = encoded },
     }
 
-pub let api_key_header: { key: Str, value: Str } -> Map Str Str = { key, value } ->
+pub let api_key_header : { key: Str, value: Str } -> Map Str Str = { key, value } ->
   map::insert { m = map::empty {}, k = key, v = value }
 
-pub let x_api_key: { key: Str } -> Map Str Str = { key } -> map::insert { m = map::empty {}, k = "X-API-Key", v = key }
+pub let x_api_key : { key: Str } -> Map Str Str = { key } ->
+  map::insert { m = map::empty {}, k = "X-API-Key", v = key }
 
 use std::effects::async::{ Async }
 
-pub let async_get: { url: Str } -> Result Response HttpError <Http, Async> = { url } ->
+pub let async_get : { url: Str } -> Result Response HttpError <Http, Async> = { url } ->
   do
     let promise = Async.spawn { f = {} -> get { url = url } }
     Async.await { p = promise }
 
-pub let async_post: { url: Str, body: Bytes } -> Result Response HttpError <Http, Async> = { url, body } ->
+pub let async_post : { url: Str, body: Bytes } -> Result Response HttpError <Http, Async> = { url, body } ->
   do
     let promise = Async.spawn { f = {} -> post { url = url, body = body } }
     Async.await { p = promise }
 
-pub let async_put: { url: Str, body: Bytes } -> Result Response HttpError <Http, Async> = { url, body } ->
+pub let async_put : { url: Str, body: Bytes } -> Result Response HttpError <Http, Async> = { url, body } ->
   do
     let promise = Async.spawn { f = {} -> put { url = url, body = body } }
     Async.await { p = promise }
 
-pub let async_delete: { url: Str } -> Result Response HttpError <Http, Async> = { url } ->
+pub let async_delete : { url: Str } -> Result Response HttpError <Http, Async> = { url } ->
   do
     let promise = Async.spawn { f = {} -> delete { url = url } }
     Async.await { p = promise }
 
-pub let async_patch: { url: Str, body: Bytes } -> Result Response HttpError <Http, Async> = { url, body } ->
+pub let async_patch : { url: Str, body: Bytes } -> Result Response HttpError <Http, Async> = { url, body } ->
   do
     let promise = Async.spawn { f = {} -> patch { url = url, body = body } }
     Async.await { p = promise }
 
-pub let async_head: { url: Str } -> Result Response HttpError <Http, Async> = { url } ->
+pub let async_head : { url: Str } -> Result Response HttpError <Http, Async> = { url } ->
   do
     let promise = Async.spawn { f = {} -> head { url = url } }
     Async.await { p = promise }
 
-pub let async_options: { url: Str } -> Result Response HttpError <Http, Async> = { url } ->
+pub let async_options : { url: Str } -> Result Response HttpError <Http, Async> = { url } ->
   do
     let promise = Async.spawn { f = {} -> options { url = url } }
     Async.await { p = promise }
 
-pub let async_get_with: { url: Str, config: HttpConfig } -> Result Response HttpError <Http, Async> = { url, config } ->
+pub let async_get_with : { url: Str, config: HttpConfig } -> Result Response HttpError <Http, Async> = { url, config } ->
   do
     let promise = Async.spawn { f = {} -> get_with { url = url, config = config } }
     Async.await { p = promise }
 
-pub let async_post_with: { url: Str, body: Bytes, config: HttpConfig } -> Result Response HttpError <Http, Async> = { url, body, config } ->
+pub let async_post_with : { url: Str, body: Bytes, config: HttpConfig } -> Result Response HttpError <Http, Async> = { url, body, config } ->
   do
     let promise = Async.spawn { f = {} -> post_with { url = url, body = body, config = config } }
     Async.await { p = promise }
 
-pub let async_put_with: { url: Str, body: Bytes, config: HttpConfig } -> Result Response HttpError <Http, Async> = { url, body, config } ->
+pub let async_put_with : { url: Str, body: Bytes, config: HttpConfig } -> Result Response HttpError <Http, Async> = { url, body, config } ->
   do
     let promise = Async.spawn { f = {} -> put_with { url = url, body = body, config = config } }
     Async.await { p = promise }
 
-pub let async_delete_with: { url: Str, config: HttpConfig } -> Result Response HttpError <Http, Async> = { url, config } ->
+pub let async_delete_with : { url: Str, config: HttpConfig } -> Result Response HttpError <Http, Async> = { url, config } ->
   do
     let promise = Async.spawn { f = {} -> delete_with { url = url, config = config } }
     Async.await { p = promise }
 
-pub let async_patch_with: { url: Str, body: Bytes, config: HttpConfig } -> Result Response HttpError <Http, Async> = { url, body, config } ->
+pub let async_patch_with : { url: Str, body: Bytes, config: HttpConfig } -> Result Response HttpError <Http, Async> = { url, body, config } ->
   do
     let promise = Async.spawn { f = {} -> patch_with { url = url, body = body, config = config } }
     Async.await { p = promise }
 
-pub let async_get_json: { url: Str } -> Result Json HttpError <Http, Async> = { url } ->
+pub let async_get_json : { url: Str } -> Result Json HttpError <Http, Async> = { url } ->
   do
     let promise = Async.spawn { f = {} -> get_json { url = url } }
     Async.await { p = promise }
 
-pub let async_post_json: { url: Str, json: Json } -> Result Response HttpError <Http, Async> = { url, json } ->
+pub let async_post_json : { url: Str, json: Json } -> Result Response HttpError <Http, Async> = { url, json } ->
   do
     let promise = Async.spawn { f = {} -> post_json { url = url, json = json } }
     Async.await { p = promise }
 
-pub let async_put_json: { url: Str, json: Json } -> Result Response HttpError <Http, Async> = { url, json } ->
+pub let async_put_json : { url: Str, json: Json } -> Result Response HttpError <Http, Async> = { url, json } ->
   do
     let promise = Async.spawn { f = {} -> put_json { url = url, json = json } }
     Async.await { p = promise }
 
-pub let async_patch_json: { url: Str, json: Json } -> Result Response HttpError <Http, Async> = { url, json } ->
+pub let async_patch_json : { url: Str, json: Json } -> Result Response HttpError <Http, Async> = { url, json } ->
   do
     let promise = Async.spawn { f = {} -> patch_json { url = url, json = json } }
     Async.await { p = promise }
 
-pub let async_post_json_json: { url: Str, json: Json } -> Result Json HttpError <Http, Async> = { url, json } ->
+pub let async_post_json_json : { url: Str, json: Json } -> Result Json HttpError <Http, Async> = { url, json } ->
   do
     let promise = Async.spawn { f = {} -> post_json_json { url = url, json = json } }
     Async.await { p = promise }
 
-pub let async_put_json_json: { url: Str, json: Json } -> Result Json HttpError <Http, Async> = { url, json } ->
+pub let async_put_json_json : { url: Str, json: Json } -> Result Json HttpError <Http, Async> = { url, json } ->
   do
     let promise = Async.spawn { f = {} -> put_json_json { url = url, json = json } }
     Async.await { p = promise }
 
-pub let async_patch_json_json: { url: Str, json: Json } -> Result Json HttpError <Http, Async> = { url, json } ->
+pub let async_patch_json_json : { url: Str, json: Json } -> Result Json HttpError <Http, Async> = { url, json } ->
   do
     let promise = Async.spawn { f = {} -> patch_json_json { url = url, json = json } }
     Async.await { p = promise }
 
-pub let async_get_json_with: { url: Str, config: HttpConfig } -> Result Json HttpError <Http, Async> = { url, config } ->
+pub let async_get_json_with : { url: Str, config: HttpConfig } -> Result Json HttpError <Http, Async> = { url, config } ->
   do
     let promise = Async.spawn { f = {} -> get_json_with { url = url, config = config } }
     Async.await { p = promise }
 
-pub let async_post_body: { url: Str, body: 'a } with EncodeRepr 'a -> Result Response HttpError <Http, Async> = { url, body } ->
+pub let async_post_body : { url: Str, body: 'a } with EncodeRepr 'a -> Result Response HttpError <Http, Async> = { url, body } ->
   do
     let promise = Async.spawn { f = {} -> post_body { url = url, body = body } }
     Async.await { p = promise }
 
-pub let async_put_body: { url: Str, body: 'a } with EncodeRepr 'a -> Result Response HttpError <Http, Async> = { url, body } ->
+pub let async_put_body : { url: Str, body: 'a } with EncodeRepr 'a -> Result Response HttpError <Http, Async> = { url, body } ->
   do
     let promise = Async.spawn { f = {} -> put_body { url = url, body = body } }
     Async.await { p = promise }
 
-pub let async_patch_body: { url: Str, body: 'a } with EncodeRepr 'a -> Result Response HttpError <Http, Async> = { url, body } ->
+pub let async_patch_body : { url: Str, body: 'a } with EncodeRepr 'a -> Result Response HttpError <Http, Async> = { url, body } ->
   do
     let promise = Async.spawn { f = {} -> patch_body { url = url, body = body } }
     Async.await { p = promise }
 
-pub let async_post_body_with: { url: Str, body: 'a, config: HttpConfig } with EncodeRepr 'a -> Result Response HttpError <Http, Async> = { url, body, config } ->
+pub let async_post_body_with : { url: Str, body: 'a, config: HttpConfig } with EncodeRepr 'a -> Result Response HttpError <Http, Async> = { url, body, config } ->
   do
-    let promise = Async.spawn { f = {} -> post_body_with { url = url, body = body, config = config } }
+    let promise = Async.spawn { f = {} ->
+      post_body_with { url = url, body = body, config = config } }
     Async.await { p = promise }
 
-pub let fetch_all: { urls: [Str] } -> [Result Response HttpError] <Http, Async> = { urls } ->
+pub let fetch_all : { urls: [Str] } -> [Result Response HttpError] <Http, Async> = { urls } ->
   Async.map { xs = urls, f = { x } -> get { url = x } }
 
-pub let fetch_all_ok: { urls: [Str] } -> Result [Response] HttpError <Http, Async> = { urls } ->
+pub let fetch_all_ok : { urls: [Str] } -> Result [Response] HttpError <Http, Async> = { urls } ->
   do
     let results = fetch_all { urls = urls }
     collect_results { results = results }
 
-let collect_results: { results: [Result 'a 'e] } -> Result ['a] 'e = { results } ->
+let collect_results : { results: [Result 'a 'e] } -> Result ['a] 'e = { results } ->
   do
-    let len = seq::length { xs = results }
-    collect_results_loop { results = results, idx = 0, len = len, acc = [] }
+    let len = seq::size { xs = results }
+    collect_results_loop {
+      results = results,
+      idx = 0,
+      len = len,
+      acc = [],
+    }
 
-let collect_results_loop: { results: [Result 'a 'e], idx: Int, len: Int, acc: ['a] } -> Result ['a] 'e = { results, idx, len, acc } ->
+let collect_results_loop : { results: [Result 'a 'e], idx: Int, len: Int, acc: ['a] } -> Result ['a] 'e = { results, idx, len, acc } ->
   if idx >= len then Ok { val = acc } else match seq::get { xs = results, i = idx } is
     Some { val } -> match val is
       Ok { val = v } -> collect_results_loop {
@@ -722,14 +727,32 @@ let collect_results_loop: { results: [Result 'a 'e], idx: Int, len: Int, acc: ['
     None -> Ok { val = acc }
 
 
-pub let format_error: { err: HttpError } -> Str = { err } -> match err is
-  ConnectionFailed { url, reason } -> str::concat { l = "Connection failed to ", r = str::concat { l = url, r = str::concat { l = ": ", r = reason } } }
-  Timeout { url, ms } -> str::concat { l = "Request timed out after ", r = str::concat { l = int::to_str { n = ms }, r = str::concat { l = "ms: ", r = url } } }
-  InvalidUrl { url, reason } -> str::concat { l = "Invalid URL '", r = str::concat { l = url, r = str::concat { l = "': ", r = reason } } }
-  TlsError { url, reason } -> str::concat { l = "TLS error for ", r = str::concat { l = url, r = str::concat { l = ": ", r = reason } } }
+pub let format_error : { err: HttpError } -> Str = { err } -> match err is
+  ConnectionFailed { url, reason } -> str::concat {
+    l = "Connection failed to ",
+    r = str::concat { l = url, r = str::concat { l = ": ", r = reason } },
+  }
+  Timeout { url, ms } -> str::concat {
+    l = "Request timed out after ",
+    r = str::concat {
+      l = int::to_str { n = ms },
+      r = str::concat { l = "ms: ", r = url },
+    },
+  }
+  InvalidUrl { url, reason } -> str::concat {
+    l = "Invalid URL '",
+    r = str::concat { l = url, r = str::concat { l = "': ", r = reason } },
+  }
+  TlsError { url, reason } -> str::concat {
+    l = "TLS error for ",
+    r = str::concat { l = url, r = str::concat { l = ": ", r = reason } },
+  }
   RequestFailed { url, status, body } -> str::concat {
     l = "Request failed with status ",
-    r = str::concat { l = int::to_str { n = status }, r = str::concat { l = ": ", r = body } },
+    r = str::concat {
+      l = int::to_str { n = status },
+      r = str::concat { l = ": ", r = body },
+    },
   }
   DecodeError { url, message } -> str::concat {
     l = "Failed to decode response from ",
@@ -742,7 +765,7 @@ pub let format_error: { err: HttpError } -> Str = { err } -> match err is
   Cancelled -> "Request was cancelled"
 
 
-pub let is_retryable: { err: HttpError } -> Bool = { err } -> match err is
+pub let is_retryable : { err: HttpError } -> Bool = { err } -> match err is
   ConnectionFailed { url, reason } -> True
   Timeout { url, ms } -> True
   TlsError { url, reason } -> False
@@ -753,230 +776,16 @@ pub let is_retryable: { err: HttpError } -> Bool = { err } -> match err is
   Cancelled -> False
 
 
-pub let is_client_issue: { err: HttpError } -> Bool = { err } -> match err is
+pub let is_client_issue : { err: HttpError } -> Bool = { err } -> match err is
   InvalidUrl { url, reason } -> True
   EncodeError { url, message } -> True
   RequestFailed { url, status, body } -> status >= 400 && status < 500
   _ -> False
 
 
-pub let is_server_issue: { err: HttpError } -> Bool = { err } -> match err is
+pub let is_server_issue : { err: HttpError } -> Bool = { err } -> match err is
   RequestFailed { url, status, body } -> status >= 500
   ConnectionFailed { url, reason } -> True
   Timeout { url, ms } -> True
   TlsError { url, reason } -> True
   _ -> False
-
-
-# Total request timeout (default: 30000)
-# Connection timeout (default: 10000)
-# Redirects
-# Follow HTTP redirects (default: True)
-# Maximum redirect hops (default: 10)
-# SSL/TLS
-# Verify SSL certificates (default: True)
-# Compression
-# Auto decompress gzip/deflate responses (default: True)
-# Connection
-# Use HTTP keep-alive (default: True)
-# Use HTTP keep-alive (default: True)
-# Default HTTP configuration
-# HTTP request
-# HTTP response
-# HTTP errors
-# =============================================================================
-# MOCK TYPES
-# =============================================================================
-# URL pattern for mock matching
-# Glob patterns support:
-#   *  - matches any characters except /
-#   ** - matches any characters including /
-#   ?  - matches single character
-# Examples:
-#   Glob { pattern = "/users/*" }           # /users/123, /users/abc
-#   Glob { pattern = "/api/**/health" }     # /api/health, /api/v1/health
-#   Glob { pattern = "/files/*.json" }      # /files/config.json
-#   Glob { pattern = "/exact/path" }        # exact match (no wildcards)
-#   Glob { pattern = "**" }                 # catch-all
-# Mock rule for matching requests
-# - methods: list of methods to match, empty [] matches any method
-# - url: URL pattern to match
-# - response: the response to return when matched
-# =============================================================================
-# HTTP EFFECT (single core operation)
-# =============================================================================
-# Core request function - all HTTP operations go through this
-# Takes a Request and HttpConfig, returns Result Response HttpError
-# =============================================================================
-# IMPLEMENTATIONS
-# =============================================================================
-# Production HTTP client using Vert.x WebClient
-# Uses scoped effects: client created once per perform block, closed on exit
-# Best for multiple requests - reuses connection pool
-# Uses default_http_config for all requests
-# HTTP client with custom configuration
-# Uses scoped effects like HttpClient but allows custom HttpConfig
-# Example:
-#   perform HttpClientWith { config = config_with_timeout { timeout_ms = 5000 } } in do
-#       get { url = "https://api.example.com/fast" }
-# Use impl param `config` instead of the one passed by helpers (default_config)
-# Simple HTTP client that creates and closes connection per request
-# No scope management needed - good for one-off requests
-# Less efficient for multiple requests (no connection reuse)
-# Simple HTTP client with custom config
-# Mock HTTP client for testing
-# Rules are matched in order - first match wins
-# Example:
-#   perform MockHttpClient { rules = [
-#       { methods = [Get], url = Glob { pattern = "/users/*" }, response = Ok { val = user_resp } },
-#       { methods = [Post], url = Glob { pattern = "/users" }, response = Ok { val = created_resp } },
-#       { methods = [], url = Glob { pattern = "**" }, response = Err { error = ConnectionFailed { url = "", reason = "No mock" } } }
-#   ] } in do ...
-# Access rules directly from impl params (captured as closure)
-# =============================================================================
-# REQUEST BUILDERS
-# =============================================================================
-# Create a basic request (no body)
-# Create request with body
-# Create request with headers
-# Create a full request
-# Add header to request (immutable - returns new request)
-# Add multiple headers (immutable - returns new request)
-# Set request body (immutable - returns new request)
-# Set request timeout (immutable - returns new request)
-# Add Content-Type header
-# Add Accept header
-# Add Authorization header
-# =============================================================================
-# CONFIG
-# =============================================================================
-#
-# Use default_http_config and spread syntax to override specific fields:
-#
-#   let my_config = { ...default_http_config, timeout_ms = 5000 }
-#   let insecure_config = { ...default_http_config, verify_ssl = False }
-#   let no_redirects = { ...default_http_config, follow_redirects = False, max_redirects = 0 }
-#
-# Then use with HttpClientWith or SimpleHttpClientWith:
-#   perform HttpClientWith { config = my_config } in do ...
-#   perform SimpleHttpClientWith { config = my_config } in do ...
-# =============================================================================
-# BASIC REQUEST HELPERS (use default config)
-# =============================================================================
-# GET request
-# POST request with body
-# PUT request with body
-# DELETE request
-# PATCH request with body
-# HEAD request
-# OPTIONS request
-# =============================================================================
-# REQUEST HELPERS WITH CONFIG
-# =============================================================================
-# GET with custom config
-# POST with custom config
-# PUT with custom config
-# DELETE with custom config
-# PATCH with custom config
-# HEAD with custom config
-# OPTIONS with custom config
-# =============================================================================
-# REQUEST HELPERS WITH HEADERS
-# =============================================================================
-# GET with headers
-# POST with headers
-# PUT with headers
-# DELETE with headers
-# PATCH with headers
-# =============================================================================
-# RESPONSE HELPERS
-# =============================================================================
-# Get response body as string (returns Result because of UTF-8 decoding)
-# Get response body as JSON
-# Check if response is successful (2xx)
-# Check if response is redirect (3xx)
-# Check if response is client error (4xx)
-# Check if response is server error (5xx)
-# Get header value (case-insensitive)
-# Get Content-Type header
-# Get Content-Length header as Int
-# =============================================================================
-# JSON HELPERS
-# =============================================================================
-# Create JSON headers map
-# GET expecting JSON response
-# POST with JSON body
-# PUT with JSON body
-# PATCH with JSON body
-# POST JSON body, expect JSON response
-# PUT JSON body, expect JSON response
-# PATCH JSON body, expect JSON response
-# GET JSON with custom config
-# POST JSON with custom config
-# POST JSON, expect JSON with custom config
-# =============================================================================
-# TYPED BODY HELPERS (using Encode/Decode abilities)
-# =============================================================================
-# POST any encodable type as JSON body
-# PUT any encodable type as JSON body
-# PATCH any encodable type as JSON body
-# POST typed body with custom config
-# PUT typed body with custom config
-# PATCH typed body with custom config
-# =============================================================================
-# COMMON HEADERS
-# =============================================================================
-# Create bearer auth header
-# Create basic auth header
-# Create API key header
-# Create X-API-Key header
-# =============================================================================
-# ASYNC WRAPPERS
-# =============================================================================
-# Async GET
-# Async POST
-# Async PUT
-# Async DELETE
-# Async PATCH
-# Async HEAD
-# Async OPTIONS
-# =============================================================================
-# ASYNC WITH CONFIG
-# =============================================================================
-# Async GET with config
-# Async POST with config
-# Async PUT with config
-# Async DELETE with config
-# Async PATCH with config
-# =============================================================================
-# ASYNC JSON
-# =============================================================================
-# Async GET expecting JSON
-# Async POST JSON
-# Async PUT JSON
-# Async PATCH JSON
-# Async POST JSON expecting JSON response
-# Async PUT JSON expecting JSON response
-# Async PATCH JSON expecting JSON response
-# Async GET JSON with config
-# =============================================================================
-# ASYNC TYPED BODY
-# =============================================================================
-# Async POST typed body
-# Async PUT typed body
-# Async PATCH typed body
-# Async POST typed body with config
-# =============================================================================
-# CONCURRENT FETCH
-# =============================================================================
-# Fetch multiple URLs concurrently (returns seq in same order)
-# Fetch multiple URLs, fail if any fail
-# Helper to collect seq of Results into Result of seq
-# Should not happen
-# =============================================================================
-# ERROR HELPERS
-# =============================================================================
-# Format error for display
-# Check if error is retryable
-# Check if error is due to client issue (4xx or validation)
-# Check if error is due to server issue (5xx)

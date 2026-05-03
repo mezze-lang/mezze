@@ -1,57 +1,51 @@
-# 06 — Mutation: mutable counters, maps, and loops
-#
-# Shows MutInt, MutMap, for_range, and while loops.
-
-use std::effects::mutation::{
-    LocalMut,
-    int_to_mut, read_int, incr, write_int,
-    map_to_mut, map_to_immut, map_put, map_get,
-    for_range, while
-}
-use std::effects::log::{Console, println}
+use std::effects::mutation::{ LocalMut, int_to_mut, read_int, incr, write_int, map_to_mut, map_to_immut, map_put, map_get, for_range, while }
+use std::effects::log::{ Console, println }
 use std::collections::seq
 use std::collections::map
 
 # Build a frequency map using mutation
-let freq_count = {words} -> perform LocalMut in do
-    let m = map_to_mut {map = map::empty {}}
-    let i = int_to_mut {n = 0}
-    let n = seq::length {xs = words}
-    while {
-        cond = {} -> read_int {n = i} < n,
-        body = {} -> do
-            let idx = read_int {n = i}
-            let word = match seq::get {xs = words, i = idx} is
-                Some {val} -> val
-                None -> ""
-            let count = match map_get {map = m, key = word} is
-                Some {val} -> val
-                None -> 0
-            map_put {map = m, key = word, value = count + 1}
-            incr {n = i, delta = 1}
-    }
-    map_to_immut {map = m}
+let freq_count = { words } -> perform LocalMut in do
+  let m = map_to_mut { map = map::empty {} }
+  let i = int_to_mut { n = 0 }
+  let n = seq::size { xs = words }
+  while {
+    cond = {} -> read_int { n = i } < n,
+    body = {} -> do
+      let idx = read_int { n = i }
+      let word = match seq::get { xs = words, i = idx } is
+        Some { val } -> val
+        None -> ""
 
-# Fibonacci with mutation
-let fib_mut = {n} -> perform LocalMut in do
-    let a = int_to_mut {n = 0}
-    let b = int_to_mut {n = 1}
-    for_range {start = 0, end = n, step = 1, body = {i} -> do
-        let old_a = read_int {n = a}
-        let old_b = read_int {n = b}
-        write_int {n = a, v = old_b}
-        write_int {n = b, v = old_a + old_b}
-    }
-    read_int {n = a}
+      let count = match map_get { map = m, key = word } is
+        Some { val } -> val
+        None -> 0
 
-let main = {} ->
-    perform Console in do
-        let words = ["hello", "world", "hello", "mezze", "world", "hello"]
-        let freqs = freq_count {words = words}
-        println {msg = "word frequencies: $(freqs.to_dbg_str {})"}
+      map_put { map = m, key = word, value = count + 1 }
+      incr { n = i, delta = 1 },
+  }
+  map_to_immut { map = m }
 
-        println {msg = "fib(0) = $(fib_mut {n = 0}.to_dbg_str {})"}
-        println {msg = "fib(1) = $(fib_mut {n = 1}.to_dbg_str {})"}
-        println {msg = "fib(5) = $(fib_mut {n = 5}.to_dbg_str {})"}
-        println {msg = "fib(10) = $(fib_mut {n = 10}.to_dbg_str {})"}
-        println {msg = "fib(20) = $(fib_mut {n = 20}.to_dbg_str {})"}
+let fib_mut = { n } -> perform LocalMut in do
+  let a = int_to_mut { n = 0 }
+  let b = int_to_mut { n = 1 }
+  for_range {
+    start = 0,
+    end = n,
+    step = 1,
+    body = { i } -> do
+      let old_a = read_int { n = a }
+      let old_b = read_int { n = b }
+      write_int { n = a, v = old_b }
+      write_int { n = b, v = old_a + old_b },
+  }
+  read_int { n = a }
+
+let main = {} -> perform Console in do
+  let words = ["hello", "world", "hello", "mezze", "world", "hello"]
+  let freqs = freq_count { words = words }
+  println { msg = "word frequencies: $(freqs.to_dbg_str {})" }
+  println { msg = "fib(0) = $(fib_mut { n = 0 }.to_dbg_str {})" }
+  println { msg = "fib(1) = $(fib_mut { n = 1 }.to_dbg_str {})" }
+  println { msg = "fib(5) = $(fib_mut { n = 5 }.to_dbg_str {})" }
+  println { msg = "fib(10) = $(fib_mut { n = 10 }.to_dbg_str {})" }
+  println { msg = "fib(20) = $(fib_mut { n = 20 }.to_dbg_str {})" }

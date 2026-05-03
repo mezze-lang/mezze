@@ -12,6 +12,7 @@ effect Environment where {
   process_args: {} -> [Str] <Environment>,
   exit: { code: Int } -> {} <Environment>
 }
+
 # Get environment variable
 # Set environment variable (for current process)
 # Get all environment variables
@@ -21,7 +22,6 @@ effect Environment where {
 # Get process information
 # Exit the process
 # System environment implementation
-
 impl Environment for SystemEnvironment where {
   get_env = { name } -> __native_env_get { name = name },
   set_env = { name, value } -> __native_env_set { name = name, value = value },
@@ -35,8 +35,8 @@ impl Environment for SystemEnvironment where {
   process_args = {} -> __native_env_process_args {},
   exit = { code } -> __native_env_exit { code = code },
 }
-# Mock environment for testing
 
+# Mock environment for testing
 impl Environment for MockEnvironment { env_vars: [{ key: Str, value: Str }], current_directory: Str, mock_os: Str } where {
   get_env = { name } -> __native_mock_env_get { env_vars = env_vars, name = name },
   set_env = { name, value } -> {},
@@ -51,33 +51,15 @@ impl Environment for MockEnvironment { env_vars: [{ key: Str, value: Str }], cur
   exit = { code } -> {},
 }
 
-pub let get_env: { name: Str } -> Option Str <Environment> = { name } -> Environment.get_env { name = name }  # No-op in mock
+pub let get_env : { name: Str } -> Option Str <Environment> = { name } ->
+  Environment.get_env { name = name }  # No-op in mock
 
-pub let current_dir: {} -> Str <Environment> = {} -> Environment.current_dir {}
+pub let current_dir : {} -> Str <Environment> = {} -> Environment.current_dir {}
+
 # No-op in mock
-
-pub let os_info: {} -> { name: Str, version: Str, arch: Str } <Environment> = {} ->
+pub let os_info : {} -> { name: Str, version: Str, arch: Str } <Environment> = {} ->
   do
     let name = Environment.os_name {}
     let version = Environment.os_version {}
-    let architecture = Environment.arch {}  # No-op in mock
+    let architecture = Environment.arch {}
     { name = name, version = version, arch = architecture }
-
-# Convenience functions
-# Usage examples:
-# 
-# Using system environment:
-# perform SystemEnvironment in do {
-#     let home = get_env { name = "HOME" }
-#     let cwd = current_dir { }
-#     let info = os_info { }
-# }
-#
-# Using mock environment for testing:
-# perform MockEnvironment { 
-#     env_vars = [("HOME", "/mock/home"), ("PATH", "/mock/bin")],
-#     current_directory = "/mock/cwd",
-#     mock_os = "MockOS"
-# } in do {
-#     let home = get_env { name = "HOME" }  # Returns Some "/mock/home"
-# }

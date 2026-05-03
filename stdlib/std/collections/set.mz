@@ -1,4 +1,5 @@
 use std::abilities::compare::{ Eq, Ord }
+use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
 use std::int
 
@@ -10,104 +11,115 @@ impl Eq 'a for Set 'a where {
   eq = { it, r } -> __native_set_equals { s1 = it, s2 = r },
   neq = { it, r } -> if __native_set_equals { s1 = it, s2 = r } then False else True,
 }
+
 # std/collections/set.mezze - Set operations using HashSet
 # Set 'a is a built-in type implemented using HashSet internally
 # No explicit type definition needed - handled by native runtime
 # Basic set operations
+pub let empty : {} -> Set 'a = {} -> __native_set_empty {}
 
-pub let empty: {} -> Set 'a = {} -> __native_set_empty {}
+pub let insert : { s: Set 'a, x: 'a } -> Set 'a = { s, x } -> __native_set_insert { s = s, x = x }
 
-pub let insert: { s: Set 'a, x: 'a } -> Set 'a = { s, x } -> __native_set_insert { s = s, x = x }
+pub let remove : { s: Set 'a, x: 'a } -> Set 'a = { s, x } -> __native_set_remove { s = s, x = x }
 
-pub let remove: { s: Set 'a, x: 'a } -> Set 'a = { s, x } -> __native_set_remove { s = s, x = x }
+pub let contains : { s: Set 'a, x: 'a } -> Bool = { s, x } ->
+  __native_set_contains { s = s, x = x }
 
-pub let contains: { s: Set 'a, x: 'a } -> Bool = { s, x } -> __native_set_contains { s = s, x = x }
+pub let size : { s: Set 'a } -> Int = { s } -> __native_set_size { s = s }
 
-pub let size: { s: Set 'a } -> Int = { s } -> __native_set_size { s = s }
+pub let is_empty : { s: Set 'a } -> Bool = { s } -> size { s = s } == 0
 
-pub let is_empty: { s: Set 'a } -> Bool = { s } -> size { s = s } == 0
 # Set operations
+pub let union : { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
+  __native_set_union { s1 = s1, s2 = s2 }
 
-pub let union: { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } -> __native_set_union { s1 = s1, s2 = s2 }
+pub let intersection : { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
+  __native_set_intersection { s1 = s1, s2 = s2 }
 
-pub let intersection: { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } -> __native_set_intersection { s1 = s1, s2 = s2 }
+pub let difference : { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
+  __native_set_difference { s1 = s1, s2 = s2 }
 
-pub let difference: { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } -> __native_set_difference { s1 = s1, s2 = s2 }
 # Set queries
+pub let is_subset : { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } ->
+  __native_set_is_subset { s1 = s1, s2 = s2 }
 
-pub let is_subset: { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } -> __native_set_is_subset { s1 = s1, s2 = s2 }
+pub let is_superset : { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } ->
+  is_subset { s1 = s2, s2 = s1 }
 
-pub let is_superset: { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } -> is_subset { s1 = s2, s2 = s1 }
+pub let is_disjoint : { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } ->
+  is_empty { s = intersection { s1 = s1, s2 = s2 } }
 
-pub let is_disjoint: { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } -> is_empty { s = intersection { s1 = s1, s2 = s2 } }
 # Conversion functions - Seq
+pub let to_seq : { s: Set 'a } -> ['a] = { s } -> __native_set_to_seq { s = s }
 
-pub let to_seq: { s: Set 'a } -> ['a] = { s } -> __native_set_to_seq { s = s }
+pub let from_seq : { xs: ['a] } -> Set 'a = { xs } -> __native_set_from_seq { xs = xs }
 
-pub let from_seq: { xs: ['a] } -> Set 'a = { xs } -> __native_set_from_seq { xs = xs }
 # Conversion functions - List
+pub let to_list : { s: Set 'a } -> List 'a = { s } -> __native_set_to_list { s = s }
 
-pub let to_list: { s: Set 'a } -> List 'a = { s } -> __native_set_to_list { s = s }
+pub let from_list : { xs: List 'a } -> Set 'a = { xs } -> __native_set_from_list { xs = xs }
 
-pub let from_list: { xs: List 'a } -> Set 'a = { xs } -> __native_set_from_list { xs = xs }
 # Higher-order functions
-
-pub let filter: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Set 'a <...> = { s, p } ->
+pub let filter : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Set 'a <...> = { s, p } ->
   __native_set_filter { s = s, p = p }
 
-pub let map: { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Set 'b <...> = { s, f } ->
+pub let map : { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Set 'b <...> = { s, f } ->
   __native_set_map { s = s, f = f }
 
-pub let fold: { s: Set 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { s, init, f } ->
+pub let fold : { s: Set 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> } -> 'acc <...> = { s, init, f } ->
   __native_set_fold { s = s, init = init, f = f }
+
 # Utility functions
+pub let singleton : { x: 'a } -> Set 'a = { x } -> insert { s = empty {}, x = x }
 
-pub let singleton: { x: 'a } -> Set 'a = { x } -> insert { s = empty {}, x = x }
+pub let insert_all : { s: Set 'a, xs: ['a] } -> Set 'a = { s, xs } ->
+  __native_set_insert_all { s = s, xs = xs }
 
-pub let insert_all: { s: Set 'a, xs: ['a] } -> Set 'a = { s, xs } -> __native_set_insert_all { s = s, xs = xs }
+pub let remove_all : { s: Set 'a, xs: ['a] } -> Set 'a = { s, xs } ->
+  __native_set_remove_all { s = s, xs = xs }
 
-pub let remove_all: { s: Set 'a, xs: ['a] } -> Set 'a = { s, xs } -> __native_set_remove_all { s = s, xs = xs }
 # Equality
+pub let equals : { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } ->
+  __native_set_equals { s1 = s1, s2 = s2 }
 
-pub let equals: { s1: Set 'a, s2: Set 'a } -> Bool = { s1, s2 } -> __native_set_equals { s1 = s1, s2 = s2 }
 # =============================================================================
 # Predicate Operations
 # =============================================================================
 # Check if any element matches predicate
-
-pub let any: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
+pub let any : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
   __native_set_any { s = s, p = p }
+
 # Check if all elements match predicate
-
-pub let all: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
+pub let all : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
   __native_set_all { s = s, p = p }
+
 # Check if no element matches predicate
-
-pub let none: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
+pub let none : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Bool <...> = { s, p } ->
   __native_set_none { s = s, p = p }
+
 # Find first element matching predicate
-
-pub let find: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Option 'a <...> = { s, p } ->
+pub let find : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Option 'a <...> = { s, p } ->
   __native_set_find { s = s, p = p }
-# Count elements matching predicate
 
-pub let count: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Int <...> = { s, p } ->
+# Count elements matching predicate
+pub let count : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Int <...> = { s, p } ->
   __native_set_count { s = s, p = p }
+
 # =============================================================================
 # Min/Max/Sum/Product
 # =============================================================================
 # Find minimum element (returns Option)
+pub let min : { s: Set 'a } -> Option 'a = { s } -> __native_set_min { s = s }
 
-pub let min: { s: Set 'a } -> Option 'a = { s } -> __native_set_min { s = s }
 # Find maximum element (returns Option)
+pub let max : { s: Set 'a } -> Option 'a = { s } -> __native_set_max { s = s }
 
-pub let max: { s: Set 'a } -> Option 'a = { s } -> __native_set_max { s = s }
 # Sum all integer elements
+pub let sum : { s: Set Int } -> Int = { s } -> __native_set_sum { s = s }
 
-pub let sum: { s: Set Int } -> Int = { s } -> __native_set_sum { s = s }
 # Product of all integer elements
+pub let product : { s: Set Int } -> Int = { s } -> __native_set_product { s = s }
 
-pub let product: { s: Set Int } -> Int = { s } -> __native_set_product { s = s }
 # =============================================================================
 # Conversion
 # =============================================================================
@@ -115,78 +127,79 @@ pub let product: { s: Set Int } -> Int = { s } -> __native_set_product { s = s }
 # Additional Operations
 # =============================================================================
 # Reduce set to single value (returns Option)
-
-pub let reduce: { s: Set 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { s, f } ->
+pub let reduce : { s: Set 'a, f: { acc: 'a, x: 'a } -> 'a <...> } -> Option 'a <...> = { s, f } ->
   __native_set_reduce { s = s, f = f }
+
 # Find element with minimum key (returns Option)
-
-pub let min_by: { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Option 'a <...> = { s, f } ->
+pub let min_by : { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Option 'a <...> = { s, f } ->
   __native_set_min_by { s = s, f = f }
+
 # Find element with maximum key (returns Option)
-
-pub let max_by: { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Option 'a <...> = { s, f } ->
+pub let max_by : { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Option 'a <...> = { s, f } ->
   __native_set_max_by { s = s, f = f }
+
 # Partition into two sets based on predicate
-
-pub let partition: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> { pass: Set 'a, fail: Set 'a } <...> = { s, p } ->
+pub let partition : { s: Set 'a, p: { val: 'a } -> Bool <...> } -> { pass: Set 'a, fail: Set 'a } <...> = { s, p } ->
   __native_set_partition { s = s, p = p }
+
 # Sum all float elements
+pub let sum_float : { s: Set Float } -> Float = { s } -> __native_set_sum_float { s = s }
 
-pub let sum_float: { s: Set Float } -> Float = { s } -> __native_set_sum_float { s = s }
 # Product of all float elements
+pub let product_float : { s: Set Float } -> Float = { s } -> __native_set_product_float { s = s }
 
-pub let product_float: { s: Set Float } -> Float = { s } -> __native_set_product_float { s = s }
 # =============================================================================
 # Additional Set Operations
 # =============================================================================
 # Flat map over elements (result sets are merged)
 # Example: flat_map { s = #{1, 2}, f = {val} -> #{val, val * 2} } -> #{1, 2, 4}
-
-pub let flat_map: { s: Set 'a, f: { val: 'a } -> Set 'b <...> } -> Set 'b <...> = { s, f } ->
+pub let flat_map : { s: Set 'a, f: { val: 'a } -> Set 'b <...> } -> Set 'b <...> = { s, f } ->
   __native_set_flat_map { s = s, f = f }
+
 # Group elements by a key function
 # Example: group_by { s = #{1, 2, 3, 4}, f = {val} -> val % 2 }
 #          -> [{ key = 0, values = #{2, 4} }, { key = 1, values = #{1, 3} }]
-
-pub let group_by: { s: Set 'a, f: { val: 'a } -> 'b <...> } -> List { key: 'b, values: Set 'a } <...> = { s, f } ->
+pub let group_by : { s: Set 'a, f: { val: 'a } -> 'b <...> } -> List { key: 'b, values: Set 'a } <...> = { s, f } ->
   __native_set_group_by { s = s, f = f }
+
 # Symmetric difference: elements in either set but not both
 # Example: symmetric_difference { s1 = #{1, 2, 3}, s2 = #{2, 3, 4} } -> #{1, 4}
-
-pub let symmetric_difference: { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
+pub let symmetric_difference : { s1: Set 'a, s2: Set 'a } -> Set 'a = { s1, s2 } ->
   __native_set_symmetric_difference { s1 = s1, s2 = s2 }
+
 # =============================================================================
 # Collect Operations
 # =============================================================================
 # Apply function returning Option to each element, collect only Some values into a Set
 # Example: filter_map { set = #{1, 2, 3, 4}, f = {val} -> if val % 2 == 0 then Some(val * 10) else None end }
 #          -> #{20, 40}
-
-pub let filter_map: { set: Set 'a, f: { val: 'a } -> Option 'b <...> } -> Set 'b <...> = { set, f } ->
+pub let filter_map : { set: Set 'a, f: { val: 'a } -> Option 'b <...> } -> Set 'b <...> = { set, f } ->
   __native_set_filter_map { set = set, f = f }
+
 # Apply function returning Option to each element, collect only Some values into Seq
 # Example: collect_seq { set = #{1, 2, 3}, f = {val} -> if val > 1 then Some(val * 2) else None end }
 #          -> [4, 6]
-
-pub let collect_seq: { set: Set 'a, f: { val: 'a } -> Option 'b <...> } -> ['b] <...> = { set, f } ->
+pub let collect_seq : { set: Set 'a, f: { val: 'a } -> Option 'b <...> } -> ['b] <...> = { set, f } ->
   __native_set_collect_seq { set = set, f = f }
+
 # Apply function returning Option to each element, collect only Some values into List
 # Example: collect_list { set = #{1, 2, 3}, f = {val} -> if val > 1 then Some(val * 2) else None end }
 #          -> [4, 6] (as List)
-
-pub let collect_list: { set: Set 'a, f: { val: 'a } -> Option 'b <...> } -> List 'b <...> = { set, f } ->
+pub let collect_list : { set: Set 'a, f: { val: 'a } -> Option 'b <...> } -> List 'b <...> = { set, f } ->
   __native_set_collect_list { set = set, f = f }
+
 # =============================================================================
 # SortedSet Conversions
 # =============================================================================
 # Convert Set to SortedSet (elements must be comparable)
 # Example: to_sorted_set { s = #{3, 1, 2} } -> sorted set with elements in order
+pub let to_sorted_set : { s: Set 'a } -> SortedSet 'a = { s } ->
+  __native_set_to_sorted_set { s = s }
 
-pub let to_sorted_set: { s: Set 'a } -> SortedSet 'a = { s } -> __native_set_to_sorted_set { s = s }
 # Convert SortedSet to Set
 # Example: from_sorted_set { s = sorted_set } -> #{...}
-
-pub let from_sorted_set: { s: SortedSet 'a } -> Set 'a = { s } -> __native_set_from_sorted_set { s = s }
+pub let from_sorted_set : { s: SortedSet 'a } -> Set 'a = { s } ->
+  __native_set_from_sorted_set { s = s }
 
 impl Set 'a where {
   insert = { it, x } -> insert { s = it, x = x },
@@ -209,4 +222,9 @@ impl Set 'a where {
   max = { it } -> max { s = it },
   to_seq = { it } -> to_seq { s = it },
   to_list = { it } -> to_list { s = it },
+}
+
+impl Sized 'a for Set 'a where {
+  size = { it } -> size { s = it },
+  is_empty = { it } -> is_empty { s = it },
 }

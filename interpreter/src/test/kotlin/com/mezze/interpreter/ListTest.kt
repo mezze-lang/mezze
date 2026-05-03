@@ -88,11 +88,11 @@ class ListTest {
     @DisplayName("List length")
     fun testListLength() {
         val code = """
-            use std::collections::list::{empty, cons, length}
+            use std::collections::list::{empty, cons, size}
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = empty {} } } }
 
-            length { xs = xs }
+            size { xs = xs }
         """
         assertEquals(3L, eval(code))
     }
@@ -105,11 +105,11 @@ class ListTest {
     @DisplayName("Singleton list")
     fun testSingleton() {
         val code = """
-            use std::collections::list::{singleton, length}
+            use std::collections::list::{singleton, size}
 
             let xs = singleton { x = 42 }
 
-            length { xs = xs }
+            size { xs = xs }
         """
         assertEquals(1L, eval(code))
     }
@@ -118,13 +118,13 @@ class ListTest {
     @DisplayName("List append")
     fun testAppend() {
         val code = """
-            use std::collections::list::{empty, cons, append, length}
+            use std::collections::list::{empty, cons, append, size}
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = empty {} } }
             let ys = cons { head = 3, tail = cons { head = 4, tail = empty {} } }
             let zs = append { xs = xs, ys = ys }
 
-            length { xs = zs }
+            size { xs = zs }
         """
         assertEquals(4L, eval(code))
     }
@@ -165,12 +165,12 @@ class ListTest {
     @DisplayName("List filter")
     fun testFilter() {
         val code = """
-            use std::collections::list::{empty, cons, filter, length}
+            use std::collections::list::{empty, cons, filter, size}
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = cons { head = 4, tail = empty {} } } } }
             let ys = filter { xs = xs, p = { x } -> x > 2 }
 
-            length { xs = ys }
+            size { xs = ys }
         """
         assertEquals(2L, eval(code))
     }
@@ -249,12 +249,12 @@ class ListTest {
     fun testToSeq() {
         val code = """
             use std::collections::list::{empty, cons, to_seq}
-            use std::collections::seq::{length}
+            use std::collections::seq::{size}
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = empty {} } } }
             let arr = to_seq { xs = xs }
 
-            length { xs = arr }
+            size { xs = arr }
         """
         assertEquals(3L, eval(code))
     }
@@ -264,12 +264,12 @@ class ListTest {
     fun testFromSeq() {
         val code = """
             use std::collections::seq::{of}
-            use std::collections::list::{from_seq, length}
+            use std::collections::list::{from_seq, size}
 
             let arr = of { x = 1, xs = of { x = 2, xs = of { x = 3, xs = [] } } }
             let xs = from_seq { xs = arr }
 
-            length { xs = xs }
+            size { xs = xs }
         """
         assertEquals(3L, eval(code))
     }
@@ -282,11 +282,11 @@ class ListTest {
     @DisplayName("List range")
     fun testRange() {
         val code = """
-            use std::collections::list::{range, length}
+            use std::collections::list::{range, size}
 
             let xs = range { start = 0, end = 10 }
 
-            length { xs = xs }
+            size { xs = xs }
         """
         assertEquals(10L, eval(code))
     }
@@ -295,11 +295,11 @@ class ListTest {
     @DisplayName("List repeat")
     fun testRepeat() {
         val code = """
-            use std::collections::list::{repeat, length}
+            use std::collections::list::{repeat, size}
 
             let xs = repeat { x = 42, n = 5 }
 
-            length { xs = xs }
+            size { xs = xs }
         """
         assertEquals(5L, eval(code))
     }

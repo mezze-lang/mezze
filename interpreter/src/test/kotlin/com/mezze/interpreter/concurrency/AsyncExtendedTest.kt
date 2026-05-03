@@ -172,7 +172,7 @@ class AsyncExtendedTest {
             perform LoomAsync in do
                 let xs: [Int] = []
                 let result = Async.map {xs = xs, f = {x} -> x * 2}
-                seq::length {xs = result}
+                seq::size {xs = result}
         """
         val result = eval(code)
         assertEquals(0L, result)
@@ -275,7 +275,7 @@ class AsyncExtendedTest {
             perform LoomAsync in do
                 let xs = [1, 2, 3]
                 let result = Async.filter {xs = xs, f = {x} -> x > 100}
-                seq::length {xs = result}
+                seq::size {xs = result}
         """
         val result = eval(code)
         assertEquals(0L, result)

@@ -1,0 +1,12 @@
+[package]
+name = "dotchain_test"
+version = "0.1.0"
+
+[[app]]
+name = "dotchain_test"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

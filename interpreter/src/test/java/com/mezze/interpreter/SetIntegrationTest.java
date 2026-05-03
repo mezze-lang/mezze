@@ -286,7 +286,7 @@ class SetIntegrationTest {
             use std::collections::seq
             let s = set::from_seq { xs = [1, 2, 3] }
             let arr = set::to_seq { s = s }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
             """);
         assertEquals(3L, result);
     }
@@ -308,7 +308,7 @@ class SetIntegrationTest {
             use std::collections::list
             let s = set::from_seq { xs = [1, 2, 3] }
             let xs = set::to_list { s = s }
-            list::length { xs = xs }
+            list::size { xs = xs }
             """);
         assertEquals(3L, result);
     }

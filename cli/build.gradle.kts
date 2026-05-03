@@ -402,6 +402,30 @@ tasks.register<Copy>("installRuntime") {
 }
 
 /**
+ * Install stdlib sources to ~/.mezze/stdlib/ so cmd-click on imported
+ * stdlib symbols can land at a stable file path. Without these on
+ * disk, the runtime's resource-extraction fallback writes to
+ * randomly-named temp files (see ModuleResolver.resolveModuleFile),
+ * which the editor can't reuse across sessions.
+ *
+ * Mirrors the on-disk layout the in-project resolver expects:
+ *   ~/.mezze/stdlib/std/...    (matches `stdlib/std/...` in repo)
+ */
+tasks.register<Copy>("installStdlibSources") {
+    group = "install"
+    description = "Install stdlib .mz sources into ~/.mezze/stdlib/ for go-to-definition"
+    // Hard dependencies — stdlib's resources/classes producers happen to
+    // touch the same source dir, and gradle 8.x flags any task that reads
+    // their output dir without declaring it. Use mustRunAfter (we don't
+    // *need* the outputs, we just want gradle to stop complaining).
+    mustRunAfter(":stdlib:processResources", ":stdlib:compileKotlin")
+    from(rootProject.projectDir.resolve("stdlib")) {
+        include("**/*.mz")
+    }
+    into(mezzeHome.map { File(it, "stdlib") })
+}
+
+/**
  * Install the native binary to ~/.mezze/bin/mez. ~3 minutes the first
  * time; faster on subsequent runs thanks to incremental compile.
  *
@@ -411,16 +435,21 @@ tasks.register<Copy>("installRuntime") {
  * from the same file. Installing one without the other gives users a
  * broken setup, so we couple them at the gradle layer.
  */
-tasks.register<Copy>("installNative") {
+tasks.register("installNative") {
     group = "install"
     description = "Install native `mez` binary + runtime jar into ~/.mezze/"
-    dependsOn("installRuntime", "nativeCompile")
-    from(layout.buildDirectory.file("native/nativeCompile/mezze"))
-    into(mezzeHome.map { File(it, "bin") })
-    rename { "mez" }
+    dependsOn("installRuntime", "installStdlibSources", "nativeCompile")
     doLast {
+        // rm-then-cp to defeat the macOS launch-services kernel cache —
+        // overwriting an existing `mez` in place hangs because the cached
+        // codesign signature is stale. Deleting first invalidates that
+        // cache so the new inode gets a fresh evaluation.
         val target = File(mezzeHome.get(), "bin/mez")
-        if (target.exists()) target.setExecutable(true, false)
+        target.parentFile.mkdirs()
+        if (target.exists()) target.delete()
+        val src = layout.buildDirectory.file("native/nativeCompile/mezze").get().asFile
+        src.copyTo(target, overwrite = true)
+        target.setExecutable(true, false)
     }
 }
 

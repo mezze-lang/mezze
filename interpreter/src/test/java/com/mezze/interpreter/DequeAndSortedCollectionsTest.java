@@ -152,7 +152,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3, 4, 5, 6, 7] }
             let sliced = deque::slice { d = d, start = 2, end = 5 }
-            deque::length { d = sliced }
+            deque::size { d = sliced }
             """);
         assertEquals(3L, result);
     }
@@ -267,7 +267,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3, 4, 5, 1, 2] }
             let taken = deque::take_while { d = d, p = { val } -> val < 4 }
-            deque::length { d = taken }
+            deque::size { d = taken }
             """);
         assertEquals(3L, result);
     }
@@ -302,7 +302,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3, 4, 5, 1, 2] }
             let dropped = deque::drop_while { d = d, p = { val } -> val < 4 }
-            deque::length { d = dropped }
+            deque::size { d = dropped }
             """);
         assertEquals(4L, result);
     }
@@ -326,7 +326,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [5, 1, 2, 3] }
             let dropped = deque::drop_while { d = d, p = { val } -> val < 3 }
-            deque::length { d = dropped }
+            deque::size { d = dropped }
             """);
         assertEquals(4L, result);
     }
@@ -341,7 +341,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3, 4, 5] }
             let result = deque::split_at { d = d, i = 2 }
-            deque::length { d = result.l }
+            deque::size { d = result.l }
             """);
         assertEquals(2L, result);
     }
@@ -352,7 +352,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3, 4, 5] }
             let result = deque::split_at { d = d, i = 2 }
-            deque::length { d = result.r }
+            deque::size { d = result.r }
             """);
         assertEquals(3L, result);
     }
@@ -376,7 +376,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3, 4, 5, 1, 2] }
             let result = deque::span { d = d, p = { val } -> val < 4 }
-            deque::length { d = result.l }
+            deque::size { d = result.l }
             """);
         assertEquals(3L, result);
     }
@@ -400,7 +400,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3] }
             let result = deque::span { d = d, p = { val } -> val < 10 }
-            deque::length { d = result.l } + deque::length { d = result.r }
+            deque::size { d = result.l } + deque::size { d = result.r }
             """);
         assertEquals(3L, result);
     }
@@ -415,7 +415,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3] }
             let scanned = deque::scan { d = d, init = 0, f = { acc, x } -> acc + x }
-            deque::length { d = scanned }
+            deque::size { d = scanned }
             """);
         assertEquals(4L, result);  // [0, 1, 3, 6]
     }
@@ -452,7 +452,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d: Deque Int = deque::empty {}
             let scanned = deque::scan { d = d, init = 42, f = { acc, x } -> acc + x }
-            deque::length { d = scanned }
+            deque::size { d = scanned }
             """);
         assertEquals(1L, result);  // Just [42]
     }
@@ -467,7 +467,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 1, 2, 2, 2, 3, 1, 1] }
             let deduped = deque::dedup { d = d }
-            deque::length { d = deduped }
+            deque::size { d = deduped }
             """);
         assertEquals(4L, result);  // [1, 2, 3, 1]
     }
@@ -478,7 +478,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 1, 2, 1] }
             let deduped = deque::dedup { d = d }
-            deque::length { d = deduped }
+            deque::size { d = deduped }
             """);
         assertEquals(5L, result);  // All different consecutively
     }
@@ -502,7 +502,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 3, 5, 2, 4, 6] }
             let deduped = deque::dedup_by { d = d, f = { val } -> val % 2 }
-            deque::length { d = deduped }
+            deque::size { d = deduped }
             """);
         assertEquals(2L, result);  // [1, 2] - consecutive odd then consecutive even, keep first of each run
     }
@@ -513,7 +513,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [{ cat = "a", val = 1 }, { cat = "a", val = 2 }, { cat = "b", val = 3 }] }
             let deduped = deque::dedup_by { d = d, f = { val } -> val.cat }
-            deque::length { d = deduped }
+            deque::size { d = deduped }
             """);
         assertEquals(2L, result);  // First "a" and first "b"
     }
@@ -528,7 +528,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3] }
             let interspersed = deque::intersperse { d = d, sep = 0 }
-            deque::length { d = interspersed }
+            deque::size { d = interspersed }
             """);
         assertEquals(5L, result);  // [1, 0, 2, 0, 3]
     }
@@ -552,7 +552,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [42] }
             let interspersed = deque::intersperse { d = d, sep = 0 }
-            deque::length { d = interspersed }
+            deque::size { d = interspersed }
             """);
         assertEquals(1L, result);  // No separator needed
     }
@@ -579,7 +579,7 @@ class DequeAndSortedCollectionsTest {
             let d1 = deque::from_seq { xs = [1, 2, 3] }
             let d2 = deque::from_seq { xs = ["a", "b", "c"] }
             let zipped = deque::zip { d1 = d1, d2 = d2 }
-            deque::length { d = zipped }
+            deque::size { d = zipped }
             """);
         assertEquals(3L, result);
     }
@@ -591,7 +591,7 @@ class DequeAndSortedCollectionsTest {
             let d1 = deque::from_seq { xs = [1, 2, 3, 4, 5] }
             let d2 = deque::from_seq { xs = ["a", "b"] }
             let zipped = deque::zip { d1 = d1, d2 = d2 }
-            deque::length { d = zipped }
+            deque::size { d = zipped }
             """);
         assertEquals(2L, result);
     }
@@ -616,7 +616,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = ["a", "b", "c"] }
             let indexed = deque::zip_with_index { d = d }
-            deque::length { d = indexed }
+            deque::size { d = indexed }
             """);
         assertEquals(3L, result);
     }
@@ -683,7 +683,7 @@ class DequeAndSortedCollectionsTest {
             use std::collections::deque
             let d = deque::from_seq { xs = [1, 2, 3, 4, 5] }
             let rotated = deque::rotate_left { d = d, n = 3 }
-            deque::length { d = rotated }
+            deque::size { d = rotated }
             """);
         assertEquals(5L, result);
     }
@@ -823,7 +823,7 @@ class DequeAndSortedCollectionsTest {
             let s3 = set::insert { s = s2, x = 2 }
             let s4 = set::insert { s = s3, x = 3 }
             let d = deque::from_set { s = s4 }
-            deque::length { d = d }
+            deque::size { d = d }
             """);
         assertEquals(3L, result);
     }
@@ -854,7 +854,7 @@ class DequeAndSortedCollectionsTest {
             let s2 = sorted_set::add { s = s, x = 20 }
             let s3 = sorted_set::add { s = s2, x = 30 }
             let d = deque::from_sorted_set { s = s3 }
-            deque::length { d = d }
+            deque::size { d = d }
             """);
         assertEquals(3L, result);
     }
@@ -872,7 +872,7 @@ class DequeAndSortedCollectionsTest {
             let m2 = map::insert { m = m, k = "a", v = 1 }
             let m3 = map::insert { m = m2, k = "b", v = 2 }
             let d = deque::from_map { m = m3 }
-            deque::length { d = d }
+            deque::size { d = d }
             """);
         assertEquals(2L, result);
     }
@@ -1312,7 +1312,7 @@ class DequeAndSortedCollectionsTest {
             let collected = sorted_set::collect_seq { set = s5, f = { val } ->
                 if val > 2 then Some { val = val * 10 } else None
             }
-            seq::length { xs = collected }
+            seq::size { xs = collected }
             """);
         assertEquals(2L, result);  // [30, 40]
     }
@@ -1346,7 +1346,7 @@ class DequeAndSortedCollectionsTest {
             let collected = sorted_set::collect_list { set = s3, f = { val } ->
                 if val % 2 == 1 then Some { val = val } else None
             }
-            list::length { xs = collected }
+            list::size { xs = collected }
             """);
         assertEquals(2L, result);  // [1, 3]
     }

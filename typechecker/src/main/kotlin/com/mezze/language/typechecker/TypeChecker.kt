@@ -140,9 +140,16 @@ class TypeChecker(
 
         /**
          * Type checking failed.
+         *
+         * `typedModule` carries the partial TypedAST when a recoverable error
+         * doesn't prevent us from emitting one (constraint-solve errors in
+         * one decl, validation failures, etc.). The LSP uses this for hover,
+         * inlay hints, and go-to-def of *other* decls in the same file —
+         * without it, a single error wipes out type info for the whole file.
          */
         data class Failure(
-            val errors: List<TypeCheckError>
+            val errors: List<TypeCheckError>,
+            val typedModule: com.mezze.language.typedast.TypedModule? = null
         ) : TypeCheckResult()
     }
 
@@ -349,22 +356,46 @@ class TypeChecker(
         val perBindingSubstitution = programConstraintResult.perBindingSubstitution
         val collectedTypeCheckErrors = programConstraintResult.collectedTypeCheckErrors
 
+        // Errors accumulated through this checker run. Any error mode that
+        // doesn't make subsequent phases unsafe goes here and we keep going,
+        // so we can still emit a TypedAST for the surviving decls. The LSP
+        // (and other tools) use that partial TypedAST for hover, inlay,
+        // and go-to-def — without it, one broken decl would wipe out type
+        // info for the whole file. Final disposition: if non-empty at the
+        // end, return Failure(collectedErrors, partialTypedModule).
+        val collectedErrors = mutableListOf<TypeCheckError>()
+
         // Check for collected TypeCheckErrors (from recovery — preserves metadata)
         if (collectedTypeCheckErrors.isNotEmpty()) {
-            // Re-throw the first one to preserve metadata (errorType, field info, etc.)
-            throw collectedTypeCheckErrors.first()
+            // When there's exactly one collected error, throw it as-is —
+            // tests assert on .metadata / .errorType which only the
+            // exception form carries. When multiple, return Failure so
+            // result-API callers (mez check) can display them all (#218).
+            if (collectedTypeCheckErrors.size == 1) {
+                throw collectedTypeCheckErrors.first()
+            }
+            collectedErrors.addAll(collectedTypeCheckErrors.map { e ->
+                TypeCheckError(
+                    phase = "Type Checking",
+                    message = e.message ?: "Type checking failed",
+                    loc = e.loc
+                )
+            })
+            // Don't return early — keep flowing so we can emit a partial
+            // TypedAST for editor support. Later phases tolerate per-decl
+            // failures (the constraint solver's per-binding pass already
+            // recorded these errors for the affected decl only).
         }
 
         // Check for per-binding solve errors
         if (perBindingSolveErrors.isNotEmpty()) {
-            val errors = perBindingSolveErrors.map { error ->
+            collectedErrors.addAll(perBindingSolveErrors.map { error ->
                 TypeCheckError(
                     phase = "Constraint Solving",
                     message = error.message,
                     loc = error.constraint.loc
                 )
-            }
-            return TypeCheckResult.Failure(errors)
+            })
         }
 
         // Check for undefined variables BEFORE solving constraints
@@ -412,10 +443,23 @@ class TypeChecker(
                     } else {
                         val candidateNames = allVariables.keys.map { key -> key.toKeyString() }
                         val similarNames = validator.findSimilarNames(undefinedVar.name, candidateNames)
+                        // Prelude-stripped name hint: the prelude deliberately drops
+                        // free-function bindings (option::fold vs seq::fold name
+                        // collisions) and only keeps inherent impls. If the user
+                        // wrote `fold {…}` bare, it's nearly always either a method
+                        // call (`xs.fold {…}`) or a qualified import they forgot.
+                        // Surface the inherent-impl carriers from the precompiled
+                        // prelude so the message points at the fix.
+                        val preludeMethodCarriers = findPreludeMethodCarriers(undefinedVar.name)
                         buildString {
                             append("Undefined variable or function: ${undefinedVar.name}")
                             if (similarNames.isNotEmpty()) {
                                 append(". Did you mean: ${similarNames.joinToString()}")
+                            }
+                            if (preludeMethodCarriers.isNotEmpty()) {
+                                val carriers = preludeMethodCarriers.take(3).joinToString(", ")
+                                append(". '${undefinedVar.name}' is available as a method on $carriers")
+                                append(" — try `<receiver>.${undefinedVar.name} {…}` or import the function explicitly")
                             }
                         }
                     }
@@ -426,20 +470,22 @@ class TypeChecker(
                     loc = undefinedVar.loc
                 )
             }
-            return TypeCheckResult.Failure(errors)
+            collectedErrors.addAll(errors)
+            // Don't return — undefined-var errors are local to one binding's
+            // constraint result; subsequent phases substitute a free TypeVar
+            // and continue.
         }
 
         // Check for duplicate bindings BEFORE solving constraints
         val duplicateBindings = constraintResults.values.flatMap { it.duplicateBindings }
         if (duplicateBindings.isNotEmpty()) {
-            val errors = duplicateBindings.map { duplicate ->
+            collectedErrors.addAll(duplicateBindings.map { duplicate ->
                 TypeCheckError(
                     phase = "Validation",
                     message = "Duplicate binding: '${duplicate.name}' is already defined in this scope",
                     loc = duplicate.loc
                 )
-            }
-            return TypeCheckResult.Failure(errors)
+            })
         }
 
         // Collect unused variable warnings
@@ -466,14 +512,24 @@ class TypeChecker(
 
         when (solveResult) {
             is ConstraintSolver.SolveResult.Failure -> {
-                val errors = solveResult.errors.map { error ->
+                // Global solve failed. Per-binding solving in
+                // ConstraintGenerator already recorded a per-decl error
+                // for the same root cause; the global pass typically
+                // re-discovers it via ability/has-field constraints. So
+                // dedupe and bail. We don't have a typedModule yet (it's
+                // built later in the Success branch) — for editors,
+                // they'll keep seeing the LAST successful typedModule
+                // via lastSuccessfulResult, which is good enough.
+                collectedErrors.addAll(solveResult.errors.map { error ->
                     TypeCheckError(
                         phase = "Constraint Solving",
                         message = error.message,
                         loc = error.constraint.loc
                     )
-                }
-                return TypeCheckResult.Failure(errors)
+                })
+                val seen = mutableSetOf<Pair<com.mezze.language.parsedast.Loc?, String>>()
+                val deduped = collectedErrors.filter { e -> seen.add(e.loc to e.message) }
+                return TypeCheckResult.Failure(errors = deduped, typedModule = null)
             }
             is ConstraintSolver.SolveResult.Success -> {
                 val substitution = solveResult.substitution.compose(perBindingSubstitution)
@@ -507,6 +563,11 @@ class TypeChecker(
                         acc + r.methodCallResolutions
                     }
 
+                val allCallReturnTypes = constraintResults.values
+                    .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType>()) { acc, r ->
+                        acc + r.callReturnTypes
+                    }
+
                 // PHASE 4: Validate Constraints
                 val validator = TypeValidator(
                     context,
@@ -518,14 +579,17 @@ class TypeChecker(
                 val constraintValidation = validator.validateConstraints(allConstraints, substitution)
                 when (constraintValidation) {
                     is ValidationResult.Failure -> {
-                        val errors = constraintValidation.errors.map { error ->
+                        // Validation errors are non-fatal for editor support
+                        // — keep flowing so the LSP gets a TypedAST. Final
+                        // disposition is decided by the bottom of this
+                        // method via `collectedErrors`.
+                        collectedErrors.addAll(constraintValidation.errors.map { error ->
                             TypeCheckError(
                                 phase = "Validation",
                                 message = error.message(),
                                 loc = error.location()
                             )
-                        }
-                        return TypeCheckResult.Failure(errors)
+                        })
                     }
                     is ValidationResult.Success -> {
                         constraintValidation.warnings.forEach { msg ->
@@ -554,7 +618,8 @@ class TypeChecker(
                         implDeclarations = buildResult.implDeclarations,
                         tailCallLocations = tailCallLocations,
                         mustBeOpenRowVars = mustBeOpenRowVars,
-                        methodCallResolutions = allMethodCallResolutions
+                        methodCallResolutions = allMethodCallResolutions,
+                        callReturnTypes = allCallReturnTypes
                     )
                     val typed = builder.build(parsedModule)
 
@@ -687,10 +752,9 @@ class TypeChecker(
 
                 val v2ValidationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution)
                 if (v2ValidationResult is ValidationResult.Failure) {
-                    val mapped = v2ValidationResult.errors.map { error ->
+                    collectedErrors.addAll(v2ValidationResult.errors.map { error ->
                         TypeCheckError(phase = "Validation", message = error.message(), loc = error.location())
-                    }
-                    return TypeCheckResult.Failure(mapped)
+                    })
                 }
 
                 // Build typeContext from constraint results + substitution
@@ -701,6 +765,24 @@ class TypeChecker(
                 val validationWarnings = if (v2ValidationResult is ValidationResult.Success) {
                     v2ValidationResult.warnings.map { TypeCheckWarning(message = it, loc = null) }
                 } else emptyList()
+
+                // Final disposition. If we accumulated any non-fatal errors
+                // along the way (constraint solve, validation, undefined
+                // vars), return Failure but include the partial typedModule
+                // so editor tooling can still hover/inlay/cmd-click into the
+                // surviving decls. Otherwise return Success.
+                if (collectedErrors.isNotEmpty()) {
+                    // Dedupe — per-binding solve, global solve, and global
+                    // validation can each surface the same error.
+                    val seen = mutableSetOf<Pair<com.mezze.language.parsedast.Loc?, String>>()
+                    val deduped = collectedErrors.filter { e ->
+                        seen.add(e.loc to e.message)
+                    }
+                    return TypeCheckResult.Failure(
+                        errors = deduped,
+                        typedModule = emittedTypedModule
+                    )
+                }
                 return TypeCheckResult.Success(
                     substitution = substitution,
                     importContext = importContext,
@@ -737,36 +819,19 @@ class TypeChecker(
         // Return cached prelude if available
         cachedPreludeContext?.let { return it }
 
-        // Load prelude module list from _prelude.mz (compiler-internal, not user-importable)
+        // Load prelude module list from _prelude.mz (compiler-internal, not user-importable).
+        // The resource MUST be present — the build pipeline ships it inside the
+        // runtime jar and the gradle compileStdlib task uses it as the source
+        // of truth. A missing resource is a build bug, not a runtime fallback,
+        // so fail loudly instead of using a stale hardcoded list (issue #222).
         val preludeSource = ModuleResolver.readStdlibFile("stdlib/std/_prelude.mz")
             ?: ModuleResolver.readStdlibFile("std/_prelude.mz")
-        val syntheticModule = if (preludeSource != null) {
-            MezzeParser().parseParsedModule(preludeSource, file = "<prelude>")
-        } else {
-            // Fallback: hardcoded list if _prelude.mz not found
-            val preludeModules = listOf(
-                listOf("std", "int"), listOf("std", "float"), listOf("std", "nat"), listOf("std", "frac"),
-                listOf("std", "bool"), listOf("std", "str"), listOf("std", "char"),
-                listOf("std", "option"), listOf("std", "result"),
-                listOf("std", "collections", "seq"), listOf("std", "collections", "list"),
-                listOf("std", "collections", "map"), listOf("std", "collections", "set"),
-                listOf("std", "collections", "deque"), listOf("std", "collections", "sorted_map"),
-                listOf("std", "collections", "sorted_set"), listOf("std", "collections", "nonemptylist"),
-                listOf("std", "collections", "bytes"),
+            ?: error(
+                "Compiler internal error: stdlib/std/_prelude.mz not found on the classpath. " +
+                "This file is required to bootstrap the prelude. Rebuild the runtime jar via " +
+                "`./gradlew :cli:installRuntime` (or `installNative`)."
             )
-            val syntheticLoc = com.mezze.language.parsedast.Loc("<prelude>", 0, 0, 0, 0)
-            com.mezze.language.parsedast.ParsedModule(
-                path = "<prelude>",
-                decls = preludeModules.map { segments ->
-                    com.mezze.language.parsedast.ParsedUseDecl(
-                        path = com.mezze.language.parsedast.ParsedUsePath.Module(
-                            com.mezze.language.parsedast.ParsedModulePath(segments), syntheticLoc
-                        ),
-                        loc = syntheticLoc
-                    )
-                }
-            )
-        }
+        val syntheticModule = MezzeParser().parseParsedModule(preludeSource, file = "<prelude>")
 
         val result = importResolver.resolveImports(syntheticModule)
         val preludeContext = when (result) {
@@ -783,7 +848,14 @@ class TypeChecker(
                     importedAbilities = emptyMap(),
                     importedEffects = emptyMap(),
                     importedImpls = emptyMap(),
-                    importedAbilityImpls = ctx.importedAbilityImpls
+                    importedAbilityImpls = ctx.importedAbilityImpls,
+                    // Carry the inferred return types so anonymous-impl method calls
+                    // (`xs.length {}`, `i.abs {}`, `s.to_upper {}`) infer concrete
+                    // return types instead of `'a`. Issue #213.
+                    inherentImplOpReturnTypes = ctx.inherentImplOpReturnTypes,
+                    // Carry the inferred PARAM types so callers can't pass a
+                    // non-function where the impl op expects one (#230).
+                    inherentImplOpParamTypes = ctx.inherentImplOpParamTypes
                 )
             }
             is ImportResolutionResult.Failure -> ModuleImportContext.empty()
@@ -794,6 +866,41 @@ class TypeChecker(
     }
 
     // Prelude cache is in the companion object below
+
+    /**
+     * For an unresolved name, return the type-constructor names of any
+     * prelude inherent impls whose operations include that name.
+     *
+     * Powers the "use method syntax" hint on undefined-variable errors:
+     * when the user writes `fold {…}` bare, the prelude strips the free
+     * function bindings but keeps the inherent impls — so `xs.fold {…}`
+     * resolves while bare `fold` doesn't. Surfacing the carrier types
+     * (Seq, Option, Result, …) tells the user how to call it.
+     *
+     * Returns at most a handful of carrier names, deduplicated.
+     */
+    private fun findPreludeMethodCarriers(name: String): List<String> {
+        val precompiled = try { PrecompiledStdlib } catch (_: Exception) { return emptyList() }
+        // During stdlib precompile, this can fire while PrecompiledStdlib itself
+        // is mid-<clinit> (typecheck of one stdlib module surfaces an undefined
+        // name; that module's error path lands here before preludeImportContext
+        // is assigned). Treat the recursive case as "no carriers".
+        val ctx = try { precompiled.preludeImportContext } catch (_: Throwable) { return emptyList() }
+        @Suppress("SENSELESS_COMPARISON") if (ctx == null) return emptyList()
+        val carriers = mutableListOf<String>()
+        for ((_, impl) in ctx.importedAbilityImpls) {
+            if (!impl.isInherent) continue
+            if (impl.operations.none { it.name == name }) continue
+            val target = impl.targetTypes.firstOrNull() ?: continue
+            val targetName = when (target) {
+                is com.mezze.language.parsedast.ParsedNamedType -> target.name
+                is com.mezze.language.parsedast.ParsedTypeApp -> target.constructor
+                else -> null
+            } ?: continue
+            if (targetName !in carriers) carriers.add(targetName)
+        }
+        return carriers
+    }
 
     /**
      * Check if a qualified name (like "module::function") refers to an item
@@ -946,7 +1053,13 @@ class TypeChecker(
             if (implDecl.isInherent) {
                 // Inherent impls need both AbilityImplInfo AND InherentMethodInfo registered.
                 // Use registerImportedInherentImpl to bypass validation (already validated in home module).
-                context = contextBuilder.registerImportedInherentImpl(context, implDecl, implKey)
+                val opReturnTypes = importContext.inherentImplOpReturnTypes[implKey].orEmpty()
+                val opParamTypes = importContext.inherentImplOpParamTypes[implKey].orEmpty()
+                context = contextBuilder.registerImportedInherentImpl(
+                    context, implDecl, implKey,
+                    opReturnTypes = opReturnTypes,
+                    opParamTypes = opParamTypes
+                )
             } else {
                 // Named ability impls only need AbilityImplInfo
                 // Extract type variable names from abilityTypeArgs for structural matching

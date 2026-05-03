@@ -58,7 +58,7 @@ public class PreludeIntegrationTest {
     void seqMethodsWithUse() {
         Object result = MezzeTestHelper.run("""
             use std::collections::seq
-            [1, 2, 3].map {f = {x} -> x * 2}.length {}
+            [1, 2, 3].map {f = {x} -> x * 2}.size {}
         """);
         assertEquals(3L, result);
     }

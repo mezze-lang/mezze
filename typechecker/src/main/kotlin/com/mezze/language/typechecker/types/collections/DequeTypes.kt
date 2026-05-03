@@ -158,11 +158,11 @@ object DequeTypes {
             )
         }
 
-        // __native_deque_length: {d: Deque 'a} -> Int
+        // __native_deque_size: {d: Deque 'a} -> Int
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
             val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
-            context["__native_deque_length"] = MezzeType.FunctionType(
+            context["__native_deque_size"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 MezzeType.IntType
             )

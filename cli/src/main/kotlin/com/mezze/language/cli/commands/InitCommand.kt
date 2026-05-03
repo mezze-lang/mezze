@@ -290,7 +290,7 @@ class InitCommand {
                 .parseParsedModule(source, file = appFile.name)
 
             val typeChecker = com.mezze.language.typechecker.TypeChecker()
-            val result = typeChecker.typeCheck(ast, projectDir.toPath())
+            val result = typeChecker.typeCheck(ast, projectDir.toPath(), enablePrelude = true)
             if (result.loweredFunctions.isEmpty()) return  // template didn't compile cleanly; skip silently
 
             val depParsed = com.mezze.language.typechecker.ModuleResolver

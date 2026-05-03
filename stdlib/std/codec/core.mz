@@ -1,48 +1,18 @@
-# std/codec/core.mz - Core serialization/deserialization abilities
-#
-# This module defines the codec system for Mezze - a type-safe, automatic
-# serialization framework.
-#
-# Architecture:
-# - Tier 1 (default): Build intermediate representation (AST), then convert to output
-#   - Flexible: inspect, manipulate AST before final conversion
-#   - Good for most use cases
-# - Tier 2 (streaming): Write directly to ByteBuffer
-#   - Performance: no intermediate allocations
-#   - Use for large data (>100MB)
-#
-# The TypeChecker automatically generates Encode/Decode implementations
-# for any serializable type at the call site.
-#
-# Example:
-#   use std::codec::{Encode, default_config}
-#   use std::codec::json
-#
-#   let user = {name = "Alice", age = 30}
-#
-#   # Encode to bytes (via JSON AST) — receiver is the data
-#   let bytes: Result Bytes EncodeError = user.encode { fmt = json::utf8, config = default_config }
-#
-#   # Encode to string
-#   let str: Result Str EncodeError = user.encode { fmt = json::string, config = default_config }
-#
-#   # Get AST for inspection/manipulation
-#   let ast: Result Json EncodeError = user.encode_repr { fmt = json::utf8, config = default_config }
 use std::str
 use std::int
 use std::collections::seq
 use std::collections::bytes
 use std::abilities::convert::{ Into, TryInto }
+
 # =============================================================================
 # ERROR TYPES
 # =============================================================================
 # Error returned when encoding fails
-
 pub type EncodeError = { path: [Str], message: Str }
 
 pub type DecodeError = {
-  path: [Str],  # Path to the field that failed (e.g., ["user", "address"])
-  message: Str,  # Human-readable error message
+  path: [Str],
+  message: Str,
   expected: Str,
   found: Option Str,
 }
@@ -64,7 +34,7 @@ pub type CodecConfig = {
   indent: Option Int,
 }
 
-pub let default_config: CodecConfig = {
+pub let default_config : CodecConfig = {
   field_transform = Identity,
   null_handling = IncludeNull,
   sort_keys = False,
@@ -181,15 +151,17 @@ ability StreamDecode 'a for 'bytes where {
   stream_decode: { offset: Int, fmt: 'fmt, config: CodecConfig } -> Result { value: 'a, offset: Int } DecodeError
 }
 
-pub let empty_path: [Str] = []
+pub let empty_path : [Str] = []
 
 pub let append_path = { path: [Str], field: Str } -> seq::add { xs = path, x = field }
 
-pub let append_index = { path: [Str], index: Int } -> seq::add { xs = path, x = int::to_str { n = index } }
+pub let append_index = { path: [Str], index: Int } ->
+  seq::add { xs = path, x = int::to_str { n = index } }
 
 pub let format_path = { path: [Str] } -> if seq::is_empty { xs = path } then "<root>" else str::join { strings = path, separator = "." }
 
-pub let encode_error = { path: [Str], message: Str } -> Err { error = { path = path, message = message } }
+pub let encode_error = { path: [Str], message: Str } ->
+  Err { error = { path = path, message = message } }
 
 pub let decode_error = { path: [Str], message: Str, expected: Str, found: Option Str } ->
   Err {
@@ -214,7 +186,6 @@ impl TryInto Str DecodeError for Bytes where {
     }
 
 }
-
 # Human-readable error message
 # Error returned when decoding fails
 # Path to the field that failed

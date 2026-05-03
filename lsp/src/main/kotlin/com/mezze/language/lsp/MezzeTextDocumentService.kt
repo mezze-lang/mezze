@@ -143,35 +143,27 @@ class MezzeTextDocumentService(
             entryFilePath = entry?.let { File(projectRoot, it).absolutePath }
             server.logInfo("Using project store at ${SQLiteMezzeStore.resolveCacheFile(projectRoot).absolutePath} (package=$packageName, entry=$entry)")
 
-            // Slice G: at workspace open we don't yet know which file
-            // the user will edit, so only pre-warm stdlib (always
-            // needed for any typecheck). User modules hydrate
-            // lazily — `ModuleResolver.resolveModule` consults
-            // `parsed_modules` (slice A) and `typed_modules` on
-            // demand when a typecheck imports them.
+            // Stdlib hydration removed (#233): the previous code populated
+            // ModuleTypeChecker.globalCache from cache.sqlite for every
+            // `std::*` module — but used `hydrateFromV2Module` which sets
+            // `parsedModule = null` on the wrapper. Downstream code in
+            // `TypeChecker.checkParsedModule` walks
+            // `getAllCachedModules().parsedModule.decls` to harvest
+            // transitive `ParsedAbilityDecl` / `ParsedEffectDecl` (lines
+            // ~317 and ~336). With null parsedModule, these loops yield
+            // nothing — and built-in abilities like NumMul/NumAdd
+            // disappear from the resolution context. The user's
+            // `xs |> seq::map { ... f = { x } -> x * 2 }` then fails
+            // with "Cannot use '*' with Int" while `mez check` (which
+            // never hydrates) typechecks fine.
+            //
+            // PrecompiledStdlib's fast-path mergeInto already injects
+            // every prelude binding/ability/effect into the typing
+            // context directly — no globalCache pre-warm needed.
+            // User modules still hydrate lazily via ModuleResolver on
+            // first import.
             val store = projectStore!!
-            val stats = StoreHydration.hydrateTypedModules(
-                store,
-                hydrate = { modulePath, blob ->
-                    try {
-                        val v2 = CodebaseSerialization.deserializeTypedModule(blob)
-                        com.mezze.language.typechecker.module.ModuleTypeChecker
-                            .hydrateFromV2Module(modulePath, v2)
-                        true
-                    } catch (_: Exception) {
-                        false
-                    }
-                },
-                include = { mod ->
-                    // Stdlib modules live in stdlib.sqlite; identify
-                    // them by path prefix (the file is the scope, no
-                    // category column any more).
-                    mod.path.startsWith("std::")
-                }
-            )
-            server.logInfo(
-                "Hydrated stdlib typed modules: ${stats.hits} hit, ${stats.misses} miss (${stats.elapsedMs}ms)"
-            )
+            server.logInfo("Project store opened: ${SQLiteMezzeStore.resolveCacheFile(rootFile).absolutePath}")
         } catch (e: Exception) {
             server.logError("Failed to create store: ${e.message}")
             e.printStackTrace()
@@ -366,21 +358,28 @@ class MezzeTextDocumentService(
                 filePath?.parent ?: Paths.get(".")
             }
 
-            val result = typeChecker.checkParsedModule(parsedModule, projectRoot, null)
+            val result = typeChecker.checkParsedModule(parsedModule, projectRoot, null, enablePrelude = true)
 
             typeAliases = typeChecker.getTypeAliases()
 
             when (result) {
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success -> {
-                    // Collect warnings
+                    // Collect warnings — same Loc-to-LSP-range conversion
+                    // as the error path below; without endLine/endColumn the
+                    // squiggle collapses to one character.
                     result.warnings.forEach { warning ->
-                        val line = warning.loc?.startLine?.minus(1) ?: 0
-                        val column = warning.loc?.startCol?.minus(1) ?: 0
+                        val loc = warning.loc
+                        val line = loc?.startLine?.minus(1) ?: 0
+                        val column = loc?.startCol?.minus(1) ?: 0
+                        val endLine = loc?.endLine?.minus(1)
+                        val endColumn = loc?.endCol
                         diagnostics.add(createDiagnostic(
                             message = warning.message,
                             severity = DiagnosticSeverity.Warning,
                             line = line,
-                            column = column
+                            column = column,
+                            endLine = endLine,
+                            endColumn = endColumn
                         ))
                     }
 
@@ -483,14 +482,36 @@ class MezzeTextDocumentService(
                 }
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> {
                     result.errors.forEach { error ->
-                        val line = error.loc?.startLine?.minus(1) ?: 0
-                        val column = error.loc?.startCol?.minus(1) ?: 0
+                        // Mezze Loc is 1-indexed inclusive on both ends.
+                        // LSP wants 0-indexed half-open [start, end), so:
+                        //   start = (line-1, col-1)
+                        //   end   = (endLine-1, endCol)        ← exclusive
+                        // Passing only `line + column` shrinks the squiggle to
+                        // a single character — see #228 / user report.
+                        val loc = error.loc
+                        val line = loc?.startLine?.minus(1) ?: 0
+                        val column = loc?.startCol?.minus(1) ?: 0
+                        val endLine = loc?.endLine?.minus(1)
+                        val endColumn = loc?.endCol
                         diagnostics.add(createDiagnostic(
                             message = error.message,
                             severity = DiagnosticSeverity.Error,
                             line = line,
-                            column = column
+                            column = column,
+                            endLine = endLine,
+                            endColumn = endColumn
                         ))
+                    }
+                    // Even on Failure, the typechecker may emit a partial
+                    // typedModule for the decls that DID solve. Hand it to
+                    // the LSP state so hover/inlay/cmd-click on surviving
+                    // decls keep working — without this, one broken decl
+                    // wipes out type info for the whole file.
+                    val partialTyped = result.typedModule
+                    if (partialTyped != null) {
+                        typeCheckResult = TypeCheckResult(
+                            typedModule = partialTyped
+                        )
                     }
                 }
             }
@@ -586,7 +607,13 @@ class MezzeTextDocumentService(
         parsed: com.mezze.language.parsedast.ParsedModule,
         typed: com.mezze.language.typedast.TypedModule
     ): List<Diagnostic> {
-        val referenced = collectReferencedNames(typed)
+        val referenced = collectReferencedNames(typed).toMutableSet()
+        // TypedVar drops the qualifier — `seq::filter` ends up as
+        // TypedVar(name = "filter"). The unused-import check then never
+        // sees `seq` as referenced, even though the user clearly is using
+        // the import. Walk the parsed AST to recover qualifier short
+        // names (the first segment of each `::`-qualified ref).
+        collectParsedQualifiers(parsed, referenced)
         val out = mutableListOf<Diagnostic>()
 
         for (decl in parsed.decls) {
@@ -633,6 +660,63 @@ class MezzeTextDocumentService(
                     if (local in referenced) null else local
                 }
             }
+        }
+    }
+
+    /**
+     * Walk the parsed module's let/expr trees collecting every qualifier's
+     * short name. For `seq::filter { ... }` the parsed identifier is
+     * `ParsedIdentifier(localName = "filter", qualifier = ["seq"])` —
+     * we add `"seq"` to the referenced set so a `use std::collections::seq`
+     * is correctly counted as used.
+     */
+    private fun collectParsedQualifiers(
+        parsed: com.mezze.language.parsedast.ParsedModule,
+        referenced: MutableSet<String>
+    ) {
+        fun walk(expr: com.mezze.language.parsedast.ParsedExpr) {
+            when (expr) {
+                is com.mezze.language.parsedast.ParsedIdentifier -> {
+                    expr.qualifier?.segments?.firstOrNull()?.let { referenced.add(it) }
+                }
+                is com.mezze.language.parsedast.ParsedFunctionCall -> {
+                    walk(expr.function); walk(expr.arguments)
+                }
+                is com.mezze.language.parsedast.ParsedLambda -> walk(expr.body)
+                is com.mezze.language.parsedast.ParsedRecordLit -> {
+                    for (entry in expr.entries) when (entry) {
+                        is com.mezze.language.parsedast.ParsedRecordEntry.Field -> entry.value?.let { walk(it) }
+                        is com.mezze.language.parsedast.ParsedRecordEntry.Spread -> walk(entry.expr)
+                    }
+                }
+                is com.mezze.language.parsedast.ParsedMemberAccess -> walk(expr.receiver)
+                is com.mezze.language.parsedast.ParsedPipe -> { walk(expr.left); walk(expr.right) }
+                is com.mezze.language.parsedast.ParsedIf -> {
+                    walk(expr.condition); walk(expr.thenBranch); walk(expr.elseBranch)
+                }
+                is com.mezze.language.parsedast.ParsedMatch -> {
+                    walk(expr.scrutinee)
+                    for (case in expr.cases) {
+                        case.guard?.let { walk(it) }
+                        walk(case.body)
+                    }
+                }
+                is com.mezze.language.parsedast.ParsedSeqLit -> for (e in expr.elements) when (e) {
+                    is com.mezze.language.parsedast.ParsedSeqElement.Regular -> walk(e.expr)
+                    is com.mezze.language.parsedast.ParsedSeqElement.Spread -> walk(e.expr)
+                }
+                is com.mezze.language.parsedast.ParsedDo -> walk(expr.result)
+                is com.mezze.language.parsedast.ParsedPerform -> walk(expr.body)
+                is com.mezze.language.parsedast.ParsedEffectCall -> walk(expr.arguments)
+                is com.mezze.language.parsedast.ParsedParens -> walk(expr.expr)
+                is com.mezze.language.parsedast.ParsedBinaryOp -> { walk(expr.left); walk(expr.right) }
+                is com.mezze.language.parsedast.ParsedUnaryOp -> walk(expr.operand)
+                is com.mezze.language.parsedast.ParsedVariantConstruct -> expr.value?.let { walk(it) }
+                else -> { /* literals + nodes that carry no Identifier */ }
+            }
+        }
+        for (decl in parsed.decls) {
+            if (decl is com.mezze.language.parsedast.ParsedLetDecl) walk(decl.value)
         }
     }
 
@@ -746,6 +830,8 @@ class MezzeTextDocumentService(
             severity = DiagnosticSeverity.Error,
             line = (loc?.startLine ?: 1) - 1,
             column = (loc?.startCol ?: 1) - 1,
+            endLine = loc?.endLine?.minus(1),
+            endColumn = loc?.endCol,
             code = error.phase
         )
     }
@@ -767,6 +853,8 @@ class MezzeTextDocumentService(
             severity = DiagnosticSeverity.Error,
             line = (loc?.startLine ?: 1) - 1,
             column = (loc?.startCol ?: 1) - 1,
+            endLine = loc?.endLine?.minus(1),
+            endColumn = loc?.endCol,
             code = error.errorType.name
         )
     }
@@ -852,8 +940,18 @@ class MezzeTextDocumentService(
                     val expr = lookup.expr
                     val typeStr = formatType(expr.type)
                     return when (expr) {
-                        is com.mezze.language.typedast.TypedVar -> codeBlock("${expr.name} : $typeStr")
-                        is com.mezze.language.typedast.TypedFieldAccess -> codeBlock(".${expr.field} : $typeStr")
+                        is com.mezze.language.typedast.TypedVar -> {
+                            val abilityHover = result?.let { renderAbilityMethodHover(expr.name, it, state) }
+                            abilityHover ?: codeBlock("${expr.name} : $typeStr")
+                        }
+                        is com.mezze.language.typedast.TypedFieldAccess -> {
+                            // Method-call syntax often surfaces here as a
+                            // pseudo field-access; if the field name matches
+                            // an ability operation in scope, prefer the
+                            // richer `Ability.method : T` hover.
+                            val abilityHover = result?.let { renderAbilityMethodHover(expr.field, it, state) }
+                            abilityHover ?: codeBlock(".${expr.field} : $typeStr")
+                        }
                         is com.mezze.language.typedast.TypedCall -> codeBlock("$typeStr")
                         else -> codeBlock(typeStr)
                     }
@@ -961,6 +1059,68 @@ class MezzeTextDocumentService(
     }
 
     /**
+     * Render hover info for a method-name token (`.first`, `.is_some`,
+     * etc.) in a dot-call. Looks up the method name in:
+     *   1. user-defined abilities in scope (importedAbilities + local decls)
+     *   2. PrecompiledStdlib's prelude abilities (Sized, Eq, Ord, …)
+     * Returns `Ability.method : { it: 'a, … } -> RetT` plus the docstring
+     * when present. Returns null when no ability operation matches —
+     * caller falls back to the generic hover.
+     */
+    private fun renderAbilityMethodHover(
+        methodName: String,
+        result: TypeCheckResult,
+        state: DocumentState
+    ): String? {
+        fun codeBlock(code: String): String = "```mezze\n$code\n```"
+
+        // 1. User-defined / file-level abilities
+        val localAbilities = state.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>() ?: emptyList()
+        val candidates = mutableListOf<Pair<String, ParsedAbilityOp>>()
+        for (ability in result.importedAbilities.values + localAbilities) {
+            ability.operations.firstOrNull { it.name == methodName }?.let {
+                candidates.add(ability.name to it)
+            }
+        }
+        // 2. Stdlib + transitively-imported abilities — the prelude strips
+        // bindings/types/abilities from its returned context, so we have
+        // to query the project store for ABILITY decls and look at their
+        // operations directly. Same pattern as dot-completion step 4.
+        if (candidates.isEmpty()) {
+            val store = projectStore
+            if (store != null) {
+                try {
+                    for (declRow in store.getDeclsByKind(com.mezze.language.codebase.DeclKind.ABILITY)) {
+                        val blob = store.getBlob(declRow.hash) ?: continue
+                        val bytes = blob.typed ?: continue
+                        val typedAbility = try {
+                            com.mezze.language.codebase.CodebaseSerialization.deserializeTypedAbilityDecl(bytes)
+                        } catch (_: Throwable) { continue }
+                        val typedOp = typedAbility.operations.firstOrNull { it.name == methodName }
+                            ?: continue
+                        // Render the typed signature directly — no parsed
+                        // annotation needed.
+                        val sig = "${typedAbility.name}.${typedOp.name} : " +
+                            "${prettyPrintTypeWithAliases(typedOp.paramType, state.typeAliases)} -> " +
+                            prettyPrintTypeWithAliases(typedOp.returnType, state.typeAliases)
+                        return codeBlock(sig)
+                    }
+                } catch (_: Throwable) { /* store may not be open */ }
+            }
+        }
+        if (candidates.isEmpty()) return null
+
+        // Render the first candidate. If multiple abilities share a method
+        // name (rare — e.g. NumAdd.add vs Seq.add), the receiver type at
+        // dispatch picks one; we don't have that info here, so just show
+        // the first match. Listing all could be a follow-up.
+        val (abilityName, op) = candidates.first()
+        val sig = "$abilityName.${op.name} : ${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
+        val doc = op.doc?.takeIf { it.isNotBlank() }?.let { "\n\n$it" } ?: ""
+        return codeBlock(sig) + doc
+    }
+
+    /**
      * Format hover info for an ability declaration, showing all operations.
      */
     private fun formatAbilityHover(decl: ParsedAbilityDecl, fromModule: String?): String {
@@ -1031,7 +1191,101 @@ class MezzeTextDocumentService(
      * Stubbed — needs ParsedExpr scope walking to resolve local let bindings.
      */
     private fun findLocalBindingType(name: String, typedModule: com.mezze.language.typedast.TypedModule?, line: Int): MezzeType? {
+        if (typedModule == null) return null
+        // Find the top-level decl whose loc spans the cursor line.
+        for (decl in typedModule.decls) {
+            if (decl is com.mezze.language.typedast.TypedLetDecl &&
+                line >= decl.loc.startLine && line <= decl.loc.endLine
+            ) {
+                val found = searchLocalBindingInExpr(decl.value, name, line)
+                if (found != null) return found
+            }
+        }
         return null
+    }
+
+    /**
+     * Walk a typed expression looking for a binding of [name] introduced before [cursorLine].
+     * Returns the most-recently-shadowing match (largest startLine ≤ cursorLine).
+     */
+    private fun searchLocalBindingInExpr(
+        expr: com.mezze.language.typedast.TypedExpr,
+        name: String,
+        cursorLine: Int
+    ): MezzeType? {
+        var best: Pair<Int, MezzeType>? = null
+        fun consider(loc: Loc, type: MezzeType) {
+            if (loc.startLine > cursorLine) return
+            val cur = best
+            if (cur == null || loc.startLine > cur.first) best = loc.startLine to type
+        }
+        fun visit(e: com.mezze.language.typedast.TypedExpr) {
+            // Cursor must lie inside this expression's span (use endLine + 1 to be lenient on trailing edits).
+            if (cursorLine < e.loc.startLine || cursorLine > e.loc.endLine + 1) return
+            when (e) {
+                is com.mezze.language.typedast.TypedBlock -> {
+                    for (stmt in e.statements) {
+                        when (stmt) {
+                            is com.mezze.language.typedast.TypedStatement.Let -> {
+                                if (stmt.name == name) consider(stmt.loc, stmt.type)
+                                visit(stmt.value)
+                            }
+                            is com.mezze.language.typedast.TypedStatement.Expr -> visit(stmt.expr)
+                        }
+                    }
+                    visit(e.result)
+                }
+                is com.mezze.language.typedast.TypedLambda -> {
+                    for (p in e.params) {
+                        if (p.name == name) consider(p.loc, p.type)
+                    }
+                    visit(e.body)
+                }
+                is com.mezze.language.typedast.TypedIf -> { visit(e.condition); visit(e.thenBranch); visit(e.elseBranch) }
+                is com.mezze.language.typedast.TypedMatch -> {
+                    visit(e.scrutinee)
+                    for (case in e.cases) {
+                        for (b in case.bindings) {
+                            if (b.name == name) consider(b.loc, b.type)
+                        }
+                        for (ilb in case.ifLetBindings) visit(ilb.expr)
+                        case.guard?.let { visit(it) }
+                        visit(case.body)
+                    }
+                }
+                is com.mezze.language.typedast.TypedCall -> { visit(e.function); visit(e.arg) }
+                is com.mezze.language.typedast.TypedRecord -> {
+                    for (entry in e.entries) when (entry) {
+                        is com.mezze.language.typedast.TypedRecordEntry.Field -> visit(entry.value)
+                        is com.mezze.language.typedast.TypedRecordEntry.Spread -> visit(entry.expr)
+                    }
+                }
+                is com.mezze.language.typedast.TypedFieldAccess -> visit(e.record)
+                is com.mezze.language.typedast.TypedRecordUpdate -> {
+                    visit(e.record)
+                    for (entry in e.updates) when (entry) {
+                        is com.mezze.language.typedast.TypedRecordEntry.Field -> visit(entry.value)
+                        is com.mezze.language.typedast.TypedRecordEntry.Spread -> visit(entry.expr)
+                    }
+                }
+                is com.mezze.language.typedast.TypedVariantConstruct -> e.payload?.let { visit(it) }
+                is com.mezze.language.typedast.TypedSeq -> {
+                    for (el in e.elements) when (el) {
+                        is com.mezze.language.typedast.TypedSeqElement.Regular -> visit(el.expr)
+                        is com.mezze.language.typedast.TypedSeqElement.Spread -> visit(el.expr)
+                    }
+                }
+                is com.mezze.language.typedast.TypedPerform -> {
+                    for (h in e.handlers) h.params?.let { visit(it) }
+                    visit(e.body)
+                }
+                is com.mezze.language.typedast.TypedPerformOp -> visit(e.arg)
+                is com.mezze.language.typedast.TypedPipe -> { visit(e.left); visit(e.right) }
+                else -> { /* leaves: literals, TypedVar, TypedStringLit, etc. */ }
+            }
+        }
+        visit(expr)
+        return best?.second
     }
 
     /**
@@ -1091,23 +1345,38 @@ class MezzeTextDocumentService(
                 is TypedAstLookup.LookupResult.Expr -> {
                     val expr = lookup.expr
                     if (expr is com.mezze.language.typedast.TypedVar) {
-                        // Variable reference — find where it was defined
+                        // Variable reference — find where it was defined.
                         when (val binding = expr.binding) {
+                            // Local let bindings in the current file: walk
+                            // the typed module looking for `let <name> = …`.
                             is com.mezze.language.typedast.BindingRef.Local -> {
-                                // Local variable — find the let binding in current file
                                 val defLoc = findLocalBindingLoc(typedModule, expr.name)
                                 if (defLoc != null) return listOf(locToLocation(state.uri, defLoc))
                             }
+                            // Cross-module / stdlib reference. The `hash` is
+                            // the content hash of the imported decl. Look it
+                            // up in the project store, resolve the module
+                            // path to a file, and emit a Location at the
+                            // decl's source range. Falls back to the import
+                            // line if anything is missing (e.g. a fresh
+                            // workspace with empty store).
                             is com.mezze.language.typedast.BindingRef.ByHash -> {
-                                // Imported — find the import declaration
+                                val target = findCrossModuleDefLocation(binding.hash)
+                                if (target != null) return listOf(target)
                                 val importLoc = findImportLoc(state, expr.name)
                                 if (importLoc != null) return listOf(importLoc)
                             }
-                            is com.mezze.language.typedast.BindingRef.Param -> {
-                                // Lambda parameter — find the enclosing lambda
-                                // For now, point to current position
+                            // Lambda param (`{x} -> x + 1`) and captures:
+                            // both are name-based bindings inside the
+                            // current file. The same searcher used for
+                            // `Local` walks lambda params and match-pattern
+                            // bindings, so we just reuse it.
+                            is com.mezze.language.typedast.BindingRef.Param,
+                            is com.mezze.language.typedast.BindingRef.Capture -> {
+                                val defLoc = findLocalBindingLoc(typedModule, expr.name)
+                                if (defLoc != null) return listOf(locToLocation(state.uri, defLoc))
                             }
-                            is com.mezze.language.typedast.BindingRef.Capture -> {}
+                            // Native bindings have no source location.
                             is com.mezze.language.typedast.BindingRef.Native -> {}
                         }
                     }
@@ -1134,16 +1403,114 @@ class MezzeTextDocumentService(
             }
         }
 
-        // 3. Check imports — jump to the import source
+        // 3. Check imports — try the actual decl in its source module
+        // first (via store), fall back to the import line.
         if (result != null) {
             val import = result.resolvedImports.find { it.localName == word }
             if (import != null) {
+                val target = findCrossModuleDefLocationByName(import.modulePath, import.originalName)
+                if (target != null) return listOf(target)
                 val importLoc = findImportLoc(state, word)
                 if (importLoc != null) return listOf(importLoc)
             }
         }
 
         return emptyList()
+    }
+
+    /**
+     * Translate an imported decl's content hash into a Location that
+     * points at the decl's source range. Looks the hash up in the project
+     * store (which has stdlib decls populated by StdlibPrecompiler) and
+     * resolves the module path to a file the editor can open.
+     */
+    private fun findCrossModuleDefLocation(hash: com.mezze.language.typedast.Hash): Location? {
+        val store = projectStore ?: return null
+        val row = store.findDeclByHash(hash) ?: return null
+        val uri = resolveModulePathToUri(row.modulePath) ?: return null
+        return Location(uri, Range(
+            Position(row.startLine - 1, row.startCol - 1),
+            Position(row.endLine - 1, row.endCol)
+        ))
+    }
+
+    /**
+     * Same as findCrossModuleDefLocation but starting from a name+module
+     * (used by the resolved-imports fallback when we don't have a hash
+     * handy — e.g. for a `use` of a name we never type-checked a
+     * reference to).
+     */
+    private fun findCrossModuleDefLocationByName(modulePath: String, declName: String): Location? {
+        val store = projectStore ?: return null
+        val row = store.getDeclsForModule(modulePath).firstOrNull { it.declName == declName } ?: return null
+        val uri = resolveModulePathToUri(row.modulePath) ?: return null
+        return Location(uri, Range(
+            Position(row.startLine - 1, row.startCol - 1),
+            Position(row.endLine - 1, row.endCol)
+        ))
+    }
+
+    /**
+     * Resolve a `::` module path to a `file://` URI the client can open.
+     *
+     * Search order:
+     *   1. `~/.mezze/stdlib/std/.../foo.mz` — installed by gradle
+     *      `installStdlibSources`. Stable across sessions.
+     *   2. `<workspace>/stdlib/std/.../foo.mz` — checked-in stdlib (we
+     *      ourselves are in this repo while developing the language).
+     *   3. `<workspace>/src/.../foo.mz` and `<workspace>/.../foo.mz` for
+     *      user-defined modules.
+     *   4. JAR-extracted temp file via ModuleResolver.readStdlibFile —
+     *      last resort. Each extraction is a fresh temp; the editor
+     *      will still open it but the path won't survive a restart.
+     *
+     * Returns null when none of those resolve. Prefer the stable disk
+     * paths so cmd-click stays consistent across sessions and so
+     * find-references can show meaningful URIs.
+     */
+    private fun resolveModulePathToUri(modulePath: String): String? {
+        val segments = modulePath.split("::")
+        if (segments.isEmpty()) return null
+
+        val candidates = mutableListOf<java.io.File>()
+
+        val ws = server.getWorkspaceRoot()
+        if (segments[0] == "std") {
+            val rest = segments.drop(1).joinToString("/") + ".mz"
+            // 1. ~/.mezze/stdlib/std/<rest>
+            val home = System.getProperty("user.home")
+            if (home != null) {
+                candidates += java.io.File("$home/.mezze/stdlib/std/$rest")
+            }
+            // 2. <workspace>/stdlib/std/<rest>
+            if (ws != null) {
+                candidates += java.io.File(ws, "stdlib/std/$rest")
+            }
+        } else {
+            val rel = segments.joinToString("/") + ".mz"
+            if (ws != null) {
+                candidates += java.io.File(ws, "src/$rel")
+                candidates += java.io.File(ws, rel)
+            }
+        }
+
+        for (f in candidates) {
+            if (f.isFile) return f.toURI().toString()
+        }
+
+        // 4. Last resort: extract from the JAR. Each call writes a fresh
+        // temp file — only useful when the install step didn't run.
+        if (segments[0] == "std") {
+            val resourcePath = "stdlib/std/" + segments.drop(1).joinToString("/") + ".mz"
+            val txt = com.mezze.language.typechecker.ModuleResolver.readStdlibFile(resourcePath)
+            if (txt != null) {
+                val temp = java.nio.file.Files.createTempFile("mezze-stdlib-", ".mz")
+                java.nio.file.Files.writeString(temp, txt)
+                temp.toFile().deleteOnExit()
+                return temp.toUri().toString()
+            }
+        }
+        return null
     }
 
     /** Find the Loc of a local binding by name in the TypedModule. */
@@ -1154,8 +1521,81 @@ class MezzeTextDocumentService(
                 return decl.loc
             }
         }
-        // TODO: search let bindings in do blocks (nested scope)
+        // Search nested let bindings + lambda params + match pattern bindings
+        for (decl in module.decls) {
+            if (decl is com.mezze.language.typedast.TypedLetDecl) {
+                val found = searchBindingLocInExpr(decl.value, name)
+                if (found != null) return found
+            }
+        }
         return null
+    }
+
+    private fun searchBindingLocInExpr(expr: com.mezze.language.typedast.TypedExpr, name: String): Loc? {
+        var found: Loc? = null
+        fun visit(e: com.mezze.language.typedast.TypedExpr) {
+            if (found != null) return
+            when (e) {
+                is com.mezze.language.typedast.TypedBlock -> {
+                    for (stmt in e.statements) {
+                        if (found != null) return
+                        when (stmt) {
+                            is com.mezze.language.typedast.TypedStatement.Let -> {
+                                if (stmt.name == name) { found = stmt.loc; return }
+                                visit(stmt.value)
+                            }
+                            is com.mezze.language.typedast.TypedStatement.Expr -> visit(stmt.expr)
+                        }
+                    }
+                    if (found == null) visit(e.result)
+                }
+                is com.mezze.language.typedast.TypedLambda -> {
+                    for (p in e.params) if (p.name == name) { found = p.loc; return }
+                    visit(e.body)
+                }
+                is com.mezze.language.typedast.TypedIf -> { visit(e.condition); visit(e.thenBranch); visit(e.elseBranch) }
+                is com.mezze.language.typedast.TypedMatch -> {
+                    visit(e.scrutinee)
+                    for (case in e.cases) {
+                        for (b in case.bindings) if (b.name == name) { found = b.loc; return }
+                        for (ilb in case.ifLetBindings) visit(ilb.expr)
+                        case.guard?.let { visit(it) }
+                        visit(case.body)
+                    }
+                }
+                is com.mezze.language.typedast.TypedCall -> { visit(e.function); visit(e.arg) }
+                is com.mezze.language.typedast.TypedRecord -> {
+                    for (entry in e.entries) when (entry) {
+                        is com.mezze.language.typedast.TypedRecordEntry.Field -> visit(entry.value)
+                        is com.mezze.language.typedast.TypedRecordEntry.Spread -> visit(entry.expr)
+                    }
+                }
+                is com.mezze.language.typedast.TypedFieldAccess -> visit(e.record)
+                is com.mezze.language.typedast.TypedRecordUpdate -> {
+                    visit(e.record)
+                    for (entry in e.updates) when (entry) {
+                        is com.mezze.language.typedast.TypedRecordEntry.Field -> visit(entry.value)
+                        is com.mezze.language.typedast.TypedRecordEntry.Spread -> visit(entry.expr)
+                    }
+                }
+                is com.mezze.language.typedast.TypedVariantConstruct -> e.payload?.let { visit(it) }
+                is com.mezze.language.typedast.TypedSeq -> {
+                    for (el in e.elements) when (el) {
+                        is com.mezze.language.typedast.TypedSeqElement.Regular -> visit(el.expr)
+                        is com.mezze.language.typedast.TypedSeqElement.Spread -> visit(el.expr)
+                    }
+                }
+                is com.mezze.language.typedast.TypedPerform -> {
+                    for (h in e.handlers) h.params?.let { visit(it) }
+                    visit(e.body)
+                }
+                is com.mezze.language.typedast.TypedPerformOp -> visit(e.arg)
+                is com.mezze.language.typedast.TypedPipe -> { visit(e.left); visit(e.right) }
+                else -> { /* leaves */ }
+            }
+        }
+        visit(expr)
+        return found
     }
 
     /** Find the Location of an imported symbol (points to the use declaration or source file). */
@@ -1193,6 +1633,8 @@ class MezzeTextDocumentService(
             val uri = params.textDocument.uri
             val position = params.position
             val state = documents[uri]
+
+            server.logInfo("[completion] request uri=${uri.substringAfterLast('/')} pos=${position.line}:${position.character} trigger='${params.context?.triggerCharacter}'")
 
             val items = mutableListOf<CompletionItem>()
 
@@ -1276,9 +1718,13 @@ class MezzeTextDocumentService(
 
         val items = mutableListOf<CompletionItem>()
 
-        // First item: complete ALL fields at once (most useful)
-        val allFieldsSnippet = recordFields.mapIndexed { index, (fieldName, _) ->
-            "$fieldName = \${${index + 1}:}"
+        // First item: complete ALL fields at once (most useful). For
+        // function-typed fields, render a lambda skeleton with the inner
+        // record's field names as the lambda's params (e.g.
+        // `p: {x: 'a} -> Bool` becomes `${1:{x} -> $0}`).
+        val allFieldsSnippet = recordFields.mapIndexed { index, (fieldName, fieldType) ->
+            val placeholder = renderFieldPlaceholder(fieldName, fieldType, index + 1)
+            "$fieldName = $placeholder"
         }.joinToString(", ")
 
         val allFieldsPreview = recordFields.joinToString(", ") { (name, _) -> "$name = ..." }
@@ -1456,6 +1902,160 @@ class MezzeTextDocumentService(
     }
 
     /**
+     * Build the LSP snippet body for a method call given its name and the
+     * field-name-with-shape-hint list. Produces `name {field1 = ${1:hint1},
+     * field2 = ${2:hint2}}`. For function-typed fields, the placeholder is a
+     * lambda skeleton (`{x} -> $0` or `{x, y} -> $0` if the function's param
+     * record names are known).
+     *
+     * Pass `paramNames` already stripped of `it` for method-call shape; for
+     * regular function calls, pass all field names.
+     *
+     * If `paramNames` is empty, returns just `name {}`.
+     */
+    internal fun buildMethodSnippet(
+        methodName: String,
+        paramNames: List<MethodParamHint>
+    ): String {
+        if (paramNames.isEmpty()) return "$methodName {}"
+        val body = paramNames.mapIndexed { idx, hint ->
+            val placeholder = when (hint) {
+                is MethodParamHint.Plain -> "\${${idx + 1}:${hint.name}}"
+                is MethodParamHint.Callback -> {
+                    val params = hint.callbackParams.joinToString(", ")
+                    "\${${idx + 1}:{$params} -> $0}"
+                }
+            }
+            "${hint.name} = $placeholder"
+        }.joinToString(", ")
+        return "$methodName {$body}"
+    }
+
+    /**
+     * Build the snippet placeholder for a single field given its name +
+     * inferred MezzeType. Used by `getFunctionArgumentCompletions` to render
+     * the right body for "Fill all fields". Function-typed fields produce a
+     * lambda skeleton placeholder; everything else gets a named placeholder.
+     */
+    private fun renderFieldPlaceholder(fieldName: String, fieldType: MezzeType, idx: Int): String {
+        val fnType = fieldType as? MezzeType.FunctionType ?: return "\${${idx}:${fieldName}}"
+        val innerParams = (fnType.paramType as? MezzeType.RecordType)
+            ?.fields?.keys?.toList()
+            ?: listOf("x")
+        return "\${${idx}:{${innerParams.joinToString(", ")}} -> $0}"
+    }
+
+    /** Hint about a method parameter for snippet placeholder rendering. */
+    internal sealed interface MethodParamHint {
+        val name: String
+        data class Plain(override val name: String) : MethodParamHint
+        /** Field is a function — emit `{p1, p2} -> $0` placeholder.
+         *  callbackParams are the inner lambda's param names (e.g. `["x"]`
+         *  for a predicate `{x: 'a} -> Bool`). */
+        data class Callback(override val name: String, val callbackParams: List<String>) : MethodParamHint
+    }
+
+    /**
+     * Build param hints from a parsed type annotation (for ability ops where
+     * paramType is a record annotation). Returns a list excluding `it` if
+     * `stripIt = true` (method-call shape).
+     */
+    internal fun paramHintsFromAnnotation(
+        paramType: ParsedTypeAnnotation?,
+        stripIt: Boolean = true
+    ): List<MethodParamHint> {
+        val record = paramType as? com.mezze.language.parsedast.ParsedRecordType ?: return emptyList()
+        return record.entries
+            .filter { !stripIt || it.name != "it" }
+            .map { entry ->
+                val fnType = entry.type as? com.mezze.language.parsedast.ParsedFunctionType
+                if (fnType != null) {
+                    val innerParams = (fnType.paramType as? com.mezze.language.parsedast.ParsedRecordType)
+                        ?.entries?.map { it.name }
+                        ?: listOf("x")
+                    MethodParamHint.Callback(entry.name, innerParams)
+                } else {
+                    MethodParamHint.Plain(entry.name)
+                }
+            }
+    }
+
+    /**
+     * Build param hints from a typed MezzeType (for the unimported-ability
+     * step that deserializes TypedAbilityDecl). Same shape rules.
+     */
+    internal fun paramHintsFromMezzeType(
+        paramType: MezzeType,
+        stripIt: Boolean = true
+    ): List<MethodParamHint> {
+        val record = paramType as? MezzeType.RecordType ?: return emptyList()
+        return record.fields
+            .filter { (name, _) -> !stripIt || name != "it" }
+            .map { (name, type) ->
+                val fnType = type as? MezzeType.FunctionType
+                if (fnType != null) {
+                    val innerParams = (fnType.paramType as? MezzeType.RecordType)
+                        ?.fields?.keys?.toList()
+                        ?: listOf("x")
+                    MethodParamHint.Callback(name, innerParams)
+                } else {
+                    MethodParamHint.Plain(name)
+                }
+            }
+    }
+
+    /**
+     * Look up an inherent impl operation's post-solve param-record type
+     * from PrecompiledStdlib's TypedAbilityImpls. Match the impl by its
+     * target-type-name (using this file's existing getTypeName helper) and
+     * read the operation lambda's typed params — for callback fields, the
+     * function-typed param's inner record names give us the real lambda
+     * skeleton (`{x} -> $0`, `{acc, x} -> $0`, etc.) without convention.
+     */
+    private fun lookupTypedImplOpParamType(
+        precompiled: com.mezze.language.typechecker.PrecompiledStdlib,
+        targetTypeName: String,
+        opName: String
+    ): MezzeType? {
+        for (impl in precompiled.stdlibAbilityImpls) {
+            val target = impl.targetTypes.firstOrNull() ?: continue
+            if (getTypeName(target) != targetTypeName) continue
+
+            val opBody = impl.operations[opName] ?: continue
+            val lambda = opBody as? com.mezze.language.typedast.TypedLambda ?: continue
+            // Each TypedParam carries its solved type. Build a record so
+            // callers can apply the standard paramHintsFromMezzeType path.
+            val fields = lambda.params.associate { it.name to it.type }
+            return MezzeType.RecordType(fields = fields, rowVar = null)
+        }
+        return null
+    }
+
+    /**
+     * Build hints from a ParsedImplOp by inspecting the implementation
+     * lambda's params. Inherent impls in stdlib usually omit explicit param
+     * types, but the lambda `{ it, p } -> ...` still names them. We strip
+     * `it` for method-call shape; types fall back to Plain (we can't know
+     * if `p` is a callback without the inferred type).
+     *
+     * For callback inference inside inherent impls, prefer the matching
+     * ability op's annotation when available — handled by callers.
+     */
+    private fun paramHintsFromImplOpLambda(op: ParsedImplOp): List<MethodParamHint> {
+        val lambda = op.implementation as? com.mezze.language.parsedast.ParsedLambda ?: return emptyList()
+        val names = when (val p = lambda.params) {
+            is com.mezze.language.parsedast.ParsedLambdaParams.Untyped -> p.names
+            is com.mezze.language.parsedast.ParsedLambdaParams.Typed -> p.fields.map { it.name }
+        }
+        // No type info — every field gets a Plain placeholder. Callers that
+        // have access to a typed methodType (e.g. via PrecompiledStdlib's
+        // TypedAbilityImpl) should layer over via paramHintsFromMezzeType,
+        // which produces real Callback hints with the inner lambda's actual
+        // param names from the function-typed field.
+        return names.filter { it != "it" }.map { MethodParamHint.Plain(it) }
+    }
+
+    /**
      * Get dot-completions: when user types `x.`, suggest methods available on x's type.
      * Includes ability methods (eq, neq, lt, add, ...) and inherent methods.
      */
@@ -1465,28 +2065,72 @@ class MezzeTextDocumentService(
 
         val line = lines[position.line]
         val beforeCursor = line.substring(0, minOf(position.character, line.length))
+        // Log each step of dot-completion to window/logMessage so the
+        // user can paste the LSP output channel for diagnosis when
+        // completions look wrong.
+        server.logInfo("[dot-completion] pos=${position.line}:${position.character} beforeCursor=${beforeCursor.takeLast(60).let { "...$it" }}")
 
-        // Check if cursor is after a dot: `identifier.` or `identifier.partial`
-        val dotMatch = Regex("""(\w+)\.(\w*)$""").find(beforeCursor) ?: return emptyList()
-        val receiverName = dotMatch.groupValues[1]
-        val partialMethod = dotMatch.groupValues[2]  // May be empty
+        // Two cases for the receiver expression:
+        //
+        //   1. Plain identifier: `xs.` — match `(\w+)\.(\w*)$`. Look up the
+        //      identifier in the typed module's binding scope.
+        //
+        //   2. Arbitrary expression: `[1,2,3].`, `"hi".`, `(expr).`, `xs[0].`,
+        //      `nums.first {}.` — scan back from the dot to find the
+        //      receiver-expression boundary (matched by bracket depth), then
+        //      ask the typed AST what type lives just before the dot via a
+        //      position-based lookup. This piggybacks on the same
+        //      `TypedAstLookup.findAtPosition` machinery hover already uses,
+        //      so any expression Mezze can typecheck is also dot-completable.
+        val identifierMatch = Regex("""(\w+)\.(\w*)$""").find(beforeCursor)
+        val partialMethod: String
+        val receiverName: String?
+        if (identifierMatch != null) {
+            receiverName = identifierMatch.groupValues[1]
+            partialMethod = identifierMatch.groupValues[2]
+            server.logInfo("[dot-completion] path=identifier receiver='$receiverName' partial='$partialMethod'")
+        } else {
+            // Expression-receiver path: confirm there's a dot somewhere right
+            // before the cursor, optionally followed by a partial method
+            // identifier.
+            val exprDotMatch = Regex("""\.(\w*)$""").find(beforeCursor) ?: run {
+                server.logInfo("[dot-completion] no dot match — returning empty")
+                return emptyList()
+            }
+            receiverName = null
+            partialMethod = exprDotMatch.groupValues[1]
+            server.logInfo("[dot-completion] path=expression partial='$partialMethod'")
+        }
 
         // Use current type check result, or fall back to last successful one
         val result = state.typeCheckResult
             ?: lastSuccessfulResult[state.uri]
-            ?: return emptyList()
+            ?: run {
+                server.logInfo("[dot-completion] no typeCheckResult — returning empty")
+                return emptyList()
+            }
+        server.logInfo("[dot-completion] typeCheckResult=${if (state.typeCheckResult != null) "current" else "lastSuccessful"}")
 
         fun formatType(type: MezzeType): String {
             return prettyPrintTypeWithAliases(type, state.typeAliases)
         }
 
-        // Find the receiver's type
-        val receiverType = findReceiverType(receiverName, result, position) ?: return emptyList()
+        // Find the receiver's type — either by binding-scope lookup (named
+        // identifier) or by typed-AST position lookup (any expression).
+        val receiverType = if (receiverName != null) {
+            findReceiverType(receiverName, result, position)
+        } else {
+            findReceiverTypeForExpressionAt(state, position, result)
+        } ?: run {
+            server.logInfo("[dot-completion] receiver type lookup returned null — returning empty")
+            return emptyList()
+        }
         // Unwrap SuspendedType
         val baseType = when (receiverType) {
             is MezzeType.SuspendedType -> receiverType.valueType
             else -> receiverType
         }
+        server.logInfo("[dot-completion] receiverType=$baseType (typeName=${getTypeName(baseType) ?: "<none>"})")
 
         val items = mutableListOf<CompletionItem>()
         val typeName = getTypeName(baseType)
@@ -1497,113 +2141,205 @@ class MezzeTextDocumentService(
         val localAbilities = state.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>() ?: emptyList()
         val allAbilities = result.importedAbilities.values + localAbilities
 
-        // Check builtin ability impls
-        for (abilityDecl in allAbilities) {
-            if (!isBuiltinAbilityForType(abilityDecl.name, baseType)) continue
-
-            for (op in abilityDecl.operations) {
-                if (op.name in addedMethods) continue
-                // Use v2 parsed operation types
-                val paramStr = formatTypeAnnotation(op.paramType)
-                if (!paramStr.contains("it")) continue
-
-                items.add(CompletionItem(op.name).apply {
-                    kind = CompletionItemKind.Method
-                    detail = "${abilityDecl.name}.${op.name}"
-                    documentation = Either.forLeft("${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}")
-                    insertText = "${op.name} {}"
-                    insertTextFormat = InsertTextFormat.Snippet
-                })
-                addedMethods.add(op.name)
-            }
-        }
-
-        // 2. Collect inherent methods from parsed module
-        val parsedImpls = state.parsedModule?.decls?.filterIsInstance<ParsedImplAbilityDecl>() ?: emptyList()
-        for (impl in parsedImpls) {
-            if (impl.target !is ParsedImplTarget.Inherent) continue
-            for (op in impl.operations) {
-                if (op.name in addedMethods) continue
-                items.add(CompletionItem(op.name).apply {
-                    kind = CompletionItemKind.Method
-                    detail = "inherent method"
-                    insertText = "${op.name} {}"
-                    insertTextFormat = InsertTextFormat.Snippet
-                })
-                addedMethods.add(op.name)
-            }
-        }
-
-        // 3. Record field access
+        // Dot-completion rules (kept deliberately narrow so the list stays
+        // useful — see issue #219):
+        //
+        //   - If the receiver is a record  → show ONLY its fields.
+        //   - Otherwise                    → show ability methods + inherent
+        //                                     impl methods that target this
+        //                                     receiver type.
+        //
+        // We deliberately do NOT mix in `seq::length`-style qualified-import
+        // bindings, "(auto-import)" suggestions, keyword fallbacks, etc. The
+        // user just wants "what can I call on `x.`".
         if (baseType is MezzeType.RecordType) {
+            server.logInfo("[dot-completion] record receiver: fields=${baseType.fields.keys}")
             for ((fieldName, fieldType) in baseType.fields) {
-                if (fieldName in addedMethods) continue
                 items.add(CompletionItem(fieldName).apply {
                     kind = CompletionItemKind.Field
                     detail = formatType(fieldType)
                 })
             }
+            val final = if (partialMethod.isNotEmpty()) {
+                items.filter { it.label.startsWith(partialMethod, ignoreCase = true) }
+            } else items
+            server.logInfo("[dot-completion] returning ${final.size} field completions: ${final.map { it.label }}")
+            return final
         }
 
-        // 4. Unimported abilities — show methods from abilities that exist in stdlib
-        //    but are NOT currently imported, with auto-import text edit
-        val importedAbilityNames = allAbilities.map { it.name }.toSet()
+        val targetTypeName = getTypeName(baseType)
+
+        // 1. Ability methods whose ability is in scope (imported or local) AND
+        //    whose impl exists for this receiver type.
+        for (abilityDecl in allAbilities) {
+            if (!isBuiltinAbilityForType(abilityDecl.name, baseType)) continue
+            for (op in abilityDecl.operations) {
+                if (op.name in addedMethods) continue
+                val paramStr = formatTypeAnnotation(op.paramType)
+                if (!paramStr.contains("it")) continue
+                val hints = paramHintsFromAnnotation(op.paramType, stripIt = true)
+                items.add(CompletionItem(op.name).apply {
+                    kind = CompletionItemKind.Method
+                    detail = "${abilityDecl.name}.${op.name}"
+                    documentation = Either.forLeft("${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}")
+                    insertText = buildMethodSnippet(op.name, hints)
+                    insertTextFormat = InsertTextFormat.Snippet
+                })
+                addedMethods.add(op.name)
+            }
+        }
+
+        // 2. Inherent methods from the local file's `impl Type where { ... }`.
+        val parsedImpls = state.parsedModule?.decls?.filterIsInstance<ParsedImplAbilityDecl>() ?: emptyList()
+        for (impl in parsedImpls) {
+            if (impl.target !is ParsedImplTarget.Inherent) continue
+            val implTarget = impl.targetTypes.firstOrNull()?.let { ann ->
+                when (ann) {
+                    is com.mezze.language.parsedast.ParsedNamedType -> ann.name
+                    is com.mezze.language.parsedast.ParsedTypeApp -> ann.constructor
+                    else -> null
+                }
+            } ?: continue
+            if (targetTypeName != null && implTarget != targetTypeName) continue
+            for (op in impl.operations) {
+                if (op.name in addedMethods) continue
+                // Param hints: prefer explicit op.paramType annotation, fall
+                // back to lambda-param names from the implementation body.
+                val hints = paramHintsFromAnnotation(op.paramType, stripIt = true)
+                    .ifEmpty { paramHintsFromImplOpLambda(op) }
+                items.add(CompletionItem(op.name).apply {
+                    kind = CompletionItemKind.Method
+                    detail = "$implTarget.${op.name}"
+                    insertText = buildMethodSnippet(op.name, hints)
+                    insertTextFormat = InsertTextFormat.Snippet
+                })
+                addedMethods.add(op.name)
+            }
+        }
+
+        // 3. Inherent methods from the prelude (`impl Seq 'a where { ... }`,
+        //    `impl Str where { ... }`, etc.). These match the receiver type
+        //    by name. Ability impls in the prelude are skipped here — only
+        //    inherent impls appear, since ability methods are already covered
+        //    by step 1 (when their ability decl is in scope).
         try {
-            val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
-            for ((_, module) in precompiled.stdlibTypedModules) {
-                for (abilityDecl in module.abilityDecls) {
-                    if (abilityDecl.name in importedAbilityNames) continue
-                    // Check if this ability has an impl for the receiver type
-                    val hasImpl = module.abilityImpls.any { impl ->
-                        impl.abilityHash == abilityDecl.hash &&
-                        impl.targetTypes.any { targetType ->
-                            matchesType(baseType, targetType)
-                        }
-                    } || isBuiltinAbilityForType(abilityDecl.name, baseType)
+            val precompiledForInherent = com.mezze.language.typechecker.PrecompiledStdlib
+            for ((_, impl) in precompiledForInherent.preludeImportContext.importedAbilityImpls) {
+                if (!impl.isInherent) continue
+                val implTargetName = impl.targetTypes.firstOrNull()?.let { ann ->
+                    when (ann) {
+                        is com.mezze.language.parsedast.ParsedNamedType -> ann.name
+                        is com.mezze.language.parsedast.ParsedTypeApp -> ann.constructor
+                        else -> null
+                    }
+                } ?: continue
+                if (targetTypeName != null && implTargetName != targetTypeName) continue
+                for (op in impl.operations) {
+                    if (op.name in addedMethods) continue
+                    // Prefer the post-solve typed impl op's param type — it
+                    // has callback functions fully typed (with inner record
+                    // field names), letting buildMethodSnippet emit a real
+                    // lambda skeleton like `{x} -> $0` instead of a bare
+                    // placeholder. Falls back to the parsed annotation, then
+                    // to lambda-name extraction.
+                    val typedParamType = lookupTypedImplOpParamType(
+                        precompiledForInherent, implTargetName, op.name
+                    )
+                    val hints = when {
+                        typedParamType != null -> paramHintsFromMezzeType(typedParamType, stripIt = true)
+                        else -> paramHintsFromAnnotation(op.paramType, stripIt = true)
+                            .ifEmpty { paramHintsFromImplOpLambda(op) }
+                    }
+                    items.add(CompletionItem(op.name).apply {
+                        kind = CompletionItemKind.Method
+                        detail = "$implTargetName.${op.name}"
+                        insertText = buildMethodSnippet(op.name, hints)
+                        insertTextFormat = InsertTextFormat.Snippet
+                    })
+                    addedMethods.add(op.name)
+                }
+            }
+        } catch (_: Exception) { /* prelude may not be loaded in tests */ }
 
-                    if (!hasImpl) continue
+        // 4. Unimported ability methods — walk ability impls across the whole
+        //    project (incl. stdlib + user code) and surface their methods when
+        //    the impl's target type matches the receiver. Each suggestion gets
+        //    `additionalTextEdits` to insert `use <module>::{<Ability>}` on
+        //    accept.
+        //
+        //    We deserialize ability_impl blobs to read structured `targetTypes`
+        //    (the AbilityImplRow.targetType string is MezzeType.toString() and
+        //    not stable for primitives — see #214). Cap the work per request
+        //    via early type-name pre-filter.
+        try {
+            val store = projectStore
+            if (store != null && targetTypeName != null) {
+                val importedAbilityNames = result.importedAbilities.keys + localAbilities.map { it.name }.toSet()
 
-                    // Find the module path for the import
-                    val modulePath = module.path
+                // Index abilities + impls once per dot-completion request.
+                val abilityDecls = store.getDeclsByKind(com.mezze.language.codebase.DeclKind.ABILITY)
+                val abilityModuleByHash = abilityDecls.associate { it.hash to it.modulePath }
+                val abilityNameByHash = abilityDecls.associate { it.hash to it.declName }
+
+                val implDecls = store.getDeclsByKind(com.mezze.language.codebase.DeclKind.IMPL)
+                var step4Added = 0
+                for (implRow in implDecls) {
+                    val implBlob = store.getBlob(implRow.hash) ?: continue
+                    if (implBlob.kind != com.mezze.language.codebase.BlobKind.ABILITY_IMPL) continue
+                    val implTyped = try {
+                        val bytes = implBlob.typed ?: continue
+                        com.mezze.language.codebase.CodebaseSerialization.deserializeTypedAbilityImpl(bytes)
+                    } catch (_: Exception) { continue }
+
+                    val abilityName = abilityNameByHash[implTyped.abilityHash] ?: continue
+                    if (abilityName in importedAbilityNames) continue   // already covered by step 1
+                    val abilityModule = abilityModuleByHash[implTyped.abilityHash] ?: continue
+
+                    // Target-type filter: receiver's type-constructor name must
+                    // match the impl's first target type.
+                    val target = implTyped.targetTypes.firstOrNull() ?: continue
+                    val implTargetName = getTypeName(target) ?: continue
+                    if (implTargetName != targetTypeName) continue
+
+                    // Look up the ability decl to learn its operations.
+                    val abilityHashRow = abilityDecls.firstOrNull { it.hash == implTyped.abilityHash } ?: continue
+                    val abilityBlob = store.getBlob(abilityHashRow.hash) ?: continue
+                    val abilityDecl = try {
+                        val bytes = abilityBlob.typed ?: continue
+                        com.mezze.language.codebase.CodebaseSerialization.deserializeTypedAbilityDecl(bytes)
+                    } catch (_: Exception) { continue }
 
                     for (op in abilityDecl.operations) {
                         if (op.name in addedMethods) continue
-                        val opParamStr = prettyPrintType(op.paramType)
-                        if (!opParamStr.contains("it")) continue
-
-                        // Determine the use statement to add
-                        val importPath = "${modulePath}::${abilityDecl.name}"
-
-                        items.add(CompletionItem(op.name).apply {
+                        val hints = paramHintsFromMezzeType(op.paramType, stripIt = true)
+                        val item = CompletionItem(op.name).apply {
                             kind = CompletionItemKind.Method
-                            detail = "${abilityDecl.name}.${op.name} (auto-import)"
-                            documentation = Either.forLeft("${prettyPrintType(op.paramType)} -> ${prettyPrintType(op.returnType)}\n\nRequires: use $importPath")
-                            insertText = "${op.name} {}"
+                            detail = "$abilityName.${op.name}  (auto-import $abilityModule)"
+                            insertText = buildMethodSnippet(op.name, hints)
                             insertTextFormat = InsertTextFormat.Snippet
-                            // Lower sort priority — imported abilities come first
-                            sortText = "z_${op.name}"
-                            // Add auto-import as additional text edit
-                            val importEdit = TextEdit(
-                                Range(Position(0, 0), Position(0, 0)),
-                                "use $importPath\n"
-                            )
-                            // Don't auto-import — user should explicitly accept via code action
-                            // additionalTextEdits = listOf(importEdit)
-                        })
+                            sortText = "z_${op.name}"  // sort below already-imported methods
+                        }
+                        val edit = buildAutoImportEdit(state, abilityModule, abilityName)
+                        if (edit != null) item.additionalTextEdits = listOf(edit)
+                        items.add(item)
                         addedMethods.add(op.name)
+                        step4Added++
                     }
                 }
+                server.logInfo("[dot-completion] step4 added=$step4Added unimported-ability methods")
             }
-        } catch (_: Exception) {
-            // PrecompiledStdlib may not be available in all contexts
+        } catch (e: Exception) {
+            server.logInfo("[dot-completion] unimported-ability scan failed: ${e.message}")
         }
 
-        // Filter by partial method name if user already typed some characters after the dot
-        return if (partialMethod.isNotEmpty()) {
+        // Filter by partial method name if the user already started typing
+        val final = if (partialMethod.isNotEmpty()) {
             items.filter { it.label.startsWith(partialMethod, ignoreCase = true) }
         } else {
             items
         }
+        server.logInfo("[dot-completion] returning ${final.size} method completions for type '${getTypeName(baseType) ?: baseType::class.simpleName}': ${final.take(20).map { it.label }}${if (final.size > 20) "..." else ""}")
+        return final
     }
 
     /** Check if a MezzeType matches a TypedAST type (simplified matching). */
@@ -1668,6 +2404,123 @@ class MezzeTextDocumentService(
 
         // Check local bindings
         return findLocalBindingType(name, result.typedModule, position.line + 1)
+    }
+
+    /**
+     * Find the receiver type for an arbitrary expression-receiver dot
+     * completion (`[1,2,3].`, `"hi".`, `(x + y).`, `xs[0].`, `nums.first {}.`).
+     *
+     * Strategy:
+     *   1. Try the typed AST (existing or last successful) — works when the
+     *      document typechecks at least up to the receiver.
+     *   2. Fall back to a syntactic shape match for the common literal forms
+     *      (seq, str, int, float, bool, char). This covers the case where
+     *      the file is mid-edit and not parseable yet — completion still
+     *      lights up immediately for `[1,2,3].`.
+     */
+    private fun findReceiverTypeForExpressionAt(
+        state: DocumentState,
+        position: Position,
+        result: TypeCheckResult
+    ): MezzeType? {
+        val lines = state.content.lines()
+        if (position.line >= lines.size) return null
+        val line = lines[position.line]
+        val beforeCursor = line.substring(0, minOf(position.character, line.length))
+        val dotIdx = beforeCursor.lastIndexOf('.')
+        if (dotIdx < 0) return null
+
+        // 1. Typed-AST lookup at column-just-before-the-dot.
+        val typedModule = result.typedModule ?: lastSuccessfulResult[state.uri]?.typedModule
+        if (typedModule != null) {
+            val charBeforeDot = dotIdx - 1
+            if (charBeforeDot >= 0) {
+                val lookupLine = position.line + 1
+                val lookupCol = charBeforeDot + 1
+                val lookup = TypedAstLookup.findAtPosition(typedModule, lookupLine, lookupCol)
+                if (lookup is TypedAstLookup.LookupResult.Expr) {
+                    val t = lookup.expr.type
+                    if (t !is MezzeType.VarType) return t
+                }
+            }
+        }
+
+        // 2. Syntactic fallback for literal receivers. Walk back from the dot
+        // matching balanced delimiters; the resulting prefix is the receiver
+        // text. We don't try to parse it — just classify by what it starts
+        // with. Keeps completion responsive while the user is mid-edit.
+        val receiverText = scanReceiverExpression(beforeCursor, dotIdx) ?: return null
+        return classifyLiteralType(receiverText)
+    }
+
+    /**
+     * Walk backwards from `dotIdx` matching `[]`, `()`, `{}`, and `""`/'`'`
+     * pairs to find where the receiver expression begins. Returns the
+     * receiver text (everything from the start of the expression up to but
+     * not including the dot), or null if we can't find a clean boundary.
+     */
+    private fun scanReceiverExpression(line: String, dotIdx: Int): String? {
+        var i = dotIdx - 1
+        // Skip whitespace immediately before the dot (multi-line chains like
+        // `nums\n  .first` aren't handled here — that's the typed-AST path).
+        while (i >= 0 && line[i].isWhitespace()) i--
+        if (i < 0) return null
+
+        // If the receiver ends with a closing bracket, walk back to the match.
+        val ch = line[i]
+        if (ch == ']' || ch == ')' || ch == '}') {
+            val open = when (ch) { ']' -> '['; ')' -> '('; '}' -> '{'; else -> return null }
+            var depth = 1
+            i--
+            while (i >= 0 && depth > 0) {
+                when (line[i]) {
+                    ch -> depth++
+                    open -> depth--
+                }
+                if (depth == 0) break
+                i--
+            }
+            if (depth != 0 || i < 0) return null
+            return line.substring(i, dotIdx).trim()
+        }
+        // String literal ending in `"` — scan back to the matching `"`.
+        if (ch == '"') {
+            var j = i - 1
+            while (j >= 0 && line[j] != '"') j--
+            if (j < 0) return null
+            return line.substring(j, dotIdx).trim()
+        }
+        // Identifier or number — walk back over word chars / digits / dots.
+        var j = i
+        while (j >= 0 && (line[j].isLetterOrDigit() || line[j] == '_')) j--
+        return line.substring(j + 1, dotIdx).trim()
+    }
+
+    /**
+     * Classify a receiver text by syntactic shape. Used as the offline
+     * fallback when the typed AST hasn't caught up to the user's edit.
+     * Only handles the common literal cases — anything more complex falls
+     * out of dot-completion (back to keyword completions, same as before).
+     */
+    private fun classifyLiteralType(receiverText: String): MezzeType? {
+        if (receiverText.isEmpty()) return null
+        val first = receiverText.first()
+        return when {
+            first == '[' && receiverText.endsWith("]") -> {
+                // Seq literal: [...]. Without parsing, we can't know the
+                // element type — synthesize SeqType with a fresh TypeVar so
+                // dispatch picks Seq's inherent methods and the call site's
+                // unification figures out the element later.
+                MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar.fresh()))
+            }
+            first == '"' && receiverText.endsWith("\"") -> MezzeType.StringType
+            first == '\'' && receiverText.endsWith("'") -> MezzeType.CharType
+            first.isDigit() || (first == '-' && receiverText.length > 1 && receiverText[1].isDigit()) -> {
+                if (receiverText.contains('.')) MezzeType.FloatType else MezzeType.IntType
+            }
+            receiverText == "true" || receiverText == "false" || receiverText == "True" || receiverText == "False" -> MezzeType.BoolType
+            else -> null
+        }
     }
 
     private fun getKeywordCompletions(): List<CompletionItem> {
@@ -2911,48 +3764,196 @@ class MezzeTextDocumentService(
             val hints = mutableListOf<InlayHint>()
 
             // 1. Let bindings without type annotations — show inferred type
+            val sourceLines = state.content.split('\n')
+
+            // 1. Top-level let-bindings — show `: T` after the binding
+            //    name when no explicit type annotation; show trailing chain
+            //    hint regardless (the chain body type is informative even
+            //    when the binding's full type IS spelled out).
             for (decl in typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
-                // Only show hint if there's no explicit type annotation in the source
                 val parsedDecl = state.parsedModule?.decls
                     ?.filterIsInstance<com.mezze.language.parsedast.ParsedLetDecl>()
                     ?.find { it.isSimpleBinding && it.variableName == decl.name }
+                val hasAnnotation = parsedDecl?.typeAnnotation != null
 
-                if (parsedDecl?.typeAnnotation == null) {
-                    val typeStr = prettyPrintTypeWithAliases(decl.scheme.type, state.typeAliases)
-                    // Skip unresolved type variables
-                    if (!typeStr.contains("'") && typeStr != "{}") {
-                        val loc = decl.loc
-                        val hint = InlayHint()
-                        hint.position = Position(loc.startLine - 1, loc.endCol)
-                        hint.setLabel(": $typeStr")
-                        hint.kind = InlayHintKind.Type
-                        hint.paddingLeft = true
-                        hints.add(hint)
+                if (!hasAnnotation) {
+                    emitLetNameHint(
+                        name = decl.name,
+                        type = decl.scheme.type,
+                        declStartLine = decl.loc.startLine,
+                        sourceLines = sourceLines,
+                        typeAliases = state.typeAliases,
+                        hints = hints
+                    )
+                }
+
+                // 1b. Multi-line lambda body — show return type at the end
+                //     of the body's last line. Useful even when the let has
+                //     an explicit annotation: lets the user see the chain
+                //     result type at the bottom of the chain without
+                //     scrolling back to the `let` line.
+                val value = decl.value
+                if (value is com.mezze.language.typedast.TypedLambda) {
+                    val body = value.body
+                    // Skip the trailing-body hint when the body is an
+                    // *imperative* shape — TypedPerform (`perform X in
+                    // do { … }`) or a top-level TypedBlock (`do { … }`).
+                    // These always end in Unit (the last statement
+                    // implicitly returns `{}`), so a `: {}` inlay at
+                    // the bottom is structural noise. Pipe chains, dot
+                    // chains, and value-returning bodies still get the
+                    // trailing hint — that's where the chain's result
+                    // type is informative.
+                    val isImperativeBody = body is com.mezze.language.typedast.TypedPerform ||
+                        body is com.mezze.language.typedast.TypedBlock
+                    if (body.loc.endLine > decl.loc.startLine && !isImperativeBody) {
+                        emitTrailingTypeHint(
+                            type = body.type,
+                            anchorLine = body.loc.endLine,
+                            anchorCol = body.loc.endCol,
+                            sourceLines = sourceLines,
+                            typeAliases = state.typeAliases,
+                            hints = hints
+                        )
                     }
                 }
             }
 
-            // 2. Pipe chain segments — show intermediate types
-            // Walk the TypedAST looking for TypedPipe on separate lines
+            // 2. Per-segment chain hints + nested-let hints inside do/blocks.
             for (decl in typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
-                collectPipeHints(decl.value, hints, state.typeAliases)
+                collectPipeHints(decl.value, hints, state.typeAliases, sourceLines)
             }
 
             hints
         }
     }
 
+    /**
+     * Emit a `: T` inlay hint anchored right after the binding name on the
+     * decl's start line (Scala / Metals convention — renders as
+     * `let foo : T = …`). The name is located by regexing for
+     * `(pub )?let <name>` on the source line; if it can't be found
+     * (pretty-printer rewrite in flight, multi-line decl name, etc.) we
+     * fall back to end-of-line.
+     *
+     * Skips wholly unresolved type variables (`'a` alone) and Unit (`{}`).
+     * Partial polymorphic types like `Option 'a` are still shown — the
+     * constructor name is informative.
+     */
+    private fun emitLetNameHint(
+        name: String,
+        type: com.mezze.language.ast.MezzeType,
+        declStartLine: Int,
+        sourceLines: List<String>,
+        typeAliases: Map<String, TypeAliasInfo>,
+        hints: MutableList<InlayHint>
+    ) {
+        val typeStr = prettyPrintTypeWithAliases(type, typeAliases)
+        if (isUninformativeType(typeStr)) return
+
+        val lineIdx = (declStartLine - 1).coerceAtLeast(0).coerceAtMost(sourceLines.lastIndex)
+        val line = sourceLines.getOrNull(lineIdx) ?: ""
+        val pattern = Regex("""\b(?:pub\s+)?let\s+${Regex.escape(name)}\b""")
+        val m = pattern.find(line)
+        val anchorCol = if (m != null) m.range.last + 1 else line.length
+        val hint = InlayHint()
+        hint.position = Position(lineIdx, anchorCol)
+        hint.setLabel(": $typeStr")
+        hint.kind = InlayHintKind.Type
+        hint.paddingLeft = true
+        // Make the hint actionable: clients with inlay textEdits support
+        // (VSCode does it on cmd+click / "Insert annotation") will insert
+        // `: T` at the anchor when the user accepts. The no-space-before
+        // colon matches the formatter's `let foo: T` style and the rest
+        // of Mezze's type-annotation syntax (record fields, params, etc.).
+        // Skip when the regex didn't match — without a known position, an
+        // edit might land in the wrong place.
+        if (m != null) {
+            hint.textEdits = listOf(
+                TextEdit(
+                    Range(Position(lineIdx, anchorCol), Position(lineIdx, anchorCol)),
+                    ": $typeStr"
+                )
+            )
+        }
+        hints.add(hint)
+    }
+
+    /**
+     * Detect `let <name> : ...` or `let <name>: ...` in source. Used to
+     * suppress nested-let inlay hints when the user already wrote an
+     * explicit annotation. Cheap text scan — no parsed-AST plumbing.
+     */
+    private fun hasExplicitAnnotation(sourceLines: List<String>, name: String, declStartLine: Int): Boolean {
+        val lineIdx = (declStartLine - 1).coerceAtLeast(0).coerceAtMost(sourceLines.lastIndex)
+        val line = sourceLines.getOrNull(lineIdx) ?: return false
+        val pattern = Regex("""\blet\s+${Regex.escape(name)}\s*:""")
+        return pattern.containsMatchIn(line)
+    }
+
+    /**
+     * Skip uninformative type strings — Unit, Unit-with-effects, and
+     * Unit-returning entry-point shapes. Showing them as inlays clutters
+     * the editor without adding signal.
+     *
+     *   `{}`             → exact Unit
+     *   `{} <…>`         → Unit with effects (e.g. for_each result)
+     *   `{} -> {}`       → entry-point shape `{}` -> `{}`
+     *   `{} -> {} <…>`   → entry-point with effects (most `main`s)
+     *   `'a` (lone var)  → wholly unresolved
+     */
+    private fun isUninformativeType(typeStr: String): Boolean {
+        // The only thing genuinely worth hiding is a bare unresolved
+        // type variable like `'a` — the user gets nothing actionable
+        // from it. Everything else (including `{}`, `{} -> {}`, and
+        // entry-function shapes) is information the user explicitly
+        // wants surfaced as an inlay.
+        if (typeStr.matches(Regex("'[a-z][a-zA-Z0-9_]*"))) return true
+        return false
+    }
+
+    /**
+     * Emit a `: T` inlay at the end of a multi-line expression's last line —
+     * used for the trailing type of a multi-line lambda body / chain so the
+     * user can see the result type without scrolling to the let line.
+     *
+     * No textEdits — this is a read-only info hint, not an annotation point.
+     */
+    private fun emitTrailingTypeHint(
+        type: com.mezze.language.ast.MezzeType,
+        anchorLine: Int,
+        anchorCol: Int,
+        sourceLines: List<String>,
+        typeAliases: Map<String, TypeAliasInfo>,
+        hints: MutableList<InlayHint>
+    ) {
+        val typeStr = prettyPrintTypeWithAliases(type, typeAliases)
+        if (isUninformativeType(typeStr)) return
+        val lineIdx = (anchorLine - 1).coerceAtLeast(0).coerceAtMost(sourceLines.lastIndex)
+        val hint = InlayHint()
+        hint.position = Position(lineIdx, anchorCol)
+        hint.setLabel(": $typeStr")
+        hint.kind = InlayHintKind.Type
+        hint.paddingLeft = true
+        hints.add(hint)
+    }
+
     private fun collectPipeHints(
         expr: com.mezze.language.typedast.TypedExpr,
         hints: MutableList<InlayHint>,
-        typeAliases: Map<String, TypeAliasInfo>
+        typeAliases: Map<String, TypeAliasInfo>,
+        sourceLines: List<String> = emptyList()
     ) {
         when (expr) {
             is com.mezze.language.typedast.TypedPipe -> {
                 // Show type at end of left side if it's on a different line from right
                 if (expr.left.loc.endLine != expr.right.loc.startLine) {
                     val typeStr = prettyPrintTypeWithAliases(expr.left.type, typeAliases)
-                    if (!typeStr.contains("'")) {
+                    // Use the same uninformative filter as the rest of the
+                    // file (bare unresolved typevars only). Polymorphic
+                    // shapes like `Option 'a` or `[Int]` are useful — they
+                    // tell the user exactly what's flowing through the pipe.
+                    if (!isUninformativeType(typeStr)) {
                         val hint = InlayHint()
                         hint.position = Position(expr.left.loc.endLine - 1, expr.left.loc.endCol)
                         hint.setLabel(": $typeStr")
@@ -2961,35 +3962,113 @@ class MezzeTextDocumentService(
                         hints.add(hint)
                     }
                 }
-                collectPipeHints(expr.left, hints, typeAliases)
-                collectPipeHints(expr.right, hints, typeAliases)
+                collectPipeHints(expr.left, hints, typeAliases, sourceLines)
+                collectPipeHints(expr.right, hints, typeAliases, sourceLines)
             }
             is com.mezze.language.typedast.TypedBlock -> {
                 for (stmt in expr.statements) {
                     when (stmt) {
-                        is com.mezze.language.typedast.TypedStatement.Let -> collectPipeHints(stmt.value, hints, typeAliases)
-                        is com.mezze.language.typedast.TypedStatement.Expr -> collectPipeHints(stmt.expr, hints, typeAliases)
+                        is com.mezze.language.typedast.TypedStatement.Let -> {
+                            // Same UX as top-level lets — anchor `: T` after the
+                            // binding name on the let-line. Skip when the source
+                            // line already shows an explicit annotation
+                            // (`let x: Int = ...`), otherwise the inlay duplicates
+                            // what the user already wrote.
+                            if (sourceLines.isNotEmpty() &&
+                                !hasExplicitAnnotation(sourceLines, stmt.name, stmt.loc.startLine)
+                            ) {
+                                emitLetNameHint(
+                                    name = stmt.name,
+                                    type = stmt.type,
+                                    declStartLine = stmt.loc.startLine,
+                                    sourceLines = sourceLines,
+                                    typeAliases = typeAliases,
+                                    hints = hints
+                                )
+                            }
+                            collectPipeHints(stmt.value, hints, typeAliases, sourceLines)
+                        }
+                        is com.mezze.language.typedast.TypedStatement.Expr -> collectPipeHints(stmt.expr, hints, typeAliases, sourceLines)
                     }
                 }
-                collectPipeHints(expr.result, hints, typeAliases)
+                collectPipeHints(expr.result, hints, typeAliases, sourceLines)
             }
             is com.mezze.language.typedast.TypedCall -> {
-                collectPipeHints(expr.function, hints, typeAliases)
-                collectPipeHints(expr.arg, hints, typeAliases)
+                // Multi-line method/dot chain: when the call's argument record
+                // contains the receiver as a field and that receiver lives on
+                // an earlier line than the call itself, emit a hint at the end
+                // of the receiver's line. Same UX as pipes — each chain segment
+                // gets its intermediate type annotated.
+                //
+                // For chains like `nums\n.first {}\n.is_some {}` we want a hint
+                // at the end of every segment line. The typed AST nests as
+                // TypedCall(is_some, {it = TypedCall(first, {it = nums})}). The
+                // recursion below visits both the outer receiver-field value
+                // (which is the inner call) and walks deeper into the inner
+                // call's own arg record — producing one hint per segment.
+                val arg = expr.arg
+                if (arg is com.mezze.language.typedast.TypedRecord) {
+                    for (entry in arg.entries) {
+                        if (entry is com.mezze.language.typedast.TypedRecordEntry.Field) {
+                            val v = entry.value
+                            if (v.loc.endLine < expr.loc.endLine) {
+                                val rawType = v.type
+                                val resolvedType: MezzeType =
+                                    if (isPlaceholderType(rawType) && v is com.mezze.language.typedast.TypedCall) {
+                                        val ft = v.function.type as? MezzeType.FunctionType
+                                        ft?.returnType ?: rawType
+                                    } else rawType
+                                val typeStr = prettyPrintTypeWithAliases(resolvedType, typeAliases)
+                                if (!isUninformativeType(typeStr) && typeStr != "unknown") {
+                                    val hint = InlayHint()
+                                    hint.position = Position(v.loc.endLine - 1, v.loc.endCol)
+                                    hint.setLabel(": $typeStr")
+                                    hint.kind = InlayHintKind.Type
+                                    hint.paddingLeft = true
+                                    hints.add(hint)
+                                }
+                            }
+                        }
+                    }
+                }
+                collectPipeHints(expr.function, hints, typeAliases, sourceLines)
+                collectPipeHints(expr.arg, hints, typeAliases, sourceLines)
             }
-            is com.mezze.language.typedast.TypedLambda -> collectPipeHints(expr.body, hints, typeAliases)
+            is com.mezze.language.typedast.TypedRecord -> {
+                // Recurse into record entry values so chained method calls
+                // hidden inside arg records (the receiver-field of a method
+                // call) still get visited.
+                for (entry in expr.entries) {
+                    if (entry is com.mezze.language.typedast.TypedRecordEntry.Field) {
+                        collectPipeHints(entry.value, hints, typeAliases, sourceLines)
+                    }
+                }
+            }
+            is com.mezze.language.typedast.TypedFieldAccess -> collectPipeHints(expr.record, hints, typeAliases, sourceLines)
+            is com.mezze.language.typedast.TypedLambda -> collectPipeHints(expr.body, hints, typeAliases, sourceLines)
             is com.mezze.language.typedast.TypedMatch -> {
-                collectPipeHints(expr.scrutinee, hints, typeAliases)
-                for (case in expr.cases) collectPipeHints(case.body, hints, typeAliases)
+                collectPipeHints(expr.scrutinee, hints, typeAliases, sourceLines)
+                for (case in expr.cases) collectPipeHints(case.body, hints, typeAliases, sourceLines)
             }
             is com.mezze.language.typedast.TypedIf -> {
-                collectPipeHints(expr.condition, hints, typeAliases)
-                collectPipeHints(expr.thenBranch, hints, typeAliases)
-                collectPipeHints(expr.elseBranch, hints, typeAliases)
+                collectPipeHints(expr.condition, hints, typeAliases, sourceLines)
+                collectPipeHints(expr.thenBranch, hints, typeAliases, sourceLines)
+                collectPipeHints(expr.elseBranch, hints, typeAliases, sourceLines)
             }
-            is com.mezze.language.typedast.TypedPerform -> collectPipeHints(expr.body, hints, typeAliases)
+            is com.mezze.language.typedast.TypedPerform -> collectPipeHints(expr.body, hints, typeAliases, sourceLines)
             else -> {} // leaf nodes
         }
+    }
+
+    /**
+     * True if `t` is an unresolved-type placeholder that the TypedAstBuilder
+     * left behind (e.g. `unknown`, `ret`, `op_*`). These shouldn't be shown
+     * as inlay hints — fall back to other type sources where possible.
+     */
+    private fun isPlaceholderType(t: MezzeType): Boolean {
+        if (t !is MezzeType.VarType) return false
+        val n = t.variable.name
+        return n == "unknown" || n == "ret" || n.startsWith("op_")
     }
 
     // ========== Rename ==========

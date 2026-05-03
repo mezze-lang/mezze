@@ -28,7 +28,7 @@ class MutationRuntimeTest {
                 let result = perform LocalMut in do
                     let m = seq_to_mut { seq = original }
                     seq_to_immut { seq = m }
-                seq::length { xs = result }
+                seq::size { xs = result }
 
             main {}
         """.trimIndent()
@@ -99,7 +99,7 @@ class MutationRuntimeTest {
                     let m = seq_to_mut { seq = empty }
                     sort { seq = m }
                     seq_to_immut { seq = m }
-                seq::length { xs = sorted }
+                seq::size { xs = sorted }
 
             main {}
         """.trimIndent()
@@ -776,7 +776,7 @@ class MutationRuntimeTest {
                     map_put { map = m, key = "a", value = 1 }
                     map_put { map = m, key = "b", value = 2 }
                     let ks = map_keys { map = m }
-                    seq::length { xs = ks }
+                    seq::size { xs = ks }
 
             main {}
         """.trimIndent()
@@ -795,7 +795,7 @@ class MutationRuntimeTest {
                     map_put { map = m, key = "a", value = 10 }
                     map_put { map = m, key = "b", value = 20 }
                     let vs = map_values { map = m }
-                    seq::length { xs = vs }
+                    seq::size { xs = vs }
 
             main {}
         """.trimIndent()
@@ -813,7 +813,7 @@ class MutationRuntimeTest {
                     let m = map_with_capacity { capacity = 10 }
                     map_put { map = m, key = "x", value = 100 }
                     let es = map_entries { map = m }
-                    seq::length { xs = es }
+                    seq::size { xs = es }
 
             main {}
         """.trimIndent()
@@ -894,7 +894,7 @@ class MutationRuntimeTest {
                     set_add { set = s, elem = 20 }
                     set_add { set = s, elem = 30 }
                     let elems = set_elements { set = s }
-                    seq::length { xs = elems }
+                    seq::size { xs = elems }
 
             main {}
         """.trimIndent()
@@ -1187,7 +1187,7 @@ class MutationRuntimeTest {
                     deque_push_back { deque = d, elem = 20 }
                     deque_push_back { deque = d, elem = 30 }
                     let s = deque_to_seq { deque = d }
-                    seq::length { xs = s }
+                    seq::size { xs = s }
 
             main {}
         """.trimIndent()
@@ -1288,7 +1288,7 @@ class MutationRuntimeTest {
                 perform LocalMut in do
                     let s = string_to_mut { s = "hello" }
                     let result = string_to_immut { s = s }
-                    str::length { s = result }
+                    str::size { s = result }
 
             main {}
         """.trimIndent()
@@ -1307,7 +1307,7 @@ class MutationRuntimeTest {
                     let v1 = read_string { s = s }
                     write_string { s = s, v = "world" }
                     let v2 = read_string { s = s }
-                    str::length { s = v1 } * 10 + str::length { s = v2 }
+                    str::size { s = v1 } * 10 + str::size { s = v2 }
 
             main {}
         """.trimIndent()
@@ -1348,7 +1348,7 @@ class MutationRuntimeTest {
                     string_prepend { s = s, prefix = "hello " }
                     string_append { s = s, suffix = "!" }
                     let result = read_string { s = s }
-                    str::length { s = result }
+                    str::size { s = result }
 
             main {}
         """.trimIndent()
@@ -1386,7 +1386,7 @@ class MutationRuntimeTest {
                     let v1 = read_string { s = s }
                     string_delete { s = s, start = 0, end = 6 }
                     let v2 = read_string { s = s }
-                    str::length { s = v1 } * 10 + str::length { s = v2 }
+                    str::size { s = v1 } * 10 + str::size { s = v2 }
 
             main {}
         """.trimIndent()

@@ -1,35 +1,45 @@
 # Type inference tests for Nat literals with 'n' suffix
-
 # Basic Nat literals infer to Nat type
-let x = 5n                         # expected: x : Nat
-let y = 100n                       # expected: y : Nat
-let z = 0n                         # expected: z : Nat
+let x = 5n  # expected: x : Nat
+
+let y = 100n  # expected: y : Nat
+
+let z = 0n  # expected: z : Nat
 
 # Default literals infer to Int
-let a = 5                          # expected: a : Int
-let b = 100                        # expected: b : Int
-let c = 0                          # expected: c : Int
+let a = 5  # expected: a : Int
+
+let b = 100  # expected: b : Int
+
+let c = 0  # expected: c : Int
 
 # Nat literals in arithmetic operations
-let sum = 10n + 20n                # expected: sum : Nat
-let product = 5n * 3n              # expected: product : Nat
-let quotient = 100n / 10n          # expected: quotient : Nat
+let sum = 10n + 20n  # expected: sum : Nat
+
+let product = 5n * 3n  # expected: product : Nat
+
+let quotient = 100n / 10n  # expected: quotient : Nat
 
 # Comparisons with Nat literals return Bool
-let isEqual = 5n == 5n             # expected: isEqual : Bool
-let isLess = 3n < 10n              # expected: isLess : Bool
-let isGreater = 20n > 5n           # expected: isGreater : Bool
+let isEqual = 5n == 5n  # expected: isEqual : Bool
+
+let isLess = 3n < 10n  # expected: isLess : Bool
+
+let isGreater = 20n > 5n  # expected: isGreater : Bool
 
 # Function parameter type inference from Nat literal
-let addOne = { x } -> x + 1n       # expected: addOne : { x: Nat } -> Nat
-let double = { x } -> x * 2n       # expected: double : { x: Nat } -> Nat
+let addOne = { x } -> x + 1n  # expected: addOne : { x: Nat } -> Nat
+
+let double = { x } -> x * 2n  # expected: double : { x: Nat } -> Nat
 
 # Using Nat literals in function calls
-let result1 = addOne { x = 5n }    # expected: result1 : Nat
-let result2 = double { x = 10n }   # expected: result2 : Nat
+let result1 = addOne { x = 5n }  # expected: result1 : Nat
+
+let result2 = double { x = 10n }  # expected: result2 : Nat
 
 # Nat literals with larger values
-let large = 1_000_000n             # expected: large : Nat
-let huge = 999_999_999n            # expected: huge : Nat
+let large = 1000000n  # expected: large : Nat
+
+let huge = 999999999n  # expected: huge : Nat
 
 x

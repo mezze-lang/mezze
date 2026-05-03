@@ -23,7 +23,7 @@ class SeqInterpreterTest {
         val code = """
             use std::collections::seq
             let xs: [Int] = []
-            seq::length { xs = xs }
+            seq::size { xs = xs }
         """
         assertEquals(0L, eval(code))
     }
@@ -42,7 +42,7 @@ class SeqInterpreterTest {
     fun `test integer array length`() {
         val code = """
             use std::collections::seq
-            seq::length { xs = [1, 2, 3, 4, 5] }
+            seq::size { xs = [1, 2, 3, 4, 5] }
         """
         assertEquals(5L, eval(code))
     }
@@ -84,7 +84,7 @@ class SeqInterpreterTest {
     fun `test string array length`() {
         val code = """
             use std::collections::seq
-            seq::length { xs = ["Alice", "Bob", "Charlie"] }
+            seq::size { xs = ["Alice", "Bob", "Charlie"] }
         """
         assertEquals(3L, eval(code))
     }
@@ -126,7 +126,7 @@ class SeqInterpreterTest {
     fun `test boolean array length`() {
         val code = """
             use std::collections::seq
-            seq::length { xs = [True, False, True] }
+            seq::size { xs = [True, False, True] }
         """
         assertEquals(3L, eval(code))
     }
@@ -173,7 +173,7 @@ class SeqInterpreterTest {
         val code = """
             use std::collections::seq
             let nested = [[1, 2], [3, 4], [5, 6]]
-            seq::length { xs = nested }
+            seq::size { xs = nested }
         """
         assertEquals(3L, eval(code))
     }
@@ -184,7 +184,7 @@ class SeqInterpreterTest {
             use std::collections::seq
             let nested = [[1, 2], [3, 4], [5, 6]]
             match seq::get { xs = nested, i = 0 } is
-                Some { val } -> seq::length { xs = val }
+                Some { val } -> seq::size { xs = val }
                 None -> -1
         """
         assertEquals(2L, eval(code))
@@ -209,7 +209,7 @@ class SeqInterpreterTest {
             use std::collections::seq
             let nested = [[1, 2], [3, 4], [5, 6]]
             match nested is
-                [_, second, ...rest] -> seq::length { xs = second }
+                [_, second, ...rest] -> seq::size { xs = second }
                 _ -> -1
         """
         assertEquals(2L, eval(code))
@@ -236,7 +236,7 @@ class SeqInterpreterTest {
         val code = """
             use std::collections::seq
             let arr = [1 + 2, 3 * 4, 10 - 5]
-            seq::length { xs = arr }
+            seq::size { xs = arr }
         """
         assertEquals(3L, eval(code))
     }
@@ -285,7 +285,7 @@ class SeqInterpreterTest {
     fun `test single element array length`() {
         val code = """
             use std::collections::seq
-            seq::length { xs = [42] }
+            seq::size { xs = [42] }
         """
         assertEquals(1L, eval(code))
     }
@@ -324,7 +324,7 @@ class SeqInterpreterTest {
             use std::collections::seq
             let arr = [1, 2, 3]
             let mapped = seq::map { xs = arr, f = { x } -> x * 2 }
-            seq::length { xs = mapped }
+            seq::size { xs = mapped }
         """
         assertEquals(3L, eval(code))
     }
@@ -335,7 +335,7 @@ class SeqInterpreterTest {
             use std::collections::seq
             let arr = [1, 2, 3]
             let filtered = seq::filter { xs = arr, p = { x } -> x > 1 }
-            seq::length { xs = filtered }
+            seq::size { xs = filtered }
         """
         assertEquals(2L, eval(code))
     }
@@ -376,8 +376,8 @@ class SeqInterpreterTest {
             let arr2 = [1, 2, 3]
 
             # Compare lengths first, then elements
-            let len1 = seq::length { xs = arr1 }
-            let len2 = seq::length { xs = arr2 }
+            let len1 = seq::size { xs = arr1 }
+            let len2 = seq::size { xs = arr2 }
 
             if len1 != len2 then False
             else if len1 == 0 then True
@@ -424,7 +424,7 @@ class SeqInterpreterTest {
             use std::collections::seq
             let arr = [1, 2]
             let new_arr = seq::add { xs = arr, x = 3 }
-            seq::length { xs = new_arr }
+            seq::size { xs = new_arr }
         """
         assertEquals(3L, eval(code))
     }
@@ -435,7 +435,7 @@ class SeqInterpreterTest {
             use std::collections::seq
             let arr = [1, 2]
             let new_arr = seq::add { xs = arr, x = 3 }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
         """
         assertEquals(2L, eval(code))
     }
@@ -475,7 +475,7 @@ class SeqInterpreterTest {
             use std::collections::seq
             let arr = [1, 2, 3]
             match seq::remove { xs = arr, i = 0 } is
-                Some { val } -> seq::length { xs = val }
+                Some { val } -> seq::size { xs = val }
                 None -> -1
         """
         assertEquals(2L, eval(code))
@@ -503,7 +503,7 @@ class SeqInterpreterTest {
             use std::collections::seq
             let arr = [1, 2, 3]
             let removed = seq::remove { xs = arr, i = 0 }
-            seq::length { xs = arr }
+            seq::size { xs = arr }
         """
         assertEquals(3L, eval(code))
     }
@@ -518,7 +518,7 @@ class SeqInterpreterTest {
             use std::collections::seq
             let rest = [1, 2, 3]
             let combined = [...rest, 4, 5]
-            seq::length { xs = combined }
+            seq::size { xs = combined }
         """
         assertEquals(5L, eval(code))
     }
@@ -556,7 +556,7 @@ class SeqInterpreterTest {
             let a = [1, 2]
             let b = [3, 4]
             let combined = [...a, ...b]
-            seq::length { xs = combined }
+            seq::size { xs = combined }
         """
         assertEquals(4L, eval(code))
     }
@@ -581,7 +581,7 @@ class SeqInterpreterTest {
             use std::collections::seq
             let arr = [1, 2, 3]
             let copy = [...arr]
-            seq::length { xs = copy }
+            seq::size { xs = copy }
         """
         assertEquals(3L, eval(code))
     }
@@ -606,7 +606,7 @@ class SeqInterpreterTest {
             let a = [1, 2]
             let b = [3, 4]
             let combined = [...a, ...b, 5, 6]
-            seq::length { xs = combined }
+            seq::size { xs = combined }
         """
         assertEquals(6L, eval(code))
     }
