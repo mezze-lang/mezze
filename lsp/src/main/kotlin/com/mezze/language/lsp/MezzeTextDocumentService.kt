@@ -4148,13 +4148,27 @@ class MezzeTextDocumentService(
                 }
             }
 
-            // Step 3: locals (no hash) — fall back to in-file TypedAST walk.
-            if (editsByFile.isEmpty() && typedModule != null) {
+            // Step 3: in-file TypedAST walk for use sites the usages index
+            // can't supply. Two scenarios converge here:
+            //   • Local bindings have no hash, so `targetHash` is null and
+            //     no usages-index lookup happened.
+            //   • Top-level decls have a hash, but the project hasn't
+            //     persisted the usages table for this revision yet (e.g.
+            //     the file was opened but never saved). In that case the
+            //     def edit was added above but call sites were missed.
+            //
+            // Mirroring the references() fallback: walk the in-memory
+            // TypedModule and add any TypedVar uses of `oldName` (or the
+            // resolved hash) that aren't already in editsByFile.
+            if (typedModule != null) {
+                val existing = editsByFile[uri].orEmpty().map { it.range }.toSet()
                 val locs = mutableListOf<Location>()
                 collectReferencesInModule(typedModule, oldName, uri, locs)
                 for (loc in locs) {
-                    editsByFile.getOrPut(uri) { mutableListOf() }
-                        .add(TextEdit(loc.range, newName))
+                    if (loc.range !in existing) {
+                        editsByFile.getOrPut(uri) { mutableListOf() }
+                            .add(TextEdit(loc.range, newName))
+                    }
                 }
             }
 
