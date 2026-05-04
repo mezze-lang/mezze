@@ -357,9 +357,6 @@ public final class HandleNode extends MezzeNode {
     @CompilationFinal
     private final int handlerSlot;
 
-    @CompilationFinal(dimensions = 1)
-    private final String[] effectNames;
-
     @CompilationFinal
     private final String handlerName;
 
@@ -430,7 +427,6 @@ public final class HandleNode extends MezzeNode {
      */
     public HandleNode(
             int handlerSlot,
-            String[] effectNames,
             String handlerName,
             String[] contentHashes,
             MezzeNode handlerNode,
@@ -442,7 +438,6 @@ public final class HandleNode extends MezzeNode {
             boolean hasFinalizeScope
     ) {
         this.handlerSlot = handlerSlot;
-        this.effectNames = effectNames != null ? effectNames : new String[0];
         this.handlerName = handlerName;
         this.contentHashes = contentHashes != null ? contentHashes : new String[0];
         this.handlerNode = handlerNode;
@@ -486,19 +481,19 @@ public final class HandleNode extends MezzeNode {
         // Pass handlerSlot as-is (including -1) - execute() will skip invalid slots
         // Store contentHash for processSuspended fallback lookup
         String[] hashes = (contentHash != null && !contentHash.isEmpty()) ? new String[]{contentHash} : new String[0];
-        return new HandleNode(handlerSlot, null, null, hashes, handlerNode, bodyChild,
+        return new HandleNode(handlerSlot, null, hashes, handlerNode, bodyChild,
                 -1, null, null, false, false);
     }
 
     /**
-     * Create a handle node with effect names for context registration.
+     * Create a handle node for context registration.
      */
-    public static HandleNode create(int handlerSlot, String contentHash, String[] effectNames, String handlerName, MezzeNode bodyChild) {
+    public static HandleNode create(int handlerSlot, String contentHash, String handlerName, MezzeNode bodyChild) {
         MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
         // Pass handlerSlot as-is (including -1) - execute() will skip invalid slots
         // Store contentHash for processSuspended fallback lookup
         String[] hashes = (contentHash != null && !contentHash.isEmpty()) ? new String[]{contentHash} : new String[0];
-        return new HandleNode(handlerSlot, effectNames, handlerName, hashes, handlerNode, bodyChild,
+        return new HandleNode(handlerSlot, handlerName, hashes, handlerNode, bodyChild,
                 -1, null, null, false, false);
     }
 
@@ -507,10 +502,10 @@ public final class HandleNode extends MezzeNode {
      * Use this for cases where handler needs to be found by multiple hashes
      * (e.g., both impl hash and effect hash).
      */
-    public static HandleNode create(int handlerSlot, String[] contentHashes, String[] effectNames, String handlerName, MezzeNode bodyChild) {
+    public static HandleNode create(int handlerSlot, String[] contentHashes, String handlerName, MezzeNode bodyChild) {
         String primaryHash = (contentHashes != null && contentHashes.length > 0) ? contentHashes[0] : "";
         MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, primaryHash);
-        return new HandleNode(handlerSlot, effectNames, handlerName, contentHashes, handlerNode, bodyChild,
+        return new HandleNode(handlerSlot, handlerName, contentHashes, handlerNode, bodyChild,
                 -1, null, null, false, false);
     }
 
@@ -519,7 +514,6 @@ public final class HandleNode extends MezzeNode {
      *
      * @param handlerSlot Frame slot for storing the handler
      * @param contentHash Content hash for handler lookup
-     * @param effectNames Effect names this handler handles
      * @param handlerName The handler/performer name
      * @param bodyChild The body to execute
      * @param scopeSlot Frame slot for storing the scope record
@@ -529,7 +523,6 @@ public final class HandleNode extends MezzeNode {
     public static HandleNode createScoped(
             int handlerSlot,
             String contentHash,
-            String[] effectNames,
             String handlerName,
             MezzeNode bodyChild,
             int scopeSlot,
@@ -537,7 +530,7 @@ public final class HandleNode extends MezzeNode {
             MezzeNode finalizeScopeNode
     ) {
         String[] hashes = (contentHash != null && !contentHash.isEmpty()) ? new String[]{contentHash} : new String[0];
-        return createScoped(handlerSlot, hashes, effectNames, handlerName, bodyChild, scopeSlot, initializeScopeNode, finalizeScopeNode);
+        return createScoped(handlerSlot, hashes, handlerName, bodyChild, scopeSlot, initializeScopeNode, finalizeScopeNode);
     }
 
     /**
@@ -546,7 +539,6 @@ public final class HandleNode extends MezzeNode {
      *
      * @param handlerSlot Frame slot for storing the handler
      * @param contentHashes Content hashes for handler lookup and registration
-     * @param effectNames Effect names this handler handles
      * @param handlerName The handler/performer name
      * @param bodyChild The body to execute
      * @param scopeSlot Frame slot for storing the scope record
@@ -556,7 +548,6 @@ public final class HandleNode extends MezzeNode {
     public static HandleNode createScoped(
             int handlerSlot,
             String[] contentHashes,
-            String[] effectNames,
             String handlerName,
             MezzeNode bodyChild,
             int scopeSlot,
@@ -567,7 +558,6 @@ public final class HandleNode extends MezzeNode {
         MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, primaryHash);
         return new HandleNode(
                 handlerSlot,
-                effectNames,
                 handlerName,
                 contentHashes,  // Pass all content hashes for registration
                 handlerNode,

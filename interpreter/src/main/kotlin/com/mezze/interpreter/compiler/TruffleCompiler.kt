@@ -511,7 +511,6 @@ class TruffleCompiler(
                         }
                         currentBody = HandleNode(
                             -1,                     // no local slot
-                            arrayOf(handler.effectHash.hex),  // effect hashes for context registration
                             handler.performerName,
                             contentHashes,
                             handlerNode,
