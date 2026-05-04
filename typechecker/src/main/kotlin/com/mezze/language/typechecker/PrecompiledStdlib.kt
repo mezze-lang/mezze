@@ -137,12 +137,12 @@ object PrecompiledStdlib {
             }
             is com.mezze.language.truffleir.SeqGetIR -> { collectHashRefs(node.seq, refs); collectHashRefs(node.index, refs) }
             is com.mezze.language.truffleir.DictMethodCallIR -> collectHashRefs(node.arg, refs)
-            // ReadContextIR/ReadContextFnIR carry a name field that — for codegen
-            // purposes — is the hex form of an op/decl hash. Wrap as Hash to keep
-            // the dep graph typed; if the field stops being a hex hash one day
-            // the Hash() ctor's hex check will surface it loudly.
-            is com.mezze.language.truffleir.ReadContextIR -> refs.add(Hash(node.name))
-            is com.mezze.language.truffleir.ReadContextFnIR -> refs.add(Hash(node.name))
+            // ReadGlobalByHash{,Fn}IR carry a Hash directly — feed it into the
+            // dep graph. ReadScopeIR is a runtime-injected local (e.g. "scope"
+            // from HandleNode); not a global, so no hash ref.
+            is com.mezze.language.truffleir.ReadGlobalByHashIR -> refs.add(node.hash)
+            is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> refs.add(node.hash)
+            is com.mezze.language.truffleir.ReadScopeIR -> {}
             else -> {} // leaf nodes
         }
     }

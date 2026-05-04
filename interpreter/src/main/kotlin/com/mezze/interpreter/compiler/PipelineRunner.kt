@@ -99,14 +99,14 @@ object PipelineRunner {
         compiler.registerFunctions(functions)
 
         // Resolve function aliases: `let toggle_bool = toggle` compiles to a FunctionIR whose
-        // body is ReadContextIR(toggle_hash). Register the alias hash → target's FunctionIR
+        // body is ReadGlobalByHashIR(toggle_hash). Register the alias hash → target's FunctionIR
         // so MonomorphicCallNode finds the real function (with its params) directly.
         val aliasMap = mutableMapOf<String, String>() // alias_hash → target_hash
         for (fn in functions) {
             if (fn.paramSlots.isEmpty() && fn.captureSlots.isEmpty() && fn.localSlots.isEmpty()) {
                 val body = fn.body
-                if (body is com.mezze.language.truffleir.ReadContextIR) {
-                    aliasMap[fn.hash.hex] = body.name
+                if (body is com.mezze.language.truffleir.ReadGlobalByHashIR) {
+                    aliasMap[fn.hash.hex] = body.hash.hex
                 }
             }
         }
@@ -338,13 +338,9 @@ object PipelineRunner {
             is com.mezze.language.truffleir.ReadLocalIR -> {}
             is com.mezze.language.truffleir.ReadCaptureIR -> {}
             is com.mezze.language.truffleir.ReadArgIR -> {}
-            is com.mezze.language.truffleir.ReadContextIR -> {}
-            is com.mezze.language.truffleir.ReadContextFnIR -> {
-                // The hash in ReadContextFnIR refers to a function that needs to be available.
-                // The .name field is a hex hash string by codegen convention; wrap as Hash so
-                // the queue stays typed.
-                queue.add(com.mezze.language.typedast.Hash(node.name))
-            }
+            is com.mezze.language.truffleir.ReadGlobalByHashIR -> queue.add(node.hash)
+            is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> queue.add(node.hash)
+            is com.mezze.language.truffleir.ReadScopeIR -> {} // local scope variable, not a function ref
             is com.mezze.language.truffleir.LongLitIR -> {}
             is com.mezze.language.truffleir.DoubleLitIR -> {}
             is com.mezze.language.truffleir.BoolLitIR -> {}

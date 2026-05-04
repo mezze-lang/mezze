@@ -8,23 +8,28 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
 
 /**
- * Read a function from the MezzeContext by hash WITHOUT auto-evaluating thunks.
+ * Read a function from the global registry by content hash WITHOUT auto-evaluating thunks.
  *
  * This is used for dictionary passing: when we inject ability op functions as
  * hidden arguments to polymorphic functions, we need the raw MezzeFunction
- * object, not the result of calling it. Regular ReadContextNode auto-evaluates
+ * object, not the result of calling it. Regular ReadGlobalByHashNode auto-evaluates
  * zero-param thunks (like value definitions), which would call the ability op
  * function and return its result instead of the function itself.
  *
  * This node specifically returns the MezzeFunction without calling it.
+ *
+ * The `name` field carries the hex form of a content Hash. Kept as String at the
+ * Truffle-node boundary for Graal partial-evaluation; the type-safe Hash flows on
+ * the Kotlin side (ReadGlobalFnByHashIR.hash: Hash) and is unwrapped at the
+ * Kotlin → Java boundary in TruffleCompiler.kt.
  */
-@NodeInfo(shortName = "read-context-fn")
-public final class ReadContextFnNode extends MezzeNode {
+@NodeInfo(shortName = "read-global-fn-by-hash")
+public final class ReadGlobalFnByHashNode extends MezzeNode {
 
     @CompilationFinal
     private final String name;
 
-    public ReadContextFnNode(String name) {
+    public ReadGlobalFnByHashNode(String name) {
         this.name = name;
     }
 

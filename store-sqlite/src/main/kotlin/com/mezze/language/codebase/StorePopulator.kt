@@ -691,8 +691,9 @@ object StorePopulator {
                 collectEdgesFromNode(node.index, report)
             }
             is com.mezze.language.truffleir.DictMethodCallIR -> collectEdgesFromNode(node.arg, report)
-            is com.mezze.language.truffleir.ReadContextFnIR -> report(node.name, EdgeKind.REFERENCES)
-            is com.mezze.language.truffleir.ReadContextIR -> report(node.name, EdgeKind.REFERENCES)
+            is com.mezze.language.truffleir.ReadGlobalByHashIR -> report(node.hash.hex, EdgeKind.REFERENCES)
+            is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> report(node.hash.hex, EdgeKind.REFERENCES)
+            is com.mezze.language.truffleir.ReadScopeIR -> {}
             // Leaf nodes — no edges
             is com.mezze.language.truffleir.ReadLocalIR -> {}
             is com.mezze.language.truffleir.ReadCaptureIR -> {}

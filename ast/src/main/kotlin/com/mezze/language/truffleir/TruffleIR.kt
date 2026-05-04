@@ -77,10 +77,13 @@ sealed interface StringPartIR {
 @Serializable data class WriteLocalIR(val slot: Int, val kind: SlotKind, val value: NodeIR, override val src: SourceInfo) : NodeIR
 @Serializable data class ReadCaptureIR(val index: Int, val kind: SlotKind, override val src: SourceInfo) : NodeIR
 @Serializable data class ReadArgIR(val index: Int, val kind: SlotKind, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
-@Serializable data class ReadContextIR(val name: String, override val src: SourceInfo) : NodeIR
-/** Read a function from context by hash WITHOUT auto-evaluating thunks.
+/** Read a top-level definition from the global registry by content hash. Auto-evaluates thunks. */
+@Serializable data class ReadGlobalByHashIR(val hash: Hash, override val src: SourceInfo) : NodeIR
+/** Read a function from the global registry by content hash WITHOUT auto-evaluating thunks.
  *  Used for dictionary passing where we need the raw MezzeFunction, not its return value. */
-@Serializable data class ReadContextFnIR(val name: String, override val src: SourceInfo) : NodeIR
+@Serializable data class ReadGlobalFnByHashIR(val hash: Hash, override val src: SourceInfo) : NodeIR
+/** Read a runtime-injected scope variable (e.g., `scope` from HandleNode) by name. */
+@Serializable data class ReadScopeIR(val varName: String, override val src: SourceInfo) : NodeIR
 
 // Calls
 @Serializable data class CallDirectIR(val targetHash: Hash, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo, val typeTag: String? = null) : NodeIR

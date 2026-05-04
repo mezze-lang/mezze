@@ -145,14 +145,18 @@ class TruffleCompiler(
 
             // === Variables ===
             is ReadLocalIR -> ReadLocalNode(node.slot, slotKindToInt(node.kind))
-            is ReadContextIR -> {
-                // Read a named value from the MezzeContext (used for `scope` in handler operations)
-                com.mezze.interpreter.nodes.ReadContextNode(node.name)
+            is ReadGlobalByHashIR -> {
+                // Read a global definition by content hash. Auto-evaluates value thunks.
+                com.mezze.interpreter.nodes.ReadGlobalByHashNode(node.hash.hex)
             }
-            is ReadContextFnIR -> {
-                // Read a function from the MezzeContext by hash WITHOUT auto-evaluating thunks.
-                // Used for dictionary passing to inject ability op functions as hidden params.
-                com.mezze.interpreter.nodes.ReadContextFnNode(node.name)
+            is ReadGlobalFnByHashIR -> {
+                // Read a function from the global registry by content hash WITHOUT auto-evaluating
+                // thunks. Used for dictionary passing to inject ability op functions as hidden params.
+                com.mezze.interpreter.nodes.ReadGlobalFnByHashNode(node.hash.hex)
+            }
+            is ReadScopeIR -> {
+                // Read a runtime-injected scope variable (e.g., `scope` from HandleNode) by name.
+                com.mezze.interpreter.nodes.ReadScopeNode(node.varName)
             }
             is WriteLocalIR -> {
                 val valueNode = compileNode(node.value, source)

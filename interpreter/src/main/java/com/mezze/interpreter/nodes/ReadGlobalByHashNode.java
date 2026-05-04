@@ -14,28 +14,29 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.RootNode;
 
 /**
- * Read a named value from the MezzeContext.
- *
- * Used for scoped effect variables like `scope` which are registered
- * in the context by HandleNode and need to be read by handler operation
- * lambdas that execute in a different frame.
+ * Read a global definition from the MezzeContext by content hash.
  *
  * Auto-evaluates zero-param zero-capture "value thunks" (like trig::pi, trig::e).
  * These are top-level values compiled as zero-param FunctionIRs. When read in
  * non-call position (e.g., `pi / 2.0`), the thunk is called to get the actual
  * value instead of returning the MezzeFunction wrapper.
+ *
+ * The `name` field carries the hex form of a content Hash. Kept as String at the
+ * Truffle-node boundary for Graal partial-evaluation; the type-safe Hash flows on
+ * the Kotlin side (ReadGlobalByHashIR.hash: Hash) and is unwrapped at the
+ * Kotlin → Java boundary in TruffleCompiler.kt.
  */
-@NodeInfo(shortName = "read-context")
-public final class ReadContextNode extends MezzeNode {
+@NodeInfo(shortName = "read-global-by-hash")
+public final class ReadGlobalByHashNode extends MezzeNode {
 
     @CompilationFinal
     private final String name;
 
     // For forcing MezzeSuspended values
-    @Child
+    @com.oracle.truffle.api.nodes.Node.Child
     private IndirectCallNode suspendedCallNode;
 
-    public ReadContextNode(String name) {
+    public ReadGlobalByHashNode(String name) {
         this.name = name;
     }
 
@@ -47,10 +48,7 @@ public final class ReadContextNode extends MezzeNode {
     @TruffleBoundary
     private Object lookupInContext() {
         MezzeContext context = MezzeContext.get(this);
-        Object value = context.lookupLocal(name);
-        if (value == null) {
-            value = context.lookupGlobal(name);
-        }
+        Object value = context.lookupGlobal(name);
         // Fall back to Language-level lazy compilation (for functions referenced by hash)
         if (value == null) {
             var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
@@ -60,7 +58,7 @@ public final class ReadContextNode extends MezzeNode {
             }
         }
         if (value == null) {
-            throw new RuntimeException("Context variable '" + name + "' not found");
+            throw new RuntimeException("Global hash not found: '" + name + "'");
         }
         // Auto-evaluate value thunks: zero-param zero-capture functions that wrap
         // top-level values (like trig::pi = 3.14...). These are compiled as FunctionIRs

@@ -823,7 +823,7 @@ class TypedASTCompiler(
             is BindingRef.Local -> {
                 // "scope" is a runtime-injected variable from HandleNode (scoped effects)
                 if (expr.name == "scope") {
-                    return ReadContextIR("scope", src)
+                    return ReadScopeIR("scope", src)
                 }
                 // Check if this is a captured variable.
                 // For lambdas: depth > 0 means crossing a lambda boundary.
@@ -873,7 +873,7 @@ class TypedASTCompiler(
                         if (binding.depth > 0) {
                             val topDecl = declIndex?.values?.find { it.name == expr.name }
                             if (topDecl != null) {
-                                return ReadContextIR(topDecl.hash.hex, src)
+                                return ReadGlobalByHashIR(topDecl.hash, src)
                             }
                         }
                         val newSlot = allocLocal(expr.name)
@@ -910,7 +910,7 @@ class TypedASTCompiler(
                             // Read the value/function from context by hash.
                             // Both value thunks (trig::pi) and function references (trig::sin) are
                             // registered in context — MonomorphicCallNode handles calling them.
-                            ReadContextIR(binding.hash.hex, src)
+                            ReadGlobalByHashIR(binding.hash, src)
                         }
                     }
                 }
@@ -1000,7 +1000,7 @@ class TypedASTCompiler(
                         val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(dictMethodName)
                         val resolvedHash = resolveOpHashFromConcreteTypes(dictMethodName, concreteTypesForDict)
                         if (resolvedHash != null) {
-                            fields.add(FieldIR(dictParamName, ReadContextFnIR(resolvedHash.hex, src)))
+                            fields.add(FieldIR(dictParamName, ReadGlobalFnByHashIR(resolvedHash, src)))
                         } else {
                             // Forward from caller's dict params if available
                             val callerDictIdx = currentParamNames.indexOf(dictParamName)
@@ -1148,7 +1148,7 @@ class TypedASTCompiler(
                 // ReadContextFnIR fetches the MezzeFunction from the global registry by hash
                 // WITHOUT auto-evaluating it as a thunk. This is critical because ability op
                 // functions may look like zero-param thunks but we need the function object itself.
-                dictFields.add(FieldIR(dictParamName, ReadContextFnIR(opHash.hex, src)))
+                dictFields.add(FieldIR(dictParamName, ReadGlobalFnByHashIR(opHash, src)))
             } else {
                 // Can't resolve — check if caller has this dict param (forwarding)
                 val callerDictIdx = currentParamNames.indexOf(dictParamName)
@@ -1285,7 +1285,7 @@ class TypedASTCompiler(
             val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(methodName)
             val opHash = resolveOpHashFromConcreteTypes(methodName, allConcreteTypes)
             if (opHash != null) {
-                resolvedDicts.add(dictParamName to ReadContextFnIR(opHash.hex, src))
+                resolvedDicts.add(dictParamName to ReadGlobalFnByHashIR(opHash, src))
             } else {
                 // Try forwarding from caller's dict params
                 val callerDictIdx = currentParamNames.indexOf(dictParamName)

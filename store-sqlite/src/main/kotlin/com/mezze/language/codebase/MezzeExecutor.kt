@@ -177,12 +177,13 @@ class MezzeExecutor(
                 collectReferencedHashes(node.index, queue)
             }
             is com.mezze.language.truffleir.DictMethodCallIR -> collectReferencedHashes(node.arg, queue)
-            is com.mezze.language.truffleir.ReadContextFnIR -> queue.add(node.name)
+            is com.mezze.language.truffleir.ReadGlobalByHashIR -> queue.add(node.hash.hex)
+            is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> queue.add(node.hash.hex)
+            is com.mezze.language.truffleir.ReadScopeIR -> {}
             // Leaf nodes
             is com.mezze.language.truffleir.ReadLocalIR -> {}
             is com.mezze.language.truffleir.ReadCaptureIR -> {}
             is com.mezze.language.truffleir.ReadArgIR -> {}
-            is com.mezze.language.truffleir.ReadContextIR -> {}
             is com.mezze.language.truffleir.LongLitIR -> {}
             is com.mezze.language.truffleir.DoubleLitIR -> {}
             is com.mezze.language.truffleir.BoolLitIR -> {}
