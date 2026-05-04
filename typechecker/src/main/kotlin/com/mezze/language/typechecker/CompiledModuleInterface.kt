@@ -78,7 +78,7 @@ data class CompiledModuleInterface(
 
         data class InherentImplRegistration(
             val implDecl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
-            val implKey: String,
+            val implKey: com.mezze.language.typedast.Hash,
             // Pre-inferred return types from the home module's typecheck.
             // See ModuleImportContext.inherentImplOpReturnTypes / issue #213.
             val opReturnTypes: Map<String, MezzeType> = emptyMap(),
@@ -94,9 +94,9 @@ data class CompiledModuleInterface(
             }
         }
 
-        data class NamedImplRegistration(val implInfo: TypingContext.AbilityImplInfo, val implKey: String) : ContextExtension {
+        data class NamedImplRegistration(val implInfo: TypingContext.AbilityImplInfo, val implKey: com.mezze.language.typedast.Hash) : ContextExtension {
             override fun apply(context: TypingContext): TypingContext {
-                return context.extendWithImpl(com.mezze.language.typedast.Hash(implKey), implInfo)
+                return context.extendWithImpl(implKey, implInfo)
             }
         }
     }
@@ -193,7 +193,7 @@ data class CompiledModuleInterface(
                         targetTypeAnnotations = implDecl.allTypeArgs,
                         associatedTypeBindings = implDecl.associatedTypeBindings,
                         sourceModule = null,
-                        contentHash = com.mezze.language.typedast.Hash(implKey),
+                        contentHash = implKey,
                         typeVars = implTypeVars
                     )
                     extensions.add(ContextExtension.NamedImplRegistration(implInfo, implKey))

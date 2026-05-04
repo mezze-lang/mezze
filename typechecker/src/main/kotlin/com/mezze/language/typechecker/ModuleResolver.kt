@@ -42,7 +42,7 @@ data class ProgramIndex(
     val performersByName: Map<String, ParsedPerformerDecl>,
     val performersByEffect: Map<String, List<ParsedPerformerDecl>>,
     val abilityImplsByAbility: Map<String, List<ParsedImplAbilityDecl>>,
-    val abilityImplsByHash: Map<String, ParsedImplAbilityDecl>,
+    val abilityImplsByHash: Map<com.mezze.language.typedast.Hash, ParsedImplAbilityDecl>,
     val letBindings: Map<String, ParsedLetDecl>,
     val useDeclarations: List<ParsedUseDecl>,
     val pubUseDeclarations: List<ParsedPubUseDecl>
@@ -114,7 +114,7 @@ data class ProgramIndex(
                     .filter { !it.isInherent }
                     .groupBy { it.abilityName!! },
                 abilityImplsByHash = hashedAbilityImpls.associateBy { impl ->
-                    impl.contentHash!!
+                    com.mezze.language.typedast.Hash(impl.contentHash!!)
                 },
                 letBindings = letDecls
                     .filter { it.isSimpleBinding }

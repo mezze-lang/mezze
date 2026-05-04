@@ -239,21 +239,21 @@ data class ModuleImportContext(
     val importedAbilities: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,  // Imported abilities (keyed by name)
     val importedEffects: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,     // Imported effects (keyed by name)
     val importedImpls: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,         // Imported effect implementations (keyed by performer name)
-    val importedAbilityImpls: Map<String, com.mezze.language.parsedast.ParsedImplAbilityDecl>,  // Imported ability implementations (keyed by content hash)
+    val importedAbilityImpls: Map<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedImplAbilityDecl>,  // Imported ability implementations (keyed by content hash)
     // Content-hash indexed maps for O(1) lookup without string parsing
-    val effectsByHash: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),    // Effects keyed by content hash
-    val abilitiesByHash: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap(),  // Abilities keyed by content hash
+    val effectsByHash: Map<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),    // Effects keyed by content hash
+    val abilitiesByHash: Map<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap(),  // Abilities keyed by content hash
     // Pre-inferred return types for inherent impl operations, harvested from the
     // home module's TypedAbilityImpl. Keyed by impl content hash, then op name.
     // ContextBuilder uses these instead of fresh TypeVars when registering an
     // imported inherent impl whose operation has no return-type annotation.
-    val inherentImplOpReturnTypes: Map<String, Map<String, com.mezze.language.ast.MezzeType>> = emptyMap(),
+    val inherentImplOpReturnTypes: Map<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>> = emptyMap(),
     // Pre-inferred PARAM-record types for inherent impl operations (issue #230).
     // Keyed by impl content hash → op name → MezzeType (a RecordType of fields).
     // Without this, callers like `nums.all {p = 5}` typecheck because the impl
     // op registered a fresh TypeVar for `p` instead of the solver-discovered
     // `{x: 'a} -> Bool`. Harvested same way as return types.
-    val inherentImplOpParamTypes: Map<String, Map<String, com.mezze.language.ast.MezzeType>> = emptyMap()
+    val inherentImplOpParamTypes: Map<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>> = emptyMap()
 ) {
     companion object {
         /**
@@ -309,13 +309,13 @@ data class ModuleImportContext(
      * Look up an effect by its content hash.
      * This is the preferred lookup method - O(1) with no string parsing.
      */
-    fun getEffectByHash(contentHash: String): com.mezze.language.parsedast.ParsedEffectDecl? = effectsByHash[contentHash]
+    fun getEffectByHash(contentHash: com.mezze.language.typedast.Hash): com.mezze.language.parsedast.ParsedEffectDecl? = effectsByHash[contentHash]
 
     /**
      * Look up an ability by its content hash.
      * This is the preferred lookup method - O(1) with no string parsing.
      */
-    fun getAbilityByHash(contentHash: String): com.mezze.language.parsedast.ParsedAbilityDecl? = abilitiesByHash[contentHash]
+    fun getAbilityByHash(contentHash: com.mezze.language.typedast.Hash): com.mezze.language.parsedast.ParsedAbilityDecl? = abilitiesByHash[contentHash]
 }
 
 /**

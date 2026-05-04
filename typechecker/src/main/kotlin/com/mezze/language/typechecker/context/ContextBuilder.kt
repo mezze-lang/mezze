@@ -970,7 +970,7 @@ class ContextBuilder {
     fun registerImportedInherentImpl(
         ctx: TypingContext,
         implDecl: ParsedImplAbilityDecl,
-        implKey: String,
+        implKey: com.mezze.language.typedast.Hash,
         file: String = "<import>",
         // Pre-inferred return types harvested from the home module's
         // TypedAbilityImpl.operations (issue #213). Keyed by op name. Used
@@ -986,7 +986,7 @@ class ContextBuilder {
         var result = ctx
         val targetTypeNames = implDecl.targetTypes.map { getTypeName(it) }
         val targetTypeName = targetTypeNames.firstOrNull() ?: return ctx
-        val implKeyHash = com.mezze.language.typedast.Hash(implKey)
+        val implKeyHash = implKey
 
         // Resolve the impl's target type once. Used to bind `it` in unannotated
         // method signatures so generic impls (e.g. `impl Seq 'a where { first }`)

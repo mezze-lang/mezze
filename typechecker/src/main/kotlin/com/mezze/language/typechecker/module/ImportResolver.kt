@@ -362,10 +362,10 @@ class ImportResolver(
         val abilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
         val effects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
         val impls = mutableMapOf<String, com.mezze.language.parsedast.ParsedPerformerDecl>()
-        val abilityImpls = mutableMapOf<String, com.mezze.language.parsedast.ParsedImplAbilityDecl>()
+        val abilityImpls = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedImplAbilityDecl>()
         // Content-hash indexed maps for O(1) lookup
-        val effectsByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
-        val abilitiesByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
+        val effectsByHash = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedEffectDecl>()
+        val abilitiesByHash = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedAbilityDecl>()
 
         // Get the loaded module to access its declarations
         val module = loader.getModule(modulePath)
@@ -439,7 +439,7 @@ class ImportResolver(
                         abilities[localName] = abilityDecl
                         // Also store by content hash for O(1) lookup without string parsing
                         abilityDecl.contentHash?.let { hash ->
-                            abilitiesByHash[hash] = abilityDecl
+                            abilitiesByHash[com.mezze.language.typedast.Hash(hash)] = abilityDecl
                         }
                     }
 
@@ -462,7 +462,7 @@ class ImportResolver(
                         effects[localName] = effectDecl
                         // Also store by content hash for O(1) lookup without string parsing
                         effectDecl.contentHash?.let { hash ->
-                            effectsByHash[hash] = effectDecl
+                            effectsByHash[com.mezze.language.typedast.Hash(hash)] = effectDecl
                         }
                     }
 
@@ -545,10 +545,10 @@ class ImportResolver(
         val abilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
         val effects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
         val impls = mutableMapOf<String, com.mezze.language.parsedast.ParsedPerformerDecl>()
-        val abilityImpls = mutableMapOf<String, com.mezze.language.parsedast.ParsedImplAbilityDecl>()
+        val abilityImpls = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedImplAbilityDecl>()
         // Content-hash indexed maps for O(1) lookup
-        val effectsByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
-        val abilitiesByHash = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
+        val effectsByHash = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedEffectDecl>()
+        val abilitiesByHash = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedAbilityDecl>()
 
         // Get the loaded module to access its declarations
         val module = loader.getModule(modulePath)
@@ -599,7 +599,7 @@ class ImportResolver(
                         abilities[localName] = abilityDecl
                         // Also store by content hash for O(1) lookup
                         abilityDecl.contentHash?.let { hash ->
-                            abilitiesByHash[hash] = abilityDecl
+                            abilitiesByHash[com.mezze.language.typedast.Hash(hash)] = abilityDecl
                         }
                     }
                     // Note: Abilities are NOT added to bindings because they don't have runtime values.
@@ -612,7 +612,7 @@ class ImportResolver(
                         effects[localName] = effectDecl
                         // Also store by content hash for O(1) lookup
                         effectDecl.contentHash?.let { hash ->
-                            effectsByHash[hash] = effectDecl
+                            effectsByHash[com.mezze.language.typedast.Hash(hash)] = effectDecl
                         }
                     }
                     // Note: Effects are NOT added to bindings because they don't have runtime values.
@@ -665,7 +665,7 @@ class ImportResolver(
                             ?: throw IllegalStateException(
                                 "Content hash not computed for imported impl: ${abilityImpl.abilityName ?: "inherent"} ${abilityImpl.targetTypes}"
                             )
-                        abilityImpls[implKey] = abilityImpl
+                        abilityImpls[com.mezze.language.typedast.Hash(implKey)] = abilityImpl
                     }
                 }
             }
@@ -839,8 +839,8 @@ class ImportResolver(
     private fun harvestInherentImplOpReturnTypes(
         v2Module: com.mezze.language.typedast.TypedModule,
         exports: Map<String, ExportedItem>
-    ): Map<String, Map<String, com.mezze.language.ast.MezzeType>> {
-        val result = mutableMapOf<String, Map<String, com.mezze.language.ast.MezzeType>>()
+    ): Map<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>> {
+        val result = mutableMapOf<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>>()
         for (impl in v2Module.abilityImpls) {
             // Inherent impls use abilityHash = Hash.ZERO.
             if (impl.abilityHash != com.mezze.language.typedast.Hash.ZERO) continue
@@ -881,7 +881,7 @@ class ImportResolver(
                 opMap[opName] = rawReturnType
             }
             if (opMap.isNotEmpty()) {
-                result[impl.hash.hex] = opMap
+                result[impl.hash] = opMap
             }
         }
         return result
@@ -904,8 +904,8 @@ class ImportResolver(
     private fun harvestInherentImplOpParamTypes(
         v2Module: com.mezze.language.typedast.TypedModule,
         exports: Map<String, ExportedItem>
-    ): Map<String, Map<String, com.mezze.language.ast.MezzeType>> {
-        val result = mutableMapOf<String, Map<String, com.mezze.language.ast.MezzeType>>()
+    ): Map<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>> {
+        val result = mutableMapOf<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>>()
         for (impl in v2Module.abilityImpls) {
             // Inherent impls use abilityHash = Hash.ZERO.
             if (impl.abilityHash != com.mezze.language.typedast.Hash.ZERO) continue
@@ -940,7 +940,7 @@ class ImportResolver(
                 opMap[opName] = rawParamType
             }
             if (opMap.isNotEmpty()) {
-                result[impl.hash.hex] = opMap
+                result[impl.hash] = opMap
             }
         }
         return result
