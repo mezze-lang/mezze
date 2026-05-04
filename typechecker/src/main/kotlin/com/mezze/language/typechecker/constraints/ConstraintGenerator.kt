@@ -602,7 +602,7 @@ class ConstraintGenerator(
 
                             // Hash-first inherent method lookup, fall back to name
                             val methodInfo = if (targetTypeHash != null) {
-                                currentContext.findAnonymousMethodByHash(com.mezze.language.typedast.Hash(targetTypeHash), op.name)
+                                currentContext.findAnonymousMethodByHash(targetTypeHash, op.name)
                                     ?: targetTypeName?.let { currentContext.findAnonymousMethod(it, op.name) }
                             } else if (targetTypeName != null) {
                                 currentContext.findAnonymousMethod(targetTypeName, op.name)

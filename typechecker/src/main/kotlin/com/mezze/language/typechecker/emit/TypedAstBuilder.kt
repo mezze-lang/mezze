@@ -135,7 +135,7 @@ class TypedAstBuilder(
         for ((name, hash) in moduleHashes) {
             val key = BindingKey.unqualified(name)
             if (key !in mutableHashes) {
-                mutableHashes[key] = Hash(hash)
+                mutableHashes[key] = hash
             }
         }
         precomputedHashes = mutableHashes
@@ -226,7 +226,7 @@ class TypedAstBuilder(
             val type = closeGeneratedRowVars(rawType)
             val value = buildExpr(decl.value, file, type)
 
-            val destrHash = Hash(com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl))
+            val destrHash = com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl)
             val scheme = V2TypeScheme(emptyList(), emptyList(), type)
             decls.add(TypedLetDecl(destrHash, destrName, emptyList(), value, scheme, false, loc))
 
@@ -253,8 +253,7 @@ class TypedAstBuilder(
 
         // Compute content hash for this declaration
         val hash = com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl, file)
-            ?.let { Hash(it) }
-            ?: Hash(com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl))
+            ?: com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl)
 
         val scheme = V2TypeScheme(emptyList(), emptyList(), type)
         val isPublic = decl.visibility == ParsedVisibility.PUBLIC
@@ -281,7 +280,7 @@ class TypedAstBuilder(
         exports: MutableMap<String, ExportEntry>
     ) {
         val loc = decl.loc
-        val hash = Hash(decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(decl))
+        val hash = decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(decl)
 
         val def: TypedTypeDef = when (val d = decl.definition) {
             is ParsedRecordDef -> TypedRecordDef(
@@ -313,7 +312,7 @@ class TypedAstBuilder(
         exports: MutableMap<String, ExportEntry>
     ) {
         val loc = decl.loc
-        val hash = Hash(decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashAbilityDecl(decl))
+        val hash = decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashAbilityDecl(decl)
 
         val ops = decl.operations.mapIndexed { idx, op ->
             typeVarCache.clear()
@@ -362,7 +361,7 @@ class TypedAstBuilder(
                 val abilityDecl = abilityDeclarations[abilityName]
                     ?: importContext?.importedAbilities?.get(abilityName)
                     ?: error("Ability '$abilityName' not found in declarations or imports")
-                Hash(abilityDecl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashAbilityDecl(abilityDecl))
+                abilityDecl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashAbilityDecl(abilityDecl)
             }
             is ParsedImplTarget.Inherent -> Hash.ZERO
         }
@@ -419,7 +418,7 @@ class TypedAstBuilder(
 
         // File+location hash — includes file path to disambiguate impls at same line/col in different files.
         // TODO: migrate to TypedASTHasher.hashAbilityImpl for true content-based hashing (requires cache rebuild)
-        val hash = Hash(decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashImplAbilityDecl(decl))
+        val hash = decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashImplAbilityDecl(decl)
 
         impls.add(TypedAbilityImpl(
             hash = hash,
@@ -439,7 +438,7 @@ class TypedAstBuilder(
         exports: MutableMap<String, ExportEntry>
     ) {
         val loc = decl.loc
-        val hash = Hash(decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl))
+        val hash = decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl)
 
         val ops = decl.operations.mapIndexed { idx, op ->
             typeVarCache.clear()
@@ -465,7 +464,7 @@ class TypedAstBuilder(
         val contentHash = decl.contentHash
             ?: implDeclarations[decl.performerName]?.contentHash
             ?: identifierContentHashes[BindingKey(null, decl.performerName)]
-        val hash = Hash(decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(decl))
+        val hash = decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(decl)
 
         // Resolve effect hash — must match the TypedEffectDecl.hash
         val effectName = decl.effect.localName
@@ -513,7 +512,7 @@ class TypedAstBuilder(
         decls: MutableList<TypedDecl>
     ) {
         val loc = decl.loc
-        val hash = Hash(com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(decl.expression))
+        val hash = com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(decl.expression)
         val type = MezzeType.VarType(TypeVar("unknown"))
         val value = buildExpr(decl.expression, file, type)
         decls.add(TypedLetDecl(
@@ -926,7 +925,7 @@ class TypedAstBuilder(
                                 if (lambdaParamScopes.isNotEmpty() && destrName !in lambdaParamScopes.last()) {
                                     lambdaParamScopes.last().add(destrName)
                                 }
-                                val destrHash = Hash(com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(stmt.value))
+                                val destrHash = com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(stmt.value)
                                 stmts.add(TypedStatement.Let(destrName, destrHash, resolvedType, value, stmt.loc))
 
                                 // For each field in the pattern, create a field access let
@@ -956,7 +955,7 @@ class TypedAstBuilder(
 
                                 // Use v1 content hash if available, otherwise compute
                                 val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
-                                val contentHash = v1LetHash ?: Hash(com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(stmt.value))
+                                val contentHash = v1LetHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(stmt.value)
                                 stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc))
                             }
                         }
@@ -1290,10 +1289,10 @@ class TypedAstBuilder(
         val implDecl = implDeclarations[performerName]
         val importedImpl = importContext?.importedImpls?.get(performerName)
         val performerHash = identifierContentHashes[BindingKey(null, performerName)]
-            ?: (implDecl?.contentHash
-                ?: importedImpl?.contentHash
-                ?: implDecl?.let { com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(it) }
-                ?: "0".repeat(64)).let { Hash(it) }
+            ?: implDecl?.contentHash
+            ?: importedImpl?.contentHash
+            ?: implDecl?.let { com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(it) }
+            ?: Hash("0".repeat(64))
 
         // Resolve effect hash from performer
         val effectName = implDecl?.effect?.localName
@@ -1693,7 +1692,7 @@ class TypedAstBuilder(
         val decl = effectDeclarations[effectName]
             ?: importContext?.importedEffects?.get(effectName)
             ?: error("Effect '$effectName' not found in declarations or imports")
-        return Hash(decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl))
+        return decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl)
     }
 
     /**

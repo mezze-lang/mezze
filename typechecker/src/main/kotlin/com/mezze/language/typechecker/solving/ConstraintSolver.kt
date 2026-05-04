@@ -72,7 +72,7 @@ class ConstraintSolver(
      */
     private data class TrackedAbilityConstraint(
         val abilityName: String,
-        val abilityHash: String?,
+        val abilityHash: com.mezze.language.typedast.Hash?,
         val typeArgs: List<MezzeType>,
         val loc: com.mezze.language.parsedast.Loc?
     )
@@ -1454,7 +1454,7 @@ class ConstraintSolver(
      * Falls back to name-based lookup via [TypingContext.getAbilityImpls] only when
      * hash is not available.
      */
-    private fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>, abilityHash: String? = null): Boolean {
+    private fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>, abilityHash: com.mezze.language.typedast.Hash? = null): Boolean {
         val effectiveHash = abilityHash ?: WellKnownHashes.resolveHash(abilityName)
         // Derivation + fallback for abilities that can't come from context alone:
         // - Inspect: universally available for ALL types
@@ -1511,7 +1511,7 @@ class ConstraintSolver(
 
         // Search for implementation — hash-based primary, name-based fallback.
         val impls = if (abilityHash != null) {
-            val byHash = context.getAbilityImplsByDeclHash(com.mezze.language.typedast.Hash(abilityHash))
+            val byHash = context.getAbilityImplsByDeclHash(abilityHash)
             if (byHash.isNotEmpty()) byHash else context.getAbilityImpls(abilityName)
         } else {
             context.getAbilityImpls(abilityName)
@@ -1567,7 +1567,7 @@ class ConstraintSolver(
      * TODO: Remove name fallback once all call paths provide abilityHash.
      *       Currently `canDeriveOrHasImpl` calls `checkAbilityImplementation` without hash.
      */
-    private fun isCodecAbility(abilityName: String, abilityHash: String? = null): Boolean =
+    private fun isCodecAbility(abilityName: String, abilityHash: com.mezze.language.typedast.Hash? = null): Boolean =
         WellKnownHashes.isCodecAbility(abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName))
 
     /**
@@ -1810,7 +1810,7 @@ class ConstraintSolver(
      * TODO: Remove primitive checks once the context propagation for imported
      * ability impls is fixed in ModuleTypeChecker/ConstraintSolver.
      */
-    private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: String? = null): Boolean {
+    private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: com.mezze.language.typedast.Hash? = null): Boolean {
         val resolvedHash = abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName)
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
 
@@ -1884,7 +1884,7 @@ class ConstraintSolver(
      * Check if a type has an ability via derivation OR via an explicit impl in context.
      * Used for recursive Eq/Ord derivation on composite types.
      */
-    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType, abilityHash: String? = null): Boolean {
+    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType, abilityHash: com.mezze.language.typedast.Hash? = null): Boolean {
         // Try derivation first, then impl lookup.
         // For impl lookup: try hash-based first, fall back to name-based if hash finds nothing
         // (some impls may not have abilityDeclHash populated when ability declaration is not in scope).
@@ -2005,7 +2005,7 @@ class ConstraintSolver(
      * @param typeArgs The type arguments (may contain type variables)
      * @return Substitution binding type variables to concrete types, or null if inference failed
      */
-    private fun tryBidirectionalInference(abilityName: String, typeArgs: List<MezzeType>, abilityHash: String? = null): Substitution? {
+    private fun tryBidirectionalInference(abilityName: String, typeArgs: List<MezzeType>, abilityHash: com.mezze.language.typedast.Hash? = null): Substitution? {
         val resolvedHash = abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName)
         if (resolvedHash == WellKnownHashConstants.ABILITY_DECODEREPR && typeArgs.size == 1) {
             val dataType = typeArgs[0]

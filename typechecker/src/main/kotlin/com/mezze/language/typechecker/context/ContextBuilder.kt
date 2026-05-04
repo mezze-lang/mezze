@@ -62,7 +62,7 @@ class ContextBuilder {
         val abilityDeclarations: Map<String, ParsedAbilityDecl>,
         val effectDeclarations: Map<String, ParsedEffectDecl>,
         val performerToEffect: Map<String, String>,  // performer name → effect name
-        val performerToEffectHash: Map<String, String> = emptyMap(),  // performer contentHash → effect contentHash
+        val performerToEffectHash: Map<com.mezze.language.typedast.Hash, com.mezze.language.typedast.Hash> = emptyMap(),  // performer contentHash → effect contentHash
         /** Maps performer names to the set of effects they ADD (not handle) */
         val performerAddedEffects: Map<String, Set<String>> = emptyMap(),
         /** Maps performer names to their ParsedPerformerDecl (for content hash lookup) */
@@ -222,7 +222,7 @@ class ContextBuilder {
         val performerToEffectMap = importedMapping + localMapping  // Local impls override imports
 
         // Build hash-based performer→effect mapping
-        val performerToEffectHashMap = mutableMapOf<String, String>()
+        val performerToEffectHashMap = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.Hash>()
         for (perf in resolvedParsedPerformerDecls) {
             val perfHash = perf.contentHash ?: continue
             val effectDecl = allEffectDecls[perf.effect.localName]
@@ -739,11 +739,11 @@ class ContextBuilder {
                 }
             )
 
-            val contentHash = com.mezze.language.typedast.Hash(implDecl.contentHash
+            val contentHash = implDecl.contentHash
                 ?: throw IllegalStateException(
                     "Content hash not computed for impl: ${implDecl.performerName}. " +
                     "Ensure computeDeclarationHashes was called before ContextBuilder."
-                ))
+                )
 
             val performerFieldsType = if (implDecl.params.isNotEmpty()) {
                 MezzeType.RecordType(
@@ -771,11 +771,11 @@ class ContextBuilder {
 
         // Even if no associated types, we still need to store performer fields for continuation inference
         if (implDecl.params.isNotEmpty()) {
-            val contentHash = com.mezze.language.typedast.Hash(implDecl.contentHash
+            val contentHash = implDecl.contentHash
                 ?: throw IllegalStateException(
                     "Content hash not computed for impl: ${implDecl.performerName}. " +
                     "Ensure computeDeclarationHashes was called before ContextBuilder."
-                ))
+                )
 
             val performerFieldsType = MezzeType.RecordType(
                 fields = implDecl.params.associate { param ->
@@ -848,10 +848,9 @@ class ContextBuilder {
         val operationConstraints = implDecl.operations.flatMap { op -> op.abilityConstraints }
 
         // Create impl info — look up ability declaration hash for hash-based index
-        val abilityDeclHash = (allAbilityDecls[implDecl.abilityName!!]?.contentHash
-            ?: importedAbilities[implDecl.abilityName!!]?.contentHash)
-            ?.let { com.mezze.language.typedast.Hash(it) }
-        val implKeyHash = com.mezze.language.typedast.Hash(implKey)
+        val abilityDeclHash = allAbilityDecls[implDecl.abilityName!!]?.contentHash
+            ?: importedAbilities[implDecl.abilityName!!]?.contentHash
+        val implKeyHash = implKey
         val implInfo = TypingContext.AbilityImplInfo(
             abilityName = implDecl.abilityName!!,  // safe: not inherent
             abilityDeclHash = abilityDeclHash,
@@ -876,12 +875,12 @@ class ContextBuilder {
         ctx: TypingContext,
         implDecl: ParsedImplAbilityDecl,
         targetTypeNames: List<String>,
-        implKey: String,
+        implKey: com.mezze.language.typedast.Hash,
         file: String = "<module>"
     ): TypingContext {
         var result = ctx
         val targetTypeName = targetTypeNames.firstOrNull() ?: return ctx
-        val implKeyHash = com.mezze.language.typedast.Hash(implKey)
+        val implKeyHash = implKey
 
         for (op in implDecl.operations) {
             // Build method type from annotations if available
@@ -1424,11 +1423,11 @@ class ContextBuilder {
          */
         fun validateHermeticEffects(
             effects: Set<String>,
-            effectHashes: Map<String, String> = emptyMap(),
+            effectHashes: Map<String, com.mezze.language.typedast.Hash> = emptyMap(),
             sourceLoc: com.mezze.language.parsedast.Loc? = null
         ) {
             // Resolve effect hash from row or WellKnownHashes
-            fun resolveHash(name: String): String? = effectHashes[name] ?: WellKnownHashes.resolveHash(name)
+            fun resolveHash(name: String): com.mezze.language.typedast.Hash? = effectHashes[name] ?: WellKnownHashes.resolveHash(name)
 
             val hermeticEffect = effects.firstOrNull { name ->
                 WellKnownHashes.isMut(resolveHash(name))

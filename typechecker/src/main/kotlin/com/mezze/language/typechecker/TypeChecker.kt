@@ -1072,7 +1072,7 @@ class TypeChecker(
                     .map { it.name }
                     .toSet()
                 val abilityDeclHashForImpl = implDecl.abilityName?.let { name ->
-                    importContext.importedAbilities[name]?.contentHash?.let { com.mezze.language.typedast.Hash(it) }
+                    importContext.importedAbilities[name]?.contentHash
                 }
                 val implKeyHash = implKey
                 val implInfo = TypingContext.AbilityImplInfo(

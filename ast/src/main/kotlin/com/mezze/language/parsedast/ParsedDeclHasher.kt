@@ -3,6 +3,7 @@ package com.mezze.language.parsedast
 import com.mezze.language.ast.hashing.HashTags
 import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.parsedast.*
+import com.mezze.language.typedast.Hash
 
 /**
  * Content hasher for ParsedAST — computes deterministic hashes directly from
@@ -19,10 +20,10 @@ import com.mezze.language.parsedast.*
 object ParsedDeclHasher {
 
     /** Compatibility overload — file param is ignored (hashes are location-independent). */
-    fun hashLetDecl(decl: ParsedLetDecl, @Suppress("UNUSED_PARAMETER") file: String): String? = hashLetDecl(decl)
+    fun hashLetDecl(decl: ParsedLetDecl, @Suppress("UNUSED_PARAMETER") file: String): Hash? = hashLetDecl(decl)
 
-    fun hashAllLetDecls(module: ParsedModule): Map<String, String> {
-        val result = mutableMapOf<String, String>()
+    fun hashAllLetDecls(module: ParsedModule): Map<String, Hash> {
+        val result = mutableMapOf<String, Hash>()
         for (decl in module.decls) {
             if (decl is ParsedLetDecl && decl.isSimpleBinding) {
                 result[decl.variableName] = hashLetDecl(decl)
@@ -31,33 +32,33 @@ object ParsedDeclHasher {
         return result
     }
 
-    fun hashExpr(expr: ParsedExpr): String {
+    fun hashExpr(expr: ParsedExpr): Hash {
         val b = MezzeHashBuilder()
         appendExpr(b, expr)
-        return b.build().toFullHexString()
+        return Hash(b.build().toFullHexString())
     }
 
-    fun hashLetDecl(decl: ParsedLetDecl): String {
+    fun hashLetDecl(decl: ParsedLetDecl): Hash {
         val b = MezzeHashBuilder()
         b.append(byteArrayOf(HashTags.LET_BINDING))
         b.appendBoolean(decl.visibility == Visibility.PUBLIC)
         decl.typeAnnotation?.let { b.appendBoolean(true); appendTypeAnnotation(b, it) } ?: b.appendBoolean(false)
         appendPattern(b, decl.pattern)
         appendExpr(b, decl.value)
-        return b.build().toFullHexString()
+        return Hash(b.build().toFullHexString())
     }
 
-    fun hashTypeDecl(decl: ParsedTypeDecl): String {
+    fun hashTypeDecl(decl: ParsedTypeDecl): Hash {
         val b = MezzeHashBuilder()
         b.append(byteArrayOf(HashTags.TYPE_DECLARATION))
         b.append(decl.name)
         b.appendInt(decl.typeParams.size)
         for (tp in decl.typeParams) b.append(tp)
         appendTypeDef(b, decl.definition)
-        return b.build().toFullHexString()
+        return Hash(b.build().toFullHexString())
     }
 
-    fun hashAbilityDecl(decl: ParsedAbilityDecl): String {
+    fun hashAbilityDecl(decl: ParsedAbilityDecl): Hash {
         val b = MezzeHashBuilder()
         b.append(byteArrayOf(HashTags.ABILITY_DECLARATION))
         b.append(decl.name)
@@ -69,16 +70,16 @@ object ParsedDeclHasher {
             appendTypeAnnotation(b, op.paramType)
             appendTypeAnnotation(b, op.returnType)
         }
-        return b.build().toFullHexString()
+        return Hash(b.build().toFullHexString())
     }
 
-    fun hashEffectDecl(decl: ParsedEffectDecl, @Suppress("UNUSED_PARAMETER") file: String): String? = hashEffectDecl(decl)
-    fun hashAbilityDecl(decl: ParsedAbilityDecl, @Suppress("UNUSED_PARAMETER") file: String): String? = hashAbilityDecl(decl)
-    fun hashPerformerDecl(decl: ParsedPerformerDecl, @Suppress("UNUSED_PARAMETER") file: String): String? = hashPerformerDecl(decl)
-    fun hashImplAbilityDecl(decl: ParsedImplAbilityDecl, @Suppress("UNUSED_PARAMETER") file: String): String? = hashImplAbilityDecl(decl)
-    fun hashTypeDecl(decl: ParsedTypeDecl, @Suppress("UNUSED_PARAMETER") file: String): String? = hashTypeDecl(decl)
+    fun hashEffectDecl(decl: ParsedEffectDecl, @Suppress("UNUSED_PARAMETER") file: String): Hash? = hashEffectDecl(decl)
+    fun hashAbilityDecl(decl: ParsedAbilityDecl, @Suppress("UNUSED_PARAMETER") file: String): Hash? = hashAbilityDecl(decl)
+    fun hashPerformerDecl(decl: ParsedPerformerDecl, @Suppress("UNUSED_PARAMETER") file: String): Hash? = hashPerformerDecl(decl)
+    fun hashImplAbilityDecl(decl: ParsedImplAbilityDecl, @Suppress("UNUSED_PARAMETER") file: String): Hash? = hashImplAbilityDecl(decl)
+    fun hashTypeDecl(decl: ParsedTypeDecl, @Suppress("UNUSED_PARAMETER") file: String): Hash? = hashTypeDecl(decl)
 
-    fun hashEffectDecl(decl: ParsedEffectDecl): String {
+    fun hashEffectDecl(decl: ParsedEffectDecl): Hash {
         val b = MezzeHashBuilder()
         b.append(byteArrayOf(HashTags.EFFECT_DECLARATION))
         b.append(decl.name)
@@ -88,10 +89,10 @@ object ParsedDeclHasher {
             appendTypeAnnotation(b, op.paramType)
             appendTypeAnnotation(b, op.returnType)
         }
-        return b.build().toFullHexString()
+        return Hash(b.build().toFullHexString())
     }
 
-    fun hashPerformerDecl(decl: ParsedPerformerDecl): String {
+    fun hashPerformerDecl(decl: ParsedPerformerDecl): Hash {
         val b = MezzeHashBuilder()
         b.append(byteArrayOf(HashTags.IMPL_DECLARATION))
         b.append(decl.effect.localName)
@@ -104,10 +105,10 @@ object ParsedDeclHasher {
             b.append(op.name)
             appendExpr(b, op.implementation)
         }
-        return b.build().toFullHexString()
+        return Hash(b.build().toFullHexString())
     }
 
-    fun hashImplAbilityDecl(decl: ParsedImplAbilityDecl): String {
+    fun hashImplAbilityDecl(decl: ParsedImplAbilityDecl): Hash {
         val b = MezzeHashBuilder()
         b.append(byteArrayOf(HashTags.IMPL_ABILITY_DECLARATION))
         when (val target = decl.target) {
@@ -121,7 +122,7 @@ object ParsedDeclHasher {
             b.append(op.name)
             appendExpr(b, op.implementation)
         }
-        return b.build().toFullHexString()
+        return Hash(b.build().toFullHexString())
     }
 
     fun computeAllHashes(module: ParsedModule): ParsedModule {

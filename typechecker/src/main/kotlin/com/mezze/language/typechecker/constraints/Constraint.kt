@@ -121,7 +121,7 @@ sealed interface Constraint {
     data class AbilityRequired(
         val typeVar: TypeVar,
         val abilityName: String,  // For error messages and fallback lookup
-        val abilityHash: String? = null,  // Content hash — preferred for impl resolution
+        val abilityHash: Hash? = null,  // Content hash — preferred for impl resolution
         val typeArgs: List<MezzeType> = emptyList(),
         val context: String? = null,  // For error messages
         override val loc: Loc? = null

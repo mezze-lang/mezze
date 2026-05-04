@@ -1057,7 +1057,7 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
     // Build a merged effectHashes map from both rows for hash-based Mut identification
     val combinedHashes = eff1.effectHashes + eff2.effectHashes
     // Resolve effect hash from the row or from WellKnownHashes for compiler-known effects
-    fun resolveEffectHash(name: String): String? = combinedHashes[name] ?: WellKnownHashes.resolveHash(name)
+    fun resolveEffectHash(name: String): com.mezze.language.typedast.Hash? = combinedHashes[name] ?: WellKnownHashes.resolveHash(name)
 
     val mutEffect = combinedEffects.firstOrNull { name ->
         WellKnownHashes.isMut(resolveEffectHash(name))

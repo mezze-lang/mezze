@@ -1,5 +1,7 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.typedast.Hash
+
 /**
  * Hash-based identification of compiler-known abilities and effects.
  *
@@ -13,26 +15,26 @@ package com.mezze.language.typechecker
 object WellKnownHashes {
 
     // Delegate everything to build-time generated constants
-    val inspectAbilityHash: String = WellKnownHashConstants.ABILITY_INSPECT
-    val mutEffectHash: String = WellKnownHashConstants.EFFECT_MUT
+    val inspectAbilityHash: Hash = WellKnownHashConstants.ABILITY_INSPECT
+    val mutEffectHash: Hash = WellKnownHashConstants.EFFECT_MUT
 
-    fun isInspect(hash: String?): Boolean = WellKnownHashConstants.isInspect(hash)
-    fun isMut(hash: String?): Boolean = WellKnownHashConstants.isMut(hash)
-    fun isCodecAbility(hash: String?): Boolean = WellKnownHashConstants.isCodecAbility(hash)
-    fun isEq(hash: String?): Boolean = WellKnownHashConstants.isEq(hash)
-    fun isOrd(hash: String?): Boolean = WellKnownHashConstants.isOrd(hash)
-    fun isNumAdd(hash: String?): Boolean = WellKnownHashConstants.isNumAdd(hash)
-    fun isNumSub(hash: String?): Boolean = WellKnownHashConstants.isNumSub(hash)
-    fun isNumMul(hash: String?): Boolean = WellKnownHashConstants.isNumMul(hash)
-    fun isNumDiv(hash: String?): Boolean = WellKnownHashConstants.isNumDiv(hash)
-    fun isNumMod(hash: String?): Boolean = WellKnownHashConstants.isNumMod(hash)
+    fun isInspect(hash: Hash?): Boolean = WellKnownHashConstants.isInspect(hash)
+    fun isMut(hash: Hash?): Boolean = WellKnownHashConstants.isMut(hash)
+    fun isCodecAbility(hash: Hash?): Boolean = WellKnownHashConstants.isCodecAbility(hash)
+    fun isEq(hash: Hash?): Boolean = WellKnownHashConstants.isEq(hash)
+    fun isOrd(hash: Hash?): Boolean = WellKnownHashConstants.isOrd(hash)
+    fun isNumAdd(hash: Hash?): Boolean = WellKnownHashConstants.isNumAdd(hash)
+    fun isNumSub(hash: Hash?): Boolean = WellKnownHashConstants.isNumSub(hash)
+    fun isNumMul(hash: Hash?): Boolean = WellKnownHashConstants.isNumMul(hash)
+    fun isNumDiv(hash: Hash?): Boolean = WellKnownHashConstants.isNumDiv(hash)
+    fun isNumMod(hash: Hash?): Boolean = WellKnownHashConstants.isNumMod(hash)
 
-    fun resolveHash(name: String): String? = WellKnownHashConstants.resolveHash(name)
+    fun resolveHash(name: String): Hash? = WellKnownHashConstants.resolveHash(name)
 
     // Keep computeAbilityHash for backward compat with callers outside typechecker
-    fun computeAbilityHash(filePath: String, abilityName: String): String? =
+    fun computeAbilityHash(filePath: String, abilityName: String): Hash? =
         WellKnownHashConstants.resolveAbilityHash(abilityName)
 
-    internal fun computeEffectHash(filePath: String, effectName: String): String? =
+    internal fun computeEffectHash(filePath: String, effectName: String): Hash? =
         WellKnownHashConstants.resolveEffectHash(effectName)
 }

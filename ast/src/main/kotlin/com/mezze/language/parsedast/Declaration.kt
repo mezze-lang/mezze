@@ -68,7 +68,7 @@ data class ParsedTypeDecl(
     override val trailingComment: ParsedComment? = null,
     override val loc: Loc,
     /** Content hash — populated by typechecker, not parser */
-    val contentHash: String? = null
+    val contentHash: com.mezze.language.typedast.Hash? = null
 ) : ParsedDecl
 
 @Serializable
@@ -143,7 +143,7 @@ data class ParsedAbilityDecl(
     override val trailingComment: ParsedComment? = null,
     override val loc: Loc,
     /** Content hash — populated by typechecker, not parser */
-    val contentHash: String? = null
+    val contentHash: com.mezze.language.typedast.Hash? = null
 ) : ParsedDecl
 
 /**
@@ -201,7 +201,7 @@ data class ParsedImplAbilityDecl(
     override val trailingComment: ParsedComment? = null,
     override val loc: Loc,
     /** Content hash — populated by typechecker, not parser */
-    val contentHash: String? = null
+    val contentHash: com.mezze.language.typedast.Hash? = null
 ) : ParsedDecl {
     val isInherent: Boolean get() = target is ParsedImplTarget.Inherent
 
@@ -259,7 +259,7 @@ data class ParsedEffectDecl(
     override val trailingComment: ParsedComment? = null,
     override val loc: Loc,
     /** Content hash — populated by typechecker, not parser */
-    val contentHash: String? = null
+    val contentHash: com.mezze.language.typedast.Hash? = null
 ) : ParsedDecl
 
 /**
@@ -297,7 +297,7 @@ data class ParsedPerformerDecl(
     override val trailingComment: ParsedComment? = null,
     override val loc: Loc,
     /** Content hash — populated by typechecker, not parser */
-    val contentHash: String? = null
+    val contentHash: com.mezze.language.typedast.Hash? = null
 ) : ParsedDecl
 
 /**

@@ -439,7 +439,7 @@ class ImportResolver(
                         abilities[localName] = abilityDecl
                         // Also store by content hash for O(1) lookup without string parsing
                         abilityDecl.contentHash?.let { hash ->
-                            abilitiesByHash[com.mezze.language.typedast.Hash(hash)] = abilityDecl
+                            abilitiesByHash[hash] = abilityDecl
                         }
                     }
 
@@ -462,7 +462,7 @@ class ImportResolver(
                         effects[localName] = effectDecl
                         // Also store by content hash for O(1) lookup without string parsing
                         effectDecl.contentHash?.let { hash ->
-                            effectsByHash[com.mezze.language.typedast.Hash(hash)] = effectDecl
+                            effectsByHash[hash] = effectDecl
                         }
                     }
 
@@ -599,7 +599,7 @@ class ImportResolver(
                         abilities[localName] = abilityDecl
                         // Also store by content hash for O(1) lookup
                         abilityDecl.contentHash?.let { hash ->
-                            abilitiesByHash[com.mezze.language.typedast.Hash(hash)] = abilityDecl
+                            abilitiesByHash[hash] = abilityDecl
                         }
                     }
                     // Note: Abilities are NOT added to bindings because they don't have runtime values.
@@ -612,7 +612,7 @@ class ImportResolver(
                         effects[localName] = effectDecl
                         // Also store by content hash for O(1) lookup
                         effectDecl.contentHash?.let { hash ->
-                            effectsByHash[com.mezze.language.typedast.Hash(hash)] = effectDecl
+                            effectsByHash[hash] = effectDecl
                         }
                     }
                     // Note: Effects are NOT added to bindings because they don't have runtime values.
@@ -665,7 +665,7 @@ class ImportResolver(
                             ?: throw IllegalStateException(
                                 "Content hash not computed for imported impl: ${abilityImpl.abilityName ?: "inherent"} ${abilityImpl.targetTypes}"
                             )
-                        abilityImpls[com.mezze.language.typedast.Hash(implKey)] = abilityImpl
+                        abilityImpls[implKey] = abilityImpl
                     }
                 }
             }

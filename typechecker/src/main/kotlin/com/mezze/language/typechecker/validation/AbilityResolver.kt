@@ -68,7 +68,7 @@ class AbilityResolver(
         type: MezzeType,
         abilityName: String,
         typeArgs: List<MezzeType> = emptyList(),
-        abilityHash: String? = null
+        abilityHash: com.mezze.language.typedast.Hash? = null
     ): AbilityCheckResult {
         // Handle recursive type checking - if we're already checking this type for this ability,
         // assume it's satisfied to break the recursion (coinductive approach)
@@ -109,7 +109,7 @@ class AbilityResolver(
         type: MezzeType,
         abilityName: String,
         typeArgs: List<MezzeType>,
-        abilityHash: String? = null
+        abilityHash: com.mezze.language.typedast.Hash? = null
     ): AbilityCheckResult {
         // NOTE: Built-in abilities (Eq, NumAdd, Ord, etc.) are validated by the
         // ConstraintSolver in Phase 3 and skipped by TypeValidator in Phase 5.
@@ -144,7 +144,7 @@ class AbilityResolver(
         }
     }
 
-    private fun checkRecordAbility(type: MezzeType.RecordType, abilityName: String, typeArgs: List<MezzeType>, abilityHash: String? = null): AbilityCheckResult {
+    private fun checkRecordAbility(type: MezzeType.RecordType, abilityName: String, typeArgs: List<MezzeType>, abilityHash: com.mezze.language.typedast.Hash? = null): AbilityCheckResult {
         return when {
             WellKnownHashes.isEq(abilityHash) -> {
                 // Records can have Eq if all fields have Eq
@@ -174,7 +174,7 @@ class AbilityResolver(
         }
     }
 
-    private fun checkVariantAbility(type: MezzeType.VariantType, abilityName: String, typeArgs: List<MezzeType>, abilityHash: String? = null): AbilityCheckResult {
+    private fun checkVariantAbility(type: MezzeType.VariantType, abilityName: String, typeArgs: List<MezzeType>, abilityHash: com.mezze.language.typedast.Hash? = null): AbilityCheckResult {
         // Bool variant — delegate to user-defined ability impl lookup
         val isBool = type.constructors.size == 2 &&
             type.constructors.containsKey("True") && type.constructors.containsKey("False") &&
@@ -238,7 +238,7 @@ class AbilityResolver(
         abilityName: String,
         typeArgs: List<MezzeType>,
         definition: com.mezze.language.parsedast.ParsedNewtypeDef,
-        abilityHash: String? = null
+        abilityHash: com.mezze.language.typedast.Hash? = null
     ): AbilityCheckResult {
         val typeName = type.typeName ?: return checkUserDefinedAbilityImpl(type, abilityName, typeArgs)
 
@@ -269,7 +269,7 @@ class AbilityResolver(
         abilityName: String,
         typeArgs: List<MezzeType>,
         definition: com.mezze.language.parsedast.ParsedNewtypeDef,
-        abilityHash: String? = null
+        abilityHash: com.mezze.language.typedast.Hash? = null
     ): AbilityCheckResult {
         return when {
             WellKnownHashes.isInspect(abilityHash) -> {
@@ -286,7 +286,7 @@ class AbilityResolver(
         type: MezzeType.TypeApplication,
         abilityName: String,
         typeArgs: List<MezzeType>,
-        abilityHash: String? = null
+        abilityHash: com.mezze.language.typedast.Hash? = null
     ): AbilityCheckResult {
         // Handle well-known built-in types
         when (type.constructor) {

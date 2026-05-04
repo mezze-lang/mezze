@@ -93,7 +93,7 @@ sealed interface MezzeType {
         val fields: Map<String, MezzeType>,
         val rowVar: RowVar? = null, // null = closed, non-null = open
         val typeName: String? = null, // Original type alias name (e.g., "Person" for `type Person = { ... }`)
-        val typeHash: String? = null  // Content hash of the type declaration (for rename-safe identity)
+        val typeHash: com.mezze.language.typedast.Hash? = null  // Content hash of the type declaration (for rename-safe identity)
     ) : MezzeType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
@@ -111,7 +111,7 @@ sealed interface MezzeType {
         val constructors: Map<String, MezzeType?>, // null = no data, MezzeType = constructor data
         val rowVar: RowVar? = null, // null = closed, non-null = open
         val typeName: String? = null, // Original type alias name (e.g., "Person" for `type Person = | ... |`)
-        val typeHash: String? = null  // Content hash of the type declaration (for rename-safe identity)
+        val typeHash: com.mezze.language.typedast.Hash? = null  // Content hash of the type declaration (for rename-safe identity)
     ) : MezzeType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
@@ -166,7 +166,7 @@ sealed interface MezzeType {
     // Generic type application (e.g., Option Int, Result String Error, MyType 'a 'b)
     // This represents applying type arguments to a type constructor
     @Serializable
-    data class TypeApplication(val constructor: String, val args: List<MezzeType>, val typeHash: String? = null) : MezzeType {
+    data class TypeApplication(val constructor: String, val args: List<MezzeType>, val typeHash: com.mezze.language.typedast.Hash? = null) : MezzeType {
         override fun toString(): String = safeToString(
             "TypeApplication",
             truncatedContent = { "$constructor, ${args.size} args" },
@@ -256,7 +256,7 @@ sealed interface MezzeType {
     data class EffectRow(
         val effects: Set<String>,
         val effectInstances: Set<EffectInstance> = emptySet(), // Effects with associated type info
-        val effectHashes: Map<String, String> = emptyMap(),  // effectName → effectDeclHash
+        val effectHashes: Map<String, com.mezze.language.typedast.Hash> = emptyMap(),  // effectName → effectDeclHash
         val rowVar: RowVar? = null, // null = closed, non-null = open
         val performed: Boolean = false // true = effects have been performed via 'perform'
     ) : MezzeType {
@@ -304,12 +304,12 @@ sealed interface MezzeType {
 
         companion object {
             /** Create an EffectRow from simple effect names (backward compatible) */
-            fun simple(effects: Set<String>, rowVar: RowVar? = null, performed: Boolean = false, effectHashes: Map<String, String> = emptyMap()): EffectRow {
+            fun simple(effects: Set<String>, rowVar: RowVar? = null, performed: Boolean = false, effectHashes: Map<String, com.mezze.language.typedast.Hash> = emptyMap()): EffectRow {
                 return EffectRow(effects = effects, effectInstances = emptySet(), effectHashes = effectHashes, rowVar = rowVar, performed = performed)
             }
 
             /** Create an EffectRow with a single effect instance (with associated types) */
-            fun withInstance(instance: EffectInstance, rowVar: RowVar? = null, performed: Boolean = false, effectHashes: Map<String, String> = emptyMap()): EffectRow {
+            fun withInstance(instance: EffectInstance, rowVar: RowVar? = null, performed: Boolean = false, effectHashes: Map<String, com.mezze.language.typedast.Hash> = emptyMap()): EffectRow {
                 return EffectRow(effects = emptySet(), effectInstances = setOf(instance), effectHashes = effectHashes, rowVar = rowVar, performed = performed)
             }
         }
@@ -321,7 +321,7 @@ sealed interface MezzeType {
         val abilityName: String,
         val typeArgs: List<MezzeType> = emptyList(),  // Type arguments for the ability
         val associatedTypeBindings: Map<String, MezzeType> = emptyMap(),  // Associated type bindings (e.g., 'item = Int)
-        val abilityHash: String? = null  // Content hash of the ability declaration
+        val abilityHash: com.mezze.language.typedast.Hash? = null  // Content hash of the ability declaration
     ) {
         /** True if this constraint has any associated type bindings specified */
         val hasAssociatedTypes: Boolean get() = associatedTypeBindings.isNotEmpty()

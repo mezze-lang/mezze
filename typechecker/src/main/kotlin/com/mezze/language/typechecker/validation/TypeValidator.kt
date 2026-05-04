@@ -785,7 +785,7 @@ class TypeValidator(
      * - Eq/Ord derivation for composite types (records, variants, lists, seqs)
      * - Bool variant matching for logical operators
      */
-    private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: String? = null): Boolean {
+    private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: com.mezze.language.typedast.Hash? = null): Boolean {
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
 
         if (unwrappedType is MezzeType.TypeApplication) {
@@ -828,7 +828,7 @@ class TypeValidator(
     /**
      * Check if a type has an ability via derivation OR via an explicit impl in context.
      */
-    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType, abilityHash: String? = null): Boolean {
+    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType, abilityHash: com.mezze.language.typedast.Hash? = null): Boolean {
         return canDeriveAbility(abilityName, type, abilityHash) || hasImplInContext(abilityName, type)
     }
 
