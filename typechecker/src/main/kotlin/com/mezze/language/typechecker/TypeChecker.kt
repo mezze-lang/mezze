@@ -128,7 +128,7 @@ class TypeChecker(
             val importContext: ModuleImportContext? = null,
             val warnings: List<TypeCheckWarning> = emptyList(),
             val loadedModules: Map<String, TypedModule> = emptyMap(),
-            val abilityImpls: Map<String, com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap(),
+            val abilityImpls: Map<com.mezze.language.typedast.Hash, com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap(),
             val typedModule: com.mezze.language.typedast.TypedModule? = null,       // V2 TypedAST (primary output)
             val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR>? = null,  // TruffleIR functions (after mono+resolve+lower)
             val loweredPerformers: List<Array<String>> = emptyList(),  // Performer record info: [hash, effectHash, op1Hash, op1Name, ...]
@@ -1068,8 +1068,9 @@ class TypeChecker(
                     .map { it.name }
                     .toSet()
                 val abilityDeclHashForImpl = implDecl.abilityName?.let { name ->
-                    importContext.importedAbilities[name]?.contentHash
+                    importContext.importedAbilities[name]?.contentHash?.let { com.mezze.language.typedast.Hash(it) }
                 }
+                val implKeyHash = com.mezze.language.typedast.Hash(implKey)
                 val implInfo = TypingContext.AbilityImplInfo(
                     abilityName = implDecl.abilityName,
                     abilityDeclHash = abilityDeclHashForImpl,
@@ -1077,10 +1078,10 @@ class TypeChecker(
                     targetTypeAnnotations = implDecl.allTypeArgs,
                     associatedTypeBindings = implDecl.associatedTypeBindings,
                     sourceModule = null,
-                    contentHash = implKey,
+                    contentHash = implKeyHash,
                     typeVars = implTypeVars
                 )
-                context = context.extendWithImpl(implKey, implInfo)
+                context = context.extendWithImpl(implKeyHash, implInfo)
             }
         }
 

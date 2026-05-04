@@ -38,7 +38,7 @@ import com.mezze.language.typechecker.solving.closeGeneratedRowVars
 class TypedAstBuilder(
     private val substitution: Substitution,
     private val constraintResults: Map<String, ConstraintResult>,
-    private val abilityImpls: Map<String, TypingContext.AbilityImplInfo>,
+    private val abilityImpls: Map<Hash, TypingContext.AbilityImplInfo>,
     private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
     private val abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
     private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
@@ -107,7 +107,7 @@ class TypedAstBuilder(
     private val typeVarCache = mutableMapOf<String, TypeVar>()
 
     private data class AbilityImplIndexEntry(
-        val contentHash: String,
+        val contentHash: Hash,
         val targetTypes: List<String>
     )
 
@@ -709,7 +709,7 @@ class TypedAstBuilder(
                             loc = memberAccess.loc
                         )
                     } else if (methodInfo.isInherentMethod && methodInfo.implContentHash != null) {
-                        val implHash = Hash(methodInfo.implContentHash)
+                        val implHash = methodInfo.implContentHash
                         val opHash = Hash.computeOpHash(implHash, methodInfo.methodName)
                         TypedVar(
                             name = methodInfo.methodName,
@@ -1788,7 +1788,7 @@ class TypedAstBuilder(
             }
 
             // Fall back to using the impl content hash itself as the method reference
-            return BindingRef.ByHash(Hash(matchingImpl.contentHash))
+            return BindingRef.ByHash(matchingImpl.contentHash)
         }
 
         return null
@@ -1801,10 +1801,10 @@ class TypedAstBuilder(
      */
     private fun resolveInherentMethodBinding(
         methodName: String,
-        implContentHash: String?
+        implContentHash: Hash?
     ): BindingRef? {
         if (implContentHash != null) {
-            return BindingRef.ByHash(Hash(implContentHash))
+            return BindingRef.ByHash(implContentHash)
         }
 
         // Fallback: try to find by method name

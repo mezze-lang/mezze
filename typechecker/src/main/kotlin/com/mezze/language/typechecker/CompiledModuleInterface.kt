@@ -96,7 +96,7 @@ data class CompiledModuleInterface(
 
         data class NamedImplRegistration(val implInfo: TypingContext.AbilityImplInfo, val implKey: String) : ContextExtension {
             override fun apply(context: TypingContext): TypingContext {
-                return context.extendWithImpl(implKey, implInfo)
+                return context.extendWithImpl(com.mezze.language.typedast.Hash(implKey), implInfo)
             }
         }
     }
@@ -193,7 +193,7 @@ data class CompiledModuleInterface(
                         targetTypeAnnotations = implDecl.allTypeArgs,
                         associatedTypeBindings = implDecl.associatedTypeBindings,
                         sourceModule = null,
-                        contentHash = implKey,
+                        contentHash = com.mezze.language.typedast.Hash(implKey),
                         typeVars = implTypeVars
                     )
                     extensions.add(ContextExtension.NamedImplRegistration(implInfo, implKey))

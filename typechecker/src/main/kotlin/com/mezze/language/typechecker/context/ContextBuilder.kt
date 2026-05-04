@@ -739,11 +739,11 @@ class ContextBuilder {
                 }
             )
 
-            val contentHash = implDecl.contentHash
+            val contentHash = com.mezze.language.typedast.Hash(implDecl.contentHash
                 ?: throw IllegalStateException(
                     "Content hash not computed for impl: ${implDecl.performerName}. " +
                     "Ensure computeDeclarationHashes was called before ContextBuilder."
-                )
+                ))
 
             val performerFieldsType = if (implDecl.params.isNotEmpty()) {
                 MezzeType.RecordType(
@@ -771,11 +771,11 @@ class ContextBuilder {
 
         // Even if no associated types, we still need to store performer fields for continuation inference
         if (implDecl.params.isNotEmpty()) {
-            val contentHash = implDecl.contentHash
+            val contentHash = com.mezze.language.typedast.Hash(implDecl.contentHash
                 ?: throw IllegalStateException(
                     "Content hash not computed for impl: ${implDecl.performerName}. " +
                     "Ensure computeDeclarationHashes was called before ContextBuilder."
-                )
+                ))
 
             val performerFieldsType = MezzeType.RecordType(
                 fields = implDecl.params.associate { param ->
@@ -848,8 +848,10 @@ class ContextBuilder {
         val operationConstraints = implDecl.operations.flatMap { op -> op.abilityConstraints }
 
         // Create impl info — look up ability declaration hash for hash-based index
-        val abilityDeclHash = allAbilityDecls[implDecl.abilityName!!]?.contentHash
-            ?: importedAbilities[implDecl.abilityName!!]?.contentHash
+        val abilityDeclHash = (allAbilityDecls[implDecl.abilityName!!]?.contentHash
+            ?: importedAbilities[implDecl.abilityName!!]?.contentHash)
+            ?.let { com.mezze.language.typedast.Hash(it) }
+        val implKeyHash = com.mezze.language.typedast.Hash(implKey)
         val implInfo = TypingContext.AbilityImplInfo(
             abilityName = implDecl.abilityName!!,  // safe: not inherent
             abilityDeclHash = abilityDeclHash,
@@ -857,13 +859,13 @@ class ContextBuilder {
             targetTypeAnnotations = allTargetAnnotations,
             associatedTypeBindings = implDecl.associatedTypeBindings,
             sourceModule = null,
-            contentHash = implKey,
+            contentHash = implKeyHash,
             typeVars = typeVars,
             operationConstraints = operationConstraints
         )
 
         // Store in context by content hash
-        return ctx.extendWithImpl(implKey, implInfo)
+        return ctx.extendWithImpl(implKeyHash, implInfo)
     }
 
     /**
@@ -879,6 +881,7 @@ class ContextBuilder {
     ): TypingContext {
         var result = ctx
         val targetTypeName = targetTypeNames.firstOrNull() ?: return ctx
+        val implKeyHash = com.mezze.language.typedast.Hash(implKey)
 
         for (op in implDecl.operations) {
             // Build method type from annotations if available
@@ -932,7 +935,7 @@ class ContextBuilder {
                 targetTypeName = targetTypeName,
                 methodName = op.name,
                 methodType = methodType,
-                implContentHash = implKey,
+                implContentHash = implKeyHash,
                 implStartLine = implDecl.loc.startLine,
                 implStartCol = implDecl.loc.startCol,
                 implSourceFile = implDecl.loc.file
@@ -948,9 +951,9 @@ class ContextBuilder {
             targetTypeAnnotations = implDecl.targetTypes,
             associatedTypeBindings = implDecl.associatedTypeBindings,
             sourceModule = null,
-            contentHash = implKey
+            contentHash = implKeyHash
         )
-        result = result.extendWithImpl(implKey, implInfo)
+        result = result.extendWithImpl(implKeyHash, implInfo)
 
         return result
     }
@@ -983,6 +986,7 @@ class ContextBuilder {
         var result = ctx
         val targetTypeNames = implDecl.targetTypes.map { getTypeName(it) }
         val targetTypeName = targetTypeNames.firstOrNull() ?: return ctx
+        val implKeyHash = com.mezze.language.typedast.Hash(implKey)
 
         // Resolve the impl's target type once. Used to bind `it` in unannotated
         // method signatures so generic impls (e.g. `impl Seq 'a where { first }`)
@@ -1094,7 +1098,7 @@ class ContextBuilder {
                 targetTypeName = targetTypeName,
                 methodName = op.name,
                 methodType = methodType,
-                implContentHash = implKey,
+                implContentHash = implKeyHash,
                 implStartLine = implDecl.loc.startLine,
                 implStartCol = implDecl.loc.startCol,
                 implSourceFile = implDecl.loc.file,
@@ -1110,9 +1114,9 @@ class ContextBuilder {
             targetTypeAnnotations = implDecl.targetTypes,
             associatedTypeBindings = implDecl.associatedTypeBindings,
             sourceModule = null,
-            contentHash = implKey
+            contentHash = implKeyHash
         )
-        result = result.extendWithImpl(implKey, implInfo)
+        result = result.extendWithImpl(implKeyHash, implInfo)
 
         return result
     }

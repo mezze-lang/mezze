@@ -1511,7 +1511,7 @@ class ConstraintSolver(
 
         // Search for implementation — hash-based primary, name-based fallback.
         val impls = if (abilityHash != null) {
-            val byHash = context.getAbilityImplsByDeclHash(abilityHash)
+            val byHash = context.getAbilityImplsByDeclHash(com.mezze.language.typedast.Hash(abilityHash))
             if (byHash.isNotEmpty()) byHash else context.getAbilityImpls(abilityName)
         } else {
             context.getAbilityImpls(abilityName)

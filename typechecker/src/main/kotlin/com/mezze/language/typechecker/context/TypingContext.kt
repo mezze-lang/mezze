@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.context
 
 import com.mezze.language.ast.BindingKey
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.typedast.Hash
 
 /**
  * Immutable typing context for type checking.
@@ -18,18 +19,18 @@ import com.mezze.language.ast.MezzeType
  */
 data class TypingContext(
     private val bindings: Map<BindingKey, Binding>,
-    private val abilityImpls: Map<String, AbilityImplInfo> = emptyMap(),  // Keyed by content hash
-    private val abilityImplsByName: Map<String?, List<String>> = emptyMap(),  // Secondary index: abilityName -> [contentHash] (null key = inherent impls)
-    private val abilityImplsByAbilityHash: Map<String, List<String>> = emptyMap(),  // Secondary index: abilityDeclHash -> [implContentHash]
+    private val abilityImpls: Map<Hash, AbilityImplInfo> = emptyMap(),  // Keyed by content hash
+    private val abilityImplsByName: Map<String?, List<Hash>> = emptyMap(),  // Secondary index: abilityName -> [contentHash] (null key = inherent impls)
+    private val abilityImplsByAbilityHash: Map<Hash, List<Hash>> = emptyMap(),  // Secondary index: abilityDeclHash -> [implContentHash]
     // Dedicated maps for ability/effect operation types (replaces "${name}_ability" pattern)
     private val abilityOperationTypes: Map<String, MezzeType> = emptyMap(),  // abilityName -> RecordType of operations
-    private val abilityOperationTypesByHash: Map<String, MezzeType> = emptyMap(),  // abilityDeclHash -> RecordType of operations
+    private val abilityOperationTypesByHash: Map<Hash, MezzeType> = emptyMap(),  // abilityDeclHash -> RecordType of operations
     private val effectOperationTypes: Map<String, MezzeType> = emptyMap(),   // effectName -> RecordType of operations
-    private val effectOperationTypesByHash: Map<String, MezzeType> = emptyMap(),   // effectDeclHash -> RecordType of operations
+    private val effectOperationTypesByHash: Map<Hash, MezzeType> = emptyMap(),   // effectDeclHash -> RecordType of operations
     // Dedicated map for performer associated types (replaces "${name}_performer" pattern)
     // Keyed by content hash for cross-module safety
-    private val performerAssociatedTypes: Map<String, PerformerTypeInfo> = emptyMap(),  // contentHash -> associated types
-    private val performerAssociatedTypesByName: Map<String, List<String>> = emptyMap(),  // performerName -> [contentHash] index
+    private val performerAssociatedTypes: Map<Hash, PerformerTypeInfo> = emptyMap(),  // contentHash -> associated types
+    private val performerAssociatedTypesByName: Map<String, List<Hash>> = emptyMap(),  // performerName -> [contentHash] index
     // Anonymous impl methods: "TypeName::methodName" -> method info
     private val anonymousImplMethods: Map<String, InherentMethodInfo> = emptyMap(),
     // Secondary index for anonymous methods: "TypeName" -> [methodName]
@@ -81,12 +82,12 @@ data class TypingContext(
      */
     data class AbilityImplInfo(
         val abilityName: String?,  // null for inherent impls — for error messages and fallback
-        val abilityDeclHash: String? = null,  // Content hash of the ability DECLARATION (not the impl)
+        val abilityDeclHash: Hash? = null,  // Content hash of the ability DECLARATION (not the impl)
         val targetTypes: List<String>,  // Type names for string-based matching, e.g., ["String"], ["Maybe_Int"]
         val targetTypeAnnotations: List<com.mezze.language.parsedast.ParsedTypeAnnotation>? = null,  // Original annotations for structural matching
         val associatedTypeBindings: Map<String, com.mezze.language.parsedast.ParsedTypeAnnotation> = emptyMap(),  // Associated type bindings like 'item = Int
         val sourceModule: String? = null,
-        val contentHash: String,  // Content hash of the IMPL (same as the map key)
+        val contentHash: Hash,  // Content hash of the IMPL (same as the map key)
         val typeVars: Set<String> = emptySet(),  // Type variables from generic impl header, e.g., {"'a"} for `impl Eq 'a for ['a]`
         val operationConstraints: List<com.mezze.language.parsedast.ParsedFnAbilityConstraint> = emptyList()  // Method-level constraints from impl operations
     )
@@ -106,7 +107,7 @@ data class TypingContext(
         val associatedTypes: MezzeType,  // RecordType with associated type bindings
         val performerFields: MezzeType? = null,  // RecordType with performer parameter types (e.g., {cont: Continuation 'a 'b 'c})
         val suspensionType: MezzeType? = null,  // Type passed to suspend_with in the handler (for continuation inference)
-        val contentHash: String? = null
+        val contentHash: Hash? = null
     )
 
     /**
@@ -116,9 +117,9 @@ data class TypingContext(
         val targetTypeName: String,     // e.g., "Int" — for error messages and fallback
         val methodName: String,         // e.g., "to_float"
         val methodType: MezzeType,      // The function type of the method (without receiver)
-        val implContentHash: String,    // Content hash of the impl declaration
+        val implContentHash: Hash,      // Content hash of the impl declaration
         val sourceModule: String? = null,
-        val targetTypeHash: String? = null,  // Content hash of the target type declaration (stable across renames)
+        val targetTypeHash: Hash? = null,    // Content hash of the target type declaration (stable across renames)
         val implStartLine: Int = 0,     // Loc of the impl declaration — for computing TypedAbilityImpl hash
         val implStartCol: Int = 0,
         val implSourceFile: String = "", // Source file of impl — disambiguates same line/col in different files
@@ -210,7 +211,7 @@ data class TypingContext(
      * Key is the content hash of the ImplAbilityDeclaration.
      * Updates both primary (by hash) and secondary (by name) indexes.
      */
-    fun extendWithImpl(key: String, implInfo: AbilityImplInfo): TypingContext {
+    fun extendWithImpl(key: Hash, implInfo: AbilityImplInfo): TypingContext {
         // Update secondary index: abilityName -> [contentHash]
         val existingHashes = abilityImplsByName[implInfo.abilityName] ?: emptyList()
         val newImplsByName = abilityImplsByName + (implInfo.abilityName to (existingHashes + key))
@@ -238,7 +239,7 @@ data class TypingContext(
      *
      * Checks both local and parent contexts.
      */
-    fun hasAbilityImpl(contentHash: String): Boolean {
+    fun hasAbilityImpl(contentHash: Hash): Boolean {
         return abilityImpls.containsKey(contentHash) || (parent?.hasAbilityImpl(contentHash) ?: false)
     }
 
@@ -250,7 +251,7 @@ data class TypingContext(
      *
      * Checks both local and parent contexts.
      */
-    fun getAbilityImpl(contentHash: String): AbilityImplInfo? {
+    fun getAbilityImpl(contentHash: Hash): AbilityImplInfo? {
         return abilityImpls[contentHash] ?: parent?.getAbilityImpl(contentHash)
     }
 
@@ -280,7 +281,7 @@ data class TypingContext(
      * Get all implementations for a given ability by its declaration hash.
      * Preferred over name-based lookup — enables renaming via `use X as Y`.
      */
-    fun getAbilityImplsByDeclHash(abilityDeclHash: String): List<AbilityImplInfo> {
+    fun getAbilityImplsByDeclHash(abilityDeclHash: Hash): List<AbilityImplInfo> {
         val localHashes = abilityImplsByAbilityHash[abilityDeclHash] ?: emptyList()
         val localImpls = localHashes.mapNotNull { abilityImpls[it] }
         val parentImpls = parent?.getAbilityImplsByDeclHash(abilityDeclHash) ?: emptyList()
@@ -292,7 +293,7 @@ data class TypingContext(
      *
      * Checks both local and parent contexts.
      */
-    fun getAllAbilityImpls(): Map<String, AbilityImplInfo> {
+    fun getAllAbilityImpls(): Map<Hash, AbilityImplInfo> {
         val parentImpls = parent?.getAllAbilityImpls() ?: emptyMap()
         return parentImpls + abilityImpls  // Local impls override parent impls
     }
@@ -313,7 +314,7 @@ data class TypingContext(
      * Get ability operation types by declaration hash.
      * Preferred over name-based lookup — stable across renames/aliases.
      */
-    fun getAbilityOperationTypeByHash(abilityDeclHash: String): MezzeType? {
+    fun getAbilityOperationTypeByHash(abilityDeclHash: Hash): MezzeType? {
         return abilityOperationTypesByHash[abilityDeclHash] ?: parent?.getAbilityOperationTypeByHash(abilityDeclHash)
     }
 
@@ -329,14 +330,14 @@ data class TypingContext(
      * Get effect operation types by declaration hash.
      * Preferred over name-based lookup — stable across renames/aliases.
      */
-    fun getEffectOperationTypeByHash(effectDeclHash: String): MezzeType? {
+    fun getEffectOperationTypeByHash(effectDeclHash: Hash): MezzeType? {
         return effectOperationTypesByHash[effectDeclHash] ?: parent?.getEffectOperationTypeByHash(effectDeclHash)
     }
 
     /**
      * Extend context with ability operation types.
      */
-    fun extendWithAbilityOperationType(abilityName: String, operationType: MezzeType, abilityDeclHash: String? = null): TypingContext {
+    fun extendWithAbilityOperationType(abilityName: String, operationType: MezzeType, abilityDeclHash: Hash? = null): TypingContext {
         val newHashIndex = if (abilityDeclHash != null) {
             abilityOperationTypesByHash + (abilityDeclHash to operationType)
         } else {
@@ -370,7 +371,7 @@ data class TypingContext(
     /**
      * Extend context with effect operation types.
      */
-    fun extendWithEffectOperationType(effectName: String, operationType: MezzeType, effectDeclHash: String? = null): TypingContext {
+    fun extendWithEffectOperationType(effectName: String, operationType: MezzeType, effectDeclHash: Hash? = null): TypingContext {
         val newHashIndex = if (effectDeclHash != null) {
             effectOperationTypesByHash + (effectDeclHash to operationType)
         } else {
@@ -399,8 +400,8 @@ data class TypingContext(
      * Find an anonymous impl method by type hash and method name.
      * Preferred over name-based lookup — stable across renames/aliases.
      */
-    fun findAnonymousMethodByHash(typeHash: String, methodName: String): InherentMethodInfo? {
-        val key = "$typeHash::$methodName"
+    fun findAnonymousMethodByHash(typeHash: Hash, methodName: String): InherentMethodInfo? {
+        val key = "${typeHash.hex}::$methodName"
         return anonymousImplMethodsByHash[key] ?: parent?.findAnonymousMethodByHash(typeHash, methodName)
     }
 
@@ -437,7 +438,7 @@ data class TypingContext(
         val existingMethods = anonymousImplMethodsByType[info.targetTypeName] ?: emptyList()
         // Also update hash-based index if typeHash is available
         val newHashIndex = if (info.targetTypeHash != null) {
-            val hashKey = "${info.targetTypeHash}::${info.methodName}"
+            val hashKey = "${info.targetTypeHash.hex}::${info.methodName}"
             anonymousImplMethodsByHash + (hashKey to info)
         } else {
             anonymousImplMethodsByHash
@@ -456,7 +457,7 @@ data class TypingContext(
     /**
      * Get performer associated types by content hash.
      */
-    fun getPerformerTypeInfo(contentHash: String): PerformerTypeInfo? {
+    fun getPerformerTypeInfo(contentHash: Hash): PerformerTypeInfo? {
         return performerAssociatedTypes[contentHash] ?: parent?.getPerformerTypeInfo(contentHash)
     }
 
@@ -474,7 +475,7 @@ data class TypingContext(
     /**
      * Extend context with performer associated types.
      */
-    fun extendWithPerformerTypeInfo(contentHash: String, info: PerformerTypeInfo): TypingContext {
+    fun extendWithPerformerTypeInfo(contentHash: Hash, info: PerformerTypeInfo): TypingContext {
         val existingHashes = performerAssociatedTypesByName[info.performerName] ?: emptyList()
         return copy(
             performerAssociatedTypes = performerAssociatedTypes + (contentHash to info),
