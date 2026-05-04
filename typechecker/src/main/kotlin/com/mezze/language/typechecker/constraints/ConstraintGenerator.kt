@@ -195,7 +195,7 @@ class ConstraintGenerator(
 
                             // Add binding to context with unsolved type
                             // Pass contentHash for simple bindings (single variable pattern)
-                            val bindingHash: String? = null  // ParsedLetDecl has no contentHash
+                            val bindingHash: com.mezze.language.typedast.Hash? = null  // ParsedLetDecl has no contentHash
                             currentContext = currentContext.extendAll(
                                 patternResult.bindings.map { (name, type) ->
                                     BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type, contentHash = bindingHash)

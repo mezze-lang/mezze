@@ -44,7 +44,7 @@ class TypedAstBuilder(
     private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
     private val performerToEffect: Map<String, String>,
     private val importContext: ModuleImportContext?,
-    private val identifierContentHashes: Map<BindingKey, String>,
+    private val identifierContentHashes: Map<BindingKey, Hash>,
     private val implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,
     private val tailCallLocations: Set<com.mezze.language.parsedast.Loc>,
     private val mustBeOpenRowVars: Set<RowVar> = emptySet(),
@@ -74,8 +74,8 @@ class TypedAstBuilder(
      * Populated from identifierContentHashes (unqualified keys only) and
      * importContext bindings.
      */
-    private val localBindingHashes: Map<String, String> by lazy {
-        val result = mutableMapOf<String, String>()
+    private val localBindingHashes: Map<String, Hash> by lazy {
+        val result = mutableMapOf<String, Hash>()
         // From identifierContentHashes: only unqualified keys
         for ((key, hash) in identifierContentHashes) {
             if (key.qualifier == null) {
@@ -135,20 +135,20 @@ class TypedAstBuilder(
         for ((name, hash) in moduleHashes) {
             val key = BindingKey.unqualified(name)
             if (key !in mutableHashes) {
-                mutableHashes[key] = hash
+                mutableHashes[key] = Hash(hash)
             }
         }
         precomputedHashes = mutableHashes
     }
 
     /** Extended identifier content hashes (includes precomputed module-level hashes) */
-    private var precomputedHashes: Map<BindingKey, String>? = null
+    private var precomputedHashes: Map<BindingKey, Hash>? = null
 
     /** Stack of lambda parameter names — these shadow content hashes */
     private val lambdaParamScopes = ArrayDeque<MutableList<String>>()
 
     /** Get the effective identifier content hashes (precomputed if available) */
-    private val effectiveContentHashes: Map<BindingKey, String>
+    private val effectiveContentHashes: Map<BindingKey, Hash>
         get() = precomputedHashes ?: identifierContentHashes
 
     /**
@@ -956,7 +956,7 @@ class TypedAstBuilder(
 
                                 // Use v1 content hash if available, otherwise compute
                                 val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
-                                val contentHash = Hash(v1LetHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(stmt.value))
+                                val contentHash = v1LetHash ?: Hash(com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(stmt.value))
                                 stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc))
                             }
                         }
@@ -1289,11 +1289,11 @@ class TypedAstBuilder(
         // then fall back to implDeclarations/importedImpls
         val implDecl = implDeclarations[performerName]
         val importedImpl = importContext?.importedImpls?.get(performerName)
-        val performerHash = Hash(identifierContentHashes[BindingKey(null, performerName)]
-            ?: implDecl?.contentHash
-            ?: importedImpl?.contentHash
-            ?: implDecl?.let { com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(it) }
-            ?: "0".repeat(64))
+        val performerHash = identifierContentHashes[BindingKey(null, performerName)]
+            ?: (implDecl?.contentHash
+                ?: importedImpl?.contentHash
+                ?: implDecl?.let { com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(it) }
+                ?: "0".repeat(64)).let { Hash(it) }
 
         // Resolve effect hash from performer
         val effectName = implDecl?.effect?.localName
@@ -1397,19 +1397,19 @@ class TypedAstBuilder(
         if (qualifier != null) {
             val qualKey = BindingKey(qualifier.shortName, name)
             val hash = hashes[qualKey]
-            if (hash != null) return BindingRef.ByHash(Hash(hash))
+            if (hash != null) return BindingRef.ByHash(hash)
         }
 
         // Unqualified: check content hashes
         val unqualKey = BindingKey.unqualified(name)
         val localHash = hashes[unqualKey]
         if (localHash != null) {
-            return BindingRef.ByHash(Hash(localHash))
+            return BindingRef.ByHash(localHash)
         }
 
         // Check importContext
         importContext?.importedBindings?.get(name)?.let { binding ->
-            return BindingRef.ByHash(Hash(binding.contentHash))
+            return BindingRef.ByHash(binding.contentHash)
         }
 
         // Check if it's a native function
@@ -1549,7 +1549,7 @@ class TypedAstBuilder(
                 localName = binding.name,
                 originalName = binding.originalName,
                 moduleHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append(binding.modulePath) }.build().toFullHexString()),
-                declHash = Hash(binding.contentHash),
+                declHash = binding.contentHash,
                 type = binding.type,
                 kind = ExportKind.FUNCTION
             )
@@ -1773,18 +1773,18 @@ class TypedAstBuilder(
             // Try: BindingKey(abilityName, methodName) or the method name in the impl.
             val qualKey = BindingKey(abilityName, methodName)
             identifierContentHashes[qualKey]?.let {
-                return BindingRef.ByHash(Hash(it))
+                return BindingRef.ByHash(it)
             }
 
             // Try unqualified method name
             val unqualKey = BindingKey.unqualified(methodName)
             identifierContentHashes[unqualKey]?.let {
-                return BindingRef.ByHash(Hash(it))
+                return BindingRef.ByHash(it)
             }
 
             // Try import context
             importContext?.importedBindings?.get(methodName)?.let { binding ->
-                return BindingRef.ByHash(Hash(binding.contentHash))
+                return BindingRef.ByHash(binding.contentHash)
             }
 
             // Fall back to using the impl content hash itself as the method reference
@@ -1810,11 +1810,11 @@ class TypedAstBuilder(
         // Fallback: try to find by method name
         val unqualKey = BindingKey.unqualified(methodName)
         identifierContentHashes[unqualKey]?.let {
-            return BindingRef.ByHash(Hash(it))
+            return BindingRef.ByHash(it)
         }
 
         importContext?.importedBindings?.get(methodName)?.let { binding ->
-            return BindingRef.ByHash(Hash(binding.contentHash))
+            return BindingRef.ByHash(binding.contentHash)
         }
 
         return null

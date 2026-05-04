@@ -28,14 +28,14 @@ data class CompiledModuleInterface(
         val key: BindingKey,
         val type: MezzeType,
         val modulePath: String?,
-        val contentHash: String?
+        val contentHash: com.mezze.language.typedast.Hash?
     )
 
     data class PolyBinding(
         val key: BindingKey,
         val scheme: TypeScheme,
         val modulePath: String?,
-        val contentHash: String?
+        val contentHash: com.mezze.language.typedast.Hash?
     )
 
     /** A pre-computed context extension (effect, ability, type, or impl registration) */

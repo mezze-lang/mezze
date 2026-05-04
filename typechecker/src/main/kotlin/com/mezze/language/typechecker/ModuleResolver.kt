@@ -175,7 +175,7 @@ data class ExportedItem(
     val mezzeType: MezzeType,
     val originalName: String,
     val visibility: com.mezze.language.parsedast.Visibility = com.mezze.language.parsedast.Visibility.PUBLIC,
-    val contentHash: String  // Content hash hex string for content-addressed lookup (REQUIRED)
+    val contentHash: com.mezze.language.typedast.Hash  // Content hash for content-addressed lookup (REQUIRED)
 )
 
 /**
@@ -957,8 +957,9 @@ class ModuleResolver(
                         ?: MezzeType.VarType(TypeVar.fresh())
 
                     // Compute content hash via ParsedDeclHasher (v2-native, Unison-style)
-                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl)
+                    val contentHashStr = com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl)
                         ?: "unknown_${name}_hash"
+                    val contentHash = com.mezze.language.typedast.Hash(contentHashStr)
 
                     exports[name] = ExportedItem(
                         name = name,
@@ -969,7 +970,7 @@ class ModuleResolver(
                     )
                     val qualifiedName = if (modulePath != null) "$modulePath::$name" else name
                     ContentHashRegistry.register(
-                        hash = contentHash,
+                        hash = contentHashStr,
                         qualifiedName = qualifiedName,
                         modulePath = modulePath,
                         kind = if (mezzeType is MezzeType.FunctionType) DeclarationKind.FUNCTION
@@ -983,7 +984,8 @@ class ModuleResolver(
                 is ParsedTypeDecl -> {
                     if (decl.visibility != com.mezze.language.parsedast.Visibility.PUBLIC) continue
 
-                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(decl)
+                    val contentHashStr = com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(decl)
+                    val contentHash = com.mezze.language.typedast.Hash(contentHashStr)
 
                     // Priority: 1) typeContext (inferred), 2) fresh var
                     val fromContext = typeContext?.get(decl.name)
@@ -998,7 +1000,7 @@ class ModuleResolver(
                     )
                     val qualifiedName = if (modulePath != null) "$modulePath::${decl.name}" else decl.name
                     ContentHashRegistry.register(
-                        hash = contentHash,
+                        hash = contentHashStr,
                         qualifiedName = qualifiedName,
                         modulePath = modulePath,
                         kind = DeclarationKind.TYPE
@@ -1022,7 +1024,8 @@ class ModuleResolver(
                 // Effect declarations — always public
                 // ----------------------------------------------------------------
                 is ParsedEffectDecl -> {
-                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl)
+                    val contentHashStr = com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl)
+                    val contentHash = com.mezze.language.typedast.Hash(contentHashStr)
 
                     // Priority: 1) typeContext (inferred), 2) fresh var
                     val fromContext = typeContext?.get(decl.name)
@@ -1037,7 +1040,7 @@ class ModuleResolver(
                     )
                     val qualifiedName = if (modulePath != null) "$modulePath::${decl.name}" else decl.name
                     ContentHashRegistry.register(
-                        hash = contentHash,
+                        hash = contentHashStr,
                         qualifiedName = qualifiedName,
                         modulePath = modulePath,
                         kind = DeclarationKind.EFFECT
@@ -1063,7 +1066,8 @@ class ModuleResolver(
                 // Ability declarations — always public
                 // ----------------------------------------------------------------
                 is ParsedAbilityDecl -> {
-                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashAbilityDecl(decl)
+                    val contentHashStr = com.mezze.language.parsedast.ParsedDeclHasher.hashAbilityDecl(decl)
+                    val contentHash = com.mezze.language.typedast.Hash(contentHashStr)
 
                     // Priority: 1) typeContext (inferred), 2) fresh var
                     val fromContext = typeContext?.get(decl.name)
@@ -1078,7 +1082,7 @@ class ModuleResolver(
                     )
                     val qualifiedName = if (modulePath != null) "$modulePath::${decl.name}" else decl.name
                     ContentHashRegistry.register(
-                        hash = contentHash,
+                        hash = contentHashStr,
                         qualifiedName = qualifiedName,
                         modulePath = modulePath,
                         kind = DeclarationKind.ABILITY
@@ -1089,7 +1093,8 @@ class ModuleResolver(
                 // Performer (effect implementation) declarations
                 // ----------------------------------------------------------------
                 is ParsedPerformerDecl -> {
-                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(decl)
+                    val contentHashStr = com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(decl)
+                    val contentHash = com.mezze.language.typedast.Hash(contentHashStr)
 
                     // Don't overwrite an existing TYPE export with a HANDLER export
                     val existingExport = exports[decl.performerName]
@@ -1107,7 +1112,7 @@ class ModuleResolver(
                         )
                         val qualifiedName = if (modulePath != null) "$modulePath::${decl.performerName}" else decl.performerName
                         ContentHashRegistry.register(
-                            hash = contentHash,
+                            hash = contentHashStr,
                             qualifiedName = qualifiedName,
                             modulePath = modulePath,
                             kind = DeclarationKind.EFFECT_HANDLER
