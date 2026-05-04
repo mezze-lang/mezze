@@ -182,6 +182,8 @@ class InitCommand {
         // createApp, also pre-typecheck the entry so the first
         // `mez dev` hits the warm-cache fast path.
         val store = SQLiteMezzeStore.openProject(projectDir)
+        com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
+        com.mezze.language.typechecker.ModuleResolver.setStore(store)
         try {
             if (createApp) {
                 val appFile = File(srcDir, "app.mz")

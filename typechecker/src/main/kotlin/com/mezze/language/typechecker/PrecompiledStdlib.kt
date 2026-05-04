@@ -19,6 +19,25 @@ object PrecompiledStdlib {
     private const val STDLIB_MODULES_RESOURCE = "mezze-stdlib-modules.cbor"
     private const val STDLIB_SQLITE_RESOURCE = "stdlib.sqlite"
 
+    /**
+     * Optional MezzeStore set by CLI/LSP BEFORE first access to PrecompiledStdlib.
+     * When set, the init block loads stdlib data from the store instead of
+     * using direct JDBC. This is the clean path — no java.sql dependency needed.
+     *
+     * Set via: PrecompiledStdlib.setStore(store) before any typechecker access.
+     */
+    @Volatile
+    private var store: com.mezze.language.store.MezzeStore? = null
+
+    /**
+     * Set the MezzeStore to use for stdlib loading.
+     * MUST be called before first access to PrecompiledStdlib fields.
+     */
+    @JvmStatic
+    fun setStore(store: com.mezze.language.store.MezzeStore) {
+        this.store = store
+    }
+
     @OptIn(ExperimentalSerializationApi::class)
     private val cbor = Cbor {
         ignoreUnknownKeys = true
@@ -147,7 +166,8 @@ object PrecompiledStdlib {
         // keep stdlibTypedModules / loadedModules around for writing
         // proper v7 rows into the seed file (slice C).
         val forceRecompile = System.getProperty("mezze.stdlib.force-recompile") == "1"
-        val fullCache = if (forceRecompile) null else tryLoadFullFromSqlite()
+        val fullCache = if (forceRecompile) null
+            else tryLoadFullFromStore() ?: tryLoadFullFromSqlite()
 
         if (fullCache != null) {
             // Fast path: all data loaded from sqlite
@@ -200,8 +220,8 @@ object PrecompiledStdlib {
                 stdlibTypedModules = v2
             }
 
-            // Try loading FunctionIRs from sqlite (partial fast path)
-            val preloaded = tryLoadPreloweredFromSqlite()
+            // Try loading FunctionIRs from store first, then fall back to direct JDBC
+            val preloaded = tryLoadPreloweredFromStore() ?: tryLoadPreloweredFromSqlite()
             if (preloaded != null) {
                 preloweredFunctions = preloaded.functions
                 preloweredPerformerRecords = preloaded.performers
@@ -289,6 +309,135 @@ object PrecompiledStdlib {
         val moduleList = stdlibTypedModules.values.toList()
         return cbor.encodeToByteArray(moduleList)
     }
+
+    // ====================================================================
+    // STORE-BASED LOADING (clean path — no java.sql dependency)
+    // ====================================================================
+
+    /**
+     * Try loading everything from the MezzeStore (set by CLI/LSP).
+     * The store already has stdlib.sqlite ATTACHed, so we can read
+     * via the standard MezzeStore interface. Returns null if no store
+     * was set or if loading fails.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    private fun tryLoadFullFromStore(): FullCacheData? {
+        val s = store ?: return null
+        return try {
+            // Read metadata
+            val version = s.getMetadata("stdlib_version") ?: return null
+            if (version != "2") return null
+
+            val preludeB64 = s.getMetadata("prelude_import_context") ?: return null
+            val preludeBytes = java.util.Base64.getDecoder().decode(preludeB64)
+            val importContext: ModuleImportContext = cbor.decodeFromByteArray(preludeBytes)
+
+            val implB64 = s.getMetadata("stdlib_ability_impls")
+            val abilityImpls: List<com.mezze.language.typedast.TypedAbilityImpl> = if (implB64 != null) {
+                cbor.decodeFromByteArray(java.util.Base64.getDecoder().decode(implB64))
+            } else emptyList()
+
+            val declHashStr = s.getMetadata("stdlib_decl_hashes") ?: ""
+            val declHashes = if (declHashStr.isNotEmpty()) declHashStr.split(";").toSet() else emptySet()
+
+            val modHashStr = s.getMetadata("stdlib_module_hashes") ?: ""
+            val moduleHashes = if (modHashStr.isNotEmpty()) modHashStr.split(";").map { Hash(it) }.toSet() else emptySet()
+
+            // Load FunctionIRs from blobs table via store
+            val functions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
+            // We need all blob hashes to iterate — use the module's known decl hashes
+            // plus any reachable via edges. Since we have declHashes, load their IR.
+            for (hexHash in declHashes) {
+                try {
+                    val irBytes = s.getIR(Hash(hexHash)) ?: continue
+                    functions[hexHash] = cbor.decodeFromByteArray(irBytes)
+                } catch (_: Exception) {}
+            }
+
+            // Also load any blobs not in declHashes (performer functions, etc.)
+            // by iterating module hashes and their edges
+            for (mHash in moduleHashes) {
+                try {
+                    val irBytes = s.getIR(mHash) ?: continue
+                    functions[mHash.hex] = cbor.decodeFromByteArray(irBytes)
+                } catch (_: Exception) {}
+            }
+
+            // Load performers
+            val performerStr = s.getMetadata("performer_records") ?: ""
+            val performers = if (performerStr.isNotEmpty()) {
+                performerStr.split(";").map { it.split(",").toTypedArray() }
+            } else emptyList()
+
+            // Load dependency graph
+            val depGraph = mutableMapOf<String, Set<String>>()
+            // Dependency graph is stored as metadata keys "deps:<hash>"
+            // We can't enumerate metadata keys through MezzeStore interface,
+            // so rebuild from FunctionIR bodies instead
+            for ((hash, fn) in functions) {
+                val refs = mutableSetOf<String>()
+                collectHashRefs(fn.body, refs)
+                if (refs.isNotEmpty()) depGraph[hash] = refs
+            }
+
+            if (functions.isNotEmpty()) {
+                FullCacheData(importContext, functions, performers, depGraph, abilityImpls, declHashes, moduleHashes)
+            } else null
+        } catch (e: Exception) {
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println("[PrecompiledStdlib] Failed to load from store: ${e.message}")
+            }
+            null
+        }
+    }
+
+    /**
+     * Try loading pre-lowered FunctionIRs from the store.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    private fun tryLoadPreloweredFromStore(): PreloweredData? {
+        val s = store ?: return null
+        return try {
+            val functions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
+
+            // Load all stdlib modules and get their decl hashes for IR lookup
+            for (mod in s.getAllModules()) {
+                if (!mod.path.startsWith("std::")) continue
+                val typedBlob = s.getTypedModule(mod.path, mod.sourceHash) ?: continue
+                try {
+                    val typedModule: com.mezze.language.typedast.TypedModule = cbor.decodeFromByteArray(typedBlob)
+                    for (decl in typedModule.decls) {
+                        if (decl is com.mezze.language.typedast.TypedLetDecl) {
+                            val irBytes = s.getIR(decl.hash) ?: continue
+                            try {
+                                functions[decl.hash.hex] = cbor.decodeFromByteArray(irBytes)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Load performers
+            val performerStr = s.getMetadata("performer_records") ?: ""
+            val performers = if (performerStr.isNotEmpty()) {
+                performerStr.split(";").map { it.split(",").toTypedArray() }
+            } else emptyList()
+
+            // Build dependency graph from function bodies
+            val depGraph = mutableMapOf<String, Set<String>>()
+            for ((hash, fn) in functions) {
+                val refs = mutableSetOf<String>()
+                collectHashRefs(fn.body, refs)
+                if (refs.isNotEmpty()) depGraph[hash] = refs
+            }
+
+            if (functions.isNotEmpty()) PreloweredData(functions, performers, depGraph) else null
+        } catch (_: Exception) { null }
+    }
+
+    // ====================================================================
+    // JDBC-BASED LOADING (legacy — used when no MezzeStore is set)
+    // ====================================================================
 
     private data class FullCacheData(
         val importContext: ModuleImportContext,
@@ -453,6 +602,7 @@ object PrecompiledStdlib {
                             val hash = rs.getString("hash")
                             val irBytes = rs.getBytes("ir")
                             try {
+                                @OptIn(ExperimentalSerializationApi::class)
                                 val fn = kotlinx.serialization.cbor.Cbor.decodeFromByteArray<com.mezze.language.truffleir.FunctionIR>(irBytes)
                                 functions[hash] = fn
                             } catch (_: Exception) {}

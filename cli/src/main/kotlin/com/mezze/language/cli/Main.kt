@@ -124,6 +124,7 @@ fun main(args: Array<String>) {
             "dev" -> handleDevCommand(remainingArgs)
             "build" -> handleBuildCommand(remainingArgs)
             "init" -> handleInitCommand(remainingArgs)
+            "index" -> handleIndexCommand(remainingArgs)
             "lsp" -> handleLspCommand(remainingArgs)
             "fmt" -> handleFmtCommand(remainingArgs)
             // Package management (add/remove/sync) is unwired pending #108.
@@ -213,7 +214,7 @@ private fun showUsage() {
     println()
     println("COMMANDS:")
     println("  Project:  init, dev, build, check")
-    println("  Tools:    fmt, lsp")
+    println("  Tools:    fmt, lsp, index")
     println()
     println("For command-specific help: mez <command> --help")
 }
@@ -382,6 +383,10 @@ private fun showCommandHelp(command: String) {
 
 private fun handleCheckCommand(args: List<String>) {
     com.mezze.language.cli.commands.CheckCommand().execute(args)
+}
+
+private fun handleIndexCommand(args: List<String>) {
+    com.mezze.language.cli.commands.IndexCommand().execute(args)
 }
 
 private fun readStdin(): String {

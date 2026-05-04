@@ -137,6 +137,8 @@ class CheckCommand {
 
         val source = appFile.readText()
         val store = SQLiteMezzeStore.openProject(currentDir)
+        com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
+        com.mezze.language.typechecker.ModuleResolver.setStore(store)
 
         try {
             val startTime = System.nanoTime()

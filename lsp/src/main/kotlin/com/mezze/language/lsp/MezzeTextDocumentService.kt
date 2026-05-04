@@ -152,6 +152,8 @@ class MezzeTextDocumentService(
         }
         try {
             projectStore = SQLiteMezzeStore.openProject(projectRoot)
+            com.mezze.language.typechecker.PrecompiledStdlib.setStore(projectStore!!)
+            com.mezze.language.typechecker.ModuleResolver.setStore(projectStore!!)
             projectRootDir = projectRoot
             val (pkg, entry) = readMezzeTomlEntries(projectRoot)
             packageName = pkg
@@ -212,6 +214,8 @@ class MezzeTextDocumentService(
         projectStore = null
         SQLiteMezzeStore.wipeProjectFiles(root)
         projectStore = SQLiteMezzeStore.openProject(root)
+        com.mezze.language.typechecker.PrecompiledStdlib.setStore(projectStore!!)
+        com.mezze.language.typechecker.ModuleResolver.setStore(projectStore!!)
         server.logInfo("Cleared cache at ${SQLiteMezzeStore.resolveProjectDir(root).absolutePath}")
         reanalyzeOpenDocuments()
     }
@@ -233,6 +237,8 @@ class MezzeTextDocumentService(
         com.mezze.language.typechecker.module.ModuleTypeChecker.clearCache()
         lastSuccessfulResult.clear()
         projectStore = SQLiteMezzeStore.openProject(root)
+        com.mezze.language.typechecker.PrecompiledStdlib.setStore(projectStore!!)
+        com.mezze.language.typechecker.ModuleResolver.setStore(projectStore!!)
         server.logInfo("Restarted LSP state for ${root.absolutePath}")
         reanalyzeOpenDocuments()
     }

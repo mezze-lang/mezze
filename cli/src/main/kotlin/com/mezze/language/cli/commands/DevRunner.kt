@@ -73,6 +73,11 @@ object DevRunner {
         // lifetime of the process.
         val store = SQLiteMezzeStore.openProject(projectRoot)
 
+        // Set store for typechecker components so they read from the store
+        // instead of using direct JDBC or global singletons.
+        com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
+        com.mezze.language.typechecker.ModuleResolver.setStore(store)
+
         // Hydrate cached typed-modules into the typechecker cache. Slice G:
         // restrict to the entry module's transitive import closure plus
         // stdlib (any decl in any imported module may reference stdlib).

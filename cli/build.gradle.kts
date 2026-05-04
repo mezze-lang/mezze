@@ -66,8 +66,8 @@ dependencies {
     implementation("io.ktor:ktor-client-cio:2.3.12")             // CIO engine for Ktor
     implementation("org.apache.commons:commons-compress:1.28.0") // tar.gz handling
 
-    // Codebase module for content-addressed storage
-    implementation(project(":codebase"))
+    // Store module for content-addressed storage (SQLite implementation)
+    implementation(project(":store-sqlite"))
 }
 
 // ----------------------------------------------------------------------------
@@ -165,7 +165,7 @@ tasks.named<ProcessResources>("processResources") {
 // Parses + typechecks + lowers all stdlib modules once, stores FunctionIRs in stdlib.sqlite.
 // Embedded in the JAR — PrecompiledStdlib loads from it instead of re-parsing on every JVM start.
 val compileStdlib by tasks.registering(JavaExec::class) {
-    dependsOn(":typechecker:classes", ":codebase:classes", ":parser:classes", ":ast:classes", ":stdlib:classes")
+    dependsOn(":typechecker:classes", ":store-sqlite:classes", ":parser:classes", ":ast:classes", ":stdlib:classes", ":store:classes")
     group = "build"
     description = "Pre-compile stdlib to SQLite (FunctionIRs + performer records)"
 

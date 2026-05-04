@@ -9,13 +9,8 @@ repositories {
 
 dependencies {
     implementation(project(":ast"))
-    implementation(project(":parser"))
-    implementation(project(":typechecker"))
 
     implementation("org.jetbrains.kotlin:kotlin-stdlib")
-
-    // SQLite for content-addressed storage
-    implementation("org.xerial:sqlite-jdbc:3.51.2.0")
 
     // CBOR serialization for compact AST storage
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-cbor:1.6.2")

@@ -23,6 +23,20 @@ class SQLiteMezzeStore private constructor(
     private val readOnly: Boolean = false
 ) : MezzeStore {
 
+    // ====================================================================
+    // L1 IN-MEMORY CACHES — sit in front of every SQLite read.
+    // Populated on first access; writes go to both L1 and SQLite.
+    // ====================================================================
+    private val l1Blobs = HashMap<String, BlobRow>(256)            // hash.hex → BlobRow
+    private val l1IR = HashMap<String, ByteArray?>(256)            // hash.hex → IR bytes
+    private val l1Names = HashMap<String, Hash?>(512)              // "mod\0name" → Hash
+    private val l1Modules = HashMap<String, ModuleRow?>(64)        // path → ModuleRow
+    private val l1ParsedModules = HashMap<String, ByteArray?>(64)  // "path\0hash" → blob
+    private val l1TypedModules = HashMap<String, ByteArray?>(64)   // "path\0hash" → blob
+
+    private fun nameKey(module: String, name: String) = "$module\u0000$name"
+    private fun cacheKey(path: String, hash: String) = "$path\u0000$hash"
+
     /**
      * Run a block with the underlying JDBC connection. Internal seam used
      * by `StdlibSeed.copyFrom` to issue ATTACH DATABASE / multi-table
@@ -786,6 +800,8 @@ class SQLiteMezzeStore private constructor(
             setBytes(5, ir)
             executeUpdate()
         }
+        l1Blobs[hash.hex] = BlobRow(hash, kind, visibility, typed, ir)
+        if (ir != null) l1IR[hash.hex] = ir
     }
 
     private val getBlobStmt: PreparedStatement by lazy {
@@ -795,9 +811,10 @@ class SQLiteMezzeStore private constructor(
     }
 
     override fun getBlob(hash: Hash): BlobRow? {
+        l1Blobs[hash.hex]?.let { return it }
         for (i in 0..2) getBlobStmt.setString(i + 1, hash.hex)
         return getBlobStmt.executeQuery().use { rs ->
-            if (rs.next()) rs.toBlobRow() else null
+            if (rs.next()) rs.toBlobRow().also { l1Blobs[hash.hex] = it } else null
         }
     }
 
@@ -840,9 +857,12 @@ class SQLiteMezzeStore private constructor(
     }
 
     override fun getIR(hash: Hash): ByteArray? {
+        if (hash.hex in l1IR) return l1IR[hash.hex]
         for (i in 0..2) getIRStmt.setString(i + 1, hash.hex)
         return getIRStmt.executeQuery().use { rs ->
-            if (rs.next()) rs.getBytes("ir") else null
+            val ir = if (rs.next()) rs.getBytes("ir") else null
+            l1IR[hash.hex] = ir
+            ir
         }
     }
 
@@ -874,6 +894,7 @@ class SQLiteMezzeStore private constructor(
             setString(3, hash.hex)
             executeUpdate()
         }
+        l1Names[nameKey(module, name)] = hash
     }
 
     private val resolveNameStmt: PreparedStatement by lazy {
@@ -883,12 +904,16 @@ class SQLiteMezzeStore private constructor(
     }
 
     override fun resolveName(module: String, name: String): Hash? {
+        val key = nameKey(module, name)
+        if (key in l1Names) return l1Names[key]
         for (i in 0..2) {
             resolveNameStmt.setString(i * 2 + 1, module)
             resolveNameStmt.setString(i * 2 + 2, name)
         }
         return resolveNameStmt.executeQuery().use { rs ->
-            if (rs.next()) Hash(rs.getString(1)) else null
+            val hash = if (rs.next()) Hash(rs.getString(1)) else null
+            l1Names[key] = hash
+            hash
         }
     }
 
@@ -944,6 +969,7 @@ class SQLiteMezzeStore private constructor(
             setString(3, sourceHash)
             executeUpdate()
         }
+        l1Modules[path] = ModuleRow(path, filePath, sourceHash)
     }
 
     private val getModuleStmt: PreparedStatement by lazy {
@@ -961,15 +987,18 @@ class SQLiteMezzeStore private constructor(
     }
 
     override fun getModule(path: String): ModuleRow? {
+        if (path in l1Modules) return l1Modules[path]
         getModuleStmt.setString(1, path)
         getModuleStmt.setString(2, path)
         getModuleStmt.setString(3, path)
         return getModuleStmt.executeQuery().use { rs ->
-            if (rs.next()) ModuleRow(
+            val row = if (rs.next()) ModuleRow(
                 path = rs.getString("path"),
                 filePath = rs.getString("file_path"),
                 sourceHash = rs.getString("source_hash"),
             ) else null
+            l1Modules[path] = row
+            row
         }
     }
 
@@ -1578,6 +1607,7 @@ class SQLiteMezzeStore private constructor(
             setLong(4, System.currentTimeMillis())
             executeUpdate()
         }
+        l1ParsedModules[cacheKey(modulePath, sourceHash)] = parsedBlob
     }
 
     private val getParsedModuleStmt: PreparedStatement by lazy {
@@ -1587,12 +1617,16 @@ class SQLiteMezzeStore private constructor(
     }
 
     override fun getParsedModule(modulePath: String, sourceHash: String): ByteArray? {
+        val key = cacheKey(modulePath, sourceHash)
+        if (key in l1ParsedModules) return l1ParsedModules[key]
         for (i in 0..2) {
             getParsedModuleStmt.setString(i * 2 + 1, modulePath)
             getParsedModuleStmt.setString(i * 2 + 2, sourceHash)
         }
         return getParsedModuleStmt.executeQuery().use { rs ->
-            if (rs.next()) rs.getBytes(1) else null
+            val blob = if (rs.next()) rs.getBytes(1) else null
+            l1ParsedModules[key] = blob
+            blob
         }
     }
 
@@ -1601,6 +1635,7 @@ class SQLiteMezzeStore private constructor(
             stmt.setString(1, modulePath)
             stmt.executeUpdate()
         }
+        l1ParsedModules.keys.removeAll { it.startsWith("$modulePath\u0000") }
     }
 
     // ====================================================================
@@ -1622,6 +1657,7 @@ class SQLiteMezzeStore private constructor(
             setLong(4, System.currentTimeMillis())
             executeUpdate()
         }
+        l1TypedModules[cacheKey(modulePath, sourceHash)] = typedBlob
     }
 
     private val getTypedModuleStmt: PreparedStatement by lazy {
@@ -1638,12 +1674,16 @@ class SQLiteMezzeStore private constructor(
     }
 
     override fun getTypedModule(modulePath: String, sourceHash: String): ByteArray? {
+        val key = cacheKey(modulePath, sourceHash)
+        if (key in l1TypedModules) return l1TypedModules[key]
         for (i in 0..2) {
             getTypedModuleStmt.setString(i * 2 + 1, modulePath)
             getTypedModuleStmt.setString(i * 2 + 2, sourceHash)
         }
         return getTypedModuleStmt.executeQuery().use { rs ->
-            if (rs.next()) rs.getBytes(1) else null
+            val blob = if (rs.next()) rs.getBytes(1) else null
+            l1TypedModules[key] = blob
+            blob
         }
     }
 
@@ -1652,6 +1692,7 @@ class SQLiteMezzeStore private constructor(
             stmt.setString(1, modulePath)
             stmt.executeUpdate()
         }
+        l1TypedModules.keys.removeAll { it.startsWith("$modulePath\u0000") }
     }
 
     // ====================================================================

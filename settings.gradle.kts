@@ -1,10 +1,11 @@
 rootProject.name = "mezze"
 
 include("ast")
+include("store")
 include("parser")
 include("formatter")
 include("stdlib")
-include("codebase")
+include("store-sqlite")
 include("typechecker")
 include("cli")
 include("lsp")

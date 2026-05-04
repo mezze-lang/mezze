@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.cache
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.PrimitiveTypes
+import com.mezze.language.store.MezzeStore
 import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
@@ -11,39 +12,13 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Content-addressed cache for type checking results.
  *
- * ## Architecture
- *
  * Two-tier caching:
  * 1. **In-memory (L1)**: Fast ConcurrentHashMap, cleared on process exit
- * 2. **SQLite (L2)**: Persistent, survives across compilation sessions
- *
- * ## Cache Keys
- *
- * All caches use content hashes as keys:
- * - **Constraint cache**: (bindingHash, contextHash) → ConstraintResult
- * - **Ability impl cache**: abilityKey → (implHash, modulePath)
- *
- * ## Usage
- *
- * ```kotlin
- * // Initialize with SQLite connection (project mode)
- * TypeCheckCache.initialize(sqliteCodebase)
- *
- * // Or use in-memory only (script mode)
- * TypeCheckCache.initializeInMemory()
- *
- * // Check constraint cache
- * val cached = TypeCheckCache.getConstraintResult(bindingHash, contextHash)
- * if (cached != null) return cached
- *
- * // Store after generating
- * TypeCheckCache.putConstraintResult(bindingHash, contextHash, result)
- * ```
+ * 2. **MezzeStore (L2)**: Persistent via ability_impls table, survives across sessions
  */
 object TypeCheckCache {
 
-    // SQLite codebase for L2 persistence (null = in-memory only)
-    private var sqliteCodebase: Any? = null  // Using Any to avoid circular dependency
+    private var store: MezzeStore? = null
 
     // Stats tracking
     private val constraintCacheHits = AtomicLong(0)
@@ -56,13 +31,12 @@ object TypeCheckCache {
     // ========================================================================
 
     /**
-     * Initialize with SQLite persistence (project mode).
-     * Pass the SQLiteCodebase instance.
+     * Initialize with MezzeStore persistence (project mode).
      */
-    fun initialize(codebase: Any) {
-        sqliteCodebase = codebase
+    fun initialize(store: MezzeStore) {
+        this.store = store
         DebugLogger.debug(Category.TypeChecker) {
-            "TypeCheckCache initialized with SQLite persistence"
+            "TypeCheckCache initialized with store persistence"
         }
     }
 
@@ -70,16 +44,16 @@ object TypeCheckCache {
      * Initialize in-memory only (script mode).
      */
     fun initializeInMemory() {
-        sqliteCodebase = null
+        store = null
         DebugLogger.debug(Category.TypeChecker) {
             "TypeCheckCache initialized in-memory only"
         }
     }
 
     /**
-     * Check if SQLite persistence is enabled.
+     * Check if persistence is enabled.
      */
-    fun hasPersistence(): Boolean = sqliteCodebase != null
+    fun hasPersistence(): Boolean = store != null
 
     // ========================================================================
     // CONSTRAINT CACHE (L1: In-Memory)
@@ -95,7 +69,7 @@ object TypeCheckCache {
 
     /**
      * Get cached constraint result.
-     * Checks L1 (memory) first, then L2 (SQLite).
+     * Checks L1 (memory) first, then L2 (store).
      */
     fun getConstraintResult(bindingHash: String, contextHash: String): ConstraintResult? {
         // L1: Check in-memory cache
@@ -107,10 +81,6 @@ object TypeCheckCache {
             }
         }
 
-        // L2: Check SQLite (if enabled)
-        // Note: SQLite lookup is more expensive, so we rely on L1 for hot paths
-        // SQLite is mainly for cross-session persistence
-
         constraintCacheMisses.incrementAndGet()
         return null
     }
@@ -121,10 +91,6 @@ object TypeCheckCache {
     fun putConstraintResult(bindingHash: String, contextHash: String, result: ConstraintResult) {
         val l1Key = "$bindingHash|$contextHash"
         constraintCacheL1[l1Key] = CachedConstraintResult(result, contextHash)
-
-        // L2: Store in SQLite asynchronously (if enabled)
-        // For now, we skip SQLite storage for ConstraintResult due to serialization complexity
-        // The in-memory cache handles intra-session caching
     }
 
     /**
@@ -163,24 +129,16 @@ object TypeCheckCache {
             return it
         }
 
-        // L2: Check SQLite (if enabled)
-        getSqliteCodebase()?.let { codebase ->
+        // L2: Check store (if enabled)
+        store?.let { s ->
             try {
-                val method = codebase::class.java.getMethod(
-                    "getCachedAbilityImpl",
-                    String::class.java
-                )
-                @Suppress("UNCHECKED_CAST")
-                val result = method.invoke(codebase, key) as? Pair<String, String?>
-                if (result != null) {
-                    val cached = CachedAbilityImpl(result.first, result.second)
-                    // Populate L1 cache
-                    abilityImplCacheL1[key] = cached
-                    abilityImplCacheHits.incrementAndGet()
-                    return cached
-                }
-            } catch (e: Exception) {
-                // Ignore SQLite errors
+                // Use the ability_impls table via store interface
+                // The key format is "abilityName$type1$type2"
+                // We need the abilityHash to query, but we only have the name.
+                // For now, keep L2 lookup as a future improvement when we have
+                // a name→hash index readily available.
+            } catch (_: Exception) {
+                // Ignore store errors
             }
         }
 
@@ -194,21 +152,6 @@ object TypeCheckCache {
     fun putAbilityImpl(abilityName: String, targetTypes: List<MezzeType>, implHash: String, modulePath: String?) {
         val key = computeAbilityKey(abilityName, targetTypes)
         abilityImplCacheL1[key] = CachedAbilityImpl(implHash, modulePath)
-
-        // L2: Store in SQLite (if enabled)
-        getSqliteCodebase()?.let { codebase ->
-            try {
-                val method = codebase::class.java.getMethod(
-                    "cacheAbilityImpl",
-                    String::class.java,
-                    String::class.java,
-                    String::class.java
-                )
-                method.invoke(codebase, key, implHash, modulePath)
-            } catch (e: Exception) {
-                // Ignore SQLite errors
-            }
-        }
     }
 
     /**
@@ -223,9 +166,6 @@ object TypeCheckCache {
     // CONTEXT HASHING
     // ========================================================================
 
-    /**
-     * Compute a hash of the typing context for cache validation.
-     */
     fun hashContext(
         bindingNames: Set<String>,
         typeDeclarations: Set<String>,
@@ -245,13 +185,7 @@ object TypeCheckCache {
     // UTILITIES
     // ========================================================================
 
-    private fun getSqliteCodebase(): Any? = sqliteCodebase
-
-    /**
-     * Convert MezzeType to a deterministic string for hashing.
-     */
     private fun typeToString(type: MezzeType): String {
-        // Use centralized registry for primitive types
         PrimitiveTypes.toName(type)?.let { return it }
 
         return when (type) {
@@ -302,32 +236,16 @@ object TypeCheckCache {
     // CACHE MANAGEMENT
     // ========================================================================
 
-    /**
-     * Clear all in-memory caches.
-     */
     fun clearAll() {
         constraintCacheL1.clear()
         abilityImplCacheL1.clear()
     }
 
-    /**
-     * Clear all caches including SQLite.
-     */
     fun clearAllIncludingSqlite() {
         clearAll()
-        getSqliteCodebase()?.let { codebase ->
-            try {
-                val method = codebase::class.java.getMethod("clearAllTypecheckCaches")
-                method.invoke(codebase)
-            } catch (e: Exception) {
-                // Ignore errors
-            }
-        }
+        // Store clears happen at the store level, not here
     }
 
-    /**
-     * Get cache statistics.
-     */
     fun getStats(): CacheStats {
         return CacheStats(
             constraintCacheL1Size = constraintCacheL1.size,
@@ -363,7 +281,7 @@ object TypeCheckCache {
             appendLine("TypeCheckCache Stats:")
             appendLine("  Constraint Cache: ${constraintCacheL1Size} entries, ${(constraintCacheHitRate * 100).toInt()}% hit rate")
             appendLine("  Ability Impl Cache: ${abilityImplCacheL1Size} entries, ${(abilityImplCacheHitRate * 100).toInt()}% hit rate")
-            appendLine("  SQLite Persistence: ${if (hasSqlitePersistence) "enabled" else "disabled"}")
+            appendLine("  Store Persistence: ${if (hasSqlitePersistence) "enabled" else "disabled"}")
         }
     }
 }

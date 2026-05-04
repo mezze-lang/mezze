@@ -9,7 +9,7 @@ dependencies {
     implementation(project(":ast"))
     implementation(project(":parser"))
     implementation(project(":typechecker"))
-    implementation(project(":codebase"))
+    implementation(project(":store-sqlite"))
     implementation(project(":formatter"))
 
     // LSP4J - Language Server Protocol implementation for Java/Kotlin

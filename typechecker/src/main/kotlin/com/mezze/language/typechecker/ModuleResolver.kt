@@ -317,6 +317,34 @@ class ModuleResolver(
         private val moduleLoadingLocks = mutableMapOf<String, Any>()
 
         /**
+         * Optional MezzeStore for parsed module caching.
+         * When set, ModuleResolver reads cached ParsedModules from the store
+         * instead of going through ParsedModuleCacheHolder.
+         * Set by CLI/LSP at startup via setStore().
+         */
+        @Volatile
+        private var store: com.mezze.language.store.MezzeStore? = null
+
+        @JvmStatic
+        fun setStore(store: com.mezze.language.store.MezzeStore) {
+            this.store = store
+        }
+
+        /**
+         * Try loading a cached ParsedModule from the store.
+         * Returns null on miss or any error — caller falls through to parser.
+         */
+        private fun tryLoadParsedFromStore(modulePath: String, sourceHash: String): com.mezze.language.parsedast.ParsedModule? {
+            val s = store ?: return null
+            return try {
+                val blob = s.getParsedModule(modulePath, sourceHash) ?: return null
+                com.mezze.language.store.StoreSerialization.deserializeParsedModule(blob)
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        /**
          * Read a stdlib file from classpath resources.
          * Path is relative to resources root, e.g. "stdlib/std/abilities/numeric.mz".
          */
@@ -652,12 +680,9 @@ class ModuleResolver(
             loadingStack.add(modulePath)
 
             try {
-                // Try the parsed-modules cache before invoking the parser.
-                // The hook (set by CLI/LSP at startup) returns null if the
-                // store is missing this file or its source_hash is stale,
-                // so we always fall through to a clean parse on miss.
-                val cached = com.mezze.language.parser.ParsedModuleCacheHolder
-                    .get(filePath.toString(), sourceHash)
+                // Try the parsed-modules cache (store → fallback to ParsedModuleCacheHolder → parse).
+                val cached = tryLoadParsedFromStore(modulePath, sourceHash)
+                    ?: com.mezze.language.parser.ParsedModuleCacheHolder.get(filePath.toString(), sourceHash)
                 val parsedModule = cached ?: run {
                     val parser = MezzeParser()
                     parser.parseParsedModule(source, file = filePath.toString())

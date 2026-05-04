@@ -5,10 +5,11 @@ plugins {
 
 dependencies {
     implementation(project(":ast"))
+    implementation(project(":store"))
     implementation(project(":parser"))
     implementation(project(":stdlib"))
 
-    // SQLite for loading pre-compiled stdlib from embedded resource
+    // TODO: remove once PrecompiledStdlib is refactored to use MezzeStore
     implementation("org.xerial:sqlite-jdbc:3.51.2.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
