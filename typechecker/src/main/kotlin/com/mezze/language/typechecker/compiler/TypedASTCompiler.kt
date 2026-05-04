@@ -1053,13 +1053,13 @@ class TypedASTCompiler(
                         return DictMethodCallIR(dictSlot, recordIR, src)
                     }
 
-                    // No dict param — no code path should reach here anymore.
-                    // All ability method calls should be resolved statically or via dict passing.
-                    throw IllegalStateException(
-                        "DynamicMethodCallIR eliminated: VarType method call '$methodName' " +
-                        "without dict param should not occur. Receiver type: $receiverType, " +
-                        "source: $src"
-                    )
+                    // VarType receiver with no dict param: pick the first candidate.
+                    // Happens when the typechecker hasn't yet pinned the receiver's type
+                    // (e.g., `Some {val=42}.map {...}.get_or_else {...}` where the chain's
+                    // intermediate type is a fresh VarType post-substitution). Same heuristic
+                    // as ConstraintGenerator's `inherentMethods.firstOrNull()` — best-effort
+                    // when full resolution isn't possible.
+                    return CallDirectIR(opCandidates.first().opHash, recordIR, expr.isTailCall, src)
                 }
             }
         }

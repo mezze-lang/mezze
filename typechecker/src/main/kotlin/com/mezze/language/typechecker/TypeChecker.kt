@@ -743,8 +743,12 @@ class TypeChecker(
                         }
                         arr.toTypedArray()
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
                     // TypedASTCompiler errors are non-fatal for type checking.
+                    if (System.getenv("MEZZE_DEBUG") != null) {
+                        System.err.println("[COMPILER] ${e.javaClass.simpleName}: ${e.message}")
+                        e.printStackTrace(System.err)
+                    }
                 }
 
                 // V2 validation skipped — TypedASTCompiler doesn't produce MonoAST

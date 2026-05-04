@@ -65,6 +65,10 @@ tasks.test {
     systemProperty("junit.jupiter.execution.timeout.default", "120s")
     systemProperty("polyglot.engine.WarnInterpreterOnly", "false")
 
+    // Pass through MEZZE_DEBUG env var into the test JVM so the deferred
+    // catches in TypeChecker print exception traces.
+    System.getenv("MEZZE_DEBUG")?.let { environment("MEZZE_DEBUG", it) }
+
     jvmArgs(
         "--enable-native-access=ALL-UNNAMED",
         "--add-opens=java.base/java.lang=ALL-UNNAMED",

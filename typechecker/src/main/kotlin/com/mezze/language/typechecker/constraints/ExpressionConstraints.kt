@@ -1064,6 +1064,18 @@ class ExpressionConstraintGenerator {
             // When there's exactly ONE candidate, there's no ambiguity even
             // with an unresolved receiver — keep dispatching.
             if (inherentMethods.size > 1 && isReceiverUnresolved(memberAccess.receiver, context)) {
+                // When the receiver's type isn't yet inferred, try a syntactic
+                // shortcut: if it's a variant constructor like `Some {val=42}`
+                // or `Ok {val=42}`, look up which type that constructor belongs
+                // to and filter candidates by that. Fixes the case where the
+                // ambiguity is statically resolvable from the surface syntax.
+                val syntacticTypeName = lookupConstructorTypeName(memberAccess.receiver, context)
+                if (syntacticTypeName != null) {
+                    val filtered = inherentMethods.filter { it.targetTypeName == syntacticTypeName }
+                    if (filtered.isNotEmpty()) {
+                        return generateInherentMethodCall(expr, memberAccess, filtered, context)
+                    }
+                }
                 return null
             }
             return generateInherentMethodCall(expr, memberAccess, inherentMethods, context)
@@ -1444,7 +1456,12 @@ class ExpressionConstraintGenerator {
         constraints.addAll(argumentResult.constraints)
 
         // Disambiguate by receiver type name when multiple types share a method name.
+        // When the inferred receiverType is still a fresh VarType (e.g., the
+        // receiver is a `Some {val=42}` whose type the solver hasn't pinned yet),
+        // fall back to a syntactic lookup: find the type-decl that declares the
+        // constructor and match impls against that type-decl name.
         val receiverTypeName = getReceiverTypeName(receiverType)
+            ?: lookupConstructorTypeName(memberAccess.receiver, context)
         val methodInfo = if (inherentMethods.size == 1) {
             inherentMethods.first()
         } else if (receiverTypeName != null) {
@@ -1561,6 +1578,70 @@ class ExpressionConstraintGenerator {
      */
 
     /** Extract type name from receiver type for inherent method disambiguation. */
+    /**
+     * When the inferred receiver type is still an unresolved VarType, try to
+     * derive a type name from the receiver expression itself. For variant
+     * constructors like `Some {val=42}`, this finds the type-decl whose
+     * variant defines `Some` and returns its name (`"Option"`). Fixes inherent
+     * method dispatch when constraint solving hasn't yet pinned the receiver
+     * type.
+     */
+    private fun lookupConstructorTypeName(receiver: ParsedExpr, context: ConstraintContext): String? {
+        // Variant constructor receiver: `Some {val=42}`, `Ok {val=42}`.
+        val ctorName = when (receiver) {
+            is ParsedVariantConstruct -> receiver.constructor
+            is ParsedFunctionCall -> (receiver.function as? ParsedVariantConstruct)?.constructor
+            else -> null
+        }
+        if (ctorName != null) {
+            // Built-in variant constructors don't appear in typeDeclarations —
+            // they're hardcoded as TypeApplication("Result", ...) etc. in
+            // BasicTypes.kt and friends. Map the well-known ones explicitly.
+            when (ctorName) {
+                "Ok", "Err" -> return "Result"
+                "Some", "None" -> return "Option"
+            }
+            for ((typeName, typeDecl) in context.typeDeclarations) {
+                val def = typeDecl.definition
+                if (def is ParsedVariantDef && def.constructors.any { it.name == ctorName }) {
+                    return typeName
+                }
+            }
+        }
+        // Function-call receiver: `set::empty {}` returns `Set 'a`. Look up the
+        // function's binding type and extract the return-type's constructor.
+        // Also handles bare identifiers like `s` whose binding may already have
+        // a non-VarType (rare here, but covered).
+        val fnExpr: ParsedExpr? = when (receiver) {
+            is ParsedFunctionCall -> receiver.function
+            else -> receiver
+        }
+        val bindingType: MezzeType? = when (fnExpr) {
+            is ParsedIdentifier -> {
+                val qualifierStr = fnExpr.qualifier?.toString()
+                val key = if (qualifierStr != null)
+                    BindingKey(qualifierStr, fnExpr.localName)
+                else BindingKey.unqualified(fnExpr.localName)
+                val lookup = context.typingContext.lookup(key)
+                if (lookup is TypingContext.LookupResult.Found) {
+                    when (val b = lookup.binding) {
+                        is TypingContext.Binding.Monomorphic -> b.type
+                        is TypingContext.Binding.Polymorphic -> b.scheme.type
+                    }
+                } else null
+            }
+            else -> null
+        }
+        // For function calls, extract the return type. For bare identifiers,
+        // use the binding type directly.
+        val resultType = when {
+            bindingType is MezzeType.FunctionType && receiver is ParsedFunctionCall -> bindingType.returnType
+            bindingType != null && receiver !is ParsedFunctionCall -> bindingType
+            else -> null
+        } ?: return null
+        return getReceiverTypeName(resultType)
+    }
+
     private fun getReceiverTypeName(type: MezzeType): String? = when (type) {
         is MezzeType.IntType -> "Int"
         is MezzeType.FloatType -> "Float"
