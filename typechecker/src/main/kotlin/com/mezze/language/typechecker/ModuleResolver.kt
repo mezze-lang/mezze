@@ -970,7 +970,7 @@ class ModuleResolver(
                     )
                     val qualifiedName = if (modulePath != null) "$modulePath::$name" else name
                     ContentHashRegistry.register(
-                        hash = contentHashStr,
+                        hash = contentHash,
                         qualifiedName = qualifiedName,
                         modulePath = modulePath,
                         kind = if (mezzeType is MezzeType.FunctionType) DeclarationKind.FUNCTION
@@ -1000,7 +1000,7 @@ class ModuleResolver(
                     )
                     val qualifiedName = if (modulePath != null) "$modulePath::${decl.name}" else decl.name
                     ContentHashRegistry.register(
-                        hash = contentHashStr,
+                        hash = contentHash,
                         qualifiedName = qualifiedName,
                         modulePath = modulePath,
                         kind = DeclarationKind.TYPE
@@ -1040,7 +1040,7 @@ class ModuleResolver(
                     )
                     val qualifiedName = if (modulePath != null) "$modulePath::${decl.name}" else decl.name
                     ContentHashRegistry.register(
-                        hash = contentHashStr,
+                        hash = contentHash,
                         qualifiedName = qualifiedName,
                         modulePath = modulePath,
                         kind = DeclarationKind.EFFECT
@@ -1082,7 +1082,7 @@ class ModuleResolver(
                     )
                     val qualifiedName = if (modulePath != null) "$modulePath::${decl.name}" else decl.name
                     ContentHashRegistry.register(
-                        hash = contentHashStr,
+                        hash = contentHash,
                         qualifiedName = qualifiedName,
                         modulePath = modulePath,
                         kind = DeclarationKind.ABILITY
@@ -1112,7 +1112,7 @@ class ModuleResolver(
                         )
                         val qualifiedName = if (modulePath != null) "$modulePath::${decl.performerName}" else decl.performerName
                         ContentHashRegistry.register(
-                            hash = contentHashStr,
+                            hash = contentHash,
                             qualifiedName = qualifiedName,
                             modulePath = modulePath,
                             kind = DeclarationKind.EFFECT_HANDLER

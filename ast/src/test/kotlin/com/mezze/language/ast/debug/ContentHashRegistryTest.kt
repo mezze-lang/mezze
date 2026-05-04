@@ -1,5 +1,6 @@
 package com.mezze.language.ast.debug
 
+import com.mezze.language.typedast.Hash
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -13,7 +14,7 @@ class ContentHashRegistryTest {
 
     @Test
     fun `register and lookup hash`() {
-        val hash = "abc123def456"
+        val hash = Hash("abc123def456")
         ContentHashRegistry.register(
             hash = hash,
             qualifiedName = "std::int::add",
@@ -29,14 +30,14 @@ class ContentHashRegistryTest {
 
     @Test
     fun `unknown hash returns truncated form`() {
-        val hash = "xyz789unknown"
+        val hash = Hash("aabbcc789ddd")
         val name = ContentHashRegistry.nameForHash(hash)
-        assertTrue(name.startsWith("<unknown:xyz789un"))
+        assertTrue(name.startsWith("<unknown:aabbcc78"))
     }
 
     @Test
     fun `describeHash with full info`() {
-        val hash = "hash123"
+        val hash = Hash("abc1230000")
         ContentHashRegistry.register(
             hash = hash,
             qualifiedName = "my::module::func",
@@ -52,36 +53,42 @@ class ContentHashRegistryTest {
 
     @Test
     fun `describeHash for unregistered returns truncated`() {
-        val description = ContentHashRegistry.describeHash("unregistered123456")
+        val description = ContentHashRegistry.describeHash(Hash("0123456789abcdef"))
         assertTrue(description.startsWith("<unregistered hash:"))
     }
 
     @Test
     fun `clear removes all entries`() {
-        ContentHashRegistry.register("h1", "name1")
-        ContentHashRegistry.register("h2", "name2")
+        val h1 = Hash("aaa1")
+        val h2 = Hash("bbb2")
+        ContentHashRegistry.register(h1, "name1")
+        ContentHashRegistry.register(h2, "name2")
         assertEquals(2, ContentHashRegistry.size())
 
         ContentHashRegistry.clear()
         assertEquals(0, ContentHashRegistry.size())
-        assertFalse(ContentHashRegistry.isRegistered("h1"))
+        assertFalse(ContentHashRegistry.isRegistered(h1))
     }
 
     @Test
     fun `allHashes returns all registered hashes`() {
-        ContentHashRegistry.register("h1", "name1")
-        ContentHashRegistry.register("h2", "name2")
+        val h1 = Hash("aaa1")
+        val h2 = Hash("bbb2")
+        ContentHashRegistry.register(h1, "name1")
+        ContentHashRegistry.register(h2, "name2")
 
         val hashes = ContentHashRegistry.allHashes()
-        assertEquals(setOf("h1", "h2"), hashes)
+        assertEquals(setOf(h1, h2), hashes)
     }
 
     @Test
     fun `allMappings returns all name mappings`() {
-        ContentHashRegistry.register("h1", "name1")
-        ContentHashRegistry.register("h2", "name2")
+        val h1 = Hash("aaa1")
+        val h2 = Hash("bbb2")
+        ContentHashRegistry.register(h1, "name1")
+        ContentHashRegistry.register(h2, "name2")
 
         val mappings = ContentHashRegistry.allMappings()
-        assertEquals(mapOf("h1" to "name1", "h2" to "name2"), mappings)
+        assertEquals(mapOf(h1 to "name1", h2 to "name2"), mappings)
     }
 }

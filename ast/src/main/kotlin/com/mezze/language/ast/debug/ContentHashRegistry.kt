@@ -1,5 +1,6 @@
 package com.mezze.language.ast.debug
 
+import com.mezze.language.typedast.Hash
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -20,21 +21,21 @@ import java.util.concurrent.ConcurrentHashMap
 object ContentHashRegistry {
     /**
      * Map from content hash to qualified name.
-     * Example: "abc123..." -> "std::int::add"
+     * Example: Hash("abc123...") -> "std::int::add"
      */
-    private val hashToName = ConcurrentHashMap<String, String>()
+    private val hashToName = ConcurrentHashMap<Hash, String>()
 
     /**
      * Map from content hash to module path.
-     * Example: "abc123..." -> "std::int"
+     * Example: Hash("abc123...") -> "std::int"
      */
-    private val hashToModule = ConcurrentHashMap<String, String>()
+    private val hashToModule = ConcurrentHashMap<Hash, String>()
 
     /**
      * Map from content hash to declaration kind.
-     * Example: "abc123..." -> "function"
+     * Example: Hash("abc123...") -> "function"
      */
-    private val hashToKind = ConcurrentHashMap<String, DeclarationKind>()
+    private val hashToKind = ConcurrentHashMap<Hash, DeclarationKind>()
 
     /**
      * Types of declarations that can be registered.
@@ -51,7 +52,7 @@ object ContentHashRegistry {
 
     /** Register a content hash with its display information. */
     fun register(
-        hash: String,
+        hash: Hash,
         qualifiedName: String,
         modulePath: String? = null,
         kind: DeclarationKind = DeclarationKind.FUNCTION
@@ -68,8 +69,8 @@ object ContentHashRegistry {
      * @param hash The content hash to look up
      * @return The qualified name, or a fallback display string
      */
-    fun nameForHash(hash: String): String {
-        return hashToName[hash] ?: "<unknown:${hash.take(8)}...>"
+    fun nameForHash(hash: Hash): String {
+        return hashToName[hash] ?: "<unknown:${hash.hex.take(8)}...>"
     }
 
     /**
@@ -78,7 +79,7 @@ object ContentHashRegistry {
      * @param hash The content hash to look up
      * @return The module path, or null if not registered
      */
-    fun moduleForHash(hash: String): String? {
+    fun moduleForHash(hash: Hash): String? {
         return hashToModule[hash]
     }
 
@@ -88,7 +89,7 @@ object ContentHashRegistry {
      * @param hash The content hash to look up
      * @return The declaration kind, or null if not registered
      */
-    fun kindForHash(hash: String): DeclarationKind? {
+    fun kindForHash(hash: Hash): DeclarationKind? {
         return hashToKind[hash]
     }
 
@@ -98,7 +99,7 @@ object ContentHashRegistry {
      * @param hash The content hash to check
      * @return true if the hash has been registered
      */
-    fun isRegistered(hash: String): Boolean {
+    fun isRegistered(hash: Hash): Boolean {
         return hashToName.containsKey(hash)
     }
 
@@ -108,7 +109,7 @@ object ContentHashRegistry {
      * @param hash The content hash to describe
      * @return A formatted description string
      */
-    fun describeHash(hash: String): String {
+    fun describeHash(hash: Hash): String {
         val name = hashToName[hash]
         val module = hashToModule[hash]
         val kind = hashToKind[hash]
@@ -127,7 +128,7 @@ object ContentHashRegistry {
                 }
             }
         } else {
-            "<unregistered hash: ${hash.take(16)}...>"
+            "<unregistered hash: ${hash.hex.take(16)}...>"
         }
     }
 
@@ -153,7 +154,7 @@ object ContentHashRegistry {
      *
      * @return Set of all registered content hashes
      */
-    fun allHashes(): Set<String> = hashToName.keys.toSet()
+    fun allHashes(): Set<Hash> = hashToName.keys.toSet()
 
     /**
      * Get all registered name mappings.
@@ -161,5 +162,5 @@ object ContentHashRegistry {
      *
      * @return Map of hash -> name
      */
-    fun allMappings(): Map<String, String> = hashToName.toMap()
+    fun allMappings(): Map<Hash, String> = hashToName.toMap()
 }
