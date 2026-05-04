@@ -35,9 +35,11 @@ data class TypingContext(
     private val anonymousImplMethods: Map<String, InherentMethodInfo> = emptyMap(),
     // Secondary index for anonymous methods: "TypeName" -> [methodName]
     private val anonymousImplMethodsByType: Map<String, List<String>> = emptyMap(),
-    // Hash-based secondary index for anonymous methods: "typeHash::methodName" -> method info
-    // Used when typeHash is available for stable cross-module resolution
-    private val anonymousImplMethodsByHash: Map<String, InherentMethodInfo> = emptyMap(),
+    // Hash-based secondary index for anonymous methods. Key = computeOpHash(typeHash, methodName) —
+    // a single Hash derived from the (type-decl hash, method name) pair, mirroring how the rest of
+    // the typechecker keys per-operation entries. Used when typeHash is available for stable
+    // cross-module resolution.
+    private val anonymousImplMethodsByHash: Map<Hash, InherentMethodInfo> = emptyMap(),
     val parent: TypingContext? = null
 ) {
     /**
@@ -401,7 +403,7 @@ data class TypingContext(
      * Preferred over name-based lookup — stable across renames/aliases.
      */
     fun findAnonymousMethodByHash(typeHash: Hash, methodName: String): InherentMethodInfo? {
-        val key = "${typeHash.hex}::$methodName"
+        val key = Hash.computeOpHash(typeHash, methodName)
         return anonymousImplMethodsByHash[key] ?: parent?.findAnonymousMethodByHash(typeHash, methodName)
     }
 
@@ -438,7 +440,7 @@ data class TypingContext(
         val existingMethods = anonymousImplMethodsByType[info.targetTypeName] ?: emptyList()
         // Also update hash-based index if typeHash is available
         val newHashIndex = if (info.targetTypeHash != null) {
-            val hashKey = "${info.targetTypeHash.hex}::${info.methodName}"
+            val hashKey = Hash.computeOpHash(info.targetTypeHash, info.methodName)
             anonymousImplMethodsByHash + (hashKey to info)
         } else {
             anonymousImplMethodsByHash
