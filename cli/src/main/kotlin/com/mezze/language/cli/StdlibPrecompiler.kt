@@ -96,10 +96,10 @@ fun main(args: Array<String>) {
             // wrote. Each function lookup updates ir on the existing row,
             // matching the user-code merge path in scatterFunctionIRs.
             for ((hash, fn) in functions) {
-                val existing = store.getBlob(Hash(hash))
+                val existing = store.getBlob(hash)
                 val irBytes = CodebaseSerialization.serializeFunctionIR(fn)
                 store.putBlob(
-                    Hash(hash),
+                    hash,
                     existing?.kind ?: BlobKind.FUNCTION,
                     existing?.visibility ?: Visibility.PUBLIC,
                     existing?.typed,
@@ -113,17 +113,19 @@ fun main(args: Array<String>) {
                     performers.joinToString(";") { it.joinToString(",") })
             }
 
-            // Store function name mappings
+            // Store function name mappings. SQLite metadata keys/values
+            // are strings — write `hash.hex` explicitly at this serialization
+            // boundary; Hash.toString() truncates to 8 chars for readability.
             for ((hash, fn) in functions) {
                 if (fn.name != "lambda" && !fn.name.startsWith("__")) {
-                    store.setMetadata("fn_name:$hash", fn.name)
+                    store.setMetadata("fn_name:${hash.hex}", fn.name)
                 }
             }
 
             // Store dependency graph
             for ((hash, deps) in precompiled.stdlibDependencyGraph) {
                 if (deps.isNotEmpty()) {
-                    store.setMetadata("deps:$hash", deps.joinToString(";"))
+                    store.setMetadata("deps:${hash.hex}", deps.joinToString(";") { it.hex })
                 }
             }
 
@@ -150,7 +152,7 @@ fun main(args: Array<String>) {
 
             // Store decl and module hashes
             store.setMetadata("stdlib_decl_hashes",
-                precompiled.stdlibDeclHashes.joinToString(";"))
+                precompiled.stdlibDeclHashes.joinToString(";") { it.hex })
             store.setMetadata("stdlib_module_hashes",
                 precompiled.stdlibModuleHashes.joinToString(";") { it.hex })
 

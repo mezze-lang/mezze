@@ -300,9 +300,13 @@ final class ParameterizedHandlerLookupNode extends MezzeNode {
             var prelowered = precompiled.getPreloweredFunctions();
             for (var entry : prelowered.entrySet()) {
                 if (performerName.equals(entry.getValue().getName())) {
-                    ct = lang.getCachedStdlibCallTarget(entry.getKey());
+                    // Phase 1 typed-identity sweep: prelowered map is now
+                    // Map<Hash, FunctionIR>. Methods on the Java side still
+                    // take hex strings; unwrap at the boundary.
+                    String hashHex = entry.getKey().getHex();
+                    ct = lang.getCachedStdlibCallTarget(hashHex);
                     if (ct != null) {
-                        handlerFn = MezzeFunction.create(ct, entry.getKey());
+                        handlerFn = MezzeFunction.create(ct, hashHex);
                         Object handler = HandlerLookupNode.evaluateHandlerFunction(handlerFn, params, context);
                         if (handler != null) return handler;
                     }

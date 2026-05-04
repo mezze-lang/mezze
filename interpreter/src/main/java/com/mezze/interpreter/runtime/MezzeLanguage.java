@@ -130,13 +130,18 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         var precompiled = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE;
         var allFunctions = precompiled.getPreloweredFunctions();
 
-        // Build name map + performer records on first call
+        // Build name map + performer records on first call.
+        // Phase 1 typed-identity sweep: PrecompiledStdlib.preloweredFunctions
+        // is now Map<Hash, FunctionIR> (was Map<String, FunctionIR>). We
+        // unwrap to hex string at the Java boundary to keep the rest of the
+        // interpreter Java code unchanged for now; Phase 1 follow-up commit
+        // migrates the Java-side Map<String, ...> caches too.
         if (stdlibHashToName == null) {
             var nameMap = new java.util.HashMap<String, String>();
             for (var entry : allFunctions.entrySet()) {
                 var fn = entry.getValue();
                 if (!fn.getName().equals("lambda") && !fn.getName().startsWith("__")) {
-                    nameMap.put(entry.getKey(), fn.getName());
+                    nameMap.put(entry.getKey().getHex(), fn.getName());
                 }
             }
             stdlibHashToName = nameMap;
@@ -146,7 +151,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         // Compile only referenced stdlib functions not yet cached
         for (String hash : referencedHashes) {
             if (!userHashes.contains(hash) && !stdlibCallTargetCache.containsKey(hash)) {
-                var ir = allFunctions.get(hash);
+                var ir = allFunctions.get(new com.mezze.language.typedast.Hash(hash));
                 if (ir != null) {
                     var rootNode = compiler.compile(ir);
                     stdlibCallTargetCache.put(hash, rootNode.getCallTarget());

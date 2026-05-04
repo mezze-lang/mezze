@@ -65,7 +65,7 @@ object PrecompiledStdlib {
 
     /** Decl hashes from ALL stdlib v2 modules — extracted during init, kept permanently.
      *  Used by TypeChecker to build preludeHashes set. */
-    var stdlibDeclHashes: Set<String> = emptySet()
+    var stdlibDeclHashes: Set<Hash> = emptySet()
         private set
 
     /** Module hashes for prelude skip detection — extracted from stdlibTypedModules.keys */
@@ -73,20 +73,20 @@ object PrecompiledStdlib {
         private set
 
     /** Pre-lowered stdlib functions: hash → FunctionIR. Always available. */
-    var preloweredFunctions: Map<String, com.mezze.language.truffleir.FunctionIR>
+    var preloweredFunctions: Map<Hash, com.mezze.language.truffleir.FunctionIR>
         private set
 
     /** Stdlib dependency graph: hash → set of hashes referenced in its body.
      *  Built eagerly at init from FunctionIR bodies.
      *  Used by PipelineRunner.collectReferencedHashes for BFS. */
-    var stdlibDependencyGraph: Map<String, Set<String>> = emptyMap()
+    var stdlibDependencyGraph: Map<Hash, Set<Hash>> = emptyMap()
         private set
 
     /** Walk all stdlib FunctionIR bodies to build hash→referenced-hashes graph. */
     private fun buildDependencyGraph() {
-        val graph = mutableMapOf<String, Set<String>>()
+        val graph = mutableMapOf<Hash, Set<Hash>>()
         for ((hash, fn) in preloweredFunctions) {
-            val refs = mutableSetOf<String>()
+            val refs = mutableSetOf<Hash>()
             collectHashRefs(fn.body, refs)
             if (refs.isNotEmpty()) {
                 graph[hash] = refs
@@ -96,15 +96,15 @@ object PrecompiledStdlib {
     }
 
     /** Collect all hash references from a NodeIR tree. */
-    private fun collectHashRefs(node: com.mezze.language.truffleir.NodeIR, refs: MutableSet<String>) {
+    private fun collectHashRefs(node: com.mezze.language.truffleir.NodeIR, refs: MutableSet<Hash>) {
         when (node) {
-            is com.mezze.language.truffleir.CallDirectIR -> { refs.add(node.targetHash.hex); collectHashRefs(node.arg, refs) }
-            is com.mezze.language.truffleir.MakeLambdaIR -> refs.add(node.functionHash.hex)
+            is com.mezze.language.truffleir.CallDirectIR -> { refs.add(node.targetHash); collectHashRefs(node.arg, refs) }
+            is com.mezze.language.truffleir.MakeLambdaIR -> refs.add(node.functionHash)
             is com.mezze.language.truffleir.HandleIR -> {
                 collectHashRefs(node.body, refs)
-                for (h in node.handlers) { refs.add(h.handlerHash.hex); refs.add(h.effectHash.hex) }
+                for (h in node.handlers) { refs.add(h.handlerHash); refs.add(h.effectHash) }
             }
-            is com.mezze.language.truffleir.PerformOpIR -> { refs.add(node.effectHash.hex); collectHashRefs(node.arg, refs) }
+            is com.mezze.language.truffleir.PerformOpIR -> { refs.add(node.effectHash); collectHashRefs(node.arg, refs) }
             is com.mezze.language.truffleir.BlockIR -> {
                 for (s in node.stmts) when (s) {
                     is com.mezze.language.truffleir.StmtIR.Let -> collectHashRefs(s.value, refs)
@@ -137,8 +137,12 @@ object PrecompiledStdlib {
             }
             is com.mezze.language.truffleir.SeqGetIR -> { collectHashRefs(node.seq, refs); collectHashRefs(node.index, refs) }
             is com.mezze.language.truffleir.DictMethodCallIR -> collectHashRefs(node.arg, refs)
-            is com.mezze.language.truffleir.ReadContextIR -> refs.add(node.name)
-            is com.mezze.language.truffleir.ReadContextFnIR -> refs.add(node.name)
+            // ReadContextIR/ReadContextFnIR carry a name field that — for codegen
+            // purposes — is the hex form of an op/decl hash. Wrap as Hash to keep
+            // the dep graph typed; if the field stops being a hex hash one day
+            // the Hash() ctor's hex check will surface it loudly.
+            is com.mezze.language.truffleir.ReadContextIR -> refs.add(Hash(node.name))
+            is com.mezze.language.truffleir.ReadContextFnIR -> refs.add(Hash(node.name))
             else -> {} // leaf nodes
         }
     }
@@ -236,7 +240,7 @@ object PrecompiledStdlib {
                     }
                 }
 
-                val preFunctions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
+                val preFunctions = mutableMapOf<Hash, com.mezze.language.truffleir.FunctionIR>()
                 val prePerformers = mutableListOf<Array<String>>()
                 val allAbilityImpls = allModulesForPrelower.values.flatMap { it.abilityImpls }
                 for ((_, typedMod) in allModulesForPrelower) {
@@ -251,7 +255,7 @@ object PrecompiledStdlib {
                             }
                             prePerformers.add(arr.toTypedArray())
                         }
-                        for (fn in result.functions) { preFunctions.putIfAbsent(fn.hash.hex, fn) }
+                        for (fn in result.functions) { preFunctions.putIfAbsent(fn.hash, fn) }
                     } catch (_: Exception) {}
                 }
                 preloweredFunctions = preFunctions
@@ -261,10 +265,10 @@ object PrecompiledStdlib {
 
             // Extract metadata from TypedModules
             stdlibAbilityImpls = stdlibTypedModules.values.flatMap { it.abilityImpls }
-            val declHashes = mutableSetOf<String>()
+            val declHashes = mutableSetOf<Hash>()
             for ((_, stdlibModule) in stdlibTypedModules) {
                 for (d in stdlibModule.decls) {
-                    if (d is com.mezze.language.typedast.TypedLetDecl) declHashes.add(d.hash.hex)
+                    if (d is com.mezze.language.typedast.TypedLetDecl) declHashes.add(d.hash)
                 }
             }
             stdlibDeclHashes = declHashes
@@ -338,19 +342,21 @@ object PrecompiledStdlib {
             } else emptyList()
 
             val declHashStr = s.getMetadata("stdlib_decl_hashes") ?: ""
-            val declHashes = if (declHashStr.isNotEmpty()) declHashStr.split(";").toSet() else emptySet()
+            val declHashes: Set<Hash> = if (declHashStr.isNotEmpty()) {
+                declHashStr.split(";").map { Hash(it) }.toSet()
+            } else emptySet()
 
             val modHashStr = s.getMetadata("stdlib_module_hashes") ?: ""
             val moduleHashes = if (modHashStr.isNotEmpty()) modHashStr.split(";").map { Hash(it) }.toSet() else emptySet()
 
             // Load FunctionIRs from blobs table via store
-            val functions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
+            val functions = mutableMapOf<Hash, com.mezze.language.truffleir.FunctionIR>()
             // We need all blob hashes to iterate — use the module's known decl hashes
             // plus any reachable via edges. Since we have declHashes, load their IR.
-            for (hexHash in declHashes) {
+            for (declHash in declHashes) {
                 try {
-                    val irBytes = s.getIR(Hash(hexHash)) ?: continue
-                    functions[hexHash] = cbor.decodeFromByteArray(irBytes)
+                    val irBytes = s.getIR(declHash) ?: continue
+                    functions[declHash] = cbor.decodeFromByteArray(irBytes)
                 } catch (_: Exception) {}
             }
 
@@ -359,7 +365,7 @@ object PrecompiledStdlib {
             for (mHash in moduleHashes) {
                 try {
                     val irBytes = s.getIR(mHash) ?: continue
-                    functions[mHash.hex] = cbor.decodeFromByteArray(irBytes)
+                    functions[mHash] = cbor.decodeFromByteArray(irBytes)
                 } catch (_: Exception) {}
             }
 
@@ -370,12 +376,12 @@ object PrecompiledStdlib {
             } else emptyList()
 
             // Load dependency graph
-            val depGraph = mutableMapOf<String, Set<String>>()
+            val depGraph = mutableMapOf<Hash, Set<Hash>>()
             // Dependency graph is stored as metadata keys "deps:<hash>"
             // We can't enumerate metadata keys through MezzeStore interface,
             // so rebuild from FunctionIR bodies instead
             for ((hash, fn) in functions) {
-                val refs = mutableSetOf<String>()
+                val refs = mutableSetOf<Hash>()
                 collectHashRefs(fn.body, refs)
                 if (refs.isNotEmpty()) depGraph[hash] = refs
             }
@@ -398,7 +404,7 @@ object PrecompiledStdlib {
     private fun tryLoadPreloweredFromStore(): PreloweredData? {
         val s = store ?: return null
         return try {
-            val functions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
+            val functions = mutableMapOf<Hash, com.mezze.language.truffleir.FunctionIR>()
 
             // Load all stdlib modules and get their decl hashes for IR lookup
             for (mod in s.getAllModules()) {
@@ -410,7 +416,7 @@ object PrecompiledStdlib {
                         if (decl is com.mezze.language.typedast.TypedLetDecl) {
                             val irBytes = s.getIR(decl.hash) ?: continue
                             try {
-                                functions[decl.hash.hex] = cbor.decodeFromByteArray(irBytes)
+                                functions[decl.hash] = cbor.decodeFromByteArray(irBytes)
                             } catch (_: Exception) {}
                         }
                     }
@@ -424,9 +430,9 @@ object PrecompiledStdlib {
             } else emptyList()
 
             // Build dependency graph from function bodies
-            val depGraph = mutableMapOf<String, Set<String>>()
+            val depGraph = mutableMapOf<Hash, Set<Hash>>()
             for ((hash, fn) in functions) {
-                val refs = mutableSetOf<String>()
+                val refs = mutableSetOf<Hash>()
                 collectHashRefs(fn.body, refs)
                 if (refs.isNotEmpty()) depGraph[hash] = refs
             }
@@ -441,11 +447,11 @@ object PrecompiledStdlib {
 
     private data class FullCacheData(
         val importContext: ModuleImportContext,
-        val functions: Map<String, com.mezze.language.truffleir.FunctionIR>,
+        val functions: Map<Hash, com.mezze.language.truffleir.FunctionIR>,
         val performers: List<Array<String>>,
-        val dependencyGraph: Map<String, Set<String>>,
+        val dependencyGraph: Map<Hash, Set<Hash>>,
         val abilityImpls: List<com.mezze.language.typedast.TypedAbilityImpl>,
-        val declHashes: Set<String>,
+        val declHashes: Set<Hash>,
         val moduleHashes: Set<Hash>
     )
 
@@ -505,7 +511,9 @@ object PrecompiledStdlib {
                         if (rs.next()) rs.getString("value") else ""
                     }
                 }
-                val declHashes = if (declHashStr.isNotEmpty()) declHashStr.split(";").toSet() else emptySet()
+                val declHashes: Set<Hash> = if (declHashStr.isNotEmpty()) {
+                    declHashStr.split(";").map { Hash(it) }.toSet()
+                } else emptySet()
 
                 // Load module hashes
                 val modHashStr = conn.createStatement().use { stmt ->
@@ -516,11 +524,11 @@ object PrecompiledStdlib {
                 val moduleHashes = if (modHashStr.isNotEmpty()) modHashStr.split(";").map { Hash(it) }.toSet() else emptySet()
 
                 // Load FunctionIRs
-                val functions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
+                val functions = mutableMapOf<Hash, com.mezze.language.truffleir.FunctionIR>()
                 conn.createStatement().use { stmt ->
                     stmt.executeQuery("SELECT hash, ir FROM blobs WHERE ir IS NOT NULL").use { rs ->
                         while (rs.next()) {
-                            val hash = rs.getString("hash")
+                            val hash = Hash(rs.getString("hash"))
                             val irBytes = rs.getBytes("ir")
                             try {
                                 functions[hash] = cbor.decodeFromByteArray(irBytes)
@@ -545,13 +553,13 @@ object PrecompiledStdlib {
                 }
 
                 // Load dependency graph
-                val depGraph = mutableMapOf<String, Set<String>>()
+                val depGraph = mutableMapOf<Hash, Set<Hash>>()
                 conn.createStatement().use { stmt ->
                     stmt.executeQuery("SELECT key, value FROM metadata WHERE key LIKE 'deps:%'").use { rs ->
                         while (rs.next()) {
-                            val hash = rs.getString("key").removePrefix("deps:")
+                            val hash = Hash(rs.getString("key").removePrefix("deps:"))
                             val deps = rs.getString("value")
-                            if (deps.isNotEmpty()) depGraph[hash] = deps.split(";").toSet()
+                            if (deps.isNotEmpty()) depGraph[hash] = deps.split(";").map { Hash(it) }.toSet()
                         }
                     }
                 }
@@ -571,9 +579,9 @@ object PrecompiledStdlib {
     }
 
     private data class PreloweredData(
-        val functions: Map<String, com.mezze.language.truffleir.FunctionIR>,
+        val functions: Map<Hash, com.mezze.language.truffleir.FunctionIR>,
         val performers: List<Array<String>>,
-        val dependencyGraph: Map<String, Set<String>>
+        val dependencyGraph: Map<Hash, Set<Hash>>
     )
 
     /**
@@ -591,15 +599,15 @@ object PrecompiledStdlib {
                 tempFile.writeBytes(stream.readAllBytes())
                 val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${tempFile.absolutePath}")
 
-                val functions = mutableMapOf<String, com.mezze.language.truffleir.FunctionIR>()
+                val functions = mutableMapOf<Hash, com.mezze.language.truffleir.FunctionIR>()
                 val performers = mutableListOf<Array<String>>()
-                val depGraph = mutableMapOf<String, Set<String>>()
+                val depGraph = mutableMapOf<Hash, Set<Hash>>()
 
                 // Load all FunctionIRs from blobs table
                 conn.createStatement().use { stmt ->
                     stmt.executeQuery("SELECT hash, ir FROM blobs WHERE ir IS NOT NULL").use { rs ->
                         while (rs.next()) {
-                            val hash = rs.getString("hash")
+                            val hash = Hash(rs.getString("hash"))
                             val irBytes = rs.getBytes("ir")
                             try {
                                 @OptIn(ExperimentalSerializationApi::class)
@@ -628,10 +636,10 @@ object PrecompiledStdlib {
                 conn.createStatement().use { stmt ->
                     stmt.executeQuery("SELECT key, value FROM metadata WHERE key LIKE 'deps:%'").use { rs ->
                         while (rs.next()) {
-                            val hash = rs.getString("key").removePrefix("deps:")
+                            val hash = Hash(rs.getString("key").removePrefix("deps:"))
                             val deps = rs.getString("value")
                             if (deps.isNotEmpty()) {
-                                depGraph[hash] = deps.split(";").toSet()
+                                depGraph[hash] = deps.split(";").map { Hash(it) }.toSet()
                             }
                         }
                     }

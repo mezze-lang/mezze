@@ -122,18 +122,17 @@ class BuildCommand {
             try {
                 val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
                 val stdlibFunctions = precompiled.preloweredFunctions
-                val candidates = stdlibFunctions.keys.map { com.mezze.language.typedast.Hash(it) }
+                val candidates = stdlibFunctions.keys.toList()
                 val present = store.blobsExist(candidates)
-                val missing = stdlibFunctions.filter { (hash, _) -> com.mezze.language.typedast.Hash(hash) !in present }
+                val missing = stdlibFunctions.filter { (hash, _) -> hash !in present }
                 if (missing.isNotEmpty()) {
                     println("Loading ${missing.size} stdlib functions into store (${present.size} already cached)...")
                     store.transaction {
                         for ((hash, fnIR) in missing) {
                             val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
-                            val h = com.mezze.language.typedast.Hash(hash)
-                            store.putBlob(h, com.mezze.language.codebase.BlobKind.FUNCTION,
+                            store.putBlob(hash, com.mezze.language.codebase.BlobKind.FUNCTION,
                                 com.mezze.language.codebase.Visibility.PUBLIC, null, irBytes)
-                            collectEdgesFromIR(fnIR, store, h)
+                            collectEdgesFromIR(fnIR, store, hash)
                         }
                     }
                 }
@@ -198,9 +197,9 @@ class BuildCommand {
                 val insertBlob = allBlobsConn.prepareStatement("INSERT OR IGNORE INTO blobs (hash, ir) VALUES (?, ?)")
                 var stdlibAdded = 0
                 for ((hash, fnIR) in com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions) {
-                    if (hash in existing) continue
+                    if (hash.hex in existing) continue
                     val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
-                    insertBlob.setString(1, hash)
+                    insertBlob.setString(1, hash.hex)
                     insertBlob.setBytes(2, irBytes)
                     insertBlob.executeUpdate()
                     stdlibAdded++

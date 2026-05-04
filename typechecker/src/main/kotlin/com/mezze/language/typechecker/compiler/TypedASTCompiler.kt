@@ -24,7 +24,7 @@ class TypedASTCompiler(
     /** All ability impls from all visible modules — for method call resolution */
     private val abilityImpls: List<TypedAbilityImpl>,
     /** Pre-lowered stdlib function hashes — calls to these are CallDirect, not traced */
-    private val stdlibHashes: Set<String> = emptySet()
+    private val stdlibHashes: Set<Hash> = emptySet()
 ) {
 
     /** Ability operation index: methodName → list of (implHash, targetTypes, opHash) */
@@ -397,22 +397,22 @@ class TypedASTCompiler(
         prescanForDictMethods(listOf(module) + additionalModules)
 
         val functions = mutableListOf<FunctionIR>()
-        val compiledHashes = mutableSetOf<String>()
+        val compiledHashes = mutableSetOf<Hash>()
 
         // Compile entry module declarations
         for (decl in module.decls) {
-            if (decl is TypedLetDecl && decl.hash.hex !in stdlibHashes) {
+            if (decl is TypedLetDecl && decl.hash !in stdlibHashes) {
                 functions.add(compileLetDecl(decl))
-                compiledHashes.add(decl.hash.hex)
+                compiledHashes.add(decl.hash)
             }
         }
 
         // Compile imported module declarations (non-prelude, non-already-compiled)
         for (importedModule in additionalModules) {
             for (decl in importedModule.decls) {
-                if (decl is TypedLetDecl && decl.hash.hex !in stdlibHashes && decl.hash.hex !in compiledHashes) {
+                if (decl is TypedLetDecl && decl.hash !in stdlibHashes && decl.hash !in compiledHashes) {
                     functions.add(compileLetDecl(decl))
-                    compiledHashes.add(decl.hash.hex)
+                    compiledHashes.add(decl.hash)
                 }
             }
         }
@@ -429,8 +429,8 @@ class TypedASTCompiler(
         for (impl in abilityImpls) {
             for ((opName, opBody) in impl.operations) {
                 val opHash = computeOpHash(impl.hash, opName)
-                if (opHash.hex in compiledOpHashes || opHash.hex in stdlibHashes) continue
-                compiledOpHashes.add(opHash.hex)
+                if (opHash in compiledOpHashes || opHash in stdlibHashes) continue
+                compiledOpHashes.add(opHash)
                 currentCaptureNames = emptyMap() // ability ops aren't closures
                 if (opBody is TypedLambda) {
                     functions.add(compileFunctionBody(opHash, opName, opBody.params, opBody.body, opBody.loc))

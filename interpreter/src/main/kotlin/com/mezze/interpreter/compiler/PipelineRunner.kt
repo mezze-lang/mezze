@@ -83,7 +83,14 @@ object PipelineRunner {
 
         val userHashes = functions.map { it.hash.hex }.toSet()
         val referencedHashes = collectReferencedHashes(functions)
-        language.compileReferencedStdlib(compiler, referencedHashes, userHashes)
+        // Bridge to Java side which still takes Set<String>. Phase 1
+        // typed-identity sweep stops at the Kotlin/Java boundary; the
+        // Java-side migration is a follow-up commit.
+        language.compileReferencedStdlib(
+            compiler,
+            referencedHashes.map { it.hex }.toSet(),
+            userHashes
+        )
 
         // Register user functions for lazy compilation — DON'T pre-compile CallTargets.
         // Each test has unique functions; pre-compiling creates CallTargets that persist on
@@ -226,12 +233,12 @@ object PipelineRunner {
      */
     private fun collectReferencedHashes(
         userFunctions: List<com.mezze.language.truffleir.FunctionIR>
-    ): Set<String> {
-        val referenced = mutableSetOf<String>()
-        val queue = ArrayDeque<String>()
+    ): Set<com.mezze.language.typedast.Hash> {
+        val referenced = mutableSetOf<com.mezze.language.typedast.Hash>()
+        val queue = ArrayDeque<com.mezze.language.typedast.Hash>()
 
         for (fn in userFunctions) {
-            referenced.add(fn.hash.hex)
+            referenced.add(fn.hash)
             collectHashesFromNode(fn.body, queue)
         }
 
@@ -247,22 +254,22 @@ object PipelineRunner {
         return referenced
     }
 
-    private fun collectHashesFromNode(node: com.mezze.language.truffleir.NodeIR, queue: ArrayDeque<String>) {
+    private fun collectHashesFromNode(node: com.mezze.language.truffleir.NodeIR, queue: ArrayDeque<com.mezze.language.typedast.Hash>) {
         when (node) {
             is com.mezze.language.truffleir.CallDirectIR -> {
-                queue.add(node.targetHash.hex)
+                queue.add(node.targetHash)
                 collectHashesFromNode(node.arg, queue)
             }
-            is com.mezze.language.truffleir.MakeLambdaIR -> queue.add(node.functionHash.hex)
+            is com.mezze.language.truffleir.MakeLambdaIR -> queue.add(node.functionHash)
             is com.mezze.language.truffleir.HandleIR -> {
                 collectHashesFromNode(node.body, queue)
                 for (h in node.handlers) {
-                    queue.add(h.handlerHash.hex)
-                    queue.add(h.effectHash.hex)
+                    queue.add(h.handlerHash)
+                    queue.add(h.effectHash)
                 }
             }
             is com.mezze.language.truffleir.PerformOpIR -> {
-                queue.add(node.effectHash.hex)
+                queue.add(node.effectHash)
                 collectHashesFromNode(node.arg, queue)
             }
             is com.mezze.language.truffleir.BlockIR -> {
@@ -333,8 +340,10 @@ object PipelineRunner {
             is com.mezze.language.truffleir.ReadArgIR -> {}
             is com.mezze.language.truffleir.ReadContextIR -> {}
             is com.mezze.language.truffleir.ReadContextFnIR -> {
-                // The hash in ReadContextFnIR refers to a function that needs to be available
-                queue.add(node.name)
+                // The hash in ReadContextFnIR refers to a function that needs to be available.
+                // The .name field is a hex hash string by codegen convention; wrap as Hash so
+                // the queue stays typed.
+                queue.add(com.mezze.language.typedast.Hash(node.name))
             }
             is com.mezze.language.truffleir.LongLitIR -> {}
             is com.mezze.language.truffleir.DoubleLitIR -> {}

@@ -699,9 +699,8 @@ class TypeChecker(
                     }
 
                     // Collect ALL prelude decl hashes to skip during compilation
-                    val preludeHashes = mutableSetOf<String>()
-                    val fnHashes = PrecompiledStdlib.preloweredFunctions.keys
-                    preludeHashes.addAll(fnHashes)
+                    val preludeHashes = mutableSetOf<com.mezze.language.typedast.Hash>()
+                    preludeHashes.addAll(PrecompiledStdlib.preloweredFunctions.keys)
                     preludeHashes.addAll(PrecompiledStdlib.stdlibDeclHashes)
 
                     // Compile with TypedASTCompiler — single pass, no Monomorphizer/Resolver/Lowerer
