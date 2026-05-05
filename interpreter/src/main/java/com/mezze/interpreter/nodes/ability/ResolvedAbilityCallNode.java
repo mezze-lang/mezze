@@ -329,65 +329,45 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
 
     private static final Object[] EMPTY_CLOSURE = new Object[0];
 
+    /**
+     * Resolve the operation field on an impl record to its underlying
+     * MezzeFunction. Caches the field index on first hit so subsequent
+     * lookups are integer-indexed instead of string-keyed.
+     *
+     * Returns null when the impl isn't a record, or when the operation
+     * field isn't a function (both shouldn't happen post-typecheck, but
+     * we handle them anyway — the typecheck reaches us via untyped
+     * Object so the runtime can't assume).
+     */
     @TruffleBoundary
+    private MezzeFunction extractFunction(Object impl) {
+        if (!(impl instanceof MezzeRecord record)) {
+            return null;
+        }
+        int opIndex = cachedOperationIndex;
+        if (opIndex < 0) {
+            opIndex = record.getFieldIndex(operationName);
+            if (opIndex >= 0) {
+                cachedOperationIndex = opIndex;
+            }
+        }
+        Object operationFunc = opIndex >= 0 ? record.getField(opIndex) : record.getField(operationName);
+        return operationFunc instanceof MezzeFunction func ? func : null;
+    }
+
     private CallTarget extractOperationTarget(Object impl) {
-        if (!(impl instanceof MezzeRecord record)) {
-            return null;
-        }
-        // Use cached index if available, otherwise compute and cache it
-        int opIndex = cachedOperationIndex;
-        if (opIndex < 0) {
-            opIndex = record.getFieldIndex(operationName);
-            if (opIndex >= 0) {
-                cachedOperationIndex = opIndex;
-            }
-        }
-        // Use index-based access when available (faster than string lookup)
-        Object operationFunc = opIndex >= 0 ? record.getField(opIndex) : record.getField(operationName);
-        if (!(operationFunc instanceof MezzeFunction func)) {
-            return null;
-        }
-        return func.getCallTarget();
+        MezzeFunction f = extractFunction(impl);
+        return f == null ? null : f.getCallTarget();
     }
 
-    @TruffleBoundary
     private Object[] extractClosureValues(Object impl) {
-        if (!(impl instanceof MezzeRecord record)) {
-            return EMPTY_CLOSURE;
-        }
-        // Use cached index if available
-        int opIndex = cachedOperationIndex;
-        if (opIndex < 0) {
-            opIndex = record.getFieldIndex(operationName);
-            if (opIndex >= 0) {
-                cachedOperationIndex = opIndex;
-            }
-        }
-        Object operationFunc = opIndex >= 0 ? record.getField(opIndex) : record.getField(operationName);
-        if (!(operationFunc instanceof MezzeFunction func)) {
-            return EMPTY_CLOSURE;
-        }
-        return func.getClosureValues();
+        MezzeFunction f = extractFunction(impl);
+        return f == null ? EMPTY_CLOSURE : f.getClosureValues();
     }
 
-    @TruffleBoundary
     private int extractClosureLength(Object impl) {
-        if (!(impl instanceof MezzeRecord record)) {
-            return 0;
-        }
-        // Use cached index if available
-        int opIndex = cachedOperationIndex;
-        if (opIndex < 0) {
-            opIndex = record.getFieldIndex(operationName);
-            if (opIndex >= 0) {
-                cachedOperationIndex = opIndex;
-            }
-        }
-        Object operationFunc = opIndex >= 0 ? record.getField(opIndex) : record.getField(operationName);
-        if (!(operationFunc instanceof MezzeFunction func)) {
-            return 0;
-        }
-        return func.getClosureValues().length;
+        MezzeFunction f = extractFunction(impl);
+        return f == null ? 0 : f.getClosureValues().length;
     }
 
     // ================== FACTORY METHODS ==================
