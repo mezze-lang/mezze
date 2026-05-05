@@ -130,7 +130,6 @@ object ErrorFormatter {
             is ValidationError.UnitVariantPayloadMismatch -> formatUnitVariantPayloadMismatchError(error, sourceCode)
             is ValidationError.TopLevelPerformedEffects -> formatTopLevelPerformedEffectsError(error, sourceCode)
             is ValidationError.TopLevelExpressionPerformedEffects -> formatTopLevelExpressionPerformedEffectsError(error, sourceCode)
-            is ValidationError.MainFunctionTypeError -> formatMainFunctionTypeError(error, sourceCode)
             is ValidationError.MissingContentHash -> formatMissingContentHashError(error, sourceCode)
         }
     }
@@ -637,20 +636,7 @@ object ErrorFormatter {
         )
     }
 
-    private fun formatMainFunctionTypeError(
-        error: ValidationError.MainFunctionTypeError,
-        sourceCode: String?
-    ): String {
-        return SourceContext.formatError(
-            errorType = "Type Error [Validation - Main Function Type]",
-            message = error.message(),
-            location = error.location(),
-            sourceCode = sourceCode,
-            suggestion = "main should be: main = {} -> perform Handler in ... where Handler handles all effects"
-        )
-    }
-
-    private fun formatMissingContentHashError(
+private fun formatMissingContentHashError(
         error: ValidationError.MissingContentHash,
         sourceCode: String?
     ): String {

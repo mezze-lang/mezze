@@ -216,7 +216,7 @@ object PipelineRunner {
             language,
             fdBuilder.build(),
             wrapped,
-            "main",
+            mainFn.name,
             mainFn.paramSlots.size,
             0,
             IntArray(0)

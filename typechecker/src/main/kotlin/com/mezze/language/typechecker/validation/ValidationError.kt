@@ -492,30 +492,7 @@ sealed interface ValidationError {
         override fun location() = loc
     }
 
-    /**
-     * main function has wrong type.
-     *
-     * main must have type {} -> {} <*> (takes unit, returns unit with performed effects).
-     *
-     * Example: main = {} -> 42 (returns Int, not {})
-     * Example: main = {} -> {} (pure, should have <*>)
-     * Example: main = {} -> Log.println {...} (has <Log>, should use perform)
-     */
-    data class MainFunctionTypeError(
-        val actualType: MezzeType,
-        val reason: String,
-        val loc: Loc? = null
-    ) : ValidationError {
-        override fun message(): String = buildString {
-            append("'main' must have type {} -> {} <*>, but ")
-            append(reason)
-            append(". The main function should perform all effects using 'perform'.")
-        }
-
-        override fun location() = loc
-    }
-
-    /**
+/**
      * Missing content hash on identifier.
      *
      * This is an internal compiler bug - identifiers should always have

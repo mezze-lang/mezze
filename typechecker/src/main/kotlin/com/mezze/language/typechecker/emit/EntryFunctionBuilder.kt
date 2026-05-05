@@ -7,37 +7,32 @@ import com.mezze.language.typedast.*
 import java.security.MessageDigest
 
 /**
- * Wraps a TypedModule's top-level declarations into a single entry function.
+ * Wraps a TypedModule's top-level *expressions* into a single entry
+ * function. Used for REPL/scratchpad-style modules that contain loose
+ * top-level expressions (e.g., `1 + 2`) at the file level — the parser
+ * lifts each into a `__toplevel_expr_N` decl, and this pass folds them
+ * into a `__entry__` function so the rest of the pipeline (mono →
+ * resolve → lower) can treat the module uniformly.
  *
- * Transforms:
- *   let x = 10
- *   let y = x + 5
- *   y                    (top-level expression)
- *
- * Into a TypedModule with a single decl:
- *   __entry__ = {} -> do
- *       let x = 10
- *       let y = x + 5
- *       y
- *
- * This allows the monomorphizer to treat the entire module as one function,
- * which then flows through Resolver → Lowerer → TruffleCompiler as a single
- * FunctionIR with one frame.
+ * For normal projects (whose entry function is declared explicitly by
+ * the user, regardless of name — `main`, `app`, whatever Mezze.toml
+ * says), there are no `__toplevel_expr_N` decls and this pass is a
+ * no-op. The typechecker doesn't need to know which decl is the
+ * "entry point"; that's a CLI/runtime concern.
  */
 object EntryFunctionBuilder {
 
     /**
-     * Wrap top-level declarations into a single entry function.
-     * If the module already has a `pub let main`, returns it unchanged.
+     * Wrap a module's top-level let decls (and any loose top-level
+     * expressions lifted by the parser to `__toplevel_expr_N` decls)
+     * into a synthetic `__entry__` function whose body is a sequential
+     * block. The runtime executes this block in order so each let's
+     * value is evaluated and registered, and so loose expressions get
+     * evaluated for their side effects / final value.
+     *
+     * Returns the original module if there are no let decls.
      */
     fun wrapTopLevel(module: TypedModule): TypedModule {
-        // Check if there's already a public main function
-        val hasMain = module.decls.any {
-            it is TypedLetDecl && it.name == "main" && it.isPublic
-        }
-        if (hasMain) return module
-
-        // No main — wrap all decls into a single entry function
         val decls = module.decls.filterIsInstance<TypedLetDecl>()
         if (decls.isEmpty()) return module
 

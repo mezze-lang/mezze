@@ -973,16 +973,19 @@ class TypeValidator(
     ): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
 
-        if (decl.isSimpleBinding && decl.variableName == "main") {
-            return emptyList()
-        }
-
         val bindingKey = if (decl.isSimpleBinding) decl.variableName else return emptyList()
         val inferredType = constraintResults[bindingKey]?.type ?: return emptyList()
         val finalType = substitution.apply(inferredType)
 
         when (finalType) {
-            is MezzeType.FunctionType -> { /* Functions are definitions, <*> is fine */ }
+            // Functions are definitions — their effect row is unperformed
+            // until the function is called. Always fine at the top level.
+            // The entry-point binding (whatever the user names it) takes
+            // this shape: `{} -> ... <*>`. The CLI / runtime layer is
+            // responsible for picking which function is the entry; the
+            // typechecker just validates that any top-level value with
+            // unhandled effects must be a function.
+            is MezzeType.FunctionType -> { /* fine */ }
             is MezzeType.SuspendedType -> {
                 if (finalType.effects.performed) {
                     errors.add(
@@ -1008,74 +1011,7 @@ class TypeValidator(
      */
     // parsedPerformerDeclToV1 deleted — v1 bridge no longer needed
 
-    /**
-     * Validate that main has the correct type: {} -> {} <*>
-     */
-    fun validateMainType(type: MezzeType, mainLoc: com.mezze.language.parsedast.Loc? = null): ValidationError? {
-        // main must be a function
-        if (type !is MezzeType.FunctionType) {
-            return ValidationError.MainFunctionTypeError(
-                actualType = type,
-                reason = "it is not a function (got ${prettyPrintType(type)})",
-                loc = mainLoc
-            )
-        }
-
-        // Check parameter type is {} (empty record)
-        val paramType = type.paramType
-        if (paramType !is MezzeType.RecordType || paramType.fields.isNotEmpty()) {
-            return ValidationError.MainFunctionTypeError(
-                actualType = type,
-                reason = "parameter type is ${prettyPrintType(paramType)}, expected {}",
-                loc = mainLoc
-            )
-        }
-
-        // Check return type is {} (empty record)
-        val returnType = type.returnType
-        if (returnType !is MezzeType.RecordType || returnType.fields.isNotEmpty()) {
-            return ValidationError.MainFunctionTypeError(
-                actualType = type,
-                reason = "return type is ${prettyPrintType(returnType)}, expected {}",
-                loc = mainLoc
-            )
-        }
-
-        // Check effects are <*> (performed, no unhandled effects)
-        val effectRow = type.effects
-        if (effectRow == null) {
-            return ValidationError.MainFunctionTypeError(
-                actualType = type,
-                reason = "it is pure (no effects). main should perform effects using 'perform'",
-                loc = mainLoc
-            )
-        }
-
-        if (!effectRow.performed) {
-            // Has unhandled effects but not performed
-            val unhandledEffects = effectRow.effects.joinToString(", ")
-            return ValidationError.MainFunctionTypeError(
-                actualType = type,
-                reason = "it has unhandled effects <$unhandledEffects>. Use 'perform' to handle all effects in main",
-                loc = mainLoc
-            )
-        }
-
-        if (effectRow.effects.isNotEmpty()) {
-            // Has performed but also has remaining unhandled effects
-            val unhandledEffects = effectRow.effects.joinToString(", ")
-            return ValidationError.MainFunctionTypeError(
-                actualType = type,
-                reason = "it has unhandled effects <$unhandledEffects, *>. All effects must be handled in main",
-                loc = mainLoc
-            )
-        }
-
-        // All checks passed - main is {} -> {} <*>
-        return null
-    }
-
-    /**
+/**
      * Extract effect row from a type if present.
      */
     private fun extractEffectRowFromType(type: MezzeType): MezzeType.EffectRow? {
