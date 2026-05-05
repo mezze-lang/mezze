@@ -6,6 +6,7 @@ import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.*;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -385,7 +386,7 @@ public final class AdaptiveAsyncHandler {
         Env env = context.getEnv();
 
         // Capture parent handlers for effect propagation
-        Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         AdaptivePromise promise = new AdaptivePromise(true);
         long startNanos = System.nanoTime();
@@ -495,7 +496,7 @@ public final class AdaptiveAsyncHandler {
                                   IndirectCallNode callNode, MezzeNode node) {
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
-        Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         CompletableFuture<Object> leftFuture = new CompletableFuture<>();
         CompletableFuture<Object> rightFuture = new CompletableFuture<>();

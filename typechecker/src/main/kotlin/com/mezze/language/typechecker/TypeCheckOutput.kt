@@ -18,14 +18,14 @@ data class TypeCheckResult(
     val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR> = emptyList(),
     val typedModule: com.mezze.language.typedast.TypedModule? = null,
     val performerRecords: List<Array<String>> = emptyList(),
-    val loadedModules: Map<String, com.mezze.language.typedast.TypedModule> = emptyMap(),
+    val loadedModules: Map<com.mezze.language.ast.ModulePath, com.mezze.language.typedast.TypedModule> = emptyMap(),
     /**
      * For each typechecked module loaded transitively (imports), the source
      * file path and content hash. Lets StorePopulator persist a typed_modules
      * row for every module, not just the entry. modulePath is keyed the same
      * way as `loadedModules` above.
      */
-    val loadedModuleSources: Map<String, LoadedModuleSource> = emptyMap()
+    val loadedModuleSources: Map<com.mezze.language.ast.ModulePath, LoadedModuleSource> = emptyMap()
 ) {
     fun getVariableType(name: String): MezzeType? {
         return typedModule?.decls
@@ -38,7 +38,7 @@ data class TypeCheckResult(
 @Serializable
 data class LoadedModuleSource(
     val filePath: String,
-    val sourceHash: String,
+    val sourceHash: com.mezze.language.typedast.Hash,
 )
 
 @Serializable

@@ -4,6 +4,7 @@ import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeFunction;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -47,7 +48,7 @@ public final class FunctionDefinitionNode extends MezzeNode {
 
     // Content hash for CallTarget caching (null = no caching)
     @CompilationFinal
-    private final String contentHash;
+    private final Hash contentHash;
 
     @CompilationFinal(dimensions = 1)
     private final int[] closureSlots;
@@ -84,7 +85,7 @@ public final class FunctionDefinitionNode extends MezzeNode {
      */
     public FunctionDefinitionNode(
             String name,
-            String contentHash,
+            Hash contentHash,
             int[] closureSlots,
             int[] closureKinds,
             String[] parameterNames,

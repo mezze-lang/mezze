@@ -5,6 +5,7 @@ import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeSuspended;
 import com.mezze.interpreter.values.MezzeUnit;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.VirtualFrame;
@@ -42,9 +43,9 @@ public final class WriteLocalWithContextNode extends MezzeNode {
     @CompilationFinal
     private final String variableName;
 
-    // Content hash for content-addressed global registration (null = use variableName only)
+    // Content hash for content-addressed global registration (null = no global registration)
     @CompilationFinal
-    private final String contentHash;
+    private final Hash contentHash;
 
     @Child
     private MezzeNode valueNode;
@@ -58,11 +59,11 @@ public final class WriteLocalWithContextNode extends MezzeNode {
         this(valueNode, slot, KIND_OBJECT, variableName, null);
     }
 
-    public WriteLocalWithContextNode(MezzeNode valueNode, int slot, String variableName, String contentHash) {
+    public WriteLocalWithContextNode(MezzeNode valueNode, int slot, String variableName, Hash contentHash) {
         this(valueNode, slot, KIND_OBJECT, variableName, contentHash);
     }
 
-    public WriteLocalWithContextNode(MezzeNode valueNode, int slot, int kind, String variableName, String contentHash) {
+    public WriteLocalWithContextNode(MezzeNode valueNode, int slot, int kind, String variableName, Hash contentHash) {
         this.valueNode = valueNode;
         this.slot = slot;
         this.kind = kind;
@@ -159,12 +160,15 @@ public final class WriteLocalWithContextNode extends MezzeNode {
         if (globalRegistered) return;
 
         MezzeContext context = MezzeContext.get(this);
-        // Register by content hash for precise lookup
+        // Register by content hash for precise runtime lookup.
         if (contentHash != null) {
             context.defineGlobal(contentHash, value);
         }
-        // Also register by variable name for name-based lookups
-        context.defineGlobal(variableName, value);
+        // Also register by variable name in the test-inspection map so
+        // getLastExecutionContext() (and any test that reads top-level bindings
+        // by name) can find this value. Strictly separate from the Hash-keyed
+        // globals map — name vs hash can never collide.
+        context.recordTestInspectionVar(variableName, value);
 
         // Mark as registered - after JIT, this makes the if-check a constant false
         com.oracle.truffle.api.CompilerDirectives.transferToInterpreterAndInvalidate();
@@ -181,14 +185,14 @@ public final class WriteLocalWithContextNode extends MezzeNode {
     /**
      * Create a write-with-context node with content hash for precise registration (Object kind).
      */
-    public static WriteLocalWithContextNode create(MezzeNode valueNode, int slot, String variableName, String contentHash) {
+    public static WriteLocalWithContextNode create(MezzeNode valueNode, int slot, String variableName, Hash contentHash) {
         return new WriteLocalWithContextNode(valueNode, slot, KIND_OBJECT, variableName, contentHash);
     }
 
     /**
      * Create a write-with-context node with explicit kind for typed slots.
      */
-    public static WriteLocalWithContextNode create(MezzeNode valueNode, int slot, int kind, String variableName, String contentHash) {
+    public static WriteLocalWithContextNode create(MezzeNode valueNode, int slot, int kind, String variableName, Hash contentHash) {
         return new WriteLocalWithContextNode(valueNode, slot, kind, variableName, contentHash);
     }
 }

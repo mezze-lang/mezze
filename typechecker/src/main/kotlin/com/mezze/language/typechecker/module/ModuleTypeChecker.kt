@@ -68,7 +68,7 @@ class ModuleTypeChecker(
             try {
                 val stdlib = com.mezze.language.typechecker.PrecompiledStdlib
                 for ((modulePath, module) in stdlib.loadedModules) {
-                    preloadIntoGlobalCache(modulePath, module)
+                    preloadIntoGlobalCache(modulePath.fullPath, module)
                 }
             } catch (_: Exception) { /* PrecompiledStdlib not initialized yet */ }
         }

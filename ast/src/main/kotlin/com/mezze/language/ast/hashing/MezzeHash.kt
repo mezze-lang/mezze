@@ -115,27 +115,11 @@ data class MezzeHash private constructor(
             return MezzeHash(bytes.copyOf())
         }
 
-        /**
-         * Derive a content hash for an individual ability impl operation.
-         * Hash(implHash || operationName)
-         */
-        fun operationHash(implHash: MezzeHash, operationName: String): MezzeHash {
-            val builder = MezzeHashBuilder()
-            builder.append(implHash.bytes)
-            builder.append(operationName)
-            return builder.build()
-        }
-
-        /**
-         * Derive a content hash for an individual ability impl operation from the impl's string key.
-         */
-        fun operationHash(implHashKey: String, operationName: String): String {
-            val builder = MezzeHashBuilder()
-            builder.append(implHashKey)
-            builder.append(operationName)
-            return builder.build().toString()
-        }
-
+        // Operation-hash derivation lives at `Hash.computeOpHash(implHash, opName)` —
+        // the typed-API canonical path used everywhere. The two `operationHash`
+        // overloads that used to live here were unused; the String/String→String
+        // variant returned `.toString()` (the truncated display form), which would
+        // silently corrupt any caller that treated its result as a real identity.
     }
 }
 
@@ -226,10 +210,21 @@ class MezzeHashBuilder {
     }
 
     /**
-     * Build the final hash.
+     * Build the final hash as the internal MezzeHash representation.
+     * Prefer `buildHash()` everywhere outside this module — it returns the
+     * canonical typed `Hash` directly, which is what every caller actually
+     * wants.
      */
     fun build(): MezzeHash {
         return MezzeHash.fromRawBytes(digest.digest())
+    }
+
+    /**
+     * Build the final hash as a typed `Hash` (full hex). Canonical exit point —
+     * replaces the `Hash(builder.build().toFullHexString())` round-trip.
+     */
+    fun buildHash(): com.mezze.language.typedast.Hash {
+        return com.mezze.language.typedast.Hash(build().toFullHexString())
     }
 }
 

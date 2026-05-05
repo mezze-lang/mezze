@@ -110,7 +110,7 @@ class TypeChecker(
     }
 
     /** Bridge for PrecompiledStdlib to get cachedPreludeLoadedModules */
-    internal fun getCachedPreludeLoadedModules(): Map<String, com.mezze.language.typechecker.module.TypedModule>? {
+    internal fun getCachedPreludeLoadedModules(): Map<com.mezze.language.ast.ModulePath, com.mezze.language.typechecker.module.TypedModule>? {
         return cachedPreludeLoadedModules
     }
 
@@ -127,7 +127,7 @@ class TypeChecker(
             val substitution: Substitution,
             val importContext: ModuleImportContext? = null,
             val warnings: List<TypeCheckWarning> = emptyList(),
-            val loadedModules: Map<String, TypedModule> = emptyMap(),
+            val loadedModules: Map<com.mezze.language.ast.ModulePath, TypedModule> = emptyMap(),
             val abilityImpls: Map<com.mezze.language.typedast.Hash, com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap(),
             val typedModule: com.mezze.language.typedast.TypedModule? = null,       // V2 TypedAST (primary output)
             val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR>? = null,  // TruffleIR functions (after mono+resolve+lower)
@@ -211,7 +211,7 @@ class TypeChecker(
 
         // PHASE 0: Module Resolution (if imports are present)
         var importContext: ModuleImportContext? = null
-        var loadedModules: Map<String, TypedModule> = emptyMap()
+        var loadedModules: Map<com.mezze.language.ast.ModulePath, TypedModule> = emptyMap()
         val shouldInjectPrelude = currentModulePath == null || !currentModulePath.startsWith("std::")
         val hasUserImports = hasImportsParsed(module)
 
@@ -703,13 +703,6 @@ class TypeChecker(
                     preludeHashes.addAll(PrecompiledStdlib.preloweredFunctions.keys)
                     preludeHashes.addAll(PrecompiledStdlib.stdlibDeclHashes)
 
-                    // Compile with TypedASTCompiler — single pass, no Monomorphizer/Resolver/Lowerer
-                    val compiler = com.mezze.language.typechecker.compiler.TypedASTCompiler(
-                        abilityImpls = allAbilityImpls,
-                        stdlibHashes = preludeHashes
-                    )
-                    compiler.setDeclIndex(declIndex)
-
                     // Collect imported modules and performers (non-prelude only)
                     val preludeModuleHashes = PrecompiledStdlib.stdlibModuleHashes
                     val importedModules = mutableListOf<com.mezze.language.typedast.TypedModule>()
@@ -732,7 +725,40 @@ class TypeChecker(
                         importedPerformers.addAll(stdlibModule.performerDecls)
                     }
 
-                    val result = compiler.compile(wrapped, importedModules, importedPerformers)
+                    // Mono Phase 1 hybrid: opt-in via -Dmezze.mono=1 or
+                    // MEZZE_MONO=1. Off by default — the dict-passing path
+                    // is the canonical compilation strategy. When on, the
+                    // monomorphizer runs over concrete decls' bodies and
+                    // produces specializations + per-call-site rewrites.
+                    //
+                    // The driver also gets `PrecompiledStdlib.stdlibTypedModules`
+                    // as resolution-only context: prelude generics live
+                    // there (lowered as FunctionIR blobs, but the
+                    // TypedLetDecl source is preserved). Calls into the
+                    // prelude are exactly where mono pays off most.
+                    val monoResult = if (com.mezze.language.typechecker.mono.MonoDriver.enabled) {
+                        val stdlibModulesForMono = PrecompiledStdlib.stdlibTypedModules.values.toList()
+                        com.mezze.language.typechecker.mono.MonoDriver.run(
+                            entry = wrapped,
+                            imported = importedModules,
+                            resolutionOnly = stdlibModulesForMono
+                        )
+                    } else null
+
+                    // Compile with TypedASTCompiler — single pass, no Monomorphizer/Resolver/Lowerer
+                    val compiler = com.mezze.language.typechecker.compiler.TypedASTCompiler(
+                        abilityImpls = allAbilityImpls,
+                        stdlibHashes = preludeHashes,
+                        monoCallSiteRewrites = monoResult?.bySiteLoc ?: emptyMap()
+                    )
+                    compiler.setDeclIndex(declIndex)
+
+                    val result = compiler.compile(
+                        module = wrapped,
+                        additionalModules = importedModules,
+                        additionalPerformers = importedPerformers,
+                        monoSpecializations = monoResult?.specializations?.values?.toList() ?: emptyList()
+                    )
 
                     loweredFns = result.functions
                     loweredPerformers = result.performerRecords.map { pr ->
@@ -745,8 +771,8 @@ class TypeChecker(
                     }
                 } catch (e: Exception) {
                     // TypedASTCompiler errors are non-fatal for type checking.
-                    if (System.getenv("MEZZE_DEBUG") != null) {
-                        System.err.println("[COMPILER] ${e.javaClass.simpleName}: ${e.message}")
+                    if (System.getenv("MEZZE_COMPILER_DBG") != null) {
+                        System.err.println("[COMPILER-DBG] ${e.javaClass.simpleName}: ${e.message}")
                         e.printStackTrace(System.err)
                     }
                 }
@@ -913,7 +939,7 @@ class TypeChecker(
      */
     private fun checkIfPrivateQualifiedItem(
         undefinedVar: ConstraintResult.UndefinedVariable,
-        loadedModules: Map<String, TypedModule>,
+        loadedModules: Map<com.mezze.language.ast.ModulePath, TypedModule>,
         importContext: ModuleImportContext?
     ): String? {
         // Only check qualified names - now using structured qualifier from AST
@@ -950,7 +976,7 @@ class TypeChecker(
         }
 
         if (matchingBinding != null) {
-            val modulePath = matchingBinding.value.modulePath
+            val modulePath = com.mezze.language.ast.ModulePath.parse(matchingBinding.value.modulePath)
             val module = loadedModules[modulePath]
             if (module != null) {
                 val existsButNotExported = checkIfItemExistsInModule(module, itemName)
@@ -1246,7 +1272,7 @@ class TypeChecker(
      */
     data class ParsedModuleCheckResult(
         val module: com.mezze.language.typedast.TypedModule,
-        val loadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>
+        val loadedModules: Map<com.mezze.language.ast.ModulePath, com.mezze.language.typechecker.module.TypedModule>
     )
 
     fun checkParsedModuleToTyped(
@@ -1343,11 +1369,11 @@ class TypeChecker(
         /** Cached prelude loaded modules — shared across all TypeChecker instances */
         @Volatile
         @JvmStatic
-        var cachedPreludeLoadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>? = null
+        var cachedPreludeLoadedModules: Map<com.mezze.language.ast.ModulePath, com.mezze.language.typechecker.module.TypedModule>? = null
 
-        /** Cached v1→v2 TypedModule conversions, keyed by content hash (module.hash.hex).
+        /** Cached v1→v2 TypedModule conversions, keyed by content hash.
          *  Hash-based identity means the same module content at different paths shares one cache entry. */
-        private val v1ToV2ModuleCache = java.util.concurrent.ConcurrentHashMap<String, com.mezze.language.typedast.TypedModule>()
+        private val v1ToV2ModuleCache = java.util.concurrent.ConcurrentHashMap<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>()
 
         /** Cached prelude-enhanced TypingContext — the parentContext + all prelude bindings merged.
          *  This is the expensive result of mergeImportContext(parentContext, preludeContext).

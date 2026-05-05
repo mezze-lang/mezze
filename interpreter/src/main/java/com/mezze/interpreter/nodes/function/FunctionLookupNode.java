@@ -3,6 +3,7 @@ package com.mezze.interpreter.nodes.function;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeFunction;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -18,12 +19,12 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 public final class FunctionLookupNode extends MezzeNode {
 
     @CompilationFinal
-    private final String contentHash;
+    private final Hash contentHash;
 
     @CompilationFinal
     private MezzeFunction cachedFunction;
 
-    public FunctionLookupNode(String contentHash) {
+    public FunctionLookupNode(Hash contentHash) {
         this.contentHash = contentHash;
     }
 
@@ -48,7 +49,7 @@ public final class FunctionLookupNode extends MezzeNode {
             var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
             var ct = lang.getCachedStdlibCallTarget(contentHash);
             if (ct != null) {
-                value = MezzeFunction.create(ct, contentHash);
+                value = MezzeFunction.create(ct, contentHash.getHex());
                 context.defineGlobal(contentHash, value);
             }
         }
@@ -57,6 +58,6 @@ public final class FunctionLookupNode extends MezzeNode {
             cachedFunction = fn;
             return fn;
         }
-        throw new RuntimeException("Function not found for tail call: " + contentHash);
+        throw new RuntimeException("Function not found for tail call: " + contentHash.getHex());
     }
 }

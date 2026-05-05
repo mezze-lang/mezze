@@ -1608,6 +1608,19 @@ class ExpressionConstraintGenerator {
                 }
             }
         }
+        // Method-chain receiver: `s.insert {x=1}.insert {x=2}` — the outer
+        // call's receiver is itself a ParsedFunctionCall whose function is a
+        // ParsedMemberAccess. Recurse on the inner receiver to find its type
+        // name, then look up the inherent method's return type.
+        if (receiver is ParsedFunctionCall && receiver.function is ParsedMemberAccess) {
+            val memberAccess = receiver.function as ParsedMemberAccess
+            val innerTypeName = lookupConstructorTypeName(memberAccess.receiver, context) ?: return null
+            val candidates = context.typingContext.findAnonymousMethodsByName(memberAccess.member)
+                .filter { it.targetTypeName == innerTypeName }
+            val method = candidates.singleOrNull() ?: return null
+            val ret = (method.methodType as? MezzeType.FunctionType)?.returnType ?: return null
+            return getReceiverTypeName(ret)
+        }
         // Function-call receiver: `set::empty {}` returns `Set 'a`. Look up the
         // function's binding type and extract the return-type's constructor.
         // Also handles bare identifiers like `s` whose binding may already have

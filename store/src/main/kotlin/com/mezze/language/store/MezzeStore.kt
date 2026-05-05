@@ -193,6 +193,21 @@ interface MezzeStore : AutoCloseable {
     fun clearTypedModulesForPath(modulePath: String)
 
     // ====================================================================
+    // MONO SPECIALIZATIONS — provenance for monomorphizer outputs.
+    // Read by tools (debugger, LSP, "go to definition") to map a
+    // specialization back to its generic. Never on the execution hot path.
+    // ====================================================================
+
+    /** Register a specialization. INSERT OR REPLACE. */
+    fun putMonoSpecialization(specializedHash: Hash, genericHash: Hash, typeArgsCbor: ByteArray)
+
+    /** Look up a specialization's provenance by its specialized hash. */
+    fun getMonoSpecialization(specializedHash: Hash): MonoSpecializationRow?
+
+    /** All specializations of a given generic. */
+    fun getMonoSpecializationsForGeneric(genericHash: Hash): List<MonoSpecializationRow>
+
+    // ====================================================================
     // LIFECYCLE
     // ====================================================================
 
@@ -278,3 +293,13 @@ data class ImportRow(
     val endLine: Int,
     val endCol: Int
 )
+
+data class MonoSpecializationRow(
+    val specializedHash: Hash,
+    val genericHash: Hash,
+    val typeArgsCbor: ByteArray
+) {
+    override fun equals(other: Any?): Boolean =
+        other is MonoSpecializationRow && specializedHash == other.specializedHash
+    override fun hashCode(): Int = specializedHash.hashCode()
+}

@@ -305,7 +305,7 @@ class ContextBuilder {
         val localAbilityNames = abilityDecls.keys
         val declaredTypeNames = module.decls.filterIsInstance<ParsedTypeDecl>().map { it.name }.toSet()
         val homeTypeNames = if (currentModulePath != null) {
-            BuiltinTypeRegistry.getLocalTypesForModule(currentModulePath)
+            BuiltinTypeRegistry.getLocalTypesForModule(com.mezze.language.ast.ModulePath.parse(currentModulePath))
         } else emptySet()
         val localTypeNames = declaredTypeNames + homeTypeNames
         val importedAbilityNames = importedAbilities.keys

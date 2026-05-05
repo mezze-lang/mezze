@@ -56,7 +56,7 @@ data class LoadedModule(
     val exports: Map<String, ExportedItem>,  // Exported items (types may be incomplete)
     val dependencies: List<ModulePath>, // Module dependencies as structured paths
     val index: ProgramIndex = ProgramIndex.EMPTY,  // Pre-computed index for O(1) declaration lookups
-    val sourceHash: String? = null,     // Content hash of source for cache validation
+    val sourceHash: com.mezze.language.typedast.Hash? = null,     // Content hash of source for cache validation
     /** V2 ParsedModule — the primary AST. */
     val parsedModule: com.mezze.language.parsedast.ParsedModule? = null
 ) {
@@ -197,7 +197,7 @@ data class TypedModule(
      *  in-memory / scratch modules. */
     val filePath: String? = null,
     /** SHA-256 of the source bytes when this module was typechecked. */
-    val sourceHash: String? = null,
+    val sourceHash: com.mezze.language.typedast.Hash? = null,
 )
 
 // ============================================================================
@@ -215,7 +215,7 @@ sealed class ImportResolutionResult {
      */
     data class Success(
         val importContext: ModuleImportContext,
-        val loadedModules: Map<String, TypedModule>
+        val loadedModules: Map<ModulePath, TypedModule>
     ) : ImportResolutionResult()
 
     /**

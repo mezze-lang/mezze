@@ -24,7 +24,15 @@ class TypedASTCompiler(
     /** All ability impls from all visible modules — for method call resolution */
     private val abilityImpls: List<TypedAbilityImpl>,
     /** Pre-lowered stdlib function hashes — calls to these are CallDirect, not traced */
-    private val stdlibHashes: Set<Hash> = emptySet()
+    private val stdlibHashes: Set<Hash> = emptySet(),
+    /**
+     * Mono Phase 1 hybrid: per-call-site rewrites from the Monomorphizer.
+     * When a call site is `(genericHash, typeArgs, abilityImpls)` and that
+     * triple is in this map, we emit `CallDirectIR(specializedHash)` instead
+     * of `CallDirectIR(genericHash)` + dict injection. Sites not in the map
+     * keep the existing dict-passing path. Empty by default → mono is off.
+     */
+    private val monoCallSiteRewrites: Map<com.mezze.language.parsedast.Loc, Hash> = emptyMap()
 ) {
 
     /** Ability operation index: methodName → list of (implHash, targetTypes, opHash) */
@@ -79,6 +87,31 @@ class TypedASTCompiler(
      * These are appended as extra params after the regular params.
      */
     private var currentDictParams = listOf<String>()
+
+    /** Static call-site census — populated as `compileCall` emits IR. Dumped
+     *  at the end of `compile()` when MEZZE_DISPATCH_CENSUS is set. Mono
+     *  "owns" inlineOp/methodConcrete/methodSingleVar/byHashMono/native;
+     *  dict shows up in methodDictCallee/byHashDictInject.
+     *
+     *  Use a dedicated env var instead of MEZZE_MONO_STATS so per-module
+     *  census output doesn't conflate with mono driver tracing during
+     *  normal stats runs. */
+    private class CallSiteCensus {
+        var inlineOp = 0          // Int.+, Str.size, etc. — inlined at compile time
+        var methodConcrete = 0    // x.show {} where x has concrete type → CallDirect(opHash)
+        var methodSingleVar = 0   // x.show {} VarType receiver but only one impl exists
+        var methodDictCallee = 0  // DictMethodCallIR — read impl from dict slot
+        var byHashMono = 0        // CallDirect(specializedHash) via monoCallSiteRewrites
+        var byHashDictInject = 0  // CallDirect(genericHash) + injected __dict_* fields
+        var byHashPlain = 0       // CallDirect(genericHash) — no dict, no specialization
+        var native = 0            // CallNativeIR
+        var indirect = 0          // CallIndirect — local/param/capture/lambda
+        var globalThunk = 0       // CallDirect(hash, unit) — auto-call top-level thunk
+        fun total() = inlineOp + methodConcrete + methodSingleVar +
+            methodDictCallee + byHashMono + byHashDictInject + byHashPlain + native +
+            indirect + globalThunk
+    }
+    private val census = CallSiteCensus()
 
     init {
         // Build ability operation index
@@ -135,12 +168,20 @@ class TypedASTCompiler(
         }
 
         // Phase 2: transitively propagate dict requirements.
-        // If function A's body calls function B (by hash) and B needs dict methods,
-        // then A also needs those same dict methods (to forward them to B).
-        // Repeat until no new dict methods are added (fixpoint).
+        // If function A's body calls function B (by hash) and B needs dict
+        // methods, A also needs those same dict methods (to forward them).
+        //
+        // Census shows ~9 distinct dict-path call sites total, so the
+        // dependency graph between dict-needing functions is tiny. A real
+        // fixpoint converges in 1-2 passes; we cap at MAX_PASSES as a
+        // defensive guard against degenerate cases. If we ever hit the cap
+        // it means there's a deep call chain that needs investigation.
+        val maxPasses = 3
+        var passes = 0
         var changed = true
-        while (changed) {
+        while (changed && passes < maxPasses) {
             changed = false
+            passes++
             for (decl in allDecls) {
                 val value = decl.value
                 if (value is TypedLambda) {
@@ -155,6 +196,12 @@ class TypedASTCompiler(
                     }
                 }
             }
+        }
+        if (changed && System.getenv("MEZZE_DEBUG") != null) {
+            System.err.println(
+                "[prescanForDictMethods] hit cap of $maxPasses iterations — " +
+                "deep dict-propagation chain detected, may indicate a bug"
+            )
         }
     }
 
@@ -382,11 +429,17 @@ class TypedASTCompiler(
      * Compile a TypedModule and its imports to FunctionIR list.
      * @param additionalModules imported modules to also compile (non-prelude)
      * @param additionalPerformers performers from imported modules
+     * @param monoSpecializations Mono Phase 1 hybrid: specialized decls
+     *   produced by [com.mezze.language.typechecker.mono.Monomorphizer].
+     *   Each gets compiled to a FunctionIR alongside the originals — same
+     *   path, just with concrete types and no dict params. Empty list →
+     *   mono is off.
      */
     fun compile(
         module: TypedModule,
         additionalModules: List<TypedModule> = emptyList(),
-        additionalPerformers: List<TypedPerformerDecl> = emptyList()
+        additionalPerformers: List<TypedPerformerDecl> = emptyList(),
+        monoSpecializations: List<com.mezze.language.typechecker.mono.Monomorphizer.Specialization> = emptyList()
     ): CompileResult {
         extractedFunctions.clear()
         performerRecords.clear()
@@ -440,8 +493,50 @@ class TypedASTCompiler(
             }
         }
 
+        // Compile mono specializations. Each is a wrapped lambda whose
+        // body is the substituted generic body — same shape as a top-level
+        // let, but with concrete types and no dict params (every dict was
+        // pinned during specialization, so the body has direct CallDirectIRs
+        // wherever it used to have method calls). The specializedHash is
+        // what call sites in already-compiled bodies were rewritten to via
+        // [monoCallSiteRewrites], so order doesn't matter for correctness.
+        for (spec in monoSpecializations) {
+            if (spec.specializedHash in compiledHashes) continue
+            currentCaptureNames = emptyMap()
+            val body = spec.specializedBody
+            val fn = if (body is TypedLambda) {
+                compileFunctionBody(spec.specializedHash, "", body.params, body.body, body.loc)
+            } else {
+                compileFunctionBody(spec.specializedHash, "", emptyList(), body, body.loc)
+            }
+            functions.add(fn)
+            compiledHashes.add(spec.specializedHash)
+        }
+
         // Add extracted lambdas
         functions.addAll(extractedFunctions)
+
+        if (System.getenv("MEZZE_DISPATCH_CENSUS") != null && census.total() > 0) {
+            val total = census.total()
+            val monoOwned = census.inlineOp + census.methodConcrete + census.methodSingleVar +
+                census.byHashMono + census.byHashPlain + census.native + census.globalThunk
+            val dictOwned = census.methodDictCallee + census.byHashDictInject
+            fun pct(n: Int) = if (total == 0) 0.0 else 100.0 * n / total
+            System.err.println(
+                "[census] total=$total mono-direct=${monoOwned}(${"%.1f".format(pct(monoOwned))}%) " +
+                "dict-path=${dictOwned}(${"%.1f".format(pct(dictOwned))}%) " +
+                "indirect=${census.indirect}(${"%.1f".format(pct(census.indirect))}%)"
+            )
+            System.err.println(
+                "[census]   inlineOp=${census.inlineOp} methodConcrete=${census.methodConcrete} " +
+                "methodSingleVar=${census.methodSingleVar} byHashMono=${census.byHashMono} " +
+                "byHashPlain=${census.byHashPlain} native=${census.native} globalThunk=${census.globalThunk}"
+            )
+            System.err.println(
+                "[census]   methodDictCallee=${census.methodDictCallee} " +
+                "byHashDictInject=${census.byHashDictInject}"
+            )
+        }
 
         return CompileResult(functions, performerRecords.toList())
     }
@@ -933,6 +1028,7 @@ class TypedASTCompiler(
             val captureIdx = currentCaptureNames[expr.name]
             if (captureIdx != null) return ReadCaptureIR(captureIdx, typeToSlotKind(expr.type), locToSourceInfo(expr.loc))
             // Global reference — auto-call thunk to get value
+            census.globalThunk++
             return CallDirectIR(binding.hash, UnitLitIR(locToSourceInfo(expr.loc)), false, locToSourceInfo(expr.loc))
         }
         return compileExpr(expr)
@@ -952,18 +1048,21 @@ class TypedASTCompiler(
             if (inlineOp != null) {
                 val receiverIR = compileReceiverExpr(fn.record)
                 // Extract 'r' or 'it' field from arg record for binary ops
+                census.inlineOp++
                 return compileInlineOp(inlineOp, receiverIR, argIR, src)
             }
 
             // Try ability method resolution. For concrete types, resolve directly.
             // For VarType, try single-candidate resolution (monomorphized code where
             // the type variable wasn't fully substituted but only one impl exists).
-            val opHash = tryResolveAbilityOp(methodName, receiverType)
+            val opHashConcrete = tryResolveAbilityOp(methodName, receiverType)
+            val opHash = opHashConcrete
                 ?: if (receiverType is VarType) {
                     val candidates = abilityOpIndex[methodName]
                     if (candidates != null && candidates.size == 1) candidates.first().opHash else null
                 } else null
             if (opHash != null) {
+                if (opHashConcrete != null) census.methodConcrete++ else census.methodSingleVar++
                 val receiverIR = compileReceiverExpr(fn.record)
                 // Build arg with receiver injected
                 val opBody = findAbilityOpBody(methodName, receiverType)
@@ -1034,15 +1133,6 @@ class TypedASTCompiler(
                     }
                     val recordIR = MakeRecordIR(fields, src)
 
-                    // Fallback candidates for dynamic dispatch
-                    val hashes = opCandidates.map { it.opHash.hex }
-                    val tags = opCandidates.map { op ->
-                        // Use the LAST target type for matching: in `ability X 'a for 'b`,
-                        // target types are ['a, 'b] and the receiver is 'b (the `for` param).
-                        // For single-type abilities like `ability Eq for 'a`, lastOrNull == firstOrNull.
-                        op.targetTypes.lastOrNull()?.let { getTypeTag(it) } ?: "Any"
-                    }
-
                     // Dictionary passing: if the current function has a __dict_<method> param,
                     // read the resolved impl function from the frame and call it directly.
                     // No runtime dispatch — the typechecker resolved everything statically.
@@ -1050,16 +1140,16 @@ class TypedASTCompiler(
                     val dictParamIdx = currentParamNames.indexOf(dictParamName)
                     if (dictParamIdx >= 0) {
                         val dictSlot = currentCaptureCount + dictParamIdx
+                        census.methodDictCallee++
                         return DictMethodCallIR(dictSlot, recordIR, src)
                     }
 
-                    // VarType receiver with no dict param: pick the first candidate.
-                    // Happens when the typechecker hasn't yet pinned the receiver's type
-                    // (e.g., `Some {val=42}.map {...}.get_or_else {...}` where the chain's
-                    // intermediate type is a fresh VarType post-substitution). Same heuristic
-                    // as ConstraintGenerator's `inherentMethods.firstOrNull()` — best-effort
-                    // when full resolution isn't possible.
-                    return CallDirectIR(opCandidates.first().opHash, recordIR, expr.isTailCall, src)
+                    // VarType receiver, multi-candidate, no dict param —
+                    // census shows count=0 across the full test corpus, so
+                    // this path is unreachable. If it ever fires, mono is
+                    // still active downstream and Phase-1 specialization
+                    // will pick it up; otherwise we'd reach the indirect
+                    // call path below. Removed in #270.
                 }
             }
         }
@@ -1070,26 +1160,42 @@ class TypedASTCompiler(
             val binding = fn.binding
             return when (binding) {
                 is BindingRef.ByHash -> {
+                    val calleeHash = binding.hash
+
+                    // Mono Phase 1 hybrid: if the monomorphizer specialized
+                    // this call site, redirect to the specialized hash. The
+                    // specialized blob has concrete types throughout and
+                    // does NOT take dict params — every dict was pinned to
+                    // a concrete impl during specialization. So we skip the
+                    // dict-injection branch entirely.
+                    val specialized = monoCallSiteRewrites[expr.loc]
+                    if (specialized != null) {
+                        census.byHashMono++
+                        return CallDirectIR(specialized, argIR, expr.isTailCall, src)
+                    }
+
                     // Check if the callee needs dictionary params. If so, inject
                     // resolved ability op functions into the argument record.
-                    val calleeHash = binding.hash
                     val calleeDictMethods = dictMethodsForHash[calleeHash]
                     if (calleeDictMethods != null && calleeDictMethods.isNotEmpty()) {
                         val enrichedArgIR = injectDictFields(argIR, expr.arg, calleeDictMethods, src)
+                        census.byHashDictInject++
                         CallDirectIR(calleeHash, enrichedArgIR, expr.isTailCall, src)
                     } else {
                         // Always use CallDirectIR for hash-based bindings.
                         // DO NOT check localsByName — a user variable with the same name
                         // (e.g., "let chars = str::chars {s = s}") would shadow the function
                         // reference and read from an uninitialized slot.
+                        census.byHashPlain++
                         CallDirectIR(binding.hash, argIR, expr.isTailCall, src)
                     }
                 }
-                is BindingRef.Native -> CallNativeIR(binding.name, argIR, src)
+                is BindingRef.Native -> { census.native++; CallNativeIR(binding.name, argIR, src) }
                 is BindingRef.Local -> {
                     // Resolve using the same scope logic as compileVar
                     val resolvedSlot = resolveLocalSlot(fn.name, binding.depth)
                     if (resolvedSlot >= 0) {
+                        census.indirect++
                         CallIndirectIR(ReadLocalIR(resolvedSlot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
                     } else {
                         // If depth > 0 and not found locally, check if it's a top-level
@@ -1097,16 +1203,19 @@ class TypedASTCompiler(
                         if (binding.depth > 0) {
                             val topDecl = declIndex?.values?.find { it.name == fn.name }
                             if (topDecl != null) {
+                                census.byHashPlain++
                                 return CallDirectIR(topDecl.hash, argIR, expr.isTailCall, src)
                             }
                         }
+                        census.indirect++
                         CallIndirectIR(fnIR, argIR, expr.isTailCall, src)
                     }
                 }
-                is BindingRef.Param -> CallIndirectIR(ReadLocalIR(currentCaptureCount + binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
-                is BindingRef.Capture -> CallIndirectIR(ReadCaptureIR(binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
+                is BindingRef.Param -> { census.indirect++; CallIndirectIR(ReadLocalIR(currentCaptureCount + binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src) }
+                is BindingRef.Capture -> { census.indirect++; CallIndirectIR(ReadCaptureIR(binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src) }
             }
         }
+        census.indirect++
         return CallIndirectIR(fnIR, argIR, expr.isTailCall, src)
     }
 

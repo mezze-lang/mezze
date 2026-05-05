@@ -3,6 +3,7 @@ package com.mezze.interpreter.runtime;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeUnit;
 import com.mezze.language.truffleir.FunctionIR;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.TruffleLanguage;
@@ -57,7 +58,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     // Store last execution result for test access
     private static final AtomicReference<Object> lastResultStore = new AtomicReference<>();
 
-    // Store last execution context (variable bindings) for test access
+    // Store last execution context (variable bindings by name) for test access.
+    // Populated from MezzeContext.testInspectionVars — explicitly name-keyed for
+    // tests that look up top-level lets by source identifier.
     private static final AtomicReference<Map<String, Object>> lastContextStore = new AtomicReference<>();
 
     // Parser and typechecker live on MezzeContext (per-context isolation).
@@ -67,25 +70,25 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     // CallTarget cache — shared across all tests for the same Language instance.
     // Content-hash keys ensure identical functions reuse the same CallTarget,
     // preventing accumulation on the Engine across 5000+ test runs.
-    private final java.util.concurrent.ConcurrentHashMap<String, CallTarget> stdlibCallTargetCache =
+    private final java.util.concurrent.ConcurrentHashMap<Hash, CallTarget> stdlibCallTargetCache =
         new java.util.concurrent.ConcurrentHashMap<>();
 
     /** Expose cache for FunctionDefinitionNode to store lambda CallTargets by content hash. */
-    public java.util.concurrent.ConcurrentHashMap<String, CallTarget> getCachedStdlibCallTargetCache() {
+    public java.util.concurrent.ConcurrentHashMap<Hash, CallTarget> getCachedStdlibCallTargetCache() {
         return stdlibCallTargetCache;
     }
-    private volatile java.util.Map<String, String> stdlibHashToName = null;
+    private volatile java.util.Map<Hash, String> stdlibHashToName = null;
     private volatile java.util.List<String[]> stdlibPerformerRecords = null;
 
     /** Register a user FunctionIR for lazy compilation (per-context). */
-    public void registerFunctionIR(String hash, com.mezze.language.truffleir.FunctionIR ir) {
+    public void registerFunctionIR(Hash hash, com.mezze.language.truffleir.FunctionIR ir) {
         getCurrentContext().registerUserFunctionIR(hash, ir);
     }
 
     /**
      * Get a cached CallTarget by hash — checks stdlib cache first, then compiles user IR on demand.
      */
-    public CallTarget getCachedStdlibCallTarget(String hash) {
+    public CallTarget getCachedStdlibCallTarget(Hash hash) {
         // 1. Check shared stdlib cache
         CallTarget ct = stdlibCallTargetCache.get(hash);
         if (ct != null) return ct;
@@ -125,23 +128,18 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      */
     public void compileReferencedStdlib(
             com.mezze.interpreter.compiler.TruffleCompiler compiler,
-            java.util.Set<String> referencedHashes,
-            java.util.Set<String> userHashes) {
+            java.util.Set<Hash> referencedHashes,
+            java.util.Set<Hash> userHashes) {
         var precompiled = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE;
         var allFunctions = precompiled.getPreloweredFunctions();
 
         // Build name map + performer records on first call.
-        // Phase 1 typed-identity sweep: PrecompiledStdlib.preloweredFunctions
-        // is now Map<Hash, FunctionIR> (was Map<String, FunctionIR>). We
-        // unwrap to hex string at the Java boundary to keep the rest of the
-        // interpreter Java code unchanged for now; Phase 1 follow-up commit
-        // migrates the Java-side Map<String, ...> caches too.
         if (stdlibHashToName == null) {
-            var nameMap = new java.util.HashMap<String, String>();
+            var nameMap = new java.util.HashMap<Hash, String>();
             for (var entry : allFunctions.entrySet()) {
                 var fn = entry.getValue();
                 if (!fn.getName().equals("lambda") && !fn.getName().startsWith("__")) {
-                    nameMap.put(entry.getKey().getHex(), fn.getName());
+                    nameMap.put(entry.getKey(), fn.getName());
                 }
             }
             stdlibHashToName = nameMap;
@@ -149,9 +147,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         }
 
         // Compile only referenced stdlib functions not yet cached
-        for (String hash : referencedHashes) {
+        for (Hash hash : referencedHashes) {
             if (!userHashes.contains(hash) && !stdlibCallTargetCache.containsKey(hash)) {
-                var ir = allFunctions.get(new com.mezze.language.typedast.Hash(hash));
+                var ir = allFunctions.get(hash);
                 if (ir != null) {
                     var rootNode = compiler.compile(ir);
                     stdlibCallTargetCache.put(hash, rootNode.getCallTarget());
@@ -161,7 +159,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     /** Get stdlib hash→name map (available after ensureStdlibCompiled). */
-    public java.util.Map<String, String> getStdlibHashToName() {
+    public java.util.Map<Hash, String> getStdlibHashToName() {
         return stdlibHashToName != null ? stdlibHashToName : java.util.Collections.emptyMap();
     }
 
@@ -171,14 +169,14 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     // Cache for imported module CallTargets (non-entry, non-stdlib functions)
-    private final java.util.concurrent.ConcurrentHashMap<String, CallTarget> importedCallTargetCache =
+    private final java.util.concurrent.ConcurrentHashMap<Hash, CallTarget> importedCallTargetCache =
         new java.util.concurrent.ConcurrentHashMap<>();
 
-    public CallTarget getCachedCallTarget(String hash) {
+    public CallTarget getCachedCallTarget(Hash hash) {
         return importedCallTargetCache.get(hash);
     }
 
-    public void cacheCallTarget(String hash, CallTarget ct) {
+    public void cacheCallTarget(Hash hash, CallTarget ct) {
         importedCallTargetCache.put(hash, ct);
     }
 
@@ -187,8 +185,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * Stdlib hashes never change in a JVM lifetime (content-addressed), so
      * they're typically absent — caller decides.
      */
-    public void invalidateHashes(java.util.Collection<String> hashes) {
-        for (String h : hashes) {
+    public void invalidateHashes(java.util.Collection<Hash> hashes) {
+        for (Hash h : hashes) {
             importedCallTargetCache.remove(h);
             stdlibCallTargetCache.remove(h);
         }
@@ -199,9 +197,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * calls invalidateHashes() before compiling the fresh user FunctionIRs.
      * Thread-local because parse() runs on whatever thread Polyglot picks.
      */
-    private static final ThreadLocal<java.util.Collection<String>> hashesToInvalidate = new ThreadLocal<>();
+    private static final ThreadLocal<java.util.Collection<Hash>> hashesToInvalidate = new ThreadLocal<>();
 
-    public static void setHashesToInvalidate(java.util.Collection<String> hashes) {
+    public static void setHashesToInvalidate(java.util.Collection<Hash> hashes) {
         hashesToInvalidate.set(hashes);
     }
 
@@ -229,7 +227,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 
         // Watch-mode targeted invalidation: DevRunner has computed the set of
         // hashes whose content changed since last reload. Evict only those.
-        java.util.Collection<String> changed = hashesToInvalidate.get();
+        java.util.Collection<Hash> changed = hashesToInvalidate.get();
         if (changed != null) {
             hashesToInvalidate.remove();
             invalidateHashes(changed);
@@ -337,9 +335,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                     forceCallNode = insert(com.oracle.truffle.api.nodes.IndirectCallNode.create());
                 }
                 // Try to execute with handlers from the handler stack
-                java.util.Map<String, Object> handlers = new java.util.HashMap<>();
+                java.util.Map<Hash, Object> handlers = new java.util.HashMap<>();
                 // Collect all available handlers from context
-                for (String effect : suspended.getUnhandledEffects()) {
+                for (Hash effect : suspended.getUnhandledEffects()) {
                     Object handler = context.getHandlerFor(effect);
                     if (handler != null) {
                         handlers.put(effect, handler);
@@ -363,9 +361,9 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             // This enables tests using runAndGetContext() to read variable values.
             try {
                 MezzeContext context = MezzeContext.get(this);
-                Map<String, Object> globals = context.getAllGlobals();
-                if (globals != null && !globals.isEmpty()) {
-                    lastContextStore.set(globals);
+                Map<String, Object> testVars = context.getTestInspectionVars();
+                if (testVars != null && !testVars.isEmpty()) {
+                    lastContextStore.set(testVars);
                 }
             } catch (Exception e) {
                 // No context available

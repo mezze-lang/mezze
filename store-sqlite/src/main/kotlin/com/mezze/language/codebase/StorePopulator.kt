@@ -125,7 +125,8 @@ object StorePopulator {
             // (#-prefixed SHA3-512). Hydration uses SHA-256 of file bytes for
             // compatibility with DevRunner's keying. Re-compute SHA-256 here
             // so both tools share the same `(modulePath, sourceHash)` keys.
-            for ((loadedPath, loadedTyped) in result.loadedModules) {
+            for ((loadedPathTyped, loadedTyped) in result.loadedModules) {
+                val loadedPath = loadedPathTyped.fullPath
                 if (loadedPath == modulePath) continue
                 // Skip stdlib here. Stdlib lives in its own attached
                 // `.mz/stdlib.sqlite`, materialised once at openProject
@@ -135,7 +136,7 @@ object StorePopulator {
                 if (loadedPath.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) {
                     continue
                 }
-                val src = result.loadedModuleSources[loadedPath] ?: continue
+                val src = result.loadedModuleSources[loadedPathTyped] ?: continue
                 val file = File(src.filePath).takeIf { it.exists() } ?: continue
                 val depSource = file.readText()
                 val sha256 = sha256Hex(depSource)
@@ -713,5 +714,74 @@ object StorePopulator {
     private fun sha256Hex(content: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
         return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Persist a [com.mezze.language.typechecker.mono.Monomorphizer.Result]
+     * to the store: each specialization becomes
+     *
+     *   1. a `blobs` row of kind `FUNCTION` (typed = serialized
+     *      [TypedLetDecl], ir = null — IR comes from the compiler in #257),
+     *   2. a `mono_specializations` row mapping specialized → generic.
+     *
+     * Idempotent — `INSERT OR REPLACE` on both tables. Skipped entirely
+     * when the result has no specializations (the caller uses this in the
+     * default code path; mono-off runs pass an empty result and pay one
+     * Map size check).
+     *
+     * @param store target store (project cache, NOT stdlib).
+     * @param mono the monomorphizer's output.
+     * @param genericNameByHash optional `genericHash → name` map. When
+     *   provided, the wrapped specialization decl gets the generic's name
+     *   (purely for reading-the-blob ergonomics; specializations are still
+     *   addressed by hash, never by name). Pass `emptyMap()` if unknown.
+     */
+    fun populateMonoSpecializations(
+        store: MezzeStore,
+        mono: com.mezze.language.typechecker.mono.Monomorphizer.Result,
+        genericNameByHash: Map<Hash, String> = emptyMap()
+    ) {
+        if (mono.specializations.isEmpty()) return
+        store.transaction {
+            for ((specHash, spec) in mono.specializations) {
+                // The specialized blob is a TypedLetDecl wrapping the
+                // substituted body — same shape as the original generic
+                // but with concrete types. typeParams are empty (every
+                // bound variable was substituted away). The scheme.type
+                // mirrors that.
+                val name = genericNameByHash[spec.genericHash] ?: ""
+                val specializedDecl = TypedLetDecl(
+                    hash = specHash,
+                    name = name,
+                    typeParams = emptyList(),
+                    value = spec.specializedBody,
+                    scheme = TypeScheme(
+                        typeParams = emptyList(),
+                        abilityConstraints = emptyList(),
+                        type = spec.specializedType
+                    ),
+                    isPublic = false,
+                    loc = spec.specializedBody.loc
+                )
+                val typedBytes = CodebaseSerialization.serializeTypedLetDecl(specializedDecl)
+                store.putBlob(
+                    hash = specHash,
+                    kind = BlobKind.FUNCTION,
+                    visibility = Visibility.PRIVATE,
+                    typed = typedBytes,
+                    ir = null
+                )
+                val typeArgsCbor = CodebaseSerialization.serializeTypeList(spec.typeArgs)
+                store.putMonoSpecialization(specHash, spec.genericHash, typeArgsCbor)
+
+                // No `edges` row from generic → spec: `edges.from_hash` has
+                // an FK to `blobs(hash)`, and the generic may not be in
+                // `blobs` at the moment this runs (e.g., when stdlib
+                // generics are referenced). The provenance row in
+                // `mono_specializations` already encodes the relationship —
+                // tools that need to walk generic→spec query
+                // `getMonoSpecializationsForGeneric(genericHash)` directly.
+            }
+        }
     }
 }

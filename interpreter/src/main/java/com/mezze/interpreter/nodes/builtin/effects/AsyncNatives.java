@@ -6,6 +6,7 @@ import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.*;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.TruffleLanguage.Env;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
@@ -433,7 +434,7 @@ public final class AsyncNatives {
         Env env = context.getEnv();
 
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
-        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         MezzePromise promise = new MezzePromise(null, semaphore);
 
@@ -517,7 +518,7 @@ public final class AsyncNatives {
         fullArgs[closureValues.length] = MezzeRecord.empty();
 
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
-        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         MezzePromise promise = new MezzePromise(null, null);
 
@@ -651,7 +652,7 @@ public final class AsyncNatives {
         fullArgs[closureValues.length] = MezzeRecord.empty();
 
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
-        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         MezzePromise promise = new MezzePromise(null, null);
 
@@ -693,7 +694,7 @@ public final class AsyncNatives {
         Env env = context.getEnv();
 
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
-        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         // Pre-sized array - we know exactly how many promises we'll create
         int numFunctions = functions.length;
@@ -774,7 +775,7 @@ public final class AsyncNatives {
         Env env = context.getEnv();
 
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
-        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         // Create promise first with placeholder thread
         MezzePromise promise = new MezzePromise(null, semaphore);
@@ -1049,7 +1050,7 @@ public final class AsyncNatives {
         Env env = context.getEnv();
 
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
-        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         // Use CompletableFuture for result coordination
         CompletableFuture<Object> leftFuture = new CompletableFuture<>();
@@ -1125,7 +1126,7 @@ public final class AsyncNatives {
         Env env = context.getEnv();
 
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
-        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         CompletableFuture<Object> aFuture = new CompletableFuture<>();
         CompletableFuture<Object> bFuture = new CompletableFuture<>();
@@ -1664,7 +1665,7 @@ public final class AsyncNatives {
         Env env = scope.env != null ? scope.env : context.getEnv();
 
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
-        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         MezzePromise promise = new MezzePromise(null, null);
         scope.addChild(promise);
@@ -1742,7 +1743,7 @@ public final class AsyncNatives {
         Env env = context.getEnv();
 
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
-        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         MezzePromise promise = new MezzePromise(null, null);
 
@@ -1832,7 +1833,7 @@ public final class AsyncNatives {
         Env env = context.getEnv();
 
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
-        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         CompletableFuture<Object> leftFuture = new CompletableFuture<>();
         CompletableFuture<Object> rightFuture = new CompletableFuture<>();
@@ -1905,7 +1906,7 @@ public final class AsyncNatives {
         Env env = context.getEnv();
 
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
-        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
 
         CompletableFuture<Object> aFuture = new CompletableFuture<>();
         CompletableFuture<Object> bFuture = new CompletableFuture<>();

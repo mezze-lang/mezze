@@ -1,5 +1,6 @@
 package com.mezze.interpreter.values;
 
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -44,7 +45,7 @@ public class MezzeThunk implements TruffleObject {
 
     /** Content hash for effect lookup (preferred over effectName when available) */
     @CompilationFinal
-    private final String effectContentHash;
+    private final Hash effectContentHash;
 
     /**
      * Create a thunk for a regular function call.
@@ -73,7 +74,7 @@ public class MezzeThunk implements TruffleObject {
      * Create a thunk for a deferred effect operation with content hash.
      * The content hash enables O(1) collision-free handler lookup.
      */
-    public MezzeThunk(String effectName, String operationName, Object arguments, String effectContentHash) {
+    public MezzeThunk(String effectName, String operationName, Object arguments, Hash effectContentHash) {
         this.function = null;
         this.arguments = arguments;
         this.effectName = effectName;
@@ -109,7 +110,7 @@ public class MezzeThunk implements TruffleObject {
     }
 
     /** Get the content hash for effect lookup (may be null) */
-    public String getEffectContentHash() {
+    public Hash getEffectContentHash() {
         return effectContentHash;
     }
 

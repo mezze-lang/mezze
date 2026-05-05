@@ -2,6 +2,7 @@ package com.mezze.interpreter.nodes;
 
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeFunction;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CallTarget;
@@ -29,7 +30,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
     @Child private MezzeNode bodyNode;
 
     @CompilationFinal(dimensions = 1)
-    private final String[] functionHashes;
+    private final Hash[] functionHashes;
 
     @CompilationFinal(dimensions = 1)
     private final CallTarget[] functionTargets;
@@ -37,9 +38,60 @@ public final class HashModuleLoaderNode extends MezzeNode {
     @CompilationFinal(dimensions = 1)
     private final String[] functionNames;
 
-    /** Performer records: each entry is [performerHash, effectHash, op1Hash, op1Name, op2Hash, op2Name, ...] */
+    /**
+     * Per-performer typed metadata. Parsed once at constructor time from the
+     * wire-format `String[][]` (each row was
+     * `[performerHashHex, effectHashHex, op1HashHex, op1Name, op2HashHex, op2Name, ...]`).
+     * The typed records prevent the parallel-array index-drift bug class.
+     */
     @CompilationFinal(dimensions = 1)
-    private final String[][] performerInfos;
+    private final PerformerInfo[] performerInfos;
+
+    /** Operation entry in a performer record: pre-resolved hash + display name. */
+    public static final class OpBinding {
+        public final Hash hash;
+        public final String name;
+        OpBinding(Hash hash, String name) {
+            this.hash = hash;
+            this.name = name;
+        }
+    }
+
+    /** Pre-decoded performer record: {@code performerHash}, optional {@code effectHash}, list of operation bindings. */
+    public static final class PerformerInfo {
+        public final Hash performerHash;
+        /** Effect hash; may be null for performers not bound to a single effect. */
+        public final Hash effectHash;
+        public final OpBinding[] ops;
+        PerformerInfo(Hash performerHash, Hash effectHash, OpBinding[] ops) {
+            this.performerHash = performerHash;
+            this.effectHash = effectHash;
+            this.ops = ops;
+        }
+    }
+
+    private static PerformerInfo[] decodePerformerInfos(String[][] raw) {
+        if (raw == null || raw.length == 0) return new PerformerInfo[0];
+        PerformerInfo[] out = new PerformerInfo[raw.length];
+        int n = 0;
+        for (String[] info : raw) {
+            if (info.length < 2) continue;
+            Hash performerHash = new Hash(info[0]);
+            Hash effectHash = info[1].isEmpty() ? null : new Hash(info[1]);
+            int opCount = (info.length - 2) / 2;
+            OpBinding[] ops = new OpBinding[opCount];
+            for (int i = 0; i < opCount; i++) {
+                ops[i] = new OpBinding(new Hash(info[2 + i * 2]), info[2 + i * 2 + 1]);
+            }
+            out[n++] = new PerformerInfo(performerHash, effectHash, ops);
+        }
+        if (n != out.length) {
+            PerformerInfo[] trimmed = new PerformerInfo[n];
+            System.arraycopy(out, 0, trimmed, 0, n);
+            return trimmed;
+        }
+        return out;
+    }
 
     @CompilationFinal
     private boolean modulesLoaded = false;
@@ -48,29 +100,29 @@ public final class HashModuleLoaderNode extends MezzeNode {
 
     public HashModuleLoaderNode(
             MezzeNode bodyNode,
-            Map<String, CallTarget> compiledFunctions
+            Map<Hash, CallTarget> compiledFunctions
     ) {
         this(bodyNode, compiledFunctions, null);
     }
 
     public HashModuleLoaderNode(
             MezzeNode bodyNode,
-            Map<String, CallTarget> compiledFunctions,
-            Map<String, String> hashToName
+            Map<Hash, CallTarget> compiledFunctions,
+            Map<Hash, String> hashToName
     ) {
         this(bodyNode, compiledFunctions, hashToName, null);
     }
 
     public HashModuleLoaderNode(
             MezzeNode bodyNode,
-            Map<String, CallTarget> compiledFunctions,
-            Map<String, String> hashToName,
+            Map<Hash, CallTarget> compiledFunctions,
+            Map<Hash, String> hashToName,
             String[][] performerInfos
     ) {
         this.bodyNode = bodyNode;
-        this.functionHashes = compiledFunctions.keySet().toArray(new String[0]);
+        this.functionHashes = compiledFunctions.keySet().toArray(new Hash[0]);
         this.functionTargets = compiledFunctions.values().toArray(new CallTarget[0]);
-        this.performerInfos = performerInfos != null ? performerInfos : new String[0][];
+        this.performerInfos = decodePerformerInfos(performerInfos);
         if (hashToName != null) {
             this.functionNames = new String[functionHashes.length];
             for (int i = 0; i < functionHashes.length; i++) {
@@ -114,47 +166,37 @@ public final class HashModuleLoaderNode extends MezzeNode {
 
         // Pass 1: Register all functions by hash AND name (raw wrappers)
         for (int i = 0; i < functionHashes.length; i++) {
-            String hash = functionHashes[i];
+            Hash hash = functionHashes[i];
             CallTarget target = functionTargets[i];
             if (!context.hasGlobal(hash)) {
-                var function = MezzeFunction.create(target, hash);
+                var function = MezzeFunction.create(target, hash.getHex());
                 context.defineGlobal(hash, function);
-                if (i < functionNames.length && functionNames[i] != null) {
-                    context.defineGlobal(functionNames[i], function);
-                }
+                // Note: name-keyed globals dropped — name lookup goes via stdlibHashToName,
+                // not the per-context globals map. Keeping the typed Hash key prevents
+                // collisions with user-defined names that happen to look like hashes.
             }
         }
 
         // Pass 2: Construct performer records.
         // For parameterized performers (whose hash maps to a factory function that takes params),
         // keep the function as-is — it will be called with actual params at perform time.
-        for (String[] info : performerInfos) {
-            if (info.length < 2) continue;
-            String performerHash = info[0];
-            String effectHash = info[1];
-            int opCount = (info.length - 2) / 2;
-            if (opCount > 0) {
-                // Check if performer hash maps to a factory function (parameterized performer).
-                // If so, keep it as a function — ParameterizedHandlerLookupNode will call it
-                // with actual params at perform time.
-                Object existing = context.lookupGlobal(performerHash);
-                if (existing instanceof MezzeFunction fn) {
-                    // If a MezzeFunction is registered at the performer hash, it's a
-                    // parameterized performer factory (compiled by TypedASTCompiler).
-                    // Non-parameterized performers don't have a function at the performer hash
-                    // — only individual operation functions at their own opHash.
-                    // Keep the factory as-is so ParameterizedHandlerLookupNode can call it
-                    // with actual params at perform time.
-                    continue;
-                }
-                // Check cache
-                Object cached = context.getCachedClosure(performerHash);
-                if (cached instanceof com.mezze.interpreter.values.MezzeRecord) {
-                    context.defineGlobal(performerHash, cached);
-                    if (!effectHash.isEmpty()) context.defineGlobal(effectHash, cached);
-                } else {
-                    constructPerformerRecord(context, performerHash, effectHash, info, opCount);
-                }
+        for (PerformerInfo info : performerInfos) {
+            if (info.ops.length == 0) continue;
+            Hash performerHash = info.performerHash;
+            Hash effectHash = info.effectHash;
+            // Check if performer hash maps to a factory function (parameterized performer).
+            Object existing = context.lookupGlobal(performerHash);
+            if (existing instanceof MezzeFunction fn) {
+                // Parameterized performer factory — leave it.
+                continue;
+            }
+            // Check cache
+            Object cached = context.getCachedClosure(performerHash);
+            if (cached instanceof com.mezze.interpreter.values.MezzeRecord) {
+                context.defineGlobal(performerHash, cached);
+                if (effectHash != null) context.defineGlobal(effectHash, cached);
+            } else {
+                constructPerformerRecord(context, info);
             }
         }
 
@@ -165,13 +207,13 @@ public final class HashModuleLoaderNode extends MezzeNode {
     }
 
     @CompilerDirectives.TruffleBoundary
-    private void constructPerformerRecord(MezzeContext context, String performerHash, String effectHash, String[] info, int opCount) {
+    private void constructPerformerRecord(MezzeContext context, PerformerInfo info) {
+        int opCount = info.ops.length;
         String[] opNames = new String[opCount];
         Object[] opValues = new Object[opCount];
-        var emptyRecord = com.mezze.interpreter.values.MezzeRecord.empty();
         for (int i = 0; i < opCount; i++) {
-            String opHash = info[2 + i * 2];
-            opNames[i] = info[2 + i * 2 + 1];
+            Hash opHash = info.ops[i].hash;
+            opNames[i] = info.ops[i].name;
             // Look up the compiled operation function — try context, then Language cache
             Object opFunc = context.lookupGlobal(opHash);
             if (opFunc == null) {
@@ -179,7 +221,7 @@ public final class HashModuleLoaderNode extends MezzeNode {
                 var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
                 var ct = lang.getCachedStdlibCallTarget(opHash);
                 if (ct != null) {
-                    opFunc = MezzeFunction.create(ct, opHash);
+                    opFunc = MezzeFunction.create(ct, opHash.getHex());
                 }
             }
 
@@ -200,10 +242,10 @@ public final class HashModuleLoaderNode extends MezzeNode {
         var shape = new com.mezze.interpreter.values.MezzeRecord.Shape(opNames, locations);
         var record = com.mezze.interpreter.values.MezzeRecord.withAllObjects(shape, opValues);
         // Register under performer hash AND effect hash, and cache
-        context.defineGlobal(performerHash, record);
-        context.putCachedClosure(performerHash, record);
-        if (!effectHash.isEmpty()) {
-            context.defineGlobal(effectHash, record);
+        context.defineGlobal(info.performerHash, record);
+        context.putCachedClosure(info.performerHash, record);
+        if (info.effectHash != null) {
+            context.defineGlobal(info.effectHash, record);
         }
     }
 

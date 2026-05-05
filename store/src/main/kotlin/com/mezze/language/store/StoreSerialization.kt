@@ -28,6 +28,14 @@ object StoreSerialization {
         return cbor.decodeFromByteArray(MezzeType.serializer(), bytes)
     }
 
+    fun serializeTypeList(types: List<MezzeType>): ByteArray {
+        return cbor.encodeToByteArray(kotlinx.serialization.builtins.ListSerializer(MezzeType.serializer()), types)
+    }
+
+    fun deserializeTypeList(bytes: ByteArray): List<MezzeType> {
+        return cbor.decodeFromByteArray(kotlinx.serialization.builtins.ListSerializer(MezzeType.serializer()), bytes)
+    }
+
     fun serializeTypedModule(module: com.mezze.language.typedast.TypedModule): ByteArray {
         return cbor.encodeToByteArray(module)
     }

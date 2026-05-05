@@ -361,7 +361,7 @@ class SQLiteMezzeStoreTest {
 
     @Test
     fun `schema_version is set`() {
-        assertEquals("1", store.getMetadata("schema_version"))
+        assertEquals(SQLiteMezzeStore.SCHEMA_VERSION.toString(), store.getMetadata("schema_version"))
     }
 
     // ====================================================================

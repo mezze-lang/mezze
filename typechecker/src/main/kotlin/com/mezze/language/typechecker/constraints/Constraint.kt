@@ -284,7 +284,7 @@ data class ConstraintResult(
     data class MethodCallInfo(
         val abilityName: String?,        // null for inherent methods
         val methodName: String,
-        val methodHash: String?,         // Content hash of the resolved method (from impl)
+        val methodHash: Hash?,           // Content hash of the resolved method (from impl)
         val receiverFieldName: String,   // The field name the receiver maps to (e.g., "it" for ability methods)
         val isInherentMethod: Boolean = false,
         val implContentHash: Hash? = null,  // Content hash of the impl declaration (for inherent methods)

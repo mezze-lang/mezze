@@ -157,7 +157,7 @@ data class Module(
     val filePath: String,
     val exports: Map<String, ExportedItem>,
     val dependencies: List<ModuleDependency>,
-    val sourceHash: String? = null,
+    val sourceHash: com.mezze.language.typedast.Hash? = null,
     val index: ProgramIndex = ProgramIndex.EMPTY,
     /** V2 ParsedModule — the primary AST. */
     val parsedModule: com.mezze.language.parsedast.ParsedModule? = null
@@ -310,7 +310,7 @@ class ModuleResolver(
 
         // Secondary cache: source content hash -> Module (for content-addressed deduplication)
         // Same content at different paths shares a single Module instance
-        private val contentHashCache = mutableMapOf<String, Module>()
+        private val contentHashCache = mutableMapOf<com.mezze.language.typedast.Hash, Module>()
 
         private val cacheLock = Any()
         // Per-module locks to prevent duplicate loading of the same module
@@ -334,10 +334,11 @@ class ModuleResolver(
          * Try loading a cached ParsedModule from the store.
          * Returns null on miss or any error — caller falls through to parser.
          */
-        private fun tryLoadParsedFromStore(modulePath: String, sourceHash: String): com.mezze.language.parsedast.ParsedModule? {
+        private fun tryLoadParsedFromStore(modulePath: String, sourceHash: com.mezze.language.typedast.Hash): com.mezze.language.parsedast.ParsedModule? {
             val s = store ?: return null
             return try {
-                val blob = s.getParsedModule(modulePath, sourceHash) ?: return null
+                // SQLite is the wire boundary — unwrap Hash to hex String here.
+                val blob = s.getParsedModule(modulePath, sourceHash.hex) ?: return null
                 com.mezze.language.store.StoreSerialization.deserializeParsedModule(blob)
             } catch (_: Exception) {
                 null
@@ -418,7 +419,7 @@ class ModuleResolver(
          * This enables content-addressed deduplication - same content at different
          * paths returns the same Module instance.
          */
-        internal fun getFromCacheByContentHash(contentHash: String): Module? {
+        internal fun getFromCacheByContentHash(contentHash: com.mezze.language.typedast.Hash): Module? {
             synchronized(cacheLock) {
                 return contentHashCache[contentHash]
             }
@@ -479,7 +480,9 @@ class ModuleResolver(
         fun isModuleStale(modulePath: String, sourceContent: String): Boolean {
             val cachedModule = getFromCache(modulePath) ?: return true  // Not cached = stale
             val cachedHash = cachedModule.sourceHash ?: return true     // No hash = stale
-            val currentHash = MezzeHashBuilder().append(sourceContent).build().toString()
+            val currentHash = com.mezze.language.typedast.Hash(
+                MezzeHashBuilder().append(sourceContent).build().toString()
+            )
             return cachedHash != currentHash
         }
 
@@ -490,7 +493,7 @@ class ModuleResolver(
          * @return The source hash, or null if not cached or no hash available
          */
         @JvmStatic
-        fun getModuleSourceHash(modulePath: String): String? {
+        fun getModuleSourceHash(modulePath: String): com.mezze.language.typedast.Hash? {
             return getFromCache(modulePath)?.sourceHash
         }
 
@@ -645,10 +648,16 @@ class ModuleResolver(
             val filePath = resolveModuleFile(modulePath)
                 ?: throw ModuleError.ModuleNotFound(modulePath, getSearchPaths(modulePath))
 
-            // Read source and compute content hash BEFORE checking cache
-            // This enables content-based cache validation and deduplication
+            // Read source and compute content hash BEFORE checking cache.
+            // Hash uses MezzeHash.toString() (truncated display form, prefixed `#`)
+            // for backwards-compat with the on-disk parsed-modules SQLite cache —
+            // those rows are keyed by the same truncated form. Hash accepts `#` +
+            // hex chars, so the typed wrapper holds the same string the rest of
+            // the system was already using.
             val source = Files.readString(filePath)
-            val sourceHash = MezzeHashBuilder().append(source).build().toString()
+            val sourceHash = com.mezze.language.typedast.Hash(
+                MezzeHashBuilder().append(source).build().toString()
+            )
 
             // First, check content-hash cache for deduplication
             // If same content exists at a different path, reuse that module
@@ -682,7 +691,7 @@ class ModuleResolver(
             try {
                 // Try the parsed-modules cache (store → fallback to ParsedModuleCacheHolder → parse).
                 val cached = tryLoadParsedFromStore(modulePath, sourceHash)
-                    ?: com.mezze.language.parser.ParsedModuleCacheHolder.get(filePath.toString(), sourceHash)
+                    ?: com.mezze.language.parser.ParsedModuleCacheHolder.get(filePath.toString(), sourceHash.hex)
                 val parsedModule = cached ?: run {
                     val parser = MezzeParser()
                     parser.parseParsedModule(source, file = filePath.toString())

@@ -4,6 +4,7 @@ import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.control.BlockNode;
 import com.mezze.interpreter.nodes.continuation.MezzeContinuationSuspended;
 import com.mezze.interpreter.runtime.MezzeContext;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -37,22 +38,22 @@ public final class MezzeSuspended implements TruffleObject {
     private final MezzeThunk computation;
 
     @CompilationFinal(dimensions = 1)
-    private final String[] unhandledEffects;
+    private final Hash[] unhandledEffects;
 
     // Cached set view for faster contains checks
     @CompilationFinal
-    private Set<String> unhandledEffectsSet;
+    private Set<Hash> unhandledEffectsSet;
 
     // Handlers already captured (for partial handling)
-    private final Map<String, Object> capturedHandlers;
+    private final Map<Hash, Object> capturedHandlers;
 
-    public MezzeSuspended(MezzeThunk computation, Set<String> unhandledEffects) {
+    public MezzeSuspended(MezzeThunk computation, Set<Hash> unhandledEffects) {
         this(computation, unhandledEffects, Collections.emptyMap());
     }
 
-    public MezzeSuspended(MezzeThunk computation, Set<String> unhandledEffects, Map<String, Object> capturedHandlers) {
+    public MezzeSuspended(MezzeThunk computation, Set<Hash> unhandledEffects, Map<Hash, Object> capturedHandlers) {
         this.computation = computation;
-        this.unhandledEffects = unhandledEffects.toArray(new String[0]);
+        this.unhandledEffects = unhandledEffects.toArray(new Hash[0]);
         this.capturedHandlers = capturedHandlers;
     }
 
@@ -60,11 +61,11 @@ public final class MezzeSuspended implements TruffleObject {
         return computation;
     }
 
-    public Set<String> getUnhandledEffects() {
+    public Set<Hash> getUnhandledEffects() {
         if (unhandledEffectsSet == null) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
             unhandledEffectsSet = new HashSet<>();
-            for (String effect : unhandledEffects) {
+            for (Hash effect : unhandledEffects) {
                 unhandledEffectsSet.add(effect);
             }
             unhandledEffectsSet = Collections.unmodifiableSet(unhandledEffectsSet);
@@ -72,13 +73,13 @@ public final class MezzeSuspended implements TruffleObject {
         return unhandledEffectsSet;
     }
 
-    public Map<String, Object> getCapturedHandlers() {
+    public Map<Hash, Object> getCapturedHandlers() {
         return capturedHandlers;
     }
 
-    public boolean hasUnhandledEffect(String effectName) {
-        for (String effect : unhandledEffects) {
-            if (effect.equals(effectName)) {
+    public boolean hasUnhandledEffect(Hash effectHash) {
+        for (Hash effect : unhandledEffects) {
+            if (effect.equals(effectHash)) {
                 return true;
             }
         }
@@ -116,26 +117,18 @@ public final class MezzeSuspended implements TruffleObject {
      * @return The result, or a new MezzeSuspended if effects remain unhandled
      */
     @TruffleBoundary
-    public Object executeWith(Map<String, Object> handlers, MezzeContext context, IndirectCallNode callNode) {
+    public Object executeWith(Map<Hash, Object> handlers, MezzeContext context, IndirectCallNode callNode) {
         // Merge captured handlers with new handlers
-        Map<String, Object> allHandlers = new HashMap<>(capturedHandlers);
+        Map<Hash, Object> allHandlers = new HashMap<>(capturedHandlers);
         allHandlers.putAll(handlers);
 
-        // Check if all required effects are now handled
-        Set<String> stillUnhandled = new HashSet<>();
-        for (String effect : unhandledEffects) {
+        // Check if all required effects are now handled.
+        // (performerHandlesEffect bails are skipped — handlers are keyed by hash now,
+        //  not by performer name, so the old name-based fallback no longer applies.)
+        Set<Hash> stillUnhandled = new HashSet<>();
+        for (Hash effect : unhandledEffects) {
             if (!allHandlers.containsKey(effect)) {
-                // Check if any performer handles this effect
-                boolean handled = false;
-                for (String performerName : allHandlers.keySet()) {
-                    if (context.performerHandlesEffect(performerName, effect)) {
-                        handled = true;
-                        break;
-                    }
-                }
-                if (!handled) {
-                    stillUnhandled.add(effect);
-                }
+                stillUnhandled.add(effect);
             }
         }
 
@@ -171,7 +164,7 @@ public final class MezzeSuspended implements TruffleObject {
     @TruffleBoundary
     private Object executeComposedBlockThunk(
             BlockNode.ComposedBlockThunk composedThunk,
-            Map<String, Object> handlers,
+            Map<Hash, Object> handlers,
             MezzeContext context,
             IndirectCallNode callNode
     ) {
@@ -186,28 +179,28 @@ public final class MezzeSuspended implements TruffleObject {
             effectResult = executeComposedBlockThunk(nestedComposed, handlers, context, callNode);
         } else if (originalThunk.isDeferredEffectCall()) {
             // Deferred effect call - use content hash for O(1) lookup
-            String effectContentHash = originalThunk.getEffectContentHash();
+            Hash effectContentHash = originalThunk.getEffectContentHash();
             String operationName = originalThunk.getOperationName();
             Object argument = originalThunk.getArguments();
 
             // Content hash lookup - no fallbacks
-            if (effectContentHash == null || effectContentHash.isEmpty()) {
+            if (effectContentHash == null) {
                 throw new RuntimeException("No effect content hash available for composed block effect call. " +
                     "Operation: " + operationName);
             }
 
             Object handler = handlers.get(effectContentHash);
             if (handler == null) {
-                throw new RuntimeException("No handler found for effect hash " + effectContentHash + " in composed block");
+                throw new RuntimeException("No handler found for effect hash " + effectContentHash.getHex() + " in composed block");
             }
 
             if (!(handler instanceof MezzeRecord handlerRecord)) {
-                throw new RuntimeException("Handler for effect hash " + effectContentHash + " must be a record");
+                throw new RuntimeException("Handler for effect hash " + effectContentHash.getHex() + " must be a record");
             }
 
             Object operation = handlerRecord.getField(operationName);
             if (!(operation instanceof MezzeFunction opFunc)) {
-                throw new RuntimeException("Operation " + operationName + " not found in handler (hash: " + effectContentHash + ")");
+                throw new RuntimeException("Operation " + operationName + " not found in handler (hash: " + effectContentHash.getHex() + ")");
             }
 
             effectResult = callFunction(opFunc, argument, callNode);
@@ -273,32 +266,32 @@ public final class MezzeSuspended implements TruffleObject {
      * Uses content hash for O(1) collision-free lookup - no effect name fallbacks.
      */
     @TruffleBoundary
-    private Object executeDeferredEffectCall(Map<String, Object> handlers, MezzeContext context, IndirectCallNode callNode) {
-        String effectContentHash = computation.getEffectContentHash();
+    private Object executeDeferredEffectCall(Map<Hash, Object> handlers, MezzeContext context, IndirectCallNode callNode) {
+        Hash effectContentHash = computation.getEffectContentHash();
         String operationName = computation.getOperationName();
         Object argument = computation.getArguments();
 
         // Content hash lookup - no fallbacks
-        if (effectContentHash == null || effectContentHash.isEmpty()) {
+        if (effectContentHash == null) {
             throw new RuntimeException("No effect content hash available for deferred effect call. " +
                 "Operation: " + operationName);
         }
 
         Object handler = handlers.get(effectContentHash);
         if (handler == null) {
-            throw new RuntimeException("No handler found for effect hash " + effectContentHash +
+            throw new RuntimeException("No handler found for effect hash " + effectContentHash.getHex() +
                 " in deferred call. Operation: " + operationName);
         }
 
         if (!(handler instanceof MezzeRecord handlerRecord)) {
-            throw new RuntimeException("Handler for effect hash " + effectContentHash + " must be a record, got: " +
+            throw new RuntimeException("Handler for effect hash " + effectContentHash.getHex() + " must be a record, got: " +
                 handler.getClass().getSimpleName());
         }
 
         // Get the operation function
         Object operation = handlerRecord.getField(operationName);
         if (!(operation instanceof MezzeFunction opFunc)) {
-            throw new RuntimeException("Operation " + operationName + " not found or not a function in handler (hash: " + effectContentHash + ")");
+            throw new RuntimeException("Operation " + operationName + " not found or not a function in handler (hash: " + effectContentHash.getHex() + ")");
         }
 
         // Call the operation with closure values prepended
@@ -332,7 +325,7 @@ public final class MezzeSuspended implements TruffleObject {
         StringBuilder sb = new StringBuilder("<suspended <");
         for (int i = 0; i < unhandledEffects.length; i++) {
             if (i > 0) sb.append(", ");
-            sb.append(unhandledEffects[i]);
+            sb.append(unhandledEffects[i].getHex());
         }
         sb.append(">>");
         return sb.toString();

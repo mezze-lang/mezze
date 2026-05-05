@@ -68,7 +68,7 @@ class ImportResolver(
     fun resolveImports(module: com.mezze.language.parsedast.ParsedModule): ImportResolutionResult {
         val errors = mutableListOf<ModuleError>()
         var importContext = ModuleImportContext.empty()
-        val loadedModules = mutableMapOf<String, TypedModule>()
+        val loadedModules = mutableMapOf<com.mezze.language.ast.ModulePath, TypedModule>()
 
         for (decl in module.decls) {
             val (usePath, alias, isPublic, loc) = when (decl) {
@@ -86,7 +86,7 @@ class ImportResolver(
             when (result) {
                 is ProcessResult.Success -> {
                     importContext = importContext.merge(result.context)
-                    result.module?.let { loadedModules[it.modulePath] = it }
+                    result.module?.let { loadedModules[com.mezze.language.ast.ModulePath.parse(it.modulePath)] = it }
                 }
                 is ProcessResult.Failure -> errors.addAll(result.errors)
             }

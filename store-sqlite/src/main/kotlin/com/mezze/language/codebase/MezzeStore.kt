@@ -26,3 +26,4 @@ typealias UsageRow = com.mezze.language.store.UsageRow
 typealias DeclRow = com.mezze.language.store.DeclRow
 typealias ImportRow = com.mezze.language.store.ImportRow
 typealias AppRow = com.mezze.language.store.AppRow
+typealias MonoSpecializationRow = com.mezze.language.store.MonoSpecializationRow

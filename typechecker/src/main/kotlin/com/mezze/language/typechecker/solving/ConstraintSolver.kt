@@ -50,7 +50,7 @@ class ConstraintSolver(
     data class GeneratedCodecImpl(
         val abilityName: String,
         val targetTypes: List<MezzeType>,  // [formatType, dataType]
-        val contentHash: String
+        val contentHash: com.mezze.language.typedast.Hash
     )
 
     /**
@@ -60,7 +60,7 @@ class ConstraintSolver(
      * that doesn't have an explicit impl, we generate one and store it here.
      * Key: Content hash of the GeneratedCodecImpl
      */
-    private val generatedCodecImpls = mutableMapOf<String, GeneratedCodecImpl>()
+    private val generatedCodecImpls = mutableMapOf<com.mezze.language.typedast.Hash, GeneratedCodecImpl>()
 
     /** Get the auto-derived codec impls metadata for downstream code generation. */
     fun getGeneratedCodecImpls(): Collection<GeneratedCodecImpl> = generatedCodecImpls.values
@@ -1495,8 +1495,7 @@ class ConstraintSolver(
                     hashBuilder.append(abilityName)
                     hashBuilder.append("_single_param_")
                     hashBuilder.append(com.mezze.language.typechecker.hashing.ContentHashComputer.mezzeTypeToString(dataType))
-                    val hash = hashBuilder.build()
-                    val implKey = hash.toFullHexString()
+                    val implKey = com.mezze.language.typedast.Hash(hashBuilder.build().toFullHexString())
                     if (!generatedCodecImpls.containsKey(implKey)) {
                         generatedCodecImpls[implKey] = GeneratedCodecImpl(
                             abilityName = abilityName,
@@ -1601,8 +1600,7 @@ class ConstraintSolver(
         hashBuilder.append(abilityName)
         hashBuilder.append(com.mezze.language.typechecker.hashing.ContentHashComputer.mezzeTypeToString(formatType))
         hashBuilder.append(com.mezze.language.typechecker.hashing.ContentHashComputer.mezzeTypeToString(dataType))
-        val hash = hashBuilder.build()
-        val implKey = hash.toFullHexString()
+        val implKey = com.mezze.language.typedast.Hash(hashBuilder.build().toFullHexString())
 
         // Check if we've already generated this impl (same content = same hash)
         if (generatedCodecImpls.containsKey(implKey)) {

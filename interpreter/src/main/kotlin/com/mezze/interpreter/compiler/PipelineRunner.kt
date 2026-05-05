@@ -79,16 +79,13 @@ object PipelineRunner {
         // ~35 per test instead of 1044. Each Language instance (=Context) compiles its own.
         val compiler = TruffleCompiler(language)
         val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
-        val compiledFunctions = mutableMapOf<String, CallTarget>()
+        val compiledFunctions = mutableMapOf<com.mezze.language.typedast.Hash, CallTarget>()
 
-        val userHashes = functions.map { it.hash.hex }.toSet()
+        val userHashes = functions.map { it.hash }.toSet()
         val referencedHashes = collectReferencedHashes(functions)
-        // Bridge to Java side which still takes Set<String>. Phase 1
-        // typed-identity sweep stops at the Kotlin/Java boundary; the
-        // Java-side migration is a follow-up commit.
         language.compileReferencedStdlib(
             compiler,
-            referencedHashes.map { it.hex }.toSet(),
+            referencedHashes,
             userHashes
         )
 
@@ -101,51 +98,51 @@ object PipelineRunner {
         // Resolve function aliases: `let toggle_bool = toggle` compiles to a FunctionIR whose
         // body is ReadGlobalByHashIR(toggle_hash). Register the alias hash → target's FunctionIR
         // so MonomorphicCallNode finds the real function (with its params) directly.
-        val aliasMap = mutableMapOf<String, String>() // alias_hash → target_hash
+        val aliasMap = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.Hash>() // alias_hash → target_hash
         for (fn in functions) {
             if (fn.paramSlots.isEmpty() && fn.captureSlots.isEmpty() && fn.localSlots.isEmpty()) {
                 val body = fn.body
                 if (body is com.mezze.language.truffleir.ReadGlobalByHashIR) {
-                    aliasMap[fn.hash.hex] = body.hash.hex
+                    aliasMap[fn.hash] = body.hash
                 }
             }
         }
 
         // Build index for resolving aliases to their target FunctionIR
-        val fnByHash = functions.associateBy { it.hash.hex }
+        val fnByHash = functions.associateBy { it.hash }
         for (fn in functions) {
-            var targetHash = aliasMap[fn.hash.hex]
+            var targetHash = aliasMap[fn.hash]
             if (targetHash != null) {
                 // Find the target's FunctionIR (may be in user functions or stdlib)
                 val targetIR = fnByHash[targetHash]
                 if (targetIR != null) {
                     // Register alias pointing to the target's FunctionIR directly
-                    language.registerFunctionIR(fn.hash.hex, targetIR)
+                    language.registerFunctionIR(fn.hash, targetIR)
                 } else {
                     // Target is in stdlib — register alias hash mapping so getCachedStdlibCallTarget resolves it
-                    language.registerFunctionIR(fn.hash.hex, fn)
+                    language.registerFunctionIR(fn.hash, fn)
                     // Also try to copy the stdlib CallTarget to the alias hash
                     val stdlibCT = language.getCachedStdlibCallTarget(targetHash)
                     if (stdlibCT != null) {
-                        language.cachedStdlibCallTargetCache[fn.hash.hex] = stdlibCT
+                        language.cachedStdlibCallTargetCache[fn.hash] = stdlibCT
                     }
                 }
             } else {
-                language.registerFunctionIR(fn.hash.hex, fn)
+                language.registerFunctionIR(fn.hash, fn)
             }
         }
 
         // Eagerly compile performer factory functions so they're available via HashModuleLoaderNode.
         // Performer factories are identified by their hash appearing in performer records.
-        val performerFactoryHashes = mutableSetOf<String>()
+        val performerFactoryHashes = mutableSetOf<com.mezze.language.typedast.Hash>()
         for (pr in performerRecords) {
-            if (pr.isNotEmpty()) performerFactoryHashes.add(pr[0])
+            if (pr.isNotEmpty()) performerFactoryHashes.add(com.mezze.language.typedast.Hash(pr[0]))
         }
         for (fn in functions) {
-            if (fn.hash.hex in performerFactoryHashes && fn.paramSlots.isNotEmpty()) {
+            if (fn.hash in performerFactoryHashes && fn.paramSlots.isNotEmpty()) {
                 // This is a parameterized performer factory — compile eagerly
                 val rootNode = compiler.compile(fn)
-                compiledFunctions[fn.hash.hex] = rootNode.callTarget
+                compiledFunctions[fn.hash] = rootNode.callTarget
             }
         }
 
@@ -190,10 +187,10 @@ object PipelineRunner {
         }
 
         // Build hash→name map for performer/handler lookup by name
-        val hashToName = mutableMapOf<String, String>()
+        val hashToName = mutableMapOf<com.mezze.language.typedast.Hash, String>()
         for (fn in functions) {
             if (fn.name != "lambda" && fn.name != "__entry__" && !fn.name.startsWith("__toplevel")) {
-                hashToName[fn.hash.hex] = fn.name
+                hashToName[fn.hash] = fn.name
             }
         }
 

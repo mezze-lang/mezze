@@ -3,6 +3,7 @@ package com.mezze.interpreter.nodes.variable;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeSuspended;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -33,9 +34,9 @@ public final class ReadLocalWithFallbackNode extends MezzeNode {
     @CompilationFinal
     private final String variableName;
 
-    // Content hash for content-addressed global lookup (null = use variableName)
+    // Content hash for content-addressed global lookup (null = name-only fallback)
     @CompilationFinal
-    private final String contentHash;
+    private final Hash contentHash;
 
     // OPTIMIZATION: Use @CompilationFinal instead of volatile
     // After JIT, this becomes a constant reference (no memory barrier)
@@ -54,7 +55,7 @@ public final class ReadLocalWithFallbackNode extends MezzeNode {
         this(slot, variableName, null);
     }
 
-    public ReadLocalWithFallbackNode(int slot, String variableName, String contentHash) {
+    public ReadLocalWithFallbackNode(int slot, String variableName, Hash contentHash) {
         this.slot = slot;
         this.variableName = variableName;
         this.contentHash = contentHash;
@@ -140,29 +141,20 @@ public final class ReadLocalWithFallbackNode extends MezzeNode {
             }
             // Content hash provided but not found - this is an error
             throw new RuntimeException(
-                "Content hash lookup failed for '" + variableName + "' with hash '" + contentHash + "'. " +
+                "Content hash lookup failed for '" + variableName + "' with hash '" + contentHash.getHex() + "'. " +
                 "The function was not registered with this content hash."
             );
         }
 
-        // No content hash - first try local lookup (for scoped effects like 'scope')
-        // Note: Don't cache local lookups since they're dynamic (scoped)
-        Object localValue = context.lookupLocal(variableName);
+        // No content hash - try scope-var lookup (for scoped effects like 'scope').
+        // Globals are now strictly Hash-keyed; without a contentHash there's no
+        // way to look up a global by name, so the previous name-keyed fallback
+        // is dropped.
+        Object localValue = context.lookupScopeVar(variableName);
         if (localValue != null) {
             return localValue;
         }
-
-        // Then try global lookup (for module-level definitions)
-        Object value = context.lookupGlobal(variableName);
-
-        // Cache for next time (even null result to avoid repeated lookups)
-        // Only cache globals, not locals (which are dynamic)
-        if (value != null) {
-            CompilerDirectives.transferToInterpreterAndInvalidate();
-            cachedGlobal = value;
-        }
-
-        return value;
+        return null;
     }
 
     /**
@@ -175,7 +167,7 @@ public final class ReadLocalWithFallbackNode extends MezzeNode {
     /**
      * Create a read-with-fallback node with content hash for precise lookup.
      */
-    public static ReadLocalWithFallbackNode create(int slot, String variableName, String contentHash) {
+    public static ReadLocalWithFallbackNode create(int slot, String variableName, Hash contentHash) {
         return new ReadLocalWithFallbackNode(slot, variableName, contentHash);
     }
 }

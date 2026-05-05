@@ -4,6 +4,7 @@ import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -40,7 +41,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     private final int localSlot;
 
     @CompilationFinal
-    private final String implHash;
+    private final Hash implHash;
 
     @CompilationFinal
     private final String operationName;
@@ -53,7 +54,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     @CompilationFinal
     private int cachedOperationIndex = -1;
 
-    protected ResolvedAbilityCallNode(int localSlot, String implHash, String operationName) {
+    protected ResolvedAbilityCallNode(int localSlot, Hash implHash, String operationName) {
         this.localSlot = localSlot;
         this.implHash = implHash;
         this.operationName = operationName;
@@ -268,7 +269,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
 
         if (target == null) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
-            throw new RuntimeException("Operation " + operationName + " not found for impl: " + implHash);
+            throw new RuntimeException("Operation " + operationName + " not found for impl: " + implHash.getHex());
         }
 
         Object[] closureValues = hasLocalSlot()
@@ -394,7 +395,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
     public static ResolvedAbilityCallNode create(
             MezzeNode argsNode,
             int localSlot,
-            String implHash,
+            Hash implHash,
             String operationName
     ) {
         return ResolvedAbilityCallNodeGen.create(localSlot, implHash, operationName, argsNode);
@@ -402,7 +403,7 @@ public abstract class ResolvedAbilityCallNode extends MezzeNode {
 
     public static ResolvedAbilityCallNode createContextLookup(
             MezzeNode argsNode,
-            String implHash,
+            Hash implHash,
             String operationName
     ) {
         return ResolvedAbilityCallNodeGen.create(-1, implHash, operationName, argsNode);

@@ -36,7 +36,7 @@ public final class ReadScopeNode extends MezzeNode {
     @TruffleBoundary
     private Object lookupInContext() {
         MezzeContext context = MezzeContext.get(this);
-        Object value = context.lookupLocal(varName);
+        Object value = context.lookupScopeVar(varName);
         if (value == null) {
             throw new RuntimeException("Scope variable '" + varName + "' not found");
         }

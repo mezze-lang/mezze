@@ -112,17 +112,32 @@ object ParsedDeclHasher {
         val b = MezzeHashBuilder()
         b.append(byteArrayOf(HashTags.IMPL_ABILITY_DECLARATION))
         when (val target = decl.target) {
-            is ParsedImplTarget.Named -> { b.appendBoolean(false); b.append(target.ability.localName) }
+            is ParsedImplTarget.Named -> {
+                b.appendBoolean(false)
+                b.append(target.ability.localName)
+                target.ability.qualifier?.let {
+                    b.appendBoolean(true); b.append(it.segments.joinToString("::"))
+                } ?: b.appendBoolean(false)
+            }
             is ParsedImplTarget.Inherent -> b.appendBoolean(true)
         }
+        b.appendInt(decl.abilityTypeArgs.size)
+        for (t in decl.abilityTypeArgs) appendTypeAnnotation(b, t)
         b.appendInt(decl.targetTypes.size)
         for (t in decl.targetTypes) appendTypeAnnotation(b, t)
+        b.appendInt(decl.forallVars.size)
+        for (v in decl.forallVars) b.append(v)
+        b.appendInt(decl.associatedTypeBindings.size)
+        for ((k, v) in decl.associatedTypeBindings.toSortedMap()) {
+            b.append(k)
+            appendTypeAnnotation(b, v)
+        }
         b.appendInt(decl.operations.size)
         for (op in decl.operations.sortedBy { it.name }) {
             b.append(op.name)
             appendExpr(b, op.implementation)
         }
-        return Hash(b.build().toFullHexString())
+        return b.buildHash()
     }
 
     fun computeAllHashes(module: ParsedModule): ParsedModule {

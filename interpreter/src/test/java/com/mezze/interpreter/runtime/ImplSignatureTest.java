@@ -1,5 +1,6 @@
 package com.mezze.interpreter.runtime;
 
+import com.mezze.language.typedast.Hash;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -9,13 +10,20 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class ImplSignatureTest {
 
+    private static final Hash HASH_1 = new Hash("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    private static final Hash HASH_2 = new Hash("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210");
+    private static final Hash HASH_3 = new Hash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    private static final Hash HASH_4 = new Hash("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    private static final Hash HASH_5 = new Hash("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+    private static final Hash HASH_6 = new Hash("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+
     @Test
     void nonScopedEffectHasCorrectDefaults() {
-        ImplSignature sig = new ImplSignature("Log", "Console", "hash123");
+        ImplSignature sig = new ImplSignature("Log", "Console", HASH_1);
 
         assertEquals("Log", sig.getEffectName());
         assertEquals("Console", sig.getPerformerName());
-        assertEquals("hash123", sig.getContentHash());
+        assertEquals(HASH_1, sig.getContentHash());
         assertFalse(sig.hasInitializeScope());
         assertFalse(sig.hasFinalizeScope());
         assertFalse(sig.isScopedEffect());
@@ -31,7 +39,7 @@ class ImplSignatureTest {
         ImplSignature sig = new ImplSignature(
                 "DB",
                 "PostgresDB",
-                "hash456",
+                HASH_2,
                 true,  // hasInitializeScope
                 true,  // hasFinalizeScope
                 null,  // initializeScopeTarget (would be CallTarget in real use)
@@ -41,7 +49,7 @@ class ImplSignatureTest {
 
         assertEquals("DB", sig.getEffectName());
         assertEquals("PostgresDB", sig.getPerformerName());
-        assertEquals("hash456", sig.getContentHash());
+        assertEquals(HASH_2, sig.getContentHash());
         assertTrue(sig.hasInitializeScope());
         assertTrue(sig.hasFinalizeScope());
         assertTrue(sig.isScopedEffect());
@@ -50,12 +58,12 @@ class ImplSignatureTest {
 
     @Test
     void builderCreatesNonScopedEffect() {
-        ImplSignature sig = ImplSignature.builder("FileSystem", "LocalFS", "hash789")
+        ImplSignature sig = ImplSignature.builder("FileSystem", "LocalFS", HASH_3)
                 .build();
 
         assertEquals("FileSystem", sig.getEffectName());
         assertEquals("LocalFS", sig.getPerformerName());
-        assertEquals("hash789", sig.getContentHash());
+        assertEquals(HASH_3, sig.getContentHash());
         assertFalse(sig.isScopedEffect());
     }
 
@@ -63,7 +71,7 @@ class ImplSignatureTest {
     void builderCreatesScopedEffect() {
         String[] scopeFields = new String[]{"handle", "path"};
 
-        ImplSignature sig = ImplSignature.builder("Resource", "FileResource", "hash000")
+        ImplSignature sig = ImplSignature.builder("Resource", "FileResource", HASH_4)
                 .withInitializeScope(null, scopeFields)
                 .withFinalizeScope(null)
                 .build();
@@ -78,7 +86,7 @@ class ImplSignatureTest {
     void toStringIncludesScopeInfo() {
         String[] scopeFields = new String[]{"x", "y"};
 
-        ImplSignature sig = ImplSignature.builder("Effect", "Handler", "hash")
+        ImplSignature sig = ImplSignature.builder("Effect", "Handler", HASH_5)
                 .withInitializeScope(null, scopeFields)
                 .withFinalizeScope(null)
                 .build();
@@ -92,7 +100,7 @@ class ImplSignatureTest {
 
     @Test
     void toStringForNonScopedDoesNotIncludeScopeInfo() {
-        ImplSignature sig = new ImplSignature("Log", "Console", "hash");
+        ImplSignature sig = new ImplSignature("Log", "Console", HASH_6);
 
         String str = sig.toString();
         assertFalse(str.contains("scoped"), "Non-scoped should not have scope info: " + str);

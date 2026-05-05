@@ -45,7 +45,7 @@ class RuntimeEffectValidationTest {
             "Should have exactly one unhandled effect but was ${suspended.unhandledEffects}")
         // Verify it's a valid content hash (128 hex characters for SHA3-512)
         val effectHash = suspended.unhandledEffects.first()
-        assertTrue(effectHash.length == 128 && effectHash.all { it in '0'..'9' || it in 'a'..'f' },
+        assertTrue(effectHash.hex.length == 128 && effectHash.hex.all { it in '0'..'9' || it in 'a'..'f' },
             "Unhandled effect should be a content hash but was $effectHash")
     }
 
@@ -112,7 +112,7 @@ class RuntimeEffectValidationTest {
             "Should have at least one unhandled effect but was empty")
         // Verify all are valid content hashes
         suspended.unhandledEffects.forEach { hash ->
-            assertTrue(hash.length == 128 && hash.all { it in '0'..'9' || it in 'a'..'f' },
+            assertTrue(hash.hex.length == 128 && hash.hex.all { it in '0'..'9' || it in 'a'..'f' },
                 "Unhandled effect should be a content hash but was $hash")
         }
     }
@@ -156,7 +156,7 @@ class RuntimeEffectValidationTest {
             "Should have exactly one unhandled effect (Random) but was ${suspended.unhandledEffects}")
         // Verify it's a valid content hash
         val effectHash = suspended.unhandledEffects.first()
-        assertTrue(effectHash.length == 128 && effectHash.all { it in '0'..'9' || it in 'a'..'f' },
+        assertTrue(effectHash.hex.length == 128 && effectHash.hex.all { it in '0'..'9' || it in 'a'..'f' },
             "Unhandled effect should be a content hash but was $effectHash")
     }
 
@@ -237,7 +237,7 @@ class RuntimeEffectValidationTest {
         assertEquals(1, suspended.unhandledEffects.size,
             "Should have exactly one unhandled effect but was ${suspended.unhandledEffects}")
         val effectHash = suspended.unhandledEffects.first()
-        assertTrue(effectHash.length == 128 && effectHash.all { it in '0'..'9' || it in 'a'..'f' },
+        assertTrue(effectHash.hex.length == 128 && effectHash.hex.all { it in '0'..'9' || it in 'a'..'f' },
             "Unhandled effect should be a content hash but was $effectHash")
     }
 
@@ -271,7 +271,7 @@ class RuntimeEffectValidationTest {
         assertEquals(1, suspended.unhandledEffects.size,
             "Should have exactly one unhandled effect but was ${suspended.unhandledEffects}")
         val effectHash = suspended.unhandledEffects.first()
-        assertTrue(effectHash.length == 128 && effectHash.all { it in '0'..'9' || it in 'a'..'f' },
+        assertTrue(effectHash.hex.length == 128 && effectHash.hex.all { it in '0'..'9' || it in 'a'..'f' },
             "Unhandled effect should be a content hash but was $effectHash")
     }
 }

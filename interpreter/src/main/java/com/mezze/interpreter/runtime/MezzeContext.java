@@ -2,6 +2,7 @@ package com.mezze.interpreter.runtime;
 
 import com.mezze.interpreter.effects.EffectRegistry;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.TruffleLanguage.Env;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -31,22 +32,27 @@ public final class MezzeContext {
     private final Env env;
 
     // Content hash → global value (functions, impls, etc.)
-    private final ConcurrentHashMap<String, Object> globals = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Hash, Object> globals = new ConcurrentHashMap<>();
+
+    // Variable name → value, ONLY for test inspection via getLastExecutionContext().
+    // Strictly separate from `globals` so name vs hash can never collide at the
+    // dispatch layer. Populated by WriteLocalWithContextNode for top-level lets.
+    private final ConcurrentHashMap<String, Object> testInspectionVars = new ConcurrentHashMap<>();
 
     // Content hash → compiled CallTarget (for caching)
-    private final ConcurrentHashMap<String, CallTarget> callTargetCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Hash, CallTarget> callTargetCache = new ConcurrentHashMap<>();
 
     // Per-context closure cache — replaces the static evaluatedClosureCache in HashModuleLoaderNode.
     // Key: function hash, Value: evaluated MezzeFunction closure (or MezzeRecord for performers)
-    private final ConcurrentHashMap<String, Object> closureCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Hash, Object> closureCache = new ConcurrentHashMap<>();
 
     // Per-context user function IR registry — FunctionIRs from the current test's source code.
     // Cleared at start of each parse() via clearUserState().
-    private final ConcurrentHashMap<String, com.mezze.language.truffleir.FunctionIR>
+    private final ConcurrentHashMap<Hash, com.mezze.language.truffleir.FunctionIR>
         userFunctionIRRegistry = new ConcurrentHashMap<>();
 
     // Per-context user CallTarget cache — compiled on demand from userFunctionIRRegistry.
-    private final ConcurrentHashMap<String, CallTarget> userCallTargetCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Hash, CallTarget> userCallTargetCache = new ConcurrentHashMap<>();
 
     // Polyglot support (lazy initialization)
     private volatile MezzePolyglotSupport polyglotSupport;
@@ -156,12 +162,12 @@ public final class MezzeContext {
     // ========================
 
     @TruffleBoundary
-    public void registerUserFunctionIR(String hash, com.mezze.language.truffleir.FunctionIR ir) {
+    public void registerUserFunctionIR(Hash hash, com.mezze.language.truffleir.FunctionIR ir) {
         userFunctionIRRegistry.put(hash, ir);
     }
 
     @TruffleBoundary
-    public com.mezze.language.truffleir.FunctionIR getUserFunctionIR(String hash) {
+    public com.mezze.language.truffleir.FunctionIR getUserFunctionIR(Hash hash) {
         return userFunctionIRRegistry.get(hash);
     }
 
@@ -171,12 +177,12 @@ public final class MezzeContext {
     }
 
     @TruffleBoundary
-    public CallTarget getUserCallTarget(String hash) {
+    public CallTarget getUserCallTarget(Hash hash) {
         return userCallTargetCache.get(hash);
     }
 
     @TruffleBoundary
-    public void cacheUserCallTarget(String hash, CallTarget ct) {
+    public void cacheUserCallTarget(Hash hash, CallTarget ct) {
         userCallTargetCache.put(hash, ct);
     }
 
@@ -184,6 +190,7 @@ public final class MezzeContext {
     public void clearUserState() {
         userFunctionIRRegistry.clear();
         userCallTargetCache.clear();
+        testInspectionVars.clear();
     }
 
     // ========================
@@ -191,12 +198,12 @@ public final class MezzeContext {
     // ========================
 
     @TruffleBoundary
-    public Object getCachedClosure(String hash) {
+    public Object getCachedClosure(Hash hash) {
         return closureCache.get(hash);
     }
 
     @TruffleBoundary
-    public void putCachedClosure(String hash, Object value) {
+    public void putCachedClosure(Hash hash, Object value) {
         closureCache.put(hash, value);
     }
 
@@ -205,7 +212,7 @@ public final class MezzeContext {
     // ========================
 
     @TruffleBoundary
-    public void defineGlobal(String contentHash, Object value) {
+    public void defineGlobal(Hash contentHash, Object value) {
         globals.put(contentHash, value);
     }
 
@@ -213,22 +220,34 @@ public final class MezzeContext {
      * Get all global definitions. Used by test infrastructure to capture variable context.
      */
     @TruffleBoundary
-    public Map<String, Object> getAllGlobals() {
+    public Map<Hash, Object> getAllGlobals() {
         return new HashMap<>(globals);
     }
 
     @TruffleBoundary
-    public Object lookupGlobal(String contentHash) {
+    public Object lookupGlobal(Hash contentHash) {
         return globals.get(contentHash);
     }
 
-    public java.util.Set<String> getAllGlobalKeys() {
+    public java.util.Set<Hash> getAllGlobalKeys() {
         return globals.keySet();
     }
 
     @TruffleBoundary
-    public boolean hasGlobal(String contentHash) {
+    public boolean hasGlobal(Hash contentHash) {
         return globals.containsKey(contentHash);
+    }
+
+    /** Test-inspection: register a top-level binding's value under its name. */
+    @TruffleBoundary
+    public void recordTestInspectionVar(String name, Object value) {
+        testInspectionVars.put(name, value);
+    }
+
+    /** Test-inspection: snapshot of all top-level bindings keyed by name. */
+    @TruffleBoundary
+    public Map<String, Object> getTestInspectionVars() {
+        return new HashMap<>(testInspectionVars);
     }
 
     // ========================
@@ -236,17 +255,17 @@ public final class MezzeContext {
     // ========================
 
     @TruffleBoundary
-    public CallTarget getCachedCallTarget(String contentHash) {
+    public CallTarget getCachedCallTarget(Hash contentHash) {
         return callTargetCache.get(contentHash);
     }
 
     @TruffleBoundary
-    public void cacheCallTarget(String contentHash, CallTarget callTarget) {
+    public void cacheCallTarget(Hash contentHash, CallTarget callTarget) {
         callTargetCache.put(contentHash, callTarget);
     }
 
     @TruffleBoundary
-    public CallTarget getOrCacheCallTarget(String contentHash, java.util.function.Supplier<CallTarget> supplier) {
+    public CallTarget getOrCacheCallTarget(Hash contentHash, java.util.function.Supplier<CallTarget> supplier) {
         return callTargetCache.computeIfAbsent(contentHash, k -> supplier.get());
     }
 
@@ -254,17 +273,36 @@ public final class MezzeContext {
     // Local definitions
     // ========================
 
-    // Local variables (thread-local scope)
-    private final ConcurrentHashMap<String, Object> locals = new ConcurrentHashMap<>();
+    // Handler / impl-record registrations keyed by content hash.
+    // Populated by HandleNode when a `with` block installs a handler so
+    // PerformNode / DynamicEffectCallNode can find it by hash.
+    private final ConcurrentHashMap<com.mezze.language.typedast.Hash, Object> handlersByHash =
+        new ConcurrentHashMap<>();
+
+    // Name-keyed scope slots. Currently only used for the reserved name "scope"
+    // (scoped-effect record) and local-variable fallback in
+    // ReadLocalWithFallbackNode. Strict separation from handlersByHash means a
+    // 64-hex local-variable name can never collide with an impl hash.
+    private final ConcurrentHashMap<String, Object> scopeVars = new ConcurrentHashMap<>();
 
     @TruffleBoundary
-    public void defineLocal(String name, Object value) {
-        locals.put(name, value);
+    public void defineHandler(com.mezze.language.typedast.Hash hash, Object value) {
+        handlersByHash.put(hash, value);
     }
 
     @TruffleBoundary
-    public Object lookupLocal(String name) {
-        return locals.get(name);
+    public Object lookupHandler(com.mezze.language.typedast.Hash hash) {
+        return handlersByHash.get(hash);
+    }
+
+    @TruffleBoundary
+    public void defineScopeVar(String name, Object value) {
+        scopeVars.put(name, value);
+    }
+
+    @TruffleBoundary
+    public Object lookupScopeVar(String name) {
+        return scopeVars.get(name);
     }
 
     // ========================
@@ -272,13 +310,13 @@ public final class MezzeContext {
     // ========================
 
     // Content hash → impl record (for O(1) lookup by hash)
-    private final ConcurrentHashMap<String, Object> abilityImplsByHash = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Hash, Object> abilityImplsByHash = new ConcurrentHashMap<>();
 
     /**
      * Register an ability implementation by content hash.
      */
     @TruffleBoundary
-    public void registerAbilityImplByHash(String contentHash, Object implRecord) {
+    public void registerAbilityImplByHash(Hash contentHash, Object implRecord) {
         abilityImplsByHash.put(contentHash, implRecord);
     }
 
@@ -287,7 +325,7 @@ public final class MezzeContext {
      * Returns null if not found.
      */
     @TruffleBoundary
-    public Object getAbilityImplByHash(String contentHash) {
+    public Object getAbilityImplByHash(Hash contentHash) {
         return abilityImplsByHash.get(contentHash);
     }
 
@@ -295,14 +333,15 @@ public final class MezzeContext {
     // Effect Handler Stack (for lazy effects)
     // ========================
 
-    // Thread-local handler stack for nested perform expressions
-    private final ThreadLocal<Deque<Map<String, Object>>> handlerStack =
+    // Thread-local handler stack for nested perform expressions.
+    // Keys are effect / impl content hashes.
+    private final ThreadLocal<Deque<Map<Hash, Object>>> handlerStack =
         ThreadLocal.withInitial(ArrayDeque::new);
 
     // OPTIMIZATION: Collapsed handler map for O(1) lookup (instead of O(N) stack search)
     // This map is updated on every push/pop to maintain a flattened view of all active handlers.
     // Inner scopes shadow outer scopes automatically since we rebuild on each push/pop.
-    private final ThreadLocal<Map<String, Object>> collapsedHandlers =
+    private final ThreadLocal<Map<Hash, Object>> collapsedHandlers =
         ThreadLocal.withInitial(HashMap::new);
 
     // OPTIMIZATION: Stack version counter for DynamicEffectCallNode caching
@@ -338,7 +377,7 @@ public final class MezzeContext {
      * and increments version counter for cache invalidation.
      */
     @TruffleBoundary
-    public void pushHandlers(Map<String, Object> handlers) {
+    public void pushHandlers(Map<Hash, Object> handlers) {
         handlerStack.get().push(new HashMap<>(handlers));
         // Update collapsed map - inner handlers shadow outer
         collapsedHandlers.get().putAll(handlers);
@@ -354,7 +393,7 @@ public final class MezzeContext {
      */
     @TruffleBoundary
     public void popHandlers() {
-        Deque<Map<String, Object>> stack = handlerStack.get();
+        Deque<Map<Hash, Object>> stack = handlerStack.get();
         if (!stack.isEmpty()) {
             stack.pop();
             // Rebuild collapsed map from remaining stack
@@ -369,11 +408,11 @@ public final class MezzeContext {
      * Called after pop to ensure correctness when inner handlers are removed.
      */
     private void rebuildCollapsedHandlers() {
-        Map<String, Object> collapsed = collapsedHandlers.get();
+        Map<Hash, Object> collapsed = collapsedHandlers.get();
         collapsed.clear();
         // Iterate from bottom to top so inner scopes shadow outer
-        Deque<Map<String, Object>> stack = handlerStack.get();
-        for (Map<String, Object> handlers : stack) {
+        Deque<Map<Hash, Object>> stack = handlerStack.get();
+        for (Map<Hash, Object> handlers : stack) {
             collapsed.putAll(handlers);
         }
     }
@@ -383,8 +422,8 @@ public final class MezzeContext {
      * Returns null if no handlers are active.
      */
     @TruffleBoundary
-    public Map<String, Object> getCurrentHandlers() {
-        Deque<Map<String, Object>> stack = handlerStack.get();
+    public Map<Hash, Object> getCurrentHandlers() {
+        Deque<Map<Hash, Object>> stack = handlerStack.get();
         return stack.isEmpty() ? null : stack.peek();
     }
 
@@ -406,8 +445,8 @@ public final class MezzeContext {
      * @param effectContentHash The content hash of the effect (NOT the effect name)
      * @return true if a handler exists for this effect
      */
-    public boolean hasHandlerFor(String effectContentHash) {
-        Map<String, Object> handlers = getCurrentHandlers();
+    public boolean hasHandlerFor(Hash effectContentHash) {
+        Map<Hash, Object> handlers = getCurrentHandlers();
         if (handlers == null) return false;
 
         // Direct O(1) lookup by content hash
@@ -422,7 +461,7 @@ public final class MezzeContext {
      * @return The handler for the effect, or null if not found
      */
     @TruffleBoundary
-    public Object getHandlerFor(String effectContentHash) {
+    public Object getHandlerFor(Hash effectContentHash) {
         // O(1) lookup in collapsed map - no stack iteration needed
         return collapsedHandlers.get().get(effectContentHash);
     }
@@ -433,7 +472,8 @@ public final class MezzeContext {
         int i = 0;
         for (var k : keys) {
             if (i++ > 0) sb.append(", ");
-            sb.append(k, 0, Math.min(16, k.length()));
+            String hex = k.getHex();
+            sb.append(hex, 0, Math.min(16, hex.length()));
         }
         sb.append("]");
         return sb.toString();
@@ -449,7 +489,7 @@ public final class MezzeContext {
      */
     @TruffleBoundary
     public Object findHandlerWithOperation(String operationName) {
-        Map<String, Object> collapsed = collapsedHandlers.get();
+        Map<Hash, Object> collapsed = collapsedHandlers.get();
         for (Object handler : collapsed.values()) {
             if (handler instanceof com.mezze.interpreter.values.MezzeRecord record) {
                 Object op = record.getField(operationName);
@@ -478,17 +518,17 @@ public final class MezzeContext {
      * Used for capturing handlers to propagate to spawned threads.
      */
     @TruffleBoundary
-    public Map<String, Object> getAllCurrentHandlers() {
-        Deque<Map<String, Object>> stack = handlerStack.get();
+    public Map<Hash, Object> getAllCurrentHandlers() {
+        Deque<Map<Hash, Object>> stack = handlerStack.get();
         if (stack.isEmpty()) return null;
 
         // Flatten all stack frames into a single map
         // Later entries (inner scopes) override earlier entries (outer scopes)
-        Map<String, Object> allHandlers = new HashMap<>();
+        Map<Hash, Object> allHandlers = new HashMap<>();
         // Iterate from bottom to top so inner scopes override outer
         var list = new java.util.ArrayList<>(stack);
         java.util.Collections.reverse(list);
-        for (Map<String, Object> handlers : list) {
+        for (Map<Hash, Object> handlers : list) {
             allHandlers.putAll(handlers);
         }
         return allHandlers;

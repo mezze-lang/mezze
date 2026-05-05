@@ -74,7 +74,7 @@ class SQLiteMezzeStore private constructor(
          * and regenerated from source. See
          * `docs/architecture/17-three-file-cache.md`.
          */
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
         const val PROJECT_DIR = ".mz"
         const val CACHE_FILE = "cache.sqlite"
         const val STDLIB_FILE = "stdlib.sqlite"
@@ -486,6 +486,13 @@ class SQLiteMezzeStore private constructor(
                     module TEXT
                 ) WITHOUT ROWID
             """.trimIndent())
+            s.executeUpdate("""
+                CREATE TABLE IF NOT EXISTS $alias.mono_specializations (
+                    specialized_hash TEXT PRIMARY KEY,
+                    generic_hash     TEXT NOT NULL,
+                    type_args_cbor   BLOB NOT NULL
+                ) WITHOUT ROWID
+            """.trimIndent())
         }
     }
 
@@ -518,6 +525,7 @@ class SQLiteMezzeStore private constructor(
             s.executeUpdate("PRAGMA foreign_keys=OFF")
             for (table in listOf(
                 "app_performers", "app_functions", "apps",
+                "mono_specializations",
                 "usages", "references_",
                 "imports", "decls", "edges", "names",
                 "effect_performers", "ability_impls",
@@ -734,6 +742,22 @@ class SQLiteMezzeStore private constructor(
                 ) WITHOUT ROWID
             """.trimIndent())
             s.executeUpdate("CREATE INDEX idx_effect_performers_effect ON effect_performers(effect_hash)")
+
+            // ----------------------------------------------------------------
+            // MONO SPECIALIZATIONS — provenance for monomorphizer outputs.
+            // Read by tools (debugger frame labels, LSP go-to-def) to map
+            // a specialized blob back to the generic decl it specializes.
+            // Never on the execution hot path. specialized_hash FK'd so
+            // dropping a blob naturally cleans up its provenance row.
+            // ----------------------------------------------------------------
+            s.executeUpdate("""
+                CREATE TABLE mono_specializations (
+                    specialized_hash TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE CASCADE,
+                    generic_hash     TEXT NOT NULL,
+                    type_args_cbor   BLOB NOT NULL
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_mono_specializations_generic ON mono_specializations(generic_hash)")
 
             // ----------------------------------------------------------------
             // APP MANIFESTS — entry points for `mez build`
@@ -1693,6 +1717,55 @@ class SQLiteMezzeStore private constructor(
             stmt.executeUpdate()
         }
         l1TypedModules.keys.removeAll { it.startsWith("$modulePath\u0000") }
+    }
+
+    // ====================================================================
+    // MONO SPECIALIZATIONS
+    // ====================================================================
+
+    override fun putMonoSpecialization(specializedHash: Hash, genericHash: Hash, typeArgsCbor: ByteArray) {
+        conn.prepareStatement("""
+            INSERT OR REPLACE INTO mono_specializations (specialized_hash, generic_hash, type_args_cbor)
+            VALUES (?, ?, ?)
+        """.trimIndent()).use { ps ->
+            ps.setString(1, specializedHash.hex)
+            ps.setString(2, genericHash.hex)
+            ps.setBytes(3, typeArgsCbor)
+            ps.executeUpdate()
+        }
+    }
+
+    override fun getMonoSpecialization(specializedHash: Hash): MonoSpecializationRow? {
+        conn.prepareStatement(
+            "SELECT generic_hash, type_args_cbor FROM mono_specializations WHERE specialized_hash = ?"
+        ).use { ps ->
+            ps.setString(1, specializedHash.hex)
+            ps.executeQuery().use { rs ->
+                if (!rs.next()) return null
+                val genericHash = Hash(rs.getString(1))
+                val cbor = rs.getBytes(2)
+                return MonoSpecializationRow(specializedHash, genericHash, cbor)
+            }
+        }
+    }
+
+    override fun getMonoSpecializationsForGeneric(genericHash: Hash): List<MonoSpecializationRow> {
+        val out = ArrayList<MonoSpecializationRow>()
+        conn.prepareStatement(
+            "SELECT specialized_hash, type_args_cbor FROM mono_specializations WHERE generic_hash = ?"
+        ).use { ps ->
+            ps.setString(1, genericHash.hex)
+            ps.executeQuery().use { rs ->
+                while (rs.next()) {
+                    out.add(MonoSpecializationRow(
+                        specializedHash = Hash(rs.getString(1)),
+                        genericHash = genericHash,
+                        typeArgsCbor = rs.getBytes(2)
+                    ))
+                }
+            }
+        }
+        return out
     }
 
     // ====================================================================

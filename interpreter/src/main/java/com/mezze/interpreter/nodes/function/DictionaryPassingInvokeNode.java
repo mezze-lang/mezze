@@ -4,6 +4,7 @@ import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -52,13 +53,37 @@ public final class DictionaryPassingInvokeNode extends MezzeNode {
     @Child
     private MezzeNode argumentsNode;
 
-    // Maps ability name to implementation content hash
-    // Provided by the typechecker via FunctionCall.resolvedAbilities
+    /**
+     * Resolved ability bindings for this call site: paired (abilityName, implHash).
+     * Replaces the previous parallel `String[] abilityNames` + `Hash[] implementationHashes`
+     * arrays — the typed pairing prevents an index-drift bug between the two.
+     */
     @CompilationFinal(dimensions = 1)
-    private final String[] abilityNames;
+    private final AbilityBinding[] bindings;
 
-    @CompilationFinal(dimensions = 1)
-    private final String[] implementationHashes;
+    /** A single ability/impl pair as resolved by the typechecker. */
+    public static final class AbilityBinding {
+        public final String abilityName;
+        public final Hash implHash;
+        public AbilityBinding(String abilityName, Hash implHash) {
+            this.abilityName = abilityName;
+            this.implHash = implHash;
+        }
+    }
+
+    private static AbilityBinding[] zip(String[] abilityNames, Hash[] implementationHashes) {
+        if (abilityNames == null || implementationHashes == null) return new AbilityBinding[0];
+        if (abilityNames.length != implementationHashes.length) {
+            throw new IllegalArgumentException(
+                "abilityNames.length (" + abilityNames.length + ") != implementationHashes.length (" + implementationHashes.length + ")"
+            );
+        }
+        AbilityBinding[] out = new AbilityBinding[abilityNames.length];
+        for (int i = 0; i < abilityNames.length; i++) {
+            out[i] = new AbilityBinding(abilityNames[i], implementationHashes[i]);
+        }
+        return out;
+    }
 
     // Cached DirectCallNode for monomorphic call sites
     @Child
@@ -89,12 +114,11 @@ public final class DictionaryPassingInvokeNode extends MezzeNode {
             MezzeNode functionNode,
             MezzeNode argumentsNode,
             String[] abilityNames,
-            String[] implementationHashes
+            Hash[] implementationHashes
     ) {
         this.functionNode = functionNode;
         this.argumentsNode = argumentsNode;
-        this.abilityNames = abilityNames;
-        this.implementationHashes = implementationHashes;
+        this.bindings = zip(abilityNames, implementationHashes);
     }
 
     @Override
@@ -191,16 +215,17 @@ public final class DictionaryPassingInvokeNode extends MezzeNode {
         abilityOperationCount = requirements.length;
 
         // Build map of ability name -> implementation hash for fast lookup
-        Map<String, String> abilityToHash = new HashMap<>();
-        for (int i = 0; i < abilityNames.length; i++) {
-            abilityToHash.put(abilityNames[i], implementationHashes[i]);
+        Map<String, Hash> abilityToHash = new HashMap<>();
+        for (AbilityBinding b : bindings) {
+            abilityToHash.put(b.abilityName, b.implHash);
         }
 
         // Resolve implementation records
         MezzeContext context = MezzeContext.get(this);
-        Map<String, MezzeRecord> hashToImpl = new HashMap<>();
+        Map<Hash, MezzeRecord> hashToImpl = new HashMap<>();
 
-        for (String hash : implementationHashes) {
+        for (AbilityBinding b : bindings) {
+            Hash hash = b.implHash;
             if (hash != null && !hashToImpl.containsKey(hash)) {
                 Object implValue = context.getAbilityImplByHash(hash);
                 if (implValue instanceof MezzeRecord impl) {
@@ -222,7 +247,7 @@ public final class DictionaryPassingInvokeNode extends MezzeNode {
 
         for (int i = 0; i < requirements.length; i++) {
             MezzeFunction.AbilitySlotRequirement req = requirements[i];
-            String hash = abilityToHash.get(req.abilityName);
+            Hash hash = abilityToHash.get(req.abilityName);
 
             if (hash == null) {
                 throw new RuntimeException(
@@ -234,7 +259,7 @@ public final class DictionaryPassingInvokeNode extends MezzeNode {
             if (impl == null) {
                 throw new RuntimeException(
                     "Implementation not found for ability " + req.abilityName +
-                    " with hash: " + hash);
+                    " with hash: " + hash.getHex());
             }
 
             // Use cached field index if available
@@ -273,7 +298,7 @@ public final class DictionaryPassingInvokeNode extends MezzeNode {
             MezzeNode functionNode,
             MezzeNode argumentsNode,
             String[] abilityNames,
-            String[] implementationHashes
+            Hash[] implementationHashes
     ) {
         return new DictionaryPassingInvokeNode(functionNode, argumentsNode, abilityNames, implementationHashes);
     }

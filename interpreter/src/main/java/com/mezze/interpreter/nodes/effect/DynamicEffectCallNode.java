@@ -6,6 +6,7 @@ import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeSuspended;
 import com.mezze.interpreter.values.MezzeThunk;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -43,7 +44,7 @@ public final class DynamicEffectCallNode extends MezzeNode {
 
     /** Content hash for effect lookup (preferred over effectName when available) */
     @CompilationFinal
-    private final String effectContentHash;
+    private final Hash effectContentHash;
 
     @Child
     private MezzeNode argumentNode;
@@ -80,7 +81,7 @@ public final class DynamicEffectCallNode extends MezzeNode {
     @Child
     private DirectCallNode directCallNode;
 
-    public DynamicEffectCallNode(String effectName, String operationName, MezzeNode argumentNode, String effectContentHash) {
+    public DynamicEffectCallNode(String effectName, String operationName, MezzeNode argumentNode, Hash effectContentHash) {
         this.effectName = effectName;
         this.operationName = operationName;
         this.argumentNode = argumentNode;
@@ -140,14 +141,15 @@ public final class DynamicEffectCallNode extends MezzeNode {
         // All effect hashes now use canonical computeHash("effect_${name}") —
         // no fallback needed since hashes are consistent between PerformOp and HandleNode.
         Object handler = null;
-        if (effectContentHash != null && !effectContentHash.isEmpty()) {
+        if (effectContentHash != null) {
             handler = context.getHandlerFor(effectContentHash);
         }
 
         // NO HANDLER AVAILABLE - Create suspended computation (LAZY EFFECTS)
         if (handler == null) {
             if (System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println("[EFFECT-MISS] op=" + operationName + " hash=" + (effectContentHash != null ? effectContentHash.substring(0, Math.min(16, effectContentHash.length())) : "null") + " available=" + context.getActiveEffectHashes());
+                String hex = effectContentHash != null ? effectContentHash.getHex() : "null";
+                System.err.println("[EFFECT-MISS] op=" + operationName + " hash=" + hex.substring(0, Math.min(16, hex.length())) + " available=" + context.getActiveEffectHashes());
             }
             return createSuspendedEffectCall(argument);
         }
@@ -168,7 +170,7 @@ public final class DynamicEffectCallNode extends MezzeNode {
                 if (result instanceof MezzeRecord rec) {
                     handlerRecord = rec;
                     // Cache the resolved record back in context for future lookups
-                    if (effectContentHash != null && !effectContentHash.isEmpty()) {
+                    if (effectContentHash != null) {
                         context.defineGlobal(effectContentHash, handlerRecord);
                     }
                 } else {
@@ -200,7 +202,7 @@ public final class DynamicEffectCallNode extends MezzeNode {
 
         if (!(operation instanceof MezzeFunction opFunc)) {
             throw new RuntimeException("Operation '" + operationName + "' not found or not a function in handler (hash: " +
-                effectContentHash + "), got: " + (operation == null ? "null" : operation.getClass().getSimpleName()));
+                (effectContentHash != null ? effectContentHash.getHex() : "null") + "), got: " + (operation == null ? "null" : operation.getClass().getSimpleName()));
         }
 
         // OPTIMIZATION: Update cache for future fast-path calls
@@ -240,7 +242,7 @@ public final class DynamicEffectCallNode extends MezzeNode {
     @TruffleBoundary
     private MezzeSuspended createSuspendedEffectCall(Object argument) {
         // Content hash is required for proper handler resolution
-        if (effectContentHash == null || effectContentHash.isEmpty()) {
+        if (effectContentHash == null) {
             throw new RuntimeException("Effect content hash is required for suspended effect call. " +
                 "Operation: " + operationName);
         }
@@ -284,7 +286,7 @@ public final class DynamicEffectCallNode extends MezzeNode {
      * @param argumentNode The argument expression node
      * @param effectContentHash Content hash of the effect (preferred for lookup)
      */
-    public static DynamicEffectCallNode create(String effectName, String operationName, MezzeNode argumentNode, String effectContentHash) {
+    public static DynamicEffectCallNode create(String effectName, String operationName, MezzeNode argumentNode, Hash effectContentHash) {
         return new DynamicEffectCallNode(effectName, operationName, argumentNode, effectContentHash);
     }
 

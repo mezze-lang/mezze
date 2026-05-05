@@ -2,10 +2,12 @@ package com.mezze.language.typechecker.cache
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.PrimitiveTypes
+import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.store.MezzeStore
 import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.typedast.Hash
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -61,26 +63,25 @@ object TypeCheckCache {
 
     data class CachedConstraintResult(
         val result: ConstraintResult,
-        val contextHash: String,
+        val contextHash: Hash,
         val timestamp: Long = System.currentTimeMillis()
     )
 
-    private val constraintCacheL1 = ConcurrentHashMap<String, CachedConstraintResult>()
+    /** Composite key (bindingHash, contextHash) — typed pair so neither component can collide. */
+    data class ConstraintCacheKey(val bindingHash: Hash, val contextHash: Hash)
+
+    private val constraintCacheL1 = ConcurrentHashMap<ConstraintCacheKey, CachedConstraintResult>()
 
     /**
      * Get cached constraint result.
      * Checks L1 (memory) first, then L2 (store).
      */
-    fun getConstraintResult(bindingHash: String, contextHash: String): ConstraintResult? {
-        // L1: Check in-memory cache
-        val l1Key = "$bindingHash|$contextHash"
-        constraintCacheL1[l1Key]?.let { cached ->
-            if (cached.contextHash == contextHash) {
-                constraintCacheHits.incrementAndGet()
-                return cached.result
-            }
+    fun getConstraintResult(bindingHash: Hash, contextHash: Hash): ConstraintResult? {
+        val key = ConstraintCacheKey(bindingHash, contextHash)
+        constraintCacheL1[key]?.let { cached ->
+            constraintCacheHits.incrementAndGet()
+            return cached.result
         }
-
         constraintCacheMisses.incrementAndGet()
         return null
     }
@@ -88,21 +89,28 @@ object TypeCheckCache {
     /**
      * Store constraint result in cache.
      */
-    fun putConstraintResult(bindingHash: String, contextHash: String, result: ConstraintResult) {
-        val l1Key = "$bindingHash|$contextHash"
-        constraintCacheL1[l1Key] = CachedConstraintResult(result, contextHash)
+    fun putConstraintResult(bindingHash: Hash, contextHash: Hash, result: ConstraintResult) {
+        val key = ConstraintCacheKey(bindingHash, contextHash)
+        constraintCacheL1[key] = CachedConstraintResult(result, contextHash)
     }
 
     /**
-     * Compute a deterministic hash for type arguments.
+     * Compute a content-addressed hash for type arguments. Replaces the old
+     * `String.hashCode().toString(16)` (32-bit collision space) with a full
+     * MezzeHash-derived identity.
      */
-    fun hashTypeArgs(typeArgs: Map<String, MezzeType>): String {
-        if (typeArgs.isEmpty()) return "empty"
-        return typeArgs.entries
-            .sortedBy { it.key }
-            .joinToString("|") { (k, v) -> "$k:${typeToString(v)}" }
-            .hashCode()
-            .toString(16)
+    fun hashTypeArgs(typeArgs: Map<String, MezzeType>): Hash {
+        val builder = MezzeHashBuilder()
+        builder.append("typeArgs")
+        if (typeArgs.isEmpty()) {
+            builder.append("empty")
+        } else {
+            for ((k, v) in typeArgs.entries.sortedBy { it.key }) {
+                builder.append(k)
+                builder.append(typeToString(v))
+            }
+        }
+        return builder.buildHash()
     }
 
     // ========================================================================
@@ -110,12 +118,12 @@ object TypeCheckCache {
     // ========================================================================
 
     data class CachedAbilityImpl(
-        val implementationHash: String,
+        val implementationHash: Hash,
         val modulePath: String?,
         val timestamp: Long = System.currentTimeMillis()
     )
 
-    private val abilityImplCacheL1 = ConcurrentHashMap<String, CachedAbilityImpl>()
+    private val abilityImplCacheL1 = ConcurrentHashMap<Hash, CachedAbilityImpl>()
 
     /**
      * Get cached ability implementation.
@@ -129,18 +137,7 @@ object TypeCheckCache {
             return it
         }
 
-        // L2: Check store (if enabled)
-        store?.let { s ->
-            try {
-                // Use the ability_impls table via store interface
-                // The key format is "abilityName$type1$type2"
-                // We need the abilityHash to query, but we only have the name.
-                // For now, keep L2 lookup as a future improvement when we have
-                // a name→hash index readily available.
-            } catch (_: Exception) {
-                // Ignore store errors
-            }
-        }
+        // L2 store lookup is a future improvement (need a name→hash index).
 
         abilityImplCacheMisses.incrementAndGet()
         return null
@@ -149,17 +146,23 @@ object TypeCheckCache {
     /**
      * Store ability implementation in cache.
      */
-    fun putAbilityImpl(abilityName: String, targetTypes: List<MezzeType>, implHash: String, modulePath: String?) {
+    fun putAbilityImpl(abilityName: String, targetTypes: List<MezzeType>, implHash: Hash, modulePath: String?) {
         val key = computeAbilityKey(abilityName, targetTypes)
         abilityImplCacheL1[key] = CachedAbilityImpl(implHash, modulePath)
     }
 
     /**
-     * Compute a deterministic key for ability implementation lookup.
+     * Compute a content-addressed key for ability implementation lookup.
+     * Replaces the old `"$abilityName\$$typeStr"` interpolation (collision
+     * class because typeToString embeds `$`) with a typed Hash derived from
+     * the canonical hash builder.
      */
-    fun computeAbilityKey(abilityName: String, targetTypes: List<MezzeType>): String {
-        val typeStr = targetTypes.joinToString("$") { typeToString(it) }
-        return "$abilityName\$$typeStr"
+    fun computeAbilityKey(abilityName: String, targetTypes: List<MezzeType>): Hash {
+        val builder = MezzeHashBuilder()
+        builder.append("abilityKey")
+        builder.append(abilityName)
+        for (t in targetTypes) builder.append(typeToString(t))
+        return builder.buildHash()
     }
 
     // ========================================================================
@@ -171,14 +174,14 @@ object TypeCheckCache {
         typeDeclarations: Set<String>,
         abilityNames: Set<String>,
         effectNames: Set<String>
-    ): String {
-        val components = listOf(
-            "b:" + bindingNames.sorted().joinToString(","),
-            "t:" + typeDeclarations.sorted().joinToString(","),
-            "a:" + abilityNames.sorted().joinToString(","),
-            "e:" + effectNames.sorted().joinToString(",")
-        )
-        return components.joinToString("|").hashCode().toString(16)
+    ): Hash {
+        val builder = MezzeHashBuilder()
+        builder.append("ctx")
+        for (b in bindingNames.sorted()) { builder.append("b"); builder.append(b) }
+        for (t in typeDeclarations.sorted()) { builder.append("t"); builder.append(t) }
+        for (a in abilityNames.sorted()) { builder.append("a"); builder.append(a) }
+        for (e in effectNames.sorted()) { builder.append("e"); builder.append(e) }
+        return builder.buildHash()
     }
 
     // ========================================================================

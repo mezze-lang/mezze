@@ -32,12 +32,12 @@ class TruffleCompiler(
     private val language: MezzeLanguage
 ) {
     private val sourceCache = mutableMapOf<String, Source>()
-    private val functionRegistry = mutableMapOf<String, FunctionIR>()
+    private val functionRegistry = mutableMapOf<com.mezze.language.typedast.Hash, FunctionIR>()
 
     /** Register all FunctionIRs so MakeLambdaIR can find them */
     fun registerFunctions(functions: List<FunctionIR>) {
         for (fn in functions) {
-            functionRegistry[fn.hash.hex] = fn
+            functionRegistry[fn.hash] = fn
         }
     }
 
@@ -147,12 +147,12 @@ class TruffleCompiler(
             is ReadLocalIR -> ReadLocalNode(node.slot, slotKindToInt(node.kind))
             is ReadGlobalByHashIR -> {
                 // Read a global definition by content hash. Auto-evaluates value thunks.
-                com.mezze.interpreter.nodes.ReadGlobalByHashNode(node.hash.hex)
+                com.mezze.interpreter.nodes.ReadGlobalByHashNode(node.hash)
             }
             is ReadGlobalFnByHashIR -> {
                 // Read a function from the global registry by content hash WITHOUT auto-evaluating
                 // thunks. Used for dictionary passing to inject ability op functions as hidden params.
-                com.mezze.interpreter.nodes.ReadGlobalFnByHashNode(node.hash.hex)
+                com.mezze.interpreter.nodes.ReadGlobalFnByHashNode(node.hash)
             }
             is ReadScopeIR -> {
                 // Read a runtime-injected scope variable (e.g., `scope` from HandleNode) by name.
@@ -171,10 +171,10 @@ class TruffleCompiler(
                 if (node.isTailCall) {
                     // For tail calls, resolve the function without calling it.
                     // TailCallNode will throw TailCallException with the function's CallTarget.
-                    val fnNode = FunctionLookupNode(node.targetHash.hex)
+                    val fnNode = FunctionLookupNode(node.targetHash)
                     TailCallNode.create(fnNode, arrayOf(argNode))
                 } else {
-                    MonomorphicCallNode(node.targetHash.hex, node.targetHash.hex, argNode)
+                    MonomorphicCallNode(node.targetHash, node.targetHash.toString(), argNode)
                 }
             }
             is CallLocalIR -> {
@@ -415,7 +415,7 @@ class TruffleCompiler(
                             // This ensures local functions are findable by MonomorphicCallNode via hash
                             allNodes.add(WriteLocalWithContextNode.create(
                                 valueNode, stmt.slot, slotKindToInt(stmt.kind),
-                                stmt.name, stmt.contentHash.hex
+                                stmt.name, stmt.contentHash
                             ))
                         }
                         is StmtIR.Expr -> allNodes.add(compileNode(stmt.node, source))
@@ -457,7 +457,7 @@ class TruffleCompiler(
             // === Closures ===
             is MakeLambdaIR -> {
                 // Look up the function body from the registry and compile it
-                val fnIR = functionRegistry[node.functionHash.hex]
+                val fnIR = functionRegistry[node.functionHash]
                 val closureSlots = node.captures.map { it.slot }.toIntArray()
                 val closureKinds = node.captures.map { slotKindToInt(it.kind) }.toIntArray()
 
@@ -468,7 +468,7 @@ class TruffleCompiler(
                     val innerFd = buildFrameDescriptor(fnIR)
                     FunctionDefinitionNode(
                         fnIR.name,
-                        node.functionHash.hex,
+                        node.functionHash,
                         closureSlots,
                         closureKinds,
                         fnIR.paramNames.toTypedArray(),
@@ -478,11 +478,11 @@ class TruffleCompiler(
                     )
                 } else {
                     // Fallback: lookup by hash at runtime
-                    val bodyNode = MonomorphicCallNode(node.functionHash.hex, node.functionHash.hex, UnitLiteralNode())
+                    val bodyNode = MonomorphicCallNode(node.functionHash, node.functionHash.toString(), UnitLiteralNode())
                     val innerFd = FrameDescriptor.newBuilder().build()
                     FunctionDefinitionNode(
-                        node.functionHash.hex,
-                        node.functionHash.hex,
+                        node.functionHash.toString(),
+                        node.functionHash,
                         closureSlots,
                         closureKinds,
                         emptyArray(),
@@ -502,12 +502,12 @@ class TruffleCompiler(
                     // Process from last to first so the first handler is outermost.
                     var currentBody: MezzeNode = bodyNode
                     for (handler in node.handlers.reversed()) {
-                        val contentHashes = arrayOf(handler.handlerHash.hex, handler.effectHash.hex)
+                        val contentHashes = arrayOf(handler.handlerHash, handler.effectHash)
                         val handlerNode: MezzeNode = if (handler.params != null) {
                             val paramsNode = compileNode(handler.params!!, source)
-                            HandleNode.createParameterizedHandlerLookup(-1, handler.handlerHash.hex, handler.performerName, paramsNode)
+                            HandleNode.createParameterizedHandlerLookup(-1, handler.handlerHash, handler.performerName, paramsNode)
                         } else {
-                            HandleNode.createHandlerLookup(-1, handler.handlerHash.hex, handler.performerName)
+                            HandleNode.createHandlerLookup(-1, handler.handlerHash, handler.performerName)
                         }
                         currentBody = HandleNode(
                             -1,                     // no local slot
@@ -534,7 +534,7 @@ class TruffleCompiler(
                     node.operationName,     // operation name for handler record lookup
                     node.operationName,     // operation name
                     argNode,
-                    node.effectHash.hex     // effect content hash
+                    node.effectHash         // effect content hash
                 )
             }
             is DictMethodCallIR -> {

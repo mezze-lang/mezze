@@ -4,6 +4,7 @@ import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeFunction;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -23,7 +24,7 @@ public final class MonomorphicCallNode extends MezzeNode {
     private final String functionName;
 
     @CompilationFinal
-    private final String contentHash;
+    private final Hash contentHash;
 
     @Child
     private MezzeNode argumentNode;
@@ -40,7 +41,7 @@ public final class MonomorphicCallNode extends MezzeNode {
     @CompilationFinal
     private int cachedClosureLength;
 
-    public MonomorphicCallNode(String functionName, String contentHash, MezzeNode argumentNode) {
+    public MonomorphicCallNode(Hash contentHash, String functionName, MezzeNode argumentNode) {
         this.functionName = functionName;
         this.contentHash = contentHash;
         this.argumentNode = argumentNode;
@@ -106,25 +107,20 @@ public final class MonomorphicCallNode extends MezzeNode {
     private void resolveFunction() {
         MezzeContext context = MezzeContext.get(this);
 
-        String lookupKey = contentHash != null ? contentHash : functionName;
-        Object value = context.lookupGlobal(lookupKey);
-
-        if (value == null && contentHash != null && !contentHash.equals(functionName)) {
-            value = context.lookupGlobal(functionName);
-        }
+        Object value = contentHash != null ? context.lookupGlobal(contentHash) : null;
 
         // Fall back to Language-level stdlib cache — these are compiled once, not per-test.
         // This avoids registering all stdlib CallTargets in every test's context.
         if (value == null && contentHash != null) {
             CallTarget stdlibCT = MezzeLanguage.get(this).getCachedStdlibCallTarget(contentHash);
             if (stdlibCT != null) {
-                value = MezzeFunction.create(stdlibCT, contentHash);
+                value = MezzeFunction.create(stdlibCT, contentHash.getHex());
             }
         }
 
         if (value == null) {
             throw new RuntimeException(
-                "Function not found" + (contentHash != null ? " for content hash: " + contentHash : "") +
+                "Function not found" + (contentHash != null ? " for content hash: " + contentHash.getHex() : "") +
                 " (function name: " + functionName + ")"
             );
         }
@@ -149,10 +145,10 @@ public final class MonomorphicCallNode extends MezzeNode {
     }
 
     public static MonomorphicCallNode create(String functionName, MezzeNode argumentNode) {
-        return new MonomorphicCallNode(functionName, null, argumentNode);
+        return new MonomorphicCallNode(null, functionName, argumentNode);
     }
 
-    public static MonomorphicCallNode create(String functionName, String contentHash, MezzeNode argumentNode) {
-        return new MonomorphicCallNode(functionName, contentHash, argumentNode);
+    public static MonomorphicCallNode create(Hash contentHash, String functionName, MezzeNode argumentNode) {
+        return new MonomorphicCallNode(contentHash, functionName, argumentNode);
     }
 }

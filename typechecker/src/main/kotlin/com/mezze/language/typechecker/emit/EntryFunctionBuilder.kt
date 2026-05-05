@@ -178,6 +178,6 @@ object EntryFunctionBuilder {
     private fun computeHash(input: String): Hash {
         val builder = com.mezze.language.ast.hashing.MezzeHashBuilder()
         builder.append(input)
-        return Hash(builder.build().toFullHexString())
+        return builder.buildHash()
     }
 }

@@ -51,7 +51,7 @@ object PrecompiledStdlib {
     val preludeImportContext: ModuleImportContext
 
     /** v1 TypedModules — used during init to build stdlibTypedModules, cleared after. */
-    var loadedModules: Map<String, com.mezze.language.typechecker.module.TypedModule>
+    var loadedModules: Map<com.mezze.language.ast.ModulePath, com.mezze.language.typechecker.module.TypedModule>
         private set
 
     /** Stdlib TypedModules — full modules during init, cleared after metadata extraction. */

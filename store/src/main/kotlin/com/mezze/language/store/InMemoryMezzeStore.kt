@@ -30,6 +30,7 @@ class InMemoryMezzeStore : MezzeStore {
     private val decls = ArrayList<DeclRow>()
     private val parsedModules = HashMap<String, ByteArray>()     // "path\0hash" → blob
     private val typedModules = HashMap<String, ByteArray>()      // "path\0hash" → blob
+    private val monoSpecializations = HashMap<String, MonoSpecializationRow>()  // specialized.hex → row
 
     private fun nameKey(module: String, name: String) = "$module\u0000$name"
     private fun moduleKey(path: String, hash: String) = "$path\u0000$hash"
@@ -246,6 +247,18 @@ class InMemoryMezzeStore : MezzeStore {
     override fun clearTypedModulesForPath(modulePath: String) {
         typedModules.keys.removeAll { it.startsWith("$modulePath\u0000") }
     }
+
+    // ── MONO SPECIALIZATIONS ──
+
+    override fun putMonoSpecialization(specializedHash: Hash, genericHash: Hash, typeArgsCbor: ByteArray) {
+        monoSpecializations[specializedHash.hex] = MonoSpecializationRow(specializedHash, genericHash, typeArgsCbor)
+    }
+
+    override fun getMonoSpecialization(specializedHash: Hash): MonoSpecializationRow? =
+        monoSpecializations[specializedHash.hex]
+
+    override fun getMonoSpecializationsForGeneric(genericHash: Hash): List<MonoSpecializationRow> =
+        monoSpecializations.values.filter { it.genericHash == genericHash }
 
     // ── LIFECYCLE ──
 

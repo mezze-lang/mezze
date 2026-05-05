@@ -32,7 +32,7 @@ object TypedASTHasher {
     fun hashExpr(expr: TypedExpr): Hash {
         val builder = MezzeHashBuilder()
         appendExpr(builder, expr)
-        return Hash(builder.build().toFullHexString())
+        return builder.buildHash()
     }
 
     /**
@@ -49,7 +49,7 @@ object TypedASTHasher {
         }
         // Hash the body expression
         appendExpr(builder, decl.value)
-        return Hash(builder.build().toFullHexString())
+        return builder.buildHash()
     }
 
     /**
@@ -65,7 +65,7 @@ object TypedASTHasher {
             opBuilder.append(decl.effectHash.hex)
             opBuilder.append(opName)
             appendExpr(opBuilder, opBody)
-            opHashes[opName] = Hash(opBuilder.build().toFullHexString())
+            opHashes[opName] = opBuilder.buildHash()
         }
 
         // Hash the performer as a whole
@@ -82,30 +82,9 @@ object TypedASTHasher {
             builder.append(opName)
             builder.append(opHashes[opName]!!.hex)
         }
-        val performerHash = Hash(builder.build().toFullHexString())
+        val performerHash = builder.buildHash()
 
         return PerformerHashes(performerHash, opHashes)
-    }
-
-    /**
-     * Hash an ability impl declaration.
-     */
-    fun hashAbilityImpl(impl: TypedAbilityImpl): Hash {
-        val builder = MezzeHashBuilder()
-        builder.append(byteArrayOf(HashTags.IMPL_ABILITY_DECLARATION))
-        builder.append(impl.abilityHash.hex)
-        // Target types
-        builder.appendInt(impl.targetTypes.size)
-        for (t in impl.targetTypes) {
-            appendType(builder, t)
-        }
-        // Operations (sorted by name for determinism)
-        builder.appendInt(impl.operations.size)
-        for (opName in impl.operations.keys.sorted()) {
-            builder.append(opName)
-            appendExpr(builder, impl.operations[opName]!!)
-        }
-        return Hash(builder.build().toFullHexString())
     }
 
     /**
@@ -121,7 +100,7 @@ object TypedASTHasher {
             appendType(builder, op.paramType)
             appendType(builder, op.returnType)
         }
-        return Hash(builder.build().toFullHexString())
+        return builder.buildHash()
     }
 
     // ========================================================================
@@ -413,64 +392,10 @@ object TypedASTHasher {
         }
     }
 
-    // ========================================================================
-    // Type hashing (for ability impl target types)
-    // ========================================================================
-
-    private fun appendType(b: MezzeHashBuilder, type: com.mezze.language.ast.MezzeType) {
-        when (type) {
-            is com.mezze.language.ast.MezzeType.IntType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x01))
-            is com.mezze.language.ast.MezzeType.FloatType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x02))
-            is com.mezze.language.ast.MezzeType.StringType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x03))
-            is com.mezze.language.ast.MezzeType.BoolType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x04))
-            is com.mezze.language.ast.MezzeType.NatType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x06))
-            is com.mezze.language.ast.MezzeType.CharType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x07))
-            is com.mezze.language.ast.MezzeType.FracType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x08))
-            is com.mezze.language.ast.MezzeType.BytesType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x09))
-            is com.mezze.language.ast.MezzeType.SeqType -> {
-                b.append(byteArrayOf(HashTags.SEQ_TYPE))
-                appendType(b, type.elementType)
-            }
-            is com.mezze.language.ast.MezzeType.TypeApplication -> {
-                b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR))
-                b.append(type.constructor)
-                b.appendInt(type.args.size)
-                for (arg in type.args) appendType(b, arg)
-            }
-            is com.mezze.language.ast.MezzeType.FunctionType -> {
-                b.append(byteArrayOf(HashTags.FUNCTION_TYPE))
-                appendType(b, type.paramType)
-                appendType(b, type.returnType)
-            }
-            is com.mezze.language.ast.MezzeType.RecordType -> {
-                b.append(byteArrayOf(HashTags.RECORD_TYPE))
-                b.appendInt(type.fields.size)
-                for (name in type.fields.keys.sorted()) {
-                    b.append(name)
-                    appendType(b, type.fields[name]!!)
-                }
-            }
-            is com.mezze.language.ast.MezzeType.VariantType -> {
-                b.append(byteArrayOf(HashTags.VARIANT_TYPE))
-                b.appendInt(type.constructors.size)
-                for (name in type.constructors.keys.sorted()) {
-                    b.append(name)
-                    val payload = type.constructors[name]
-                    b.appendBoolean(payload != null)
-                    payload?.let { appendType(b, it) }
-                }
-            }
-            is com.mezze.language.ast.MezzeType.VarType -> {
-                b.append(byteArrayOf(HashTags.TYPE_VAR))
-                b.append(type.variable.name)
-            }
-            else -> {
-                // Fallback for complex types — use string representation
-                b.append(byteArrayOf(HashTags.TYPE_VAR, 0x01))
-                b.append(type.toString())
-            }
-        }
-    }
+    // Type hashing — canonical encoder lives in
+    // [com.mezze.language.ast.hashing.appendType]; we just import it.
+    private fun appendType(b: MezzeHashBuilder, type: com.mezze.language.ast.MezzeType) =
+        com.mezze.language.ast.hashing.appendType(b, type)
 
     // ========================================================================
     // Result types

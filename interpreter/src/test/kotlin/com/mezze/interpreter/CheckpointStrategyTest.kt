@@ -60,12 +60,19 @@ class CheckpointStrategyTest {
 
     /**
      * Checkpoint periodically based on time intervals.
+     *
+     * The clock is injectable so tests can drive time deterministically
+     * (the default supplier is `System.currentTimeMillis`, so production
+     * code stays unchanged).
      */
-    open class PeriodicCheckpoint(private val intervalMs: Long) : CheckpointStrategy {
+    open class PeriodicCheckpoint(
+        private val intervalMs: Long,
+        private val clock: () -> Long = System::currentTimeMillis,
+    ) : CheckpointStrategy {
         private var lastCheckpoint = 0L
 
         override fun shouldCheckpoint(): Boolean {
-            val now = System.currentTimeMillis()
+            val now = clock()
             return if (now - lastCheckpoint >= intervalMs) {
                 lastCheckpoint = now
                 true
@@ -75,7 +82,7 @@ class CheckpointStrategyTest {
         }
 
         override fun onCheckpoint(state: ContinuationStateMachine) {
-            lastCheckpoint = System.currentTimeMillis()
+            lastCheckpoint = clock()
         }
     }
 
@@ -245,7 +252,8 @@ class CheckpointStrategyTest {
 
     @Test
     fun testPeriodicCheckpointBasic() {
-        val strategy = PeriodicCheckpoint(intervalMs = 100L)
+        var now = 1_000L
+        val strategy = PeriodicCheckpoint(intervalMs = 100L, clock = { now })
 
         // First call should checkpoint
         assertTrue(strategy.shouldCheckpoint())
@@ -253,8 +261,8 @@ class CheckpointStrategyTest {
         // Immediate next call should not
         assertFalse(strategy.shouldCheckpoint())
 
-        // Wait for interval
-        Thread.sleep(150)
+        // Advance past interval
+        now += 150
 
         // Should checkpoint again
         assertTrue(strategy.shouldCheckpoint())
@@ -262,43 +270,50 @@ class CheckpointStrategyTest {
 
     @Test
     fun testPeriodicCheckpointTiming() {
-        val strategy = PeriodicCheckpoint(intervalMs = 50L)
+        // Drive time with a virtual clock to keep the assertion deterministic
+        // regardless of host scheduling jitter. Start at a time past the
+        // interval so the first call mirrors production behaviour (where
+        // lastCheckpoint=0 and System.currentTimeMillis is huge).
+        var now = 1_000L
+        val strategy = PeriodicCheckpoint(intervalMs = 50L, clock = { now })
 
-        // First checkpoint
+        // First checkpoint: now=1000, lastCheckpoint=0 → 1000 >= 50 → true,
+        // lastCheckpoint becomes 1000.
         assertTrue(strategy.shouldCheckpoint())
 
         // Within interval - should not checkpoint
-        Thread.sleep(25)
+        now += 25  // 1025-1000 = 25 < 50
         assertFalse(strategy.shouldCheckpoint())
 
         // Still within interval
-        Thread.sleep(10)
+        now += 10  // 1035-1000 = 35 < 50
         assertFalse(strategy.shouldCheckpoint())
 
         // After interval
-        Thread.sleep(20)
+        now += 20  // 1055-1000 = 55 >= 50
         assertTrue(strategy.shouldCheckpoint())
     }
 
     @Test
     fun testPeriodicCheckpointMultipleCycles() {
-        val strategy = PeriodicCheckpoint(intervalMs = 50L)
+        var now = 1_000L
+        val strategy = PeriodicCheckpoint(intervalMs = 50L, clock = { now })
         val checkpoints = mutableListOf<Boolean>()
 
-        // Cycle 1
-        checkpoints.add(strategy.shouldCheckpoint()) // true
-        Thread.sleep(25)
-        checkpoints.add(strategy.shouldCheckpoint()) // false
+        // First call: 1000-0 >= 50 → true; lastCheckpoint=1000
+        checkpoints.add(strategy.shouldCheckpoint())
+        now += 25  // 1025-1000 = 25 < 50
+        checkpoints.add(strategy.shouldCheckpoint())
 
         // Cycle 2
-        Thread.sleep(30)
-        checkpoints.add(strategy.shouldCheckpoint()) // true
-        Thread.sleep(25)
-        checkpoints.add(strategy.shouldCheckpoint()) // false
+        now += 30  // 1055-1000 = 55 >= 50 → true; lastCheckpoint=1055
+        checkpoints.add(strategy.shouldCheckpoint())
+        now += 25  // 1080-1055 = 25 < 50
+        checkpoints.add(strategy.shouldCheckpoint())
 
         // Cycle 3
-        Thread.sleep(30)
-        checkpoints.add(strategy.shouldCheckpoint()) // true
+        now += 30  // 1110-1055 = 55 >= 50 → true
+        checkpoints.add(strategy.shouldCheckpoint())
 
         assertEquals(listOf(true, false, true, false, true), checkpoints)
     }
@@ -315,7 +330,8 @@ class CheckpointStrategyTest {
 
     @Test
     fun testPeriodicCheckpointLongInterval() {
-        val strategy = PeriodicCheckpoint(intervalMs = 10000L) // 10 seconds
+        var now = 100_000L
+        val strategy = PeriodicCheckpoint(intervalMs = 10000L, clock = { now }) // 10 seconds
 
         // First checkpoint
         assertTrue(strategy.shouldCheckpoint())
@@ -323,23 +339,24 @@ class CheckpointStrategyTest {
         // Many calls within interval should all be false
         repeat(100) {
             assertFalse(strategy.shouldCheckpoint())
-            Thread.sleep(10)
+            now += 10
         }
     }
 
     @Test
     fun testPeriodicCheckpointReset() {
-        val strategy = PeriodicCheckpoint(intervalMs = 100L)
+        var now = 1_000L
+        val strategy = PeriodicCheckpoint(intervalMs = 100L, clock = { now })
 
-        assertTrue(strategy.shouldCheckpoint()) // Resets timer
+        assertTrue(strategy.shouldCheckpoint()) // Resets timer; lastCheckpoint=1000
 
-        Thread.sleep(50)
+        now += 50  // 1050-1000 = 50 < 100
         assertFalse(strategy.shouldCheckpoint())
 
-        Thread.sleep(60)
-        assertTrue(strategy.shouldCheckpoint()) // Resets timer again
+        now += 60  // 1110-1000 = 110 >= 100
+        assertTrue(strategy.shouldCheckpoint()) // Resets timer; lastCheckpoint=1110
 
-        Thread.sleep(50)
+        now += 50  // 1160-1110 = 50 < 100
         assertFalse(strategy.shouldCheckpoint())
     }
 
@@ -552,7 +569,8 @@ class CheckpointStrategyTest {
 
     @Test
     fun testStrategyBehaviorDifferences() {
-        val periodic = PeriodicCheckpoint(intervalMs = 50L)
+        var now = 1_000L
+        val periodic = PeriodicCheckpoint(intervalMs = 50L, clock = { now })
         val count = OperationCountCheckpoint(operationCount = 3)
         val explicit = ExplicitCheckpoint()
 
@@ -561,8 +579,8 @@ class CheckpointStrategyTest {
         assertFalse(count.shouldCheckpoint())   // Count needs operations
         assertFalse(explicit.shouldCheckpoint()) // Explicit needs request
 
-        // After waiting
-        Thread.sleep(60)
+        // After advancing past interval
+        now += 60
         assertTrue(periodic.shouldCheckpoint()) // Time passed
         assertFalse(count.shouldCheckpoint())   // Still counting
         assertFalse(explicit.shouldCheckpoint()) // No request
@@ -788,16 +806,15 @@ class CheckpointStrategyTest {
 
     @Test
     fun testPeriodicCheckpointClockSkew() {
-        val strategy = PeriodicCheckpoint(intervalMs = 100L)
+        var now = 1_000L
+        val strategy = PeriodicCheckpoint(intervalMs = 100L, clock = { now })
 
-        assertTrue(strategy.shouldCheckpoint()) // t=0
+        assertTrue(strategy.shouldCheckpoint())
 
-        // Simulate clock going backwards (shouldn't happen in practice)
-        // Strategy should handle gracefully
-        Thread.sleep(50)
+        now += 50
         assertFalse(strategy.shouldCheckpoint())
 
-        Thread.sleep(60)
+        now += 60
         assertTrue(strategy.shouldCheckpoint())
     }
 

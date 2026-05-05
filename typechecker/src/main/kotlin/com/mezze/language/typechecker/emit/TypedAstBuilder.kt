@@ -193,7 +193,7 @@ class TypedAstBuilder(
             abilityImplsList.map { it.hash.hex } +
             effectDeclsList.map { it.hash.hex } +
             performerDeclsList.map { it.hash.hex }
-        val moduleHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { b -> for (h in allHashes.sorted()) b.append(h) }.build().toFullHexString())
+        val moduleHash = com.mezze.language.ast.hashing.MezzeHashBuilder().also { b -> for (h in allHashes.sorted()) b.append(h) }.buildHash()
 
         return TypedModule(
             path = module.path,
@@ -255,13 +255,21 @@ class TypedAstBuilder(
         val hash = com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl, file)
             ?: com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl)
 
-        val scheme = V2TypeScheme(emptyList(), emptyList(), type)
+        // Derive typeParams from the surface type. Any free TypeVar
+        // remaining after substitution at top-level scope IS a quantifier
+        // (let-generalization) — there's no enclosing forall to capture
+        // it. Mono needs typeParams to know which type vars to specialize
+        // at call sites.
+        val freeVars = com.mezze.language.ast.collectTypeVarsInOrder(type, sortFields = false)
+            .distinctBy { it.name }
+            .map { TypeParam(it.name, TypeKind.Star) }
+        val scheme = V2TypeScheme(freeVars, emptyList(), type)
         val isPublic = decl.visibility == ParsedVisibility.PUBLIC
 
         decls.add(TypedLetDecl(
             hash = hash,
             name = name,
-            typeParams = emptyList(),
+            typeParams = freeVars,
             value = value,
             scheme = scheme,
             isPublic = isPublic,
@@ -416,15 +424,15 @@ class TypedAstBuilder(
             op.name to opExpr
         }
 
-        // File+location hash — includes file path to disambiguate impls at same line/col in different files.
-        // TODO: migrate to TypedASTHasher.hashAbilityImpl for true content-based hashing (requires cache rebuild)
         val hash = decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashImplAbilityDecl(decl)
+
+        val forallVars = decl.forallVars.map { TypeParam(it, TypeKind.Star) }
 
         impls.add(TypedAbilityImpl(
             hash = hash,
             abilityHash = abilityHash,
             targetTypes = targetTypes,
-            forallVars = emptyList(),
+            forallVars = forallVars,
             associatedTypeBindings = assocTypeBindings,
             operations = ops,
             loc = loc
@@ -497,7 +505,7 @@ class TypedAstBuilder(
             opBuilder.append(opName)
             val bodyHash = com.mezze.language.typechecker.hashing.TypedASTHasher.hashExpr(opBody)
             opBuilder.append(bodyHash.hex)
-            Hash(opBuilder.build().toFullHexString())
+            opBuilder.buildHash()
         }
 
         decls.add(TypedPerformerDecl(hash, effectHash, decl.performerName, params, assocTypeBindings, ops, opHashes, loc))
@@ -700,7 +708,7 @@ class TypedAstBuilder(
                     // Build the function reference — use ByHash
                     val fn = if (methodInfo.methodHash != null) {
                         // Direct call by hash — no field access, no lambda wrapper
-                        val hash = Hash(methodInfo.methodHash!!)
+                        val hash = methodInfo.methodHash!!
                         TypedVar(
                             name = methodInfo.methodName,
                             binding = BindingRef.ByHash(hash),
@@ -1547,7 +1555,7 @@ class TypedAstBuilder(
             TypedImport(
                 localName = binding.name,
                 originalName = binding.originalName,
-                moduleHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append(binding.modulePath) }.build().toFullHexString()),
+                moduleHash = com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append(binding.modulePath) }.buildHash(),
                 declHash = binding.contentHash,
                 type = binding.type,
                 kind = ExportKind.FUNCTION
@@ -1583,28 +1591,28 @@ class TypedAstBuilder(
                 null -> {
                     // Punning: { x } means { x = x }
                     identifierContext[fieldName] = fieldType
-                    val fieldHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(fieldName) }.build().toFullHexString())
+                    val fieldHash = com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(fieldName) }.buildHash()
                     stmts.add(TypedStatement.Let(fieldName, fieldHash, fieldType, fieldAccess, loc))
                 }
                 is ParsedVariablePattern -> {
                     // Rename: { x as renamed }
                     val bindingName = p.name
                     identifierContext[bindingName] = fieldType
-                    val fieldHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(bindingName) }.build().toFullHexString())
+                    val fieldHash = com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(bindingName) }.buildHash()
                     stmts.add(TypedStatement.Let(bindingName, fieldHash, fieldType, fieldAccess, loc))
                 }
                 is ParsedRecordPattern -> {
                     // Nested: { inner: { x, y } }
                     val nestedVarName = "__destr_${fieldName}_${stmts.size}"
                     identifierContext[nestedVarName] = fieldType
-                    val nestedHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(nestedVarName) }.build().toFullHexString())
+                    val nestedHash = com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(nestedVarName) }.buildHash()
                     stmts.add(TypedStatement.Let(nestedVarName, nestedHash, fieldType, fieldAccess, loc))
                     emitRecordDestructureFields(p.entries, nestedVarName, fieldType, loc, stmts)
                 }
                 else -> {
                     // Other patterns (wildcard, etc.) — bind with field name
                     identifierContext[fieldName] = fieldType
-                    val fieldHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(fieldName) }.build().toFullHexString())
+                    val fieldHash = com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(fieldName) }.buildHash()
                     stmts.add(TypedStatement.Let(fieldName, fieldHash, fieldType, fieldAccess, loc))
                 }
             }
@@ -1637,7 +1645,7 @@ class TypedAstBuilder(
             when (val p = entry.pattern) {
                 null -> {
                     // Punning: { x }
-                    val fieldHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(fieldName) }.build().toFullHexString())
+                    val fieldHash = com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(fieldName) }.buildHash()
                     val fieldScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
                     decls.add(TypedLetDecl(fieldHash, fieldName, emptyList(), fieldAccess, fieldScheme, isPublic, loc))
                     if (isPublic) {
@@ -1647,7 +1655,7 @@ class TypedAstBuilder(
                 is ParsedVariablePattern -> {
                     // Rename: { x as renamed }
                     val bindingName = p.name
-                    val fieldHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(bindingName) }.build().toFullHexString())
+                    val fieldHash = com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(bindingName) }.buildHash()
                     val fieldScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
                     decls.add(TypedLetDecl(fieldHash, bindingName, emptyList(), fieldAccess, fieldScheme, isPublic, loc))
                     if (isPublic) {
@@ -1657,14 +1665,14 @@ class TypedAstBuilder(
                 is ParsedRecordPattern -> {
                     // Nested: { inner: { x, y } }
                     val nestedVarName = "__destructured_${fieldName}_${decls.size}"
-                    val nestedHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(nestedVarName) }.build().toFullHexString())
+                    val nestedHash = com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(nestedVarName) }.buildHash()
                     val nestedScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
                     decls.add(TypedLetDecl(nestedHash, nestedVarName, emptyList(), fieldAccess, nestedScheme, false, loc))
                     emitRecordDestructureDeclFields(p.entries, nestedVarName, fieldType, loc, isPublic, decls, exports)
                 }
                 else -> {
                     // Other patterns — bind with field name
-                    val fieldHash = Hash(com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(fieldName) }.build().toFullHexString())
+                    val fieldHash = com.mezze.language.ast.hashing.MezzeHashBuilder().also { it.append("field"); it.append(parentVarName); it.append(fieldName) }.buildHash()
                     val fieldScheme = V2TypeScheme(emptyList(), emptyList(), fieldType)
                     decls.add(TypedLetDecl(fieldHash, fieldName, emptyList(), fieldAccess, fieldScheme, isPublic, loc))
                     if (isPublic) {

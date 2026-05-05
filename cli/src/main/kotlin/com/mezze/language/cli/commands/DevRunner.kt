@@ -581,7 +581,7 @@ object DevRunner {
 
         // Hand the changed-hash set to MezzeLanguage so its CallTarget cache
         // evicts only changed hashes (#152). Empty set = no eviction.
-        MezzeLanguage.setHashesToInvalidate(delta.newHashes.map { it.hex })
+        MezzeLanguage.setHashesToInvalidate(delta.newHashes)
         lastDelta = delta
 
         executeAndReport(result.loweredFunctions, result.performerRecords,

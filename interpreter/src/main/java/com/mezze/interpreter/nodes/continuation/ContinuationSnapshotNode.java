@@ -8,6 +8,7 @@ import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeUnit;
 import com.mezze.interpreter.values.MezzeVariant;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
@@ -81,9 +82,12 @@ public final class ContinuationSnapshotNode extends MezzeNode {
             String funcName = func.getName();
             String snapshotKey = funcName + "__snapshot_" + SNAPSHOT_COUNTER.incrementAndGet();
 
-            // Register the function globally so ContinuationRestoreNode can find it
+            // Register the function globally so ContinuationRestoreNode can find it.
+            // Build a synthetic Hash for the snapshot key — the `#` prefix marks it as
+            // synthetic (Hash accepts hex + `#`).
             MezzeContext context = MezzeContext.get(this);
-            context.defineGlobal(snapshotKey, func);
+            Hash snapshotHash = synthesizeSnapshotHash(snapshotKey);
+            context.defineGlobal(snapshotHash, func);
 
             byte[] nameBytes = snapshotKey.getBytes(StandardCharsets.UTF_8);
             out.writeInt(nameBytes.length);
@@ -186,5 +190,18 @@ public final class ContinuationSnapshotNode extends MezzeNode {
         } else {
             throw new RuntimeException("Cannot serialize value of type: " + value.getClass().getName());
         }
+    }
+
+    /**
+     * Build a synthetic Hash for a snapshot key. Hash accepts hex chars + `#`,
+     * so we hex-encode the key bytes and prefix with `#` to mark it synthetic.
+     */
+    static Hash synthesizeSnapshotHash(String snapshotKey) {
+        byte[] bytes = snapshotKey.getBytes(StandardCharsets.UTF_8);
+        StringBuilder sb = new StringBuilder("#");
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b & 0xff));
+        }
+        return new Hash(sb.toString());
     }
 }

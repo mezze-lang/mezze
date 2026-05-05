@@ -95,9 +95,9 @@ public final class ContinuationRestoreNode extends MezzeNode {
                 capturedValues[i + 1] = deserializeValue(in);
             }
 
-            // Look up the function by name in global context
+            // Look up the function via synthetic snapshot hash (mirrors ContinuationSnapshotNode.synthesizeSnapshotHash).
             MezzeContext context = MezzeContext.get(this);
-            Object funcObj = context.lookupGlobal(funcName);
+            Object funcObj = context.lookupGlobal(ContinuationSnapshotNode.synthesizeSnapshotHash(funcName));
 
             if (!(funcObj instanceof MezzeFunction originalFunc)) {
                 throw new RuntimeException("Cannot restore continuation: function '" + funcName + "' not found");

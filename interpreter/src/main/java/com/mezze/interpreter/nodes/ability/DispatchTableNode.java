@@ -1,6 +1,7 @@
 package com.mezze.interpreter.nodes.ability;
 
 import com.mezze.interpreter.nodes.MezzeNode;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -35,10 +36,10 @@ public final class DispatchTableNode extends MezzeNode {
      * Global registry of dispatch tables, keyed by ability content hash.
      * Thread-safe and lock-free for reads after initialization.
      */
-    private static final ConcurrentHashMap<String, DispatchTable> DISPATCH_TABLES = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Hash, DispatchTable> DISPATCH_TABLES = new ConcurrentHashMap<>();
 
     @CompilationFinal
-    private final String abilityHash;
+    private final Hash abilityHash;
 
     @CompilationFinal
     private final int operationId;
@@ -55,7 +56,7 @@ public final class DispatchTableNode extends MezzeNode {
     @CompilationFinal
     private Assumption tableStableAssumption;
 
-    public DispatchTableNode(String abilityHash, int operationId, MezzeNode[] argumentNodes) {
+    public DispatchTableNode(Hash abilityHash, int operationId, MezzeNode[] argumentNodes) {
         this.abilityHash = abilityHash;
         this.operationId = operationId;
         this.argumentNodes = argumentNodes;
@@ -88,7 +89,7 @@ public final class DispatchTableNode extends MezzeNode {
 
         if (target == null) {
             throw new RuntimeException("No impl registered for operation " + operationId +
-                                       " of ability " + abilityHash);
+                                       " of ability " + abilityHash.getHex());
         }
 
         this.callNode = insert(DirectCallNode.create(target));
@@ -98,7 +99,7 @@ public final class DispatchTableNode extends MezzeNode {
     /**
      * Factory method.
      */
-    public static DispatchTableNode create(String abilityHash, int operationId, MezzeNode[] arguments) {
+    public static DispatchTableNode create(Hash abilityHash, int operationId, MezzeNode[] arguments) {
         return new DispatchTableNode(abilityHash, operationId, arguments);
     }
 
@@ -106,7 +107,7 @@ public final class DispatchTableNode extends MezzeNode {
      * Get or create a dispatch table for an ability.
      */
     @TruffleBoundary
-    public static DispatchTable getOrCreateDispatchTable(String abilityHash) {
+    public static DispatchTable getOrCreateDispatchTable(Hash abilityHash) {
         return DISPATCH_TABLES.computeIfAbsent(abilityHash, DispatchTable::new);
     }
 
@@ -115,7 +116,7 @@ public final class DispatchTableNode extends MezzeNode {
      * Called during impl loading.
      */
     @TruffleBoundary
-    public static void registerImpl(String abilityHash, int operationId, CallTarget callTarget) {
+    public static void registerImpl(Hash abilityHash, int operationId, CallTarget callTarget) {
         DispatchTable table = getOrCreateDispatchTable(abilityHash);
         table.register(operationId, callTarget);
     }
@@ -126,7 +127,7 @@ public final class DispatchTableNode extends MezzeNode {
      */
     public static final class DispatchTable {
 
-        private final String abilityHash;
+        private final Hash abilityHash;
 
         // Note: These are modified only during registration (rare) and checked via Assumption
         // The Assumption invalidation triggers deoptimization, so volatile is not needed
@@ -139,7 +140,7 @@ public final class DispatchTableNode extends MezzeNode {
         @CompilationFinal
         private Assumption stableAssumption;
 
-        public DispatchTable(String abilityHash) {
+        public DispatchTable(Hash abilityHash) {
             this.abilityHash = abilityHash;
             this.callTargets = new CallTarget[8];  // Initial capacity
             this.capacity = 8;
@@ -147,7 +148,7 @@ public final class DispatchTableNode extends MezzeNode {
         }
 
         private Assumption createAssumption() {
-            return Truffle.getRuntime().createAssumption("dispatch-table-stable:" + abilityHash);
+            return Truffle.getRuntime().createAssumption("dispatch-table-stable:" + abilityHash.getHex());
         }
 
         /**

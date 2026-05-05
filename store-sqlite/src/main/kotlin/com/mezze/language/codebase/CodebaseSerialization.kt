@@ -14,6 +14,8 @@ object CodebaseSerialization {
 
     fun serializeType(type: com.mezze.language.ast.MezzeType) = delegate.serializeType(type)
     fun deserializeType(bytes: ByteArray) = delegate.deserializeType(bytes)
+    fun serializeTypeList(types: List<com.mezze.language.ast.MezzeType>) = delegate.serializeTypeList(types)
+    fun deserializeTypeList(bytes: ByteArray) = delegate.deserializeTypeList(bytes)
     fun serializeTypedModule(module: com.mezze.language.typedast.TypedModule) = delegate.serializeTypedModule(module)
     fun deserializeTypedModule(bytes: ByteArray) = delegate.deserializeTypedModule(bytes)
     fun serializeParsedModule(module: com.mezze.language.parsedast.ParsedModule) = delegate.serializeParsedModule(module)

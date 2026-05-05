@@ -1,5 +1,6 @@
 package com.mezze.interpreter.runtime;
 
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 
@@ -35,7 +36,7 @@ public final class ImplSignature {
      * Content hash for impl lookup and assumption tracking.
      */
     @CompilationFinal
-    private final String contentHash;
+    private final Hash contentHash;
 
     /**
      * Whether this impl has initialize_scope (making it a scoped effect).
@@ -83,7 +84,7 @@ public final class ImplSignature {
     public ImplSignature(
             String effectName,
             String performerName,
-            String contentHash
+            Hash contentHash
     ) {
         this(effectName, performerName, contentHash, false, false, null, null, null);
     }
@@ -94,7 +95,7 @@ public final class ImplSignature {
     public ImplSignature(
             String effectName,
             String performerName,
-            String contentHash,
+            Hash contentHash,
             boolean hasInitializeScope,
             boolean hasFinalizeScope,
             CallTarget initializeScopeTarget,
@@ -121,7 +122,7 @@ public final class ImplSignature {
         return performerName;
     }
 
-    public String getContentHash() {
+    public Hash getContentHash() {
         return contentHash;
     }
 
@@ -152,21 +153,21 @@ public final class ImplSignature {
     /**
      * Builder pattern for cleaner construction.
      */
-    public static Builder builder(String effectName, String performerName, String contentHash) {
+    public static Builder builder(String effectName, String performerName, Hash contentHash) {
         return new Builder(effectName, performerName, contentHash);
     }
 
     public static final class Builder {
         private final String effectName;
         private final String performerName;
-        private final String contentHash;
+        private final Hash contentHash;
         private boolean hasInitializeScope = false;
         private boolean hasFinalizeScope = false;
         private CallTarget initializeScopeTarget = null;
         private CallTarget finalizeScopeTarget = null;
         private String[] scopeFieldNames = null;
 
-        private Builder(String effectName, String performerName, String contentHash) {
+        private Builder(String effectName, String performerName, Hash contentHash) {
             this.effectName = effectName;
             this.performerName = performerName;
             this.contentHash = contentHash;

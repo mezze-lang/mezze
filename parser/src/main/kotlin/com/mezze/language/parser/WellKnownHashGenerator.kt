@@ -1,6 +1,7 @@
 package com.mezze.language.parser
 
 import com.mezze.language.parsedast.*
+import com.mezze.language.typedast.Hash
 import java.io.File
 
 /**
@@ -15,9 +16,9 @@ fun main(args: Array<String>) {
 
     val parser = com.mezze.language.parser.MezzeParser()
 
-    // Collect all ability and effect declarations from stdlib
-    val abilities = mutableMapOf<String, String>() // name → content hash
-    val effects = mutableMapOf<String, String>()
+    // Collect all ability and effect declarations from stdlib (typed Hash end-to-end).
+    val abilities = mutableMapOf<String, Hash>() // name → content hash
+    val effects = mutableMapOf<String, Hash>()
 
     fun scanFile(file: File) {
         try {
@@ -26,12 +27,10 @@ fun main(args: Array<String>) {
             for (decl in module.decls) {
                 when (decl) {
                     is ParsedAbilityDecl -> {
-                        val hash = decl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(decl)
-                        abilities[decl.name] = hash.hex
+                        abilities[decl.name] = decl.contentHash ?: ParsedDeclHasher.hashAbilityDecl(decl)
                     }
                     is ParsedEffectDecl -> {
-                        val hash = decl.contentHash ?: ParsedDeclHasher.hashEffectDecl(decl)
-                        effects[decl.name] = hash.hex
+                        effects[decl.name] = decl.contentHash ?: ParsedDeclHasher.hashEffectDecl(decl)
                     }
                     else -> {}
                 }
@@ -68,12 +67,12 @@ fun main(args: Array<String>) {
     sb.appendLine()
     sb.appendLine("    // Ability hashes")
     for ((name, hash) in abilities.toSortedMap()) {
-        sb.appendLine("    val ABILITY_${name.uppercase()} = Hash(\"$hash\")")
+        sb.appendLine("    val ABILITY_${name.uppercase()} = Hash(\"${hash.hex}\")")
     }
     sb.appendLine()
     sb.appendLine("    // Effect hashes")
     for ((name, hash) in effects.toSortedMap()) {
-        sb.appendLine("    val EFFECT_${name.uppercase()} = Hash(\"$hash\")")
+        sb.appendLine("    val EFFECT_${name.uppercase()} = Hash(\"${hash.hex}\")")
     }
     sb.appendLine()
     sb.appendLine("    // Lookup tables")

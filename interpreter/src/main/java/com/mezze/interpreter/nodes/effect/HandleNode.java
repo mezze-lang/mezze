@@ -11,6 +11,7 @@ import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeSuspended;
 import com.mezze.interpreter.values.MezzeVariant;
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -29,10 +30,10 @@ import java.util.Map;
  * Each thread gets its own map that is cleared and reused.
  */
 final class HandlerMapPool {
-    private static final ThreadLocal<Map<String, Object>> POOL = ThreadLocal.withInitial(HashMap::new);
+    private static final ThreadLocal<Map<Hash, Object>> POOL = ThreadLocal.withInitial(HashMap::new);
 
-    static Map<String, Object> acquire() {
-        Map<String, Object> map = POOL.get();
+    static Map<Hash, Object> acquire() {
+        Map<Hash, Object> map = POOL.get();
         map.clear();
         return map;
     }
@@ -51,16 +52,16 @@ final class HandlerLookupNode extends MezzeNode {
     private final int localSlot;
 
     @CompilationFinal
-    private final String contentHash;
+    private final Hash contentHash;
 
     @CompilationFinal
     private final String performerName;
 
-    HandlerLookupNode(int localSlot, String contentHash) {
+    HandlerLookupNode(int localSlot, Hash contentHash) {
         this(localSlot, contentHash, null);
     }
 
-    HandlerLookupNode(int localSlot, String contentHash, String performerName) {
+    HandlerLookupNode(int localSlot, Hash contentHash, String performerName) {
         this.localSlot = localSlot;
         this.contentHash = contentHash;
         this.performerName = performerName;
@@ -87,30 +88,17 @@ final class HandlerLookupNode extends MezzeNode {
     @TruffleBoundary
     Object lookupInContext(Object paramsRecord) {
         MezzeContext context = MezzeContext.get(this);
-        // Try by content hash (impl declaration hash)
-        Object handler = context.lookupLocal(contentHash);
+        // Try by content hash — handlers map (installed by HandleNode) then globals.
+        Object handler = context.lookupHandler(contentHash);
         if (handler == null) {
             handler = context.lookupGlobal(contentHash);
-        }
-        // Try by performer name (WriteLocalWithContextNode registers by variable name)
-        if (handler == null && performerName != null) {
-            handler = context.lookupLocal(performerName);
-            if (handler == null) {
-                handler = context.lookupGlobal(performerName);
-            }
         }
         // Fall back to Language-level stdlib cache
         if (handler == null) {
             var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
             var ct = lang.getCachedStdlibCallTarget(contentHash);
             if (ct != null) {
-                handler = com.mezze.interpreter.values.MezzeFunction.create(ct, contentHash);
-            }
-            if (handler == null && performerName != null) {
-                ct = lang.getCachedStdlibCallTarget(performerName);
-                if (ct != null) {
-                    handler = com.mezze.interpreter.values.MezzeFunction.create(ct, performerName);
-                }
+                handler = com.mezze.interpreter.values.MezzeFunction.create(ct, contentHash.getHex());
             }
         }
         // If handler is a MezzeFunction (from HashModuleLoaderNode), evaluate it
@@ -120,7 +108,7 @@ final class HandlerLookupNode extends MezzeNode {
             handler = evaluateHandlerFunction(fn, paramsRecord, context);
         }
         if (handler == null) {
-            throw new RuntimeException("Handler not found for: " + contentHash +
+            throw new RuntimeException("Handler not found for: " + contentHash.getHex() +
                 (performerName != null ? " (performer: " + performerName + ")" : ""));
         }
         return handler;
@@ -184,7 +172,7 @@ final class ParameterizedHandlerLookupNode extends MezzeNode {
     private final int localSlot;
 
     @CompilationFinal
-    private final String contentHash;
+    private final Hash contentHash;
 
     @CompilationFinal
     private final String performerName;
@@ -192,7 +180,7 @@ final class ParameterizedHandlerLookupNode extends MezzeNode {
     @Child
     private MezzeNode paramsNode;
 
-    ParameterizedHandlerLookupNode(int localSlot, String contentHash, String performerName, MezzeNode paramsNode) {
+    ParameterizedHandlerLookupNode(int localSlot, Hash contentHash, String performerName, MezzeNode paramsNode) {
         this.localSlot = localSlot;
         this.contentHash = contentHash;
         this.performerName = performerName;
@@ -227,24 +215,13 @@ final class ParameterizedHandlerLookupNode extends MezzeNode {
         var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
         var ct = lang.getCachedStdlibCallTarget(contentHash);
         if (ct != null) {
-            handlerFn = com.mezze.interpreter.values.MezzeFunction.create(ct, contentHash);
-        }
-        if (handlerFn == null && performerName != null) {
-            ct = lang.getCachedStdlibCallTarget(performerName);
-            if (ct != null) {
-                handlerFn = com.mezze.interpreter.values.MezzeFunction.create(ct, performerName);
-            }
+            handlerFn = com.mezze.interpreter.values.MezzeFunction.create(ct, contentHash.getHex());
         }
 
         // 2. Context lookup — only use if it's a function (skip cached records)
         if (handlerFn == null) {
-            Object candidate = context.lookupLocal(contentHash);
+            Object candidate = context.lookupHandler(contentHash);
             if (candidate == null) candidate = context.lookupGlobal(contentHash);
-            if (candidate instanceof MezzeFunction fn) handlerFn = fn;
-        }
-        if (handlerFn == null && performerName != null) {
-            Object candidate = context.lookupLocal(performerName);
-            if (candidate == null) candidate = context.lookupGlobal(performerName);
             if (candidate instanceof MezzeFunction fn) handlerFn = fn;
         }
 
@@ -258,12 +235,8 @@ final class ParameterizedHandlerLookupNode extends MezzeNode {
         // (e.g., `perform TestLogger {} in ...` where {} is just empty params).
         // In that case, no factory function exists — only a pre-constructed MezzeRecord
         // from HashModuleLoaderNode Pass 2. Use it directly.
-        Object record = context.lookupLocal(contentHash);
+        Object record = context.lookupHandler(contentHash);
         if (record == null) record = context.lookupGlobal(contentHash);
-        if (record == null && performerName != null) {
-            record = context.lookupLocal(performerName);
-            if (record == null) record = context.lookupGlobal(performerName);
-        }
         if (record instanceof MezzeRecord) {
             return record;
         }
@@ -283,13 +256,13 @@ final class ParameterizedHandlerLookupNode extends MezzeNode {
             var nameMap = lang.getStdlibHashToName();
             for (var info : stdlibPerformers) {
                 if (info.length < 2) continue;
-                String pHash = info[0];
+                Hash pHash = new Hash(info[0]);
                 String registeredName = nameMap.get(pHash);
                 if (performerName.equals(registeredName)) {
                     // Found the stdlib hash for this performer — try to get its factory function
                     ct = lang.getCachedStdlibCallTarget(pHash);
                     if (ct != null) {
-                        handlerFn = MezzeFunction.create(ct, pHash);
+                        handlerFn = MezzeFunction.create(ct, pHash.getHex());
                         Object handler = HandlerLookupNode.evaluateHandlerFunction(handlerFn, params, context);
                         if (handler != null) return handler;
                     }
@@ -300,13 +273,10 @@ final class ParameterizedHandlerLookupNode extends MezzeNode {
             var prelowered = precompiled.getPreloweredFunctions();
             for (var entry : prelowered.entrySet()) {
                 if (performerName.equals(entry.getValue().getName())) {
-                    // Phase 1 typed-identity sweep: prelowered map is now
-                    // Map<Hash, FunctionIR>. Methods on the Java side still
-                    // take hex strings; unwrap at the boundary.
-                    String hashHex = entry.getKey().getHex();
-                    ct = lang.getCachedStdlibCallTarget(hashHex);
+                    Hash entryHash = entry.getKey();
+                    ct = lang.getCachedStdlibCallTarget(entryHash);
                     if (ct != null) {
-                        handlerFn = MezzeFunction.create(ct, hashHex);
+                        handlerFn = MezzeFunction.create(ct, entryHash.getHex());
                         Object handler = HandlerLookupNode.evaluateHandlerFunction(handlerFn, params, context);
                         if (handler != null) return handler;
                     }
@@ -325,13 +295,13 @@ final class ParameterizedHandlerLookupNode extends MezzeNode {
                 var rootNode = compiler.compile(userIR);
                 ct = rootNode.getCallTarget();
                 context.cacheUserCallTarget(contentHash, ct);
-                handlerFn = MezzeFunction.create(ct, contentHash);
+                handlerFn = MezzeFunction.create(ct, contentHash.getHex());
                 Object handler = HandlerLookupNode.evaluateHandlerFunction(handlerFn, params, context);
                 if (handler != null) return handler;
             }
         }
 
-        throw new RuntimeException("Handler function not found for parameterized performer: " + contentHash +
+        throw new RuntimeException("Handler function not found for parameterized performer: " + contentHash.getHex() +
             (performerName != null ? " (performer: " + performerName + ")" : ""));
     }
 }
@@ -364,7 +334,7 @@ public final class HandleNode extends MezzeNode {
     // First hash is typically the impl hash (for handler lookup)
     // Additional hashes may include effect hash (for effect operation lookup)
     @CompilationFinal(dimensions = 1)
-    private final String[] contentHashes;
+    private final Hash[] contentHashes;
 
     @Child
     private MezzeNode handlerNode;
@@ -428,7 +398,7 @@ public final class HandleNode extends MezzeNode {
     public HandleNode(
             int handlerSlot,
             String handlerName,
-            String[] contentHashes,
+            Hash[] contentHashes,
             MezzeNode handlerNode,
             MezzeNode bodyNode,
             int scopeSlot,
@@ -439,7 +409,7 @@ public final class HandleNode extends MezzeNode {
     ) {
         this.handlerSlot = handlerSlot;
         this.handlerName = handlerName;
-        this.contentHashes = contentHashes != null ? contentHashes : new String[0];
+        this.contentHashes = contentHashes != null ? contentHashes : new Hash[0];
         this.handlerNode = handlerNode;
         this.bodyNode = bodyNode;
         this.scopeSlot = scopeSlot;
@@ -454,11 +424,11 @@ public final class HandleNode extends MezzeNode {
      * Tries local frame slot first, then falls back to context lookup.
      * Used by TruffleCompiler for the v2 pipeline.
      */
-    public static MezzeNode createHandlerLookup(int localSlot, String contentHash) {
+    public static MezzeNode createHandlerLookup(int localSlot, Hash contentHash) {
         return new HandlerLookupNode(localSlot, contentHash);
     }
 
-    public static MezzeNode createHandlerLookup(int localSlot, String contentHash, String performerName) {
+    public static MezzeNode createHandlerLookup(int localSlot, Hash contentHash, String performerName) {
         return new HandlerLookupNode(localSlot, contentHash, performerName);
     }
 
@@ -467,7 +437,7 @@ public final class HandleNode extends MezzeNode {
      * and calls it with the user-provided params record.
      * Used for parameterized performers like `perform SeededRandom {seed = 42} in body`.
      */
-    public static MezzeNode createParameterizedHandlerLookup(int localSlot, String contentHash, String performerName, MezzeNode paramsNode) {
+    public static MezzeNode createParameterizedHandlerLookup(int localSlot, Hash contentHash, String performerName, MezzeNode paramsNode) {
         return new ParameterizedHandlerLookupNode(localSlot, contentHash, performerName, paramsNode);
     }
 
@@ -475,12 +445,9 @@ public final class HandleNode extends MezzeNode {
      * Create a handle node for a statically resolved handler.
      * The handler is looked up by content hash from the frame slot or context.
      */
-    public static HandleNode create(int handlerSlot, String contentHash, MezzeNode bodyChild) {
-        // Create a handler lookup node
+    public static HandleNode create(int handlerSlot, Hash contentHash, MezzeNode bodyChild) {
         MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
-        // Pass handlerSlot as-is (including -1) - execute() will skip invalid slots
-        // Store contentHash for processSuspended fallback lookup
-        String[] hashes = (contentHash != null && !contentHash.isEmpty()) ? new String[]{contentHash} : new String[0];
+        Hash[] hashes = contentHash != null ? new Hash[]{contentHash} : new Hash[0];
         return new HandleNode(handlerSlot, null, hashes, handlerNode, bodyChild,
                 -1, null, null, false, false);
     }
@@ -488,11 +455,9 @@ public final class HandleNode extends MezzeNode {
     /**
      * Create a handle node for context registration.
      */
-    public static HandleNode create(int handlerSlot, String contentHash, String handlerName, MezzeNode bodyChild) {
+    public static HandleNode create(int handlerSlot, Hash contentHash, String handlerName, MezzeNode bodyChild) {
         MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
-        // Pass handlerSlot as-is (including -1) - execute() will skip invalid slots
-        // Store contentHash for processSuspended fallback lookup
-        String[] hashes = (contentHash != null && !contentHash.isEmpty()) ? new String[]{contentHash} : new String[0];
+        Hash[] hashes = contentHash != null ? new Hash[]{contentHash} : new Hash[0];
         return new HandleNode(handlerSlot, handlerName, hashes, handlerNode, bodyChild,
                 -1, null, null, false, false);
     }
@@ -502,9 +467,11 @@ public final class HandleNode extends MezzeNode {
      * Use this for cases where handler needs to be found by multiple hashes
      * (e.g., both impl hash and effect hash).
      */
-    public static HandleNode create(int handlerSlot, String[] contentHashes, String handlerName, MezzeNode bodyChild) {
-        String primaryHash = (contentHashes != null && contentHashes.length > 0) ? contentHashes[0] : "";
-        MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, primaryHash);
+    public static HandleNode create(int handlerSlot, Hash[] contentHashes, String handlerName, MezzeNode bodyChild) {
+        Hash primaryHash = (contentHashes != null && contentHashes.length > 0) ? contentHashes[0] : null;
+        MezzeNode handlerNode = primaryHash != null
+            ? new HandlerLookupNode(handlerSlot, primaryHash)
+            : null;
         return new HandleNode(handlerSlot, handlerName, contentHashes, handlerNode, bodyChild,
                 -1, null, null, false, false);
     }
@@ -522,14 +489,14 @@ public final class HandleNode extends MezzeNode {
      */
     public static HandleNode createScoped(
             int handlerSlot,
-            String contentHash,
+            Hash contentHash,
             String handlerName,
             MezzeNode bodyChild,
             int scopeSlot,
             MezzeNode initializeScopeNode,
             MezzeNode finalizeScopeNode
     ) {
-        String[] hashes = (contentHash != null && !contentHash.isEmpty()) ? new String[]{contentHash} : new String[0];
+        Hash[] hashes = contentHash != null ? new Hash[]{contentHash} : new Hash[0];
         return createScoped(handlerSlot, hashes, handlerName, bodyChild, scopeSlot, initializeScopeNode, finalizeScopeNode);
     }
 
@@ -547,15 +514,17 @@ public final class HandleNode extends MezzeNode {
      */
     public static HandleNode createScoped(
             int handlerSlot,
-            String[] contentHashes,
+            Hash[] contentHashes,
             String handlerName,
             MezzeNode bodyChild,
             int scopeSlot,
             MezzeNode initializeScopeNode,
             MezzeNode finalizeScopeNode
     ) {
-        String primaryHash = (contentHashes != null && contentHashes.length > 0) ? contentHashes[0] : "";
-        MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, primaryHash);
+        Hash primaryHash = (contentHashes != null && contentHashes.length > 0) ? contentHashes[0] : null;
+        MezzeNode handlerNode = primaryHash != null
+            ? new HandlerLookupNode(handlerSlot, primaryHash)
+            : null;
         return new HandleNode(
                 handlerSlot,
                 handlerName,
@@ -820,10 +789,10 @@ public final class HandleNode extends MezzeNode {
 
         // Build handler map using the resolved handler directly
         // (can't look up from context — handler stack already popped)
-        Map<String, Object> handlers = HandlerMapPool.acquire();
+        Map<Hash, Object> handlers = HandlerMapPool.acquire();
 
-        for (String hash : contentHashes) {
-            if (hash != null && !hash.isEmpty()) {
+        for (Hash hash : contentHashes) {
+            if (hash != null) {
                 if (resolvedHandler != null) {
                     handlers.put(hash, resolvedHandler);
                 } else {
@@ -862,9 +831,9 @@ public final class HandleNode extends MezzeNode {
         }
 
         // Register under all content hashes (O(1) lookup) - no effect names
-        for (String hash : contentHashes) {
-            if (hash != null && !hash.isEmpty()) {
-                context.defineLocal(hash, handler);
+        for (Hash hash : contentHashes) {
+            if (hash != null) {
+                context.defineHandler(hash, handler);
             }
         }
     }
@@ -885,10 +854,10 @@ public final class HandleNode extends MezzeNode {
         }
 
         // Build handler map - reuse pooled map to avoid allocation
-        Map<String, Object> handlers = HandlerMapPool.acquire();
+        Map<Hash, Object> handlers = HandlerMapPool.acquire();
 
-        for (String hash : contentHashes) {
-            if (hash != null && !hash.isEmpty()) {
+        for (Hash hash : contentHashes) {
+            if (hash != null) {
                 handlers.put(hash, handler);
             }
         }
@@ -995,6 +964,6 @@ public final class HandleNode extends MezzeNode {
         }
 
         // Register scope under the reserved name "scope"
-        context.defineLocal("scope", scope);
+        context.defineScopeVar("scope", scope);
     }
 }

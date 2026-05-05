@@ -1,5 +1,6 @@
 package com.mezze.interpreter.runtime;
 
+import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.Truffle;
@@ -27,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class ImplRegistry {
 
     // Content hash → CyclicAssumption
-    private final ConcurrentHashMap<String, CyclicAssumption> implAssumptions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Hash, CyclicAssumption> implAssumptions = new ConcurrentHashMap<>();
 
     // Singleton instance
     private static final ImplRegistry INSTANCE = new ImplRegistry();
@@ -45,10 +46,10 @@ public final class ImplRegistry {
      * Use this in @Specialization(assumptions = ...) guards.
      */
     @TruffleBoundary
-    public Assumption getAssumption(String contentHash) {
+    public Assumption getAssumption(Hash contentHash) {
         CyclicAssumption cyclic = implAssumptions.computeIfAbsent(
             contentHash,
-            k -> new CyclicAssumption("impl:" + k)
+            k -> new CyclicAssumption("impl:" + k.getHex())
         );
         return cyclic.getAssumption();
     }
@@ -61,7 +62,7 @@ public final class ImplRegistry {
      * impl was stable.
      */
     @TruffleBoundary
-    public void invalidate(String contentHash) {
+    public void invalidate(Hash contentHash) {
         CyclicAssumption cyclic = implAssumptions.get(contentHash);
         if (cyclic != null) {
             cyclic.invalidate();
@@ -72,7 +73,7 @@ public final class ImplRegistry {
      * Check if an impl has ever been registered.
      */
     @TruffleBoundary
-    public boolean hasImpl(String contentHash) {
+    public boolean hasImpl(Hash contentHash) {
         return implAssumptions.containsKey(contentHash);
     }
 

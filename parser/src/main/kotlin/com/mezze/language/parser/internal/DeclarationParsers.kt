@@ -1492,12 +1492,17 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
                         }
                         val file = currentFile ?: "<unknown>"
                         val loc = spanLoc(implToken.value, rbrace.value, file)
+                        // Extract implicit forallVars: every type variable
+                        // (`'a`, `'b`, …) that appears in abilityTypeArgs or
+                        // targetTypes is an implicit quantifier of the impl.
+                        // E.g., `impl Eq 'a for Option 'a` → forallVars = ["'a"].
+                        val implicitForallVars = collectTypeVarNames(abilityTypeArgs + targetTypes)
                         ParseResult.Success(
                             ParsedImplAbilityDecl(
                                 target = implTarget,
                                 targetTypes = targetTypes,
                                 abilityTypeArgs = abilityTypeArgs,
-                                forallVars = emptyList(),
+                                forallVars = implicitForallVars,
                                 associatedTypeBindings = associatedTypeBindings,
                                 operations = operations,
                                 loc = loc
@@ -1841,3 +1846,32 @@ internal val MezzeParser.importItemParser: Parser<ParsedImportItem> get() = { st
             is ParseResult.Failure -> name
         }
     }
+
+/**
+ * Collect every type variable name (`'a`, `'b`, …) that appears anywhere
+ * in the given type annotations. Preserves first-occurrence order, no
+ * duplicates. Used to derive implicit `forallVars` on `impl` decls — the
+ * surface syntax doesn't list quantifiers explicitly; whatever type vars
+ * appear in the abilityTypeArgs / targetTypes ARE the quantifiers.
+ */
+private fun collectTypeVarNames(annotations: List<ParsedTypeAnnotation>): List<String> {
+    val seen = LinkedHashSet<String>()
+    for (ann in annotations) collectTypeVarNamesInto(ann, seen)
+    return seen.toList()
+}
+
+private fun collectTypeVarNamesInto(ann: ParsedTypeAnnotation, out: MutableSet<String>) {
+    when (ann) {
+        is ParsedNamedType -> if (ann.name.startsWith("'")) out.add(ann.name)
+        is ParsedQualifiedType -> Unit
+        is ParsedTypeApp -> for (a in ann.args) collectTypeVarNamesInto(a, out)
+        is ParsedFunctionType -> {
+            collectTypeVarNamesInto(ann.paramType, out)
+            collectTypeVarNamesInto(ann.returnType, out)
+        }
+        is ParsedRecordType -> for (e in ann.entries) collectTypeVarNamesInto(e.type, out)
+        is ParsedVariantType -> for (c in ann.constructors) c.dataType?.let { collectTypeVarNamesInto(it, out) }
+        is ParsedSeqType -> collectTypeVarNamesInto(ann.elementType, out)
+        is ParsedEffectRow, is ParsedEffectAnnotation -> Unit
+    }
+}
