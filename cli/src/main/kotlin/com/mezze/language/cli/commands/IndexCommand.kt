@@ -36,9 +36,10 @@ class IndexCommand {
             kotlin.system.exitProcess(1)
         }
 
-        val apps = manifest.app
-        if (apps.isNullOrEmpty()) {
-            println("Error: No [[app]] entries in Mezze.toml")
+        val apps = manifest.app ?: emptyList()
+        val lib = manifest.lib
+        if (apps.isEmpty() && lib == null) {
+            println("Error: No [lib] or [[app]] entries in Mezze.toml")
             kotlin.system.exitProcess(1)
         }
 
@@ -51,28 +52,32 @@ class IndexCommand {
         var totalDecls = 0
         var totalErrors = 0
 
+        // Collect all entry points: lib + apps
+        data class IndexEntry(val name: String, val path: String)
+        val entries = mutableListOf<IndexEntry>()
+        if (lib != null) entries.add(IndexEntry(manifest.`package`.name, lib.path))
+        for (app in apps) entries.add(IndexEntry(app.name, app.path))
+
         try {
-            // Index each app entry point
-            for (appConfig in apps) {
-                val appFile = File(currentDir, appConfig.path)
-                if (!appFile.exists()) {
-                    println("Warning: App file not found: ${appFile.absolutePath}")
+            for (entry in entries) {
+                val entryFile = File(currentDir, entry.path)
+                if (!entryFile.exists()) {
+                    println("Warning: File not found: ${entryFile.absolutePath}")
                     totalErrors++
                     continue
                 }
 
-                val source = appFile.readText()
+                val source = entryFile.readText()
                 val parser = MezzeParser()
-                val ast = parser.parseParsedModule(source, file = appFile.name)
+                val ast = parser.parseParsedModule(source, file = entryFile.name)
 
                 val typeChecker = TypeChecker()
                 val rawResult = typeChecker.checkParsedModule(ast, currentDir.toPath(), enablePrelude = true)
 
                 when (rawResult) {
                     is TypeChecker.TypeCheckResult.Failure -> {
-                        println("  ${appConfig.path}: ${rawResult.errors.size} type error(s)")
+                        println("  ${entry.path}: ${rawResult.errors.size} type error(s)")
                         totalErrors += rawResult.errors.size
-                        // Still try to scatter what we can from partial results
                     }
                     is TypeChecker.TypeCheckResult.Success -> {
                         val success = rawResult
@@ -99,14 +104,13 @@ class IndexCommand {
                         )
 
                         val sourceHash = sha256(source)
-                        val modulePath = appConfig.name
                         val depParsedModules = com.mezze.language.typechecker.ModuleResolver.getAllParsedModules()
 
                         val delta = StorePopulator.populate(
                             store = store,
                             result = typeCheckResult,
-                            modulePath = modulePath,
-                            filePath = appFile.absolutePath,
+                            modulePath = entry.name,
+                            filePath = entryFile.absolutePath,
                             sourceHash = sourceHash,
                             entrySource = source,
                             parsedModule = ast,
@@ -122,7 +126,7 @@ class IndexCommand {
                         totalDecls += declCount
                         totalFiles += 1 + depParsedModules.size
 
-                        println("  ${appConfig.path}: ${declCount} declarations, ${delta.newHashes.size} new blobs")
+                        println("  ${entry.path}: ${declCount} declarations, ${delta.newHashes.size} new blobs")
                     }
                 }
             }
