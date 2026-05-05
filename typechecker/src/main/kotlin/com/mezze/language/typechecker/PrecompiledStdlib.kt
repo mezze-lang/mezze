@@ -408,7 +408,7 @@ object PrecompiledStdlib {
 
             // Load all stdlib modules and get their decl hashes for IR lookup
             for (mod in s.getAllModules()) {
-                if (!mod.path.startsWith("std::")) continue
+                if (!com.mezze.language.ast.ModulePathConventions.isStdlib(mod.path)) continue
                 val typedBlob = s.getTypedModule(mod.path, mod.sourceHash) ?: continue
                 try {
                     val typedModule: com.mezze.language.typedast.TypedModule = cbor.decodeFromByteArray(typedBlob)

@@ -373,6 +373,22 @@ data class BindingKey(
  * Language keyword constants shared across parser, typechecker, and interpreter.
  * Centralizes keyword strings so they're never hardcoded as magic strings.
  */
+/**
+ * Module-path conventions. Centralizes the well-known prefix rules
+ * (e.g., the `std::` namespace for stdlib modules) so callers don't
+ * spread prefix-matching string literals across the codebase.
+ */
+object ModulePathConventions {
+    const val STDLIB_PREFIX = "std::"
+
+    /** True when the given dotted module path is a stdlib module
+     *  (e.g., `std::seq`, `std::option`). Null is treated as "user
+     *  module" — callers using a null path mean "no module context",
+     *  which is never stdlib. */
+    fun isStdlib(modulePath: String?): Boolean =
+        modulePath != null && modulePath.startsWith(STDLIB_PREFIX)
+}
+
 object Keywords {
     /** The `it` implicit receiver binding in ability impl bodies. Used
      *  by TypedAstBuilder when desugaring `x.method {…}` into
@@ -389,5 +405,38 @@ object Keywords {
 
     /** The Inspect ability's debug string method */
     const val TO_DBG_STR = "to_dbg_str"
+}
+
+/**
+ * Constructor-set → typeName aliases for stdlib variant types.
+ *
+ * Mezze's stdlib defines a handful of well-known variants by their
+ * constructor sets without a leading `typeName` (e.g., `Option = None |
+ * Some 'a`). When a `MezzeType.VariantType` doesn't have its
+ * `typeName` set, but its constructor set matches one of these
+ * conventions, we can reverse-lookup the alias for ability-impl
+ * matching purposes (e.g., resolving `impl Sized for Option`).
+ *
+ * Used by [com.mezze.language.typechecker.compiler.TypedASTCompiler]
+ * and [com.mezze.language.typechecker.mono.MonoTypeOps] —
+ * keeping the table here ensures both consumers agree.
+ *
+ * Key: comma-joined sorted constructor names. Value: the canonical
+ * type name. Entries should match the stdlib's Option/Result/List/
+ * Bool/Maybe declarations.
+ */
+object VariantAliases {
+    val byConstructorSet: Map<String, String> = mapOf(
+        "None,Some" to "Option",
+        "Err,Ok" to "Result",
+        "Cons,Nil" to "List",
+        "False,True" to "Bool",
+        "Just,Nothing" to "Maybe",
+    )
+
+    /** Look up a type-name alias for a variant by its constructor set.
+     *  `constructors` will be sorted + comma-joined to form the key. */
+    fun aliasFor(constructors: Set<String>): String? =
+        byConstructorSet[constructors.sorted().joinToString(",")]
 }
 

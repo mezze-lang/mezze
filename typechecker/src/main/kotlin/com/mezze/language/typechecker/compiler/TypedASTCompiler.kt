@@ -4,6 +4,7 @@ import com.mezze.language.ast.Keywords
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.MezzeType.*
 import com.mezze.language.ast.TypeVar
+import com.mezze.language.ast.VariantAliases
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.truffleir.*
 import com.mezze.language.typedast.*
@@ -2021,14 +2022,8 @@ class TypedASTCompiler(
                 concreteType.constructors.size == 1 &&
                 concreteType.constructors.keys.first() == targetType.constructor -> true
             concreteType is VariantType && targetType is TypeApplication -> {
-                val ctors = concreteType.constructors.keys.sorted().joinToString(",")
-                val knownAliases = mapOf(
-                    "None,Some" to "Option", "Err,Ok" to "Result",
-                    "Cons,Nil" to "List", "False,True" to "Bool",
-                    "Just,Nothing" to "Maybe"
-                )
                 concreteType.typeName == targetType.constructor ||
-                    knownAliases[ctors] == targetType.constructor
+                    VariantAliases.aliasFor(concreteType.constructors.keys) == targetType.constructor
             }
             concreteType is SeqType && targetType is TypeApplication && targetType.constructor == "Seq" -> true
             concreteType is BytesType && targetType is TypeApplication && targetType.constructor == "Bytes" -> true

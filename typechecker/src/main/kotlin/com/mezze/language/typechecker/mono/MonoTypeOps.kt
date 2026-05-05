@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.mono
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.VariantAliases
 
 /**
  * Type-level helpers used by the mono pipeline. These are intentionally
@@ -90,13 +91,7 @@ internal fun typeMatchesTarget(concrete: MezzeType, target: MezzeType): Boolean 
             is MezzeType.RecordType -> concrete.typeName == target.constructor
             is MezzeType.VariantType -> {
                 if (concrete.typeName == target.constructor) return true
-                val ctors = concrete.constructors.keys.sorted().joinToString(",")
-                val knownAliases = mapOf(
-                    "None,Some" to "Option", "Err,Ok" to "Result",
-                    "Cons,Nil" to "List", "False,True" to "Bool",
-                    "Just,Nothing" to "Maybe"
-                )
-                knownAliases[ctors] == target.constructor
+                VariantAliases.aliasFor(concrete.constructors.keys) == target.constructor
             }
             else -> false
         }

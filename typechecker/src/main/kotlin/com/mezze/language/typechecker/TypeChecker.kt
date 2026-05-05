@@ -212,7 +212,7 @@ class TypeChecker(
         // PHASE 0: Module Resolution (if imports are present)
         var importContext: ModuleImportContext? = null
         var loadedModules: Map<com.mezze.language.ast.ModulePath, TypedModule> = emptyMap()
-        val shouldInjectPrelude = currentModulePath == null || !currentModulePath.startsWith("std::")
+        val shouldInjectPrelude = !com.mezze.language.ast.ModulePathConventions.isStdlib(currentModulePath)
         val hasUserImports = hasImportsParsed(module)
 
         // Try to use PrecompiledStdlib for fast prelude injection
@@ -599,7 +599,7 @@ class TypeChecker(
                 }
 
                 // V2 Pipeline: TypedAST -> Mono -> Resolve -> Lower -> TruffleIR
-                val isStdlibModule = currentModulePath != null && currentModulePath.startsWith("std::")
+                val isStdlibModule = com.mezze.language.ast.ModulePathConventions.isStdlib(currentModulePath)
                 var emittedTypedModule: com.mezze.language.typedast.TypedModule? = null
                 var loweredFns: List<com.mezze.language.truffleir.FunctionIR>? = null
                 var loweredPerformers: List<Array<String>> = emptyList()
