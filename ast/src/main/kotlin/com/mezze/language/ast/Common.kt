@@ -374,8 +374,18 @@ data class BindingKey(
  * Centralizes keyword strings so they're never hardcoded as magic strings.
  */
 object Keywords {
-    /** The `it` implicit receiver binding in ability impl bodies */
+    /** The `it` implicit receiver binding in ability impl bodies. Used
+     *  by TypedAstBuilder when desugaring `x.method {…}` into
+     *  `method({it = x, …})`. Compilers downstream extract the receiver
+     *  from this field. */
     const val IT = "it"
+
+    /** The right operand of a binary op call. TypedAstBuilder desugars
+     *  `x.add {r = y}` so the right operand lives at field `r`. Both
+     *  the typechecker's inline-op path and the interpreter's
+     *  TruffleCompiler extract this field name to feed the
+     *  DirectAddNode/etc. */
+    const val R = "r"
 
     /** The Inspect ability's debug string method */
     const val TO_DBG_STR = "to_dbg_str"

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.compiler
 
+import com.mezze.language.ast.Keywords
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.MezzeType.*
 import com.mezze.language.truffleir.InlineBinaryOpIR
@@ -65,10 +66,12 @@ internal fun tryInlineOp(methodName: String, receiverType: MezzeType): InlineOp?
  *  operand from the wrapped argument record (typically `{r = value}`
  *  or `{it = receiver, r = value}`). */
 internal fun compileInlineOp(op: InlineOp, receiverIR: NodeIR, argIR: NodeIR, src: SourceInfo): NodeIR {
-    // Extract the 'r' value from the argument record
-    // arg is typically MakeRecordIR({it=receiver, r=value}) or MakeRecordIR({r=value})
+    // Extract the right operand from the wrapped argument record.
+    // TypedAstBuilder desugars `x.add {r = y}` to a call whose arg is
+    // a record like {it = x, r = y} (or just {r = y}); the right
+    // operand always lives at field `Keywords.R`.
     val rightIR = if (argIR is MakeRecordIR) {
-        val rField = argIR.fields.find { it.name == "r" }
+        val rField = argIR.fields.find { it.name == Keywords.R }
         rField?.value ?: argIR
     } else {
         argIR

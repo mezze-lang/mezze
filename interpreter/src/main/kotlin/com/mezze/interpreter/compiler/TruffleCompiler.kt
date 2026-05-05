@@ -16,6 +16,7 @@ import com.mezze.interpreter.nodes.effect.DynamicEffectCallNode
 import com.mezze.interpreter.converter.InterpolatedStringNode
 import com.mezze.interpreter.nodes.builtin.NativeDispatch
 import com.mezze.interpreter.runtime.MezzeLanguage
+import com.mezze.language.ast.Keywords
 import com.mezze.language.truffleir.*
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.FrameSlotKind
@@ -628,9 +629,9 @@ class TruffleCompiler(
         val receiverNode = compileNode(fn.record, source)
 
         // Unary operators: pattern is CallIndirect(ReadField(x, "neg"), MakeRecord({it = x}))
-        // The "it" field contains the operand. Compile to native function call with the
-        // correct argument record.
-        val itField = argRecord.fields.find { it.name == "it" }
+        // The Keywords.IT field contains the operand. Compile to native function call with
+        // the correct argument record.
+        val itField = argRecord.fields.find { it.name == Keywords.IT }
         if (itField != null) {
             when (opName) {
                 "neg" -> {
@@ -645,15 +646,15 @@ class TruffleCompiler(
                         listOf(FieldIR("b", itField.value)), node.src), source)
                     return NativeDispatch.create("__native_bool_not", nativeArg)
                 }
-                "to_dbg_str" -> {
+                Keywords.TO_DBG_STR -> {
                     // x.to_dbg_str {} → DirectInspectNode(x) (built-in Inspect ability)
                     return com.mezze.interpreter.nodes.inline.DirectInspectNode.create(compileNode(itField.value, source))
                 }
             }
         }
 
-        // Binary operators: extract 'r' field (right operand)
-        val rightField = argRecord.fields.find { it.name == "r" }
+        // Binary operators: extract right operand from Keywords.R field
+        val rightField = argRecord.fields.find { it.name == Keywords.R }
         val rightNode = rightField?.let { compileNode(it.value, source) }
 
         if (rightNode == null) return null
