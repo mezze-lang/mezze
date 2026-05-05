@@ -432,8 +432,15 @@ class BuildCommand {
     private fun createStandaloneJar(blobsFile: File, outputJar: File) {
         println("Creating standalone JAR...")
 
-        // Find the runtime JAR (mezze-lang.jar) — this is the single shadow JAR
-        // that contains all of mezze + Truffle + dependencies.
+        // Find the runtime JAR(s) by asking the running CLI where its own
+        // classes were loaded from. That location IS the source of truth
+        // for the bytecode that should be embedded in the user JAR. We
+        // never look at `~/.mezze/lib/` directly — system installs are
+        // isolated per-mez-binary, not a shared library other invocations
+        // consult. (When `~/.mezze/bin/mez` runs, it walks up from its
+        // own location and naturally finds `~/.mezze/lib/`. When
+        // `cli/build/install/mez/bin/mez` runs, it walks up from there
+        // instead. The two never cross.)
         val cliLocation = javaClass.protectionDomain.codeSource?.location
         val cliJarOrClassDir = if (cliLocation != null) File(cliLocation.toURI()) else null
         val libDir = findLibDir(cliJarOrClassDir)
@@ -533,12 +540,44 @@ class BuildCommand {
         }
     }
 
+    /**
+     * Find the directory of runtime JARs that should be embedded into the
+     * user's standalone JAR.
+     *
+     * **Single source of truth**: whatever classpath the *running* mez was
+     * launched from. We never look at `~/.mezze/lib/` — that's just where
+     * the system-installed mez happens to live; it is NOT a shared library
+     * other invocations should consult. Each `mez` binary embeds its own
+     * runtime via the location it was launched from.
+     *
+     * Concretely:
+     * - If `startDir` is a JAR file (shadow build, e.g.
+     *   `~/.mezze/lib/mezze-lang.jar` when running `~/.mezze/bin/mez`):
+     *   return its parent dir, which holds the single shadow JAR.
+     * - If `startDir` is a JAR file inside a `lib/` directory of many
+     *   sibling JARs (`installDist` layout, e.g.
+     *   `cli/build/install/mez/lib/cli-*.jar`): return that `lib/` dir,
+     *   which holds the full set of dependency JARs.
+     * - If `startDir` is a class directory (running from gradle, IDE, or
+     *   tests): walk up looking for a sibling `lib/`, falling back to
+     *   `cli/build/libs/` under `mezze.project.root`.
+     *
+     * Returning null means we genuinely couldn't locate the running CLI's
+     * own dependencies — caller emits a warning and produces blobs.sqlite
+     * only.
+     */
     private fun findLibDir(startDir: File?): File? {
-        // 1. ~/.mezze/lib/ (installed via install.sh)
-        val mezzeHome = File(System.getProperty("user.home"), ".mezze/lib")
-        if (mezzeHome.exists() && mezzeHome.isDirectory) return mezzeHome
+        if (startDir == null) return null
 
-        // 2. Walk up from the binary/class location looking for lib/
+        // Case 1: startDir is the JAR we're running from. Its parent IS
+        // the lib dir we want.
+        if (startDir.isFile && startDir.extension == "jar") {
+            val parent = startDir.parentFile
+            if (parent != null && parent.isDirectory) return parent
+        }
+
+        // Case 2: startDir is a class dir (or build/classes/...). Walk up
+        // looking for a sibling `lib/`.
         var current = startDir
         while (current != null) {
             val lib = File(current, "lib")
@@ -546,7 +585,9 @@ class BuildCommand {
             current = current.parentFile
         }
 
-        // 3. Development: cli/build/libs/ relative to project root
+        // Case 3: dev fallback — running from gradle test runner where
+        // there's no install layout yet. Honor `mezze.project.root` to
+        // point at `cli/build/libs/`. Only used for tests.
         val projectRoot = System.getProperty("mezze.project.root")
         if (projectRoot != null) {
             val devLibs = File(projectRoot, "cli/build/libs")
