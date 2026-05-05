@@ -2099,23 +2099,6 @@ class TypedASTCompiler(
         else -> SlotKind.OBJECT
     }
 
-    private fun getTypeTag(type: MezzeType): String = when (type) {
-        is IntType -> "Int"
-        is FloatType -> "Float"
-        is StringType -> "Str"
-        is BoolType -> "Bool"
-        is NatType -> "Nat"
-        is CharType -> "Char"
-        is FracType -> "Frac"
-        is SeqType -> "Seq"
-        is BytesType -> "Bytes"
-        is TypeApplication -> type.constructor
-        is VariantType -> type.typeName ?: type.constructors.keys.sorted().joinToString(",")
-        is RecordType -> type.typeName ?: "Record"
-        is VarType -> "Any"
-        else -> type::class.simpleName ?: "Unknown"
-    }
-
     companion object {
         @JvmStatic
         fun computeOpHash(implHash: Hash, opName: String): Hash = Hash.computeOpHash(implHash, opName)
@@ -2126,8 +2109,8 @@ class TypedASTCompiler(
         return SourceInfo(fileIndex, loc.startLine, loc.startCol, loc.endLine, loc.endCol)
     }
 
-    /** Find a TypedLetDecl by hash — used to determine if a ByHash ref is a function */
+    /** Set by callers via [setDeclIndex] before [compile]. Read by
+     *  call-site lookup paths that need to find a referenced decl. */
     private var declIndex: Map<Hash, TypedLetDecl>? = null
     fun setDeclIndex(decls: Map<Hash, TypedLetDecl>) { declIndex = decls }
-    private fun findDecl(hash: Hash): TypedLetDecl? = declIndex?.get(hash)
 }
