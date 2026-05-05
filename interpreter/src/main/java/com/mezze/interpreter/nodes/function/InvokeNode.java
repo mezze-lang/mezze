@@ -48,14 +48,12 @@ public abstract class InvokeNode extends MezzeNode {
     @CompilationFinal
     private final int argumentCount;
 
-    // Cached argument arrays for common sizes (0-4 args + 0-2 closure = sizes 0-6)
-    // After JIT, these become constant references
-    private static final Object[][] CACHED_ARRAYS = new Object[8][];
-    static {
-        for (int i = 0; i < CACHED_ARRAYS.length; i++) {
-            CACHED_ARRAYS[i] = new Object[i];
-        }
-    }
+    // Singleton empty array used by the zero-arg/zero-closure fast path.
+    // Sharing is safe because the callee never mutates the args array.
+    // Kept as a small array (length 1) rather than a single Object[] so
+    // the access pattern at line ~127 (CACHED_ARRAYS[0]) stays unchanged
+    // — and so future no-arg specializations could reuse the slot.
+    private static final Object[][] CACHED_ARRAYS = { new Object[0] };
 
     protected InvokeNode(MezzeNode[] argumentNodes) {
         this.argumentNodes = argumentNodes;
@@ -75,19 +73,6 @@ public abstract class InvokeNode extends MezzeNode {
     @Idempotent
     protected final boolean hasOneArg() {
         return argumentCount == 1;
-    }
-
-    /**
-     * Get or create argument array. Uses cached arrays for small sizes.
-     * For monomorphic calls, JIT constant-folds this to direct array reference.
-     */
-    private static Object[] getArgumentArray(int size) {
-        if (size < CACHED_ARRAYS.length) {
-            // Reuse cached array - but we need fresh one each call since we mutate it
-            // Actually, we can't reuse - must allocate. But JIT will scalar-replace small arrays.
-            return new Object[size];
-        }
-        return new Object[size];
     }
 
     /**
