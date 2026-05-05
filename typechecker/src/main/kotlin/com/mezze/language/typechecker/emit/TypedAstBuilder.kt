@@ -503,7 +503,7 @@ class TypedAstBuilder(
             opBuilder.append(effectHash.hex)
             opBuilder.append(hash.hex)
             opBuilder.append(opName)
-            val bodyHash = com.mezze.language.typechecker.hashing.TypedASTHasher.hashExpr(opBody)
+            val bodyHash = com.mezze.language.typedast.TypedASTHasher.hashExpr(opBody)
             opBuilder.append(bodyHash.hex)
             opBuilder.buildHash()
         }

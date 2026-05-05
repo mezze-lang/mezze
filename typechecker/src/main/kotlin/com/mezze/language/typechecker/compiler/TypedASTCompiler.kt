@@ -1527,7 +1527,7 @@ class TypedASTCompiler(
         currentCaptureNames = captureNameMap
 
         // Extract lambda as a separate FunctionIR
-        val lambdaHash = com.mezze.language.typechecker.hashing.TypedASTHasher.hashExpr(expr)
+        val lambdaHash = com.mezze.language.typedast.TypedASTHasher.hashExpr(expr)
         val lambdaCaptureInfo = expr.captures.map { c -> c.name to typeToSlotKind(c.type) }
         val fnIR = compileFunctionBody(
             hash = lambdaHash,

@@ -1,8 +1,7 @@
-package com.mezze.language.typechecker.hashing
+package com.mezze.language.typedast
 
 import com.mezze.language.ast.hashing.HashTags
 import com.mezze.language.ast.hashing.MezzeHashBuilder
-import com.mezze.language.typedast.*
 
 /**
  * Content hasher for TypedAST — computes deterministic hashes directly from
