@@ -647,9 +647,14 @@ class TypeChecker(
                                 } else {
                                     continue
                                 }
-                                val parsedImpl = when (ci.abilityName) {
-                                    "Encode", "EncodeRepr" -> codecGen.generateEncodeImpl(formatType, dataType)
-                                    "Decode", "DecodeRepr" -> codecGen.generateDecodeImpl(formatType, dataType)
+                                // Pick encode-shaped vs decode-shaped impl body via
+                                // hash, not name — rename-safe.
+                                val abilityHash = WellKnownHashes.resolveHash(ci.abilityName)
+                                val parsedImpl = when {
+                                    WellKnownHashes.isEncodeFlavoredCodec(abilityHash) ->
+                                        codecGen.generateEncodeImpl(formatType, dataType)
+                                    WellKnownHashes.isDecodeFlavoredCodec(abilityHash) ->
+                                        codecGen.generateDecodeImpl(formatType, dataType)
                                     else -> continue
                                 }
                                 builder.buildCodecImpl(parsedImpl, extraImpls)

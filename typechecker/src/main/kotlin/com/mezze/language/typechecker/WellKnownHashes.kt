@@ -21,6 +21,8 @@ object WellKnownHashes {
     fun isInspect(hash: Hash?): Boolean = WellKnownHashConstants.isInspect(hash)
     fun isMut(hash: Hash?): Boolean = WellKnownHashConstants.isMut(hash)
     fun isCodecAbility(hash: Hash?): Boolean = WellKnownHashConstants.isCodecAbility(hash)
+    fun isEncodeFlavoredCodec(hash: Hash?): Boolean = WellKnownHashConstants.isEncodeFlavoredCodec(hash)
+    fun isDecodeFlavoredCodec(hash: Hash?): Boolean = WellKnownHashConstants.isDecodeFlavoredCodec(hash)
     fun isEq(hash: Hash?): Boolean = WellKnownHashConstants.isEq(hash)
     fun isOrd(hash: Hash?): Boolean = WellKnownHashConstants.isOrd(hash)
     fun isNumAdd(hash: Hash?): Boolean = WellKnownHashConstants.isNumAdd(hash)

@@ -95,6 +95,10 @@ fun main(args: Array<String>) {
     sb.appendLine("    fun isInspect(hash: Hash?): Boolean = hash != null && hash == ABILITY_INSPECT")
     sb.appendLine("    fun isMut(hash: Hash?): Boolean = hash != null && hash == EFFECT_MUT")
     sb.appendLine("    fun isCodecAbility(hash: Hash?): Boolean = hash != null && hash in codecAbilitySet")
+    sb.appendLine("    /** Encode-flavored codec: codec auto-gen emits an encode-shaped impl body. */")
+    sb.appendLine("    fun isEncodeFlavoredCodec(hash: Hash?): Boolean = hash != null && hash in encodeFlavoredSet")
+    sb.appendLine("    /** Decode-flavored codec: codec auto-gen emits a decode-shaped impl body. */")
+    sb.appendLine("    fun isDecodeFlavoredCodec(hash: Hash?): Boolean = hash != null && hash in decodeFlavoredSet")
     sb.appendLine("    fun isEq(hash: Hash?): Boolean = hash != null && hash == ABILITY_EQ")
     sb.appendLine("    fun isOrd(hash: Hash?): Boolean = hash != null && hash == ABILITY_ORD")
     sb.appendLine("    fun isNumAdd(hash: Hash?): Boolean = hash != null && hash == ABILITY_NUMADD")
@@ -110,6 +114,28 @@ fun main(args: Array<String>) {
         "StreamFormat", "StreamDecodeFormat", "Format")
     sb.appendLine("    private val codecAbilitySet = setOf(")
     for (name in codecNames) {
+        if (abilities.containsKey(name)) {
+            sb.appendLine("        ABILITY_${name.uppercase()},")
+        }
+    }
+    sb.appendLine("    )")
+    sb.appendLine()
+
+    // Encode/decode flavor split — the codec auto-generator picks an
+    // encode-shaped or decode-shaped impl body based on which family
+    // the ability belongs to.
+    val encodeFlavored = listOf("Encode", "EncodeRepr")
+    sb.appendLine("    private val encodeFlavoredSet = setOf(")
+    for (name in encodeFlavored) {
+        if (abilities.containsKey(name)) {
+            sb.appendLine("        ABILITY_${name.uppercase()},")
+        }
+    }
+    sb.appendLine("    )")
+    sb.appendLine()
+    val decodeFlavored = listOf("Decode", "DecodeRepr")
+    sb.appendLine("    private val decodeFlavoredSet = setOf(")
+    for (name in decodeFlavored) {
         if (abilities.containsKey(name)) {
             sb.appendLine("        ABILITY_${name.uppercase()},")
         }
