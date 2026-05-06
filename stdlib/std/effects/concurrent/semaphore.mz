@@ -1,15 +1,13 @@
 use std::abilities::compare::{ Eq }
 
+## Counting semaphore for limiting concurrent access.
 pub newtype Semaphore = Semaphore __NativeSemaphore
 
-# Semaphore type wrapping Java's Semaphore
-# Semaphore type wrapping Java's Semaphore
 impl Eq for Semaphore where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
 
-# Inherent impls for Semaphore — method syntax for common operations
 impl Semaphore where {
   acquire = { it } -> acquire { sem = it },
   acquire_n = { it, permits } -> acquire_n { sem = it, permits = permits },
@@ -21,72 +19,36 @@ impl Semaphore where {
   with_permit = { it, f } -> with_permit { sem = it, f = f },
 }
 
-# Create a new semaphore with specified number of permits
-#
-# Example:
-#   let pool = semaphore {permits = 5}  # Allow 5 concurrent
+## Create a semaphore with the given number of permits.
 pub let semaphore : { permits: Int } -> Semaphore = { permits } ->
   __native_semaphore_new { permits = permits }
 
-# Acquire one permit (blocks until available)
-#
-# Example:
-#   let _ = acquire {sem = pool}
-#   # ... use resource ...
-#   let _ = release {sem = pool}
+## Acquire one permit (blocks until available).
 pub let acquire : { sem: Semaphore } -> {} = { sem } -> __native_semaphore_acquire { sem = sem }
 
-# Acquire multiple permits (blocks until all available)
-#
-# Example:
-#   let _ = acquire_n {sem = pool, permits = 2}  # Need 2 resources
+## Acquire n permits (blocks until all available).
 pub let acquire_n : { sem: Semaphore, permits: Int } -> {} = { sem, permits } ->
   __native_semaphore_acquire_n { sem = sem, permits = permits }
 
-# Release one permit
-#
-# Example:
-#   release {sem = pool}
+## Release one permit.
 pub let release : { sem: Semaphore } -> {} = { sem } -> __native_semaphore_release { sem = sem }
 
-# Release multiple permits
-#
-# Example:
-#   release_n {sem = pool, permits = 2}
+## Release n permits.
 pub let release_n : { sem: Semaphore, permits: Int } -> {} = { sem, permits } ->
   __native_semaphore_release_n { sem = sem, permits = permits }
 
-# Try to acquire one permit without blocking
-# Returns true if acquired, false if no permits available
-#
-# Example:
-#   if try_acquire {sem = pool} then do
-#       # Got permit
-#       let result = do_work {}
-#       let _ = release {sem = pool}
-#       Some {val = result}
-#   else
-#       None  # Resource busy
+## Try to acquire one permit without blocking.
 pub let try_acquire : { sem: Semaphore } -> Bool = { sem } ->
   __native_semaphore_try_acquire { sem = sem }
 
-# Try to acquire multiple permits without blocking
+## Try to acquire n permits without blocking.
 pub let try_acquire_n : { sem: Semaphore, permits: Int } -> Bool = { sem, permits } ->
   __native_semaphore_try_acquire_n { sem = sem, permits = permits }
 
-# Get number of currently available permits
-#
-# Example:
-#   let free = available {sem = pool}
+## Get the number of currently available permits.
 pub let available : { sem: Semaphore } -> Int = { sem } ->
   __native_semaphore_available { sem = sem }
 
-# RAII-style acquire/release - acquire, run function, release automatically
-#
-# Example:
-#   let result = with_permit {sem = pool, f = {} -> do
-#       # ... use resource ...
-#       compute_result {}
-#   }
+## Acquire a permit, run f, release automatically.
 pub let with_permit : { sem: Semaphore, f: {} -> 'a } -> 'a = { sem, f } ->
   __native_semaphore_with_permit { sem = sem, f = f }

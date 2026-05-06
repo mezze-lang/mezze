@@ -200,10 +200,11 @@ class InMemoryMezzeStore : MezzeStore {
 
     override fun putDecl(
         modulePath: String, declName: String, declKind: DeclKind, sourceHash: String,
-        hash: Hash, startLine: Int, startCol: Int, endLine: Int, endCol: Int
+        hash: Hash, startLine: Int, startCol: Int, endLine: Int, endCol: Int,
+        doc: String?, metadata: String?
     ) {
         decls.removeAll { it.modulePath == modulePath && it.declKind == declKind && it.declName == declName }
-        decls.add(DeclRow(modulePath, declName, declKind, sourceHash, hash, startLine, startCol, endLine, endCol))
+        decls.add(DeclRow(modulePath, declName, declKind, sourceHash, hash, startLine, startCol, endLine, endCol, doc, metadata))
     }
 
     override fun clearDeclsForModule(modulePath: String) {

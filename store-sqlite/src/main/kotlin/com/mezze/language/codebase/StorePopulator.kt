@@ -105,7 +105,7 @@ object StorePopulator {
                 // index. We need source bytes to compute per-decl ranges,
                 // so the entry's decls only land if `entrySource` was passed.
                 if (entrySource != null) {
-                    scatterDecls(store, typedModule, modulePath, entrySource)
+                    scatterDecls(store, typedModule, modulePath, entrySource, parsedModule)
                 }
 
                 // Cross-file find-references index. Walks every TypedExpr
@@ -159,7 +159,7 @@ object StorePopulator {
                 }
 
                 // Per-decl index for the dep too. We have its source in hand.
-                scatterDecls(store, loadedTyped, loadedPath, depSource)
+                scatterDecls(store, loadedTyped, loadedPath, depSource, depParsed)
 
                 // Imports for the dep — only if we have its ParsedModule.
                 // Without the ParsedModule we don't have the use-decl source
@@ -405,31 +405,78 @@ object StorePopulator {
         store: MezzeStore,
         module: TypedModule,
         modulePath: String,
-        source: String
+        source: String,
+        parsedModule: com.mezze.language.parsedast.ParsedModule? = null
     ) {
         store.clearDeclsForModule(modulePath)
         val lineStarts = LineIndex(source)
 
+        // Build lookup from parsed decls for doc/metadata extraction
+        val parsedDeclsByName = buildParsedDeclLookup(parsedModule)
+
         for (decl in module.decls.filterIsInstance<TypedLetDecl>()) {
-            writeDecl(store, modulePath, decl.name, DeclKind.LET, decl.hash, decl.loc, source, lineStarts)
+            val parsed = parsedDeclsByName[decl.name]
+            writeDecl(store, modulePath, decl.name, DeclKind.LET, decl.hash, decl.loc, source, lineStarts, parsed)
         }
         for (decl in module.decls.filterIsInstance<TypedTypeDecl>()) {
-            writeDecl(store, modulePath, decl.name, DeclKind.TYPE, decl.hash, decl.loc, source, lineStarts)
+            val parsed = parsedDeclsByName[decl.name]
+            writeDecl(store, modulePath, decl.name, DeclKind.TYPE, decl.hash, decl.loc, source, lineStarts, parsed)
         }
         for (decl in module.abilityDecls) {
-            writeDecl(store, modulePath, decl.name, DeclKind.ABILITY, decl.hash, decl.loc, source, lineStarts)
+            val parsed = parsedDeclsByName[decl.name]
+            writeDecl(store, modulePath, decl.name, DeclKind.ABILITY, decl.hash, decl.loc, source, lineStarts, parsed)
         }
         for (decl in module.effectDecls) {
-            writeDecl(store, modulePath, decl.name, DeclKind.EFFECT, decl.hash, decl.loc, source, lineStarts)
+            val parsed = parsedDeclsByName[decl.name]
+            writeDecl(store, modulePath, decl.name, DeclKind.EFFECT, decl.hash, decl.loc, source, lineStarts, parsed)
         }
         for (decl in module.performerDecls) {
-            writeDecl(store, modulePath, decl.name, DeclKind.PERFORMER, decl.hash, decl.loc, source, lineStarts)
+            val parsed = parsedDeclsByName[decl.name]
+            writeDecl(store, modulePath, decl.name, DeclKind.PERFORMER, decl.hash, decl.loc, source, lineStarts, parsed)
         }
         // Ability impls have no user-facing name; synthesize one from the
         // hash so the (module, kind, name) primary key stays unique.
         for (impl in module.abilityImpls) {
             val synthName = "impl_${impl.hash.hex.take(12)}"
-            writeDecl(store, modulePath, synthName, DeclKind.IMPL, impl.hash, impl.loc, source, lineStarts)
+            writeDecl(store, modulePath, synthName, DeclKind.IMPL, impl.hash, impl.loc, source, lineStarts, null)
+        }
+    }
+
+    private fun buildParsedDeclLookup(
+        parsedModule: com.mezze.language.parsedast.ParsedModule?
+    ): Map<String, com.mezze.language.parsedast.ParsedDecl> {
+        if (parsedModule == null) return emptyMap()
+        val result = mutableMapOf<String, com.mezze.language.parsedast.ParsedDecl>()
+        for (decl in parsedModule.decls) {
+            val name = when (decl) {
+                is com.mezze.language.parsedast.ParsedLetDecl -> if (decl.isSimpleBinding) decl.variableName else null
+                is com.mezze.language.parsedast.ParsedTypeDecl -> decl.name
+                is com.mezze.language.parsedast.ParsedAbilityDecl -> decl.name
+                is com.mezze.language.parsedast.ParsedEffectDecl -> decl.name
+                is com.mezze.language.parsedast.ParsedPerformerDecl -> decl.performerName
+                else -> null
+            }
+            if (name != null) result[name] = decl
+        }
+        return result
+    }
+
+    private fun serializeMetadata(metadata: com.mezze.language.parsedast.ParsedMetadata?): String? {
+        if (metadata == null || metadata.fields.isEmpty()) return null
+        // Simple JSON serialization of metadata fields
+        return metadata.fields.entries.joinToString(", ", "{", "}") { (key, value) ->
+            "\"$key\": ${serializeMetadataValue(value)}"
+        }
+    }
+
+    private fun serializeMetadataValue(value: com.mezze.language.parsedast.ParsedMetadataValue): String {
+        return when (value) {
+            is com.mezze.language.parsedast.ParsedMetadataValue.StringVal -> "\"${value.value.replace("\"", "\\\"")}\""
+            is com.mezze.language.parsedast.ParsedMetadataValue.IntVal -> value.value.toString()
+            is com.mezze.language.parsedast.ParsedMetadataValue.BoolVal -> value.value.toString()
+            is com.mezze.language.parsedast.ParsedMetadataValue.FloatVal -> value.value.toString()
+            is com.mezze.language.parsedast.ParsedMetadataValue.ListVal -> value.values.joinToString(", ", "[", "]") { serializeMetadataValue(it) }
+            is com.mezze.language.parsedast.ParsedMetadataValue.RecordVal -> value.fields.entries.joinToString(", ", "{", "}") { (k, v) -> "\"$k\": ${serializeMetadataValue(v)}" }
         }
     }
 
@@ -441,7 +488,8 @@ object StorePopulator {
         hash: Hash,
         loc: com.mezze.language.parsedast.Loc,
         source: String,
-        lineStarts: LineIndex
+        lineStarts: LineIndex,
+        parsedDecl: com.mezze.language.parsedast.ParsedDecl? = null
     ) {
         val sliced = lineStarts.slice(source, loc)
         val perDeclSourceHash = sha256Hex(sliced)
@@ -454,7 +502,9 @@ object StorePopulator {
             startLine = loc.startLine,
             startCol = loc.startCol,
             endLine = loc.endLine,
-            endCol = loc.endCol
+            endCol = loc.endCol,
+            doc = parsedDecl?.docComment,
+            metadata = serializeMetadata(parsedDecl?.metadata)
         )
     }
 

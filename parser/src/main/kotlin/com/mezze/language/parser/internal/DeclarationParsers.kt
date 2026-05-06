@@ -673,14 +673,14 @@ internal val MezzeParser.variantConstructorParser: Parser<ParsedVariantCtorDef> 
                     is ParseResult.Success -> {
                         val loc = spanLocTo(name.value, dataType.remaining, file)
                         ParseResult.Success(
-                            ParsedVariantCtorDef(name.value.text, dataType.value, loc),
+                            ParsedVariantCtorDef(name.value.text, dataType.value, loc = loc),
                             dataType.remaining
                         )
                     }
                     is ParseResult.Failure -> {
                         val loc = tokenLoc(name.value, file)
                         ParseResult.Success(
-                            ParsedVariantCtorDef(name.value.text, null, loc),
+                            ParsedVariantCtorDef(name.value.text, null, loc = loc),
                             stream1
                         )
                     }
@@ -698,7 +698,7 @@ internal val MezzeParser.recordTypeParser: Parser<ParsedTypeDef> get() = { strea
                 val value = recordType.value
                 if (value is ParsedRecordType) {
                     val fields = value.entries.map { entry ->
-                        ParsedRecordFieldDef(entry.name, entry.type, entry.loc)
+                        ParsedRecordFieldDef(entry.name, entry.type, loc = entry.loc)
                     }
                     ParseResult.Success(
                         ParsedRecordDef(fields, value.isOpen, value.loc),

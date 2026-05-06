@@ -1,49 +1,38 @@
 use std::control::continuation
 use std::control::continuation::{ Continuation }
 
+## Early return effect for escaping computations with a value.
 effect Return having 'result where {
+  ## Return a value, exiting the current perform block.
   return: { val: 'result } -> 'a <Return>
 }
 
-# =============================================================================
-# Built-in Handler (uses scoped continuation)
-# =============================================================================
-# Returns the value immediately via early return
-# Uses scoped continuation to manage lifecycle automatically.
-#
-# Example:
-#   let result = perform EarlyReturn in do
-#       for_each {xs = items, f = {item} -> do
-#           if is_target {item = item} then
-#               return {val = item}  # Found it, exit early
-#       }
-#       default_value  # Not found
+## Handler that implements early return via scoped continuations.
 impl Return for EarlyReturn having 'result = 'r where {
   initialize_scope = {} -> { cont = continuation::new {} },
   finalize_scope = {} -> scope.cont.reset {},
   return = { val } -> scope.cont.suspend_with { value = val },
 }
 
-# =============================================================================
-# Helpers
-# =============================================================================
-# Shorthand for Return.return
+## Shorthand for Return.return.
 pub let return = { val } -> Return.return { val }
 
-# Return if condition is true
+## Return early if condition is true.
 pub let return_if = { condition, val } -> if condition then Return.return { val } else {}
 
-# Return early unless value is None
+## Return early if option is Some, otherwise continue.
 pub let return_some = { option } -> match option is
   Some { val } -> Return.return { val = val }
   None -> {}
 
 
+## Unwrap Some or return default on None.
 pub let return_none = { option, default } -> match option is
   Some { val } -> val
   None -> Return.return { val = default }
 
 
+## Unwrap Ok or return default on Err.
 pub let return_err = { result, default } -> match result is
   Ok { val } -> val
   Err { error } -> Return.return { val = default }

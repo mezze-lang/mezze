@@ -1,5 +1,6 @@
 use std::abilities::compare::{ Eq }
 
+## One-shot countdown barrier that releases waiting threads when count reaches zero.
 pub newtype Latch = Latch __NativeLatch
 
 impl Eq for Latch where {
@@ -7,7 +8,6 @@ impl Eq for Latch where {
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
 
-## Inherent impls for Latch — method syntax for common operations
 impl Latch where {
   count_down = { it } -> count_down { latch = it },
   await = { it } -> await_latch { latch = it },
@@ -15,24 +15,20 @@ impl Latch where {
   get_count = { it } -> get_count { latch = it },
 }
 
-## Create a new latch with the given count.
-## The count must be non-negative.
+## Create a new latch with the given count (must be non-negative).
 pub let latch : { count: Int } -> Latch = { count } -> __native_latch_new { count = count }
 
-## Decrement the latch count by one.
-## If the count reaches zero, all waiting threads are released.
+## Decrement the count by one. Releases waiters when count reaches zero.
 pub let count_down : { latch: Latch } -> {} = { latch } ->
   __native_latch_count_down { latch = latch }
 
-## Wait until the latch count reaches zero.
-## If the count is already zero, returns immediately.
+## Wait until the count reaches zero.
 pub let await_latch : { latch: Latch } -> {} = { latch } -> __native_latch_await { latch = latch }
 
-## Wait until the latch count reaches zero or timeout expires.
-## Returns True if the count reached zero, False if timeout expired.
+## Wait until count reaches zero or timeout expires. Returns True if released.
 pub let await_latch_timeout : { latch: Latch, ms: Int } -> Bool = { latch, ms } ->
   __native_latch_await_timeout { latch = latch, ms = ms }
 
-## Get the current count of the latch.
+## Get the current count.
 pub let get_count : { latch: Latch } -> Int = { latch } ->
   __native_latch_get_count { latch = latch }

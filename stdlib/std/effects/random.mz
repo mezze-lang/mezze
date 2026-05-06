@@ -4,20 +4,19 @@ use std::collections::seq
 use std::int
 use std::float
 
-# Random effect definition
-# Random effect definition
-# Random effect definition
-# Random effect definition
+## Random number generation effect.
 effect Random where {
+  ## Generate a random Float in [0, 1).
   random_float: {} -> Float <Random>,
+  ## Generate a random Int in [min, max].
   random_int: { min: Int, max: Int } -> Int <Random>,
+  ## Generate a random Nat in [0, max].
   random_nat: { max: Nat } -> Nat <Random>,
+  ## Re-seed the generator.
   seed: { new_seed: Int } -> {} <Random>
 }
 
-# Seeded random implementation with deterministic behavior
-# Uses scoped effects to reset the random state at the start of each perform block,
-# ensuring that the same seed always produces the same sequence.
+## Deterministic random using a seed. Same seed always produces same sequence.
 impl Random for SeededRandom { seed: Int } where {
   initialize_scope = {} -> do
     __native_reset_seeded_random { seed = seed }
@@ -29,33 +28,36 @@ impl Random for SeededRandom { seed: Int } where {
   seed = { new_seed } -> __native_update_seed { old_seed = seed, new_seed = new_seed },
 }
 
-# Reset the seeded random to ensure deterministic behavior
-# Each perform block with the same seed will produce identical sequences
-# Convenience functions that use the Random effect
+## Generate a random float in [0, 1).
 pub let random_float : {} -> Float <Random> = {} -> Random.random_float {}
 
+## Generate a random integer in [min, max].
 pub let random_int : { min: Int, max: Int } -> Int <Random> = { min, max } ->
   Random.random_int { min = min, max = max }
 
+## Generate a random natural number in [0, max].
 pub let random_nat : { max: Nat } -> Nat <Random> = { max } -> Random.random_nat { max = max }
 
+## Generate a random boolean with given probability of True.
 pub let random_boolean : { probability: Float } -> Bool <Random> = { probability } ->
   do
     let rand = Random.random_float {}
     rand < probability
 
+## Generate a random float in [min, max).
 pub let random_range : { min: Float, max: Float } -> Float <Random> = { min, max } ->
   do
     let rand = Random.random_float {}
     min + (rand * (max - min))
 
+## Re-seed the random generator.
 pub let seed_random : { seed: Int } -> {} <Random> = { seed } -> Random.seed { new_seed = seed }
 
-# Distribution functions using the Random effect
+## Uniform distribution in [min, max).
 pub let uniform : { min: Float, max: Float } -> Float <Random> = { min, max } ->
   random_range { min = min, max = max }
 
-# Normal distribution using Box-Muller transform
+## Normal (Gaussian) distribution using Box-Muller transform.
 pub let normal : { mean: Float, std_dev: Float } -> Float <Random> = { mean, std_dev } ->
   do
     let u1 = Random.random_float {}
@@ -63,10 +65,12 @@ pub let normal : { mean: Float, std_dev: Float } -> Float <Random> = { mean, std
     let z0 = core::sqrt { n = -2.0 * core::ln { n = u1 } } * trig::cos { n = 2.0 * trig::pi * u2 }
     mean + (std_dev * z0)
 
+## Exponential distribution with given rate.
 pub let exponential : { rate: Float } -> Float <Random> = { rate } -> do
   let u = Random.random_float {}
   (-1.0 / rate) * core::ln { n = u }
 
+## Bernoulli trial returning 1 with probability p, else 0.
 pub let bernoulli : { p: Float } -> Int <Random> = { p } -> do
   let r = Random.random_float {}
   match r < p is
@@ -74,6 +78,7 @@ pub let bernoulli : { p: Float } -> Int <Random> = { p } -> do
     False -> 0
 
 
+## Pick a random element from a sequence, or None if empty.
 pub let random_element : { xs: ['a] } -> Option 'a <Random> = { xs } -> do
   let len = seq::size { xs = xs }
   match len > 0 is
@@ -83,19 +88,21 @@ pub let random_element : { xs: ['a] } -> Option 'a <Random> = { xs } -> do
     False -> None
 
 
+## Pure Box-Muller transform (no effect needed).
 pub let box_muller : { u1: Float, u2: Float, mean: Float, std_dev: Float } -> Float = { u1, u2, mean, std_dev } ->
   do
     let z0 = core::sqrt { n = -2.0 * core::ln { n = u1 } } * trig::cos { n = 2.0 * trig::pi * u2 }
     mean + (std_dev * z0)
 
+## Pure inverse CDF for exponential distribution.
 pub let exponential_inverse : { u: Float, rate: Float } -> Float = { u, rate } ->
   (-1.0 / rate) * core::ln { n = u }
 
-# Linear interpolation for uniform distribution
+## Linear interpolation for uniform distribution.
 pub let uniform_transform : { u: Float, min: Float, max: Float } -> Float = { u, min, max } ->
   min + (u * (max - min))
 
-# Probability density function for normal distribution
+## Probability density function for the normal distribution.
 pub let normal_pdf : { x: Float, mean: Float, std_dev: Float } -> Float = { x, mean, std_dev } ->
   do
     let variance = std_dev * std_dev
@@ -103,24 +110,14 @@ pub let normal_pdf : { x: Float, mean: Float, std_dev: Float } -> Float = { x, m
     let exponent = -((x - mean) * (x - mean)) / (2.0 * variance)
     coefficient * core::exp { n = exponent }
 
+## Approximate CDF for the normal distribution.
 pub let normal_cdf_approx : { x: Float, mean: Float, std_dev: Float } -> Float = { x, mean, std_dev } ->
   do
     let z = (x - mean) / std_dev
     0.5 * (1.0 + trig::tanh { n = z * core::sqrt { n = 2.0 / trig::pi } })
 
+## PDF for the exponential distribution.
 pub let exponential_pdf : { x: Float, rate: Float } -> Float = { x, rate } -> if x < 0.0 then 0.0 else rate * core::exp { n = -rate * x }
 
-# Cumulative distribution function for exponential distribution
+## CDF for the exponential distribution.
 pub let exponential_cdf : { x: Float, rate: Float } -> Float = { x, rate } -> if x < 0.0 then 0.0 else 1.0 - core::exp { n = -rate * x }
-# =============================================================================
-# Usage examples
-# =============================================================================
-#
-# Using seeded random for deterministic behavior:
-# perform SeededRandom { seed = 42 } in do {
-#     let x = random_float { }  # Always same sequence with seed 42
-#     let y = random_int { min = 1, max = 10 }
-# }
-#
-# Different seeds produce different sequences:
-# perform SeededRandom { seed = 123 } in normal { mean = 0.0, std_dev = 1.0 }

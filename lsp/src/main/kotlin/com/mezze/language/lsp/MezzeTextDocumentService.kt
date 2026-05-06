@@ -452,6 +452,9 @@ class MezzeTextDocumentService(
                         )
                     }
 
+                    // Deprecation diagnostics: mark deprecated declarations
+                    diagnostics.addAll(deprecationDiagnostics(parsedModule))
+
                     // Write typed bytes + per-decl blobs into the shared store
                     // so concurrent `mez dev` (and a future LSP restart) see
                     // them. Same path StorePopulator uses for the CLI.
@@ -676,6 +679,45 @@ class MezzeTextDocumentService(
                 endColumn = decl.loc.endCol
             )
             diag.tags = listOf(DiagnosticTag.Unnecessary)
+            out.add(diag)
+        }
+        return out
+    }
+
+    /**
+     * Generate diagnostics for declarations marked with `#{ deprecated: True }`.
+     * The diagnostic uses DiagnosticTag.Deprecated so editors render strikethrough.
+     */
+    private fun deprecationDiagnostics(parsed: com.mezze.language.parsedast.ParsedModule): List<Diagnostic> {
+        val out = mutableListOf<Diagnostic>()
+        for (decl in parsed.decls) {
+            val meta = decl.metadata ?: continue
+            if (!meta.isDeprecated) continue
+
+            val name = when (decl) {
+                is ParsedLetDecl -> if (decl.isSimpleBinding) decl.variableName else null
+                is ParsedTypeDecl -> decl.name
+                is ParsedAbilityDecl -> decl.name
+                is ParsedEffectDecl -> decl.name
+                is ParsedPerformerDecl -> decl.performerName
+                else -> null
+            } ?: continue
+
+            val message = buildString {
+                append("'$name' is deprecated")
+                meta.since?.let { append(" since $it") }
+                meta.note?.let { append(". $it") }
+            }
+
+            val diag = createDiagnostic(
+                message = message,
+                severity = DiagnosticSeverity.Hint,
+                line = decl.loc.startLine - 1,
+                column = decl.loc.startCol - 1,
+                endLine = decl.loc.endLine - 1,
+                endColumn = decl.loc.endCol
+            )
+            diag.tags = listOf(DiagnosticTag.Deprecated)
             out.add(diag)
         }
         return out
@@ -983,13 +1025,12 @@ class MezzeTextDocumentService(
                     return when (expr) {
                         is com.mezze.language.typedast.TypedVar -> {
                             val abilityHover = result?.let { renderAbilityMethodHover(expr.name, it, state) }
-                            abilityHover ?: codeBlock("${expr.name} : $typeStr")
+                            val hover = abilityHover ?: codeBlock("${expr.name} : $typeStr")
+                            val doc = findDocForDecl(state.parsedModule, expr.name) ?: findDocFromStore(expr.name)
+                            val meta = findMetadataForDecl(state.parsedModule, expr.name)
+                            appendDoc(hover, doc, meta)
                         }
                         is com.mezze.language.typedast.TypedFieldAccess -> {
-                            // Method-call syntax often surfaces here as a
-                            // pseudo field-access; if the field name matches
-                            // an ability operation in scope, prefer the
-                            // richer `Ability.method : T` hover.
                             val abilityHover = result?.let { renderAbilityMethodHover(expr.field, it, state) }
                             abilityHover ?: codeBlock(".${expr.field} : $typeStr")
                         }
@@ -1034,7 +1075,9 @@ class MezzeTextDocumentService(
             if (typedBinding != null) {
                 val bindingType = typedBinding.scheme.type
                 if (bindingType !is MezzeType.VarType) {
-                    return codeBlock("$word : ${formatType(bindingType)}")
+                    val doc = findDocForDecl(state.parsedModule, word)
+                    val meta = findMetadataForDecl(state.parsedModule, word)
+                    return appendDoc(codeBlock("$word : ${formatType(bindingType)}"), doc, meta)
                 }
             }
 
@@ -1052,7 +1095,8 @@ class MezzeTextDocumentService(
                 val fromModule = if (resolvedImport.modulePath.isNotEmpty()) {
                     "\n\n*from* `${resolvedImport.modulePath}`"
                 } else ""
-                return codeBlock("$kindPrefix$word : $typeStr") + fromModule
+                val doc = findDocFromStore(word)
+                return appendDoc(codeBlock("$kindPrefix$word : $typeStr") + fromModule, doc)
             }
         }
 
@@ -1062,7 +1106,7 @@ class MezzeTextDocumentService(
         // 3. Look up type declarations from parsed module
         val typeDecl = parsedModule?.decls?.filterIsInstance<ParsedTypeDecl>()?.find { it.name == word }
         if (typeDecl != null) {
-            return codeBlock("type $word")
+            return appendDoc(codeBlock("type $word"), typeDecl.docComment, typeDecl.metadata)
         }
 
         // 4-5. Look up ability declarations from parsed module or imports
@@ -1093,9 +1137,82 @@ class MezzeTextDocumentService(
             ?.find { it.variableName == word }
 
         if (letDecl != null) {
-            return codeBlock("let $word = ...")
+            return appendDoc(codeBlock("let $word = ..."), letDecl.docComment, letDecl.metadata)
         }
 
+        return null
+    }
+
+    /**
+     * Look up the doc comment for a named declaration from the current file's ParsedModule.
+     * Returns the doc string or null.
+     */
+    private fun findDocForDecl(parsedModule: ParsedModule?, name: String): String? {
+        if (parsedModule == null) return null
+        for (decl in parsedModule.decls) {
+            val declName = when (decl) {
+                is ParsedLetDecl -> if (decl.isSimpleBinding) decl.variableName else null
+                is ParsedTypeDecl -> decl.name
+                is ParsedAbilityDecl -> decl.name
+                is ParsedEffectDecl -> decl.name
+                is ParsedPerformerDecl -> decl.performerName
+                else -> null
+            }
+            if (declName == name) return decl.docComment
+        }
+        return null
+    }
+
+    /**
+     * Look up the doc comment for a declaration by name from the store.
+     * Used for imported symbols where the ParsedModule isn't available.
+     */
+    private fun findDocFromStore(name: String): String? {
+        val store = projectStore ?: return null
+        val decls = store.searchDeclsByName(name)
+        return decls.firstOrNull { it.declName == name }?.doc
+    }
+
+    /**
+     * Append a doc comment and deprecation warning to hover markdown.
+     */
+    private fun appendDoc(hover: String, doc: String?, metadata: ParsedMetadata? = null): String {
+        val parts = mutableListOf(hover)
+
+        // Deprecation warning
+        if (metadata?.isDeprecated == true) {
+            val deprecation = buildString {
+                append("**Deprecated**")
+                metadata.since?.let { append(" since $it") }
+                metadata.note?.let { append(" — $it") }
+            }
+            parts.add(deprecation)
+        }
+
+        // Doc comment
+        if (!doc.isNullOrBlank()) {
+            parts.add(doc)
+        }
+
+        return parts.joinToString("\n\n---\n\n")
+    }
+
+    /**
+     * Find the metadata for a named declaration from the current file's ParsedModule.
+     */
+    private fun findMetadataForDecl(parsedModule: ParsedModule?, name: String): ParsedMetadata? {
+        if (parsedModule == null) return null
+        for (decl in parsedModule.decls) {
+            val declName = when (decl) {
+                is ParsedLetDecl -> if (decl.isSimpleBinding) decl.variableName else null
+                is ParsedTypeDecl -> decl.name
+                is ParsedAbilityDecl -> decl.name
+                is ParsedEffectDecl -> decl.name
+                is ParsedPerformerDecl -> decl.performerName
+                else -> null
+            }
+            if (declName == name) return decl.metadata
+        }
         return null
     }
 
@@ -1178,7 +1295,7 @@ class MezzeTextDocumentService(
         val body = if (ops.isNotEmpty()) " where {\n$ops\n}" else ""
         val moduleInfo = if (!fromModule.isNullOrEmpty()) "\n\n*from* `$fromModule`" else ""
 
-        return codeBlock("$header$body") + moduleInfo
+        return appendDoc(codeBlock("$header$body") + moduleInfo, decl.docComment, decl.metadata)
     }
 
     /**
@@ -1196,7 +1313,7 @@ class MezzeTextDocumentService(
         val body = if (ops.isNotEmpty()) " where {\n$ops\n}" else ""
         val moduleInfo = if (!fromModule.isNullOrEmpty()) "\n\n*from* `$fromModule`" else ""
 
-        return codeBlock("$header$body") + moduleInfo
+        return appendDoc(codeBlock("$header$body") + moduleInfo, decl.docComment, decl.metadata)
     }
 
     /**

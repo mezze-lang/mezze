@@ -1,15 +1,13 @@
 use std::abilities::compare::{ Eq }
 
+## Lock-free atomic reference for shared mutable state.
 pub newtype Atom 'a = Atom __NativeAtomicRef
 
-# Opaque type wrapping Java's AtomicReference
-# Opaque type wrapping Java's AtomicReference
 impl Eq 'a for Atom 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
 
-# Inherent impls for Atom — method syntax for common operations
 impl Atom 'a where {
   deref = { it } -> deref { atom = it },
   reset = { it, value } -> reset { atom = it, value = value },
@@ -23,122 +21,44 @@ impl Atom 'a where {
   set_validator = { it, validator } -> set_validator { atom = it, validator = validator },
 }
 
-# Create a new atom with an initial value
-#
-# Example:
-#   let counter = atom {value = 0}
-#   let state = atom {value = {users = [], count = 0}}
+## Create a new atom with an initial value.
 pub let atom : { value: 'a } -> Atom 'a = { value } -> __native_atom_new { value = value }
 
-# Read the current value of an atom (non-blocking)
-#
-# Example:
-#   let current = deref {atom = counter}
+## Read the current value of an atom (non-blocking).
 pub let deref : { atom: Atom 'a } -> 'a = { atom } -> __native_atom_deref { atom = atom }
 
-# Set the atom to a new value, returns the new value
-# This is NOT atomic with respect to reads - use swap for read-modify-write
-#
-# Example:
-#   reset {atom = counter, value = 0}  # Reset counter to 0
+## Set the atom to a new value directly (not atomic with reads -- use swap for CAS).
 pub let reset : { atom: Atom 'a, value: 'a } -> 'a = { atom, value } ->
   __native_atom_reset { atom = atom, value = value }
 
-# Atomically apply a function to the atom's value
-# If another thread modified the atom, retries with the new value
-# Returns the new value after successful update
-#
-# The function f should be pure and fast - it may be called multiple times!
-#
-# Example:
-#   swap {atom = counter, f = {current} -> current + 1}           # Increment
-#   swap {atom = state, f = {current} -> {users = current.users, count = current.count + 1}}
+## Atomically apply f to the atom's value, retrying on contention.
 pub let swap : { atom: Atom 'a, f: { current: 'a } -> 'a } -> 'a = { atom, f } ->
   __native_atom_swap { atom = atom, f = f }
 
-# Low-level compare-and-set operation
-# Sets atom to new value only if current value equals expected
-# Returns true if successful, false if value had changed
-#
-# Example:
-#   let success = compare_and_set {atom = counter, expected = 0, new = 1}
+## Compare-and-set: update only if current value equals expected.
 pub let compare_and_set : { atom: Atom 'a, expected: 'a, new: 'a } -> Bool = { atom, expected, new } ->
   __native_atom_cas { atom = atom, expected = expected, new = new }
 
-# Atomically apply a function, also passing an extra argument
-# Useful when the update depends on external data
-#
-# Example:
-#   swap_with {atom = counter, f = {current, delta} -> current + delta, arg = 5}
+## Atomically apply f with an extra argument.
 pub let swap_with : { atom: Atom 'a, f: { current: 'a, arg: 'b } -> 'a, arg: 'b } -> 'a = { atom, f, arg } ->
   __native_atom_swap_with { atom = atom, f = f, arg = arg }
 
-# Read the current value and apply a function atomically
-# Returns both the old and new values
-#
-# Example:
-#   let {old, new} = get_and_swap {atom = counter, f = {current} -> current + 1}
+## Atomically apply f, returning both old and new values.
 pub let get_and_swap : { atom: Atom 'a, f: { current: 'a } -> 'a } -> { old: 'a, new: 'a } = { atom, f } ->
   __native_atom_get_and_swap { atom = atom, f = f }
 
-# =============================================================================
-# Watches - Callbacks on State Change
-# =============================================================================
-#
-# Watches are functions called whenever the atom's value changes.
-# They receive the watch key, old value, and new value.
-#
-# Use cases:
-# - Logging/debugging state changes
-# - Updating derived state
-# - Reactive patterns
-# Add a watch function to the atom
-# The watch will be called on every state change with (key, old, new)
-#
-# Example:
-#   add_watch {
-#       atom = counter,
-#       key = "logger",
-#       f = {key, old, new} -> Log.debug {msg = key ++ ": " ++ show {v = old} ++ " -> " ++ show {v = new}}
-#   }
+## Register a watch callback invoked on every state change.
 pub let add_watch : { atom: Atom 'a, key: Str, f: { key: Str, old: 'a, new: 'a } -> {} } -> {} = { atom, key, f } ->
   __native_atom_add_watch { atom = atom, key = key, f = f }
 
-# Remove a watch by its key
-#
-# Example:
-#   remove_watch {atom = counter, key = "logger"}
+## Remove a watch by its key.
 pub let remove_watch : { atom: Atom 'a, key: Str } -> {} = { atom, key } ->
   __native_atom_remove_watch { atom = atom, key = key }
 
-# =============================================================================
-# Validators - State Invariants
-# =============================================================================
-#
-# Validators are functions that check whether a new value is valid.
-# If a validator returns false, the update is rejected with an exception.
-#
-# Use cases:
-# - Enforcing business rules (e.g., counter must be non-negative)
-# - Preventing invalid state transitions
-# - Catching bugs early
-# Create a new atom with a validator
-# The initial value must pass the validator
-# All future updates must also pass the validator
-#
-# Example:
-#   let positive = atom_validated {value = 0, validator = {val} -> val >= 0}
-#   swap {atom = positive, f = {current} -> current + 1}  # OK
-#   swap {atom = positive, f = {current} -> current - 100}  # Throws!
+## Create an atom with a validator that rejects invalid updates.
 pub let atom_validated : { value: 'a, validator: { val: 'a } -> Bool } -> Atom 'a = { value, validator } ->
   __native_atom_new_validated { value = value, validator = validator }
 
-# Set a validator on an existing atom
-# Note: Does NOT validate the current value
-# All future updates must pass the validator
-#
-# Example:
-#   let counter = atom {value = 0}
-#   set_validator {atom = counter, validator = {val} -> val >= 0}
+## Set a validator on an existing atom. Future updates must pass it.
 pub let set_validator : { atom: Atom 'a, validator: { val: 'a } -> Bool } -> {} = { atom, validator } ->
   __native_atom_set_validator { atom = atom, validator = validator }

@@ -2,10 +2,7 @@ use std::str::{ split, join }
 use std::collections::seq
 use std::int
 
-# FileSystem error types (exported for pattern matching)
-# FileSystem error types (exported for pattern matching)
-# FileSystem error types (exported for pattern matching)
-# FileSystem error types (exported for pattern matching)
+## Error types for filesystem operations.
 pub type FileSystemError = |
   FileNotFound { path: Str },
   PermissionDenied { path: Str, operation: Str },
@@ -17,6 +14,7 @@ pub type FileSystemError = |
   InvalidPath { path: Str },
 |
 
+## File system effect for reading, writing, and managing files and directories.
 effect FileSystem where {
   read_file: { path: Str } -> Result Str FileSystemError <FileSystem>,
   write_file: { path: Str, content: Str } -> Result {} FileSystemError <FileSystem>,
@@ -34,7 +32,7 @@ effect FileSystem where {
   move_file: { src: Str, dest: Str } -> Result {} FileSystemError <FileSystem>
 }
 
-# Local disk implementation (runs in virtual threads transparently)
+## Local disk implementation using the real filesystem.
 impl FileSystem for LocalDisk where {
   read_file = { path } -> __native_fs_read_file { path = path },
   write_file = { path, content } -> __native_fs_write_file { path = path, content = content },
@@ -52,7 +50,7 @@ impl FileSystem for LocalDisk where {
   move_file = { src, dest } -> __native_fs_move_file { src = src, dest = dest },
 }
 
-# Memory-based file system (for testing)
+## In-memory filesystem for testing without touching disk.
 impl FileSystem for MemoryFS where {
   read_file = { path } -> __native_memfs_read_file { path = path },
   write_file = { path, content } -> __native_memfs_write_file { path = path, content = content },
@@ -70,14 +68,11 @@ impl FileSystem for MemoryFS where {
   move_file = { src, dest } -> __native_memfs_move_file { src = src, dest = dest },
 }
 
-# =========================================================================
-# Path Helper Functions (pure, no effects needed)
-# =========================================================================
-# Join path components with separator
+## Join path components with "/".
 pub let path_join : { parts: [Str] } -> Str = { parts } ->
   join { strings = parts, separator = "/" }
 
-# Get the file name from a path (last component)
+## Get the file name (last component) from a path.
 pub let file_name : { path: Str } -> Str = { path } -> do
   let parts = split { s = path, delimiter = "/" }
   let len = seq::size { xs = parts }
@@ -88,6 +83,7 @@ pub let file_name : { path: Str } -> Str = { path } -> do
     False -> ""
 
 
+## Get the parent directory of a path.
 pub let parent : { path: Str } -> Str = { path } -> do
   let parts = split { s = path, delimiter = "/" }
   let len = seq::size { xs = parts }
@@ -98,6 +94,7 @@ pub let parent : { path: Str } -> Str = { path } -> do
     False -> "/"
 
 
+## Get the file extension, if any.
 pub let extension : { path: Str } -> Option Str = { path } -> do
   let name = file_name { path = path }
   let parts = split { s = name, delimiter = "." }
@@ -107,23 +104,27 @@ pub let extension : { path: Str } -> Option Str = { path } -> do
     False -> None
 
 
+## Check if a path has the given file extension.
 pub let has_extension : { path: Str, ext: Str } -> Bool = { path, ext } -> match extension { path = path } is
   Some { val } -> val == ext
   None -> False
 
 
+## Read a file, returning a default string on failure.
 pub let read_file_or : { path: Str, default: Str } -> Str <FileSystem> = { path, default } ->
   match FileSystem.read_file { path = path } is
     Ok { val } -> val
     Err { error } -> default
 
 
+## Write a file, creating parent directories if needed.
 pub let write_file_mkdirs : { path: Str, content: Str } -> Result {} FileSystemError <FileSystem> = { path, content } ->
   do
     let parent_path = parent { path = path }
     let _ = FileSystem.create_directories { path = parent_path }
     FileSystem.write_file { path = path, content = content }
 
+## Ensure a path is an existing directory, creating it if absent.
 pub let ensure_directory : { path: Str } -> Result {} FileSystemError <FileSystem> = { path } ->
   match FileSystem.exists { path = path } is
     Ok { val = exists } -> match exists is

@@ -40,63 +40,49 @@ impl TryInto Char | ConversionError { msg: Str } | for Str where {
 
 }
 
-# std/char.mezze - Character type operations
-#
-# Char represents a single Unicode character (UTF-16 code unit).
-# Provides character classification, case conversion, and numeric operations.
-# === Construction ===
-# Create a character from a Unicode code point
-# Returns None if the code point is invalid (outside 0-65535)
+## Create a Char from a Unicode code point. Returns None if invalid.
 pub let from_int = { code } -> __native_char_from_int { code = code }
 
-# Get the first character from a string
-# Returns None if the string is empty
+## Get the first character of a string. Returns None if empty.
 pub let from_string = { s } -> __native_char_from_string { s = s }
 
-# === Conversion ===
-# Get the Unicode code point of a character
+## Get the Unicode code point of a character.
 pub let to_int = { c } -> __native_char_to_int { c = c }
 
-# Convert a character to a single-character string
+## Convert a character to a single-character string.
 pub let to_str = { c } -> __native_char_to_str { c = c }
 
-# === Case Conversion ===
-# Convert to uppercase
+## Convert to uppercase.
 pub let to_upper = { c } -> __native_char_to_upper { c = c }
 
-# Convert to lowercase
+## Convert to lowercase.
 pub let to_lower = { c } -> __native_char_to_lower { c = c }
 
-# === Character Classification ===
-# Check if character is a digit (0-9)
+## True if the character is a digit (0-9).
 pub let is_digit = { c } -> __native_char_is_digit { c = c }
 
-# Check if character is a letter
+## True if the character is a letter.
 pub let is_letter = { c } -> __native_char_is_letter { c = c }
 
-# Check if character is alphanumeric (letter or digit)
+## True if the character is a letter or digit.
 pub let is_alpha_numeric = { c } -> __native_char_is_alpha_numeric { c = c }
 
-# Check if character is whitespace
+## True if the character is whitespace.
 pub let is_whitespace = { c } -> __native_char_is_whitespace { c = c }
 
-# Check if character is uppercase
+## True if the character is uppercase.
 pub let is_upper = { c } -> __native_char_is_upper { c = c }
 
-# Check if character is lowercase
+## True if the character is lowercase.
 pub let is_lower = { c } -> __native_char_is_lower { c = c }
 
-# === Comparison ===
-# Check equality of two characters
+## True if two characters are equal.
 pub let eq = { a, b } -> __native_char_eq { a = a, b = b }
 
-# Compare two characters, returns Ordering (LT, EQ, GT)
+## Compare two characters, returning an Ordering.
 pub let compare = { a, b } -> __native_char_compare { a = a, b = b }
 
-# === Digit Operations ===
-# Convert a digit character to its numeric value in the given radix
-# Returns None if the character is not a valid digit in that radix
-# Example: digit_to_int { c = 'A', radix = 16 } -> Some { val = 10 }
+## Convert a digit char to its numeric value in the given radix. Returns None if invalid.
 pub let digit_to_int = { c, radix } -> __native_char_digit_to_int { c = c, radix = radix }
 
 impl Char where {

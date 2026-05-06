@@ -1,25 +1,13 @@
 use std::control::continuation
 use std::control::continuation::{ Continuation }
 
-# Generator effect with yield operation
+## Generator effect for yielding values from a computation.
 effect Generator having 'a where {
+  ## Yield a value to the caller, suspending execution.
   yield: { value: 'a } -> {} <Generator>
 }
 
-# =============================================================================
-# Handlers
-# =============================================================================
-# Collect handler - collects all yielded values into a Seq
-#
-# Uses suspend_and_resume to collect values without escaping,
-# then finalize_scope returns all collected values via suspend_with.
-#
-# Example:
-#   let values = perform Collect in do
-#       Generator.yield {value = 1}
-#       Generator.yield {value = 2}
-#       Generator.yield {value = 3}
-#   # values = [1, 2, 3]
+## Collect handler that gathers all yielded values into a sequence.
 impl Generator for Collect having 'a = 'x where {
   initialize_scope = {} -> { cont = continuation::new {} },
   finalize_scope = {} -> do
@@ -28,8 +16,5 @@ impl Generator for Collect having 'a = 'x where {
   yield = { value } -> scope.cont.suspend_and_resume { value = value },
 }
 
-# =============================================================================
-# Helpers
-# =============================================================================
-# Shorthand for Generator.yield
+## Shorthand for Generator.yield.
 pub let yield = { value } -> Generator.yield { value }

@@ -74,7 +74,7 @@ class SQLiteMezzeStore private constructor(
          * and regenerated from source. See
          * `docs/architecture/17-three-file-cache.md`.
          */
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
         const val PROJECT_DIR = ".mz"
         const val CACHE_FILE = "cache.sqlite"
         const val STDLIB_FILE = "stdlib.sqlite"
@@ -424,6 +424,8 @@ class SQLiteMezzeStore private constructor(
                     start_col INTEGER NOT NULL,
                     end_line INTEGER NOT NULL,
                     end_col INTEGER NOT NULL,
+                    doc TEXT,
+                    metadata TEXT,
                     PRIMARY KEY (module_path, decl_kind, decl_name)
                 ) WITHOUT ROWID
             """.trimIndent())
@@ -633,6 +635,8 @@ class SQLiteMezzeStore private constructor(
                     start_col   INTEGER NOT NULL,
                     end_line    INTEGER NOT NULL,
                     end_col     INTEGER NOT NULL,
+                    doc         TEXT,
+                    metadata    TEXT,
                     PRIMARY KEY (module_path, decl_kind, decl_name)
                 ) WITHOUT ROWID
             """.trimIndent())
@@ -1497,8 +1501,8 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("""
             INSERT OR REPLACE INTO decls
                 (module_path, decl_name, decl_kind, source_hash, hash,
-                 start_line, start_col, end_line, end_col)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 start_line, start_col, end_line, end_col, doc, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """.trimIndent())
     }
 
@@ -1511,7 +1515,9 @@ class SQLiteMezzeStore private constructor(
         startLine: Int,
         startCol: Int,
         endLine: Int,
-        endCol: Int
+        endCol: Int,
+        doc: String?,
+        metadata: String?
     ) {
         putDeclStmt.apply {
             setString(1, modulePath)
@@ -1523,6 +1529,8 @@ class SQLiteMezzeStore private constructor(
             setInt(7, startCol)
             setInt(8, endLine)
             setInt(9, endCol)
+            setString(10, doc)
+            setString(11, metadata)
             executeUpdate()
         }
     }
@@ -1543,13 +1551,15 @@ class SQLiteMezzeStore private constructor(
         startLine = getInt("start_line"),
         startCol = getInt("start_col"),
         endLine = getInt("end_line"),
-        endCol = getInt("end_col")
+        endCol = getInt("end_col"),
+        doc = getString("doc"),
+        metadata = getString("metadata")
     )
 
     private val getDeclsForModuleStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col
+                   start_line, start_col, end_line, end_col, doc, metadata
             FROM <DB>.decls
             WHERE module_path = ?
         """.trimIndent()))
@@ -1565,7 +1575,7 @@ class SQLiteMezzeStore private constructor(
     private val searchDeclsByNameStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col
+                   start_line, start_col, end_line, end_col, doc, metadata
             FROM <DB>.decls
             WHERE decl_name LIKE ? || '%'
         """.trimIndent()) + " ORDER BY decl_name LIMIT 200")
@@ -1581,7 +1591,7 @@ class SQLiteMezzeStore private constructor(
     private val getDeclsByKindStmt: PreparedStatement by lazy {
         conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col
+                   start_line, start_col, end_line, end_col, doc, metadata
             FROM <DB>.decls
             WHERE decl_kind = ?
         """.trimIndent()))
@@ -1599,7 +1609,7 @@ class SQLiteMezzeStore private constructor(
         // resolve regardless of which file owns the decl.
         conn.prepareStatement(unionAll("""
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
-                   start_line, start_col, end_line, end_col
+                   start_line, start_col, end_line, end_col, doc, metadata
             FROM <DB>.decls
             WHERE hash = ?
         """.trimIndent()) + " LIMIT 1")

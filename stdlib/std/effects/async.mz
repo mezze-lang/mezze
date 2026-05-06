@@ -2,129 +2,76 @@ use std::collections::seq
 use std::effects::concurrent::cancellation::{ CancellationToken }
 use std::abilities::compare::{ Eq }
 
+## Opaque promise representing an asynchronous computation.
 pub newtype Promise 'a = Promise __NativePromise
 
+## Opaque scope for structured concurrency.
 pub newtype Scope 'a = Scope __NativeScope
 
-# Promise type - opaque wrapper around native promise/future
-# Promise type - opaque wrapper around native promise/future
-# Scope type - opaque wrapper for structured concurrency scopes
-# Scope type - opaque wrapper for structured concurrency scopes
-# Scope type - opaque wrapper for structured concurrency scopes
-# Scope type - opaque wrapper for structured concurrency scopes
-# Used with `scoped` to ensure all spawned children complete before parent
-# Used with `scoped` to ensure all spawned children complete before parent
-# Used with `scoped` to ensure all spawned children complete before parent
-# Used with `scoped` to ensure all spawned children complete before parent
-# Eq for Promise — reference identity (same promise object)
-# Eq for Promise — reference identity (same promise object)
-# Eq for Promise — reference identity (same promise object)
-# Eq for Promise — reference identity (same promise object)
 impl Eq 'a for Promise 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
 
-# Eq for Scope — reference identity
 impl Eq 'a for Scope 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
 
-# Inherent impls for Promise — method syntax for common operations
 impl Promise 'a where {
   await = { it } -> Async.await { p = it },
   is_done = { it } -> Async.is_done { p = it },
   cancel = { it } -> Async.cancel { p = it },
 }
 
-# Error type for async operations
-# - AsyncFailed: Task failed with an exception
-# - AsyncCancelled: Task was cancelled
-# - AsyncTimedOut: Task timed out after ms milliseconds
+## Error type for async operations.
 pub type AsyncError = |
   AsyncFailed { msg: Str },
   AsyncCancelled,
   AsyncTimedOut { ms: Int },
 |
 
-# Async effect - unified async operations
-# Note: Callback parameters use <...> for effect polymorphism - they accept any effects
+## Unified async effect for spawning, awaiting, and structured concurrency.
 effect Async where {
+  ## Spawn a computation, returning a Promise immediately.
   spawn: { f: {} -> 'a <...> } -> Promise 'a <Async>,
+  ## Await a Promise to completion.
   await: { p: Promise 'a } -> 'a <Async>,
+  ## Wait for the first Promise to complete.
   race: { ps: [Promise 'a] } -> 'a <Async>,
+  ## Wait for all Promises to complete.
   all: { ps: [Promise 'a] } -> ['a] <Async>,
+  ## Await with timeout, returning None if it expires.
   timeout: { ms: Int, p: Promise 'a } -> Option 'a <Async>,
+  ## Request cancellation of a Promise.
   cancel: { p: Promise 'a } -> {} <Async>,
+  ## Sleep for the given milliseconds.
   sleep: { ms: Int } -> {} <Async>,
+  ## Check if a Promise is complete (non-blocking).
   is_done: { p: Promise 'a } -> Bool <Async>,
+  ## Check if current computation was cancelled.
   is_cancelled: {} -> Bool <Async>,
+  ## Cancellation checkpoint -- throws if cancelled.
   check: {} -> {} <Async>,
+  ## Run two computations concurrently, cancel sibling on failure.
   join: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Async>,
+  ## Run three computations concurrently.
   join3: { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: 'a, b: 'b, c: 'c } <Async>,
+  ## Map over a sequence concurrently, results in input order.
   map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Async>,
+  ## Run f on each element concurrently for side effects.
   for_each: { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Async>,
+  ## Filter elements with concurrent predicate evaluation.
   filter: { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Async>,
+  ## Return first successful result; fail only if all fail.
   any: { ps: [Promise 'a] } -> 'a <Async>,
+  ## Await all promises, returning Results (never throws).
   settle: { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async>,
+  ## Run f within a structured concurrency scope.
   scoped: { f: { sc: Scope 'a } -> 'a <...> } -> 'a <Async>
 }
 
-# Spawn a computation, returns immediately with Promise
-# The computation can have any effects (<...>)
-# Await Promise to complete, returns result
-# Wait for first Promise to complete (others continue running)
-# Wait for all Promises to complete
-# Wait with timeout, returns None if timeout expires
-# Cancel a Promise (request cancellation, may not be immediate)
-# Sleep for specified milliseconds
-# Check if Promise is complete (non-blocking)
-# Check if current computation was cancelled
-# Cancellation checkpoint - throws if cancelled
-# === Structured Concurrency ===
-# Run two computations concurrently, return both results
-# If either fails, the other is cancelled
-# Run three computations concurrently
-# === Collection Operations ===
-# Apply function to each element concurrently, results in input order
-# Run function on each element concurrently for side effects
-# Filter elements with predicate evaluated concurrently
-# === Error Handling ===
-# Return first successful result, fail only if ALL fail
-# Wait for all promises, return list of Results
-# Never throws - each result is either Ok or Err
-# === Structured Concurrency Scopes ===
-# Run a function with a structured concurrency scope.
-# All tasks spawned via Scope.spawn must complete before scoped returns.
-# If the function fails, all children are cancelled.
-# If any child fails, siblings are cancelled (fail-fast behavior).
-# The callback can have any effects (<...>)
-#
-# Example:
-#   Async.scoped {f = {sc} -> do
-#       let p1 = scope_spawn {sc = sc, f = {} -> task1 {}}
-#       let p2 = scope_spawn {sc = sc, f = {} -> task2 {}}
-#       # Both p1 and p2 are awaited automatically before scoped returns
-#       process {p1 = p1, p2 = p2}
-#   }
-# =============================================================================
-# LoomAsync Implementation - Virtual Threads (Default)
-# =============================================================================
-#
-# Uses Project Loom virtual threads (Java 21+).
-# - Scales to millions of concurrent tasks
-# - Blocking I/O becomes async automatically
-# - Best for I/O-bound workloads (DB, files, network)
-#
-# Example:
-#   perform LoomAsync in do
-#       let p1 = Async.spawn {f = {} -> fetch_url {url = "http://a.com"}}
-#       let p2 = Async.spawn {f = {} -> fetch_url {url = "http://b.com"}}
-#       let results = Async.all {ps = [p1, p2]}
-#       results
-# Default handler - unbounded virtual threads
-# Uses scoped effects to track all spawned promises and ensure cleanup
+## Default handler using Project Loom virtual threads.
 impl Async for LoomAsync where {
   initialize_scope = {} -> __native_loom_init_scope {},
   finalize_scope = {} -> __native_loom_finalize_scope { tracker = scope },
@@ -148,15 +95,7 @@ impl Async for LoomAsync where {
   scoped = { f } -> __native_loom_scoped { f = f },
 }
 
-# Create a tracker for all spawned promises in this handler scope
-# Await any unawaited promises (structured concurrency at handler level)
-# Configurable handler - control concurrency limit
-# Parameters:
-#   max_concurrent: Maximum concurrent tasks (0 = unbounded)
-#
-# Example:
-#   perform LoomAsyncWith {max_concurrent = 100} in do
-#       Async.spawn {f = ...}
+## LoomAsync with configurable concurrency limit (0 = unbounded).
 impl Async for LoomAsyncWith { max_concurrent: Int } where {
   initialize_scope = {} -> __native_loom_init_scope {},
   finalize_scope = {} -> __native_loom_finalize_scope { tracker = scope },
@@ -185,22 +124,7 @@ impl Async for LoomAsyncWith { max_concurrent: Int } where {
   scoped = { f } -> __native_loom_scoped { f = f },
 }
 
-# =============================================================================
-# OSThreadAsync Implementation - Platform Threads
-# =============================================================================
-#
-# Uses OS-level platform threads.
-# - True parallelism for CPU-bound work
-# - Thread-locals work correctly
-# - Limited scale (thousands, not millions)
-# - Higher memory per thread
-#
-# Example:
-#   perform OSThreadAsync in do
-#       let p = Async.spawn {f = {} -> cpu_intensive_work {}}
-#       Async.await {p = p}
-# Default handler - unbounded OS threads
-# Uses scoped effects for thread tracking and cleanup
+## OS platform thread implementation for true parallelism on CPU-bound work.
 impl Async for OSThreadAsync where {
   initialize_scope = {} -> __native_os_init_scope {},
   finalize_scope = {} -> __native_os_finalize_scope { tracker = scope },
@@ -224,15 +148,7 @@ impl Async for OSThreadAsync where {
   scoped = { f } -> __native_os_scoped { f = f },
 }
 
-# Create thread tracker for cleanup
-# Join all spawned threads, cleanup resources
-# Configurable handler - control thread pool size
-# Parameters:
-#   pool_size: Maximum concurrent OS threads (0 = unbounded)
-#
-# Example:
-#   perform OSThreadAsyncWith {pool_size = 4} in do
-#       Async.spawn {f = ...}
+## OSThreadAsync with configurable thread pool size (0 = unbounded).
 impl Async for OSThreadAsyncWith { pool_size: Int } where {
   initialize_scope = {} -> __native_os_init_scope {},
   finalize_scope = {} -> __native_os_finalize_scope { tracker = scope },
@@ -256,23 +172,8 @@ impl Async for OSThreadAsyncWith { pool_size: Int } where {
   scoped = { f } -> __native_os_scoped { f = f },
 }
 
-# =============================================================================
-# CoopAsync Implementation - Continuation-Based Cooperative Multitasking
-# =============================================================================
-#
-# Uses native scheduler for proper integration with continuation system.
-# Provides the same API as LoomAsync but uses cooperative scheduling internally.
-#
-# - Single-threaded, no true parallelism
-# - Tasks interleave at await points
-# - Good for testing, JS compile target, workflow orchestration
-# - Deterministic execution order
-# - Supports serialization/checkpointing via continuation
-#
-# Usage:
-#   perform CoopAsync in do
-#       let p = Async.spawn {f = {} -> 42}
-#       Async.await {p = p}
+## Cooperative single-threaded scheduler using continuations.
+## Tasks interleave at await points. Good for testing and deterministic execution.
 impl Async for CoopAsync where {
   initialize_scope = {} -> __native_scheduler_new {},
   finalize_scope = {} -> __native_scheduler_drain { sched = scope },
@@ -347,95 +248,31 @@ impl Async for CoopAsync where {
   scoped = { f } -> f { sc = Scope { val = {} } },
 }
 
-# Create scheduler for cooperative scheduling
-# Drain remaining tasks to ensure all spawned tasks complete
-# Spawn queues task, returns promise (does NOT execute immediately)
-# Await runs scheduler until promise completes
-# In coop mode, there's no real time - just await the promise
-# and always return Some (the task will complete eventually)
+## Spawn and immediately await (synchronous helper).
 pub let run : { f: {} -> 'a } -> 'a <Async> = { f } -> do
   let p = Async.spawn { f = f }
   Async.await { p = p }
 
+## Spawn and detach (fire and forget).
 pub let go : { f: {} -> 'a } -> {} <Async> = { f } -> do
   let _ = Async.spawn { f = f }
   {}
 
+## Run a computation with cooperative scheduling.
 pub let run_coop : { computation: {} -> 'a <Async> } -> 'a = { computation } -> perform CoopAsync in computation {}
 
+## Spawn a task within a structured concurrency scope.
 pub let scope_spawn : { sc: Scope 'a, f: {} -> 'b <...> } -> Promise 'b = { sc, f } ->
   __native_loom_scope_spawn { sc = sc, f = f }
 
+## Cancel all tasks in a scope.
 pub let scope_cancel_all : { sc: Scope 'a } -> {} = { sc } ->
   __native_loom_scope_cancel_all { sc = sc }
 
+## Get the CancellationToken for a scope.
 pub let scope_get_token : { sc: Scope 'a } -> CancellationToken = { sc } ->
   __native_loom_scope_get_token { sc = sc }
 
+## Check if a scope has been cancelled.
 pub let scope_is_cancelled : { sc: Scope 'a } -> Bool = { sc } ->
   __native_loom_scope_is_cancelled { sc = sc }
-# Cancel is no-op in coop mode
-# Join runs both functions, awaiting each
-# Map spawns all tasks then awaits all
-# Spawn filter checks for all elements
-# Await and filter
-# Await each promise, catching errors as Err
-# TODO: proper try/catch here
-# Scoped just runs the function - structured concurrency is implicit
-# =============================================================================
-# Helper Functions
-# =============================================================================
-# Short alias for spawn + wait (run synchronously)
-# Spawn and immediately detach (fire and forget)
-# =============================================================================
-# Convenience Wrappers
-# =============================================================================
-# Run computation with CoopAsync handler (cooperative scheduling)
-# Equivalent to: perform CoopAsync in computation {}
-# =============================================================================
-# Scope Functions - Helpers for Structured Concurrency Scopes
-# =============================================================================
-#
-# These functions help with spawning tasks within a structured concurrency scope.
-# Tasks spawned via scope_spawn are tracked by the scope and automatically
-# awaited when the scope ends.
-#
-# Usage:
-#   perform LoomAsync in do
-#       Async.scoped {f = {sc} -> do
-#           let p1 = scope_spawn {sc = sc, f = {} -> task1 {}}
-#           let p2 = scope_spawn {sc = sc, f = {} -> task2 {}}
-#           # p1 and p2 are awaited automatically before scoped returns
-#           process {p1 = Async.await {p = p1}, p2 = Async.await {p = p2}}
-#       }
-# Spawn a task within a scope
-# The scope will wait for this task to complete before exiting
-# Note: f accepts any effects (<...>) for effect polymorphism
-#
-# Example:
-#   scope_spawn {sc = sc, f = {} -> expensive_computation {}}
-# Cancel all tasks in the scope
-#
-# Example:
-#   scope_cancel_all {sc = sc}
-# Get the CancellationToken for a scope
-#
-# Each scope has an associated CancellationToken that tasks can use
-# to check for cancellation or register cleanup callbacks.
-#
-# Example:
-#   Async.scoped {f = {sc} -> do
-#       let token = scope_get_token {sc = sc}
-#       scope_spawn {sc = sc, f = {} -> do
-#           # Periodically check for cancellation
-#           while not (Cancellation.is_cancelled {token = token}) do
-#               process_batch {}
-#       }
-#   }
-# Check if a scope has been cancelled
-#
-# Example:
-#   if scope_is_cancelled {sc = sc} then
-#       cleanup {}
-#   else
-#       continue_work {}

@@ -2,11 +2,13 @@ use std::abilities::compare::{ Eq, Ord }
 use std::abilities::sized::{ Sized }
 use std::int
 
+## Structural equality for non-empty lists.
 impl Eq 'a for NonEmptyList 'a where {
   eq = { it, r } -> __native_nel_equals { xs = it, ys = r },
   neq = { it, r } -> if __native_nel_equals { xs = it, ys = r } then False else True,
 }
 
+## Lexicographic ordering for non-empty lists.
 impl Ord 'a for NonEmptyList 'a where {
   lt = { it, r } -> __native_nel_compare { xs = it, ys = r } == (0 - 1),
   le = { it, r } -> __native_nel_compare { xs = it, ys = r } != 1,
@@ -14,98 +16,111 @@ impl Ord 'a for NonEmptyList 'a where {
   ge = { it, r } -> __native_nel_compare { xs = it, ys = r } != (0 - 1),
 }
 
-# std/collections/nonemptylist.mezze - Non-empty list operations
-#
-# NonEmptyList 'a is a list that is guaranteed to have at least one element
-# This provides type-safe operations like head/tail that cannot fail
-#
-# Conceptually: type NonEmptyList 'a = NonEmpty { head: 'a, tail: List 'a }
-# Implementation uses native JVM List with invariant checking
-# Note: List is a built-in type, no import needed
-# Basic non-empty list operations
+## Creates a single-element non-empty list.
 pub let singleton : { x: 'a } -> NonEmptyList 'a = { x } -> __native_nel_singleton { x = x }
 
+## Creates a non-empty list from a head and tail.
 pub let from_head_tail : { head: 'a, tail: List 'a } -> NonEmptyList 'a = { head, tail } ->
   __native_nel_from_head_tail { head = head, tail = tail }
 
+## Returns the first element (always succeeds).
 pub let head : { xs: NonEmptyList 'a } -> 'a = { xs } -> __native_nel_head { xs = xs }
 
+## Returns all elements except the first.
 pub let tail : { xs: NonEmptyList 'a } -> List 'a = { xs } -> __native_nel_tail { xs = xs }
 
+## Returns the number of elements.
 pub let size : { xs: NonEmptyList 'a } -> Int = { xs } -> __native_nel_size { xs = xs }
 
-# Construction
+## Prepends an element to the front.
 pub let cons : { x: 'a, xs: NonEmptyList 'a } -> NonEmptyList 'a = { x, xs } ->
   __native_nel_cons { x = x, xs = xs }
 
+## Concatenates two non-empty lists.
 pub let append : { xs: NonEmptyList 'a, ys: NonEmptyList 'a } -> NonEmptyList 'a = { xs, ys } ->
   __native_nel_append { xs = xs, ys = ys }
 
+## Creates a non-empty list from a List prefix and a guaranteed element.
 pub let prepend_list : { xs: List 'a, y: 'a } -> NonEmptyList 'a = { xs, y } ->
   __native_nel_prepend_list { xs = xs, y = y }
 
+## Appends a List to a non-empty list.
 pub let append_list : { xs: NonEmptyList 'a, ys: List 'a } -> NonEmptyList 'a = { xs, ys } ->
   __native_nel_append_list { xs = xs, ys = ys }
 
-# Access
+## Returns the element at the given index.
 pub let get : { xs: NonEmptyList 'a, index: Int } -> 'a = { xs, index } ->
   __native_nel_get { xs = xs, index = index }
 
+## Returns the last element (always succeeds).
 pub let last : { xs: NonEmptyList 'a } -> 'a = { xs } -> __native_nel_last { xs = xs }
 
-# Higher-order functions
+## Applies f to each element, returning a new non-empty list.
 pub let map : { xs: NonEmptyList 'a, f: { x: 'a } -> 'b } -> NonEmptyList 'b = { xs, f } ->
   __native_nel_map { xs = xs, f = f }
 
+## Applies f to each element and flattens the resulting non-empty lists.
 pub let flat_map : { xs: NonEmptyList 'a, f: { x: 'a } -> NonEmptyList 'b } -> NonEmptyList 'b = { xs, f } ->
   __native_nel_flat_map { xs = xs, f = f }
 
+## Left fold with an initial accumulator value.
 pub let fold_left : { xs: NonEmptyList 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc } -> 'acc = { xs, init, f } ->
   __native_nel_fold_left { xs = xs, init = init, f = f }
 
+## Right fold with an initial accumulator value.
 pub let fold_right : { xs: NonEmptyList 'a, init: 'acc, f: { x: 'a, acc: 'acc } -> 'acc } -> 'acc = { xs, init, f } ->
   __native_nel_fold_right { xs = xs, init = init, f = f }
 
+## Reduces elements using f (always succeeds since non-empty).
 pub let reduce : { xs: NonEmptyList 'a, f: { acc: 'a, x: 'a } -> 'a } -> 'a = { xs, f } ->
   __native_nel_reduce { xs = xs, f = f }
 
-# Predicates
+## Returns True if any element matches the predicate.
 pub let any : { xs: NonEmptyList 'a, p: { x: 'a } -> Bool } -> Bool = { xs, p } ->
   __native_nel_any { xs = xs, p = p }
 
+## Returns True if all elements match the predicate.
 pub let all : { xs: NonEmptyList 'a, p: { x: 'a } -> Bool } -> Bool = { xs, p } ->
   __native_nel_all { xs = xs, p = p }
 
+## Returns True if the list contains the element.
 pub let contains : { xs: NonEmptyList 'a, x: 'a } -> Bool = { xs, x } ->
   __native_nel_contains { xs = xs, x = x }
 
-# Transformations
+## Reverses the non-empty list.
 pub let reverse : { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } ->
   __native_nel_reverse { xs = xs }
 
+## Pairs elements from two non-empty lists.
 pub let zip : { xs: NonEmptyList 'a, ys: NonEmptyList 'b } -> NonEmptyList { fst: 'a, snd: 'b } = { xs, ys } ->
   __native_nel_zip { xs = xs, ys = ys }
 
+## Inserts a separator between every pair of elements.
 pub let intersperse : { xs: NonEmptyList 'a, sep: 'a } -> NonEmptyList 'a = { xs, sep } ->
   __native_nel_intersperse { xs = xs, sep = sep }
 
-# Conversion functions
+## Converts to a List.
 pub let to_list : { xs: NonEmptyList 'a } -> List 'a = { xs } -> __native_nel_to_list { xs = xs }
 
+## Creates a NonEmptyList from a List. Fails if the list is empty.
 pub let from_list : { xs: List 'a } -> NonEmptyList 'a = { xs } ->
   __native_nel_from_list { xs = xs }
 
+## Converts to a Seq.
 pub let to_seq : { xs: NonEmptyList 'a } -> ['a] = { xs } -> __native_nel_to_seq { xs = xs }
 
+## Creates a NonEmptyList from a Seq. Fails if the seq is empty.
 pub let from_seq : { xs: ['a] } -> NonEmptyList 'a = { xs } -> __native_nel_from_seq { xs = xs }
 
-# Sorting
+## Sorts elements in ascending order.
 pub let sort : { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } ->
   __native_nel_sort { xs = xs }
 
+## Sorts using a custom comparator.
 pub let sort_by : { xs: NonEmptyList 'a, cmp: { l: 'a, r: 'a } -> Int } -> NonEmptyList 'a = { xs, cmp } ->
   __native_nel_sort_by { xs = xs, cmp = cmp }
 
+## Method implementations for NonEmptyList.
 impl NonEmptyList 'a where {
   head = { it } -> head { xs = it },
   tail = { it } -> tail { xs = it },
@@ -125,6 +140,7 @@ impl NonEmptyList 'a where {
   to_seq = { it } -> to_seq { xs = it },
 }
 
+## NonEmptyList is never empty, so is_empty always returns False.
 impl Sized 'a for NonEmptyList 'a where {
   size = { it } -> size { xs = it },
   is_empty = { it } -> False,

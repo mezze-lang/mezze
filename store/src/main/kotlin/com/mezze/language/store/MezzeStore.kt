@@ -168,7 +168,9 @@ interface MezzeStore : AutoCloseable {
         startLine: Int,
         startCol: Int,
         endLine: Int,
-        endCol: Int
+        endCol: Int,
+        doc: String? = null,
+        metadata: String? = null
     )
     fun clearDeclsForModule(modulePath: String)
     fun getDeclsForModule(modulePath: String): List<DeclRow>
@@ -279,7 +281,9 @@ data class DeclRow(
     val startLine: Int,
     val startCol: Int,
     val endLine: Int,
-    val endCol: Int
+    val endCol: Int,
+    val doc: String? = null,
+    val metadata: String? = null
 )
 
 data class ImportRow(

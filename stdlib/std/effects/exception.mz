@@ -1,84 +1,49 @@
 use std::control::continuation
 use std::control::continuation::{ Continuation }
 
+## Typed exception effect for recoverable errors.
 effect Exception having 'error where {
+  ## Throw an error, aborting normal control flow.
   throw: { error: 'error } -> 'a <Exception>
 }
 
-# =============================================================================
-# Built-in Handlers (all use scoped continuations)
-# =============================================================================
-# Converts exceptions to Result values (RECOMMENDED for most cases)
-# On throw, returns Err {error}. Normal completion returns Ok {val}.
-#
-# Example:
-#   let result = perform ExceptionToResult in do
-#       let x = risky_operation {}
-#       x + 1
-#   # result is Result Int Error
+## Converts exceptions to Result values (Ok on success, Err on throw).
 impl Exception for ExceptionToResult having 'error = 'e where {
   initialize_scope = {} -> { cont = continuation::new {} },
   finalize_scope = {} -> scope.cont.reset {},
   throw = { error } -> scope.cont.suspend_with { value = Err { error } },
 }
 
-# Converts exceptions to Option, discarding error details
-# On throw, returns None. Normal completion returns Some {val}.
-#
-# Example:
-#   let maybe = perform ExceptionToOption in do
-#       let x = parse_int {s = "abc"}
-#       x
-#   # maybe is Option Int (will be None)
+## Converts exceptions to Option (Some on success, None on throw).
 impl Exception for ExceptionToOption having 'error = 'e where {
   initialize_scope = {} -> { cont = continuation::new {} },
   finalize_scope = {} -> scope.cont.reset {},
   throw = { error } -> scope.cont.suspend_with { value = None },
 }
 
-# Aborts current computation (testable, catchable by outer handlers)
-# On throw, aborts the continuation. Use for "stop processing" semantics.
-#
-# Example:
-#   perform AbortException in do
-#       if invalid then Exception.throw {error = "invalid"}
-#       continue_processing {}
+## Aborts current computation via continuation on throw.
 impl Exception for AbortException having 'error = 'e where {
   initialize_scope = {} -> { cont = continuation::new {} },
   finalize_scope = {} -> scope.cont.reset {},
   throw = { error } -> scope.cont.abort {},
 }
 
-# Silently ignores all errors, returning unit
-# On throw, returns {}. Use sparingly - errors are silently swallowed.
-#
-# Example:
-#   perform IgnoreException in do
-#       log_to_remote_server {}  # We don't care if this fails
+## Silently ignores all errors, returning unit on throw.
 impl Exception for IgnoreException having 'error = 'e where {
   initialize_scope = {} -> { cont = continuation::new {} },
   finalize_scope = {} -> scope.cont.reset {},
   throw = { error } -> scope.cont.suspend_with { value = {} },
 }
 
-# Terminates entire program immediately (fatal errors only)
-# Does NOT use continuation - immediately crashes the program.
-# Use only for unrecoverable errors.
-#
-# Example:
-#   perform CrashException in do
-#       if config_missing then Exception.throw {error = "No config file"}
+## Terminates the program immediately on throw. Use for fatal errors only.
 impl Exception for CrashException having 'error = 'e where {
   throw = { error } -> crash { msg = "Unhandled exception" }
 }
 
-# =============================================================================
-# Helpers
-# =============================================================================
-# Shorthand for Exception.throw
+## Shorthand for Exception.throw.
 pub let throw = { error } -> Exception.throw { error }
 
-# Convert Result to exception (opposite of ExceptionToResult handler)
+## Unwrap a Result, throwing on Err.
 pub let unwrap = { result } -> match result is
   Ok { val } -> val
   Err { error } -> Exception.throw { error }

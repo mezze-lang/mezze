@@ -1,12 +1,5 @@
-# std/abilities/default.mz - Default ability
-#
-# Provides a default value for any type that implements it.
-# No `it` param — this is a construction ability (like NumZero.zero).
-#
-# Usage:
-#   let x: Int = Default.default {}      # → 0
-#   let s: Str = Default.default {}      # → ""
-#   let xs: [Int] = Default.default {}   # → []
+## Provides a default value for a type (e.g. 0 for Int, "" for Str).
 ability Default for 'a where {
+  ## Construct the default value.
   default: {} -> 'a
 }

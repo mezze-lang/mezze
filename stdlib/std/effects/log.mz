@@ -1,31 +1,13 @@
-# std/effects/log.mz - Logging effects
-#
-# A simple, extensible logging effect with a single operation.
-# Log levels are open variants, allowing users to define custom levels.
-#
-# Usage:
-#   use std::effects::log::{Log, Console, println, info, debug}
-#
-#   perform Console in do
-#       println {msg = "Hello world"}
-#       info {msg = "Starting application"}
-#       debug {msg = "Debug info"}
-# =============================================================================
-# Log Level - Open variant type for extensibility
-# =============================================================================
+## Extensible log level type, open for user-defined levels.
 pub type LogLevel = | Error, Warn, Info, Debug, Trace, Print, ... |
 
-# =============================================================================
-# Log Effect - Single operation with open variant levels
-# =============================================================================
+## Logging effect with a single operation dispatching on level.
 effect Log where {
+  ## Write a log message at the given level.
   log: { level: LogLevel, msg: Str } -> {} <Log>
 }
 
-# =============================================================================
-# Formatters - Users can use these or create their own
-# =============================================================================
-# Default formatter - adds prefix for known levels, unknown pass through as-is
+## Default formatter that prefixes known levels.
 pub let default_formatter : { level: LogLevel, msg: Str } -> Str = { level, msg } ->
   match level is
     Error -> "[ERROR] $(msg)\n"
@@ -36,6 +18,7 @@ pub let default_formatter : { level: LogLevel, msg: Str } -> Str = { level, msg 
     _ -> msg
 
 
+## ANSI color formatter for terminal output.
 pub let color_formatter : { level: LogLevel, msg: Str } -> Str = { level, msg } ->
   match level is
     Error -> "\\x1b[31m[ERROR]\\x1b[0m $(msg)\n"
@@ -46,37 +29,40 @@ pub let color_formatter : { level: LogLevel, msg: Str } -> Str = { level, msg } 
     _ -> msg
 
 
+## Console handler that prints to stdout with the default formatter.
 impl Log for Console where {
   log = { level, msg } ->
     __native_console_print { msg = default_formatter { level = level, msg = msg } }
 }
 
-# ConsoleWith - customizable formatter
+## Console handler with a user-supplied formatter.
 impl Log for ConsoleWith { formatter: { level: LogLevel, msg: Str } -> Str } where {
   log = { level, msg } ->
     __native_console_print { msg = formatter { level = level, msg = msg } }
 }
 
-# QuietConsole - for testing, suppresses all output
+## Silent handler that discards all output, useful for testing.
 impl Log for QuietConsole where {
   log = { level, msg } -> {}
 }
 
-# =============================================================================
-# Helper Functions - Convenient wrappers
-# =============================================================================
-# Level-specific helpers
+## Log at Error level.
 pub let error : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Error, msg = msg }
 
+## Log at Warn level.
 pub let warn : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Warn, msg = msg }
 
+## Log at Info level.
 pub let info : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Info, msg = msg }
 
+## Log at Debug level.
 pub let debug : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Debug, msg = msg }
 
+## Log at Trace level.
 pub let trace : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Trace, msg = msg }
 
-# Print helpers - use Print level (falls through to raw message in default_formatter)
+## Print a raw message without level prefix.
 pub let print : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Print, msg = msg }
 
+## Print a raw message with trailing newline.
 pub let println : { msg: Str } -> {} <Log> = { msg } -> Log.log { level = Print, msg = "$(msg)\n" }

@@ -2,72 +2,14 @@ use std::collections::list
 use std::int
 use std::abilities::compare::{ Eq }
 
+## Transactional variable -- can only be read/written inside STM transactions.
 pub newtype TVar 'a = TVar __NativeTVar
 
-# All reads and writes to shared memory happen atomically within transactions.
-# All reads and writes to shared memory happen atomically within transactions.
-#
-#
-# Key features:
-# Key features:
-# - Optimistic concurrency: transactions run in parallel, retry on conflict
-# - Optimistic concurrency: transactions run in parallel, retry on conflict
-# - Composability: transactions can be nested and combined
-# - Composability: transactions can be nested and combined
-# - No deadlocks: no locks means no deadlock cycles
-# - No deadlocks: no locks means no deadlock cycles
-# - Retry: block until watched TVars change
-# - Retry: block until watched TVars change
-# - OrElse: try alternatives if first transaction retries
-# - OrElse: try alternatives if first transaction retries
-#
-#
-# Implementation uses:
-# Implementation uses:
-# - Multi-Version Concurrency Control (MVCC) for snapshot isolation
-# - Multi-Version Concurrency Control (MVCC) for snapshot isolation
-# - Bloom filters for fast conflict detection
-# - Bloom filters for fast conflict detection
-# - Optimistic reads with validation at commit time
-# - Optimistic reads with validation at commit time
-#
-#
-# Available implementations:
-# Available implementations:
-# - OptimisticSTM: Default, uses virtual threads for blocking operations
-# - OptimisticSTM: Default, uses virtual threads for blocking operations
-# - SequentialSTM: Single-threaded, for testing/debugging
-# - SequentialSTM: Single-threaded, for testing/debugging
-#
-#
-# Usage:
-# Usage:
-#   use std::effects::stm::{STM, OptimisticSTM, TVar, tvar}
-#   use std::effects::stm::{STM, OptimisticSTM, TVar, tvar}
-#
-#
-#   let account = tvar {init = 1000}
-#   let account = tvar {init = 1000}
-#
-#
-#   perform OptimisticSTM in do
-#   perform OptimisticSTM in do
-#       let balance = STM.read {var = account}
-#       let balance = STM.read {var = account}
-#       STM.write {var = account, val = balance - 100}
-#       STM.write {var = account, val = balance - 100}
-# TVar - Transactional Variable
-# TVar - Transactional Variable
-# A mutable reference that can only be read/written inside transactions.
-# A mutable reference that can only be read/written inside transactions.
-# Outside transactions, use tvar to create and deref to read (without consistency).
-# Outside transactions, use tvar to create and deref to read (without consistency).
 impl Eq 'a for TVar 'a where {
   eq = { it, r } -> __native_ref_eq { l = it, r = r },
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
 
-# Inherent impls for TVar — method syntax for common operations
 impl TVar 'a where {
   read = { it } -> STM.read { var = it },
   write = { it, val } -> STM.write { var = it, val = val },
@@ -77,105 +19,35 @@ impl TVar 'a where {
   deref = { it } -> deref { var = it },
 }
 
-# Create a new TVar with an initial value
-#
-# Example:
-#   let counter = tvar {init = 0}
-#   let accounts = tvar {init = {alice = 1000, bob = 500}}
+## Create a new TVar with an initial value.
 pub let tvar : { init: 'a } -> TVar 'a = { init } -> __native_tvar_new { init = init }
 
-# Read TVar value outside of transaction (non-transactional)
-# WARNING: This read is NOT part of any transaction!
-# Use only for debugging or when you don't need consistency.
-#
-# Example:
-#   let current = deref {var = account}  # Non-transactional read
+## Read a TVar outside of a transaction (non-transactional, no consistency).
 pub let deref : { var: TVar 'a } -> 'a = { var } -> __native_tvar_deref { var = var }
 
-# STM effect - Transactional operations
+## Software transactional memory effect with optimistic concurrency.
 effect STM where {
+  ## Read a TVar within a transaction (tracked for conflict detection).
   read: { var: TVar 'a } -> 'a <STM>,
+  ## Write a value to a TVar (buffered until commit).
   write: { var: TVar 'a, val: 'a } -> {} <STM>,
+  ## Read-modify-write atomically.
   modify: { var: TVar 'a, f: { val: 'a } -> 'a } -> {} <STM>,
+  ## Write new value, return old value.
   swap: { var: TVar 'a, val: 'a } -> 'a <STM>,
+  ## Protect a TVar from outside modification during this transaction.
   ensure: { var: TVar 'a } -> 'a <STM>,
+  ## Retry transaction when watched TVars change.
   retry: {} -> 'a <STM>,
+  ## Try primary, fall back to fallback if primary retries.
   or_else: { primary: {} -> 'a <STM>, fallback: {} -> 'a <STM> } -> 'a <STM>,
+  ## Retry if condition is false.
   check: { cond: Bool } -> {} <STM>,
+  ## Run a sub-transaction atomically with automatic retry on conflict.
   atomically: { f: {} -> 'a <STM> } -> 'a <STM>
 }
 
-# Read a TVar's value within the transaction
-# Tracked for conflict detection at commit time
-#
-# Example:
-#   let balance = STM.read {var = account}
-# Write a value to a TVar within the transaction
-# Buffered until commit, visible to subsequent reads in same transaction
-#
-# Example:
-#   STM.write {var = account, val = 500}
-# Read, apply function, write back - all atomically
-# Equivalent to: let v = read; write {val = f {val = v}}
-#
-# Example:
-#   STM.modify {var = counter, f = {val} -> val + 1}
-# Write new value, return old value
-# Equivalent to: let old = read; write {val = new}; old
-#
-# Example:
-#   let old_balance = STM.swap {var = account, val = 0}
-# Mark TVar as protected from outside modification
-# If another transaction modifies this TVar, current transaction retries.
-# Returns current value. Use when you need strong consistency on reads.
-#
-# Example:
-#   let balance = STM.ensure {var = account}  # Protected read
-# Retry current transaction until a watched TVar changes
-# All TVars read so far are "watched" - transaction restarts when any changes.
-#
-# Example:
-#   let balance = STM.read {var = account}
-#   match balance < amount is
-#       True -> STM.retry {}  # Wait for more funds
-#       False -> STM.write {var = account, val = balance - amount}
-# Try first alternative, if it retries, run second
-# Combines two STM computations with fallback semantics.
-#
-# Example:
-#   STM.or_else {
-#       primary = {} -> withdraw {from = checking, amount = 100},
-#       fallback = {} -> withdraw {from = savings, amount = 100}
-#   }
-# Retry if condition is false
-# Equivalent to: match cond is True -> {} | False -> retry {}
-#
-# Example:
-#   STM.check {cond = balance >= amount}
-# Run a transaction atomically with automatic retry on conflict
-# This is the primary way to execute STM transactions that modify TVars.
-# The transaction will be automatically retried if there's a conflict.
-#
-# Example:
-#   perform OptimisticSTM in do
-#       STM.atomically {f = {} -> do
-#           let balance = STM.read {var = account}
-#           STM.write {var = account, val = balance + 100}
-#       }
-# =============================================================================
-# OptimisticSTM Implementation - Default
-# =============================================================================
-#
-# Uses optimistic concurrency with MVCC and bloom filter conflict detection.
-# Transactions run in parallel and validate at commit time.
-# On conflict, transactions automatically retry with fresh data.
-#
-# Blocking operations (retry) use virtual threads to wait efficiently.
-#
-# Example:
-#   perform OptimisticSTM in do
-#       let balance = STM.read {var = account}
-#       STM.write {var = account, val = balance + deposit}
+## Default optimistic STM using MVCC and bloom-filter conflict detection.
 impl STM for OptimisticSTM where {
   initialize_scope = {} -> __native_stm_begin_transaction {},
   finalize_scope = {} -> __native_stm_commit_transaction {},
@@ -191,20 +63,7 @@ impl STM for OptimisticSTM where {
   atomically = { f } -> __native_stm_atomic { f = f },
 }
 
-# Scoped effect: automatically begin transaction at start and commit at end
-# =============================================================================
-# OptimisticSTMWith Implementation - Configurable
-# =============================================================================
-#
-# Like OptimisticSTM but with tuning parameters.
-#
-# Parameters:
-#   max_retries: Maximum automatic retries before failing (0 = unlimited)
-#   spin_count: Spins before parking thread on retry (higher = more CPU, lower latency)
-#
-# Example:
-#   perform OptimisticSTMWith {max_retries = 100, spin_count = 10} in do
-#       STM.read {var = account}
+## Configurable optimistic STM with retry limits and spin tuning.
 impl STM for OptimisticSTMWith { max_retries: Int, spin_count: Int } where {
   initialize_scope = {} -> __native_stm_begin_transaction {},
   finalize_scope = {} -> __native_stm_commit_transaction_cfg { max_retries = max_retries },
@@ -220,18 +79,7 @@ impl STM for OptimisticSTMWith { max_retries: Int, spin_count: Int } where {
   atomically = { f } -> __native_stm_atomic { f = f },
 }
 
-# Scoped effect: automatically begin transaction at start and commit at end
-# Pass max_retries to commit so it can signal to the scoped handler
-# =============================================================================
-# SequentialSTM Implementation - Single-Threaded
-# =============================================================================
-#
-# Executes transactions sequentially, no parallelism.
-# Useful for testing and debugging STM code.
-#
-# Example:
-#   perform SequentialSTM in do
-#       STM.read {var = account}
+## Single-threaded STM for testing and debugging.
 impl STM for SequentialSTM where {
   initialize_scope = {} -> {},
   finalize_scope = {} -> {},
@@ -247,29 +95,10 @@ impl STM for SequentialSTM where {
   atomically = { f } -> f {},
 }
 
-# Scoped effect: SequentialSTM writes directly, so initialize/finalize are no-ops
-# SequentialSTM writes directly, so atomically just runs the function
-# =============================================================================
-# Helper Functions
-# =============================================================================
-# Run a transaction atomically with automatic retry on conflict
-# This is the primary way to execute STM transactions.
-# The transaction will be automatically retried if there's a conflict.
-#
-# Example:
-#   let balance = atomically {f = {} -> STM.read {var = account}}
-#
-#   atomically {f = {} -> do
-#       let balance = STM.read {var = account}
-#       STM.write {var = account, val = balance + 100}
-#   }
+## Run a transaction atomically with OptimisticSTM.
 pub let atomically : { f: {} -> 'a <STM> } -> 'a = { f } -> perform OptimisticSTM in __native_stm_atomic { f = f }
 
-# Transfer amount from one TVar to another
-# Returns True if successful, False if insufficient funds
-#
-# Example:
-#   let success = transfer {from = alice, to = bob, amount = 100}
+## Transfer amount between two TVar Int accounts. Returns False if insufficient funds.
 pub let transfer : { from: TVar Int, to: TVar Int, amount: Int } -> Bool <STM> = { from, to, amount } ->
   do
     let from_balance = STM.read { var = from }
@@ -282,6 +111,7 @@ pub let transfer : { from: TVar Int, to: TVar Int, amount: Int } -> Bool <STM> =
       False -> False
 
 
+## Transfer amount, blocking (retry) until sufficient funds are available.
 pub let transfer_or_wait : { from: TVar Int, to: TVar Int, amount: Int } -> {} <STM> = { from, to, amount } ->
   do
     let from_balance = STM.read { var = from }
@@ -290,63 +120,16 @@ pub let transfer_or_wait : { from: TVar Int, to: TVar Int, amount: Int } -> {} <
     let to_balance = STM.read { var = to }
     STM.write { var = to, val = to_balance + amount }
 
+## Read multiple TVars atomically.
 pub let read_all : { vars: [TVar 'a] } -> ['a] <STM> = { vars } ->
   __native_stm_read_all { vars = vars }
 
-# Write to multiple TVars atomically
+## Write to multiple TVars atomically.
 pub let write_all : { pairs: [{ var: TVar 'a, val: 'a }] } -> {} <STM> = { pairs } ->
   __native_stm_write_all { pairs = pairs }
 
-# =============================================================================
-# =============================================================================
-# TMVar - Blocking Transactional Variable
-# TMVar - Blocking Transactional Variable
-# =============================================================================
-# =============================================================================
-#
-#
-# TMVar is like a TVar that can be empty or full.
-# TMVar is like a TVar that can be empty or full.
-# - take: blocks if empty, returns value and empties the TMVar
-# - take: blocks if empty, returns value and empties the TMVar
-# - put: blocks if full, fills the TMVar with a value
-# - put: blocks if full, fills the TMVar with a value
-# - read: blocks if empty, returns value without taking it
-# - read: blocks if empty, returns value without taking it
-#
-#
-# This is useful for:
-# This is useful for:
-# - Synchronization (handoff between threads)
-# - Synchronization (handoff between threads)
-# - One-shot events
-# - One-shot events
-# - Locks (empty = locked, full = unlocked)
-# - Locks (empty = locked, full = unlocked)
-#
-#
-# Implementation: TMVar is a TVar holding Option 'a
-# Implementation: TMVar is a TVar holding Option 'a
-#
-#
-# Example:
-# Example:
-#   let mvar = tmvar_empty {}
-#   let mvar = tmvar_empty {}
-#
-#
-#   # Thread 1: puts a value
-#   # Thread 1: puts a value
-#   STM.put_tmvar {var = mvar, val = 42}
-#   STM.put_tmvar {var = mvar, val = 42}
-#
-#
-#   # Thread 2: takes the value (blocks until available)
-#   # Thread 2: takes the value (blocks until available)
-#   let value = STM.take_tmvar {var = mvar}
-#   let value = STM.take_tmvar {var = mvar}
-# TMVar type - a TVar that can be empty or full
-# TMVar type - a TVar that can be empty or full
+## Blocking transactional variable (can be empty or full).
+## Useful for synchronization, one-shot events, and locks.
 pub newtype TMVar 'a = TMVar TVar (Option 'a)
 
 impl Eq 'a for TMVar 'a where {
@@ -354,7 +137,6 @@ impl Eq 'a for TMVar 'a where {
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
 
-# Inherent impls for TMVar — method syntax for common operations
 impl TMVar 'a where {
   take = { it } -> take_tmvar { var = it },
   put = { it, val } -> put_tmvar { var = it, val = val },
@@ -365,19 +147,21 @@ impl TMVar 'a where {
   is_empty = { it } -> is_empty_tmvar { var = it },
 }
 
-# Internal helper to unwrap the TMVar to get the underlying TVar
 let unwrap_tmvar : { var: TMVar 'a } -> TVar (Option 'a) = { var } -> match var is
   TMVar { val } -> val
 
 
+## Create an empty TMVar.
 pub let tmvar_empty : {} -> TMVar 'a = {} -> do
   let inner = tvar { init = None }
   TMVar { val = inner }
 
+## Create a TMVar with an initial value.
 pub let tmvar : { init: 'a } -> TMVar 'a = { init } -> do
   let inner = tvar { init = Some { val = init } }
   TMVar { val = inner }
 
+## Take the value from a TMVar (blocks if empty, empties the TMVar).
 pub let take_tmvar : { var: TMVar 'a } -> 'a <STM> = { var } -> do
   let inner = unwrap_tmvar { var = var }
   let contents = STM.read { var = inner }
@@ -388,6 +172,7 @@ pub let take_tmvar : { var: TMVar 'a } -> 'a <STM> = { var } -> do
     None -> STM.retry {}
 
 
+## Put a value into a TMVar (blocks if full).
 pub let put_tmvar : { var: TMVar 'a, val: 'a } -> {} <STM> = { var, val } -> do
   let inner = unwrap_tmvar { var = var }
   let contents = STM.read { var = inner }
@@ -396,6 +181,7 @@ pub let put_tmvar : { var: TMVar 'a, val: 'a } -> {} <STM> = { var, val } -> do
     None -> STM.write { var = inner, val = Some { val = val } }
 
 
+## Read a TMVar without taking it (blocks if empty).
 pub let read_tmvar : { var: TMVar 'a } -> 'a <STM> = { var } -> do
   let inner = unwrap_tmvar { var = var }
   let contents = STM.read { var = inner }
@@ -404,6 +190,7 @@ pub let read_tmvar : { var: TMVar 'a } -> 'a <STM> = { var } -> do
     None -> STM.retry {}
 
 
+## Try to take from a TMVar without blocking.
 pub let try_take_tmvar : { var: TMVar 'a } -> Option 'a <STM> = { var } -> do
   let inner = unwrap_tmvar { var = var }
   let contents = STM.read { var = inner }
@@ -414,6 +201,7 @@ pub let try_take_tmvar : { var: TMVar 'a } -> Option 'a <STM> = { var } -> do
     None -> None
 
 
+## Try to put into a TMVar without blocking. Returns True on success.
 pub let try_put_tmvar : { var: TMVar 'a, val: 'a } -> Bool <STM> = { var, val } ->
   do
     let inner = unwrap_tmvar { var = var }
@@ -425,11 +213,13 @@ pub let try_put_tmvar : { var: TMVar 'a, val: 'a } -> Bool <STM> = { var, val } 
         True
 
 
+## Swap the value in a TMVar (blocks if empty).
 pub let swap_tmvar : { var: TMVar 'a, val: 'a } -> 'a <STM> = { var, val } -> do
   let old = take_tmvar { var = var }
   put_tmvar { var = var, val = val }
   old
 
+## Check if a TMVar is empty.
 pub let is_empty_tmvar : { var: TMVar 'a } -> Bool <STM> = { var } -> do
   let inner = unwrap_tmvar { var = var }
   let contents = STM.read { var = inner }
@@ -438,6 +228,7 @@ pub let is_empty_tmvar : { var: TMVar 'a } -> Bool <STM> = { var } -> do
     None -> True
 
 
+## Unbounded transactional FIFO queue.
 pub newtype TQueue 'a = TQueue TVar { read: List 'a, write: List 'a }
 
 impl Eq 'a for TQueue 'a where {
@@ -459,16 +250,19 @@ let unwrap_tqueue : { q: TQueue 'a } -> TVar { read: List 'a, write: List 'a } =
     TQueue { val } -> val
 
 
+## Create an empty TQueue.
 pub let tqueue : {} -> TQueue 'a = {} -> do
   let empty_list = list::empty {}
   let inner = tvar { init = { read = empty_list, write = empty_list } }
   TQueue { val = inner }
 
+## Create a TQueue pre-populated with items.
 pub let tqueue_from_list : { items: List 'a } -> TQueue 'a = { items } -> do
   let empty_list = list::empty {}
   let inner = tvar { init = { read = items, write = empty_list } }
   TQueue { val = inner }
 
+## Write a value to the back of a TQueue.
 pub let write_tqueue : { q: TQueue 'a, val: 'a } -> {} <STM> = { q, val } -> do
   let inner = unwrap_tqueue { q = q }
   let state = STM.read { var = inner }
@@ -478,6 +272,7 @@ pub let write_tqueue : { q: TQueue 'a, val: 'a } -> {} <STM> = { q, val } -> do
     val = { read = state.read, write = new_write },
   }
 
+## Read a value from the front of a TQueue (blocks if empty).
 pub let read_tqueue : { q: TQueue 'a } -> 'a <STM> = { q } -> do
   let inner = unwrap_tqueue { q = q }
   let state = STM.read { var = inner }
@@ -503,6 +298,7 @@ pub let read_tqueue : { q: TQueue 'a } -> 'a <STM> = { q } -> do
           None -> STM.retry {}
 
 
+## Try to read from a TQueue without blocking.
 pub let try_read_tqueue : { q: TQueue 'a } -> Option 'a <STM> = { q } -> do
   let inner = unwrap_tqueue { q = q }
   let state = STM.read { var = inner }
@@ -528,6 +324,7 @@ pub let try_read_tqueue : { q: TQueue 'a } -> Option 'a <STM> = { q } -> do
           None -> None
 
 
+## Peek at the front of a TQueue without removing (blocks if empty).
 pub let peek_tqueue : { q: TQueue 'a } -> 'a <STM> = { q } -> do
   let inner = unwrap_tqueue { q = q }
   let state = STM.read { var = inner }
@@ -547,6 +344,7 @@ pub let peek_tqueue : { q: TQueue 'a } -> 'a <STM> = { q } -> do
           None -> STM.retry {}
 
 
+## Check if a TQueue is empty.
 pub let is_empty_tqueue : { q: TQueue 'a } -> Bool <STM> = { q } -> do
   let inner = unwrap_tqueue { q = q }
   let state = STM.read { var = inner }
@@ -555,11 +353,13 @@ pub let is_empty_tqueue : { q: TQueue 'a } -> Bool <STM> = { q } -> do
     False -> False
 
 
+## Get the number of elements in a TQueue.
 pub let size_tqueue : { q: TQueue 'a } -> Int <STM> = { q } -> do
   let inner = unwrap_tqueue { q = q }
   let state = STM.read { var = inner }
   list::size { xs = state.read } + list::size { xs = state.write }
 
+## Bounded transactional FIFO queue that blocks on write when full.
 pub newtype TBQueue 'a = TBQueue TVar { read: List 'a, write: List 'a, size: Int, capacity: Int }
 
 impl Eq 'a for TBQueue 'a where {
@@ -584,6 +384,7 @@ let unwrap_tbqueue : { q: TBQueue 'a } -> TVar { read: List 'a, write: List 'a, 
     TBQueue { val } -> val
 
 
+## Create a bounded TBQueue with the given capacity.
 pub let tbqueue : { capacity: Int } -> TBQueue 'a = { capacity } -> do
   let empty_list = list::empty {}
   let inner = tvar {
@@ -596,6 +397,7 @@ pub let tbqueue : { capacity: Int } -> TBQueue 'a = { capacity } -> do
   }
   TBQueue { val = inner }
 
+## Write to a TBQueue (blocks if full).
 pub let write_tbqueue : { q: TBQueue 'a, val: 'a } -> {} <STM> = { q, val } -> do
   let inner = unwrap_tbqueue { q = q }
   let state = STM.read { var = inner }
@@ -614,6 +416,7 @@ pub let write_tbqueue : { q: TBQueue 'a, val: 'a } -> {} <STM> = { q, val } -> d
       }
 
 
+## Read from a TBQueue (blocks if empty).
 pub let read_tbqueue : { q: TBQueue 'a } -> 'a <STM> = { q } -> do
   let inner = unwrap_tbqueue { q = q }
   let state = STM.read { var = inner }
@@ -649,6 +452,7 @@ pub let read_tbqueue : { q: TBQueue 'a } -> 'a <STM> = { q } -> do
           None -> STM.retry {}
 
 
+## Try to read from a TBQueue without blocking.
 pub let try_read_tbqueue : { q: TBQueue 'a } -> Option 'a <STM> = { q } -> do
   let inner = unwrap_tbqueue { q = q }
   let state = STM.read { var = inner }
@@ -684,6 +488,7 @@ pub let try_read_tbqueue : { q: TBQueue 'a } -> Option 'a <STM> = { q } -> do
           None -> None
 
 
+## Try to write to a TBQueue without blocking. Returns True on success.
 pub let try_write_tbqueue : { q: TBQueue 'a, val: 'a } -> Bool <STM> = { q, val } ->
   do
     let inner = unwrap_tbqueue { q = q }
@@ -704,6 +509,7 @@ pub let try_write_tbqueue : { q: TBQueue 'a, val: 'a } -> Bool <STM> = { q, val 
         True
 
 
+## Peek at the front of a TBQueue without removing (blocks if empty).
 pub let peek_tbqueue : { q: TBQueue 'a } -> 'a <STM> = { q } -> do
   let inner = unwrap_tbqueue { q = q }
   let state = STM.read { var = inner }
@@ -728,21 +534,25 @@ pub let peek_tbqueue : { q: TBQueue 'a } -> 'a <STM> = { q } -> do
           None -> STM.retry {}
 
 
+## Check if a TBQueue is empty.
 pub let is_empty_tbqueue : { q: TBQueue 'a } -> Bool <STM> = { q } -> do
   let inner = unwrap_tbqueue { q = q }
   let state = STM.read { var = inner }
   state.size == 0
 
+## Check if a TBQueue is full.
 pub let is_full_tbqueue : { q: TBQueue 'a } -> Bool <STM> = { q } -> do
   let inner = unwrap_tbqueue { q = q }
   let state = STM.read { var = inner }
   state.size >= state.capacity
 
+## Get the current size of a TBQueue.
 pub let size_tbqueue : { q: TBQueue 'a } -> Int <STM> = { q } -> do
   let inner = unwrap_tbqueue { q = q }
   let state = STM.read { var = inner }
   state.size
 
+## Get the capacity of a TBQueue.
 pub let capacity_tbqueue : { q: TBQueue 'a } -> Int <STM> = { q } -> do
   let inner = unwrap_tbqueue { q = q }
   let state = STM.read { var = inner }

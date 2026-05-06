@@ -5,18 +5,6 @@ use std::abilities::default::{ Default }
 use std::int
 use std::collections::bytes
 
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# Ability implementations for Str
-# Ability implementations for Str
-# Ability implementations for Str
-# Ability implementations for Str
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
 impl Into Bytes for Str where {
   into = { it } -> bytes::from_string { s = it }
 }
@@ -37,9 +25,6 @@ impl Default for Str where {
   default = {} -> ""
 }
 
-# =============================================================================
-# Inherent methods on Str (called as value.method {args})
-# =============================================================================
 impl Str where {
   size = { it } -> size { s = it },
   is_empty = { it } -> is_empty { s = it },
@@ -72,172 +57,111 @@ impl Str where {
   to_screaming_snake_case = { it } -> to_screaming_snake_case { s = it },
 }
 
-# =============================================================================
-# String operations
-# =============================================================================
-# String concatenation
+## Concatenate two strings.
 pub let concat = { l: Str, r: Str } -> __native_string_concat { l = l, r = r }
 
-# String utility functions
+## Identity -- returns the string unchanged.
 pub let to_str = { s: Str } -> s
 
+## Number of characters in the string.
 pub let size = { s: Str } -> __native_string_size { s = s }
 
+## True if the string has zero length.
 pub let is_empty = { s: Str } -> size { s = s } == 0
 
+## Convert all characters to uppercase.
 pub let to_upper = { s: Str } -> __native_string_to_upper { s = s }
 
+## Convert all characters to lowercase.
 pub let to_lower = { s: Str } -> __native_string_to_lower { s = s }
 
+## Strip leading and trailing whitespace.
 pub let trim = { s: Str } -> __native_string_trim { s = s }
 
+## Reverse the string.
 pub let reverse = { s: Str } -> __native_string_reverse { s = s }
 
-# Additional string utilities
+## True if the string starts with prefix.
 pub let starts_with = { s: Str, prefix: Str } ->
   __native_string_starts_with { s = s, prefix = prefix }
 
+## True if the string ends with suffix.
 pub let ends_with = { s: Str, suffix: Str } ->
   __native_string_ends_with { s = s, suffix = suffix }
 
+## True if the string contains the given substring.
 pub let contains = { s: Str, substring: Str } ->
   __native_string_contains { s = s, substring = substring }
 
+## Repeat the string n times.
 pub let repeat = { s: Str, n: Int } -> if n <= 0 then "" else if n == 1 then s else concat { l = s, r = repeat { s = s, n = n - 1 } }
 
-# Split string by delimiter into a seq of strings
+## Split by delimiter into a seq of strings.
 pub let split = { s: Str, delimiter: Str } ->
   __native_string_split { s = s, delimiter = delimiter }
 
-# Join seq of strings with separator
+## Join a seq of strings with separator.
 pub let join = { strings: [Str], separator: Str } ->
   __native_string_join { strings = strings, separator = separator }
 
-# =============================================================================
-# Substring and Slicing
-# =============================================================================
-# Extract substring from start (inclusive) to end (exclusive)
-# Returns empty string if indices are out of bounds
-# Example: substring {s = "hello", start = 1, end = 4} -> "ell"
+## Extract substring from start (inclusive) to end (exclusive).
 pub let substring = { s: Str, start: Int, end: Int } ->
   __native_string_substring { s = s, start = start, end = end }
 
-# =============================================================================
-# Replace Operations
-# =============================================================================
-# Replace first occurrence of old with new
-# Example: replace {s = "hello world", old = "o", new = "0"} -> "hell0 world"
+## Replace the first occurrence of old with new.
 pub let replace = { s: Str, old: Str, new: Str } ->
   __native_string_replace { s = s, old = old, new = new }
 
-# Replace all occurrences of old with new
-# Example: replace_all {s = "hello world", old = "o", new = "0"} -> "hell0 w0rld"
+## Replace all occurrences of old with new.
 pub let replace_all = { s: Str, old: Str, new: Str } ->
   __native_string_replace_all { s = s, old = old, new = new }
 
-# =============================================================================
-# Character Access
-# =============================================================================
-# Get character at index, returns None if out of bounds
-# Example: char_at {s = "hello", i = 1} -> Some {val = 'e'}
+## Get character at index. Returns None if out of bounds.
 pub let char_at = { s: Str, i: Int } -> __native_string_char_at { s = s, i = i }
 
-# =============================================================================
-# Index Search
-# =============================================================================
-# Find first index of substring, returns None if not found
-# Example: index_of {s = "hello", sub = "ll"} -> Some {val = 2}
+## Find the first index of a substring. Returns None if not found.
 pub let index_of = { s: Str, sub: Str } -> __native_string_index_of { s = s, sub = sub }
 
-# Find last index of substring, returns None if not found
-# Example: last_index_of {s = "hello hello", sub = "ll"} -> Some {val = 8}
+## Find the last index of a substring. Returns None if not found.
 pub let last_index_of = { s: Str, sub: Str } -> __native_string_last_index_of { s = s, sub = sub }
 
-# =============================================================================
-# Additional Trimming
-# =============================================================================
-# Trim leading whitespace only
-# Example: trim_start {s = "  hello  "} -> "hello  "
+## Strip leading whitespace.
 pub let trim_start = { s: Str } -> __native_string_trim_start { s = s }
 
-# Trim trailing whitespace only
-# Example: trim_end {s = "  hello  "} -> "  hello"
+## Strip trailing whitespace.
 pub let trim_end = { s: Str } -> __native_string_trim_end { s = s }
 
-# =============================================================================
-# Splitting Utilities
-# =============================================================================
-# Split string by newlines
-# Example: lines {s = "a\nb\nc"} -> ["a", "b", "c"]
+## Split by newlines.
 pub let lines = { s: Str } -> __native_string_lines { s = s }
 
-# Split string by whitespace (removes empty strings)
-# Example: words {s = "hello  world"} -> ["hello", "world"]
+## Split by whitespace, removing empty strings.
 pub let words = { s: Str } -> __native_string_words { s = s }
 
-# Convert string to seq of characters
-# Example: chars {s = "abc"} -> ['a', 'b', 'c']
+## Convert to a seq of characters.
 pub let chars = { s: Str } -> __native_string_chars { s = s }
 
-# =============================================================================
-# Padding
-# =============================================================================
-# Pad string on the left to reach target length
-# Example: pad_left {s = "42", len = 5, c = '0'} -> "00042"
+## Pad on the left to reach target length.
 pub let pad_left = { s: Str, len: Int, c: Char } ->
   __native_string_pad_left { s = s, len = len, c = c }
 
-# Pad string on the right to reach target length
-# Example: pad_right {s = "hi", len = 5, c = '.'} -> "hi..."
+## Pad on the right to reach target length.
 pub let pad_right = { s: Str, len: Int, c: Char } ->
   __native_string_pad_right { s = s, len = len, c = c }
 
-# =============================================================================
-# Glob Pattern Matching
-# =============================================================================
-# Match a string against a glob pattern
-#
-# Supported patterns:
-#   *      - matches any characters except /
-#   **     - matches any characters including /
-#   ?      - matches a single character (not /)
-#   [abc]  - matches any character in the set
-#   [!abc] - matches any character not in the set
-#   [a-z]  - matches any character in the range
-#
-# Examples:
-#   glob_match { pattern = "/users/*", text = "/users/123" }           -> True
-#   glob_match { pattern = "/users/*", text = "/users/123/posts" }     -> False (stops at /)
-#   glob_match { pattern = "/api/**/health", text = "/api/v1/health" } -> True
-#   glob_match { pattern = "*.json", text = "config.json" }            -> True
-#   glob_match { pattern = "file?.txt", text = "file1.txt" }           -> True
-#   glob_match { pattern = "[abc].txt", text = "a.txt" }               -> True
-#   glob_match { pattern = "[!abc].txt", text = "d.txt" }              -> True
-#
+## Match against a glob pattern (*, **, ?, [abc], [a-z]).
 pub let glob_match = { pattern: Str, s: Str } ->
   __native_string_glob_match { pattern = pattern, s = s }
 
-# =============================================================================
-# Case Conversion
-# =============================================================================
-# Convert string to snake_case
-# Example: to_snake_case {s = "HelloWorld"} -> "hello_world"
-# Example: to_snake_case {s = "myFieldName"} -> "my_field_name"
+## Convert to snake_case.
 pub let to_snake_case = { s: Str } -> __native_string_to_snake_case { s = s }
 
-# Convert string to camelCase
-# Example: to_camel_case {s = "hello_world"} -> "helloWorld"
-# Example: to_camel_case {s = "my_field_name"} -> "myFieldName"
+## Convert to camelCase.
 pub let to_camel_case = { s: Str } -> __native_string_to_camel_case { s = s }
 
-# Convert string to kebab-case
-# Example: to_kebab_case {s = "HelloWorld"} -> "hello-world"
-# Example: to_kebab_case {s = "myFieldName"} -> "my-field-name"
+## Convert to kebab-case.
 pub let to_kebab_case = { s: Str } -> __native_string_to_kebab_case { s = s }
 
-# Convert string to SCREAMING_SNAKE_CASE
-# Example: to_screaming_snake_case {s = "HelloWorld"} -> "HELLO_WORLD"
-# Example: to_screaming_snake_case {s = "myFieldName"} -> "MY_FIELD_NAME"
+## Convert to SCREAMING_SNAKE_CASE.
 pub let to_screaming_snake_case = { s: Str } -> __native_string_to_screaming_snake_case { s = s }
 
 impl Sized for Str where {

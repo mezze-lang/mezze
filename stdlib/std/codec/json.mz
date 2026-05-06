@@ -10,21 +10,13 @@ use std::char
 use std::nat
 use std::codec::core::{ Format, DecodeFormat, EncodeError, DecodeError, CodecConfig }
 
-# ============================================================================
-# JSON FORMAT MARKER TYPE
-# ============================================================================
-# Marker type for JSON format - used as the 'fmt parameter in Format/DecodeFormat
-# Use `json_fmt` as the format value when calling Encode/Decode
+## Marker type for JSON format.
 pub type JsonFmt = {}
 
+## JSON format instance for use with Encode/Decode abilities.
 pub let json_fmt : JsonFmt = {}
 
-# ============================================================================
-# JSON INTERMEDIATE REPRESENTATION
-# ============================================================================
-# The Json type represents any JSON value
-# Note: JArray and JObject use Seq for efficient construction with [...] literals
-# Using anonymous record {key: Str, value: Json} for structural compatibility with codec
+## JSON value — the intermediate representation for JSON encoding/decoding.
 pub type Json = |
   JNull,
   JBool { val: Bool },
@@ -37,7 +29,7 @@ pub type Json = |
 
 use std::codec::core::{ FieldTransform }
 
-# JSON encoding configuration
+## JSON encoding configuration.
 pub type JsonConfig = {
   pretty: Bool,
   indent: Int,
@@ -45,7 +37,7 @@ pub type JsonConfig = {
   skip_null: Bool,
 }
 
-# Default JSON configuration
+## Default JSON configuration (compact, 2-space indent, no transforms).
 pub let default_config : JsonConfig = {
   pretty = False,
   indent = 2,
@@ -53,7 +45,7 @@ pub let default_config : JsonConfig = {
   skip_null = False,
 }
 
-# Create a config with custom settings
+## Creates a JSON config with custom settings.
 pub let config = { pretty: Bool, indent: Int, field_transform: FieldTransform, skip_null: Bool } ->
   {
     pretty = pretty,
@@ -62,10 +54,6 @@ pub let config = { pretty: Bool, indent: Int, field_transform: FieldTransform, s
     skip_null = skip_null,
   }
 
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
-# Get the type name of a Json value (for error messages)
 let json_type_name : { json: Json } -> Str = { json } -> match json is
   JNull -> "null"
   JBool { val } -> "boolean"

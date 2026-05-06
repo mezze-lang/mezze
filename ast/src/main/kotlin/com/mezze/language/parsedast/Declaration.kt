@@ -19,8 +19,16 @@ data class ParsedModule(
  * Every declaration has:
  * - `loc` — source span
  * - `visibility` — pub or private
- * - `leadingComments` — comments above this declaration
+ * - `leadingComments` — regular `#` comments above this declaration (for formatter)
  * - `trailingComment` — comment on the same line after
+ * - `docComment` — merged `##` doc comment lines (contiguous block before declaration)
+ * - `metadata` — structured `#{key: value}` metadata (single block before declaration)
+ *
+ * Annotation block rules (Roc-style):
+ * - `##` doc lines first, then `#{}` metadata, then declaration
+ * - A blank line or `#` regular comment resets (breaks attachment)
+ * - Only the last contiguous block attaches
+ * - Doc and metadata do NOT affect the declaration's content hash
  */
 @Serializable
 sealed interface ParsedDecl {
@@ -28,6 +36,8 @@ sealed interface ParsedDecl {
     val visibility: Visibility
     val leadingComments: List<ParsedComment>
     val trailingComment: ParsedComment?
+    val docComment: String?
+    val metadata: ParsedMetadata?
 }
 
 
@@ -48,6 +58,8 @@ data class ParsedLetDecl(
     override val visibility: Visibility = Visibility.PRIVATE,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
+    override val docComment: String? = null,
+    override val metadata: ParsedMetadata? = null,
     override val loc: Loc
 ) : ParsedDecl {
     val isSimpleBinding: Boolean get() = pattern is ParsedVariablePattern
@@ -66,6 +78,8 @@ data class ParsedTypeDecl(
     override val visibility: Visibility = Visibility.PRIVATE,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
+    override val docComment: String? = null,
+    override val metadata: ParsedMetadata? = null,
     override val loc: Loc,
     /** Content hash — populated by typechecker, not parser */
     val contentHash: com.mezze.language.typedast.Hash? = null
@@ -90,6 +104,8 @@ data class ParsedRecordDef(
 data class ParsedRecordFieldDef(
     val name: String,
     val type: ParsedTypeAnnotation,
+    val docComment: String? = null,
+    val metadata: ParsedMetadata? = null,
     val loc: Loc
 )
 
@@ -107,6 +123,8 @@ data class ParsedVariantDef(
 data class ParsedVariantCtorDef(
     val name: String,
     val dataType: ParsedTypeAnnotation? = null,
+    val docComment: String? = null,
+    val metadata: ParsedMetadata? = null,
     val loc: Loc
 )
 
@@ -141,6 +159,8 @@ data class ParsedAbilityDecl(
     override val visibility: Visibility = Visibility.PUBLIC,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
+    override val docComment: String? = null,
+    override val metadata: ParsedMetadata? = null,
     override val loc: Loc,
     /** Content hash — populated by typechecker, not parser */
     val contentHash: com.mezze.language.typedast.Hash? = null
@@ -199,6 +219,8 @@ data class ParsedImplAbilityDecl(
     override val visibility: Visibility = Visibility.PRIVATE,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
+    override val docComment: String? = null,
+    override val metadata: ParsedMetadata? = null,
     override val loc: Loc,
     /** Content hash — populated by typechecker, not parser */
     val contentHash: com.mezze.language.typedast.Hash? = null
@@ -257,6 +279,8 @@ data class ParsedEffectDecl(
     override val visibility: Visibility = Visibility.PUBLIC,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
+    override val docComment: String? = null,
+    override val metadata: ParsedMetadata? = null,
     override val loc: Loc,
     /** Content hash — populated by typechecker, not parser */
     val contentHash: com.mezze.language.typedast.Hash? = null
@@ -295,6 +319,8 @@ data class ParsedPerformerDecl(
     override val visibility: Visibility = Visibility.PRIVATE,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
+    override val docComment: String? = null,
+    override val metadata: ParsedMetadata? = null,
     override val loc: Loc,
     /** Content hash — populated by typechecker, not parser */
     val contentHash: com.mezze.language.typedast.Hash? = null
@@ -326,6 +352,8 @@ data class ParsedUseDecl(
     override val visibility: Visibility = Visibility.PRIVATE,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
+    override val docComment: String? = null,
+    override val metadata: ParsedMetadata? = null,
     override val loc: Loc
 ) : ParsedDecl
 
@@ -337,6 +365,8 @@ data class ParsedPubUseDecl(
     override val visibility: Visibility = Visibility.PUBLIC,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
+    override val docComment: String? = null,
+    override val metadata: ParsedMetadata? = null,
     override val loc: Loc
 ) : ParsedDecl
 
@@ -348,5 +378,7 @@ data class ParsedTopLevelExpr(
     override val visibility: Visibility = Visibility.PRIVATE,
     override val leadingComments: List<ParsedComment> = emptyList(),
     override val trailingComment: ParsedComment? = null,
+    override val docComment: String? = null,
+    override val metadata: ParsedMetadata? = null,
     override val loc: Loc
 ) : ParsedDecl

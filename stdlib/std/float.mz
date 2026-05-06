@@ -69,58 +69,44 @@ impl Default for Float where {
   default = {} -> 0.0
 }
 
-# Float utility functions
-# This module provides utility functions for working with floats
-# Note: The Float type and basic operations are now built-in
-# Built-in ability implementations (NumAdd, NumSub, NumMul, NumDiv, Eq, Inspect) are automatically available
-# Note: Mathematical functions like min, max, pow, sqrt, floor, ceil, round are in std::math::core
-# Type conversions
+## Convert a float to its string representation.
 pub let to_str = { n: Float } -> __native_float_to_str { n = n }
 
+## Convert an Int to a Float.
 pub let from_int = { n: Int } -> __native_float_from_int { n = n }
 
+## Convert a Nat to a Float.
 pub let from_nat = { n: Nat } -> __native_float_from_nat { n = n }
 
+## Parse a string as a float. Returns None on failure.
 pub let from_string = { s: Str } -> __native_float_from_string { s = s }
 
+## Absolute value.
 pub let abs = { n: Float } -> __native_float_abs { n = n }
 
+## Return the smaller of two floats.
 pub let min = { l: Float, r: Float } -> __native_float_min { l = l, r = r }
 
+## Return the larger of two floats.
 pub let max = { l: Float, r: Float } -> __native_float_max { l = l, r = r }
 
-# =============================================================================
-# Float Classification
-# =============================================================================
-# Check if value is NaN (Not a Number)
-# Example: is_nan {n = 0.0 / 0.0} -> True
+## True if the value is NaN.
 pub let is_nan = { n: Float } -> __native_float_is_nan { n = n }
 
-# Check if value is infinite (positive or negative)
-# Example: is_infinite {n = 1.0 / 0.0} -> True
+## True if the value is positive or negative infinity.
 pub let is_infinite = { n: Float } -> __native_float_is_infinite { n = n }
 
-# Check if value is finite (not NaN and not infinite)
-# Example: is_finite {n = 3.14} -> True
+## True if the value is neither NaN nor infinite.
 pub let is_finite = { n: Float } -> __native_float_is_finite { n = n }
 
-# =============================================================================
-# Float Utilities
-# =============================================================================
-# Get sign of float (-1.0, 0.0, or 1.0)
-# Returns NaN if input is NaN
-# Example: sign {n = -5.5} -> -1.0
+## Sign of the float: -1.0, 0.0, or 1.0. Returns NaN for NaN input.
 pub let sign = { n: Float } -> __native_float_sign { n = n }
 
-# Clamp value to range [min, max]
-# Example: clamp {n = 15.5, min = 0.0, max = 10.0} -> 10.0
+## Clamp n to the range [min, max].
 pub let clamp = { n: Float, min: Float, max: Float } ->
   __native_float_clamp { n = n, min = min, max = max }
 
-# Convert float to int (truncate towards zero)
-# Returns None for NaN or Infinity
-# Example: to_int {n = 3.7} -> Some {val = 3}
-# Example: to_int {n = 1.0 / 0.0} -> None
+## Truncate toward zero. Returns None for NaN or infinity.
 pub let to_int = { n: Float } -> __native_float_to_int { n = n }
 
 impl Float where {

@@ -4,12 +4,10 @@ use std::collections::seq
 use std::collections::bytes
 use std::abilities::convert::{ Into, TryInto }
 
-# =============================================================================
-# ERROR TYPES
-# =============================================================================
-# Error returned when encoding fails
+## Error returned when encoding fails.
 pub type EncodeError = { path: [Str], message: Str }
 
+## Error returned when decoding fails.
 pub type DecodeError = {
   path: [Str],
   message: Str,
@@ -17,6 +15,7 @@ pub type DecodeError = {
   found: Option Str,
 }
 
+## Field name transformation strategies for codecs.
 pub type FieldTransform = |
   Identity,
   SnakeCase,
@@ -25,8 +24,10 @@ pub type FieldTransform = |
   ScreamingSnakeCase,
 |
 
+## How to handle null/None values during encoding.
 pub type NullHandling = | OmitNull, IncludeNull |
 
+## Configuration for encoding and decoding.
 pub type CodecConfig = {
   field_transform: FieldTransform,
   null_handling: NullHandling,
@@ -34,6 +35,7 @@ pub type CodecConfig = {
   indent: Option Int,
 }
 
+## Default codec configuration (identity transform, include nulls, compact).
 pub let default_config : CodecConfig = {
   field_transform = Identity,
   null_handling = IncludeNull,
@@ -41,6 +43,7 @@ pub let default_config : CodecConfig = {
   indent = None,
 }
 
+## Format ability — implement once per serialization format (JSON, CSV, etc).
 ability Format 'repr for 'fmt where {
   encode_int: { val: Int, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
   encode_float: { val: Float, config: CodecConfig, path: [Str] } -> Result 'repr EncodeError,
@@ -59,6 +62,7 @@ ability Format 'repr for 'fmt where {
   transform_field: { name: Str, config: CodecConfig } -> Str
 }
 
+## Decode format ability — extract values from an intermediate representation.
 ability DecodeFormat 'repr for 'fmt where {
   decode_int: { val: 'repr, config: CodecConfig, path: [Str] } -> Result Int DecodeError,
   decode_float: { val: 'repr, config: CodecConfig, path: [Str] } -> Result Float DecodeError,
@@ -77,22 +81,27 @@ ability DecodeFormat 'repr for 'fmt where {
   transform_field: { name: Str, config: CodecConfig } -> Str
 }
 
+## Encode a value to an intermediate representation.
 ability EncodeRepr for 'a where {
   encode_repr: { fmt: 'fmt, config: CodecConfig } -> Result 'repr EncodeError
 }
 
+## Encode a value directly to an output type (Bytes, Str, etc).
 ability Encode for 'a where {
   encode: { fmt: 'fmt, config: CodecConfig } -> Result 'out EncodeError
 }
 
+## Decode a value from an intermediate representation.
 ability DecodeRepr 'a for 'repr where {
   decode_repr: { fmt: 'fmt, config: CodecConfig } -> Result 'a DecodeError
 }
 
+## Decode a value from an input type (Bytes, Str, etc).
 ability Decode 'a for 'in where {
   decode: { fmt: 'fmt, config: CodecConfig } -> Result 'a DecodeError
 }
 
+## Streaming format — writes directly to ByteBuffer without intermediate AST.
 ability StreamFormat for 'fmt where {
   stream_int: { val: Int, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
   stream_float: { val: Float, buffer: ByteBuffer, config: CodecConfig, path: [Str] } -> Result ByteBuffer EncodeError,
@@ -121,6 +130,7 @@ ability StreamFormat for 'fmt where {
   transform_field: { name: Str, config: CodecConfig } -> Str
 }
 
+## Streaming decode format — reads directly from Bytes.
 ability StreamDecodeFormat for 'fmt where {
   stream_decode_int: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Int, offset: Int } DecodeError,
   stream_decode_float: { bytes: Bytes, offset: Int, config: CodecConfig, path: [Str] } -> Result { value: Float, offset: Int } DecodeError,
@@ -143,26 +153,34 @@ ability StreamDecodeFormat for 'fmt where {
   transform_field: { name: Str, config: CodecConfig } -> Str
 }
 
+## Streaming encode — writes a value directly to a ByteBuffer.
 ability StreamEncode for 'a where {
   stream_encode: { fmt: 'fmt, buffer: ByteBuffer, config: CodecConfig } -> Result ByteBuffer EncodeError
 }
 
+## Streaming decode — reads a value directly from Bytes.
 ability StreamDecode 'a for 'bytes where {
   stream_decode: { offset: Int, fmt: 'fmt, config: CodecConfig } -> Result { value: 'a, offset: Int } DecodeError
 }
 
+## Empty path for top-level encoding/decoding.
 pub let empty_path : [Str] = []
 
+## Appends a field name to a codec path.
 pub let append_path = { path: [Str], field: Str } -> seq::add { xs = path, x = field }
 
+## Appends an index to a codec path.
 pub let append_index = { path: [Str], index: Int } ->
   seq::add { xs = path, x = int::to_str { n = index } }
 
+## Formats a codec path as a dotted string.
 pub let format_path = { path: [Str] } -> if seq::is_empty { xs = path } then "<root>" else str::join { strings = path, separator = "." }
 
+## Creates an encode error Result.
 pub let encode_error = { path: [Str], message: Str } ->
   Err { error = { path = path, message = message } }
 
+## Creates a decode error Result.
 pub let decode_error = { path: [Str], message: Str, expected: Str, found: Option Str } ->
   Err {
     error = {
@@ -186,117 +204,3 @@ impl TryInto Str DecodeError for Bytes where {
     }
 
 }
-# Human-readable error message
-# Error returned when decoding fails
-# Path to the field that failed
-# Human-readable error message
-# What type was expected (e.g., "Int")
-# What was actually found (e.g., "String")
-# What was actually found (e.g., "String")
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-# Field name transformation strategies
-# How to handle null/None values
-# Codec configuration for runtime customization
-# None = compact, Some n = pretty with n spaces
-# None = compact, Some n = pretty with n spaces
-# Default codec configuration
-# =============================================================================
-# TIER 1: INTERMEDIATE REPRESENTATION
-# =============================================================================
-# Format ability - format authors implement this ONCE per format
-# Hooks build the intermediate representation (AST)
-#
-# Example: impl Format for Json JsonFmt where { ... }
-#          impl Format for Csv CsvFmt where { ... }
-#
-# Atoms (8 hooks)
-# Structures (2 hooks)
-# Collections (3 hooks)
-# Nullable (1 hook)
-# Field name transformation (1 hook)
-# Decode format ability - format authors implement this ONCE per format
-# Hooks extract values from the intermediate representation (AST)
-#
-# Atoms (8 hooks)
-# Structures (2 hooks)
-# Collections (3 hooks)
-# Nullable (1 hook)
-# Field name transformation (1 hook)
-# =============================================================================
-# USER-FACING ENCODE ABILITIES
-# =============================================================================
-# Encode to intermediate representation (for inspection/manipulation)
-# TypeChecker auto-generates implementations for serializable types
-# Receiver (it) is the data to encode
-# Encode directly to output type (Bytes, Str, etc.)
-# Uses Format to build AST, then TryTo to convert to final output
-# TypeChecker auto-generates implementations for serializable types
-# Receiver (it) is the data to encode
-# =============================================================================
-# USER-FACING DECODE ABILITIES
-# =============================================================================
-# Decode from intermediate representation
-# TypeChecker auto-generates implementations for serializable types
-# Receiver (it) is the serialized representation (e.g., Json AST)
-# 'a is the target type (inferred from type annotation on the binding)
-# Decode from input type (Bytes, Str, etc.)
-# Uses TryFrom to parse input to AST, then DecodeFormat to extract values
-# TypeChecker auto-generates implementations for serializable types
-# Receiver (it) is the serialized input (e.g., Bytes, Str)
-# 'a is the target type (inferred from type annotation on the binding)
-# =============================================================================
-# TIER 2: STREAMING (Performance, large data)
-# =============================================================================
-# Streaming format ability - writes directly to ByteBuffer
-# No intermediate AST - maximum performance for large data
-#
-# Atoms (8 hooks)
-# Record (3 hooks)
-# Variant (2 hooks)
-# List (3 hooks)
-# Set (3 hooks)
-# Map (3 hooks)
-# Option (2 hooks)
-# Field name transformation (1 hook)
-# Streaming decode format ability - reads directly from Bytes
-#
-# Atoms (8 hooks)
-# Record (2 hooks)
-# Variant (1 hook)
-# List (2 hooks)
-# Set (2 hooks)
-# Map (2 hooks)
-# Option (1 hook)
-# Field name transformation (1 hook)
-# User-facing streaming encode
-# Receiver (it) is the data to encode
-# User-facing streaming decode
-# Receiver (it) is the byte data to decode from
-# 'a is the target type (inferred from type annotation)
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
-# Create an empty path (for top-level encoding/decoding)
-# Append a field name to a path
-# Append an index to a path (for sequences/lists)
-# Format a path as a string (e.g., "user.address.city")
-# Create an encode error
-# Create a decode error
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
-# Note: For now, use the ability methods directly:
-# - value.encode {fmt, config = default_config}
-# - repr.decode {fmt, config = default_config}
-# - value.stream_encode {fmt, buffer, config = default_config}
-# - bytes.stream_decode {offset, fmt, config = default_config}
-#
-# Fully polymorphic convenience wrappers require ability constraints to
-# introduce new type variables which isn't currently supported.
-# =============================================================================
-# CONVERSION IMPLEMENTATIONS
-# =============================================================================
-# Bytes -> Str (UTF-8)
-# Defined here to avoid circular dependency with std/convert.mz

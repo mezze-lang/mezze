@@ -1,17 +1,7 @@
-# std/abilities/sized.mz - Container-size ability
-#
-# `Sized` is implemented by every collection type — Seq, List, Deque,
-# NonEmptyList, Bytes, Str, Map, Set, SortedMap, SortedSet — and exposes
-# the universal "how many elements" / "is it empty" methods.
-#
-# Method-call syntax:
-#   xs.size {}        ->  Sized.size { it = xs }
-#   xs.is_empty {}    ->  Sized.is_empty { it = xs }
-#
-# Generic container code can constrain on `Sized 'c`:
-#   pub let any_full : { c: 'c } -> Bool with Sized 'c -> Bool = { c } ->
-#     c.size {} > 0
+## Container size. Implemented by all collection types.
 ability Sized for 'c where {
+  ## Number of elements in the container.
   size: { it: 'c } -> Int,
+  ## Returns True if the container has no elements.
   is_empty: { it: 'c } -> Bool
 }

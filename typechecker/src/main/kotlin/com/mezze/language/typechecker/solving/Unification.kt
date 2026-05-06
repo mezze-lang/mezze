@@ -1310,7 +1310,7 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
                 )
             }
             val synLoc = com.mezze.language.parsedast.Loc("<expand>", 0, 0, 0, 0)
-            com.mezze.language.parsedast.ParsedVariantDef(listOf(com.mezze.language.parsedast.ParsedVariantCtorDef(def.constructor, payloadType, synLoc)), loc = synLoc)
+            com.mezze.language.parsedast.ParsedVariantDef(listOf(com.mezze.language.parsedast.ParsedVariantCtorDef(def.constructor, payloadType, loc = synLoc)), loc = synLoc)
         }
         else -> return null
     }

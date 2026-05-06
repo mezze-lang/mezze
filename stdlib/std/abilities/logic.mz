@@ -1,18 +1,17 @@
-# std/abilities/logic.mz - Logical abilities
-#
-# Defines logical operations as abilities.
-# Operators are desugared to method-call syntax:
-#   x && y  ->  x.and {r = y}
-#   x || y  ->  x.or {r = y}
-#   !x      ->  x.not {}
+## Logical AND. Desugars the `&&` operator.
 ability LogicalAnd for 'a where {
+  ## Logical conjunction of it and r.
   and: { it: 'a, r: 'a } -> 'a
 }
 
+## Logical OR. Desugars the `||` operator.
 ability LogicalOr for 'a where {
+  ## Logical disjunction of it and r.
   or: { it: 'a, r: 'a } -> 'a
 }
 
+## Logical NOT. Desugars the `!` operator.
 ability LogicalNot for 'a where {
+  ## Logical negation.
   not: { it: 'a } -> 'a
 }

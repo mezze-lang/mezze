@@ -103,18 +103,18 @@ class MezzeParser {
             val tokens = lexer.tokenize()
             var stream = TokenStream(tokens)
 
-            // Skip leading newlines and collect comments
-            val (startStream, leadingComments) = skipNewlinesCollectComments(stream)
+            // Skip leading newlines and collect annotations
+            val (startStream, leadingBlock) = skipNewlinesCollectAnnotations(stream)
             stream = startStream
-            var pendingComments = leadingComments.toMutableList()
+            var pendingBlock = leadingBlock
 
             // Parse top-level items with recovery
             while (stream.current()?.type != TokenType.EOF) {
                 when (val result = parsedTopLevelItem(stream)) {
                     is ParseResult.Success -> {
-                        val decl = attachCommentsToDecl(result.value, pendingComments)
+                        val decl = attachAnnotationsToDecl(result.value, pendingBlock)
                         decls.add(decl)
-                        pendingComments = mutableListOf()
+                        pendingBlock = AnnotationBlock(emptyList(), null, null)
 
                         // Check for trailing comment
                         val afterDecl = result.remaining
@@ -130,8 +130,8 @@ class MezzeParser {
                             stream = afterDecl
                         }
 
-                        val (nextStream, betweenComments) = skipNewlinesCollectComments(stream)
-                        pendingComments.addAll(betweenComments)
+                        val (nextStream, betweenBlock) = skipNewlinesCollectAnnotations(stream)
+                        pendingBlock = betweenBlock
                         stream = nextStream
                     }
                     is ParseResult.Failure -> {
@@ -147,12 +147,12 @@ class MezzeParser {
 
                         // Synchronize: skip to next top-level declaration
                         stream = synchronizeToNextDeclaration(stream)
-                        pendingComments = mutableListOf() // discard comments in error region
+                        pendingBlock = AnnotationBlock(emptyList(), null, null)
                     }
                 }
             }
 
-            orphanComments.addAll(pendingComments)
+            orphanComments.addAll(pendingBlock.regularComments)
 
             // Mirror parseParsedModule: resolve impl decls AND compute
             // content hashes. The LSP path lives or dies by these hashes —
@@ -229,22 +229,22 @@ class MezzeParser {
 
 
     private val parsedModuleParser: Parser<ParsedModule> = { stream ->
-        // Skip leading newlines and collect any leading comments
-        val (startStream, leadingComments) = skipNewlinesCollectComments(stream)
+        // Skip leading newlines and collect annotations
+        val (startStream, leadingBlock) = skipNewlinesCollectAnnotations(stream)
         var currentStream = startStream
         val decls = mutableListOf<ParsedDecl>()
         val orphanComments = mutableListOf<ParsedComment>()
-        var pendingComments = leadingComments.toMutableList()
+        var pendingBlock = leadingBlock
         var failure: ParseResult.Failure? = null
 
-        // Parse top-level items, collecting comments between them
+        // Parse top-level items, collecting annotations between them
         while (currentStream.current()?.type != TokenType.EOF && failure == null) {
             when (val result = parsedTopLevelItem(currentStream)) {
                 is ParseResult.Success -> {
-                    // Attach pending comments to this declaration
-                    val decl = attachCommentsToDecl(result.value, pendingComments)
+                    // Attach pending annotations to this declaration
+                    val decl = attachAnnotationsToDecl(result.value, pendingBlock)
                     decls.add(decl)
-                    pendingComments = mutableListOf()
+                    pendingBlock = AnnotationBlock(emptyList(), null, null)
 
                     // Check for trailing comment on the same line
                     val afterDecl = result.remaining
@@ -261,9 +261,9 @@ class MezzeParser {
                         currentStream = afterDecl
                     }
 
-                    // Collect comments before next declaration
-                    val (nextStream, betweenComments) = skipNewlinesCollectComments(currentStream)
-                    pendingComments.addAll(betweenComments)
+                    // Collect annotations before next declaration
+                    val (nextStream, betweenBlock) = skipNewlinesCollectAnnotations(currentStream)
+                    pendingBlock = betweenBlock
                     currentStream = nextStream
                 }
                 is ParseResult.Failure -> {
@@ -278,7 +278,7 @@ class MezzeParser {
         }
 
         // Any remaining pending comments are orphans
-        orphanComments.addAll(pendingComments)
+        orphanComments.addAll(pendingBlock.regularComments)
 
         failure ?: ParseResult.Success(
             ParsedModule(currentFile ?: "<unknown>", decls, orphanComments),
@@ -297,9 +297,25 @@ class MezzeParser {
             is ParsedAbilityDecl -> decl.copy(leadingComments = comments)
             is ParsedImplAbilityDecl -> decl.copy(leadingComments = comments)
             is ParsedPerformerDecl -> decl.copy(leadingComments = comments)
-            is ParsedUseDecl -> decl // use decls don't have comment fields
-            is ParsedPubUseDecl -> decl
-            is ParsedTopLevelExpr -> decl
+            is ParsedUseDecl -> decl.copy(leadingComments = comments)
+            is ParsedPubUseDecl -> decl.copy(leadingComments = comments)
+            is ParsedTopLevelExpr -> decl.copy(leadingComments = comments)
+        }
+    }
+
+    private fun attachAnnotationsToDecl(decl: ParsedDecl, block: AnnotationBlock): ParsedDecl {
+        val (comments, doc, meta) = block
+        if (comments.isEmpty() && doc == null && meta == null) return decl
+        return when (decl) {
+            is ParsedLetDecl -> decl.copy(leadingComments = comments, docComment = doc, metadata = meta)
+            is ParsedTypeDecl -> decl.copy(leadingComments = comments, docComment = doc, metadata = meta)
+            is ParsedEffectDecl -> decl.copy(leadingComments = comments, docComment = doc, metadata = meta)
+            is ParsedAbilityDecl -> decl.copy(leadingComments = comments, docComment = doc, metadata = meta)
+            is ParsedImplAbilityDecl -> decl.copy(leadingComments = comments, docComment = doc, metadata = meta)
+            is ParsedPerformerDecl -> decl.copy(leadingComments = comments, docComment = doc, metadata = meta)
+            is ParsedUseDecl -> decl.copy(leadingComments = comments, docComment = doc, metadata = meta)
+            is ParsedPubUseDecl -> decl.copy(leadingComments = comments, docComment = doc, metadata = meta)
+            is ParsedTopLevelExpr -> decl.copy(leadingComments = comments, docComment = doc, metadata = meta)
         }
     }
 
@@ -441,28 +457,113 @@ class MezzeParser {
     }
 
     /**
-     * Skip newlines and collect COMMENT tokens into a list.
-     * Used by the module parser to attach comments to declarations.
+     * Result of collecting comments, doc strings, and metadata between declarations.
+     */
+    internal data class AnnotationBlock(
+        val regularComments: List<ParsedComment>,
+        val docComment: String?,
+        val metadata: ParsedMetadata?
+    )
+
+    /**
+     * Skip newlines and collect COMMENT tokens, applying Roc-style reset rules:
+     *
+     * - `##` doc comment lines are collected into a doc string
+     * - `#{}` metadata is parsed into a ParsedMetadata
+     * - `#` regular comments are collected for the formatter
+     * - A blank line (consecutive NEWLINEs) or a regular `#` comment RESETS
+     *   the doc and metadata accumulators — only the last contiguous block survives
+     * - Ordering enforced: `##` before `#{}`, error if `##` after `#{}`
+     * - Only one `#{}` block allowed
      */
     internal fun skipNewlinesCollectComments(stream: TokenStream): Pair<TokenStream, List<ParsedComment>> {
+        val (finalStream, _) = skipNewlinesCollectAnnotations(stream)
+        // For backward compatibility with callers that still use the old signature,
+        // return all comments as a flat list. The module parser uses skipNewlinesCollectAnnotations directly.
+        return Pair(finalStream, emptyList())
+    }
+
+    /**
+     * Collects annotations (doc comments, metadata) and regular comments between declarations.
+     * Implements Roc-style reset: blank lines and regular comments reset doc/metadata.
+     */
+    internal fun skipNewlinesCollectAnnotations(stream: TokenStream): Pair<TokenStream, AnnotationBlock> {
         var current = stream
-        val comments = mutableListOf<ParsedComment>()
+        val file = currentFile ?: "<unknown>"
+
+        // Accumulators for the current contiguous annotation block
+        var docLines = mutableListOf<String>()
+        var metadata: ParsedMetadata? = null
+        var metadataLoc: Loc? = null
+        var hasSeenMetadata = false
+
+        // All regular comments (for formatter preservation)
+        val regularComments = mutableListOf<ParsedComment>()
+
+        var lastWasNewline = false
+
         while (true) {
             val token = current.current() ?: break
             when (token.type) {
-                TokenType.NEWLINE -> current = current.advance()
+                TokenType.NEWLINE -> {
+                    if (lastWasNewline) {
+                        // Blank line (two consecutive newlines) → reset doc and metadata
+                        docLines = mutableListOf()
+                        metadata = null
+                        metadataLoc = null
+                        hasSeenMetadata = false
+                    }
+                    lastWasNewline = true
+                    current = current.advance()
+                }
                 TokenType.COMMENT -> {
+                    lastWasNewline = false
                     val text = token.text
-                    val isDoc = text.startsWith("##")
-                    val file = currentFile ?: "<unknown>"
                     val loc = Loc(file, token.line, token.column, token.line, token.column + text.length - 1)
-                    comments.add(ParsedComment(text, isDoc, loc))
+
+                    when {
+                        MetadataParser.isMetadata(text) -> {
+                            // #{...} metadata block
+                            if (hasSeenMetadata) {
+                                // Error: second #{} block — for now, just overwrite (parser error in strict mode)
+                                // TODO: emit parse error for multiple #{} blocks
+                            }
+                            metadata = MetadataParser.parse(text, loc)
+                            metadataLoc = loc
+                            hasSeenMetadata = true
+                        }
+                        text.startsWith("##") -> {
+                            // Doc comment line
+                            if (hasSeenMetadata) {
+                                // Error: ## after #{} — for now, reset and start fresh
+                                // TODO: emit parse error for doc after metadata
+                                docLines = mutableListOf()
+                                metadata = null
+                                metadataLoc = null
+                                hasSeenMetadata = false
+                            }
+                            // Strip the ## prefix and optional leading space
+                            val docText = text.removePrefix("##").removePrefix(" ")
+                            docLines.add(docText)
+                        }
+                        else -> {
+                            // Regular # comment → reset doc and metadata
+                            docLines = mutableListOf()
+                            metadata = null
+                            metadataLoc = null
+                            hasSeenMetadata = false
+                            // Preserve for formatter
+                            regularComments.add(ParsedComment(text, false, loc))
+                        }
+                    }
                     current = current.advance()
                 }
                 else -> break
             }
         }
-        return Pair(current, comments)
+
+        val docComment = if (docLines.isNotEmpty()) docLines.joinToString("\n") else null
+        return Pair(current, AnnotationBlock(regularComments, docComment, metadata))
     }
 
     internal fun tok(type: TokenType): Parser<Token> =

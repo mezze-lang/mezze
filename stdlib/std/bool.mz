@@ -28,25 +28,26 @@ impl Default for Bool where {
   default = {} -> False
 }
 
-# Bool utility functions
-# This module provides utility functions for working with bools
-# Note: The Bool type and basic operations (&&, ||) are built-in via Truffle nodes
-# Built-in ability implementations (Eq, Inspect) are automatically available
-# Type conversions
+## Convert a Bool to "True" or "False".
 pub let to_str = { b: Bool } -> __native_bool_to_str { b = b }
 
-# Bool logic operations
+## Logical AND.
 pub let and = { l: Bool, r: Bool } -> __native_bool_and { l = l, r = r }
 
+## Logical OR.
 pub let or = { l: Bool, r: Bool } -> __native_bool_or { l = l, r = r }
 
+## Logical NOT.
 pub let not = { b: Bool } -> __native_bool_not { b = b }
 
+## Exclusive OR.
 pub let xor = { l: Bool, r: Bool } -> __native_bool_xor { l = l, r = r }
 
+## Material implication: !l || r.
 pub let implies = { l: Bool, r: Bool } ->
   __native_bool_or { l = __native_bool_not { b = l }, r = r }
 
+## Biconditional: True when both values are equal.
 pub let iff = { l: Bool, r: Bool } ->
   __native_bool_or {
     l = __native_bool_and { l = l, r = r },
@@ -56,19 +57,6 @@ pub let iff = { l: Bool, r: Bool } ->
     },
   }
 
-# Additional bool utilities
-# TODO: Seq pattern matching [head, ...tail] not yet supported in parser
-# These functions are temporarily commented out until the feature is implemented
-# pub let all = { xs: [Bool] } ->
-#     match xs is
-#         [] -> True
-#         [head, ...tail] -> if head then all { xs = tail } else False
-# pub let any = { xs: [Bool] } ->
-#     match xs is
-#         [] -> False
-#         [head, ...tail] -> if head then True else any { xs = tail }
-# pub let none = { xs: [Bool] } ->
-#     not { b = any { xs = xs } }
 impl Bool where {
   to_str = { it } -> __native_bool_to_str { b = it },
   to_int = { it } -> if it then 1 else 0,

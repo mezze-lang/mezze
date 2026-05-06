@@ -1,46 +1,52 @@
 use std::math::core
 use std::float
 
-# Basic trigonometric functions
-# Basic trigonometric functions
-# Basic trigonometric functions
-# Basic trigonometric functions
+## Sine of an angle in radians.
 pub let sin = { n: Float } -> __native_float_sin { n = n }
 
+## Cosine of an angle in radians.
 pub let cos = { n: Float } -> __native_float_cos { n = n }
 
+## Tangent of an angle in radians.
 pub let tan = { n: Float } -> __native_float_tan { n = n }
 
-# Inverse trigonometric functions
+## Inverse sine (arcsine), returns radians.
 pub let asin = { n: Float } -> __native_float_asin { n = n }
 
+## Inverse cosine (arccosine), returns radians.
 pub let acos = { n: Float } -> __native_float_acos { n = n }
 
+## Inverse tangent (arctangent), returns radians.
 pub let atan = { n: Float } -> __native_float_atan { n = n }
 
+## Two-argument arctangent, returns the angle from the x-axis to the point (x, y).
 pub let atan2 = { y: Float, x: Float } -> __native_float_atan2 { y = y, x = x }
 
-# Mathematical constants
+## The ratio of a circle's circumference to its diameter.
 pub let pi = 3.141592653589793
 
+## Euler's number.
 pub let e = 2.718281828459045
 
-# Utility functions
+## Converts degrees to radians.
 pub let degrees_to_radians = { degrees: Float } -> degrees * (pi / 180.0)
 
+## Converts radians to degrees.
 pub let radians_to_degrees = { radians: Float } -> radians * (180.0 / pi)
 
-# Additional trigonometric functions
+## Hyperbolic tangent.
 pub let tanh = { n: Float } -> do
   let exp_pos = core::exp { n = n }
   let exp_neg = core::exp { n = -n }
   (exp_pos - exp_neg) / (exp_pos + exp_neg)
 
+## Hyperbolic sine.
 pub let sinh = { n: Float } -> do
   let exp_pos = core::exp { n = n }
   let exp_neg = core::exp { n = -n }
   (exp_pos - exp_neg) / 2.0
 
+## Hyperbolic cosine.
 pub let cosh = { n: Float } -> do
   let exp_pos = core::exp { n = n }
   let exp_neg = core::exp { n = -n }

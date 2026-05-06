@@ -1,13 +1,14 @@
 use std::int
 
-# Time effect definition
-# Time effect definition
-# Time effect definition
-# Time effect definition
+## Time effect for clock access, sleeping, and timestamp formatting.
 effect Time where {
+  ## Current time in milliseconds since epoch.
   now: {} -> Int <Time>,
+  ## Current time in nanoseconds since epoch.
   now_nanos: {} -> Int <Time>,
+  ## Sleep for the given number of milliseconds.
   sleep: { millis: Int } -> {} <Time>,
+  ## Sleep for the given number of nanoseconds.
   sleep_nanos: { nanos: Int } -> {} <Time>,
   current_year: {} -> Int <Time>,
   current_month: {} -> Int <Time>,
@@ -15,18 +16,13 @@ effect Time where {
   current_hour: {} -> Int <Time>,
   current_minute: {} -> Int <Time>,
   current_second: {} -> Int <Time>,
+  ## Format a timestamp to a string using a pattern.
   format_timestamp: { timestamp: Int, format: Str } -> Str <Time>,
+  ## Parse a date string into a timestamp using a pattern.
   parse_timestamp: { date_string: Str, format: Str } -> Int <Time>
 }
 
-# Get current timestamp in milliseconds since epoch
-# Get current timestamp in nanoseconds (high precision)
-# Sleep for specified milliseconds
-# Sleep for specified nanoseconds (high precision)
-# Get current date/time components
-# Format timestamp to string
-# Parse string to timestamp
-# System time implementation using system clock
+## System clock implementation.
 impl Time for SystemTime where {
   now = {} -> __native_time_now {},
   now_nanos = {} -> __native_time_now_nanos {},
@@ -44,7 +40,7 @@ impl Time for SystemTime where {
     __native_time_parse { date_string = date_string, format = format },
 }
 
-# Mock time implementation for testing (controllable time)
+## Mock time implementation with a fixed timestamp, for testing.
 impl Time for MockTime { fixed_time: Int } where {
   now = {} -> fixed_time,
   now_nanos = {} -> fixed_time * 1000000,
@@ -62,19 +58,23 @@ impl Time for MockTime { fixed_time: Int } where {
     __native_time_parse { date_string = date_string, format = format },
 }
 
-# Convenience functions
+## Get current timestamp in milliseconds.
 pub let now : {} -> Int <Time> = {} -> Time.now {}
 
+## Sleep for the given milliseconds.
 pub let sleep : { millis: Int } -> {} <Time> = { millis } -> Time.sleep { millis = millis }
 
+## Alias for now.
 pub let current_timestamp : {} -> Int <Time> = {} -> Time.now {}
 
+## Get the current date as a record.
 pub let current_date : {} -> { year: Int, month: Int, day: Int } <Time> = {} -> do
   let year = Time.current_year {}
   let month = Time.current_month {}
   let day = Time.current_day {}
   { year = year, month = month, day = day }
 
+## Get the current time-of-day as a record.
 pub let current_time : {} -> { hour: Int, minute: Int, second: Int } <Time> = {} ->
   do
     let hour = Time.current_hour {}
@@ -82,6 +82,7 @@ pub let current_time : {} -> { hour: Int, minute: Int, second: Int } <Time> = {}
     let second = Time.current_second {}
     { hour = hour, minute = minute, second = second }
 
+## Get the current date and time as a record.
 pub let current_datetime : {} -> { year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int } <Time> = {} ->
   do
     let year = Time.current_year {}
@@ -99,40 +100,49 @@ pub let current_datetime : {} -> { year: Int, month: Int, day: Int, hour: Int, m
       second = second,
     }
 
+## Add milliseconds to a timestamp.
 pub let add_millis : { timestamp: Int, millis: Int } -> Int = { timestamp, millis } ->
   timestamp + millis
 
+## Add seconds to a timestamp.
 pub let add_seconds : { timestamp: Int, seconds: Int } -> Int = { timestamp, seconds } ->
   timestamp + (seconds * 1000)
 
+## Add minutes to a timestamp.
 pub let add_minutes : { timestamp: Int, minutes: Int } -> Int = { timestamp, minutes } ->
   timestamp + (minutes * 60 * 1000)
 
+## Add hours to a timestamp.
 pub let add_hours : { timestamp: Int, hours: Int } -> Int = { timestamp, hours } ->
   timestamp + (hours * 60 * 60 * 1000)
 
+## Add days to a timestamp.
 pub let add_days : { timestamp: Int, days: Int } -> Int = { timestamp, days } ->
   timestamp + (days * 24 * 60 * 60 * 1000)
 
-# Time difference utilities (pure functions)
+## Difference in milliseconds between two timestamps.
 pub let diff_millis : { start: Int, end: Int } -> Int = { start, end } -> end - start
 
+## Difference in seconds between two timestamps.
 pub let diff_seconds : { start: Int, end: Int } -> Int = { start, end } -> (end - start) / 1000
 
+## Difference in minutes between two timestamps.
 pub let diff_minutes : { start: Int, end: Int } -> Int = { start, end } ->
   (end - start) / (60 * 1000)
 
+## Difference in hours between two timestamps.
 pub let diff_hours : { start: Int, end: Int } -> Int = { start, end } ->
   (end - start) / (60 * 60 * 1000)
 
+## Difference in days between two timestamps.
 pub let diff_days : { start: Int, end: Int } -> Int = { start, end } ->
   (end - start) / (24 * 60 * 60 * 1000)
 
-# Check if year is leap year (pure function)
+## Check if a year is a leap year.
 pub let is_leap_year : { year: Int } -> Bool = { year } ->
   (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 
-# Get days in month (pure function, requires year for February)
+## Get the number of days in a month (accounts for leap years).
 pub let days_in_month : { year: Int, month: Int } -> Int = { year, month } -> match month is
   1 -> 31
   2 -> match is_leap_year { year = year } is
@@ -151,22 +161,26 @@ pub let days_in_month : { year: Int, month: Int } -> Int = { year, month } -> ma
   _ -> 0
 
 
+## Format a timestamp as ISO 8601.
 pub let format_iso8601 : { timestamp: Int } -> Str <Time> = { timestamp } ->
   Time.format_timestamp {
     timestamp = timestamp,
     format = "yyyy-MM-dd'T'HH:mm:ss'Z'",
   }
 
+## Format a timestamp as a date string (yyyy-MM-dd).
 pub let format_date : { timestamp: Int } -> Str <Time> = { timestamp } ->
   Time.format_timestamp { timestamp = timestamp, format = "yyyy-MM-dd" }
 
+## Format a timestamp as a time string (HH:mm:ss).
 pub let format_time_only : { timestamp: Int } -> Str <Time> = { timestamp } ->
   Time.format_timestamp { timestamp = timestamp, format = "HH:mm:ss" }
 
+## Format a timestamp as date and time (yyyy-MM-dd HH:mm:ss).
 pub let format_datetime : { timestamp: Int } -> Str <Time> = { timestamp } ->
   Time.format_timestamp { timestamp = timestamp, format = "yyyy-MM-dd HH:mm:ss" }
 
-# Get elapsed time since timestamp
+## Get milliseconds elapsed since the given timestamp.
 pub let elapsed_since : { timestamp: Int } -> Int <Time> = { timestamp } -> do
   let current = Time.now {}
   current - timestamp

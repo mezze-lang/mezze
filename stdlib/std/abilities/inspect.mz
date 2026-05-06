@@ -1,10 +1,6 @@
-# std/abilities/inspect.mz - Inspect ability
-#
-# Inspect is compiler-provided: every type can be inspected.
-# No explicit impls are needed — the compiler auto-derives to_dbg_str for all types.
-#
-# Used for string interpolation and debugging:
-#   "value is $(x)"  ->  uses x.to_dbg_str {}
+## Debug string representation. Auto-derived by the compiler for all types.
+## Used for string interpolation: "value is $(x)" calls x.to_dbg_str {}.
 ability Inspect for 'a where {
+  ## Convert to a human-readable debug string.
   to_dbg_str: { it: 'a } -> Str
 }

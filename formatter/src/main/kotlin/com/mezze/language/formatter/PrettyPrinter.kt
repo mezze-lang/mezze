@@ -36,6 +36,8 @@ class PrettyPrinter {
             lastWasUse = isUse
 
             printLeadingComments(decl)
+            printDocComment(decl)
+            printMetadata(decl)
             printDecl(decl)
             printTrailingComment(decl)
         }
@@ -1006,32 +1008,57 @@ class PrettyPrinter {
     // =========================================================================
 
     private fun printLeadingComments(decl: ParsedDecl) {
-        val comments = when (decl) {
-            is ParsedLetDecl -> decl.leadingComments
-            is ParsedTypeDecl -> decl.leadingComments
-            is ParsedEffectDecl -> decl.leadingComments
-            is ParsedAbilityDecl -> decl.leadingComments
-            is ParsedImplAbilityDecl -> decl.leadingComments
-            is ParsedPerformerDecl -> decl.leadingComments
-            else -> emptyList()
-        }
-        for (comment in comments) {
+        for (comment in decl.leadingComments) {
             printIndent()
             append(comment.text)
             newLine()
         }
     }
 
-    private fun printTrailingComment(decl: ParsedDecl) {
-        val comment = when (decl) {
-            is ParsedLetDecl -> decl.trailingComment
-            is ParsedTypeDecl -> decl.trailingComment
-            is ParsedEffectDecl -> decl.trailingComment
-            is ParsedAbilityDecl -> decl.trailingComment
-            is ParsedImplAbilityDecl -> decl.trailingComment
-            is ParsedPerformerDecl -> decl.trailingComment
-            else -> null
+    private fun printDocComment(decl: ParsedDecl) {
+        val doc = decl.docComment ?: return
+        for (line in doc.split("\n")) {
+            printIndent()
+            if (line.isEmpty()) {
+                append("##")
+            } else {
+                append("## $line")
+            }
+            newLine()
         }
+    }
+
+    private fun printMetadata(decl: ParsedDecl) {
+        val meta = decl.metadata ?: return
+        printIndent()
+        val content = formatMetadataFields(meta.fields)
+        if (content.isEmpty()) {
+            append("#{}")
+        } else {
+            append("#{ $content }")
+        }
+        newLine()
+    }
+
+    private fun formatMetadataFields(fields: Map<String, ParsedMetadataValue>): String {
+        return fields.entries.joinToString(", ") { (key, value) ->
+            "$key: ${formatMetadataValue(value)}"
+        }
+    }
+
+    private fun formatMetadataValue(value: ParsedMetadataValue): String {
+        return when (value) {
+            is ParsedMetadataValue.StringVal -> "\"${value.value.replace("\"", "\\\"")}\""
+            is ParsedMetadataValue.IntVal -> value.value.toString()
+            is ParsedMetadataValue.BoolVal -> if (value.value) "True" else "False"
+            is ParsedMetadataValue.FloatVal -> value.value.toString()
+            is ParsedMetadataValue.ListVal -> "[${value.values.joinToString(", ") { formatMetadataValue(it) }}]"
+            is ParsedMetadataValue.RecordVal -> "{${formatMetadataFields(value.fields)}}"
+        }
+    }
+
+    private fun printTrailingComment(decl: ParsedDecl) {
+        val comment = decl.trailingComment
         if (comment != null) {
             // Remove the last newline, add trailing comment, then re-add newline
             if (output.isNotEmpty() && output.last() == '\n') {

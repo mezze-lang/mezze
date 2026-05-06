@@ -1,44 +1,45 @@
-# std/abilities/numeric.mz - Numeric abilities
-#
-# Defines arithmetic operations as abilities.
-# Operators are desugared to method-call syntax:
-#   x + y  ->  x.add {r = y}
-#   x - y  ->  x.sub {r = y}
-#   x * y  ->  x.mul {r = y}
-#   x / y  ->  x.div {r = y}
-#   x % y  ->  x.mod {r = y}
-#   -x     ->  x.neg {}
+## Addition. Desugars the `+` operator.
 ability NumAdd for 'a where {
+  ## Add two values.
   add: { it: 'a, r: 'a } -> 'a
 }
 
+## Subtraction and negation. Desugars `-` (binary and unary).
 ability NumSub for 'a where {
+  ## Subtract r from it.
   sub: { it: 'a, r: 'a } -> 'a,
+  ## Negate the value.
   neg: { it: 'a } -> 'a
 }
 
+## Multiplication. Desugars the `*` operator.
 ability NumMul for 'a where {
+  ## Multiply two values.
   mul: { it: 'a, r: 'a } -> 'a
 }
 
+## Division. Desugars the `/` operator.
 ability NumDiv for 'a where {
+  ## Divide it by r.
   div: { it: 'a, r: 'a } -> 'a
 }
 
+## Modulo. Desugars the `%` operator.
 ability NumMod for 'a where {
+  ## Remainder of it divided by r.
   mod: { it: 'a, r: 'a } -> 'a
 }
 
-# Additive identity — zero value and zero check
-# zero: no `it` (construction), is_zero: has `it` (method on value)
-# Usage: NumZero.zero {}  or  x.is_zero {}
+## Additive identity -- zero value and zero check.
 ability NumZero for 'a where {
+  ## Construct the zero value for this type.
   zero: {} -> 'a,
+  ## Returns True if the value is zero.
   is_zero: { it: 'a } -> Bool
 }
 
-# Multiplicative identity
-# Usage: NumOne.one {}
+## Multiplicative identity -- the one value.
 ability NumOne for 'a where {
+  ## Construct the one value for this type.
   one: {} -> 'a
 }

@@ -1,27 +1,30 @@
-# std/effects/environment.mezze - Environment and system information effects
+## Environment and system information effect.
 effect Environment where {
+  ## Get an environment variable by name.
   get_env: { name: Str } -> Option Str <Environment>,
+  ## Set an environment variable for the current process.
   set_env: { name: Str, value: Str } -> {} <Environment>,
+  ## Get all environment variables as key-value pairs.
   get_all_env: {} -> [{ key: Str, value: Str }] <Environment>,
+  ## Get the current working directory.
   current_dir: {} -> Str <Environment>,
+  ## Change the current working directory.
   change_dir: { path: Str } -> {} <Environment>,
+  ## Get the operating system name.
   os_name: {} -> Str <Environment>,
+  ## Get the operating system version.
   os_version: {} -> Str <Environment>,
+  ## Get the CPU architecture.
   arch: {} -> Str <Environment>,
+  ## Get the current process ID.
   process_id: {} -> Int <Environment>,
+  ## Get command-line arguments.
   process_args: {} -> [Str] <Environment>,
+  ## Exit the process with a status code.
   exit: { code: Int } -> {} <Environment>
 }
 
-# Get environment variable
-# Set environment variable (for current process)
-# Get all environment variables
-# Get current working directory
-# Change current working directory
-# Get system information
-# Get process information
-# Exit the process
-# System environment implementation
+## System environment implementation using real OS calls.
 impl Environment for SystemEnvironment where {
   get_env = { name } -> __native_env_get { name = name },
   set_env = { name, value } -> __native_env_set { name = name, value = value },
@@ -36,7 +39,7 @@ impl Environment for SystemEnvironment where {
   exit = { code } -> __native_env_exit { code = code },
 }
 
-# Mock environment for testing
+## Mock environment for testing with fixed values.
 impl Environment for MockEnvironment { env_vars: [{ key: Str, value: Str }], current_directory: Str, mock_os: Str } where {
   get_env = { name } -> __native_mock_env_get { env_vars = env_vars, name = name },
   set_env = { name, value } -> {},
@@ -51,12 +54,14 @@ impl Environment for MockEnvironment { env_vars: [{ key: Str, value: Str }], cur
   exit = { code } -> {},
 }
 
+## Get an environment variable by name.
 pub let get_env : { name: Str } -> Option Str <Environment> = { name } ->
-  Environment.get_env { name = name }  # No-op in mock
+  Environment.get_env { name = name }
 
+## Get the current working directory.
 pub let current_dir : {} -> Str <Environment> = {} -> Environment.current_dir {}
 
-# No-op in mock
+## Get OS name, version, and architecture as a record.
 pub let os_info : {} -> { name: Str, version: Str, arch: Str } <Environment> = {} ->
   do
     let name = Environment.os_name {}

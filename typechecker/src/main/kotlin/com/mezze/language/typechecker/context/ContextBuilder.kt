@@ -1332,8 +1332,8 @@ class ContextBuilder {
                 typeParams = emptyList(),
                 definition = ParsedVariantDef(
                     constructors = listOf(
-                        ParsedVariantCtorDef("True", null, syntheticLoc),
-                        ParsedVariantCtorDef("False", null, syntheticLoc)
+                        ParsedVariantCtorDef("True", null, loc = syntheticLoc),
+                        ParsedVariantCtorDef("False", null, loc = syntheticLoc)
                     ),
                     isOpen = false,
                     loc = syntheticLoc
@@ -1351,8 +1351,8 @@ class ContextBuilder {
                     constructors = listOf(
                         ParsedVariantCtorDef(BuiltinTypes.SOME,
                             ParsedRecordType(listOf(ParsedRecordTypeEntry(BuiltinTypes.VAL_FIELD, ParsedNamedType("a", syntheticLoc), syntheticLoc)), false, syntheticLoc),
-                            syntheticLoc),
-                        ParsedVariantCtorDef(BuiltinTypes.NONE, null, syntheticLoc)
+                            loc = syntheticLoc),
+                        ParsedVariantCtorDef(BuiltinTypes.NONE, null, loc = syntheticLoc)
                     ),
                     isOpen = false,
                     loc = syntheticLoc
@@ -1370,10 +1370,10 @@ class ContextBuilder {
                     constructors = listOf(
                         ParsedVariantCtorDef(BuiltinTypes.OK,
                             ParsedRecordType(listOf(ParsedRecordTypeEntry(BuiltinTypes.VAL_FIELD, ParsedNamedType("a", syntheticLoc), syntheticLoc)), false, syntheticLoc),
-                            syntheticLoc),
+                            loc = syntheticLoc),
                         ParsedVariantCtorDef(BuiltinTypes.ERR,
                             ParsedRecordType(listOf(ParsedRecordTypeEntry(BuiltinTypes.ERROR_FIELD, ParsedNamedType("e", syntheticLoc), syntheticLoc)), false, syntheticLoc),
-                            syntheticLoc)
+                            loc = syntheticLoc)
                     ),
                     isOpen = false,
                     loc = syntheticLoc
@@ -1389,9 +1389,9 @@ class ContextBuilder {
                 typeParams = emptyList(),
                 definition = ParsedVariantDef(
                     constructors = listOf(
-                        ParsedVariantCtorDef("LT", null, syntheticLoc),
-                        ParsedVariantCtorDef("EQ", null, syntheticLoc),
-                        ParsedVariantCtorDef("GT", null, syntheticLoc)
+                        ParsedVariantCtorDef("LT", null, loc = syntheticLoc),
+                        ParsedVariantCtorDef("EQ", null, loc = syntheticLoc),
+                        ParsedVariantCtorDef("GT", null, loc = syntheticLoc)
                     ),
                     isOpen = false,
                     loc = syntheticLoc

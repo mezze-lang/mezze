@@ -1,59 +1,35 @@
 use std::collections::seq
 use std::int
 
-# Parallel effect - data parallel operations
-# Parallel effect - data parallel operations
-# Parallel effect - data parallel operations
-# Parallel effect - data parallel operations
+## Data parallelism effect for parallel collection operations.
 effect Parallel where {
+  ## Apply f to each element in parallel, results in input order.
   map: { xs: ['a], f: { x: 'a } -> 'b } -> ['b] <Parallel>,
+  ## Run f on each element in parallel for side effects.
   for_each: { xs: ['a], f: { x: 'a } -> {} } -> {} <Parallel>,
+  ## Filter elements with predicate evaluated in parallel.
   filter: { xs: ['a], f: { x: 'a } -> Bool } -> ['a] <Parallel>,
+  ## Reduce with an associative operation in parallel.
   reduce: { xs: ['a], f: { l: 'a, r: 'a } -> 'a } -> Option 'a <Parallel>,
+  ## Parallel fold: map each element then combine with associative combiner.
   fold: { xs: ['a], zero: 'b, map_fn: { x: 'a } -> 'b, combine: { l: 'b, r: 'b } -> 'b } -> 'b <Parallel>,
+  ## Run two computations in parallel.
   both: { l: {} -> 'a, r: {} -> 'b } -> { l: 'a, r: 'b } <Parallel>,
+  ## Run three computations in parallel.
   both3: { a: {} -> 'a, b: {} -> 'b, c: {} -> 'c } -> { a: 'a, b: 'b, c: 'c } <Parallel>,
+  ## Find first element matching predicate (short-circuits).
   find: { xs: ['a], f: { x: 'a } -> Bool } -> Option 'a <Parallel>,
+  ## Check if any element matches predicate (short-circuits).
   any: { xs: ['a], f: { x: 'a } -> Bool } -> Bool <Parallel>,
+  ## Check if all elements match predicate (short-circuits).
   all: { xs: ['a], f: { x: 'a } -> Bool } -> Bool <Parallel>,
+  ## Partition elements by predicate into {pass, fail}.
   partition: { xs: ['a], f: { x: 'a } -> Bool } -> { pass: ['a], fail: ['a] } <Parallel>,
+  ## Group elements by key function.
   group_by: { xs: ['a], f: { x: 'a } -> 'k } -> [{ key: 'k, values: ['a] }] <Parallel>
 }
 
-# === Core Operations ===
-# Apply function to each element in parallel, results in input order
-# Run function on each element in parallel for side effects
-# Filter elements with predicate evaluated in parallel
-# Reduce collection in parallel with associative operation
-# The operation must be associative: f(f(a, b), c) == f(a, f(b, c))
-# Fold collection in parallel with associative combiner
-# combine must be associative, and combine(zero, x) == x
-# === Tuple Operations ===
-# Run two computations in parallel
-# Run three computations in parallel
-# === Search Operations ===
-# Find first element matching predicate (parallel search, short-circuits)
-# Check if any element matches predicate (parallel, short-circuits)
-# Check if all elements match predicate (parallel, short-circuits)
-# === Partitioning ===
-# Partition elements based on predicate, returns {pass, fail}
-# Group elements by key function
-# =============================================================================
-# VirtualParallel Implementation - Virtual Threads (Default)
-# =============================================================================
-#
-# Uses Project Loom virtual threads for parallelism. Each element/task is
-# processed on its own virtual thread, with the JVM handling scheduling.
-#
-# Benefits:
-# - Scales to millions of concurrent tasks
-# - Low overhead per task
-# - Automatic work distribution by JVM scheduler
-# - Full Truffle context support for calling Mezze functions
-#
-# Example:
-#   perform VirtualParallel in do
-#       Parallel.map {xs = numbers, f = {x} -> fibonacci {n = x}}
+## Default implementation using virtual threads for parallelism.
 impl Parallel for VirtualParallel where {
   map = { xs, f } -> __native_parallel_map { xs = xs, f = f },
   for_each = { xs, f } -> __native_parallel_for_each { xs = xs, f = f },
@@ -75,19 +51,7 @@ impl Parallel for VirtualParallel where {
   group_by = { xs, f } -> __native_parallel_group_by { xs = xs, f = f },
 }
 
-# =============================================================================
-# VirtualParallelWith Implementation - Configurable Virtual Threads
-# =============================================================================
-#
-# Like VirtualParallel but with configurable parameters for tuning.
-#
-# Parameters:
-#   parallelism: Maximum number of concurrent virtual threads (0 = unlimited)
-#   chunk_size: Minimum elements per batch for chunked processing (1 = per-element)
-#
-# Example:
-#   perform VirtualParallelWith {parallelism = 8, chunk_size = 100} in do
-#       Parallel.map {xs = huge_list, f = {x} -> process {x = x}}
+## Configurable virtual-thread parallelism with concurrency and chunk limits.
 impl Parallel for VirtualParallelWith { parallelism: Int, chunk_size: Int } where {
   map = { xs, f } ->
     __native_parallel_map_cfg {
@@ -165,26 +129,7 @@ impl Parallel for VirtualParallelWith { parallelism: Int, chunk_size: Int } wher
     },
 }
 
-# =============================================================================
-# ForkJoinParallel Implementation - True Work-Stealing Parallelism
-# =============================================================================
-#
-# Uses Java's ForkJoinPool with work-stealing for best CPU-bound performance.
-# Recursively splits work into subtasks that can be stolen by idle workers.
-#
-# Benefits:
-# - True work-stealing: idle threads steal work from busy threads
-# - Recursive task decomposition (divide-and-conquer)
-# - Optimal for CPU-bound, compute-intensive operations
-# - Configurable threshold for sequential fallback
-#
-# Parameters:
-#   threshold: Minimum elements to process sequentially (default 64)
-#   parallelism: Number of worker threads (0 = CPU count)
-#
-# Example:
-#   perform ForkJoinParallel in do
-#       Parallel.map {xs = huge_list, f = {x} -> cpu_intensive {x = x}}
+## ForkJoin work-stealing implementation for CPU-bound workloads.
 impl Parallel for ForkJoinParallel where {
   map = { xs, f } -> __native_forkjoin_map { xs = xs, f = f, threshold = 64, parallelism = 0 },
   for_each = { xs, f } ->
@@ -213,19 +158,7 @@ impl Parallel for ForkJoinParallel where {
     __native_forkjoin_group_by { xs = xs, f = f, threshold = 64, parallelism = 0 },
 }
 
-# =============================================================================
-# ForkJoinParallelWith Implementation - Configurable Work-Stealing
-# =============================================================================
-#
-# Like ForkJoinParallel but with explicit control over threshold and parallelism.
-#
-# Parameters:
-#   threshold: Below this size, tasks execute sequentially (avoids fork overhead)
-#   parallelism: Number of worker threads (0 = available processors)
-#
-# Example:
-#   perform ForkJoinParallelWith {threshold = 100, parallelism = 8} in do
-#       Parallel.map {xs = data, f = {x} -> process {x = x}}
+## Configurable ForkJoin with explicit threshold and parallelism.
 impl Parallel for ForkJoinParallelWith { threshold: Int, parallelism: Int } where {
   map = { xs, f } ->
     __native_forkjoin_map {
@@ -304,18 +237,7 @@ impl Parallel for ForkJoinParallelWith { threshold: Int, parallelism: Int } wher
     },
 }
 
-# =============================================================================
-# Sequential Implementation - Single-Threaded
-# =============================================================================
-#
-# Executes all operations sequentially. Useful for:
-# - Testing and debugging parallel algorithms
-# - Small collections where parallelism overhead isn't worth it
-# - Deterministic execution order
-#
-# Example:
-#   perform Sequential in do
-#       Parallel.map {xs = small_list, f = {x} -> x * 2}
+## Sequential implementation for testing or small collections.
 impl Parallel for Sequential where {
   map = { xs, f } -> __native_sequential_map { xs = xs, f = f },
   for_each = { xs, f } -> __native_sequential_for_each { xs = xs, f = f },
@@ -337,22 +259,21 @@ impl Parallel for Sequential where {
   group_by = { xs, f } -> __native_sequential_group_by { xs = xs, f = f },
 }
 
-# =============================================================================
-# Helper Functions
-# =============================================================================
-# Sum a list of numbers in parallel
+## Sum a list of integers in parallel.
 pub let sum : { xs: [Int] } -> Int <Parallel> = { xs } -> match Parallel.reduce { xs = xs, f = { l, r } ->
   l + r } is
   Some { val } -> val
   None -> 0
 
 
+## Multiply a list of integers in parallel.
 pub let product : { xs: [Int] } -> Int <Parallel> = { xs } -> match Parallel.reduce { xs = xs, f = { l, r } ->
   l * r } is
   Some { val } -> val
   None -> 1
 
 
+## Count elements matching a predicate in parallel.
 pub let count : { xs: ['a], f: { x: 'a } -> Bool } -> Int <Parallel> = { xs, f } ->
   Parallel.fold {
     xs = xs,
@@ -364,7 +285,7 @@ pub let count : { xs: ['a], f: { x: 'a } -> Bool } -> Int <Parallel> = { xs, f }
     combine = { l, r } -> l + r,
   }
 
-# Flatten nested seqs in parallel
+## Flatten nested sequences in parallel.
 pub let flatten : { xs: [['a]] } -> ['a] <Parallel> = { xs } ->
   Parallel.fold {
     xs = xs,
@@ -373,6 +294,6 @@ pub let flatten : { xs: [['a]] } -> ['a] <Parallel> = { xs } ->
     combine = { l, r } -> seq::concat { xs = l, ys = r },
   }
 
-# Flat map - map then flatten in parallel
+## Map then flatten in parallel.
 pub let flat_map : { xs: ['a], f: { x: 'a } -> ['b] } -> ['b] <Parallel> = { xs, f } ->
   flatten { xs = Parallel.map { xs = xs, f = f } }
