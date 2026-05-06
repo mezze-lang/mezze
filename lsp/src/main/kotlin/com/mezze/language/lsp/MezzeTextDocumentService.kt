@@ -1026,8 +1026,7 @@ class MezzeTextDocumentService(
                         is com.mezze.language.typedast.TypedVar -> {
                             val abilityHover = result?.let { renderAbilityMethodHover(expr.name, it, state) }
                             val hover = abilityHover ?: codeBlock("${expr.name} : $typeStr")
-                            val doc = findDocForDecl(state.parsedModule, expr.name) ?: findDocFromStore(expr.name)
-                            val meta = findMetadataForDecl(state.parsedModule, expr.name)
+                            val (doc, meta) = resolveDoc(state, result, expr.name)
                             appendDoc(hover, doc, meta)
                         }
                         is com.mezze.language.typedast.TypedFieldAccess -> {
@@ -1040,7 +1039,8 @@ class MezzeTextDocumentService(
                 }
                 is TypedAstLookup.LookupResult.Binding -> {
                     val typeStr = formatType(lookup.type)
-                    return codeBlock("${lookup.name} : $typeStr")
+                    val (doc, meta) = resolveDoc(state, result, lookup.name)
+                    return appendDoc(codeBlock("${lookup.name} : $typeStr"), doc, meta)
                 }
                 is TypedAstLookup.LookupResult.NotFound -> {} // Fall through to word-based lookup
             }
@@ -1095,8 +1095,8 @@ class MezzeTextDocumentService(
                 val fromModule = if (resolvedImport.modulePath.isNotEmpty()) {
                     "\n\n*from* `${resolvedImport.modulePath}`"
                 } else ""
-                val doc = findDocFromStore(word)
-                return appendDoc(codeBlock("$kindPrefix$word : $typeStr") + fromModule, doc)
+                val (doc, meta) = resolveDoc(state, result, word)
+                return appendDoc(codeBlock("$kindPrefix$word : $typeStr") + fromModule, doc, meta)
             }
         }
 
@@ -1171,6 +1171,47 @@ class MezzeTextDocumentService(
         val store = projectStore ?: return null
         val decls = store.searchDeclsByName(name)
         return decls.firstOrNull { it.declName == name }?.doc
+    }
+
+    /**
+     * Resolve doc + metadata for `name` at hover time, walking from
+     * narrowest to widest scope:
+     *
+     *   1. The user's own parsed module (local decls).
+     *   2. The parsed module the user imported `name` from — looked up in
+     *      ModuleTypeChecker's in-memory cache. This honors the *specific*
+     *      import source, so same-named symbols across modules (`min` in
+     *      std::int vs std::collections::seq) resolve to the right doc,
+     *      and modules StdlibPrecompiler never indexed (effects, codec,
+     *      etc.) work without a build-time re-walk.
+     *   3. The on-disk store, for cold-start lookups when nothing has
+     *      been parsed yet.
+     */
+    private fun resolveDoc(
+        state: DocumentState,
+        result: TypeCheckResult?,
+        name: String
+    ): Pair<String?, ParsedMetadata?> {
+        // (1) user's file
+        findDocForDecl(state.parsedModule, name)?.let { doc ->
+            return doc to findMetadataForDecl(state.parsedModule, name)
+        }
+        // (2) imported module's parsed AST
+        val importPath = result?.resolvedImports
+            ?.find { it.localName == name }
+            ?.modulePath
+            ?.takeIf { it.isNotEmpty() }
+        if (importPath != null) {
+            val parsed = com.mezze.language.typechecker.module.ModuleTypeChecker
+                .getAllCachedModules()[importPath]?.parsedModule
+            if (parsed != null) {
+                findDocForDecl(parsed, name)?.let { doc ->
+                    return doc to findMetadataForDecl(parsed, name)
+                }
+            }
+        }
+        // (3) on-disk store
+        return findDocFromStore(name) to null
     }
 
     /**

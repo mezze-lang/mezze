@@ -102,6 +102,97 @@ class LspFeaturesTest {
         )
     }
 
+    // ===== Hover doc comments ==========================================
+
+    @Test
+    fun `hover on def-site of doc-commented let surfaces the doc`() {
+        // Regression for #300: hovering on a top-level `let` binding's name
+        // returned only the type — `## doc` lines were dropped because the
+        // TypedAstLookup.LookupResult.Binding branch didn't read docComment.
+        val (uri, _) = openSingleFile("""
+            ## Greet by name.
+            ## Multi-line is preserved.
+            let greet = {x: Int} -> x + 1
+        """.trimIndent())
+
+        // Cursor on `greet` at line 2, char 4 (the `g` of `let greet`).
+        val hover = hoverAt(uri, line = 2, character = 4)
+        assertNotNull(hover, "expected hover on `let greet` def-site")
+        val content = hoverText(hover!!)
+        assertTrue(
+            content.contains("Greet by name."),
+            "expected doc-comment text in hover, got:\n$content"
+        )
+        assertTrue(
+            content.contains("Multi-line is preserved."),
+            "expected multi-line doc preserved, got:\n$content"
+        )
+    }
+
+    @Test
+    fun `hover on use-site of doc-commented let surfaces the doc`() {
+        // Regression for #300/#301: the use-site goes through a different
+        // code path (TypedAstLookup → TypedVar) than the def-site. Both
+        // need to surface the doc; before the fix, only the type rendered.
+        val (uri, _) = openSingleFile("""
+            ## Add one.
+            let inc = {x: Int} -> x + 1
+            let main = {} -> inc { x = 4 }
+        """.trimIndent())
+
+        // 0         1         2
+        // 0123456789012345678901234567
+        // let main = {} -> inc { x = 4 }
+        //                  ^ char 17 — the `i` of the `inc` use
+        val hover = hoverAt(uri, line = 2, character = 17)
+        assertNotNull(hover, "expected hover on `inc` use-site")
+        val content = hoverText(hover!!)
+        assertTrue(
+            content.contains("Add one."),
+            "expected doc-comment text on use-site hover, got:\n$content"
+        )
+    }
+
+    // Disabled for the same reason as the cross-module go-to-definition
+    // test below: the LSP test JVM has no stdlib.sqlite on the classpath,
+    // and any cross-module `use` chains through prelude setup which fails
+    // without stdlib. Verified manually against ~/.mezze/bin/mez (see
+    // /tmp/lsp-probe.py) — `use std::int::{min}` hover correctly shows
+    // "Return the smaller of two integers." (Int's doc) instead of Seq's
+    // "Returns the minimum element..." which was the buggy behavior.
+    @org.junit.jupiter.api.Disabled("requires stdlib on test classpath")
+    @Test
+    fun `hover on cross-module import resolves doc via cached parsed module`() {
+        // Regression for #301: imports were going through findDocFromStore
+        // which (a) misses modules StdlibPrecompiler never indexed and (b)
+        // picks the alphabetically-first match for ambiguous names. The
+        // fix walks ModuleTypeChecker.getAllCachedModules()[importPath] —
+        // a Map lookup against the in-memory typecheck cache — so the doc
+        // comes from the *specific* module the user imported from.
+        val ws = mkProject(
+            "app.mz" to """
+                use util::increment
+                let main = {} -> increment { n = 4 }
+            """.trimIndent(),
+            "util.mz" to """
+                ## Increment by one.
+                pub let increment = {n: Int} -> n + 1
+            """.trimIndent()
+        )
+        openProject(ws)
+        val appUri = ws.resolve("src/app.mz").toUri().toString()
+        openFile(appUri, ws.resolve("src/app.mz").toFile().readText())
+
+        // Cursor on `increment` at line 1, char 17 (use-site in app.mz).
+        val hover = hoverAt(appUri, line = 1, character = 17)
+        assertNotNull(hover, "expected hover on cross-module `increment`")
+        val content = hoverText(hover!!)
+        assertTrue(
+            content.contains("Increment by one."),
+            "expected doc to come from util.mz (the module the user imported from), got:\n$content"
+        )
+    }
+
     // ===== Inlay hints =================================================
 
     @Test
