@@ -150,10 +150,10 @@ object JvmLauncher {
         val installed = File(System.getProperty("user.home"), ".mezze/lib/mezze-lang.jar")
         if (installed.exists()) return installed
 
-        // 2. Development: cli/build/libs/mezze.jar (shadow JAR output)
+        // 2. Development: cli/build/libs/mezze-lang.jar (shadow JAR output)
         val projectRoot = System.getProperty("mezze.project.root")
         if (projectRoot != null) {
-            val devJar = File(projectRoot, "cli/build/libs/mezze.jar")
+            val devJar = File(projectRoot, "cli/build/libs/mezze-lang.jar")
             if (devJar.exists()) return devJar
         }
 

@@ -198,7 +198,7 @@ sourceSets.main {
 // shadowJar depends on compileStdlib so stdlib.db is always fresh in the JAR
 tasks.shadowJar {
     dependsOn("compileStdlib")
-    archiveFileName.set("mezze.jar")
+    archiveFileName.set("mezze-lang.jar")
     mergeServiceFiles()
     // Truffle API is a multi-release JAR — JDK 21+ version of JDKAccessor
     // has virtual thread support. Without this, the base class is loaded
@@ -268,7 +268,7 @@ tasks.register<Jar>("buildStandaloneJar") {
 graalvmNative {
     binaries {
         named("main") {
-            imageName.set("mezze")
+            imageName.set("mez")
             mainClass.set("com.mezze.language.cli.MainKt")
 
             // Get zlib path from environment or use default
@@ -396,9 +396,8 @@ tasks.register<Copy>("installRuntime") {
     group = "install"
     description = "Install mezze-lang.jar into ~/.mezze/lib/"
     dependsOn("shadowJar")
-    from(layout.buildDirectory.file("libs/mezze.jar"))
+    from(layout.buildDirectory.file("libs/mezze-lang.jar"))
     into(mezzeHome.map { File(it, "lib") })
-    rename { "mezze-lang.jar" }
 }
 
 /**
@@ -447,7 +446,7 @@ tasks.register("installNative") {
         val target = File(mezzeHome.get(), "bin/mez")
         target.parentFile.mkdirs()
         if (target.exists()) target.delete()
-        val src = layout.buildDirectory.file("native/nativeCompile/mezze").get().asFile
+        val src = layout.buildDirectory.file("native/nativeCompile/mez").get().asFile
         src.copyTo(target, overwrite = true)
         target.setExecutable(true, false)
     }
