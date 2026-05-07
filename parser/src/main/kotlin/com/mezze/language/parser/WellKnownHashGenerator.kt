@@ -16,9 +16,11 @@ fun main(args: Array<String>) {
 
     val parser = com.mezze.language.parser.MezzeParser()
 
-    // Collect all ability and effect declarations from stdlib (typed Hash end-to-end).
+    // Collect all ability, effect, and type declarations from stdlib
+    // (typed Hash end-to-end).
     val abilities = mutableMapOf<String, Hash>() // name → content hash
     val effects = mutableMapOf<String, Hash>()
+    val types = mutableMapOf<String, Hash>()     // user-defined types in stdlib
 
     fun scanFile(file: File) {
         try {
@@ -31,6 +33,17 @@ fun main(args: Array<String>) {
                     }
                     is ParsedEffectDecl -> {
                         effects[decl.name] = decl.contentHash ?: ParsedDeclHasher.hashEffectDecl(decl)
+                    }
+                    is ParsedTypeDecl -> {
+                        // Public types only — private types aren't well-known.
+                        // Skip duplicates: first declaration wins (which means
+                        // a name collision across stdlib files would silently
+                        // hide the second; ok for now since stdlib enforces
+                        // unique names, but worth a follow-up assertion.)
+                        if (decl.visibility == com.mezze.language.parsedast.Visibility.PUBLIC &&
+                            !types.containsKey(decl.name)) {
+                            types[decl.name] = decl.contentHash ?: ParsedDeclHasher.hashTypeDecl(decl)
+                        }
                     }
                     else -> {}
                 }
@@ -75,6 +88,11 @@ fun main(args: Array<String>) {
         sb.appendLine("    val EFFECT_${name.uppercase()} = Hash(\"${hash.hex}\")")
     }
     sb.appendLine()
+    sb.appendLine("    // Type hashes (public stdlib types)")
+    for ((name, hash) in types.toSortedMap()) {
+        sb.appendLine("    val TYPE_${name.uppercase()} = Hash(\"${hash.hex}\")")
+    }
+    sb.appendLine()
     sb.appendLine("    // Lookup tables")
     sb.appendLine("    val abilityHashes: Map<String, Hash> = mapOf(")
     for ((name, hash) in abilities.toSortedMap()) {
@@ -88,9 +106,16 @@ fun main(args: Array<String>) {
     }
     sb.appendLine("    )")
     sb.appendLine()
+    sb.appendLine("    val typeHashes: Map<String, Hash> = mapOf(")
+    for ((name, hash) in types.toSortedMap()) {
+        sb.appendLine("        \"$name\" to TYPE_${name.uppercase()},")
+    }
+    sb.appendLine("    )")
+    sb.appendLine()
     sb.appendLine("    fun resolveAbilityHash(name: String): Hash? = abilityHashes[name]")
     sb.appendLine("    fun resolveEffectHash(name: String): Hash? = effectHashes[name]")
-    sb.appendLine("    fun resolveHash(name: String): Hash? = abilityHashes[name] ?: effectHashes[name]")
+    sb.appendLine("    fun resolveTypeHash(name: String): Hash? = typeHashes[name]")
+    sb.appendLine("    fun resolveHash(name: String): Hash? = abilityHashes[name] ?: effectHashes[name] ?: typeHashes[name]")
     sb.appendLine()
     sb.appendLine("    fun isInspect(hash: Hash?): Boolean = hash != null && hash == ABILITY_INSPECT")
     sb.appendLine("    fun isMut(hash: Hash?): Boolean = hash != null && hash == EFFECT_MUT")
@@ -145,5 +170,5 @@ fun main(args: Array<String>) {
     sb.appendLine("}")
 
     output.writeText(sb.toString())
-    println("Generated ${abilities.size} ability hashes + ${effects.size} effect hashes → $outputPath")
+    println("Generated ${abilities.size} ability + ${effects.size} effect + ${types.size} type hashes → $outputPath")
 }

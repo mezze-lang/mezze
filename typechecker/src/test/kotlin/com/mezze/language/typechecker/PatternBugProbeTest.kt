@@ -263,6 +263,34 @@ class PatternBugProbeTest {
     // ========================================================================
 
     @Test
+    fun `WellKnownHashes resolves stdlib type hashes for hash-based identity`() {
+        // After #309 — the WellKnownHashGenerator scans stdlib for ParsedTypeDecl
+        // alongside abilities and effects. Public stdlib types should have
+        // resolvable hashes; an unknown type returns null.
+        val jsonHash = com.mezze.language.typechecker.WellKnownHashes.resolveTypeHash("Json")
+        assertTrue(jsonHash != null,
+            "Json (declared in std::codec::json) should be in WellKnownHashes (#309)")
+
+        val httpHash = com.mezze.language.typechecker.WellKnownHashes.resolveTypeHash("HttpError")
+        assertTrue(httpHash != null,
+            "HttpError (declared in std::effects::http) should resolve via WellKnownHashes")
+
+        // Unknown type resolves to null (not a default/empty hash that would
+        // accidentally match something).
+        val unknown = com.mezze.language.typechecker.WellKnownHashes.resolveTypeHash("DefinitelyNotARealStdlibType")
+        assertEquals(null, unknown,
+            "Unknown type names should return null, not a default hash")
+
+        // Built-in synthetic types (Option, Result, Bool, Ordering) are NOT in
+        // the registry — they're built in Kotlin in ContextBuilder, not parsed
+        // from .mz. Confirming they don't accidentally resolve.
+        val optionHash = com.mezze.language.typechecker.WellKnownHashes.resolveTypeHash("Option")
+        assertEquals(null, optionHash,
+            "Built-in synthetic Option (constructed in Kotlin) is not in the source-derived registry. " +
+            "If Option ever gets a real .mz declaration, this test should flip.")
+    }
+
+    @Test
     fun `built-in constructor names cannot be shadowed in user variants`() {
         // Some/None/Ok/Err are reserved variant constructors. Trying to
         // declare a user variant that uses these names must be rejected.

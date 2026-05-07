@@ -33,6 +33,17 @@ object WellKnownHashes {
 
     fun resolveHash(name: String): Hash? = WellKnownHashConstants.resolveHash(name)
 
+    /**
+     * Resolve a public stdlib type by its declared name. For #309 — gives
+     * callers a hash-based identity for stdlib types so `constructor == "Json"`
+     * style checks can be replaced by `typeHash == WellKnownHashes.resolveTypeHash("Json")`.
+     *
+     * Built-in synthetic types (Option, Result, Bool, Ordering — built in
+     * Kotlin in ContextBuilder, not parsed from `.mz`) are NOT in this map.
+     * They're protected from user redeclaration by DuplicateDeclarationValidator.
+     */
+    fun resolveTypeHash(name: String): Hash? = WellKnownHashConstants.resolveTypeHash(name)
+
     // Keep computeAbilityHash for backward compat with callers outside typechecker
     fun computeAbilityHash(filePath: String, abilityName: String): Hash? =
         WellKnownHashConstants.resolveAbilityHash(abilityName)
