@@ -75,8 +75,19 @@ object BuiltInAbilities {
                     result[decl.name] = methods
                 }
             } catch (e: Exception) {
-                // Parse failures for built-in ability definitions are silently ignored;
-                // the ability will be absent and the typechecker will report missing impls.
+                // A parse failure here means an ability declaration file in
+                // stdlib is malformed. User code will see confusing
+                // "NumAdd not found" errors with no clue why. Surface it
+                // loudly under MEZZE_DEBUG; in normal mode print a one-line
+                // warning so it's at least visible in CI logs. (#308)
+                System.err.println(
+                    "[BuiltInAbilities] WARNING: failed to parse $embeddedPath: " +
+                    "${e.javaClass.simpleName}: ${e.message}. " +
+                    "Affected abilities will appear missing to user code."
+                )
+                if (System.getenv("MEZZE_DEBUG") != null) {
+                    e.printStackTrace(System.err)
+                }
             }
         }
 

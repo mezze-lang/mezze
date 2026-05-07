@@ -340,7 +340,17 @@ class ModuleResolver(
                 // SQLite is the wire boundary — unwrap Hash to hex String here.
                 val blob = s.getParsedModule(modulePath, sourceHash.hex) ?: return null
                 com.mezze.language.store.StoreSerialization.deserializeParsedModule(blob)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                // Cache hit but blob can't be deserialized — almost always
+                // serialized-shape mismatch (older cache from a different
+                // build). Surface under MEZZE_DEBUG; falling through to a
+                // fresh parse is the right runtime behavior. (#308)
+                if (System.getenv("MEZZE_DEBUG") != null) {
+                    System.err.println(
+                        "[ModuleResolver] failed to deserialize parsed module $modulePath@${sourceHash.hex.take(8)}: " +
+                        "${e.javaClass.simpleName}: ${e.message}. Re-parsing."
+                    )
+                }
                 null
             }
         }
@@ -354,7 +364,15 @@ class ModuleResolver(
             return try {
                 val resourceStream = ModuleResolver::class.java.classLoader.getResourceAsStream(path)
                 resourceStream?.bufferedReader()?.use { it.readText() }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                // IOException reading from JAR resource — extremely rare, but
+                // worth noting. Caller has fallback paths so don't throw. (#308)
+                if (System.getenv("MEZZE_DEBUG") != null) {
+                    System.err.println(
+                        "[ModuleResolver] readStdlibFile($path) failed: " +
+                        "${e.javaClass.simpleName}: ${e.message}"
+                    )
+                }
                 null
             }
         }

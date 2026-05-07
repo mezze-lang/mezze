@@ -243,7 +243,7 @@ object PrecompiledStdlib {
                 val preFunctions = mutableMapOf<Hash, com.mezze.language.truffleir.FunctionIR>()
                 val prePerformers = mutableListOf<Array<String>>()
                 val allAbilityImpls = allModulesForPrelower.values.flatMap { it.abilityImpls }
-                for ((_, typedMod) in allModulesForPrelower) {
+                for ((modHash, typedMod) in allModulesForPrelower) {
                     try {
                         val compiler = com.mezze.language.typechecker.compiler.TypedASTCompiler(abilityImpls = allAbilityImpls)
                         val result = compiler.compile(typedMod)
@@ -256,7 +256,18 @@ object PrecompiledStdlib {
                             prePerformers.add(arr.toTypedArray())
                         }
                         for (fn in result.functions) { preFunctions.putIfAbsent(fn.hash, fn) }
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) {
+                        // Stdlib lowering failures are not "best-effort": they mean a
+                        // stdlib function won't be available at runtime, manifesting
+                        // as bizarre missing-binding errors in user code. Emit a loud
+                        // diagnostic. Don't throw — the prelude init must still
+                        // produce *some* state for downstream consumers (#308).
+                        System.err.println(
+                            "[PrecompiledStdlib] WARNING: failed to lower stdlib module " +
+                            "${modHash.hex.take(8)} (${typedMod.path}): " +
+                            "${e.javaClass.simpleName}: ${e.message}"
+                        )
+                    }
                 }
                 preloweredFunctions = preFunctions
                 preloweredPerformerRecords = prePerformers
@@ -299,7 +310,19 @@ object PrecompiledStdlib {
             val bytes = stream.readAllBytes()
             val moduleList: List<com.mezze.language.typedast.TypedModule> = cbor.decodeFromByteArray(bytes)
             moduleList.associateBy { it.hash }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // Resource is present but couldn't be deserialized. Almost always
+            // means a serialized-shape mismatch between the build that
+            // produced stdlib.cbor and the build now running — surface it
+            // under MEZZE_DEBUG to expedite diagnosis. Falling through to
+            // slow path is the right runtime behavior; the warning is
+            // forensic. (#308)
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println(
+                    "[PrecompiledStdlib] $STDLIB_MODULES_RESOURCE present but failed to deserialize: " +
+                    "${e.javaClass.simpleName}: ${e.message}. Falling back to slow path."
+                )
+            }
             null
         }
     }
@@ -351,13 +374,19 @@ object PrecompiledStdlib {
 
             // Load FunctionIRs from blobs table via store
             val functions = mutableMapOf<Hash, com.mezze.language.truffleir.FunctionIR>()
+            val decodeFailures = mutableListOf<Pair<Hash, String>>()
             // We need all blob hashes to iterate — use the module's known decl hashes
             // plus any reachable via edges. Since we have declHashes, load their IR.
             for (declHash in declHashes) {
                 try {
                     val irBytes = s.getIR(declHash) ?: continue
                     functions[declHash] = cbor.decodeFromByteArray(irBytes)
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    // Surface FunctionIR decode failures under MEZZE_DEBUG. Per-hash
+                    // failures are non-fatal individually but indicate stdlib.sqlite
+                    // serialized-shape mismatch with the running build (#308).
+                    decodeFailures.add(declHash to "${e.javaClass.simpleName}: ${e.message}")
+                }
             }
 
             // Also load any blobs not in declHashes (performer functions, etc.)
@@ -366,7 +395,17 @@ object PrecompiledStdlib {
                 try {
                     val irBytes = s.getIR(mHash) ?: continue
                     functions[mHash] = cbor.decodeFromByteArray(irBytes)
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    decodeFailures.add(mHash to "${e.javaClass.simpleName}: ${e.message}")
+                }
+            }
+
+            if (decodeFailures.isNotEmpty() && System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println(
+                    "[PrecompiledStdlib] ${decodeFailures.size} FunctionIR blob(s) failed to decode " +
+                    "from stdlib store. Examples: " +
+                    decodeFailures.take(3).joinToString(", ") { (h, msg) -> "${h.hex.take(8)} ($msg)" }
+                )
             }
 
             // Load performers
@@ -405,6 +444,9 @@ object PrecompiledStdlib {
         val s = store ?: return null
         return try {
             val functions = mutableMapOf<Hash, com.mezze.language.truffleir.FunctionIR>()
+            var modDecodeFailures = 0
+            var irDecodeFailures = 0
+            var lastError: String? = null
 
             // Load all stdlib modules and get their decl hashes for IR lookup
             for (mod in s.getAllModules()) {
@@ -417,10 +459,25 @@ object PrecompiledStdlib {
                             val irBytes = s.getIR(decl.hash) ?: continue
                             try {
                                 functions[decl.hash] = cbor.decodeFromByteArray(irBytes)
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {
+                                irDecodeFailures++
+                                lastError = "IR ${decl.hash.hex.take(8)}: ${e.javaClass.simpleName}"
+                            }
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    modDecodeFailures++
+                    lastError = "module ${mod.path}: ${e.javaClass.simpleName}"
+                }
+            }
+
+            if ((modDecodeFailures > 0 || irDecodeFailures > 0) &&
+                System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println(
+                    "[PrecompiledStdlib] tryLoadPreloweredFromStore: " +
+                    "$modDecodeFailures module(s) and $irDecodeFailures IR(s) failed to decode. " +
+                    "Last: $lastError"
+                )
             }
 
             // Load performers
@@ -438,7 +495,15 @@ object PrecompiledStdlib {
             }
 
             if (functions.isNotEmpty()) PreloweredData(functions, performers, depGraph) else null
-        } catch (_: Exception) { null }
+        } catch (e: Exception) {
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println(
+                    "[PrecompiledStdlib] tryLoadPreloweredFromStore failed: " +
+                    "${e.javaClass.simpleName}: ${e.message}"
+                )
+            }
+            null
+        }
     }
 
     // ====================================================================
@@ -525,6 +590,8 @@ object PrecompiledStdlib {
 
                 // Load FunctionIRs
                 val functions = mutableMapOf<Hash, com.mezze.language.truffleir.FunctionIR>()
+                var jdbcDecodeFailures = 0
+                var jdbcLastError: String? = null
                 conn.createStatement().use { stmt ->
                     stmt.executeQuery("SELECT hash, ir FROM blobs WHERE ir IS NOT NULL").use { rs ->
                         while (rs.next()) {
@@ -532,9 +599,18 @@ object PrecompiledStdlib {
                             val irBytes = rs.getBytes("ir")
                             try {
                                 functions[hash] = cbor.decodeFromByteArray(irBytes)
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {
+                                jdbcDecodeFailures++
+                                jdbcLastError = "${hash.hex.take(8)}: ${e.javaClass.simpleName}: ${e.message}"
+                            }
                         }
                     }
+                }
+                if (jdbcDecodeFailures > 0 && System.getenv("MEZZE_DEBUG") != null) {
+                    System.err.println(
+                        "[PrecompiledStdlib] (legacy JDBC path) $jdbcDecodeFailures " +
+                        "FunctionIR blob(s) failed to decode. Last: $jdbcLastError"
+                    )
                 }
 
                 // Load performers
