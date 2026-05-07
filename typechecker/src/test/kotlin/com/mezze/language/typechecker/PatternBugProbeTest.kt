@@ -241,6 +241,72 @@ class PatternBugProbeTest {
     // record shape is identical regardless of registration source.
     // ========================================================================
 
+    // ========================================================================
+    // PATTERN 17 — Stringly-typed type-constructor matching (#309 scope check)
+    //
+    // ~341 sites in the typechecker construct `MezzeType.TypeApplication("Foo", …)`
+    // from string literals. The original concern (#309) was rename-safety:
+    // user shadows `Option` and `constructor == "Option"` checks silently
+    // mis-match.
+    //
+    // Reality after investigation: built-in type names (Option/Result/Seq/etc.)
+    // are RESERVED — `DuplicateDeclarationValidator` rejects user re-declarations,
+    // and built-in constructor names (Some, None, Ok, Err) are also reserved.
+    // So the rename-safety concern doesn't apply for these specifically.
+    //
+    // The residual concern is user-defined types in different modules with
+    // the same name — that's what `typeHash` on TypeApplication is for.
+    //
+    // These probes lock in the current invariants:
+    //   (a) built-in shadow attempts are rejected loudly;
+    //   (b) `typeHash` IS populated for user-defined type lookups (not null).
+    // ========================================================================
+
+    @Test
+    fun `built-in constructor names cannot be shadowed in user variants`() {
+        // Some/None/Ok/Err are reserved variant constructors. Trying to
+        // declare a user variant that uses these names must be rejected.
+        val code = """
+            type MyType = | Some { val: Int }, None |
+        """.trimIndent()
+        val ex = assertThrows<TypeCheckError> { typeCheck(code) }
+        val msg = ex.message ?: ""
+        assertTrue(
+            msg.contains("Some") ||
+            msg.contains("None") ||
+            msg.contains("built-in") ||
+            msg.contains("reserved") ||
+            msg.contains("Option"),
+            "rejection should mention Some/None/Option, got: $msg"
+        )
+    }
+
+    @Test
+    fun `user-defined TypeApplication carries typeHash for rename-safe identity`() {
+        // White-box: parse a module declaring a generic variant type, then
+        // verify the ParsedTypeDecl has contentHash populated. This is the
+        // data needed to make stringly-typed comparisons safe — even if 341
+        // call sites still build TypeApplication("Foo", ..) from string
+        // literals, the *user-defined* path attaches the hash via
+        // ConstraintSolver:384/410.
+        val code = """
+            type Box 'a = | Wrap { val: 'a } |
+            let b = Wrap { val = 42 }
+        """.trimIndent()
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
+        val typeDecl = parsedModule.decls
+            .filterIsInstance<com.mezze.language.parsedast.ParsedTypeDecl>()
+            .single { it.name == "Box" }
+        assertTrue(
+            typeDecl.contentHash != null,
+            "ParsedTypeDecl.contentHash MUST be populated by typecheck for " +
+            "rename-safe TypeApplication identity (#309). If null, " +
+            "ContextBuilder/ConstraintSolver TypeApplication-construction sites " +
+            "won't be able to attach typeHash."
+        )
+    }
+
     @Test
     fun `AbilityImplFactory normalizes targetTypes to synthetic-key form`() {
         // Direct probe of the factory: targetTypes for `impl X Int for [Int]`
