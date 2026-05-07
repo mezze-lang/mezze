@@ -799,6 +799,16 @@ class ConstraintGenerator(
         val bindingName = getBindingName(binding)
         val enclosingFunctionName = if (binding.value is ParsedLambda) bindingName else null
 
+        // Collect ability names declared in the binding's `with X 'a` annotation.
+        // Method-call resolution uses these to disambiguate when multiple
+        // abilities declare the same method (#304) — the user's explicit
+        // declaration wins over a coincidentally-named prelude ability.
+        val annotationAbilityNames = (binding.typeAnnotation as? ParsedFunctionType)
+            ?.abilityConstraints
+            ?.map { it.abilityName }
+            ?.toSet()
+            .orEmpty()
+
         val constraintContext = ConstraintContext(
             context,
             expectedType = expectedType,
@@ -811,7 +821,8 @@ class ConstraintGenerator(
             recordLiteralBindings = recordLiteralBindings,
             typeDeclarations = typeDeclarations,
             currentBindingName = bindingName,
-            enclosingFunctionName = enclosingFunctionName
+            enclosingFunctionName = enclosingFunctionName,
+            annotationAbilityNames = annotationAbilityNames
         )
 
         // Generate constraints for the expression with expected type

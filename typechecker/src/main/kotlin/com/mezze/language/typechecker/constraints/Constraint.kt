@@ -436,7 +436,12 @@ data class ConstraintContext(
     // TCO: Name of the enclosing function for self-recursion detection
     val enclosingFunctionName: String? = null,
     // TCO: True when current expression is in tail position
-    val inTailPosition: Boolean = false
+    val inTailPosition: Boolean = false,
+    // Ability names declared in the enclosing function's `with X 'a` annotation.
+    // When method-call resolution finds multiple candidate abilities, prefer
+    // ones the user explicitly declared in scope (#304). Empty set means no
+    // annotation-driven preference.
+    val annotationAbilityNames: Set<String> = emptySet()
 ) {
     /**
      * Extend context with new variable binding

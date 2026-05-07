@@ -1125,7 +1125,7 @@ class ExpressionConstraintGenerator {
             is ParsedRecordLit -> args.entries.filterIsInstance<ParsedRecordEntry.Field>().map { entry -> entry.name }.toSet()
             else -> null
         }
-        val filteredMatchingAbilities = if (callSiteFieldNames != null && matchingAbilities.isNotEmpty() && builtInMatches.isNotEmpty()) {
+        val fieldFilteredAbilities = if (callSiteFieldNames != null && matchingAbilities.isNotEmpty() && builtInMatches.isNotEmpty()) {
             matchingAbilities.filter { (_, rawMethodType) ->
                 val methodParamFields = when (rawMethodType) {
                     is MezzeType.FunctionType -> when (val pt = rawMethodType.paramType) {
@@ -1139,6 +1139,21 @@ class ExpressionConstraintGenerator {
             }
         } else {
             matchingAbilities
+        }
+
+        // When the enclosing function annotation declared specific ability
+        // constraints, prefer those abilities over coincidentally-matching ones
+        // (e.g. user-defined Container.size vs prelude Sized.size). #304.
+        val filteredMatchingAbilities = if (
+            fieldFilteredAbilities.size > 1 &&
+            context.annotationAbilityNames.isNotEmpty()
+        ) {
+            val annotationMatches = fieldFilteredAbilities.filter { (n, _) ->
+                n in context.annotationAbilityNames
+            }
+            if (annotationMatches.isNotEmpty()) annotationMatches else fieldFilteredAbilities
+        } else {
+            fieldFilteredAbilities
         }
 
         if (builtInMatches.size == 1 && filteredMatchingAbilities.isEmpty()) {

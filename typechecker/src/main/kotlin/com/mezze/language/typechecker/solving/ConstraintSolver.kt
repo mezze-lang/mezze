@@ -74,7 +74,12 @@ class ConstraintSolver(
         val abilityName: String,
         val abilityHash: com.mezze.language.typedast.Hash?,
         val typeArgs: List<MezzeType>,
-        val loc: com.mezze.language.parsedast.Loc?
+        val loc: com.mezze.language.parsedast.Loc?,
+        // True when the constraint came from an explicit `with X 'a` annotation;
+        // false when it was inferred from a method call. Used to enforce the
+        // "annotated constraints can't be satisfied by anonymous structural
+        // records" rule (#304) without breaking permissive inference (#216).
+        val fromAnnotation: Boolean = false
     )
 
     /**
@@ -1210,6 +1215,22 @@ class ConstraintSolver(
                     // Check if all types are now concrete
                     val allConcrete = closedTypeArgs.all { isConcrete(it) }
 
+                    // Structural-record carriers can never satisfy an ability constraint —
+                    // there is no syntax to write `impl X for {field: T}`. If the resolved
+                    // primary type is a RecordType (open or closed) AND the constraint came
+                    // from an explicit annotation, the constraint is definitively
+                    // unsatisfiable. Without this check, an annotation like `with X 'a`
+                    // plus a body using a method NOT in X causes 'a to be unified with a
+                    // structural record, then deferred indefinitely (#304).
+                    //
+                    // The annotation guard preserves the permissive closed-record fallback
+                    // for unannotated method-call inference (#216): `let f = {xs} -> xs.size {}`
+                    // still infers `xs` as `{size: () -> 'r}` and accepts matching records.
+                    val primaryArg = closedTypeArgs.firstOrNull()
+                    if (tracked.fromAnnotation && primaryArg is MezzeType.RecordType) {
+                        return Pair(generateAbilityErrorMessage(abilityName, closedTypeArgs, errorLoc), errorLoc)
+                    }
+
                     if (allConcrete) {
                         // Check if implementation exists; pass abilityHash for hash-preferred lookup.
                         val hasImpl = checkAbilityImplementation(abilityName, closedTypeArgs, tracked.abilityHash)
@@ -1273,7 +1294,8 @@ class ConstraintSolver(
             listOf(MezzeType.VarType(constraint.typeVar)) + typeArgs  // Prepend the constrained var
         }
         // Use original constraint hash for tracking (used in impl lookup), not the resolved effectiveHash
-        val trackedEntry = TrackedAbilityConstraint(abilityName, constraint.abilityHash, trackingArgs, constraint.loc)
+        val fromAnnotation = constraint.context?.startsWith("Type annotation on ") == true
+        val trackedEntry = TrackedAbilityConstraint(abilityName, constraint.abilityHash, trackingArgs, constraint.loc, fromAnnotation)
         typeVarAbilityConstraints.getOrPut(constraint.typeVar) { mutableListOf() }
             .add(trackedEntry)
 

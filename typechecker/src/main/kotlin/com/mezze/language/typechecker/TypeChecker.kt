@@ -873,13 +873,17 @@ class TypeChecker(
                 // Import inherent impls for method syntax + named ability impls for
                 // context-based constraint solving (replacing hardcoded checks).
                 // No bindings — prevents name collisions (option::fold vs seq::fold).
+                //
+                // Abilities ARE carried so that `with X 'a` constraints in user
+                // code can refer to prelude abilities (Sized, Show, etc.) and
+                // method-call resolution sees their operation types (#304).
                 val ctx = result.importContext
                 // Cache loaded modules for inclusion in Monomorphizer's allModules
                 cachedPreludeLoadedModules = result.loadedModules
                 ModuleImportContext(
                     importedBindings = emptyMap(),
                     importedTypes = emptyMap(),
-                    importedAbilities = emptyMap(),
+                    importedAbilities = ctx.importedAbilities,
                     importedEffects = emptyMap(),
                     importedImpls = emptyMap(),
                     importedAbilityImpls = ctx.importedAbilityImpls,

@@ -9,21 +9,22 @@ import java.nio.file.Paths
 
 /**
  * Locks in: when `xs.method {}` appears at a declaration where `xs` is
- * unannotated, the typechecker infers `xs` as a closed record carrying
- * the called method as a function-valued field. It does NOT speculatively
- * dispatch to a prelude inherent impl (which would be unsound — multiple
- * stdlib types share method names).
+ * unannotated AND a unique prelude/in-scope ability declares `method`,
+ * the typechecker infers `xs` as a polymorphic type with that ability
+ * constraint. It does NOT speculatively dispatch to a prelude inherent
+ * impl (which would be unsound — multiple stdlib types share method names),
+ * nor does it silently fall back to a structural record.
  *
- * Tracked by issue #216. Three behaviours:
+ * Behaviours:
  *
  * 1. `let f = { xs } -> xs.size {}` infers
- *    `f : { xs: { size: {} -> 'a } } -> 'a`.
- *    No commitment to Str, Seq, Bytes, etc.
+ *    `f : { xs: 'a } -> Int with Sized 'a`. Polymorphic in 'a, constrained
+ *    to types that implement Sized.
  *
- * 2. Calling `f` with a record whose shape matches works.
+ * 2. Calling `f` with a value whose type implements Sized (Seq, Str, …) works.
  *
- * 3. Calling `f` with a primitive (Str) or seq literal ([Int]) is a type
- *    error — they don't have the expected closed-record shape.
+ * 3. Calling `f` with a structural record literal does NOT work — anonymous
+ *    records can't satisfy ability constraints (no `impl Sized for {…}` syntax).
  *
  * 4. Concrete receivers still dispatch via inherent impls when the type
  *    is statically known: `[1,2,3].size {}` resolves to Seq.length and
@@ -48,66 +49,66 @@ class ClosedRecordMethodCallTest {
     }
 
     @Test
-    fun `unannotated method call infers closed-record receiver`() {
-        // No annotation, no concrete receiver — `xs.size {}` shouldn't pick
-        // any specific inherent impl. The receiver `xs` should be inferred as
-        // a closed record `{ length: {} -> 'a }`.
+    fun `unannotated method call infers ability-constrained receiver`() {
+        // `xs.size {}` is uniquely `Sized.size` (in prelude). Inference adds
+        // the Sized constraint on `xs`'s type variable instead of falling back
+        // to a structural record (#304).
         val result = checkWithPrelude("let f = { xs } -> xs.size {}")
         val ftype = result.getVariableType("f")
             ?: fail("expected 'f' to be type-checked; got null")
         assertTrue(ftype is MezzeType.FunctionType,
             "expected f to be FunctionType, got ${ftype::class.simpleName}: $ftype")
         val ft = ftype as MezzeType.FunctionType
-        // f's param is { xs: <receiverType> }
+        // f's param is { xs: 'a } where 'a has Sized constraint
         val paramRecord = ft.paramType as? MezzeType.RecordType
             ?: fail("expected param to be RecordType, got ${ft.paramType}")
         val xsType = paramRecord.fields["xs"]
             ?: fail("expected xs field; got fields ${paramRecord.fields.keys}")
-        // xs should be a record with `size` field — NOT Str, NOT Seq.
-        assertTrue(xsType is MezzeType.RecordType,
-            "expected xs to be a structural RecordType (closed-record method-call inference), " +
-            "got ${xsType::class.simpleName}: $xsType. " +
-            "If this is Str/Seq, the typechecker is speculatively dispatching.")
-        val xsRecord = xsType as MezzeType.RecordType
-        assertTrue(xsRecord.fields.containsKey("size"),
-            "expected xs's record to have field 'size', got ${xsRecord.fields.keys}")
+        assertTrue(xsType is MezzeType.VarType,
+            "expected xs to be a polymorphic type variable, got ${xsType::class.simpleName}: $xsType")
+        // The Sized constraint shows up in pretty-printed type
+        assertTrue(ft.abilityConstraints.any { it.abilityName == "Sized" },
+            "expected Sized constraint on f's type, got ${ft.abilityConstraints}")
     }
 
     @Test
     fun `calling with mismatched primitive is a type error`() {
-        // After #216, `f { xs = "hello" }` should fail because Str doesn't
-        // match the inferred closed-record shape.
+        // Str DOES implement Sized, so `f { xs = "hello" }` actually succeeds.
+        // Keep this as a guard against regressions: Str's inherent size impl
+        // satisfies the Sized constraint inferred for f's param.
         val code = """
             let f = { xs } -> xs.size {}
             let n = f { xs = "hello" }
         """.trimIndent()
-        assertThrows(TypeCheckError::class.java) {
-            checkWithPrelude(code)
-        }
+        val r = checkWithPrelude(code)
+        assertEquals(MezzeType.IntType, r.getVariableType("n"))
     }
 
     @Test
-    fun `calling with mismatched seq literal is a type error`() {
-        // After #216, `f { xs = [1, 2, 3] }` should fail because [Int] doesn't
-        // match the inferred closed-record shape.
+    fun `calling with seq literal works because seq implements Sized`() {
+        // `[Int]` implements Sized via inherent `size` method — passes.
         val code = """
             let f = { xs } -> xs.size {}
             let n = f { xs = [1, 2, 3] }
         """.trimIndent()
-        assertThrows(TypeCheckError::class.java) {
-            checkWithPrelude(code)
-        }
+        val r = checkWithPrelude(code)
+        assertEquals(MezzeType.IntType, r.getVariableType("n"))
     }
 
     @Test
-    fun `calling with matching record shape works`() {
-        // A literal record carrying the right field shape DOES typecheck.
+    fun `calling with structural record literal is a type error`() {
+        // Anonymous structural records can't satisfy ability constraints —
+        // there's no syntax for `impl Sized for {size: () -> Int}`. Passing
+        // a record literal whose shape matches the method op's signature
+        // would have worked under the old permissive model (#216), but is
+        // now correctly rejected (#304).
         val code = """
             let f = { xs } -> xs.size {}
             let n = f { xs = { size = {} -> 5 } }
         """.trimIndent()
-        val r = checkWithPrelude(code)
-        assertEquals(MezzeType.IntType, r.getVariableType("n"))
+        assertThrows(TypeCheckError::class.java) {
+            checkWithPrelude(code)
+        }
     }
 
     // ---- Concrete receivers continue to dispatch through inherent impls ----
