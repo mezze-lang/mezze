@@ -118,6 +118,25 @@ class ConstraintGenerator(
             // Convert and store annotation types for ALL bindings with annotations
             // This ensures type annotations with variant/record types are preserved correctly
             binding.typeAnnotation?.let { annotation ->
+                // Validate ability constraints in the annotation: every `with X 'a`
+                // must reference a real ability that's in scope. Without this,
+                // typos like `with FooBaz 'a` (or constraints whose ability isn't
+                // imported / not in prelude) get silently dropped — the annotation
+                // looks like it worked but adds zero typing power.
+                if (annotation is ParsedFunctionType) {
+                    for (constraint in annotation.abilityConstraints) {
+                        val name = constraint.abilityName
+                        val isKnown = abilityDeclarations.containsKey(name) ||
+                            BuiltInAbilities.getAllAbilityNames().contains(name)
+                        if (!isKnown) {
+                            throw com.mezze.language.typechecker.TypeCheckError(
+                                "Ability '$name' referenced in 'with' constraint is not defined or not imported. " +
+                                "Did you forget to import it with 'use'?",
+                                constraint.loc
+                            )
+                        }
+                    }
+                }
                 val convertedType = convertTypeAnnotation(annotation)
                 annotationTypes[binding] = convertedType  // Store for reuse in second pass
             }
