@@ -229,6 +229,80 @@ class PatternBugProbeTest {
     // ========================================================================
 
     // ========================================================================
+    // PATTERN 16 — All 5 ability-impl registration paths produce identical
+    // AbilityImplInfo for the same input (#307).
+    //
+    // Before: targetTypes used `getTypeName(...)` (synthetic key form) in
+    // local-named, but `it.toString()` (source form) in import paths.
+    // typeVars was computed in 3 of 5 paths, defaulted empty in others.
+    // operationConstraints was collected only in local-named.
+    //
+    // After: all 5 sites delegate to AbilityImplFactory.build, so the
+    // record shape is identical regardless of registration source.
+    // ========================================================================
+
+    @Test
+    fun `AbilityImplFactory normalizes targetTypes to synthetic-key form`() {
+        // Direct probe of the factory: targetTypes for `impl X Int for [Int]`
+        // must come out as ["Int", "Seq_Int"] — NOT ["Int", "[Int]"] (toString form).
+        val code = """
+            ability TheAbil 'b for 'a where {
+                op: {it: 'a, r: 'a} -> 'b,
+            }
+
+            impl TheAbil Int for [Int] where {
+                op = {it, r} -> 42,
+            }
+        """.trimIndent()
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        // typeCheck populates contentHashes on the parsed decls.
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
+        val implDecl = parsedModule.decls
+            .filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()
+            .single()
+        val abilityDecl = parsedModule.decls
+            .filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()
+            .single()
+
+        val info = com.mezze.language.typechecker.util.AbilityImplFactory.build(
+            implDecl, abilityDecl.contentHash
+        )
+        // Synthetic-key form: Seq[Int] → "Seq_Int", not "[Int]" or "Seq Int".
+        assertEquals(listOf("Int", "Seq_Int"), info.targetTypes)
+        // typeVars: only counts quantifier-shaped names in abilityTypeArgs.
+        // For `impl TheAbil Int for [Int]` there are none (Int is concrete);
+        // we just assert the field exists and is empty.
+        assertEquals(emptySet<String>(), info.typeVars)
+        // abilityDeclHash threaded through.
+        assertTrue(info.abilityDeclHash != null,
+            "abilityDeclHash should be passed through")
+    }
+
+    @Test
+    fun `AbilityImplFactory captures typeVars from generic impl header`() {
+        // `impl Eq 'a for ['a]` — 'a is a quantifier in abilityTypeArgs.
+        val code = """
+            ability MyEq for 'a where {
+                myeq: {it: 'a, r: 'a} -> Bool,
+            }
+
+            impl MyEq 'a for ['a] where {
+                myeq = {it, r} -> True,
+            }
+        """.trimIndent()
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        try { typeChecker.typeCheck(parsedModule, Paths.get(".")) } catch (_: Exception) { /* ok */ }
+        val implDecl = parsedModule.decls
+            .filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()
+            .single()
+        val info = com.mezze.language.typechecker.util.AbilityImplFactory.build(
+            implDecl, abilityDeclHash = null
+        )
+        assertEquals(setOf("'a"), info.typeVars,
+            "Generic impl `impl MyEq 'a for ['a]` should expose 'a as a quantifier")
+    }
+
+    // ========================================================================
     // PATTERN 15 — Cross-module ability impl by-hash registration (Bug D)
     //
     // CompiledModuleInterface.fromImportContext (line 191) hard-codes

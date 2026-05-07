@@ -1099,28 +1099,20 @@ class TypeChecker(
                     opParamTypes = opParamTypes
                 )
             } else {
-                // Named ability impls only need AbilityImplInfo
-                // Extract type variable names from abilityTypeArgs for structural matching
-                val implTypeVars = implDecl.abilityTypeArgs
-                    .filterIsInstance<com.mezze.language.parsedast.ParsedNamedType>()
-                    .filter { it.name.startsWith("'") }
-                    .map { it.name }
-                    .toSet()
+                // Named ability impls only need AbilityImplInfo. The shared
+                // factory (#307) ensures imported impls produce the same
+                // shape as locally-registered ones — fixes a long-standing
+                // divergence where targetTypes used `it.toString()` (source
+                // form) here but `getTypeName` (synthetic-key form) in
+                // ContextBuilder, AND where `operationConstraints` was
+                // dropped on the import path.
                 val abilityDeclHashForImpl = implDecl.abilityName?.let { name ->
                     importContext.importedAbilities[name]?.contentHash
                 }
-                val implKeyHash = implKey
-                val implInfo = TypingContext.AbilityImplInfo(
-                    abilityName = implDecl.abilityName,
-                    abilityDeclHash = abilityDeclHashForImpl,
-                    targetTypes = implDecl.allTypeArgs.map { it.toString() },
-                    targetTypeAnnotations = implDecl.allTypeArgs,
-                    associatedTypeBindings = implDecl.associatedTypeBindings,
-                    sourceModule = null,
-                    contentHash = implKeyHash,
-                    typeVars = implTypeVars
+                val implInfo = com.mezze.language.typechecker.util.AbilityImplFactory.build(
+                    implDecl, abilityDeclHashForImpl
                 )
-                context = context.extendWithImpl(implKeyHash, implInfo)
+                context = context.extendWithImpl(implKey, implInfo)
             }
         }
 

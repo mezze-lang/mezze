@@ -823,11 +823,9 @@ class ContextBuilder {
         importedAbilities: Map<String, ParsedAbilityDecl> = emptyMap(),
         file: String = "<module>"
     ): TypingContext {
-        // Extract target type names from type annotations
+        // Extract target type names from type annotations (used by inherent path)
         val targetTypeNames = implDecl.targetTypes.map { getTypeName(it) }
 
-        // Use content hash as the key - no more mangled strings!
-        // Content hashes are computed in Phase 0.5 before ContextBuilder runs
         val implKey = implDecl.contentHash
             ?: throw IllegalStateException(
                 "Content hash not computed for impl: ${implDecl.abilityName ?: "inherent"} ${implDecl.targetTypes}. " +
@@ -839,42 +837,16 @@ class ContextBuilder {
             return addAnonymousImpl(ctx, implDecl, targetTypeNames, implKey, file)
         }
 
-        // Extract type variables from generic impl header (e.g., 'a from `impl Eq 'a for ['a]`)
-        // Only actual type variables (starting with ') are tracked — concrete types (like Str, Float)
-        // in abilityTypeArgs are not type variables.
-        val typeVars = implDecl.abilityTypeArgs
-            .filterIsInstance<ParsedNamedType>()
-            .filter { it.name.startsWith("'") }
-            .map { it.name }
-            .toSet()
-
-        // Use allTypeArgs which combines concrete abilityTypeArgs (before 'for') with targetTypes (after 'for').
-        // For `impl Into Str for Int`: allTypeArgs=[Str, Int]
-        // For `impl Eq 'a for ['a]`: allTypeArgs=[['a]] (type var 'a excluded as it's a quantifier)
-        val allTargetAnnotations = implDecl.allTypeArgs
-        val allTargetNames = allTargetAnnotations.map { getTypeName(it) }
-
-        // Collect method-level constraints from all operations (v2 directly)
-        val operationConstraints = implDecl.operations.flatMap { op -> op.abilityConstraints }
-
-        // Create impl info — look up ability declaration hash for hash-based index
+        // Look up the ability declaration hash from local + imported scopes.
+        // The factory takes the resolved hash (caller-aware lookup); everything
+        // else about the impl shape is unified across registration paths (#307).
         val abilityDeclHash = allAbilityDecls[implDecl.abilityName!!]?.contentHash
             ?: importedAbilities[implDecl.abilityName!!]?.contentHash
-        val implKeyHash = implKey
-        val implInfo = TypingContext.AbilityImplInfo(
-            abilityName = implDecl.abilityName!!,  // safe: not inherent
-            abilityDeclHash = abilityDeclHash,
-            targetTypes = allTargetNames,
-            targetTypeAnnotations = allTargetAnnotations,
-            associatedTypeBindings = implDecl.associatedTypeBindings,
-            sourceModule = null,
-            contentHash = implKeyHash,
-            typeVars = typeVars,
-            operationConstraints = operationConstraints
+        val implInfo = com.mezze.language.typechecker.util.AbilityImplFactory.build(
+            implDecl, abilityDeclHash
         )
 
-        // Store in context by content hash
-        return ctx.extendWithImpl(implKeyHash, implInfo)
+        return ctx.extendWithImpl(implKey, implInfo)
     }
 
     /**
@@ -953,14 +925,10 @@ class ContextBuilder {
             result = result.extendWithAnonymousMethod(methodInfo)
         }
 
-        // Also register as a regular impl so the interpreter can find it by content hash
-        val implInfo = TypingContext.AbilityImplInfo(
-            abilityName = null,  // inherent impl
-            targetTypes = targetTypeNames,
-            targetTypeAnnotations = implDecl.targetTypes,
-            associatedTypeBindings = implDecl.associatedTypeBindings,
-            sourceModule = null,
-            contentHash = implKeyHash
+        // Also register as a regular impl so the interpreter can find it by content hash.
+        // Inherent impls have abilityName=null and no abilityDeclHash (#307 helper).
+        val implInfo = com.mezze.language.typechecker.util.AbilityImplFactory.build(
+            implDecl, abilityDeclHash = null
         )
         result = result.extendWithImpl(implKeyHash, implInfo)
 
@@ -1116,14 +1084,10 @@ class ContextBuilder {
             result = result.extendWithAnonymousMethod(methodInfo)
         }
 
-        // Also register as a regular impl so the interpreter can find it by content hash
-        val implInfo = TypingContext.AbilityImplInfo(
-            abilityName = null,
-            targetTypes = targetTypeNames,
-            targetTypeAnnotations = implDecl.targetTypes,
-            associatedTypeBindings = implDecl.associatedTypeBindings,
-            sourceModule = null,
-            contentHash = implKeyHash
+        // Also register as a regular impl so the interpreter can find it by content hash.
+        // Inherent imported impl — same shape as locally-registered inherent (#307 helper).
+        val implInfo = com.mezze.language.typechecker.util.AbilityImplFactory.build(
+            implDecl, abilityDeclHash = null
         )
         result = result.extendWithImpl(implKeyHash, implInfo)
 
@@ -1140,34 +1104,14 @@ class ContextBuilder {
      */
     /**
      * Extract type name from ParsedTypeAnnotation for impl keys.
+     *
+     * Delegates to the shared factory util — same algorithm. Kept as a thin
+     * wrapper because callers in this file pass ParsedTypeAnnotation directly
+     * and a class-internal name is more discoverable than a deep import.
+     * (#307 — single source of truth.)
      */
-    private fun getTypeName(annotation: ParsedTypeAnnotation): String {
-        return when (annotation) {
-            is ParsedNamedType -> annotation.name.removePrefix("'")
-            is ParsedTypeApp -> {
-                val allArgsAreTypeVars = annotation.args.all { arg ->
-                    arg is ParsedNamedType && (arg.name.startsWith("'") || arg.name.first().isLowerCase())
-                }
-                if (allArgsAreTypeVars) {
-                    annotation.constructor
-                } else {
-                    val argNames = annotation.args.map { getTypeName(it) }
-                    if (argNames.isEmpty()) annotation.constructor
-                    else "${annotation.constructor}_${argNames.joinToString("_")}"
-                }
-            }
-            is ParsedFunctionType -> "Function"
-            is ParsedRecordType -> "Record"
-            is ParsedVariantType -> "Variant"
-            is ParsedSeqType -> "Seq_${getTypeName(annotation.elementType)}"
-            is ParsedQualifiedType -> {
-                val modulePart = annotation.modulePath.joinToString("_")
-                val argNames = annotation.args.map { getTypeName(it) }
-                if (argNames.isEmpty()) "${modulePart}_${annotation.typeName}"
-                else "${modulePart}_${annotation.typeName}_${argNames.joinToString("_")}"
-            }
-        }
-    }
+    private fun getTypeName(annotation: ParsedTypeAnnotation): String =
+        com.mezze.language.typechecker.util.AbilityImplFactory.typeNameOf(annotation)
 
     /**
      * Convert type annotation to MezzeType.
