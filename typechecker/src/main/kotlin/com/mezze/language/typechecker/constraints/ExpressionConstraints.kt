@@ -3060,6 +3060,61 @@ class ExpressionConstraintGenerator {
                  context.performerToEffect.containsKey(receiverName) ||
                  BuiltInAbilities.isBuiltInAbility(receiverName))
 
+            // QUALIFIED ABILITY CALL: `Ability.method { it = receiver, ... }`
+            // When the function-call's function is `Ability.method` (where Ability is a
+            // user-declared or built-in ability) and the args record contains `it = ...`,
+            // dispatch as an ability method call with `it` as the receiver. This is the
+            // form the existing error message at generateMemberAccess advertises as
+            // supported but which previously fell through to the standalone
+            // `Ability.method` evaluator and got rejected there.
+            if (isAbilityOrEffect && receiverName != null) {
+                val isUserAbility = context.typingContext.getAbilityOperationType(receiverName) != null
+                val isBuiltInAb = BuiltInAbilities.isBuiltInAbility(receiverName)
+                if ((isUserAbility || isBuiltInAb) && expr.arguments is ParsedRecordLit) {
+                    val argRecord = expr.arguments as ParsedRecordLit
+                    val itEntry = argRecord.entries
+                        .filterIsInstance<ParsedRecordEntry.Field>()
+                        .find { it.name == Keywords.IT }
+                    // Build the receiver expression from the it entry. If `value` is
+                    // null (record-punning `{it}`), there's an in-scope `it` we can
+                    // reference by name.
+                    val itReceiver: ParsedExpr? = itEntry?.let {
+                        it.value ?: ParsedIdentifier(
+                            qualifier = null,
+                            localName = Keywords.IT,
+                            loc = it.loc
+                        )
+                    }
+                    if (itReceiver != null) {
+                        // Synthesize an equivalent method-call expression:
+                        //   <it-value>.method { remaining-args }
+                        // and dispatch through the existing method-call path.
+                        val remainingFields = argRecord.entries.filter { e ->
+                            e !is ParsedRecordEntry.Field || e.name != Keywords.IT
+                        }
+                        val syntheticArgs = ParsedRecordLit(remainingFields, argRecord.loc)
+                        val syntheticReceiverAccess = ParsedMemberAccess(
+                            receiver = itReceiver,
+                            member = memberAccess.member,
+                            loc = memberAccess.loc
+                        )
+                        val syntheticCall = ParsedFunctionCall(
+                            function = syntheticReceiverAccess,
+                            arguments = syntheticArgs,
+                            loc = expr.loc
+                        )
+                        val methodResult = tryGenerateMethodCall(
+                            syntheticCall,
+                            syntheticReceiverAccess,
+                            context
+                        )
+                        if (methodResult != null) {
+                            return methodResult
+                        }
+                    }
+                }
+            }
+
             // If receiver is a ParsedVariantConstruct (uppercase) that's NOT a known ability/effect,
             // check if it's a known value (variant constructor like True, Some, etc.).
             // If it's not a known value either, it's likely a misspelled ability —
