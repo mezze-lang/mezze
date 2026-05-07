@@ -897,6 +897,20 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                 var lastStatementWasLet = false
                 var lastLetName: String? = null
 
+                // Capture the deepest fatal failure encountered while trying to
+                // parse a statement body. Fatal failures (`isFatal = true`)
+                // come from parsers that have already committed to a path —
+                // e.g. `additiveExpression` after consuming a left operand
+                // and then seeing `++`. We surface those instead of the
+                // generic "Do block is empty / must end with expression"
+                // message which buried the real error.
+                var fatalFailure: ParseResult.Failure? = null
+                fun keepIfFatal(f: ParseResult.Failure) {
+                    if (f.isFatal && (fatalFailure == null || f.position > fatalFailure!!.position)) {
+                        fatalFailure = f
+                    }
+                }
+
                 // Track the column of the first token in the do block to determine scope
                 val doBlockColumn = stream1.current()?.column
 
@@ -934,7 +948,7 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                                         val typeAnn = typeAnnotationParser(stream4)
                                         when (typeAnn) {
                                             is ParseResult.Success -> Pair(typeAnn.value, typeAnn.remaining)
-                                            is ParseResult.Failure -> break
+                                            is ParseResult.Failure -> { keepIfFatal(typeAnn); break }
                                         }
                                     }
                                     is ParseResult.Failure -> Pair(null, stream3)
@@ -969,13 +983,13 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                                                     else -> null
                                                 }
                                             }
-                                            is ParseResult.Failure -> break
+                                            is ParseResult.Failure -> { keepIfFatal(expr); break }
                                         }
                                     }
-                                    is ParseResult.Failure -> break
+                                    is ParseResult.Failure -> { keepIfFatal(assign); break }
                                 }
                             }
-                            is ParseResult.Failure -> break
+                            is ParseResult.Failure -> { keepIfFatal(patternResult); break }
                         }
                     } else {
                         // Not a let statement, try to parse an expression
@@ -1012,6 +1026,7 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                             }
                             is ParseResult.Failure -> {
                                 // Can't parse an expression, we're done
+                                keepIfFatal(expr)
                                 break
                             }
                         }
@@ -1024,6 +1039,12 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                         ParsedDo(statements, finalResult.first, loc = spanLocTo(doTok, finalResult.second, file)),
                         finalResult.second
                     )
+                } else if (fatalFailure != null) {
+                    // A statement parser produced a targeted error that was
+                    // explicitly marked fatal (e.g. "'++' is not a valid operator"
+                    // detected after the LHS was already consumed). Surface that
+                    // instead of the generic do-block-shape message.
+                    fatalFailure!!
                 } else {
                     val errorMsg = if (lastStatementWasLet && lastLetName != null) {
                         """Do block must end with a result expression, not a 'let' statement.
@@ -1769,7 +1790,11 @@ internal val MezzeParser.additiveExpression: Parser<ParsedExpr>
                         else "Use '${op.text}' with two operands instead",
                         opStream.position,
                         nextToken.line,
-                        nextToken.column
+                        nextToken.column,
+                        // We've already consumed a valid LHS; this error
+                        // describes the actual problem. Don't let oneOf
+                        // backtrack and bury it under a shallower miss.
+                        isFatal = true
                     )
                     break
                 }

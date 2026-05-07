@@ -10,7 +10,14 @@ sealed class ParseResult<out T> {
         val message: String,
         val position: Int,
         val line: Int = 0,
-        val column: Int = 0
+        val column: Int = 0,
+        // When true, oneOf stops trying further alternatives and propagates this
+        // failure as-is. Used by parsers that have committed to a path and
+        // produced a targeted error (e.g. "'++' is not a valid operator" after
+        // consuming a successful left operand) — such errors describe the real
+        // problem and should not be hidden by a competing alternative's
+        // shallower "Expected X but got Y" message.
+        val isFatal: Boolean = false
     ) : ParseResult<Nothing>()
 }
 
@@ -51,6 +58,7 @@ object Parsers {
 
     fun <T> oneOf(vararg parsers: Parser<T>): Parser<T> = { stream ->
         var bestFailure: ParseResult.Failure? = null
+        var fatal: ParseResult.Failure? = null
         var result: ParseResult<T>? = null
         for (parser in parsers) {
             when (val r = parser(stream)) {
@@ -59,13 +67,19 @@ object Parsers {
                     break
                 }
                 is ParseResult.Failure -> {
+                    if (r.isFatal) {
+                        // Committed-path error — stop trying alternatives so
+                        // we don't bury it under a competing "Expected X" miss.
+                        fatal = r
+                        break
+                    }
                     if (bestFailure == null || r.position > bestFailure.position) {
                         bestFailure = r
                     }
                 }
             }
         }
-        result ?: (bestFailure ?: stream.failure("No alternatives matched"))
+        result ?: fatal ?: bestFailure ?: stream.failure("No alternatives matched")
     }
 
     private fun <T> optional(parser: Parser<T>): Parser<T?> = { stream ->
