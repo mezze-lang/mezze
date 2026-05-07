@@ -29,13 +29,13 @@ object STMTypes {
             MezzeType.RecordType(mapOf(
                 "init" to MezzeType.VarType(TypeVar("a"))
             )),
-            MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
         )
 
         // __native_tvar_deref: {var: TVar 'a} -> 'a
         context["__native_tvar_deref"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
+                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
             )),
             MezzeType.VarType(TypeVar("a"))
         )
@@ -45,7 +45,7 @@ object STMTypes {
         // __native_stm_read: {var: TVar 'a} -> 'a
         context["__native_stm_read"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
+                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
             )),
             MezzeType.VarType(TypeVar("a"))
         )
@@ -53,7 +53,7 @@ object STMTypes {
         // __native_stm_write: {var: TVar 'a, val: 'a} -> {}
         context["__native_stm_write"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
+                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
                 "val" to MezzeType.VarType(TypeVar("a"))
             )),
             MezzeType.RecordType(emptyMap())
@@ -62,7 +62,7 @@ object STMTypes {
         // __native_stm_modify: {var: TVar 'a, f: {val: 'a} -> 'a} -> {}
         context["__native_stm_modify"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
+                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("val" to MezzeType.VarType(TypeVar("a")))),
                     MezzeType.VarType(TypeVar("a"))
@@ -74,7 +74,7 @@ object STMTypes {
         // __native_stm_swap: {var: TVar 'a, val: 'a} -> 'a
         context["__native_stm_swap"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
+                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
                 "val" to MezzeType.VarType(TypeVar("a"))
             )),
             MezzeType.VarType(TypeVar("a"))
@@ -83,7 +83,7 @@ object STMTypes {
         // __native_stm_ensure: {var: TVar 'a} -> 'a
         context["__native_stm_ensure"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
+                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
             )),
             MezzeType.VarType(TypeVar("a"))
         )
@@ -124,7 +124,7 @@ object STMTypes {
         // __native_stm_read_cfg: {var: TVar 'a, max_retries: Int, spin_count: Int} -> 'a
         context["__native_stm_read_cfg"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
+                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
                 "max_retries" to MezzeType.IntType,
                 "spin_count" to MezzeType.IntType
             )),
@@ -134,7 +134,7 @@ object STMTypes {
         // __native_stm_write_cfg: {var: TVar 'a, val: 'a, max_retries: Int, spin_count: Int} -> {}
         context["__native_stm_write_cfg"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
+                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
                 "val" to MezzeType.VarType(TypeVar("a")),
                 "max_retries" to MezzeType.IntType,
                 "spin_count" to MezzeType.IntType
@@ -145,7 +145,7 @@ object STMTypes {
         // __native_stm_modify_cfg
         context["__native_stm_modify_cfg"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
+                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(mapOf("val" to MezzeType.VarType(TypeVar("a")))),
                     MezzeType.VarType(TypeVar("a"))
@@ -159,7 +159,7 @@ object STMTypes {
         // __native_stm_swap_cfg
         context["__native_stm_swap_cfg"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
+                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
                 "val" to MezzeType.VarType(TypeVar("a")),
                 "max_retries" to MezzeType.IntType,
                 "spin_count" to MezzeType.IntType
@@ -170,7 +170,7 @@ object STMTypes {
         // __native_stm_ensure_cfg
         context["__native_stm_ensure_cfg"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
+                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
                 "max_retries" to MezzeType.IntType,
                 "spin_count" to MezzeType.IntType
             )),
@@ -231,7 +231,7 @@ object STMTypes {
         context["__native_stm_read_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "vars" to MezzeType.SeqType(
-                    MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
                 )
             )),
             MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
@@ -242,7 +242,7 @@ object STMTypes {
             MezzeType.RecordType(mapOf(
                 "pairs" to MezzeType.SeqType(
                     MezzeType.RecordType(mapOf(
-                        "var" to MezzeType.TypeApplication("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
+                        "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
                         "val" to MezzeType.VarType(TypeVar("a"))
                     ))
                 )

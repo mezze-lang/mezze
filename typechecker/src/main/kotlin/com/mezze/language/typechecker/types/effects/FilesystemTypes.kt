@@ -7,7 +7,7 @@ import com.mezze.language.ast.MezzeType
  * Note: Result takes value type first, then error type
  */
 private fun resultType(valueType: MezzeType, errorType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("Result", listOf(valueType, errorType))
+    return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(valueType, errorType))
 }
 
 /**

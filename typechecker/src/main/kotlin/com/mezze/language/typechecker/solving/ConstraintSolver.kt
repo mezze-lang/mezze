@@ -381,9 +381,9 @@ class ConstraintSolver(
             if (definition.isOpen) {
                 // OPEN variant: Accept if SOME constructors match
                 val variantType = if (freshArgs.isNotEmpty()) {
-                    MezzeType.TypeApplication(typeName, freshArgs, typeHash = typeDecl.contentHash)
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeName, freshArgs, typeHash = typeDecl.contentHash)
                 } else {
-                    MezzeType.TypeApplication(typeName, emptyList(), typeHash = typeDecl.contentHash)
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeName, emptyList(), typeHash = typeDecl.contentHash)
                 }
                 return VariantInferenceResult.Success(variantType, payloadConstraints)
             } else {
@@ -407,10 +407,10 @@ class ConstraintSolver(
 
                 // All constructors match - this is the right variant
                 val variantType = if (freshArgs.isNotEmpty()) {
-                    MezzeType.TypeApplication(typeName, freshArgs, typeHash = typeDecl.contentHash)
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeName, freshArgs, typeHash = typeDecl.contentHash)
                 } else {
                     // Non-parametric variant type
-                    MezzeType.TypeApplication(typeName, emptyList(), typeHash = typeDecl.contentHash)
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeName, emptyList(), typeHash = typeDecl.contentHash)
                 }
                 return VariantInferenceResult.Success(variantType, payloadConstraints)
             }
@@ -1458,13 +1458,13 @@ class ConstraintSolver(
      */
     private fun typeAnnotationToMezzeType(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
         return when (annotation) {
-            is com.mezze.language.parsedast.ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: MezzeType.TypeApplication(annotation.name, emptyList())
-            is com.mezze.language.parsedast.ParsedTypeApp -> MezzeType.TypeApplication(annotation.constructor, annotation.args.map { typeAnnotationToMezzeType(it) })
+            is com.mezze.language.parsedast.ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
+            is com.mezze.language.parsedast.ParsedTypeApp -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { typeAnnotationToMezzeType(it) })
             is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(typeAnnotationToMezzeType(annotation.elementType))
             is com.mezze.language.parsedast.ParsedRecordType -> MezzeType.RecordType(fields = annotation.entries.associate { it.name to typeAnnotationToMezzeType(it.type) })
             is com.mezze.language.parsedast.ParsedFunctionType -> MezzeType.FunctionType(paramType = typeAnnotationToMezzeType(annotation.paramType), returnType = typeAnnotationToMezzeType(annotation.returnType))
             is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> typeAnnotationToMezzeType(dt) } })
-            is com.mezze.language.parsedast.ParsedQualifiedType -> MezzeType.TypeApplication((annotation.modulePath + annotation.typeName).joinToString("::"), annotation.args.map { typeAnnotationToMezzeType(it) })
+            is com.mezze.language.parsedast.ParsedQualifiedType -> com.mezze.language.typechecker.util.WellKnownTypeApp.of((annotation.modulePath + annotation.typeName).joinToString("::"), annotation.args.map { typeAnnotationToMezzeType(it) })
         }
     }
 
@@ -1693,7 +1693,7 @@ class ConstraintSolver(
                 }
                 // For Result {name: String} DecodeError, close nested records in args
                 val closedArgs = type.args.map { closeOpenRecordsForCodec(it) }
-                MezzeType.TypeApplication(type.constructor, closedArgs, type.typeHash)
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(type.constructor, closedArgs, type.typeHash)
             }
             is MezzeType.VariantType -> {
                 // OPTIMIZATION: Check if already closed and no payloads need closing
@@ -2152,8 +2152,8 @@ class ConstraintSolver(
      */
     private fun convertAnnotationToType(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType? {
         return when (annotation) {
-            is com.mezze.language.parsedast.ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: MezzeType.TypeApplication(annotation.name, emptyList())
-            is com.mezze.language.parsedast.ParsedTypeApp -> { val args = annotation.args.mapNotNull { convertAnnotationToType(it) }; if (args.size != annotation.args.size) null else MezzeType.TypeApplication(annotation.constructor, args) }
+            is com.mezze.language.parsedast.ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
+            is com.mezze.language.parsedast.ParsedTypeApp -> { val args = annotation.args.mapNotNull { convertAnnotationToType(it) }; if (args.size != annotation.args.size) null else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, args) }
             is com.mezze.language.parsedast.ParsedSeqType -> convertAnnotationToType(annotation.elementType)?.let { MezzeType.SeqType(it) }
             is com.mezze.language.parsedast.ParsedRecordType -> { val fields = mutableMapOf<String, MezzeType>(); for (e in annotation.entries) { val ft = convertAnnotationToType(e.type) ?: return null; fields[e.name] = ft }; MezzeType.RecordType(fields) }
             is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertAnnotationToType(dt) } })
@@ -3192,7 +3192,7 @@ class ConstraintSolver(
                 MezzeType.SortedSetType(closeRowVarsInType(type.elementType, rowVarsToClose))
             }
             is MezzeType.TypeApplication -> {
-                MezzeType.TypeApplication(
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                     constructor = type.constructor,
                     args = type.args.map { closeRowVarsInType(it, rowVarsToClose) },
                     typeHash = type.typeHash
@@ -3412,7 +3412,7 @@ class ConstraintSolver(
                 typeName = type.typeName,
                 typeHash = type.typeHash
             )
-            is MezzeType.TypeApplication -> MezzeType.TypeApplication(
+            is MezzeType.TypeApplication -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                 constructor = type.constructor,
                 args = type.args.map { applyVarSubstitution(it, substitution) },
                 typeHash = type.typeHash
@@ -3509,7 +3509,7 @@ class ConstraintSolver(
                     typeParamSubst[annotation.name]
                         ?: typeParamSubst["'" + annotation.name.trimStart('\'')]
                         ?: MezzeType.VarType(TypeVar(annotation.name))
-                } else MezzeType.TypeApplication(annotation.name, emptyList())
+                } else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
             }
             is com.mezze.language.parsedast.ParsedFunctionType -> MezzeType.FunctionType(
                 paramType = convertTypeAnnotation(annotation.paramType, typeParamSubst),
@@ -3521,9 +3521,9 @@ class ConstraintSolver(
                 rowVar = if (annotation.isOpen) RowVar.userOpen() else null
             )
             is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertTypeAnnotation(dt, typeParamSubst) } })
-            is com.mezze.language.parsedast.ParsedTypeApp -> MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotation(it, typeParamSubst) })
+            is com.mezze.language.parsedast.ParsedTypeApp -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertTypeAnnotation(it, typeParamSubst) })
             is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(convertTypeAnnotation(annotation.elementType, typeParamSubst))
-            is com.mezze.language.parsedast.ParsedQualifiedType -> MezzeType.TypeApplication(
+            is com.mezze.language.parsedast.ParsedQualifiedType -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                 (annotation.modulePath + annotation.typeName).joinToString("::"),
                 annotation.args.map { convertTypeAnnotation(it, typeParamSubst) }
             )

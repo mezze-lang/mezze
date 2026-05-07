@@ -7,7 +7,7 @@ import com.mezze.language.ast.TypeVar
  * Helper function to create Option type (as TypeApplication)
  */
 private fun optionType(elementType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("Option", listOf(elementType))
+    return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
 }
 
 /**

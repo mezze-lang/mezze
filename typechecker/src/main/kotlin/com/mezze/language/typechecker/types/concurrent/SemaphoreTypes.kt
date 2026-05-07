@@ -14,7 +14,7 @@ object SemaphoreTypes {
      * Register all semaphore native function types.
      */
     fun registerAll(context: MutableMap<String, MezzeType>) {
-        val semType = MezzeType.TypeApplication("Semaphore", emptyList())
+        val semType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Semaphore", emptyList())
         val unitType = MezzeType.RecordType(emptyMap())
 
         // __native_semaphore_new: {permits: Int} -> Semaphore

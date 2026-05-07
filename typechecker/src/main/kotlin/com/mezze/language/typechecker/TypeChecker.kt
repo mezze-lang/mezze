@@ -1332,7 +1332,7 @@ class TypeChecker(
                 localName = name,
                 originalName = name,
                 modulePath = "",  // TypeDeclaration doesn't track module path
-                type = MezzeType.TypeApplication(name, typeParams),
+                type = com.mezze.language.typechecker.util.WellKnownTypeApp.of(name, typeParams),
                 kind = com.mezze.language.typechecker.ImportKind.TYPE
             ))
         }
@@ -1343,7 +1343,7 @@ class TypeChecker(
                 localName = name,
                 originalName = name,
                 modulePath = "",
-                type = MezzeType.TypeApplication(name, emptyList()),
+                type = com.mezze.language.typechecker.util.WellKnownTypeApp.of(name, emptyList()),
                 kind = com.mezze.language.typechecker.ImportKind.ABILITY
             ))
         }
@@ -1354,7 +1354,7 @@ class TypeChecker(
                 localName = name,
                 originalName = name,
                 modulePath = "",
-                type = MezzeType.TypeApplication(name, emptyList()),
+                type = com.mezze.language.typechecker.util.WellKnownTypeApp.of(name, emptyList()),
                 kind = com.mezze.language.typechecker.ImportKind.EFFECT
             ))
         }

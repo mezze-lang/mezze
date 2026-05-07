@@ -7,7 +7,7 @@ import com.mezze.language.ast.MezzeType
  * Note: Result takes value type first, then error type
  */
 private fun resultType(valueType: MezzeType, errorType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("Result", listOf(valueType, errorType))
+    return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(valueType, errorType))
 }
 
 /**
@@ -21,7 +21,7 @@ private fun seqType(elementType: MezzeType): MezzeType {
  * Helper function to create Option type (as TypeApplication)
  */
 private fun optionType(elementType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("Option", listOf(elementType))
+    return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
 }
 
 /**
@@ -53,7 +53,7 @@ object JsonTypes {
     // Json variant type - we use a recursive TypeApplication to represent it
     // Note: The actual variant structure is defined in std/json.mz
     // For type checking, we use a nominal type reference
-    private val jsonType = MezzeType.TypeApplication("Json", emptyList())
+    private val jsonType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Json", emptyList())
 
     fun registerAll(context: MutableMap<String, MezzeType>) {
         // __native_json_parse: {s: String} -> Result Json DecodeError

@@ -129,7 +129,7 @@ object BuiltInAbilities {
                     ?: if (annotation.name.startsWith("'") || annotation.name.first().isLowerCase()) {
                         typeVar
                     } else {
-                        MezzeType.TypeApplication(annotation.name, emptyList())
+                        com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
                     }
             }
             is ParsedRecordType -> {

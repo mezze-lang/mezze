@@ -29,7 +29,7 @@ object DequeTypes {
         // __native_deque_empty: {} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_empty"] = MezzeType.FunctionType(
                 MezzeType.RecordType(emptyMap()),
                 dequeType
@@ -39,7 +39,7 @@ object DequeTypes {
         // __native_deque_singleton: {x: 'a} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_singleton"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to elemType)),
                 dequeType
@@ -49,7 +49,7 @@ object DequeTypes {
         // __native_deque_from_list: {xs: List 'a} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_from_list"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to MezzeType.ListType(elemType))),
                 dequeType
@@ -63,7 +63,7 @@ object DequeTypes {
         // __native_deque_push_front: {d: Deque 'a, x: 'a} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_push_front"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -76,7 +76,7 @@ object DequeTypes {
         // __native_deque_push_back: {d: Deque 'a, x: 'a} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_push_back"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -93,10 +93,10 @@ object DequeTypes {
         // __native_deque_pop_front: {d: Deque 'a} -> Option {head: 'a, tail: Deque 'a}
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_pop_front"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
-                MezzeType.TypeApplication("Option", listOf(
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(
                     MezzeType.RecordType(mapOf(
                         "head" to elemType,
                         "tail" to dequeType
@@ -108,10 +108,10 @@ object DequeTypes {
         // __native_deque_pop_back: {d: Deque 'a} -> Option {init: Deque 'a, last: 'a}
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_pop_back"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
-                MezzeType.TypeApplication("Option", listOf(
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(
                     MezzeType.RecordType(mapOf(
                         "init" to dequeType,
                         "last" to elemType
@@ -127,20 +127,20 @@ object DequeTypes {
         // __native_deque_peek_front: {d: Deque 'a} -> Option 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_peek_front"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
-                MezzeType.TypeApplication("Option", listOf(elemType))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elemType))
             )
         }
 
         // __native_deque_peek_back: {d: Deque 'a} -> Option 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_peek_back"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
-                MezzeType.TypeApplication("Option", listOf(elemType))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elemType))
             )
         }
 
@@ -151,7 +151,7 @@ object DequeTypes {
         // __native_deque_is_empty: {d: Deque 'a} -> Bool
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_is_empty"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 MezzeType.BoolType
@@ -161,7 +161,7 @@ object DequeTypes {
         // __native_deque_size: {d: Deque 'a} -> Int
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_size"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 MezzeType.IntType
@@ -175,7 +175,7 @@ object DequeTypes {
         // __native_deque_to_list: {d: Deque 'a} -> List 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_to_list"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 MezzeType.ListType(elemType)
@@ -185,7 +185,7 @@ object DequeTypes {
         // __native_deque_to_seq: {d: Deque 'a} -> ['a]
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_to_seq"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 MezzeType.SeqType(elemType)
@@ -200,8 +200,8 @@ object DequeTypes {
         run {
             val elemTypeA = MezzeType.VarType(TypeVar("a"))
             val elemTypeB = MezzeType.VarType(TypeVar("b"))
-            val dequeTypeA = MezzeType.TypeApplication("Deque", listOf(elemTypeA))
-            val dequeTypeB = MezzeType.TypeApplication("Deque", listOf(elemTypeB))
+            val dequeTypeA = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemTypeA))
+            val dequeTypeB = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemTypeB))
             context["__native_deque_map"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeTypeA,
@@ -217,7 +217,7 @@ object DequeTypes {
         // __native_deque_filter: {d: Deque 'a, p: {x: 'a} -> Bool} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_filter"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -234,7 +234,7 @@ object DequeTypes {
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
             val accType = MezzeType.VarType(TypeVar("b"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_fold"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -258,7 +258,7 @@ object DequeTypes {
         // __native_deque_reverse: {d: Deque 'a} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_reverse"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 dequeType
@@ -268,7 +268,7 @@ object DequeTypes {
         // __native_deque_concat: {d1: Deque 'a, d2: Deque 'a} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_concat"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d1" to dequeType,
@@ -281,7 +281,7 @@ object DequeTypes {
         // __native_deque_equals: {d1: Deque 'a, d2: Deque 'a} -> Bool
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_equals"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d1" to dequeType,
@@ -294,7 +294,7 @@ object DequeTypes {
         // __native_deque_compare: {d1: Deque 'a, d2: Deque 'a} -> Int
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_compare"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d1" to dequeType,
@@ -311,7 +311,7 @@ object DequeTypes {
         // __native_deque_any: {d: Deque 'a, p: {x: 'a} -> Bool} -> Bool
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_any"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -327,7 +327,7 @@ object DequeTypes {
         // __native_deque_all: {d: Deque 'a, p: {x: 'a} -> Bool} -> Bool
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_all"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -343,7 +343,7 @@ object DequeTypes {
         // __native_deque_none: {d: Deque 'a, p: {x: 'a} -> Bool} -> Bool
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_none"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -359,7 +359,7 @@ object DequeTypes {
         // __native_deque_find: {d: Deque 'a, p: {x: 'a} -> Bool} -> Option 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_find"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -368,14 +368,14 @@ object DequeTypes {
                         MezzeType.BoolType
                     )
                 )),
-                MezzeType.TypeApplication("Option", listOf(elemType))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elemType))
             )
         }
 
         // __native_deque_count: {d: Deque 'a, p: {x: 'a} -> Bool} -> Int
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_count"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -395,26 +395,26 @@ object DequeTypes {
         // __native_deque_min: {d: Deque 'a} -> Option 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_min"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
-                MezzeType.TypeApplication("Option", listOf(elemType))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elemType))
             )
         }
 
         // __native_deque_max: {d: Deque 'a} -> Option 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_max"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
-                MezzeType.TypeApplication("Option", listOf(elemType))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elemType))
             )
         }
 
         // __native_deque_sum: {d: Deque Int} -> Int
         run {
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(MezzeType.IntType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(MezzeType.IntType))
             context["__native_deque_sum"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 MezzeType.IntType
@@ -423,7 +423,7 @@ object DequeTypes {
 
         // __native_deque_product: {d: Deque Int} -> Int
         run {
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(MezzeType.IntType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(MezzeType.IntType))
             context["__native_deque_product"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 MezzeType.IntType
@@ -437,7 +437,7 @@ object DequeTypes {
         // __native_deque_contains: {d: Deque 'a, x: 'a} -> Bool
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_contains"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -454,7 +454,7 @@ object DequeTypes {
         // __native_deque_to_seq: {d: Deque 'a} -> ['a]
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_to_seq"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 MezzeType.SeqType(elemType)
@@ -464,7 +464,7 @@ object DequeTypes {
         // __native_deque_from_seq: {xs: ['a]} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_from_seq"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to MezzeType.SeqType(elemType))),
                 dequeType
@@ -478,7 +478,7 @@ object DequeTypes {
         // __native_deque_reduce: {d: Deque 'a, f: {acc: 'a, x: 'a} -> 'a} -> Option 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_reduce"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -487,7 +487,7 @@ object DequeTypes {
                         elemType
                     )
                 )),
-                MezzeType.TypeApplication("Option", listOf(elemType))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elemType))
             )
         }
 
@@ -495,8 +495,8 @@ object DequeTypes {
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
             val resultType = MezzeType.VarType(TypeVar("b"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
-            val resultDequeType = MezzeType.TypeApplication("Deque", listOf(resultType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
+            val resultDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(resultType))
             context["__native_deque_flat_map"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -512,7 +512,7 @@ object DequeTypes {
         // __native_deque_partition: {d: Deque 'a, p: {val: 'a} -> Bool} -> {pass: Deque 'a, fail: Deque 'a}
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_partition"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -528,7 +528,7 @@ object DequeTypes {
         // __native_deque_take: {d: Deque 'a, n: Int} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_take"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType, "n" to MezzeType.IntType)),
                 dequeType
@@ -538,7 +538,7 @@ object DequeTypes {
         // __native_deque_drop: {d: Deque 'a, n: Int} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_drop"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType, "n" to MezzeType.IntType)),
                 dequeType
@@ -548,7 +548,7 @@ object DequeTypes {
         // __native_deque_unique: {d: Deque 'a} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_unique"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 dequeType
@@ -557,20 +557,20 @@ object DequeTypes {
 
         // __native_deque_sum_float: {d: Deque Float} -> Float
         context["__native_deque_sum_float"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("d" to MezzeType.TypeApplication("Deque", listOf(MezzeType.FloatType)))),
+            MezzeType.RecordType(mapOf("d" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(MezzeType.FloatType)))),
             MezzeType.FloatType
         )
 
         // __native_deque_product_float: {d: Deque Float} -> Float
         context["__native_deque_product_float"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("d" to MezzeType.TypeApplication("Deque", listOf(MezzeType.FloatType)))),
+            MezzeType.RecordType(mapOf("d" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(MezzeType.FloatType)))),
             MezzeType.FloatType
         )
 
         // __native_deque_sort: {d: Deque 'a} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_sort"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 dequeType
@@ -585,7 +585,7 @@ object DequeTypes {
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
             val keyType = MezzeType.VarType(TypeVar("b"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_min_by"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -594,7 +594,7 @@ object DequeTypes {
                         keyType
                     )
                 )),
-                MezzeType.TypeApplication("Option", listOf(elemType))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elemType))
             )
         }
 
@@ -602,7 +602,7 @@ object DequeTypes {
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
             val keyType = MezzeType.VarType(TypeVar("b"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_max_by"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -611,7 +611,7 @@ object DequeTypes {
                         keyType
                     )
                 )),
-                MezzeType.TypeApplication("Option", listOf(elemType))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elemType))
             )
         }
 
@@ -622,17 +622,17 @@ object DequeTypes {
         // __native_deque_get: {d: Deque 'a, i: Int} -> Option 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_get"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType, "i" to MezzeType.IntType)),
-                MezzeType.TypeApplication("Option", listOf(elemType))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elemType))
             )
         }
 
         // __native_deque_slice: {d: Deque 'a, start: Int, end: Int} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_slice"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType, "start" to MezzeType.IntType, "end" to MezzeType.IntType)),
                 dequeType
@@ -642,17 +642,17 @@ object DequeTypes {
         // __native_deque_index_of: {d: Deque 'a, x: 'a} -> Option Int
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_index_of"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType, "x" to elemType)),
-                MezzeType.TypeApplication("Option", listOf(MezzeType.IntType))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.IntType))
             )
         }
 
         // __native_deque_find_index: {d: Deque 'a, p: {val: 'a} -> Bool} -> Option Int
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_find_index"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -661,7 +661,7 @@ object DequeTypes {
                         MezzeType.BoolType
                     )
                 )),
-                MezzeType.TypeApplication("Option", listOf(MezzeType.IntType))
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.IntType))
             )
         }
 
@@ -672,7 +672,7 @@ object DequeTypes {
         // __native_deque_take_while: {d: Deque 'a, p: {val: 'a} -> Bool} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_take_while"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -688,7 +688,7 @@ object DequeTypes {
         // __native_deque_drop_while: {d: Deque 'a, p: {val: 'a} -> Bool} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_drop_while"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -704,7 +704,7 @@ object DequeTypes {
         // __native_deque_split_at: {d: Deque 'a, i: Int} -> {l: Deque 'a, r: Deque 'a}
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_split_at"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType, "i" to MezzeType.IntType)),
                 MezzeType.RecordType(mapOf("l" to dequeType, "r" to dequeType))
@@ -714,7 +714,7 @@ object DequeTypes {
         // __native_deque_span: {d: Deque 'a, p: {val: 'a} -> Bool} -> {l: Deque 'a, r: Deque 'a}
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_span"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -735,8 +735,8 @@ object DequeTypes {
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
             val accType = MezzeType.VarType(TypeVar("b"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
-            val resultDequeType = MezzeType.TypeApplication("Deque", listOf(accType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
+            val resultDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(accType))
             context["__native_deque_scan"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -753,7 +753,7 @@ object DequeTypes {
         // __native_deque_dedup: {d: Deque 'a} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_dedup"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 dequeType
@@ -764,7 +764,7 @@ object DequeTypes {
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
             val keyType = MezzeType.VarType(TypeVar("b"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_dedup_by"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "d" to dequeType,
@@ -780,7 +780,7 @@ object DequeTypes {
         // __native_deque_intersperse: {d: Deque 'a, sep: 'a} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_intersperse"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType, "sep" to elemType)),
                 dequeType
@@ -795,10 +795,10 @@ object DequeTypes {
         run {
             val elemType1 = MezzeType.VarType(TypeVar("a"))
             val elemType2 = MezzeType.VarType(TypeVar("b"))
-            val dequeType1 = MezzeType.TypeApplication("Deque", listOf(elemType1))
-            val dequeType2 = MezzeType.TypeApplication("Deque", listOf(elemType2))
+            val dequeType1 = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType1))
+            val dequeType2 = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType2))
             val pairType = MezzeType.RecordType(mapOf("fst" to elemType1, "snd" to elemType2))
-            val resultDequeType = MezzeType.TypeApplication("Deque", listOf(pairType))
+            val resultDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(pairType))
             context["__native_deque_zip"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d1" to dequeType1, "d2" to dequeType2)),
                 resultDequeType
@@ -808,9 +808,9 @@ object DequeTypes {
         // __native_deque_zip_with_index: {d: Deque 'a} -> Deque {val: 'a, idx: Int}
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             val pairType = MezzeType.RecordType(mapOf("val" to elemType, "idx" to MezzeType.IntType))
-            val resultDequeType = MezzeType.TypeApplication("Deque", listOf(pairType))
+            val resultDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(pairType))
             context["__native_deque_zip_with_index"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 resultDequeType
@@ -820,7 +820,7 @@ object DequeTypes {
         // __native_deque_rotate_left: {d: Deque 'a, n: Int} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_rotate_left"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType, "n" to MezzeType.IntType)),
                 dequeType
@@ -830,7 +830,7 @@ object DequeTypes {
         // __native_deque_rotate_right: {d: Deque 'a, n: Int} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_rotate_right"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType, "n" to MezzeType.IntType)),
                 dequeType
@@ -842,8 +842,8 @@ object DequeTypes {
         // __native_deque_to_set: {d: Deque 'a} -> Set 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
-            val setType = MezzeType.TypeApplication("Set", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
+            val setType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Set", listOf(elemType))
             context["__native_deque_to_set"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 setType
@@ -853,8 +853,8 @@ object DequeTypes {
         // __native_deque_to_sorted_set: {d: Deque 'a} -> SortedSet 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
-            val sortedSetType = MezzeType.TypeApplication("SortedSet", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
+            val sortedSetType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("SortedSet", listOf(elemType))
             context["__native_deque_to_sorted_set"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 sortedSetType
@@ -866,8 +866,8 @@ object DequeTypes {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valType = MezzeType.VarType(TypeVar("v"))
             val recordType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valType))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(recordType))
-            val mapType = MezzeType.TypeApplication("Map", listOf(keyType, valType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(recordType))
+            val mapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Map", listOf(keyType, valType))
             context["__native_deque_to_map"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 mapType
@@ -879,8 +879,8 @@ object DequeTypes {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valType = MezzeType.VarType(TypeVar("v"))
             val recordType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valType))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(recordType))
-            val sortedMapType = MezzeType.TypeApplication("SortedMap", listOf(keyType, valType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(recordType))
+            val sortedMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("SortedMap", listOf(keyType, valType))
             context["__native_deque_to_sorted_map"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),
                 sortedMapType
@@ -890,8 +890,8 @@ object DequeTypes {
         // __native_deque_from_set: {s: Set 'a} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val setType = MezzeType.TypeApplication("Set", listOf(elemType))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val setType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Set", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_from_set"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to setType)),
                 dequeType
@@ -901,8 +901,8 @@ object DequeTypes {
         // __native_deque_from_sorted_set: {s: SortedSet 'a} -> Deque 'a
         run {
             val elemType = MezzeType.VarType(TypeVar("a"))
-            val sortedSetType = MezzeType.TypeApplication("SortedSet", listOf(elemType))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val sortedSetType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("SortedSet", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_deque_from_sorted_set"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to sortedSetType)),
                 dequeType
@@ -913,9 +913,9 @@ object DequeTypes {
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valType = MezzeType.VarType(TypeVar("v"))
-            val mapType = MezzeType.TypeApplication("Map", listOf(keyType, valType))
+            val mapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Map", listOf(keyType, valType))
             val recordType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valType))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(recordType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(recordType))
             context["__native_deque_from_map"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("m" to mapType)),
                 dequeType
@@ -926,9 +926,9 @@ object DequeTypes {
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valType = MezzeType.VarType(TypeVar("v"))
-            val sortedMapType = MezzeType.TypeApplication("SortedMap", listOf(keyType, valType))
+            val sortedMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("SortedMap", listOf(keyType, valType))
             val recordType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valType))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(recordType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(recordType))
             context["__native_deque_from_sorted_map"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("m" to sortedMapType)),
                 dequeType

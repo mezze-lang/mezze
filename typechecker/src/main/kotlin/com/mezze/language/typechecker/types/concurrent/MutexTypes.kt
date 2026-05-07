@@ -16,7 +16,7 @@ object MutexTypes {
     fun registerAll(context: MutableMap<String, MezzeType>) {
         // __native_mutex_new: {} -> Mutex
         run {
-            val mutexType = MezzeType.TypeApplication("Mutex", emptyList())
+            val mutexType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Mutex", emptyList())
             context["__native_mutex_new"] = MezzeType.FunctionType(
                 MezzeType.RecordType(emptyMap()),
                 mutexType
@@ -25,7 +25,7 @@ object MutexTypes {
 
         // __native_mutex_with_lock: {mutex: Mutex, f: {} -> 'a} -> 'a
         run {
-            val mutexType = MezzeType.TypeApplication("Mutex", emptyList())
+            val mutexType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Mutex", emptyList())
             val resultType = MezzeType.VarType(TypeVar("a"))
             val funcType = MezzeType.FunctionType(
                 MezzeType.RecordType(emptyMap()),
@@ -42,7 +42,7 @@ object MutexTypes {
 
         // __native_mutex_lock: {mutex: Mutex} -> {}
         run {
-            val mutexType = MezzeType.TypeApplication("Mutex", emptyList())
+            val mutexType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Mutex", emptyList())
             context["__native_mutex_lock"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "mutex" to mutexType
@@ -53,7 +53,7 @@ object MutexTypes {
 
         // __native_mutex_unlock: {mutex: Mutex} -> {}
         run {
-            val mutexType = MezzeType.TypeApplication("Mutex", emptyList())
+            val mutexType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Mutex", emptyList())
             context["__native_mutex_unlock"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "mutex" to mutexType
@@ -64,7 +64,7 @@ object MutexTypes {
 
         // __native_mutex_try_lock: {mutex: Mutex} -> Bool
         run {
-            val mutexType = MezzeType.TypeApplication("Mutex", emptyList())
+            val mutexType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Mutex", emptyList())
             context["__native_mutex_try_lock"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "mutex" to mutexType
@@ -75,7 +75,7 @@ object MutexTypes {
 
         // __native_mutex_is_held_by_current_thread: {mutex: Mutex} -> Bool
         run {
-            val mutexType = MezzeType.TypeApplication("Mutex", emptyList())
+            val mutexType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Mutex", emptyList())
             context["__native_mutex_is_held_by_current_thread"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "mutex" to mutexType

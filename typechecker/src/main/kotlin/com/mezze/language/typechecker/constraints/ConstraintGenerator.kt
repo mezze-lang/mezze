@@ -244,7 +244,7 @@ class ConstraintGenerator(
 
                                     if (isUserDefinedAlias) {
                                         // User-defined type alias - preserve it, apply substitution to type arguments only
-                                        MezzeType.TypeApplication(
+                                        com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                                             constructor = preConvertedAnnotationType.constructor,
                                             args = preConvertedAnnotationType.args.map { substitution.apply(it) },
                                             typeHash = preConvertedAnnotationType.typeHash
@@ -1177,7 +1177,7 @@ class ConstraintGenerator(
                             }
                             MezzeType.VarType(typeVar)
                         } else {
-                            MezzeType.TypeApplication(annotation.name, emptyList(), typeDeclarations[annotation.name]?.contentHash)
+                            com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList(), typeDeclarations[annotation.name]?.contentHash)
                         }
                     }
                 }
@@ -1246,7 +1246,7 @@ class ConstraintGenerator(
                 )
             }
             is ParsedTypeApp -> {
-                MezzeType.TypeApplication(
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                     constructor = annotation.constructor,
                     args = annotation.args.map { convertTypeAnnotationInternal(it) },
                     typeHash = typeDeclarations[annotation.constructor]?.contentHash
@@ -1262,7 +1262,7 @@ class ConstraintGenerator(
             }
             is ParsedQualifiedType -> {
                 val qualifiedName = annotation.modulePath.joinToString("::") + "::" + annotation.typeName
-                MezzeType.TypeApplication(
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                     constructor = qualifiedName,
                     args = annotation.args.map { convertTypeAnnotationInternal(it) },
                     typeHash = typeDeclarations[qualifiedName]?.contentHash
@@ -1957,7 +1957,7 @@ class ConstraintGenerator(
                 typeName = type.typeName,
                 typeHash = type.typeHash
             )
-            is MezzeType.TypeApplication -> MezzeType.TypeApplication(
+            is MezzeType.TypeApplication -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                 constructor = type.constructor,
                 args = type.args.map { substituteTypeParams(it, substitution) },
                 typeHash = type.typeHash

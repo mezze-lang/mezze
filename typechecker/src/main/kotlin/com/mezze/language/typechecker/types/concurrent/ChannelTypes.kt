@@ -74,7 +74,7 @@ object ChannelTypes {
             MezzeType.RecordType(mapOf(
                 "ch" to chanType
             )),
-            MezzeType.TypeApplication("Option", listOf(elementType))
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
         )
 
         // __native_channel_close: { ch: Chan 'a } -> {}
@@ -96,7 +96,7 @@ object ChannelTypes {
         // __native_channel_recv_any: { channels: [Chan 'a] } -> { index: Int, value: 'a }
         context["__native_channel_recv_any"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "channels" to MezzeType.TypeApplication("List", listOf(chanType))
+                "channels" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("List", listOf(chanType))
             )),
             MezzeType.RecordType(mapOf(
                 "index" to MezzeType.IntType,
@@ -107,10 +107,10 @@ object ChannelTypes {
         // __native_channel_recv_any_timeout: { channels: [Chan 'a], ms: Int } -> Option { index: Int, value: 'a }
         context["__native_channel_recv_any_timeout"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "channels" to MezzeType.TypeApplication("List", listOf(chanType)),
+                "channels" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("List", listOf(chanType)),
                 "ms" to MezzeType.IntType
             )),
-            MezzeType.TypeApplication("Option", listOf(
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(
                 MezzeType.RecordType(mapOf(
                     "index" to MezzeType.IntType,
                     "value" to elementType
@@ -153,7 +153,7 @@ object ChannelTypes {
             MezzeType.RecordType(mapOf(
                 "ch" to chanType
             )),
-            MezzeType.TypeApplication("Option", listOf(elementType))
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
         )
 
         // __native_mock_channel_close: { ch: Chan 'a } -> {}
@@ -175,7 +175,7 @@ object ChannelTypes {
         // __native_mock_channel_recv_any: { channels: [Chan 'a] } -> { index: Int, value: 'a }
         context["__native_mock_channel_recv_any"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "channels" to MezzeType.TypeApplication("List", listOf(chanType))
+                "channels" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("List", listOf(chanType))
             )),
             MezzeType.RecordType(mapOf(
                 "index" to MezzeType.IntType,
@@ -186,10 +186,10 @@ object ChannelTypes {
         // __native_mock_channel_recv_any_timeout: { channels: [Chan 'a], ms: Int } -> Option { index: Int, value: 'a }
         context["__native_mock_channel_recv_any_timeout"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "channels" to MezzeType.TypeApplication("List", listOf(chanType)),
+                "channels" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("List", listOf(chanType)),
                 "ms" to MezzeType.IntType
             )),
-            MezzeType.TypeApplication("Option", listOf(
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(
                 MezzeType.RecordType(mapOf(
                     "index" to MezzeType.IntType,
                     "value" to elementType

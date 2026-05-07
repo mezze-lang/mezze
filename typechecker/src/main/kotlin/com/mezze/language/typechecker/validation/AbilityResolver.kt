@@ -515,9 +515,9 @@ class AbilityResolver(
      */
     private fun resolveTypeAnnotation(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
         return when (annotation) {
-            is com.mezze.language.parsedast.ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: MezzeType.TypeApplication(annotation.name, emptyList())
+            is com.mezze.language.parsedast.ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
             is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(resolveTypeAnnotation(annotation.elementType))
-            else -> MezzeType.TypeApplication(annotation.toString(), emptyList())
+            else -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.toString(), emptyList())
         }
     }
 

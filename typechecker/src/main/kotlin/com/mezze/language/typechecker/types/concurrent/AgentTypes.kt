@@ -22,7 +22,7 @@ object AgentTypes {
         // __native_agent_new: {value: 'a} -> Agent 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val agentType = MezzeType.TypeApplication("Agent", listOf(elementType))
+            val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
             context["__native_agent_new"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "value" to elementType
@@ -34,7 +34,7 @@ object AgentTypes {
         // __native_agent_deref: {agent: Agent 'a} -> 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val agentType = MezzeType.TypeApplication("Agent", listOf(elementType))
+            val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
             context["__native_agent_deref"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "agent" to agentType
@@ -46,7 +46,7 @@ object AgentTypes {
         // __native_agent_send: {agent: Agent 'a, f: {current: 'a} -> 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val agentType = MezzeType.TypeApplication("Agent", listOf(elementType))
+            val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
             val funcType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("current" to elementType)),
                 elementType
@@ -63,7 +63,7 @@ object AgentTypes {
         // __native_agent_send_off: {agent: Agent 'a, f: {current: 'a} -> 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val agentType = MezzeType.TypeApplication("Agent", listOf(elementType))
+            val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
             val funcType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("current" to elementType)),
                 elementType
@@ -80,7 +80,7 @@ object AgentTypes {
         // __native_agent_await: {agent: Agent 'a, timeout_ms: Int} -> Bool
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val agentType = MezzeType.TypeApplication("Agent", listOf(elementType))
+            val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
             context["__native_agent_await"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "agent" to agentType,
@@ -93,7 +93,7 @@ object AgentTypes {
         // __native_agent_error: {agent: Agent 'a} -> Option String
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val agentType = MezzeType.TypeApplication("Agent", listOf(elementType))
+            val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
             val optionStringType = MezzeType.VariantType(
                 mapOf(
                     "Some" to MezzeType.RecordType(mapOf("val" to MezzeType.StringType)),
@@ -112,7 +112,7 @@ object AgentTypes {
         // __native_agent_restart: {agent: Agent 'a, value: 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val agentType = MezzeType.TypeApplication("Agent", listOf(elementType))
+            val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
             context["__native_agent_restart"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "agent" to agentType,
@@ -125,7 +125,7 @@ object AgentTypes {
         // __native_agent_set_error_handler: {agent: Agent 'a, handler: {agent: Agent 'a, error: String} -> {}} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val agentType = MezzeType.TypeApplication("Agent", listOf(elementType))
+            val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
             val handlerType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "agent" to agentType,

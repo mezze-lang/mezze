@@ -15,7 +15,7 @@ object CancellationTokenTypes {
      * Register all cancellation token native function types.
      */
     fun registerAll(context: MutableMap<String, MezzeType>) {
-        val cancellationTokenType = MezzeType.TypeApplication("CancellationToken", emptyList())
+        val cancellationTokenType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("CancellationToken", emptyList())
         val unitType = MezzeType.RecordType(emptyMap())
 
         // __native_cancellation_token_new: {} -> CancellationToken
@@ -46,7 +46,7 @@ object CancellationTokenTypes {
             MezzeType.RecordType(mapOf(
                 "token" to cancellationTokenType
             )),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.StringType))
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.StringType))
         )
 
         // __native_cancellation_token_throw_if_cancelled: {token: CancellationToken} -> {}

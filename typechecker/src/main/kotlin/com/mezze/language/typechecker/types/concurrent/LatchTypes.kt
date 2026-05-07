@@ -13,7 +13,7 @@ object LatchTypes {
      * Register all latch native function types.
      */
     fun registerAll(context: MutableMap<String, MezzeType>) {
-        val latchType = MezzeType.TypeApplication("Latch", emptyList())
+        val latchType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Latch", emptyList())
         val unitType = MezzeType.RecordType(emptyMap())
 
         // __native_latch_new: {count: Int} -> Latch

@@ -18,14 +18,14 @@ object NonEmptyListTypes {
      * Helper to create Option type
      */
     private fun optionType(elementType: MezzeType): MezzeType {
-        return MezzeType.TypeApplication("Option", listOf(elementType))
+        return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
     }
 
     /**
      * Helper to create NonEmptyList type
      */
     private fun nelType(elementType: MezzeType): MezzeType {
-        return MezzeType.TypeApplication("NonEmptyList", listOf(elementType))
+        return com.mezze.language.typechecker.util.WellKnownTypeApp.of("NonEmptyList", listOf(elementType))
     }
 
     /**

@@ -2083,7 +2083,7 @@ class ExpressionConstraintGenerator {
                     associatedTypeBindings[type.constructor] ?: type
                 } else {
                     // Regular type application - recurse into args
-                    MezzeType.TypeApplication(
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                         constructor = type.constructor,
                         args = type.args.map { substituteAssociatedTypesInType(it, associatedTypeBindings) },
                         typeHash = type.typeHash
@@ -2354,7 +2354,7 @@ class ExpressionConstraintGenerator {
                 valueType = applyTypeVarSubstitution(type.valueType, substitution),
                 effects = type.effects
             )
-            is MezzeType.TypeApplication -> MezzeType.TypeApplication(
+            is MezzeType.TypeApplication -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                 constructor = type.constructor,
                 args = type.args.map { applyTypeVarSubstitution(it, substitution) },
                 typeHash = type.typeHash
@@ -4678,7 +4678,7 @@ class ExpressionConstraintGenerator {
             is com.mezze.language.parsedast.ParsedNamedType -> {
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
                 if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) MezzeType.VarType(TypeVar(annotation.name))
-                else MezzeType.TypeApplication(annotation.name, emptyList())
+                else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
             }
             is com.mezze.language.parsedast.ParsedRecordType -> MezzeType.RecordType(
                 fields = annotation.entries.associate { it.name to convertParsedFieldType(it.type) },
@@ -4692,14 +4692,14 @@ class ExpressionConstraintGenerator {
                     MezzeType.EffectRow.simple(it.effects.toSet(), null, it.isPerformed)
                 }
             )
-            is com.mezze.language.parsedast.ParsedTypeApp -> MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedFieldType(it) })
+            is com.mezze.language.parsedast.ParsedTypeApp -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedFieldType(it) })
             is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(
                 constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertParsedFieldType(dt) } },
                 rowVar = if (annotation.isOpen) RowVar.userOpen() else null,
                 typeName = if (!annotation.isOpen) "<inline>" else null
             )
             is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(convertParsedFieldType(annotation.elementType))
-            is com.mezze.language.parsedast.ParsedQualifiedType -> MezzeType.TypeApplication(
+            is com.mezze.language.parsedast.ParsedQualifiedType -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                 (annotation.modulePath + annotation.typeName).joinToString("::"),
                 annotation.args.map { convertParsedFieldType(it) }
             )
@@ -4785,12 +4785,12 @@ class ExpressionConstraintGenerator {
                 if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
                     MezzeType.VarType(TypeVar(annotation.name))
                 } else {
-                    MezzeType.TypeApplication(annotation.name, emptyList())
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
                 }
             }
             is ParsedQualifiedType -> {
                 val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
-                MezzeType.TypeApplication(
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                     constructor = qualifiedName,
                     args = annotation.args.map { convertParsedTypeAnnotation(it) }
                 )
@@ -4799,16 +4799,16 @@ class ExpressionConstraintGenerator {
                 // Check for built-in collection types
                 when (annotation.constructor) {
                     "Seq" -> if (annotation.args.size == 1) MezzeType.SeqType(convertParsedTypeAnnotation(annotation.args[0]))
-                             else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
+                             else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
                     "List" -> if (annotation.args.size == 1) MezzeType.ListType(convertParsedTypeAnnotation(annotation.args[0]))
-                              else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
+                              else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
                     "Set" -> if (annotation.args.size == 1) MezzeType.SetType(convertParsedTypeAnnotation(annotation.args[0]))
-                             else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
+                             else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
                     "Map" -> if (annotation.args.size == 2) MezzeType.MapType(
                                  convertParsedTypeAnnotation(annotation.args[0]),
                                  convertParsedTypeAnnotation(annotation.args[1])
-                             ) else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
-                    else -> MezzeType.TypeApplication(
+                             ) else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedTypeAnnotation(it) })
+                    else -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                         constructor = annotation.constructor,
                         args = annotation.args.map { convertParsedTypeAnnotation(it) }
                     )

@@ -23,7 +23,7 @@ object LoomTypes {
      * unifying one would affect all others.
      */
     fun registerAll(context: MutableMap<String, MezzeType>) {
-        val promiseType = MezzeType.TypeApplication("Promise", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
+        val promiseType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Promise", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
 
         // __native_loom_spawn: {f: {} -> 'a} -> Promise 'a
         context["__native_loom_spawn"] = MezzeType.FunctionType(
@@ -101,7 +101,7 @@ object LoomTypes {
         )
 
         // __native_loom_timeout: {ms: Int, p: Promise 'a} -> Option 'a
-        val optionType = MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
+        val optionType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
         context["__native_loom_timeout"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "ms" to MezzeType.IntType,
@@ -247,7 +247,7 @@ object LoomTypes {
         // __native_loom_settle: {ps: [Promise 'a]} -> [Result 'a AsyncError]
         // AsyncError is a variant: Failed {message: String} | Cancelled | TimedOut {ms: Int}
         val asyncErrorType = MezzeType.VarType(com.mezze.language.ast.TypeVar("AsyncError"))
-        val resultType = MezzeType.TypeApplication("Result", listOf(
+        val resultType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
             asyncErrorType
         ))
@@ -261,7 +261,7 @@ object LoomTypes {
         // === Structured Concurrency Scopes ===
 
         // Scope type - opaque wrapper for structured concurrency scopes
-        val scopeType = MezzeType.TypeApplication("Scope", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
+        val scopeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Scope", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
 
         // Helper: Create an effect-polymorphic function type {sc: Scope 'a} -> 'a <...>
         fun effectPolymorphicScopedCallback(scopeType: MezzeType, returnType: MezzeType): MezzeType.FunctionType {
@@ -283,7 +283,7 @@ object LoomTypes {
 
         // __native_loom_scope_spawn: {sc: Scope 'a, f: {} -> 'b <...>} -> Promise 'b
         // The f parameter can have any effects (<...>)
-        val scopeSpawnPromiseType = MezzeType.TypeApplication("Promise", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))))
+        val scopeSpawnPromiseType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Promise", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))))
         context["__native_loom_scope_spawn"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "sc" to scopeType,
@@ -301,7 +301,7 @@ object LoomTypes {
         )
 
         // __native_loom_scope_get_token: {sc: Scope 'a} -> CancellationToken
-        val cancellationTokenType = MezzeType.TypeApplication("CancellationToken", emptyList())
+        val cancellationTokenType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("CancellationToken", emptyList())
         context["__native_loom_scope_get_token"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "sc" to scopeType

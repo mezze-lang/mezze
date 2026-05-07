@@ -6,14 +6,14 @@ import com.mezze.language.ast.MezzeType
  * Helper function to create Option type (as TypeApplication)
  */
 private fun optionType(elementType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("Option", listOf(elementType))
+    return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
 }
 
 /**
  * Helper function to create Result type (as TypeApplication)
  */
 private fun resultType(okType: MezzeType, errType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("Result", listOf(okType, errType))
+    return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(okType, errType))
 }
 
 /**

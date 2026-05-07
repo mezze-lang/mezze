@@ -6,7 +6,7 @@ import com.mezze.language.ast.MezzeType
  * Helper function to create Option type (as TypeApplication)
  */
 private fun optionType(elementType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("Option", listOf(elementType))
+    return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
 }
 
 /**
@@ -1681,7 +1681,7 @@ object SeqTypes {
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val seqType = MezzeType.SeqType(elemType)
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             context["__native_seq_to_deque"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to seqType)),
                 dequeType
@@ -1750,7 +1750,7 @@ object SeqTypes {
         // __native_seq_from_deque: {d: Deque['a]} -> ['a]
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elemType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elemType))
             val seqType = MezzeType.SeqType(elemType)
             context["__native_seq_from_deque"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("d" to dequeType)),

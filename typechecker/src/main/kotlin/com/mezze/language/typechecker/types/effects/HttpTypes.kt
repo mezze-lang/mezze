@@ -13,32 +13,32 @@ object HttpTypes {
 
     // Helper to create Result type
     private fun resultType(valueType: MezzeType, errorType: MezzeType): MezzeType {
-        return MezzeType.TypeApplication("Result", listOf(valueType, errorType))
+        return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(valueType, errorType))
     }
 
     // Helper to create Option type
     private fun optionType(elementType: MezzeType): MezzeType {
-        return MezzeType.TypeApplication("Option", listOf(elementType))
+        return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
     }
 
     // HTTP Response type: {status: Int, headers: Map String String, body: Bytes}
     private val responseType = MezzeType.RecordType(mapOf(
         "status" to MezzeType.IntType,
-        "headers" to MezzeType.TypeApplication("Map", listOf(MezzeType.StringType, MezzeType.StringType)),
+        "headers" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("Map", listOf(MezzeType.StringType, MezzeType.StringType)),
         "body" to MezzeType.BytesType
     ))
 
     // HTTP Error variant type
-    private val httpErrorType = MezzeType.TypeApplication("HttpError", emptyList())
+    private val httpErrorType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("HttpError", emptyList())
 
     // Result Response HttpError
     private val httpResultType = resultType(responseType, httpErrorType)
 
     // Request type
     private val requestType = MezzeType.RecordType(mapOf(
-        "method" to MezzeType.TypeApplication("Method", emptyList()),
+        "method" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("Method", emptyList()),
         "url" to MezzeType.StringType,
-        "headers" to MezzeType.TypeApplication("Map", listOf(MezzeType.StringType, MezzeType.StringType)),
+        "headers" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("Map", listOf(MezzeType.StringType, MezzeType.StringType)),
         "body" to optionType(MezzeType.BytesType),
         "timeout_ms" to optionType(MezzeType.IntType)
     ))
@@ -55,18 +55,18 @@ object HttpTypes {
     ))
 
     // UrlPattern variant type: | Glob { pattern: String } |
-    private val urlPatternType = MezzeType.TypeApplication("UrlPattern", emptyList())
+    private val urlPatternType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("UrlPattern", emptyList())
 
     // MockRule type: { methods: [Method], url: UrlPattern, response: Result Response HttpError }
     private val mockRuleType = MezzeType.RecordType(mapOf(
-        "methods" to MezzeType.SeqType(MezzeType.TypeApplication("Method", emptyList())),
+        "methods" to MezzeType.SeqType(com.mezze.language.typechecker.util.WellKnownTypeApp.of("Method", emptyList())),
         "url" to urlPatternType,
         "response" to httpResultType
     ))
 
     // HttpClient handle type (opaque type for the client handle)
     // Using a TypeApplication with no args to represent an opaque external type
-    private val httpClientHandleType = MezzeType.TypeApplication("HttpClientHandle", emptyList())
+    private val httpClientHandleType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("HttpClientHandle", emptyList())
 
     // Unit type is represented as empty record
     private val unitType = MezzeType.RecordType(emptyMap())

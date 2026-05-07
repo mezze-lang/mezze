@@ -59,7 +59,7 @@ object OSThreadTypes {
                 "ms" to MezzeType.IntType,
                 "p" to timeoutPromise
             )),
-            MezzeType.TypeApplication("Option", listOf(timeoutResult))
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(timeoutResult))
         )
 
         // __native_os_cancel: {p: Promise 'a} -> {}
@@ -189,7 +189,7 @@ object OSThreadTypes {
         // __native_os_settle: {ps: [Promise 'a]} -> [Result 'a AsyncError]
         val settlePromise = MezzeType.VarType(TypeVar("Promise"))
         val asyncErrorType = MezzeType.VarType(TypeVar("AsyncError"))
-        val resultType = MezzeType.TypeApplication("Result", listOf(
+        val resultType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(
             MezzeType.VarType(TypeVar("a")),
             asyncErrorType
         ))
@@ -203,7 +203,7 @@ object OSThreadTypes {
         // === Structured Concurrency Scopes ===
 
         // Scope type for OS threads
-        val scopeType = MezzeType.TypeApplication("Scope", listOf(MezzeType.VarType(TypeVar("a"))))
+        val scopeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Scope", listOf(MezzeType.VarType(TypeVar("a"))))
 
         // __native_os_scoped: {f: {sc: Scope 'a} -> 'a} -> 'a
         context["__native_os_scoped"] = MezzeType.FunctionType(
@@ -217,7 +217,7 @@ object OSThreadTypes {
         )
 
         // __native_os_scope_spawn: {sc: Scope 'a, f: {} -> 'b} -> Promise 'b
-        val scopeSpawnPromiseType = MezzeType.TypeApplication("Promise", listOf(MezzeType.VarType(TypeVar("b"))))
+        val scopeSpawnPromiseType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Promise", listOf(MezzeType.VarType(TypeVar("b"))))
         context["__native_os_scope_spawn"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "sc" to scopeType,

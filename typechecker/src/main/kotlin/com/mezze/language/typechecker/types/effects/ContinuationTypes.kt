@@ -123,7 +123,7 @@ object ContinuationTypes {
                 "suspended" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             )),
             // Return type: Option { value: 'v, cont: 'c }
-            MezzeType.TypeApplication("Option", listOf(
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(
                 MezzeType.RecordType(mapOf(
                     "value" to MezzeType.VarType(com.mezze.language.ast.TypeVar("v")),
                     "cont" to MezzeType.FunctionType(

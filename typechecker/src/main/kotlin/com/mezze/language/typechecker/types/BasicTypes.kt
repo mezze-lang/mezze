@@ -1,21 +1,21 @@
 package com.mezze.language.typechecker.types
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.typechecker.util.WellKnownTypeApp
 
 /**
- * Helper function to create Option type (as TypeApplication)
+ * Helper function to create Option type (as TypeApplication).
+ * Routes through WellKnownTypeApp so `typeHash` is populated when known (#309).
  */
-private fun optionType(elementType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("Option", listOf(elementType))
-}
+private fun optionType(elementType: MezzeType): MezzeType =
+    WellKnownTypeApp.of("Option", listOf(elementType))
 
 /**
- * Helper function to create Result type (as TypeApplication)
- * Note: Result takes value type first, then error type
+ * Helper function to create Result type (as TypeApplication).
+ * Note: Result takes value type first, then error type.
  */
-private fun resultType(valueType: MezzeType, errorType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("Result", listOf(valueType, errorType))
-}
+private fun resultType(valueType: MezzeType, errorType: MezzeType): MezzeType =
+    WellKnownTypeApp.of("Result", listOf(valueType, errorType))
 
 /**
  * Type signatures for basic numeric and string types:

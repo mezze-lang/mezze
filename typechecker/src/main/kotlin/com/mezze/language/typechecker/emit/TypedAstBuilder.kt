@@ -1491,7 +1491,7 @@ class TypedAstBuilder(
                             }
                             MezzeType.VarType(typeVar)
                         } else {
-                            MezzeType.TypeApplication(annotation.name, emptyList())
+                            com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
                         }
                     }
                 }
@@ -1531,7 +1531,7 @@ class TypedAstBuilder(
                 )
             }
             is ParsedTypeApp -> {
-                MezzeType.TypeApplication(
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                     constructor = annotation.constructor,
                     args = annotation.args.map { convertParsedTypeAnnotation(it) }
                 )
@@ -1540,7 +1540,7 @@ class TypedAstBuilder(
                 MezzeType.SeqType(elementType = convertParsedTypeAnnotation(annotation.elementType))
             }
             is ParsedQualifiedType -> {
-                MezzeType.TypeApplication(
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                     constructor = annotation.modulePath.joinToString("::") + "::" + annotation.typeName,
                     args = annotation.args.map { convertParsedTypeAnnotation(it) }
                 )

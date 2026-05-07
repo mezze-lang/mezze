@@ -70,7 +70,7 @@ object ParallelTypes {
                     MezzeType.VarType(TypeVar("a"))
                 )
             )),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(TypeVar("a"))))
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(TypeVar("a"))))
         )
 
         // __native_parallel_fold: {xs: ['a], zero: 'b, map_fn: {x: 'a} -> 'b, combine: {l: 'b, r: 'b} -> 'b} -> 'b
@@ -143,7 +143,7 @@ object ParallelTypes {
                     MezzeType.BoolType
                 )
             )),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(TypeVar("a"))))
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(TypeVar("a"))))
         )
 
         // __native_parallel_any: {xs: ['a], f: {x: 'a} -> Bool} -> Bool
@@ -256,7 +256,7 @@ object ParallelTypes {
                 "parallelism" to MezzeType.IntType,
                 "chunk_size" to MezzeType.IntType
             )),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(TypeVar("a"))))
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(TypeVar("a"))))
         )
 
         context["__native_parallel_fold_cfg"] = MezzeType.FunctionType(
@@ -290,7 +290,7 @@ object ParallelTypes {
                 "parallelism" to MezzeType.IntType,
                 "chunk_size" to MezzeType.IntType
             )),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(TypeVar("a"))))
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(TypeVar("a"))))
         )
 
         context["__native_parallel_any_cfg"] = MezzeType.FunctionType(
@@ -423,7 +423,7 @@ object ParallelTypes {
                 "threshold" to MezzeType.IntType,
                 "parallelism" to MezzeType.IntType
             )),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(TypeVar("a"))))
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(TypeVar("a"))))
         )
 
         context["__native_forkjoin_fold"] = MezzeType.FunctionType(
@@ -498,7 +498,7 @@ object ParallelTypes {
                 "threshold" to MezzeType.IntType,
                 "parallelism" to MezzeType.IntType
             )),
-            MezzeType.TypeApplication("Option", listOf(MezzeType.VarType(TypeVar("a"))))
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(TypeVar("a"))))
         )
 
         context["__native_forkjoin_any"] = MezzeType.FunctionType(

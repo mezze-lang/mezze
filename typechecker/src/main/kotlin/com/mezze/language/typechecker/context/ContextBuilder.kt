@@ -383,7 +383,7 @@ class ContextBuilder {
                 val typeArgs = typeDecl.typeParams.map { param ->
                     MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar(param) })
                 }
-                val newtypeResult = MezzeType.TypeApplication(typeDecl.name, typeArgs)
+                val newtypeResult = com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeDecl.name, typeArgs)
                 val constructorType = MezzeType.FunctionType(paramType = wrappedMezzeType, returnType = newtypeResult)
                 val typeVars = mutableSetOf<TypeVar>()
                 collectTypeVarsFromType(constructorType, typeVars)
@@ -397,7 +397,7 @@ class ContextBuilder {
         typeVarCache.clear()
         val resultType = if (typeDecl.typeParams.isEmpty()) {
             when (val def = typeDecl.definition) {
-                is ParsedNewtypeDef -> MezzeType.TypeApplication(typeDecl.name, emptyList())
+                is ParsedNewtypeDef -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeDecl.name, emptyList())
                 else -> {
                     val constructors = when (def) {
                         is ParsedVariantDef -> def.constructors.associate { ctor ->
@@ -413,7 +413,7 @@ class ContextBuilder {
                 }
             }
         } else {
-            MezzeType.TypeApplication(
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                 constructor = typeDecl.name,
                 args = typeDecl.typeParams.map { param ->
                     MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar(param) })
@@ -621,20 +621,20 @@ class ContextBuilder {
                     val errorType = associatedTypes["error"] ?: MezzeType.VarType(TypeVar.fresh())
                     val valType = MezzeType.VarType(TypeVar.fresh())
 
-                    MezzeType.TypeApplication(
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                         constructor = BuiltinTypes.RESULT,
                         args = listOf(valType, errorType)
                     )
                 } else if (constructorName == BuiltinTypes.NONE) {
                     // This is Option None - create Option 'a
-                    MezzeType.TypeApplication(
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                         constructor = BuiltinTypes.OPTION,
                         args = listOf(MezzeType.VarType(TypeVar.fresh()))
                     )
                 } else if (constructorName == BuiltinTypes.SOME) {
                     // This is Option Some - create Option with the payload type
                     val innerType = payloadType ?: MezzeType.VarType(TypeVar.fresh())
-                    MezzeType.TypeApplication(
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                         constructor = BuiltinTypes.OPTION,
                         args = listOf(innerType)
                     )
@@ -1146,7 +1146,7 @@ class ContextBuilder {
                     val typeVar = typeVarCache.getOrPut(varName) { TypeVar(varName) }
                     MezzeType.VarType(typeVar)
                 } else {
-                    MezzeType.TypeApplication(annotation.name, emptyList(), currentTypeDecls[annotation.name]?.contentHash)
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList(), currentTypeDecls[annotation.name]?.contentHash)
                 }
             }
             is com.mezze.language.parsedast.ParsedFunctionType -> {
@@ -1191,16 +1191,16 @@ class ContextBuilder {
                 val resolvedTypeHash = currentTypeDecls[annotation.constructor]?.contentHash
                 when (annotation.constructor) {
                     "List" -> if (annotation.args.size == 1) MezzeType.ListType(convertParsedTypeAnnotationInternal(annotation.args[0]))
-                        else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
+                        else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
                     "Seq" -> if (annotation.args.size == 1) MezzeType.SeqType(convertParsedTypeAnnotationInternal(annotation.args[0]))
-                        else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
+                        else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
                     "Set" -> if (annotation.args.size == 1) MezzeType.SetType(convertParsedTypeAnnotationInternal(annotation.args[0]))
-                        else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
+                        else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
                     "Map" -> if (annotation.args.size == 2) MezzeType.MapType(
                             keyType = convertParsedTypeAnnotationInternal(annotation.args[0]),
                             valueType = convertParsedTypeAnnotationInternal(annotation.args[1])
-                        ) else MezzeType.TypeApplication(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
-                    else -> MezzeType.TypeApplication(
+                        ) else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
+                    else -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                         constructor = annotation.constructor,
                         args = annotation.args.map { convertParsedTypeAnnotationInternal(it) },
                         typeHash = resolvedTypeHash
@@ -1212,7 +1212,7 @@ class ContextBuilder {
             }
             is com.mezze.language.parsedast.ParsedQualifiedType -> {
                 val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
-                MezzeType.TypeApplication(
+                com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                     constructor = qualifiedName,
                     args = annotation.args.map { convertParsedTypeAnnotationInternal(it) },
                     typeHash = currentTypeDecls[qualifiedName]?.contentHash
@@ -1465,7 +1465,7 @@ class ContextBuilder {
             keyType = alignVarTypesByMapping(type.keyType, mapping),
             valueType = alignVarTypesByMapping(type.valueType, mapping)
         )
-        is MezzeType.TypeApplication -> MezzeType.TypeApplication(
+        is MezzeType.TypeApplication -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
             type.constructor,
             type.args.map { alignVarTypesByMapping(it, mapping) },
             type.typeHash
@@ -1544,7 +1544,7 @@ class ContextBuilder {
             keyType = alignVarTypesByName(type.keyType, byName),
             valueType = alignVarTypesByName(type.valueType, byName)
         )
-        is MezzeType.TypeApplication -> MezzeType.TypeApplication(
+        is MezzeType.TypeApplication -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
             type.constructor,
             type.args.map { alignVarTypesByName(it, byName) },
             type.typeHash

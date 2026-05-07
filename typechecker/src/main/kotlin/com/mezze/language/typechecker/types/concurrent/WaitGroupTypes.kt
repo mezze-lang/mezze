@@ -14,7 +14,7 @@ object WaitGroupTypes {
      * Register all wait group native function types.
      */
     fun registerAll(context: MutableMap<String, MezzeType>) {
-        val wgType = MezzeType.TypeApplication("WaitGroup", emptyList())
+        val wgType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("WaitGroup", emptyList())
         val unitType = MezzeType.RecordType(emptyMap())
 
         // __native_waitgroup_new: {} -> WaitGroup

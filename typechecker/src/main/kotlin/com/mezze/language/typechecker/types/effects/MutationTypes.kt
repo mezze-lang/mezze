@@ -26,7 +26,7 @@ object MutationTypes {
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val seqType = MezzeType.SeqType(elementType)
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             context["__native_seq_to_mut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to seqType)),
                 mutSeqType
@@ -37,7 +37,7 @@ object MutationTypes {
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val seqType = MezzeType.SeqType(elementType)
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             context["__native_seq_to_immut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType)),
                 seqType
@@ -47,7 +47,7 @@ object MutationTypes {
         // __native_mut_seq_with_capacity: {capacity: Int} -> MutSeq 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             context["__native_mut_seq_with_capacity"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("capacity" to MezzeType.IntType)),
                 mutSeqType
@@ -63,7 +63,7 @@ object MutationTypes {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
             val mapType = MezzeType.MapType(keyType, valueType)
-            val mutMapType = MezzeType.TypeApplication("MutMap", listOf(keyType, valueType))
+            val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
             context["__native_map_to_mut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("map" to mapType)),
                 mutMapType
@@ -75,7 +75,7 @@ object MutationTypes {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
             val mapType = MezzeType.MapType(keyType, valueType)
-            val mutMapType = MezzeType.TypeApplication("MutMap", listOf(keyType, valueType))
+            val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
             context["__native_map_to_immut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("map" to mutMapType)),
                 mapType
@@ -86,7 +86,7 @@ object MutationTypes {
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
-            val mutMapType = MezzeType.TypeApplication("MutMap", listOf(keyType, valueType))
+            val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
             context["__native_mut_map_with_capacity"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("capacity" to MezzeType.IntType)),
                 mutMapType
@@ -100,8 +100,8 @@ object MutationTypes {
         // __native_set_to_mut: {set: Set 'a} -> MutSet 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val setType = MezzeType.TypeApplication("Set", listOf(elementType))
-            val mutSetType = MezzeType.TypeApplication("MutSet", listOf(elementType))
+            val setType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Set", listOf(elementType))
+            val mutSetType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSet", listOf(elementType))
             context["__native_set_to_mut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("set" to setType)),
                 mutSetType
@@ -111,8 +111,8 @@ object MutationTypes {
         // __native_set_to_immut: {set: MutSet 'a} -> Set 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val setType = MezzeType.TypeApplication("Set", listOf(elementType))
-            val mutSetType = MezzeType.TypeApplication("MutSet", listOf(elementType))
+            val setType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Set", listOf(elementType))
+            val mutSetType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSet", listOf(elementType))
             context["__native_set_to_immut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("set" to mutSetType)),
                 setType
@@ -122,7 +122,7 @@ object MutationTypes {
         // __native_mut_set_with_capacity: {capacity: Int} -> MutSet 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSetType = MezzeType.TypeApplication("MutSet", listOf(elementType))
+            val mutSetType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSet", listOf(elementType))
             context["__native_mut_set_with_capacity"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("capacity" to MezzeType.IntType)),
                 mutSetType
@@ -137,8 +137,8 @@ object MutationTypes {
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
-            val mutMapType = MezzeType.TypeApplication("MutMap", listOf(keyType, valueType))
-            val optionType = MezzeType.TypeApplication("Option", listOf(valueType))
+            val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
+            val optionType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(valueType))
             context["__native_mut_map_get"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("map" to mutMapType, "key" to keyType)),
                 optionType
@@ -149,7 +149,7 @@ object MutationTypes {
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
-            val mutMapType = MezzeType.TypeApplication("MutMap", listOf(keyType, valueType))
+            val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
             context["__native_mut_map_put"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("map" to mutMapType, "key" to keyType, "value" to valueType)),
                 MezzeType.RecordType(emptyMap())
@@ -160,7 +160,7 @@ object MutationTypes {
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
-            val mutMapType = MezzeType.TypeApplication("MutMap", listOf(keyType, valueType))
+            val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
             context["__native_mut_map_remove"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("map" to mutMapType, "key" to keyType)),
                 MezzeType.RecordType(emptyMap())
@@ -171,7 +171,7 @@ object MutationTypes {
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
-            val mutMapType = MezzeType.TypeApplication("MutMap", listOf(keyType, valueType))
+            val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
             context["__native_mut_map_contains"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("map" to mutMapType, "key" to keyType)),
                 MezzeType.BoolType
@@ -182,7 +182,7 @@ object MutationTypes {
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
-            val mutMapType = MezzeType.TypeApplication("MutMap", listOf(keyType, valueType))
+            val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
             context["__native_mut_map_size"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("map" to mutMapType)),
                 MezzeType.IntType
@@ -193,7 +193,7 @@ object MutationTypes {
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
-            val mutMapType = MezzeType.TypeApplication("MutMap", listOf(keyType, valueType))
+            val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
             context["__native_mut_map_clear"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("map" to mutMapType)),
                 MezzeType.RecordType(emptyMap())
@@ -204,7 +204,7 @@ object MutationTypes {
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
-            val mutMapType = MezzeType.TypeApplication("MutMap", listOf(keyType, valueType))
+            val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
             context["__native_mut_map_keys"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("map" to mutMapType)),
                 MezzeType.SeqType(keyType)
@@ -215,7 +215,7 @@ object MutationTypes {
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
-            val mutMapType = MezzeType.TypeApplication("MutMap", listOf(keyType, valueType))
+            val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
             context["__native_mut_map_values"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("map" to mutMapType)),
                 MezzeType.SeqType(valueType)
@@ -226,7 +226,7 @@ object MutationTypes {
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
-            val mutMapType = MezzeType.TypeApplication("MutMap", listOf(keyType, valueType))
+            val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
             val entryType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valueType))
             context["__native_mut_map_entries"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("map" to mutMapType)),
@@ -241,7 +241,7 @@ object MutationTypes {
         // __native_mut_set_add: {set: MutSet 'a, elem: 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSetType = MezzeType.TypeApplication("MutSet", listOf(elementType))
+            val mutSetType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSet", listOf(elementType))
             context["__native_mut_set_add"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("set" to mutSetType, "elem" to elementType)),
                 MezzeType.RecordType(emptyMap())
@@ -251,7 +251,7 @@ object MutationTypes {
         // __native_mut_set_remove: {set: MutSet 'a, elem: 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSetType = MezzeType.TypeApplication("MutSet", listOf(elementType))
+            val mutSetType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSet", listOf(elementType))
             context["__native_mut_set_remove"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("set" to mutSetType, "elem" to elementType)),
                 MezzeType.RecordType(emptyMap())
@@ -261,7 +261,7 @@ object MutationTypes {
         // __native_mut_set_contains: {set: MutSet 'a, elem: 'a} -> Bool
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSetType = MezzeType.TypeApplication("MutSet", listOf(elementType))
+            val mutSetType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSet", listOf(elementType))
             context["__native_mut_set_contains"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("set" to mutSetType, "elem" to elementType)),
                 MezzeType.BoolType
@@ -271,7 +271,7 @@ object MutationTypes {
         // __native_mut_set_size: {set: MutSet 'a} -> Int
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSetType = MezzeType.TypeApplication("MutSet", listOf(elementType))
+            val mutSetType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSet", listOf(elementType))
             context["__native_mut_set_size"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("set" to mutSetType)),
                 MezzeType.IntType
@@ -281,7 +281,7 @@ object MutationTypes {
         // __native_mut_set_clear: {set: MutSet 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSetType = MezzeType.TypeApplication("MutSet", listOf(elementType))
+            val mutSetType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSet", listOf(elementType))
             context["__native_mut_set_clear"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("set" to mutSetType)),
                 MezzeType.RecordType(emptyMap())
@@ -291,7 +291,7 @@ object MutationTypes {
         // __native_mut_set_elements: {set: MutSet 'a} -> ['a]
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSetType = MezzeType.TypeApplication("MutSet", listOf(elementType))
+            val mutSetType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSet", listOf(elementType))
             context["__native_mut_set_elements"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("set" to mutSetType)),
                 MezzeType.SeqType(elementType)
@@ -301,7 +301,7 @@ object MutationTypes {
         // __native_mut_set_toggle: {set: MutSet 'a, elem: 'a} -> Bool
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSetType = MezzeType.TypeApplication("MutSet", listOf(elementType))
+            val mutSetType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSet", listOf(elementType))
             context["__native_mut_set_toggle"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("set" to mutSetType, "elem" to elementType)),
                 MezzeType.BoolType
@@ -314,7 +314,7 @@ object MutationTypes {
 
         // __native_bytes_to_mut: {bytes: Bytes} -> MutBytes
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
             context["__native_bytes_to_mut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("bytes" to MezzeType.BytesType)),
                 mutBytesType
@@ -323,7 +323,7 @@ object MutationTypes {
 
         // __native_bytes_to_immut: {bytes: MutBytes} -> Bytes
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
             context["__native_bytes_to_immut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("bytes" to mutBytesType)),
                 MezzeType.BytesType
@@ -336,8 +336,8 @@ object MutationTypes {
 
         // __native_mut_bytes_get: {bytes: MutBytes, i: Int} -> Option Int
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
-            val optionType = MezzeType.TypeApplication("Option", listOf(MezzeType.IntType))
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
+            val optionType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.IntType))
             context["__native_mut_bytes_get"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("bytes" to mutBytesType, "i" to MezzeType.IntType)),
                 optionType
@@ -346,7 +346,7 @@ object MutationTypes {
 
         // __native_mut_bytes_set: {bytes: MutBytes, i: Int, v: Int} -> Bool
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
             context["__native_mut_bytes_set"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("bytes" to mutBytesType, "i" to MezzeType.IntType, "v" to MezzeType.IntType)),
                 MezzeType.BoolType
@@ -355,7 +355,7 @@ object MutationTypes {
 
         // __native_mut_bytes_len: {bytes: MutBytes} -> Int
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
             context["__native_mut_bytes_len"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("bytes" to mutBytesType)),
                 MezzeType.IntType
@@ -364,7 +364,7 @@ object MutationTypes {
 
         // __native_mut_bytes_fill: {bytes: MutBytes, v: Int} -> {}
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
             context["__native_mut_bytes_fill"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("bytes" to mutBytesType, "v" to MezzeType.IntType)),
                 MezzeType.RecordType(emptyMap())
@@ -373,7 +373,7 @@ object MutationTypes {
 
         // __native_mut_bytes_fill_range: {bytes: MutBytes, start: Int, end: Int, v: Int} -> {}
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
             context["__native_mut_bytes_fill_range"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "bytes" to mutBytesType,
@@ -387,7 +387,7 @@ object MutationTypes {
 
         // __native_mut_bytes_slice: {bytes: MutBytes, start: Int, end: Int} -> Bytes
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
             context["__native_mut_bytes_slice"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "bytes" to mutBytesType,
@@ -400,7 +400,7 @@ object MutationTypes {
 
         // __native_mut_bytes_resize: {bytes: MutBytes, size: Int} -> {}
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
             context["__native_mut_bytes_resize"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("bytes" to mutBytesType, "size" to MezzeType.IntType)),
                 MezzeType.RecordType(emptyMap())
@@ -409,7 +409,7 @@ object MutationTypes {
 
         // __native_mut_bytes_swap: {bytes: MutBytes, i: Int, j: Int} -> Bool
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
             context["__native_mut_bytes_swap"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("bytes" to mutBytesType, "i" to MezzeType.IntType, "j" to MezzeType.IntType)),
                 MezzeType.BoolType
@@ -418,7 +418,7 @@ object MutationTypes {
 
         // __native_mut_bytes_reverse: {bytes: MutBytes} -> {}
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
             context["__native_mut_bytes_reverse"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("bytes" to mutBytesType)),
                 MezzeType.RecordType(emptyMap())
@@ -427,7 +427,7 @@ object MutationTypes {
 
         // __native_mut_bytes_clear: {bytes: MutBytes} -> {}
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
             context["__native_mut_bytes_clear"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("bytes" to mutBytesType)),
                 MezzeType.RecordType(emptyMap())
@@ -436,7 +436,7 @@ object MutationTypes {
 
         // __native_mut_bytes_copy: {dest: MutBytes, src: MutBytes, src_offset: Int, dest_offset: Int, length: Int} -> {}
         run {
-            val mutBytesType = MezzeType.TypeApplication("MutBytes", emptyList())
+            val mutBytesType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBytes", emptyList())
             context["__native_mut_bytes_copy"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "dest" to mutBytesType,
@@ -455,7 +455,7 @@ object MutationTypes {
 
         // __native_int_to_mut: {n: Int} -> MutInt
         run {
-            val mutIntType = MezzeType.TypeApplication("MutInt", emptyList())
+            val mutIntType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutInt", emptyList())
             context["__native_int_to_mut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to MezzeType.IntType)),
                 mutIntType
@@ -464,7 +464,7 @@ object MutationTypes {
 
         // __native_int_to_immut: {n: MutInt} -> Int
         run {
-            val mutIntType = MezzeType.TypeApplication("MutInt", emptyList())
+            val mutIntType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutInt", emptyList())
             context["__native_int_to_immut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutIntType)),
                 MezzeType.IntType
@@ -473,7 +473,7 @@ object MutationTypes {
 
         // __native_float_to_mut: {n: Float} -> MutFloat
         run {
-            val mutFloatType = MezzeType.TypeApplication("MutFloat", emptyList())
+            val mutFloatType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutFloat", emptyList())
             context["__native_float_to_mut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
                 mutFloatType
@@ -482,7 +482,7 @@ object MutationTypes {
 
         // __native_float_to_immut: {n: MutFloat} -> Float
         run {
-            val mutFloatType = MezzeType.TypeApplication("MutFloat", emptyList())
+            val mutFloatType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutFloat", emptyList())
             context["__native_float_to_immut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutFloatType)),
                 MezzeType.FloatType
@@ -491,7 +491,7 @@ object MutationTypes {
 
         // __native_bool_to_mut: {b: Bool} -> MutBool
         run {
-            val mutBoolType = MezzeType.TypeApplication("MutBool", emptyList())
+            val mutBoolType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBool", emptyList())
             context["__native_bool_to_mut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("b" to MezzeType.BoolType)),
                 mutBoolType
@@ -500,7 +500,7 @@ object MutationTypes {
 
         // __native_bool_to_immut: {b: MutBool} -> Bool
         run {
-            val mutBoolType = MezzeType.TypeApplication("MutBool", emptyList())
+            val mutBoolType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBool", emptyList())
             context["__native_bool_to_immut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("b" to mutBoolType)),
                 MezzeType.BoolType
@@ -513,7 +513,7 @@ object MutationTypes {
 
         // __native_mut_seq_sort: {seq: MutSeq Int} -> {}
         run {
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(MezzeType.IntType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(MezzeType.IntType))
             context["__native_mut_seq_sort"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType)),
                 MezzeType.RecordType(emptyMap())
@@ -523,7 +523,7 @@ object MutationTypes {
         // __native_mut_seq_sort_by: {seq: MutSeq 'a, cmp: {a: 'a, b: 'a} -> Int} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             val cmpType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("a" to elementType, "b" to elementType)),
                 MezzeType.IntType
@@ -537,7 +537,7 @@ object MutationTypes {
         // __native_mut_seq_reverse: {seq: MutSeq 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             context["__native_mut_seq_reverse"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType)),
                 MezzeType.RecordType(emptyMap())
@@ -547,7 +547,7 @@ object MutationTypes {
         // __native_mut_seq_fill: {seq: MutSeq 'a, v: 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             context["__native_mut_seq_fill"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType, "v" to elementType)),
                 MezzeType.RecordType(emptyMap())
@@ -557,7 +557,7 @@ object MutationTypes {
         // __native_mut_seq_fill_range: {seq: MutSeq 'a, start: Int, end: Int, v: 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             context["__native_mut_seq_fill_range"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "seq" to mutSeqType,
@@ -572,7 +572,7 @@ object MutationTypes {
         // __native_mut_seq_push: {seq: MutSeq 'a, v: 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             context["__native_mut_seq_push"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType, "v" to elementType)),
                 MezzeType.RecordType(emptyMap())
@@ -582,8 +582,8 @@ object MutationTypes {
         // __native_mut_seq_pop: {seq: MutSeq 'a} -> Option 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
-            val optionType = MezzeType.TypeApplication("Option", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
+            val optionType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
             context["__native_mut_seq_pop"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType)),
                 optionType
@@ -593,8 +593,8 @@ object MutationTypes {
         // __native_mut_seq_get: {seq: MutSeq 'a, i: Int} -> Option 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
-            val optionType = MezzeType.TypeApplication("Option", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
+            val optionType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
             context["__native_mut_seq_get"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType, "i" to MezzeType.IntType)),
                 optionType
@@ -604,7 +604,7 @@ object MutationTypes {
         // __native_mut_seq_set: {seq: MutSeq 'a, i: Int, v: 'a} -> Bool
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             context["__native_mut_seq_set"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType, "i" to MezzeType.IntType, "v" to elementType)),
                 MezzeType.BoolType
@@ -614,7 +614,7 @@ object MutationTypes {
         // __native_mut_seq_len: {seq: MutSeq 'a} -> Int
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             context["__native_mut_seq_len"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType)),
                 MezzeType.IntType
@@ -624,7 +624,7 @@ object MutationTypes {
         // __native_mut_seq_clear: {seq: MutSeq 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             context["__native_mut_seq_clear"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType)),
                 MezzeType.RecordType(emptyMap())
@@ -634,7 +634,7 @@ object MutationTypes {
         // __native_mut_seq_insert: {seq: MutSeq 'a, i: Int, v: 'a} -> Bool
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             context["__native_mut_seq_insert"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType, "i" to MezzeType.IntType, "v" to elementType)),
                 MezzeType.BoolType
@@ -644,8 +644,8 @@ object MutationTypes {
         // __native_mut_seq_remove: {seq: MutSeq 'a, i: Int} -> Option 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
-            val optionType = MezzeType.TypeApplication("Option", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
+            val optionType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
             context["__native_mut_seq_remove"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType, "i" to MezzeType.IntType)),
                 optionType
@@ -655,7 +655,7 @@ object MutationTypes {
         // __native_mut_seq_swap: {seq: MutSeq 'a, i: Int, j: Int} -> Bool
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutSeqType = MezzeType.TypeApplication("MutSeq", listOf(elementType))
+            val mutSeqType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutSeq", listOf(elementType))
             context["__native_mut_seq_swap"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("seq" to mutSeqType, "i" to MezzeType.IntType, "j" to MezzeType.IntType)),
                 MezzeType.BoolType
@@ -668,7 +668,7 @@ object MutationTypes {
 
         // __native_mut_int_read: {n: MutInt} -> Int
         run {
-            val mutIntType = MezzeType.TypeApplication("MutInt", emptyList())
+            val mutIntType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutInt", emptyList())
             context["__native_mut_int_read"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutIntType)),
                 MezzeType.IntType
@@ -677,7 +677,7 @@ object MutationTypes {
 
         // __native_mut_int_write: {n: MutInt, v: Int} -> {}
         run {
-            val mutIntType = MezzeType.TypeApplication("MutInt", emptyList())
+            val mutIntType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutInt", emptyList())
             context["__native_mut_int_write"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutIntType, "v" to MezzeType.IntType)),
                 MezzeType.RecordType(emptyMap())
@@ -686,7 +686,7 @@ object MutationTypes {
 
         // __native_mut_int_incr: {n: MutInt, delta: Int} -> {}
         run {
-            val mutIntType = MezzeType.TypeApplication("MutInt", emptyList())
+            val mutIntType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutInt", emptyList())
             context["__native_mut_int_incr"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutIntType, "delta" to MezzeType.IntType)),
                 MezzeType.RecordType(emptyMap())
@@ -695,7 +695,7 @@ object MutationTypes {
 
         // __native_mut_int_decr: {n: MutInt, delta: Int} -> {}
         run {
-            val mutIntType = MezzeType.TypeApplication("MutInt", emptyList())
+            val mutIntType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutInt", emptyList())
             context["__native_mut_int_decr"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutIntType, "delta" to MezzeType.IntType)),
                 MezzeType.RecordType(emptyMap())
@@ -704,7 +704,7 @@ object MutationTypes {
 
         // __native_mut_int_mul: {n: MutInt, factor: Int} -> {}
         run {
-            val mutIntType = MezzeType.TypeApplication("MutInt", emptyList())
+            val mutIntType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutInt", emptyList())
             context["__native_mut_int_mul"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutIntType, "factor" to MezzeType.IntType)),
                 MezzeType.RecordType(emptyMap())
@@ -713,7 +713,7 @@ object MutationTypes {
 
         // __native_mut_int_div: {n: MutInt, divisor: Int} -> {}
         run {
-            val mutIntType = MezzeType.TypeApplication("MutInt", emptyList())
+            val mutIntType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutInt", emptyList())
             context["__native_mut_int_div"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutIntType, "divisor" to MezzeType.IntType)),
                 MezzeType.RecordType(emptyMap())
@@ -722,7 +722,7 @@ object MutationTypes {
 
         // __native_mut_int_mod: {n: MutInt, divisor: Int} -> {}
         run {
-            val mutIntType = MezzeType.TypeApplication("MutInt", emptyList())
+            val mutIntType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutInt", emptyList())
             context["__native_mut_int_mod"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutIntType, "divisor" to MezzeType.IntType)),
                 MezzeType.RecordType(emptyMap())
@@ -731,7 +731,7 @@ object MutationTypes {
 
         // __native_mut_int_cas: {n: MutInt, expected: Int, new_val: Int} -> Bool
         run {
-            val mutIntType = MezzeType.TypeApplication("MutInt", emptyList())
+            val mutIntType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutInt", emptyList())
             context["__native_mut_int_cas"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "n" to mutIntType,
@@ -748,7 +748,7 @@ object MutationTypes {
 
         // __native_mut_float_read: {n: MutFloat} -> Float
         run {
-            val mutFloatType = MezzeType.TypeApplication("MutFloat", emptyList())
+            val mutFloatType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutFloat", emptyList())
             context["__native_mut_float_read"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutFloatType)),
                 MezzeType.FloatType
@@ -757,7 +757,7 @@ object MutationTypes {
 
         // __native_mut_float_write: {n: MutFloat, v: Float} -> {}
         run {
-            val mutFloatType = MezzeType.TypeApplication("MutFloat", emptyList())
+            val mutFloatType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutFloat", emptyList())
             context["__native_mut_float_write"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutFloatType, "v" to MezzeType.FloatType)),
                 MezzeType.RecordType(emptyMap())
@@ -766,7 +766,7 @@ object MutationTypes {
 
         // __native_mut_float_add: {n: MutFloat, delta: Float} -> {}
         run {
-            val mutFloatType = MezzeType.TypeApplication("MutFloat", emptyList())
+            val mutFloatType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutFloat", emptyList())
             context["__native_mut_float_add"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutFloatType, "delta" to MezzeType.FloatType)),
                 MezzeType.RecordType(emptyMap())
@@ -775,7 +775,7 @@ object MutationTypes {
 
         // __native_mut_float_sub: {n: MutFloat, delta: Float} -> {}
         run {
-            val mutFloatType = MezzeType.TypeApplication("MutFloat", emptyList())
+            val mutFloatType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutFloat", emptyList())
             context["__native_mut_float_sub"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutFloatType, "delta" to MezzeType.FloatType)),
                 MezzeType.RecordType(emptyMap())
@@ -784,7 +784,7 @@ object MutationTypes {
 
         // __native_mut_float_mul: {n: MutFloat, factor: Float} -> {}
         run {
-            val mutFloatType = MezzeType.TypeApplication("MutFloat", emptyList())
+            val mutFloatType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutFloat", emptyList())
             context["__native_mut_float_mul"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutFloatType, "factor" to MezzeType.FloatType)),
                 MezzeType.RecordType(emptyMap())
@@ -793,7 +793,7 @@ object MutationTypes {
 
         // __native_mut_float_div: {n: MutFloat, divisor: Float} -> {}
         run {
-            val mutFloatType = MezzeType.TypeApplication("MutFloat", emptyList())
+            val mutFloatType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutFloat", emptyList())
             context["__native_mut_float_div"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("n" to mutFloatType, "divisor" to MezzeType.FloatType)),
                 MezzeType.RecordType(emptyMap())
@@ -807,8 +807,8 @@ object MutationTypes {
         // __native_deque_to_mut: {deque: Deque 'a} -> MutDeque 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elementType))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
             context["__native_deque_to_mut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to dequeType)),
                 mutDequeType
@@ -818,8 +818,8 @@ object MutationTypes {
         // __native_deque_to_immut: {deque: MutDeque 'a} -> Deque 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val dequeType = MezzeType.TypeApplication("Deque", listOf(elementType))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
+            val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
             context["__native_deque_to_immut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to mutDequeType)),
                 dequeType
@@ -829,7 +829,7 @@ object MutationTypes {
         // __native_mut_deque_with_capacity: {capacity: Int} -> MutDeque 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
             context["__native_mut_deque_with_capacity"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("capacity" to MezzeType.IntType)),
                 mutDequeType
@@ -839,7 +839,7 @@ object MutationTypes {
         // __native_mut_deque_push_front: {deque: MutDeque 'a, elem: 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
             context["__native_mut_deque_push_front"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to mutDequeType, "elem" to elementType)),
                 MezzeType.RecordType(emptyMap())
@@ -849,7 +849,7 @@ object MutationTypes {
         // __native_mut_deque_push_back: {deque: MutDeque 'a, elem: 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
             context["__native_mut_deque_push_back"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to mutDequeType, "elem" to elementType)),
                 MezzeType.RecordType(emptyMap())
@@ -859,8 +859,8 @@ object MutationTypes {
         // __native_mut_deque_pop_front: {deque: MutDeque 'a} -> Option 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
-            val optionType = MezzeType.TypeApplication("Option", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
+            val optionType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
             context["__native_mut_deque_pop_front"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to mutDequeType)),
                 optionType
@@ -870,8 +870,8 @@ object MutationTypes {
         // __native_mut_deque_pop_back: {deque: MutDeque 'a} -> Option 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
-            val optionType = MezzeType.TypeApplication("Option", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
+            val optionType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
             context["__native_mut_deque_pop_back"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to mutDequeType)),
                 optionType
@@ -881,8 +881,8 @@ object MutationTypes {
         // __native_mut_deque_peek_front: {deque: MutDeque 'a} -> Option 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
-            val optionType = MezzeType.TypeApplication("Option", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
+            val optionType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
             context["__native_mut_deque_peek_front"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to mutDequeType)),
                 optionType
@@ -892,8 +892,8 @@ object MutationTypes {
         // __native_mut_deque_peek_back: {deque: MutDeque 'a} -> Option 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
-            val optionType = MezzeType.TypeApplication("Option", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
+            val optionType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
             context["__native_mut_deque_peek_back"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to mutDequeType)),
                 optionType
@@ -903,7 +903,7 @@ object MutationTypes {
         // __native_mut_deque_size: {deque: MutDeque 'a} -> Int
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
             context["__native_mut_deque_size"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to mutDequeType)),
                 MezzeType.IntType
@@ -913,7 +913,7 @@ object MutationTypes {
         // __native_mut_deque_is_empty: {deque: MutDeque 'a} -> Bool
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
             context["__native_mut_deque_is_empty"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to mutDequeType)),
                 MezzeType.BoolType
@@ -923,7 +923,7 @@ object MutationTypes {
         // __native_mut_deque_clear: {deque: MutDeque 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
             context["__native_mut_deque_clear"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to mutDequeType)),
                 MezzeType.RecordType(emptyMap())
@@ -933,7 +933,7 @@ object MutationTypes {
         // __native_mut_deque_reverse: {deque: MutDeque 'a} -> {}
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
             context["__native_mut_deque_reverse"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to mutDequeType)),
                 MezzeType.RecordType(emptyMap())
@@ -943,7 +943,7 @@ object MutationTypes {
         // __native_mut_deque_to_seq: {deque: MutDeque 'a} -> ['a]
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
-            val mutDequeType = MezzeType.TypeApplication("MutDeque", listOf(elementType))
+            val mutDequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutDeque", listOf(elementType))
             context["__native_mut_deque_to_seq"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("deque" to mutDequeType)),
                 MezzeType.SeqType(elementType)
@@ -956,7 +956,7 @@ object MutationTypes {
 
         // __native_mut_bool_read: {b: MutBool} -> Bool
         run {
-            val mutBoolType = MezzeType.TypeApplication("MutBool", emptyList())
+            val mutBoolType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBool", emptyList())
             context["__native_mut_bool_read"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("b" to mutBoolType)),
                 MezzeType.BoolType
@@ -965,7 +965,7 @@ object MutationTypes {
 
         // __native_mut_bool_write: {b: MutBool, v: Bool} -> {}
         run {
-            val mutBoolType = MezzeType.TypeApplication("MutBool", emptyList())
+            val mutBoolType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBool", emptyList())
             context["__native_mut_bool_write"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("b" to mutBoolType, "v" to MezzeType.BoolType)),
                 MezzeType.RecordType(emptyMap())
@@ -974,7 +974,7 @@ object MutationTypes {
 
         // __native_mut_bool_toggle: {b: MutBool} -> {}
         run {
-            val mutBoolType = MezzeType.TypeApplication("MutBool", emptyList())
+            val mutBoolType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBool", emptyList())
             context["__native_mut_bool_toggle"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("b" to mutBoolType)),
                 MezzeType.RecordType(emptyMap())
@@ -983,7 +983,7 @@ object MutationTypes {
 
         // __native_mut_bool_set_true: {b: MutBool} -> {}
         run {
-            val mutBoolType = MezzeType.TypeApplication("MutBool", emptyList())
+            val mutBoolType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBool", emptyList())
             context["__native_mut_bool_set_true"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("b" to mutBoolType)),
                 MezzeType.RecordType(emptyMap())
@@ -992,7 +992,7 @@ object MutationTypes {
 
         // __native_mut_bool_set_false: {b: MutBool} -> {}
         run {
-            val mutBoolType = MezzeType.TypeApplication("MutBool", emptyList())
+            val mutBoolType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutBool", emptyList())
             context["__native_mut_bool_set_false"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("b" to mutBoolType)),
                 MezzeType.RecordType(emptyMap())
@@ -1005,7 +1005,7 @@ object MutationTypes {
 
         // __native_string_to_mut: {s: String} -> MutString
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_string_to_mut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
                 mutStringType
@@ -1014,7 +1014,7 @@ object MutationTypes {
 
         // __native_string_with_capacity: {capacity: Int} -> MutString
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_string_with_capacity"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("capacity" to MezzeType.IntType)),
                 mutStringType
@@ -1023,7 +1023,7 @@ object MutationTypes {
 
         // __native_string_to_immut: {s: MutString} -> String
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_string_to_immut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to mutStringType)),
                 MezzeType.StringType
@@ -1032,7 +1032,7 @@ object MutationTypes {
 
         // __native_mut_string_read: {s: MutString} -> String
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_mut_string_read"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to mutStringType)),
                 MezzeType.StringType
@@ -1041,7 +1041,7 @@ object MutationTypes {
 
         // __native_mut_string_write: {s: MutString, v: String} -> {}
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_mut_string_write"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to mutStringType, "v" to MezzeType.StringType)),
                 MezzeType.RecordType(emptyMap())
@@ -1050,7 +1050,7 @@ object MutationTypes {
 
         // __native_mut_string_len: {s: MutString} -> Int
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_mut_string_len"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to mutStringType)),
                 MezzeType.IntType
@@ -1059,7 +1059,7 @@ object MutationTypes {
 
         // __native_mut_string_is_empty: {s: MutString} -> Bool
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_mut_string_is_empty"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to mutStringType)),
                 MezzeType.BoolType
@@ -1068,7 +1068,7 @@ object MutationTypes {
 
         // __native_mut_string_append: {s: MutString, suffix: String} -> {}
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_mut_string_append"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to mutStringType, "suffix" to MezzeType.StringType)),
                 MezzeType.RecordType(emptyMap())
@@ -1077,7 +1077,7 @@ object MutationTypes {
 
         // __native_mut_string_prepend: {s: MutString, prefix: String} -> {}
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_mut_string_prepend"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to mutStringType, "prefix" to MezzeType.StringType)),
                 MezzeType.RecordType(emptyMap())
@@ -1086,7 +1086,7 @@ object MutationTypes {
 
         // __native_mut_string_clear: {s: MutString} -> {}
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_mut_string_clear"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to mutStringType)),
                 MezzeType.RecordType(emptyMap())
@@ -1095,7 +1095,7 @@ object MutationTypes {
 
         // __native_mut_string_reverse: {s: MutString} -> {}
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_mut_string_reverse"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to mutStringType)),
                 MezzeType.RecordType(emptyMap())
@@ -1104,7 +1104,7 @@ object MutationTypes {
 
         // __native_mut_string_insert: {s: MutString, i: Int, text: String} -> {}
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_mut_string_insert"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "s" to mutStringType,
@@ -1117,7 +1117,7 @@ object MutationTypes {
 
         // __native_mut_string_delete: {s: MutString, start: Int, end: Int} -> {}
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_mut_string_delete"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "s" to mutStringType,
@@ -1130,8 +1130,8 @@ object MutationTypes {
 
         // __native_mut_string_char_at: {s: MutString, i: Int} -> Option Char
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
-            val optionCharType = MezzeType.TypeApplication("Option", listOf(MezzeType.CharType))
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
+            val optionCharType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.CharType))
             context["__native_mut_string_char_at"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("s" to mutStringType, "i" to MezzeType.IntType)),
                 optionCharType
@@ -1140,7 +1140,7 @@ object MutationTypes {
 
         // __native_mut_string_set_char_at: {s: MutString, i: Int, c: Char} -> {}
         run {
-            val mutStringType = MezzeType.TypeApplication("MutString", emptyList())
+            val mutStringType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutString", emptyList())
             context["__native_mut_string_set_char_at"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "s" to mutStringType,
@@ -1157,7 +1157,7 @@ object MutationTypes {
 
         // __native_char_to_mut: {c: Char} -> MutChar
         run {
-            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            val mutCharType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutChar", emptyList())
             context["__native_char_to_mut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
                 mutCharType
@@ -1166,7 +1166,7 @@ object MutationTypes {
 
         // __native_char_to_immut: {c: MutChar} -> Char
         run {
-            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            val mutCharType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutChar", emptyList())
             context["__native_char_to_immut"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("c" to mutCharType)),
                 MezzeType.CharType
@@ -1175,7 +1175,7 @@ object MutationTypes {
 
         // __native_mut_char_read: {c: MutChar} -> Char
         run {
-            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            val mutCharType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutChar", emptyList())
             context["__native_mut_char_read"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("c" to mutCharType)),
                 MezzeType.CharType
@@ -1184,7 +1184,7 @@ object MutationTypes {
 
         // __native_mut_char_write: {c: MutChar, v: Char} -> {}
         run {
-            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            val mutCharType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutChar", emptyList())
             context["__native_mut_char_write"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("c" to mutCharType, "v" to MezzeType.CharType)),
                 MezzeType.RecordType(emptyMap())
@@ -1193,7 +1193,7 @@ object MutationTypes {
 
         // __native_mut_char_to_upper: {c: MutChar} -> {}
         run {
-            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            val mutCharType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutChar", emptyList())
             context["__native_mut_char_to_upper"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("c" to mutCharType)),
                 MezzeType.RecordType(emptyMap())
@@ -1202,7 +1202,7 @@ object MutationTypes {
 
         // __native_mut_char_to_lower: {c: MutChar} -> {}
         run {
-            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            val mutCharType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutChar", emptyList())
             context["__native_mut_char_to_lower"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("c" to mutCharType)),
                 MezzeType.RecordType(emptyMap())
@@ -1211,7 +1211,7 @@ object MutationTypes {
 
         // __native_mut_char_is_digit: {c: MutChar} -> Bool
         run {
-            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            val mutCharType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutChar", emptyList())
             context["__native_mut_char_is_digit"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("c" to mutCharType)),
                 MezzeType.BoolType
@@ -1220,7 +1220,7 @@ object MutationTypes {
 
         // __native_mut_char_is_letter: {c: MutChar} -> Bool
         run {
-            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            val mutCharType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutChar", emptyList())
             context["__native_mut_char_is_letter"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("c" to mutCharType)),
                 MezzeType.BoolType
@@ -1229,7 +1229,7 @@ object MutationTypes {
 
         // __native_mut_char_is_whitespace: {c: MutChar} -> Bool
         run {
-            val mutCharType = MezzeType.TypeApplication("MutChar", emptyList())
+            val mutCharType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutChar", emptyList())
             context["__native_mut_char_is_whitespace"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("c" to mutCharType)),
                 MezzeType.BoolType
