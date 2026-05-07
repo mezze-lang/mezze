@@ -1,5 +1,11 @@
 ## Auto-imported modules available in every Mezze file.
 use std::abilities::sized
+use std::abilities::numeric
+use std::abilities::compare
+use std::abilities::logic
+use std::abilities::convert
+use std::abilities::default
+use std::abilities::inspect
 use std::int
 use std::float
 use std::nat

@@ -279,19 +279,18 @@ class PatternBugProbeTest {
         // prelude propagation (#304 fix only carried direct imports).
         // A future fix should propagate transitive abilities into the
         // serialized prelude_import_context.
+        // After #306: prelude now imports the full ability stack (numeric,
+        // compare, logic, convert, default, inspect) so these abilities ARE
+        // visible in the precompiled prelude context.
         val knownAbilitiesUsedEverywhere = setOf("NumAdd", "NumSub", "NumMul", "Eq", "Ord")
         val missing = knownAbilitiesUsedEverywhere.filter { name ->
             preludeAbilities.keys.none { it == name || it.endsWith("::$name") }
         }
-        // We don't fail on `missing` here — this test documents the gap.
-        // If you fix transitive ability propagation, tighten this check.
-        if (missing.isNotEmpty()) {
-            println(
-                "Note: prelude does not transitively expose ${missing.size} common abilities: $missing. " +
-                "These are reached via BuiltInAbilities or per-module transitive aggregation, " +
-                "not the precompiled prelude context. See PrecompiledStdlib follow-up."
-            )
-        }
+        assertTrue(
+            missing.isEmpty(),
+            "expected all common abilities in preludeImportContext, missing: $missing. " +
+            "preludeAbilities keys: ${preludeAbilities.keys.sorted()}"
+        )
     }
 
     @Test

@@ -1084,18 +1084,51 @@ class ExpressionConstraintGenerator {
         // Receiver-driven preference (issue #229): the operator-desugar
         // built-in abilities (NumAdd, NumMul, …) share method names with
         // collection inherent impls (Seq.add). When the receiver's concrete
-        // type has an inherent method but DOES NOT have an ability impl
-        // covering that name (the user-defined `matchingAbilities` would
-        // signal that), prefer the inherent. Without this, `nums.add {x=4}`
-        // (nums : [Int]) routes to NumAdd.add expecting `{r}` and fires a
-        // cascading "[Int] does not implement NumAdd" error.
-        if (inherentMethods.isNotEmpty() && matchingAbilities.isEmpty() && builtInMatches.isNotEmpty()) {
+        // type has an inherent method matching the call shape, prefer it.
+        // Without this, `nums.add {x=4}` (nums : [Int]) routes to NumAdd.add
+        // expecting `{r}` and fires a cascading "[Int] does not implement
+        // NumAdd" error.
+        //
+        // Originally guarded on `matchingAbilities.isEmpty()` — fine when
+        // operator abilities lived only in BuiltInAbilities. After #306
+        // those abilities also reach the regular ability registry. The
+        // guard now also fires on user-defined abilities — but only if
+        // the inherent's parameter shape matches the call-site arguments.
+        // Otherwise (e.g. `[1,2,3].set {i=0, v=42}` against a user ability
+        // `Mutable.set` whose param is {it, i, v}), the user's intent is
+        // the ability impl, not the unrelated Seq.set inherent.
+        if (inherentMethods.isNotEmpty() &&
+            (builtInMatches.isNotEmpty() || matchingAbilities.isNotEmpty())) {
             val concreteReceiver = getReceiverConcreteType(memberAccess.receiver, context)
             if (concreteReceiver != null) {
                 val receiverTypeName = getReceiverTypeName(concreteReceiver)
                 val matchingInherent = inherentMethods.filter { it.targetTypeName == receiverTypeName }
-                if (matchingInherent.isNotEmpty()) {
-                    return generateInherentMethodCall(expr, memberAccess, matchingInherent, context)
+                // Compute call-site field names locally (the cached value is
+                // declared further down). Field-shape filter: keep only
+                // inherents whose param record matches the call-site argument
+                // record. Without this, an unrelated inherent with the same
+                // name but different signature shadows a user ability
+                // designed for that exact concrete type.
+                val localCallSiteFields: Set<String>? = when (val args = expr.arguments) {
+                    is ParsedRecordLit -> args.entries.filterIsInstance<ParsedRecordEntry.Field>().map { it.name }.toSet()
+                    else -> null
+                }
+                val shapeMatched = if (localCallSiteFields != null) {
+                    matchingInherent.filter { info ->
+                        // InherentMethodInfo's `methodType` storage shape
+                        // varies: some paths register the param record WITH
+                        // an `it` receiver field; others (when the impl op
+                        // declares its param annotation explicitly) leave it
+                        // out. Compare both shapes.
+                        val pf = (info.methodType as? MezzeType.FunctionType)
+                            ?.paramType
+                            ?.let { it as? MezzeType.RecordType }
+                            ?.fields?.keys ?: return@filter true
+                        pf == localCallSiteFields || (pf - Keywords.IT) == localCallSiteFields
+                    }
+                } else matchingInherent
+                if (shapeMatched.isNotEmpty()) {
+                    return generateInherentMethodCall(expr, memberAccess, shapeMatched, context)
                 }
             }
         }
