@@ -51,9 +51,9 @@ class AbilityConstraintInferenceTest {
         typeChecker = TypeChecker()
     }
 
-    private fun typeCheck(code: String, enablePrelude: Boolean = false): TypeCheckResult {
+    private fun typeCheck(code: String): TypeCheckResult {
         val parsedModule = parser.parseParsedModule(code, "test.mz")
-        return typeChecker.typeCheck(parsedModule, Paths.get("."), enablePrelude = enablePrelude)
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     /** Stringify a type for easy contains-checks. */
@@ -169,13 +169,6 @@ class AbilityConstraintInferenceTest {
     // Either way: NEVER silently fall back to structural-record.
     // ========================================================================
 
-    @org.junit.jupiter.api.Disabled(
-        "Known bug: when annotation has `with X 'a` but body uses a method not declared by X, " +
-        "the typechecker silently falls back to structural-record interpretation. Should error " +
-        "or pin 'a to a concrete type that has the inherent method. Filed for follow-up — " +
-        "fixing this requires the constraint-aware method-call resolution rule that Pass-1 " +
-        "inference doesn't yet support."
-    )
     @Test
     fun `annotated constraint plus body method-name not in any ability or inherent fails`() {
         // wrong_name_size is in NO ability and NO inherent impl. The body cannot
@@ -314,25 +307,17 @@ class AbilityConstraintInferenceTest {
     // PRELUDE ABILITY (Sized) — same as same-module case, but with prelude scope
     // ========================================================================
 
-    @org.junit.jupiter.api.Disabled(
-        "Known bug: prelude abilities aren't registered into typingContext.abilityOperationTypes, " +
-        "so findAbilitiesByMethodName misses them. Naive fix (passing transitive abilities into " +
-        "ContextBuilder.importedAbilities) breaks ~12 other tests because ContextBuilder treats " +
-        "the imported set as needing impl validation. The right fix is more surgical: register " +
-        "ability operation types from transitive abilities AFTER the build, without re-running " +
-        "impl validation. Filed for follow-up."
-    )
     @Test
     fun `prelude Sized ability is available without explicit import`() {
         // Sized comes from prelude. The annotation should be honored just like
-        // any same-module ability.
+        // any same-module ability — currently a known bug (#304).
         val code = """
             let x : {m: 'a} -> Int with Sized 'a = {m} -> m.size {}
         """.trimIndent()
 
         // Test that the inferred type carries the constraint, not that it
         // degenerates to structural record.
-        val result = typeCheck(code, enablePrelude = true)
+        val result = typeCheck(code)
         val t = render(result.getVariableType("x"))
         assertTrue(
             t.contains("Sized"),
