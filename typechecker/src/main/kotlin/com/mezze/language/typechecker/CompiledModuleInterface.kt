@@ -186,9 +186,17 @@ data class CompiledModuleInterface(
                         .filter { it.name.startsWith("'") }
                         .map { it.name }
                         .toSet()
+                    // Look up the ability's content hash from importContext, matching
+                    // the slow path (TypeChecker.kt mergeImportContext). Without this,
+                    // FAST PATH impls have abilityDeclHash=null and the by-hash impl
+                    // registry in TypingContext silently drifts from the by-name index —
+                    // breaks any code that reaches an impl through hash lookup.
+                    val abilityDeclHash = implDecl.abilityName?.let { name ->
+                        importContext.importedAbilities[name]?.contentHash
+                    }
                     val implInfo = TypingContext.AbilityImplInfo(
                         abilityName = implDecl.abilityName,
-                        abilityDeclHash = null,
+                        abilityDeclHash = abilityDeclHash,
                         targetTypes = implDecl.allTypeArgs.map { it.toString() },
                         targetTypeAnnotations = implDecl.allTypeArgs,
                         associatedTypeBindings = implDecl.associatedTypeBindings,

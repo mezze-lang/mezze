@@ -3118,10 +3118,18 @@ class ExpressionConstraintGenerator {
                             arguments = syntheticArgs,
                             loc = expr.loc
                         )
+                        // Force the dispatcher to pick THIS ability (not a coincidentally-
+                        // matching one). Reuse the annotationAbilityNames channel — its
+                        // semantics are "prefer these abilities when multiple match" — by
+                        // narrowing it to {receiverName}. Without this, `B.foo {it=x}`
+                        // routes to `A` whenever both have a `foo` method.
+                        val qualifiedContext = context.copy(
+                            annotationAbilityNames = setOf(receiverName)
+                        )
                         val methodResult = tryGenerateMethodCall(
                             syntheticCall,
                             syntheticReceiverAccess,
-                            context
+                            qualifiedContext
                         )
                         if (methodResult != null) {
                             return methodResult

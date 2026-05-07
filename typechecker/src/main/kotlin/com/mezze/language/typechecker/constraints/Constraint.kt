@@ -437,10 +437,11 @@ data class ConstraintContext(
     val enclosingFunctionName: String? = null,
     // TCO: True when current expression is in tail position
     val inTailPosition: Boolean = false,
-    // Ability names declared in the enclosing function's `with X 'a` annotation.
-    // When method-call resolution finds multiple candidate abilities, prefer
-    // ones the user explicitly declared in scope (#304). Empty set means no
-    // annotation-driven preference.
+    // Ability names the user has explicitly named — either in an enclosing
+    // function's `with X 'a` annotation, or as the prefix of a qualified
+    // call like `X.method {…}`. When method-call resolution finds multiple
+    // candidate abilities for the same method name, ones in this set win.
+    // Empty set means no user-driven preference (#304).
     val annotationAbilityNames: Set<String> = emptySet()
 ) {
     /**

@@ -453,7 +453,13 @@ class ContextBuilder {
                 op.name to functionType
             }
         )
-        result = result.extendWithAbilityOperationType(abilityDecl.name, abilityRecordType)
+        // Pass abilityDecl.contentHash so the by-hash index gets populated alongside
+        // the by-name index. Without this, getAbilityOperationTypeByHash always returns
+        // null even though the ability is in the context — the two registries silently
+        // drift, breaking any future hash-based lookup.
+        result = result.extendWithAbilityOperationType(
+            abilityDecl.name, abilityRecordType, abilityDecl.contentHash
+        )
 
         return result
     }
@@ -488,7 +494,11 @@ class ContextBuilder {
             }
         )
         // Use dedicated map instead of "${name}_ability" pattern
-        result = result.extendWithEffectOperationType(effectDecl.name, effectRecordType)
+        // Pass effectDecl.contentHash so by-hash index stays in sync with by-name —
+        // see addAbilityMethods for the analogous registry-drift fix.
+        result = result.extendWithEffectOperationType(
+            effectDecl.name, effectRecordType, effectDecl.contentHash
+        )
 
         return result
     }
