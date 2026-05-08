@@ -147,7 +147,7 @@ class CodecGenerator {
             record("val" to id("it"), "path" to id("path"))
         )
         return createEncodeImpl(formatType, MezzeType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
+            constructors = mapOf(com.mezze.language.ast.BuiltinTypes.TRUE to null, com.mezze.language.ast.BuiltinTypes.FALSE to null),
             rowVar = null
         ), body)
     }
@@ -193,7 +193,7 @@ class CodecGenerator {
             record("val" to id("it"), "path" to id("path"))
         )
         return createDecodeImpl(formatType, MezzeType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
+            constructors = mapOf(com.mezze.language.ast.BuiltinTypes.TRUE to null, com.mezze.language.ast.BuiltinTypes.FALSE to null),
             rowVar = null
         ), body)
     }

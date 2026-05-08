@@ -2514,7 +2514,7 @@ class ConstraintSolver(
 
                     // Use the closed Bool variant type
                     val boolType = MezzeType.VariantType(
-                        constructors = mapOf("True" to null, "False" to null),
+                        constructors = mapOf(com.mezze.language.ast.BuiltinTypes.TRUE to null, com.mezze.language.ast.BuiltinTypes.FALSE to null),
                         rowVar = null,  // Bool is closed
                         typeName = "Bool"
                     )
@@ -2599,14 +2599,14 @@ class ConstraintSolver(
                 // SPECIAL CASE: Built-in List constructors (Cons/Nil) in pattern context
                 // When no user-defined type declaration exists for Cons/Nil, they belong to
                 // the built-in List type which should produce ListType.
-                if (constructorName == "Cons" || constructorName == "Nil") {
+                if (constructorName == com.mezze.language.ast.BuiltinTypes.CONS || constructorName == com.mezze.language.ast.BuiltinTypes.NIL) {
                     val elemTypeVar = MezzeType.VarType(TypeVar.fresh())
                     val listType = MezzeType.ListType(elemTypeVar)
 
                     var resultSubst = Substitution.single(variantType.variable, listType)
 
                     // For Cons, unify the payload type
-                    if (constructorName == "Cons" && expectedPayloadType != null) {
+                    if (constructorName == com.mezze.language.ast.BuiltinTypes.CONS && expectedPayloadType != null) {
                         val expectedConsPayload = MezzeType.RecordType(mapOf(
                             "head" to elemTypeVar,
                             "tail" to listType
@@ -2640,7 +2640,7 @@ class ConstraintSolver(
                 }
 
                 val boolType = MezzeType.VariantType(
-                    constructors = mapOf("True" to null, "False" to null),
+                    constructors = mapOf(com.mezze.language.ast.BuiltinTypes.TRUE to null, com.mezze.language.ast.BuiltinTypes.FALSE to null),
                     rowVar = null,  // Bool is closed
                     typeName = "Bool"
                 )
@@ -2652,7 +2652,7 @@ class ConstraintSolver(
             // SPECIAL CASE: Cons/Nil constructors in expression context
             // First check if there's a user-defined type declaration. If so, use VariantType.
             // Only fall back to built-in ListType when no type declaration exists.
-            if (constructorName == "Cons" || constructorName == "Nil") {
+            if (constructorName == com.mezze.language.ast.BuiltinTypes.CONS || constructorName == com.mezze.language.ast.BuiltinTypes.NIL) {
                 val declaringTypeExpr = findTypeDeclarationForConstructor(constructorName)
 
                 if (declaringTypeExpr != null) {
@@ -2718,7 +2718,7 @@ class ConstraintSolver(
                 var resultSubst = Substitution.single(variantType.variable, listType)
 
                 // For Cons, unify the payload type
-                if (constructorName == "Cons" && expectedPayloadType != null) {
+                if (constructorName == com.mezze.language.ast.BuiltinTypes.CONS && expectedPayloadType != null) {
                     val expectedConsPayload = MezzeType.RecordType(mapOf(
                         "head" to elemTypeVar,
                         "tail" to listType
@@ -3057,7 +3057,7 @@ class ConstraintSolver(
         // List is internally ListType for optimization, but users can pattern match
         // on it as if it were `type List 'a = | Cons { head: 'a, tail: List 'a } | Nil |`
         if (variantType is MezzeType.ListType) {
-            if (constructorName == "Cons") {
+            if (constructorName == com.mezze.language.ast.BuiltinTypes.CONS) {
                 // Cons has payload: { head: 'a, tail: List 'a }
                 if (expectedPayloadType != null) {
                     val elemType = variantType.elementType
@@ -3079,7 +3079,7 @@ class ConstraintSolver(
                         "Use 'Cons { head, tail }' to match the payload."
                     )
                 }
-            } else if (constructorName == "Nil") {
+            } else if (constructorName == com.mezze.language.ast.BuiltinTypes.NIL) {
                 // Nil has no payload
                 if (expectedPayloadType != null) {
                     return ConstraintResult.Failure(

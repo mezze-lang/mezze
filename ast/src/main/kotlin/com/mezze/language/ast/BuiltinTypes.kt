@@ -28,6 +28,22 @@ object BuiltinTypes {
     const val OK = "Ok"
     const val ERR = "Err"
 
+    // Bool constructors
+    const val TRUE = "True"
+    const val FALSE = "False"
+
+    // List (cons-list) constructors
+    const val CONS = "Cons"
+    const val NIL = "Nil"
+
+    /**
+     * All variant constructor names that belong to types defined internally
+     * (not via .mz `type` declarations). Used by validators that need to know
+     * which constructor names are "declared" and so exempt from anonymous-
+     * constructor rules.
+     */
+    val coreVariantConstructors = setOf(SOME, NONE, OK, ERR, TRUE, FALSE, CONS, NIL)
+
     // Standard record field names for built-in types
     const val VAL_FIELD = "val"      // Used in Option.Some and Result.Ok
     const val ERROR_FIELD = "error"  // Used in Result.Err
@@ -41,7 +57,7 @@ object BuiltinTypes {
 
     fun getBoolType(): MezzeType.VariantType {
         return MezzeType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
+            constructors = mapOf(TRUE to null, FALSE to null),
             rowVar = null
         )
     }

@@ -134,7 +134,7 @@ class PatternConstraintGenerator {
                 MezzeType.FloatType
             }
             is ParsedLiteralValue.BoolValue -> MezzeType.VariantType(
-                constructors = mapOf("True" to null, "False" to null),
+                constructors = mapOf(com.mezze.language.ast.BuiltinTypes.TRUE to null, com.mezze.language.ast.BuiltinTypes.FALSE to null),
                 rowVar = null
             )
             is ParsedLiteralValue.StringValue -> MezzeType.StringType

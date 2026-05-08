@@ -1284,7 +1284,7 @@ class TypeValidator(
             is MezzeType.TypeApplication ->
                 expandTypeApplicationToVariant(scrutineeType, typeDeclarations) ?: scrutineeType
             is MezzeType.BoolType -> MezzeType.VariantType(
-                constructors = mapOf("True" to null, "False" to null), rowVar = null
+                constructors = mapOf(com.mezze.language.ast.BuiltinTypes.TRUE to null, com.mezze.language.ast.BuiltinTypes.FALSE to null), rowVar = null
             )
             else -> scrutineeType
         }

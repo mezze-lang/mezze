@@ -3684,7 +3684,7 @@ class ExpressionConstraintGenerator {
                     Constraint.Equality(
                         left = guardResult.type,
                         right = MezzeType.VariantType(
-                            constructors = mapOf("True" to null, "False" to null),
+                            constructors = mapOf(com.mezze.language.ast.BuiltinTypes.TRUE to null, com.mezze.language.ast.BuiltinTypes.FALSE to null),
                             rowVar = null
                         ),
                         context = "Match guard must be Bool"
