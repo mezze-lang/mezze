@@ -62,6 +62,10 @@ class ConstraintGenerator(
     // Ensures all occurrences of 'a in an annotation refer to the same TypeVar instance
     // Matches old typechecker behavior
     private val typeVarCache = mutableMapOf<String, TypeVar>()
+
+    // Shared row variable across all `<...>` in a single annotation. Lazily allocated.
+    // See ContextBuilder.sharedAnnotationRowVar for full rationale.
+    private var sharedAnnotationRowVar: RowVar? = null
     /**
      * Generate constraints for a program.
      *
@@ -294,9 +298,13 @@ class ConstraintGenerator(
                                 }
 
                                 // 2. EFFECTS VALIDATION
-                                // Check that annotation doesn't overpromise effects.
-                                // ONLY validate when there are NO function calls - because effects propagate
-                                // through function calls and we can't easily track that here.
+                                // Annotation must not declare effects the inferred type
+                                // doesn't carry. Skipped when the body contains function
+                                // calls — even with the new shared-row-var rule (#310),
+                                // the unifier doesn't yet propagate row var bindings from
+                                // a HOF's input row to its output row at call sites, so
+                                // legitimate annotations like `async_get : … <Http, Async>`
+                                // would be flagged as over-promising.
                                 if (annotation is ParsedFunctionType &&
                                     annotation.effects != null &&
                                     !containsFunctionCalls(item.value)) {
@@ -1145,6 +1153,7 @@ class ConstraintGenerator(
      */
     private fun convertTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
         typeVarCache.clear()
+        sharedAnnotationRowVar = null
         return convertTypeAnnotationInternal(annotation)
     }
 
@@ -1203,8 +1212,13 @@ class ConstraintGenerator(
                         // Use allEffectNames to include both simple effects and effect annotations
                         ContextBuilder.validateHermeticEffects(effectRow.allEffectNames)
 
-                        // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
-                        val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
+                        // If the effect row is polymorphic (<...> or <Effect, ...>), reuse
+                        // the per-annotation shared row var so multiple `<...>` in one
+                        // signature carry the same effects (input → output propagation).
+                        val rowVar = if (effectRow.isPolymorphic) {
+                            sharedAnnotationRowVar
+                                ?: RowVar.fresh().also { sharedAnnotationRowVar = it }
+                        } else null
 
                         // Convert effect annotations with associated types to EffectInstance objects
                         val effectInstances = effectRow.effectAnnotations.map { effectAnnotation ->

@@ -33,6 +33,16 @@ class ContextBuilder {
     private val typeVarCache = mutableMapOf<String, TypeVar>()
 
     /**
+     * Shared effect row variable for the annotation currently being converted.
+     * Lazily allocated the first time a `<...>` is seen, then reused for every
+     * other `<...>` in the same signature. This makes effect rows propagate
+     * naturally — `{ f: {} -> 'a <...> } -> Promise 'a <Async, ...>` carries
+     * f's effects into the output instead of allocating a fresh, discarded
+     * row variable per occurrence.
+     */
+    private var sharedAnnotationRowVar: RowVar? = null
+
+    /**
      * Effect declarations available during the current build() invocation.
      * Populated at the start of build() so that convertTypeAnnotationV1Internal
      * can resolve effect names to their content hashes for EffectRow.effectHashes.
@@ -1130,6 +1140,7 @@ class ContextBuilder {
      */
     fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
         typeVarCache.clear()
+        sharedAnnotationRowVar = null
         return convertParsedTypeAnnotationInternal(annotation)
     }
 
@@ -1159,7 +1170,13 @@ class ContextBuilder {
                             val hash = currentEffectDecls[name]?.contentHash ?: return@mapNotNull null
                             name to hash
                         }.toMap()
-                        val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
+                        val rowVar = if (effectRow.isPolymorphic) {
+                            // All `<...>` markers within one signature share the same
+                            // row variable — that's what carries effects from an input
+                            // closure to the output. First `<...>` allocates; rest reuse.
+                            sharedAnnotationRowVar
+                                ?: RowVar.fresh().also { sharedAnnotationRowVar = it }
+                        } else null
                         MezzeType.EffectRow.simple(effectRow.effects.toSet(), rowVar, effectRow.isPerformed, hashes)
                     },
                     abilityConstraints = annotation.abilityConstraints.map { constraint ->

@@ -227,17 +227,23 @@ object STMTypes {
     }
 
     private fun registerBulkOperations(context: MutableMap<String, MezzeType>) {
-        // __native_stm_read_all: {vars: [TVar 'a]} -> ['a]
+        // __native_stm_read_all and __native_stm_write_all are the only STM
+        // natives that appear as a BARE call in a wrapper that declares <STM>
+        // (see std/effects/stm.mz read_all / write_all). Every other STM native
+        // sits inside an `impl STM for X where {…}` handler body, where the
+        // handler itself can't self-refer to <STM>, so those stay pure.
+        // __native_stm_read_all: {vars: [TVar 'a]} -> ['a] <STM>
         context["__native_stm_read_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "vars" to MezzeType.SeqType(
                     com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
                 )
             )),
-            MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
+            MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
+            MezzeType.EffectRow(effects = setOf("STM"))
         )
 
-        // __native_stm_write_all: {pairs: [{var: TVar 'a, val: 'a}]} -> {}
+        // __native_stm_write_all: {pairs: [{var: TVar 'a, val: 'a}]} -> {} <STM>
         context["__native_stm_write_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "pairs" to MezzeType.SeqType(
@@ -247,7 +253,8 @@ object STMTypes {
                     ))
                 )
             )),
-            MezzeType.RecordType(emptyMap())
+            MezzeType.RecordType(emptyMap()),
+            MezzeType.EffectRow(effects = setOf("STM"))
         )
 
         // __native_stm_atomic: {f: {} -> 'a <e>} -> 'a <e>

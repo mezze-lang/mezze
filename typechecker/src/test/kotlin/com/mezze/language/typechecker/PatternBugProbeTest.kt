@@ -701,6 +701,28 @@ class PatternBugProbeTest {
     }
 
     @Test
+    fun `annotation lying about effects is detected for bodies without function calls`() {
+        // #310 baseline: over-promise IS rejected when the body has NO function
+        // calls — that's the case where the constraint solver can fully account
+        // for body effects. Bodies with function calls are still skipped (gate
+        // kept) until row-var propagation through HOFs is wired up end-to-end.
+        val code = """
+            let f : {x: Int} -> Int <Console> = {x} -> x + 1
+        """.trimIndent()
+        try {
+            typeCheck(code)
+            assert(false) {
+                "expected over-promise rejection: f annotated <Console> but body is pure"
+            }
+        } catch (e: TypeCheckError) {
+            assertTrue(
+                e.message?.contains("Console") == true,
+                "error should name the over-promised effect, got: ${e.message}"
+            )
+        }
+    }
+
+    @Test
     fun `annotation declaring unused ability constraint is observable`() {
         // f's annotation says `with Sized 'a` but body never calls a Sized
         // method on 'a. The constraint is dead weight — could indicate a

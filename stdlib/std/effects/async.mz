@@ -34,7 +34,7 @@ pub type AsyncError = |
 ## Unified async effect for spawning, awaiting, and structured concurrency.
 effect Async where {
   ## Spawn a computation, returning a Promise immediately.
-  spawn: { f: {} -> 'a <...> } -> Promise 'a <Async>,
+  spawn: { f: {} -> 'a <...> } -> Promise 'a <Async, ...>,
   ## Await a Promise to completion.
   await: { p: Promise 'a } -> 'a <Async>,
   ## Wait for the first Promise to complete.
@@ -54,21 +54,21 @@ effect Async where {
   ## Cancellation checkpoint -- throws if cancelled.
   check: {} -> {} <Async>,
   ## Run two computations concurrently, cancel sibling on failure.
-  join: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Async>,
+  join: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Async, ...>,
   ## Run three computations concurrently.
-  join3: { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: 'a, b: 'b, c: 'c } <Async>,
+  join3: { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: 'a, b: 'b, c: 'c } <Async, ...>,
   ## Map over a sequence concurrently, results in input order.
-  map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Async>,
+  map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Async, ...>,
   ## Run f on each element concurrently for side effects.
-  for_each: { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Async>,
+  for_each: { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Async, ...>,
   ## Filter elements with concurrent predicate evaluation.
-  filter: { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Async>,
+  filter: { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Async, ...>,
   ## Return first successful result; fail only if all fail.
   any: { ps: [Promise 'a] } -> 'a <Async>,
   ## Await all promises, returning Results (never throws).
   settle: { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async>,
   ## Run f within a structured concurrency scope.
-  scoped: { f: { sc: Scope 'a } -> 'a <...> } -> 'a <Async>
+  scoped: { f: { sc: Scope 'a } -> 'a <...> } -> 'a <Async, ...>
 }
 
 ## Default handler using Project Loom virtual threads.
