@@ -680,6 +680,46 @@ class TypeChecker(
                     // will be null and the pipeline will skip lowering.
                 }
 
+                // #311: anonymous variant constructors must have a single shape per module.
+                // Stdlib modules use polymorphic constructors (Some, None, Ok, Err) that we
+                // intentionally let through — they're declared via `type` decls there.
+                if (!isStdlibModule && emittedTypedModule != null) {
+                    val declaredCtors = mutableSetOf<String>()
+                    // Built-in variant constructors (Option, Result, Bool, List) —
+                    // these types are defined internally, not via .mz type decls, so
+                    // they wouldn't otherwise show up in any of our scans.
+                    declaredCtors.addAll(com.mezze.language.ast.BuiltinTypes.coreVariantConstructors)
+                    fun collectFromTypeDecl(decl: com.mezze.language.parsedast.ParsedTypeDecl) {
+                        when (val def = decl.definition) {
+                            is com.mezze.language.parsedast.ParsedVariantDef ->
+                                def.constructors.forEach { declaredCtors.add(it.name) }
+                            is com.mezze.language.parsedast.ParsedNewtypeDef ->
+                                declaredCtors.add(def.constructor)
+                            else -> {}
+                        }
+                    }
+                    for (decl in module.decls) {
+                        if (decl is com.mezze.language.parsedast.ParsedTypeDecl) collectFromTypeDecl(decl)
+                    }
+                    importContext?.importedTypes?.values?.forEach { collectFromTypeDecl(it) }
+                    // Prelude type declarations (Option, Result, …) live in stdlibTypedModules.
+                    for ((_, stdMod) in PrecompiledStdlib.stdlibTypedModules) {
+                        for (d in stdMod.decls) {
+                            if (d is com.mezze.language.typedast.TypedTypeDecl) {
+                                when (val def = d.definition) {
+                                    is com.mezze.language.typedast.TypedVariantDef ->
+                                        def.constructors.keys.forEach { declaredCtors.add(it) }
+                                    is com.mezze.language.typedast.TypedNewtypeDef ->
+                                        declaredCtors.add(def.constructor)
+                                    else -> {}
+                                }
+                            }
+                        }
+                    }
+                    com.mezze.language.typechecker.validation.AnonymousConstructorShapeValidator
+                        .validate(emittedTypedModule!!, declaredCtors)
+                }
+
                 // Phase 2: Mono -> Resolve -> Lower (entry module only)
                 if (!isStdlibModule && emittedTypedModule != null) try {
                     val wrapped = com.mezze.language.typechecker.emit.EntryFunctionBuilder.wrapTopLevel(emittedTypedModule!!)

@@ -359,9 +359,38 @@ object DuplicateDeclarationValidator {
     }
 
     /**
-     * Validate no duplicate variable declarations
+     * Validate no duplicate value-namespace declarations.
+     *
+     * Value namespace includes:
+     * - `let x` bindings
+     * - performer names (e.g. `impl Eff for Performer`) — they're invokable
+     *   as handles in `perform Performer in ...` so they're value-level
+     * - declared variant + newtype constructors are also in value namespace,
+     *   but their cross-collision with let/performer is enforced via
+     *   `validateDuplicateConstructors` (constructors globally unique) plus
+     *   the type-namespace checks. We just need to make sure let and
+     *   performer don't collide with each other or with constructors here.
+     *
+     * #311.
      */
     private fun validateDuplicateVariables(module: ParsedModule) {
+        // Pre-collect performer names so we can cross-check against lets.
+        val performerNames = module.decls
+            .filterIsInstance<ParsedPerformerDecl>()
+            .map { it.performerName }
+            .toSet()
+
+        // Pre-collect declared constructor names (variant + newtype) so let
+        // bindings can't shadow a constructor that's also in value ns.
+        val constructorNames = mutableSetOf<String>()
+        for (typeDecl in module.decls.filterIsInstance<ParsedTypeDecl>()) {
+            when (val def = typeDecl.definition) {
+                is ParsedVariantDef -> def.constructors.forEach { constructorNames.add(it.name) }
+                is ParsedNewtypeDef -> constructorNames.add(def.constructor)
+                else -> {}  // record defs have no constructor in value ns
+            }
+        }
+
         val declaredVariables = mutableSetOf<String>()
 
         for (item in module.decls.filterIsInstance<ParsedLetDecl>()) {
@@ -371,6 +400,20 @@ object DuplicateDeclarationValidator {
                 if (declaredVariables.contains(name)) {
                     throw TypeCheckError(
                         "Duplicate variable declaration: '$name' is already defined in this scope",
+                        item.value.loc
+                    )
+                }
+                if (name in performerNames) {
+                    throw TypeCheckError(
+                        "Name '$name' collides with an effect performer of the same name. " +
+                            "Performers and let bindings share the value namespace; rename one.",
+                        item.value.loc
+                    )
+                }
+                if (name in constructorNames) {
+                    throw TypeCheckError(
+                        "Name '$name' collides with a variant or newtype constructor of the same name. " +
+                            "Constructors and let bindings share the value namespace; rename one.",
                         item.value.loc
                     )
                 }
