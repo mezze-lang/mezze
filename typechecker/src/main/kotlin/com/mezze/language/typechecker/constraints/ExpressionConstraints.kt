@@ -2774,13 +2774,11 @@ class ExpressionConstraintGenerator {
         //   - Exception with 'error = | MathError, FakeError |
         val (mergedEffectInstances, effectMergeConstraints) = mergeEffectInstances(bodyResult.effectInstances)
 
-        val effectRow = if (bodyResult.effects.isNotEmpty() || mergedEffectInstances.isNotEmpty() || bodyResult.performed || bodyResult.effectRowVar != null) {
-            // #312: carry the body's open row var (from a polymorphic-row HOF call) so
-            // unification can later substitute it with the closure's concrete effects.
+        val effectRow = if (bodyResult.effects.isNotEmpty() || mergedEffectInstances.isNotEmpty() || bodyResult.performed) {
             MezzeType.EffectRow(
                 effects = bodyResult.effects,
                 effectInstances = mergedEffectInstances,
-                rowVar = bodyResult.effectRowVar,
+                rowVar = null,
                 performed = bodyResult.performed
             )
         } else {
@@ -3397,17 +3395,11 @@ class ExpressionConstraintGenerator {
                     functionType.returnType
                 }
 
-                // #312: surface the function's effect row var so it bubbles to enclosing
-                // scopes. After unification with an effectful closure argument, the
-                // substitution will rewrite this row var into concrete effects.
-                val propagatedEffectRowVar =
-                    effectRow.rowVar ?: functionResult.effectRowVar ?: argumentResult.effectRowVar
                 return ConstraintResult(
                     type = resultType,
                     constraints = constraints,
                     effects = propagatedEffects,  // Propagate effects from function type
                     effectInstances = propagatedEffectInstances,  // Propagate effect instances from function type too!
-                    effectRowVar = propagatedEffectRowVar,
                     performed = propagatedPerformed,  // Propagate performed flag
                     abilityConstraints = effectfulAbilityConstraints,  // Propagate ability constraints including method-level
                     associatedTypeConstraints = functionResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
@@ -3796,7 +3788,6 @@ class ExpressionConstraintGenerator {
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val effects = mutableSetOf<String>()
         val effectInstances = mutableSetOf<MezzeType.EffectInstance>()
-        var effectRowVar: com.mezze.language.ast.RowVar? = null  // #312: open row from any effectful HOF call
         var performed = false  // Track performed flag
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
@@ -3835,7 +3826,6 @@ class ExpressionConstraintGenerator {
                     undefinedVars.addAll(exprResult.undefinedVariables)
                     effects.addAll(exprResult.effects)
                     effectInstances.addAll(exprResult.effectInstances)
-                    if (effectRowVar == null) effectRowVar = exprResult.effectRowVar
                     performed = performed || exprResult.performed  // Propagate performed
                     abilityConstraints.addAll(exprResult.abilityConstraints)
                     associatedTypeConstraints.addAll(exprResult.associatedTypeConstraints)
@@ -3963,7 +3953,6 @@ class ExpressionConstraintGenerator {
                     undefinedVars.addAll(exprResult.undefinedVariables)
                     effects.addAll(exprResult.effects)
                     effectInstances.addAll(exprResult.effectInstances)
-                    if (effectRowVar == null) effectRowVar = exprResult.effectRowVar
                     performed = performed || exprResult.performed  // Propagate performed
                     abilityConstraints.addAll(exprResult.abilityConstraints)
                     associatedTypeConstraints.addAll(exprResult.associatedTypeConstraints)
@@ -3988,7 +3977,6 @@ class ExpressionConstraintGenerator {
         undefinedVars.addAll(resultResult.undefinedVariables)
         effects.addAll(resultResult.effects)
         effectInstances.addAll(resultResult.effectInstances)
-        if (effectRowVar == null) effectRowVar = resultResult.effectRowVar
         performed = performed || resultResult.performed  // Propagate performed
         abilityConstraints.addAll(resultResult.abilityConstraints)
         associatedTypeConstraints.addAll(resultResult.associatedTypeConstraints)
@@ -4024,7 +4012,6 @@ class ExpressionConstraintGenerator {
             constraints = constraints,
             effects = effects,  // Still track effects for propagation
             effectInstances = effectInstances,
-            effectRowVar = effectRowVar,
             performed = performed,  // Include performed flag
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,

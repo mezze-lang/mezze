@@ -299,14 +299,12 @@ class ConstraintGenerator(
 
                                 // 2. EFFECTS VALIDATION
                                 // Annotation must not declare effects the inferred type
-                                // doesn't carry. Skipped when the body has function calls
-                                // — the row-var propagation infra (#312) is wired through
-                                // ConstraintResult/Substitution/Unification, but until the
-                                // parser preserves the polymorphic-row marker on
-                                // ParsedEffectOp the row var on operations like
-                                // `Async.spawn` can't be reconstructed at the operation's
-                                // outer level without breaking unrelated operations like
-                                // `Workflow.step` whose params are intentionally pure.
+                                // doesn't carry. Skipped when the body contains function
+                                // calls — even with the new shared-row-var rule (#310),
+                                // the unifier doesn't yet propagate row var bindings from
+                                // a HOF's input row to its output row at call sites, so
+                                // legitimate annotations like `async_get : … <Http, Async>`
+                                // would be flagged as over-promising.
                                 if (annotation is ParsedFunctionType &&
                                     annotation.effects != null &&
                                     !containsFunctionCalls(item.value)) {

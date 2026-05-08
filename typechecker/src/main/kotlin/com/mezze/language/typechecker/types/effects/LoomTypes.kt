@@ -64,15 +64,14 @@ object LoomTypes {
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
         )
 
-        // __native_loom_spawn_all: {fs: [{} -> 'a <...>]} -> ['a] <Concurrency>
-        // Bare-call wrapper from `concurrency.all` declares <Concurrency>, so the
-        // native must too — same pattern as STM's read_all/write_all (#310).
+        // __native_loom_spawn_all: {fs: [{} -> 'a <...>]} -> ['a]
+        // Spawns all computations on virtual threads and waits for all to complete
+        // The fs parameter accepts functions with any effects
         context["__native_loom_spawn_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "fs" to MezzeType.SeqType(effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
             )),
-            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-            MezzeType.EffectRow(effects = setOf("Concurrency"))
+            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
         )
 
         // __native_loom_spawn_race: {fs: [{} -> 'a <...>]} -> 'a

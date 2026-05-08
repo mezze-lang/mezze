@@ -485,23 +485,20 @@ class ContextBuilder {
         // for associated types (e.g., all 'env references become TypeVar(name='env))
         typeVarCache.clear()
 
-        // Add effect record type (for qualified access like Log.write).
-        // We keep the shared-row-var converter logic so `<...>` on a parameter's
-        // function type flows correctly inside the parameter, but DON'T put the
-        // shared row var on the operation's own outer effect row — doing that
-        // pollutes operations like `step : { f: {} -> 'a } -> 'a <Workflow>`
-        // where `f` is intentionally pure and the unifier ends up rejecting
-        // pure callbacks against an `<Workflow>`-tagged param. Effect names
-        // (and the call-site row var) are added by tryGenerateEffectOperationCall.
+        // Add effect record type (for qualified access like Log.write)
+        // NOTE: We don't add effects to the operation types here to avoid module import issues
+        // Instead, effects are added when the operation is called (in tryGenerateEffectOperationCall)
         val effectRecordType = MezzeType.RecordType(
             fields = effectDecl.operations.associate { op ->
-                sharedAnnotationRowVar = null
-                val convertedParamType = convertParsedTypeAnnotationInternal(op.paramType)
+                // Convert the type annotation and strip any effects
+                // Effect operations are stored as plain function types
+                // IMPORTANT: Use internal converter to avoid clearing cache between operations
                 val convertedReturnType = convertParsedTypeAnnotationInternal(op.returnType)
+                val convertedParamType = convertParsedTypeAnnotationInternal(op.paramType)
                 val plainFunctionType = MezzeType.FunctionType(
                     paramType = convertedParamType,
                     returnType = convertedReturnType,
-                    effects = null
+                    effects = null  // NO effects here - added during call
                 )
                 op.name to plainFunctionType
             }
