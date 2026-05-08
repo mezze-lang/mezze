@@ -486,31 +486,22 @@ class ContextBuilder {
         typeVarCache.clear()
 
         // Add effect record type (for qualified access like Log.write).
-        // Effect names live in ConstraintResult.effects (added when the op is called).
-        // BUT we DO need to preserve the operation's row variable when the return-type
-        // annotation declares an open row — that's what makes
-        // `spawn : { f: ... <...> } -> Promise 'a <Async, ...>` carry the shared row var
-        // through to call sites for #312 propagation. Effect names live in ParsedEffectOp.effects
-        // (List<String>), but the open-row marker is signaled via ParsedEffectOp.effects
-        // also containing the literal "..." token, OR via the return type's own annotation.
-        // For now: re-parse the parameter and return annotations together, allocate one
-        // shared row var per operation, and let the converter wire it through both.
+        // We keep the shared-row-var converter logic so `<...>` on a parameter's
+        // function type flows correctly inside the parameter, but DON'T put the
+        // shared row var on the operation's own outer effect row — doing that
+        // pollutes operations like `step : { f: {} -> 'a } -> 'a <Workflow>`
+        // where `f` is intentionally pure and the unifier ends up rejecting
+        // pure callbacks against an `<Workflow>`-tagged param. Effect names
+        // (and the call-site row var) are added by tryGenerateEffectOperationCall.
         val effectRecordType = MezzeType.RecordType(
             fields = effectDecl.operations.associate { op ->
-                // Reset shared row var for this operation, but keep it shared between
-                // its param and return type so a `<...>` on input flows to `<…, ...>`
-                // on output via the same row var.
                 sharedAnnotationRowVar = null
                 val convertedParamType = convertParsedTypeAnnotationInternal(op.paramType)
                 val convertedReturnType = convertParsedTypeAnnotationInternal(op.returnType)
-                val opRowVar = sharedAnnotationRowVar
-                val opEffects = if (opRowVar != null) {
-                    MezzeType.EffectRow(effects = emptySet(), rowVar = opRowVar)
-                } else null
                 val plainFunctionType = MezzeType.FunctionType(
                     paramType = convertedParamType,
                     returnType = convertedReturnType,
-                    effects = opEffects
+                    effects = null
                 )
                 op.name to plainFunctionType
             }

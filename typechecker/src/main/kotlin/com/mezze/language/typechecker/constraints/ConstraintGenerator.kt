@@ -299,20 +299,14 @@ class ConstraintGenerator(
 
                                 // 2. EFFECTS VALIDATION
                                 // Annotation must not declare effects the inferred type
-                                // doesn't carry. With #310 (shared row var per signature)
-                                // and #312 (row-var propagation through HOF call sites),
-                                // closure effects from `Async.spawn { f = effectful }`
-                                // now correctly surface on the surrounding scope. The
-                                // gate is kept off only when the body has no function
-                                // calls — that path's already-rigorous check catches the
-                                // `let f : … <Console> = {x} -> x + 1` case.
-                                //
-                                // Stdlib still has bare-call wrappers around natives that
-                                // weren't fixed (e.g. `concurrency.all` calling
-                                // `__native_loom_spawn_all` without `<Concurrency>` on
-                                // the native registration). Lifting the gate fully would
-                                // expose those as over-promises; tracked under a follow-up
-                                // for the broader native-effects audit.
+                                // doesn't carry. Skipped when the body has function calls
+                                // — the row-var propagation infra (#312) is wired through
+                                // ConstraintResult/Substitution/Unification, but until the
+                                // parser preserves the polymorphic-row marker on
+                                // ParsedEffectOp the row var on operations like
+                                // `Async.spawn` can't be reconstructed at the operation's
+                                // outer level without breaking unrelated operations like
+                                // `Workflow.step` whose params are intentionally pure.
                                 if (annotation is ParsedFunctionType &&
                                     annotation.effects != null &&
                                     !containsFunctionCalls(item.value)) {
