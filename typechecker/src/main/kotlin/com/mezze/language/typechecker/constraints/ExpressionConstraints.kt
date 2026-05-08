@@ -1853,13 +1853,23 @@ class ExpressionConstraintGenerator {
             emptySet()
         }
 
-        // Return the plain function type with the effect tracked in ConstraintResult
-        // When this operation is called, the effect will be collected and propagated
-        // This matches how OldTypeChecker handled effect operations
+        // Return the plain function type with the effects tracked in ConstraintResult.
+        //
+        // #312: when the operation's own outer effect row mentions the parent effect
+        // explicitly (e.g. `query: ... -> Str <Database, Log>` inside `effect Database`),
+        // we trust the row as exhaustive and surface ALL of its effects. When the row
+        // names a different effect entirely (e.g. `succeed: ... <Result>` inside
+        // `effect Outcome`), we treat that as a free-form "tag" annotation and fall
+        // back to just the parent effect — preserving long-standing behavior of
+        // EffectAssociatedTypesInterpreterTest. (Empty op row → parent only.)
+        val opOwnEffects = effectDecl?.operations
+            ?.firstOrNull { it.name == operationName }
+            ?.effects?.toSet().orEmpty()
+        val operationEffects = if (effectName in opOwnEffects) opOwnEffects else setOf(effectName)
         return ConstraintResult(
             type = instantiatedOperationType,
             constraints = emptyList(),
-            effects = setOf(effectName),  // Track simple effect name for backward compatibility
+            effects = operationEffects,
             effectInstances = effectInstances,  // Track effect with associated types (only if present)
             undefinedVariables = emptyList()
         )
@@ -3343,7 +3353,17 @@ class ExpressionConstraintGenerator {
 
                 // CRITICAL FIX: Propagate effects from the function type to ConstraintResult.effects
                 // This allows generatePerform to track which effects are used by the expression
-                val propagatedEffects = effectRow.effects + functionResult.effects + argumentResult.effects
+                //
+                // #312: when the function's effect row has a row var (e.g. spawn declared
+                // `<Async, ...>`), harvest effects from any closure-typed argument fields.
+                // Those effects flow through the row var to the surrounding scope. We do this
+                // as a *side-channel* read here (no Substitution involvement) because mixing
+                // row var bindings into the substitution machinery interacts badly with type
+                // var unification and broke 12 interp tests in the previous attempt.
+                val rowVarEffects: Set<String> = if (effectRow.rowVar != null) {
+                    collectClosureArgEffects(argumentResult.type)
+                } else emptySet()
+                val propagatedEffects = effectRow.effects + functionResult.effects + argumentResult.effects + rowVarEffects
                 // CRITICAL FIX: Also propagate effectInstances from the function type!
                 // This is needed so that when a function calls another function with associated effect types
                 // (like Exception with 'error), those effect instances are properly propagated and merged.
@@ -3448,8 +3468,19 @@ class ExpressionConstraintGenerator {
         )
 
         // Collect effects from the function being called (e.g., effect operations)
-        // Also collect effects from the arguments
-        val collectedEffects = functionResult.effects + argumentResult.effects
+        // Also collect effects from the arguments.
+        //
+        // #312: when calling an effect operation (functionResult.effects is
+        // non-empty — set by tryGenerateEffectOperationCall), the operation's
+        // declared signature may have a polymorphic effect row (`<Effect, ...>`)
+        // for inputs like `f: {} -> 'a <...>`. Pulling effects out of any
+        // closure-typed argument fields here surfaces them at the call site
+        // — `Async.spawn { f = effectful }` ends up performing `<Async, …f's effects>`.
+        // Pure side-channel: argument types are inspected, no Substitution touched.
+        val rowVarEffects = if (functionResult.effects.isNotEmpty())
+            collectClosureArgEffects(argumentResult.type)
+        else emptySet()
+        val collectedEffects = functionResult.effects + argumentResult.effects + rowVarEffects
         val collectedPerformed = functionResult.performed || argumentResult.performed
 
         // CRITICAL: Propagate ability constraints from function and arguments
@@ -4743,6 +4774,32 @@ class ExpressionConstraintGenerator {
      *
      * For record literals, returns the first field name or a combined description.
      * For identifiers, returns the identifier name.
+     * #312: harvest effects from any closure-typed fields in an argument record.
+     *
+     * When a function is called whose declared effect row is open (`<Async, ...>`),
+     * the row var stands for "whatever effects the closure arguments have". This
+     * walks the argument's record type and pulls effect names out of any
+     * `FunctionType` field's effect row. The results are added directly to the
+     * call's `propagatedEffects` — bypassing the substitution machinery (which
+     * leaks badly when row var bindings interact with type var unification).
+     *
+     * Conservative by design: only walks one level of record fields and only
+     * inspects FunctionType's own `.effects.effects` set. Effect propagation
+     * through deeper structures or transitive HOFs is intentionally out of scope.
+     */
+    private fun collectClosureArgEffects(argType: MezzeType): Set<String> {
+        if (argType !is MezzeType.RecordType) return emptySet()
+        val effects = mutableSetOf<String>()
+        for ((_, fieldType) in argType.fields) {
+            val fnType = fieldType as? MezzeType.FunctionType ?: continue
+            val effRow = fnType.effects ?: continue
+            effects.addAll(effRow.effects)
+            for (instance in effRow.effectInstances) effects.add(instance.name)
+        }
+        return effects
+    }
+
+     /**
      * For other expressions, returns null.
      */
     private fun extractArgumentName(expr: ParsedExpr): String? {
