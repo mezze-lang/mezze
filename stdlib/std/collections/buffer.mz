@@ -1,3 +1,5 @@
+use std::abilities::sized::{ Sized }
+
 ## Creates a new buffer with the specified initial capacity.
 pub let new = { capacity } -> __native_buffer_new { capacity = capacity }
 
@@ -24,3 +26,8 @@ pub let is_empty = { buf } -> __native_buffer_is_empty { buf = buf }
 
 ## Clears the buffer, resetting it to empty. The buffer can be reused.
 pub let clear = { buf } -> __native_buffer_clear { buf = buf }
+
+impl Sized for ByteBuffer where {
+  size = { it } -> size { buf = it },
+  is_empty = { it } -> is_empty { buf = it },
+}

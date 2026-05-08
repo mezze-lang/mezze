@@ -126,4 +126,28 @@ class ClosedRecordMethodCallTest {
         val r = checkWithPrelude("""let n = "hello".size {}""")
         assertEquals(MezzeType.IntType, r.getVariableType("n"))
     }
+
+    // #303: Buffer was missing impl Sized; verify generic Sized fns accept it.
+    @Test
+    fun `bytebuffer satisfies Sized constraint via impl`() {
+        // ByteBuffer.new {capacity=8} produces a ByteBuffer; passing it to a
+        // generic Sized-constrained function must typecheck.
+        val code = """
+            use std::collections::buffer
+            let f = { xs } -> xs.size {}
+            let n = f { xs = buffer::new { capacity = 8 } }
+        """.trimIndent()
+        val r = checkWithPrelude(code)
+        assertEquals(MezzeType.IntType, r.getVariableType("n"))
+    }
+
+    @Test
+    fun `concrete bytebuffer dispatches inherent size`() {
+        val code = """
+            use std::collections::buffer
+            let n = (buffer::new { capacity = 8 }).size {}
+        """.trimIndent()
+        val r = checkWithPrelude(code)
+        assertEquals(MezzeType.IntType, r.getVariableType("n"))
+    }
 }
