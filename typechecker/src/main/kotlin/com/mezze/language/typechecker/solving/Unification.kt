@@ -553,16 +553,25 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
         // Both pure - OK
         isPure1 && isPure2 -> Substitution.empty
 
-        // Pure with polymorphic - OK (polymorphic instantiates to empty)
-        isPure1 && isPolymorphic2 -> Substitution.empty
-        isPolymorphic1 && isPure2 -> Substitution.empty
+        // Pure with polymorphic — bind the polymorphic side's row var to empty so
+        // downstream substitution surfaces nothing extra.
+        isPure1 && isPolymorphic2 -> bindRowVarToEmpty(effects2!!.rowVar!!)
+        isPolymorphic1 && isPure2 -> bindRowVarToEmpty(effects1!!.rowVar!!)
 
-        // Both polymorphic - OK (unify the row variables)
-        isPolymorphic1 && isPolymorphic2 -> Substitution.empty
+        // Both polymorphic — link rowVar2 → rowVar1 so they unify to one row.
+        isPolymorphic1 && isPolymorphic2 -> bindRowVarsTogether(
+            effects1!!.rowVar!!, effects2!!.rowVar!!)
 
-        // Polymorphic with concrete - OK (polymorphic instantiates to those effects)
-        isPolymorphic1 && hasConcrete2 -> Substitution.empty
-        hasConcrete1 && isPolymorphic2 -> Substitution.empty
+        // Polymorphic with concrete — bind the polymorphic side's row var to the
+        // concrete effects. This is what carries closure effects through HOFs:
+        // when `f`'s `<...>` row var unifies with the actual `<Http>`, the binding
+        // flows to the surrounding signature's output `<…, ...>` (#312).
+        isPolymorphic1 && hasConcrete2 -> Substitution(
+            rowMappings = mapOf(effects1!!.rowVar!! to effects2!!.copy(rowVar = null))
+        )
+        hasConcrete1 && isPolymorphic2 -> Substitution(
+            rowMappings = mapOf(effects2!!.rowVar!! to effects1!!.copy(rowVar = null))
+        )
 
         // Pure with concrete - ERROR if concrete is on fn1 (actual), OK if concrete is on fn2 (expected)
         // A pure function CAN be used where effectful is expected (caller handles effects that don't occur)
@@ -578,13 +587,17 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
             )
         }
 
-        // Both have concrete effects - unify them
+        // Both have concrete effects - unify them. Also propagate row vars if either
+        // side has one and additional concrete effects (e.g. `<Async, r>` vs `<Async, Http>`):
+        // the row var picks up the difference.
         hasConcrete1 && hasConcrete2 -> {
             val effectResult = unifyEffectRows(effects1!!, effects2!!)
             if (effectResult is UnificationResult.Failure) {
                 return effectResult
             }
-            (effectResult as UnificationResult.Success).substitution
+            val baseSubst = (effectResult as UnificationResult.Success).substitution
+            val rowVarSubst = bindRowVarOverflow(effects1, effects2)
+            baseSubst.compose(rowVarSubst)
         }
 
         // Catch-all for any other combination (shouldn't happen)
@@ -1047,6 +1060,60 @@ private fun unifySuspended(susp1: MezzeType.SuspendedType, susp2: MezzeType.Susp
  * conceptually produces <E1, E2>. This allows match branches with different
  * effects to be unified.
  */
+/**
+ * Bind a polymorphic row variable to the empty effect row. Used when one side
+ * of unification is pure and the other is purely polymorphic — we want the
+ * polymorphic row var to instantiate to "no extra effects" so substitution
+ * doesn't leak open rows downstream.
+ */
+private fun bindRowVarToEmpty(rowVar: RowVar): Substitution {
+    return Substitution(
+        rowMappings = mapOf(rowVar to MezzeType.EffectRow(effects = emptySet()))
+    )
+}
+
+/**
+ * When two purely-polymorphic effect rows unify, bind one row var to a row
+ * containing only the other row var. That way both reduce to the same row
+ * after substitution.
+ */
+private fun bindRowVarsTogether(rowVar1: RowVar, rowVar2: RowVar): Substitution {
+    if (rowVar1 == rowVar2) return Substitution.empty
+    return Substitution(
+        rowMappings = mapOf(rowVar2 to MezzeType.EffectRow(effects = emptySet(), rowVar = rowVar1))
+    )
+}
+
+/**
+ * When both rows have concrete effects AND a row var on at least one side,
+ * bind the row var to capture any "overflow" effects from the other side.
+ * E.g. `<Async, r>` vs `<Async, Http>` → `r := <Http>`.
+ */
+private fun bindRowVarOverflow(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow): Substitution {
+    val rv1 = eff1.rowVar
+    val rv2 = eff2.rowVar
+    val mappings = mutableMapOf<RowVar, MezzeType.EffectRow>()
+    if (rv1 != null) {
+        val overflow = eff2.effects - eff1.effects
+        if (overflow.isNotEmpty() || rv2 != null) {
+            mappings[rv1] = MezzeType.EffectRow(
+                effects = overflow,
+                rowVar = if (rv2 != rv1) rv2 else null
+            )
+        }
+    }
+    if (rv2 != null && rv2 !in mappings) {
+        val overflow = eff1.effects - eff2.effects
+        if (overflow.isNotEmpty() || rv1 != null) {
+            mappings[rv2] = MezzeType.EffectRow(
+                effects = overflow,
+                rowVar = if (rv1 != rv2) rv1 else null
+            )
+        }
+    }
+    return if (mappings.isEmpty()) Substitution.empty else Substitution(rowMappings = mappings)
+}
+
 private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow): UnificationResult {
     // HERMETIC EFFECT CHECK: Mut cannot coexist with other effects
     // This ensures data-race freedom by preventing interleaving of mutation with other effects

@@ -21,7 +21,18 @@ import com.mezze.language.ast.TypeVar
  * - Exhaustive pattern matching on MezzeType
  */
 data class Substitution(
-    val mappings: Map<TypeVar, MezzeType> = emptyMap()
+    val mappings: Map<TypeVar, MezzeType> = emptyMap(),
+    /**
+     * Row variable bindings. When `unifyEffectRows` matches a polymorphic row
+     * variable against a concrete effect row (or another row var), the binding
+     * is recorded here. `applyToEffectRowWithVisited` substitutes — so an
+     * effect row `<Async, r>` where `r := <Http>` becomes `<Async, Http>`.
+     *
+     * Without this, signatures like
+     * `spawn : { f: {} -> 'a <...> } -> Promise 'a <Async, ...>`
+     * couldn't propagate the closure's effects to the spawn return.
+     */
+    val rowMappings: Map<RowVar, MezzeType.EffectRow> = emptyMap()
 ) {
     /**
      * Apply this substitution to a type.
@@ -36,7 +47,7 @@ data class Substitution(
      */
     fun apply(type: MezzeType): MezzeType {
         // Short-circuit 1: Empty substitution - nothing to apply
-        if (mappings.isEmpty()) {
+        if (mappings.isEmpty() && rowMappings.isEmpty()) {
             return type
         }
 
@@ -120,6 +131,7 @@ data class Substitution(
      * Returns true if any effectInstance has an associated type containing a mapped TypeVar.
      */
     private fun needsSubstitutionInEffectRow(effectRow: MezzeType.EffectRow): Boolean {
+        if (effectRow.rowVar != null && effectRow.rowVar in rowMappings) return true
         return effectRow.effectInstances.any { instance ->
             instance.associatedTypes.values.any { needsSubstitution(it) }
         }
@@ -268,23 +280,37 @@ data class Substitution(
      * OPTIMIZATION: Only creates new objects if substitution actually changes something.
      */
     private fun applyToEffectRowWithVisited(effectRow: MezzeType.EffectRow, visitedVars: Set<TypeVar>): MezzeType.EffectRow {
-        // Fast path: no effectInstances, nothing to substitute
-        if (effectRow.effectInstances.isEmpty()) {
-            return effectRow
+        // Step 1: Substitute the row var if it has a binding. The binding's effects
+        // and (transitive) row var are unioned into the row.
+        var substitutedEffects = effectRow.effects
+        var substitutedInstancesFromRowVar = effectRow.effectInstances
+        var substitutedHashes = effectRow.effectHashes
+        var substitutedRowVar = effectRow.rowVar
+        var rowVarChanged = false
+        if (effectRow.rowVar != null) {
+            val binding = rowMappings[effectRow.rowVar]
+            if (binding != null) {
+                rowVarChanged = true
+                // Recursively resolve in case the binding's row var itself has a mapping.
+                val resolved = applyToEffectRowWithVisited(binding, visitedVars)
+                substitutedEffects = effectRow.effects + resolved.effects
+                substitutedInstancesFromRowVar = effectRow.effectInstances + resolved.effectInstances
+                substitutedHashes = effectRow.effectHashes + resolved.effectHashes
+                substitutedRowVar = resolved.rowVar
+            }
         }
 
-        // Check if any substitution would actually change the effectInstances
-        var anyChanged = false
-        val substitutedInstances = effectRow.effectInstances.map { instance ->
+        // Step 2: substitute associated types in effectInstances.
+        var instancesChanged = false
+        val finalInstances = substitutedInstancesFromRowVar.map { instance ->
             if (instance.associatedTypes.isEmpty()) {
                 instance
             } else {
-                // Check if any associated type needs substitution
                 val needsSub = instance.associatedTypes.values.any { needsSubstitution(it) }
                 if (!needsSub) {
                     instance
                 } else {
-                    anyChanged = true
+                    instancesChanged = true
                     val substitutedAssocTypes = instance.associatedTypes.mapValues { (_, type) ->
                         applyWithVisited(type, visitedVars)
                     }
@@ -294,7 +320,14 @@ data class Substitution(
         }
 
         // OPTIMIZATION: Return original if nothing changed
-        return if (anyChanged) effectRow.copy(effectInstances = substitutedInstances.toSet()) else effectRow
+        return if (rowVarChanged || instancesChanged) {
+            effectRow.copy(
+                effects = substitutedEffects,
+                effectInstances = finalInstances.toSet(),
+                effectHashes = substitutedHashes,
+                rowVar = substitutedRowVar
+            )
+        } else effectRow
     }
 
     /**
@@ -319,7 +352,10 @@ data class Substitution(
         // Example: if other = {v1 -> Variant(Pair -> v2)} and this = {v2 -> {fst}}
         // We want to keep v2 as a reference so later {v2 -> {fst, snd}} can update it.
         // If we applied here, Variant would have {fst} baked in.
-        return Substitution(other.mappings + mappings)
+        return Substitution(
+            mappings = other.mappings + mappings,
+            rowMappings = other.rowMappings + rowMappings
+        )
     }
 
     /**

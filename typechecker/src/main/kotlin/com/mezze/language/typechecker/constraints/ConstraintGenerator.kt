@@ -300,11 +300,12 @@ class ConstraintGenerator(
                                 // 2. EFFECTS VALIDATION
                                 // Annotation must not declare effects the inferred type
                                 // doesn't carry. Skipped when the body contains function
-                                // calls — even with the new shared-row-var rule (#310),
-                                // the unifier doesn't yet propagate row var bindings from
-                                // a HOF's input row to its output row at call sites, so
-                                // legitimate annotations like `async_get : … <Http, Async>`
-                                // would be flagged as over-promising.
+                                // calls — #310 wired up shared row vars per signature,
+                                // #312 added row-var-aware substitution + unification, but
+                                // the call-site path doesn't yet apply the resulting
+                                // substitution to inferred effects on the surrounding `do`
+                                // block, so a wrapper like `async_get : … <Http, Async>`
+                                // still trips this check spuriously.
                                 if (annotation is ParsedFunctionType &&
                                     annotation.effects != null &&
                                     !containsFunctionCalls(item.value)) {
