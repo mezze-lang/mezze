@@ -338,15 +338,43 @@ object PrecompiledStdlib {
     }
 
     // ====================================================================
-    // STORE-BASED LOADING (clean path — no java.sql dependency)
+    // STORE-BASED LOADING — sole path. Both externally-provided stores
+    // (CLI/LSP via setStore) and the JAR-resource fallback flow through
+    // these methods.
     // ====================================================================
 
     /**
-     * Try loading everything from the MezzeStore (set by CLI/LSP).
-     * The store already has stdlib.sqlite ATTACHed, so we can read
-     * via the standard MezzeStore interface. Returns null if no store
-     * was set or if loading fails.
+     * Try loading everything from the MezzeStore. Returns null if no store
+     * is set or if any required metadata is missing.
      */
+    /**
+     * Read the persisted dependency graph from `deps:<hash>` metadata keys.
+     * Falls back to walking FunctionIR bodies if the store has no `deps:*`
+     * entries — preserves correctness against older stdlib.sqlite shapes
+     * where the graph wasn't serialized.
+     */
+    private fun loadDepGraphFromStore(
+        s: com.mezze.language.store.MezzeStore,
+        functions: Map<Hash, com.mezze.language.truffleir.FunctionIR>
+    ): Map<Hash, Set<Hash>> {
+        val graph = mutableMapOf<Hash, Set<Hash>>()
+        val depEntries = s.getMetadataByPrefix("deps:")
+        if (depEntries.isNotEmpty()) {
+            for ((key, value) in depEntries) {
+                if (value.isEmpty()) continue
+                val hash = Hash(key.removePrefix("deps:"))
+                graph[hash] = value.split(";").map { Hash(it) }.toSet()
+            }
+            return graph
+        }
+        for ((hash, fn) in functions) {
+            val refs = mutableSetOf<Hash>()
+            collectHashRefs(fn.body, refs)
+            if (refs.isNotEmpty()) graph[hash] = refs
+        }
+        return graph
+    }
+
     @OptIn(ExperimentalSerializationApi::class)
     private fun tryLoadFullFromStore(): FullCacheData? {
         val s = store ?: return null
@@ -414,16 +442,8 @@ object PrecompiledStdlib {
                 performerStr.split(";").map { it.split(",").toTypedArray() }
             } else emptyList()
 
-            // Load dependency graph
-            val depGraph = mutableMapOf<Hash, Set<Hash>>()
-            // Dependency graph is stored as metadata keys "deps:<hash>"
-            // We can't enumerate metadata keys through MezzeStore interface,
-            // so rebuild from FunctionIR bodies instead
-            for ((hash, fn) in functions) {
-                val refs = mutableSetOf<Hash>()
-                collectHashRefs(fn.body, refs)
-                if (refs.isNotEmpty()) depGraph[hash] = refs
-            }
+            // Load persisted dependency graph (deps:<hash> → semicolon-delimited refs).
+            val depGraph = loadDepGraphFromStore(s, functions)
 
             if (functions.isNotEmpty()) {
                 FullCacheData(importContext, functions, performers, depGraph, abilityImpls, declHashes, moduleHashes)
@@ -486,13 +506,8 @@ object PrecompiledStdlib {
                 performerStr.split(";").map { it.split(",").toTypedArray() }
             } else emptyList()
 
-            // Build dependency graph from function bodies
-            val depGraph = mutableMapOf<Hash, Set<Hash>>()
-            for ((hash, fn) in functions) {
-                val refs = mutableSetOf<Hash>()
-                collectHashRefs(fn.body, refs)
-                if (refs.isNotEmpty()) depGraph[hash] = refs
-            }
+            // Load persisted dependency graph (with body-walk fallback for older stores).
+            val depGraph = loadDepGraphFromStore(s, functions)
 
             if (functions.isNotEmpty()) PreloweredData(functions, performers, depGraph) else null
         } catch (e: Exception) {
@@ -507,8 +522,76 @@ object PrecompiledStdlib {
     }
 
     // ====================================================================
-    // JDBC-BASED LOADING (legacy — used when no MezzeStore is set)
+    // RESOURCE-BASED LOADING — opens stdlib.sqlite from JAR and routes through
+    // MezzeStore. Used when no MezzeStore is set externally (e.g. tests).
     // ====================================================================
+
+    /**
+     * Open the bundled `stdlib.sqlite` resource as a read-only MezzeStore.
+     * Returns null if the resource is missing or SQLiteMezzeStore is not on
+     * the classpath. Uses reflection to keep :typechecker free of a hard
+     * dependency on :store-sqlite (which itself depends on :typechecker).
+     */
+    private fun openStdlibResourceAsStore(): com.mezze.language.store.MezzeStore? {
+        return try {
+            val stream = PrecompiledStdlib::class.java.classLoader
+                .getResourceAsStream(STDLIB_SQLITE_RESOURCE) ?: return null
+            val tempFile = java.io.File.createTempFile("mezze-stdlib", ".sqlite")
+            tempFile.deleteOnExit()
+            tempFile.writeBytes(stream.readAllBytes())
+
+            val cls = Class.forName("com.mezze.language.codebase.SQLiteMezzeStore")
+            val companion = cls.getField("Companion").get(null)
+            val readOnlyMethod = companion.javaClass.getMethod("readOnly", java.io.File::class.java)
+            readOnlyMethod.invoke(companion, tempFile) as com.mezze.language.store.MezzeStore
+        } catch (e: Exception) {
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println(
+                    "[PrecompiledStdlib] Failed to open stdlib.sqlite resource as store: " +
+                    "${e.javaClass.simpleName}: ${e.message}"
+                )
+            }
+            null
+        }
+    }
+
+    /**
+     * Resource-backed counterpart of [tryLoadFullFromStore]. Opens the bundled
+     * stdlib.sqlite as a transient SQLiteMezzeStore, sets it as the active
+     * store for the duration of the load, then delegates. No raw JDBC.
+     */
+    private fun tryLoadFullFromSqlite(): FullCacheData? {
+        val s = openStdlibResourceAsStore() ?: return null
+        return try {
+            val previous = store
+            store = s
+            try {
+                tryLoadFullFromStore()
+            } finally {
+                store = previous
+            }
+        } finally {
+            try { s.close() } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Resource-backed counterpart of [tryLoadPreloweredFromStore].
+     */
+    private fun tryLoadPreloweredFromSqlite(): PreloweredData? {
+        val s = openStdlibResourceAsStore() ?: return null
+        return try {
+            val previous = store
+            store = s
+            try {
+                tryLoadPreloweredFromStore()
+            } finally {
+                store = previous
+            }
+        } finally {
+            try { s.close() } catch (_: Exception) {}
+        }
+    }
 
     private data class FullCacheData(
         val importContext: ModuleImportContext,
@@ -520,217 +603,9 @@ object PrecompiledStdlib {
         val moduleHashes: Set<Hash>
     )
 
-    /**
-     * Try loading everything from the bundled `stdlib.sqlite` JAR
-     * resource (has prelude context). The legacy filesystem path
-     * `~/.mezze/cache/stdlib.sqlite` is no longer consulted — the
-     * JAR is the single source of truth.
-     */
-    @OptIn(ExperimentalSerializationApi::class)
-    private fun tryLoadFullFromSqlite(): FullCacheData? {
-        return try {
-            val stream = PrecompiledStdlib::class.java.classLoader
-                .getResourceAsStream(STDLIB_SQLITE_RESOURCE) ?: return null
-            val tempFile = java.io.File.createTempFile("mezze-stdlib-full", ".sqlite")
-            tempFile.deleteOnExit()
-            tempFile.writeBytes(stream.readAllBytes())
-            val sqlitePath = tempFile.absolutePath
-
-            try {
-                val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:$sqlitePath")
-
-                // Check version — v2 has prelude context
-                val version = conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'stdlib_version'").use { rs ->
-                        if (rs.next()) rs.getString("value") else null
-                    }
-                }
-                if (version != "2") {
-                    conn.close()
-                    return null
-                }
-
-                // Load prelude import context
-                val preludeB64 = conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'prelude_import_context'").use { rs ->
-                        if (rs.next()) rs.getString("value") else null
-                    }
-                } ?: run { conn.close(); return null }
-
-                val preludeBytes = java.util.Base64.getDecoder().decode(preludeB64)
-                val importContext: ModuleImportContext = cbor.decodeFromByteArray(preludeBytes)
-
-                // Load ability impls
-                val implB64 = conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'stdlib_ability_impls'").use { rs ->
-                        if (rs.next()) rs.getString("value") else null
-                    }
-                }
-                val abilityImpls: List<com.mezze.language.typedast.TypedAbilityImpl> = if (implB64 != null) {
-                    cbor.decodeFromByteArray(java.util.Base64.getDecoder().decode(implB64))
-                } else emptyList()
-
-                // Load decl hashes
-                val declHashStr = conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'stdlib_decl_hashes'").use { rs ->
-                        if (rs.next()) rs.getString("value") else ""
-                    }
-                }
-                val declHashes: Set<Hash> = if (declHashStr.isNotEmpty()) {
-                    declHashStr.split(";").map { Hash(it) }.toSet()
-                } else emptySet()
-
-                // Load module hashes
-                val modHashStr = conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'stdlib_module_hashes'").use { rs ->
-                        if (rs.next()) rs.getString("value") else ""
-                    }
-                }
-                val moduleHashes = if (modHashStr.isNotEmpty()) modHashStr.split(";").map { Hash(it) }.toSet() else emptySet()
-
-                // Load FunctionIRs
-                val functions = mutableMapOf<Hash, com.mezze.language.truffleir.FunctionIR>()
-                var jdbcDecodeFailures = 0
-                var jdbcLastError: String? = null
-                conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT hash, ir FROM blobs WHERE ir IS NOT NULL").use { rs ->
-                        while (rs.next()) {
-                            val hash = Hash(rs.getString("hash"))
-                            val irBytes = rs.getBytes("ir")
-                            try {
-                                functions[hash] = cbor.decodeFromByteArray(irBytes)
-                            } catch (e: Exception) {
-                                jdbcDecodeFailures++
-                                jdbcLastError = "${hash.hex.take(8)}: ${e.javaClass.simpleName}: ${e.message}"
-                            }
-                        }
-                    }
-                }
-                if (jdbcDecodeFailures > 0 && System.getenv("MEZZE_DEBUG") != null) {
-                    System.err.println(
-                        "[PrecompiledStdlib] (legacy JDBC path) $jdbcDecodeFailures " +
-                        "FunctionIR blob(s) failed to decode. Last: $jdbcLastError"
-                    )
-                }
-
-                // Load performers
-                val performers = mutableListOf<Array<String>>()
-                conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'performer_records'").use { rs ->
-                        if (rs.next()) {
-                            val data = rs.getString("value")
-                            if (data.isNotEmpty()) {
-                                for (record in data.split(";")) {
-                                    performers.add(record.split(",").toTypedArray())
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Load dependency graph
-                val depGraph = mutableMapOf<Hash, Set<Hash>>()
-                conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT key, value FROM metadata WHERE key LIKE 'deps:%'").use { rs ->
-                        while (rs.next()) {
-                            val hash = Hash(rs.getString("key").removePrefix("deps:"))
-                            val deps = rs.getString("value")
-                            if (deps.isNotEmpty()) depGraph[hash] = deps.split(";").map { Hash(it) }.toSet()
-                        }
-                    }
-                }
-
-                conn.close()
-
-                if (functions.isNotEmpty()) {
-                    FullCacheData(importContext, functions, performers, depGraph, abilityImpls, declHashes, moduleHashes)
-                } else null
-            } catch (_: Exception) { null }
-        } catch (e: Exception) {
-            if (System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println("[PrecompiledStdlib] Failed to load full cache from stdlib.sqlite: ${e.message}")
-            }
-            null
-        }
-    }
-
     private data class PreloweredData(
         val functions: Map<Hash, com.mezze.language.truffleir.FunctionIR>,
         val performers: List<Array<String>>,
         val dependencyGraph: Map<Hash, Set<Hash>>
     )
-
-    /**
-     * Try loading pre-compiled FunctionIRs from embedded stdlib.sqlite resource.
-     * Generated by StdlibPrecompiler at Gradle build time.
-     * Uses raw JDBC to avoid circular dependency on :codebase module.
-     */
-    private fun tryLoadPreloweredFromSqlite(): PreloweredData? {
-        return try {
-            val stream = PrecompiledStdlib::class.java.classLoader
-                .getResourceAsStream(STDLIB_SQLITE_RESOURCE) ?: return null
-
-            val tempFile = java.io.File.createTempFile("mezze-stdlib", ".sqlite")
-            try {
-                tempFile.writeBytes(stream.readAllBytes())
-                val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${tempFile.absolutePath}")
-
-                val functions = mutableMapOf<Hash, com.mezze.language.truffleir.FunctionIR>()
-                val performers = mutableListOf<Array<String>>()
-                val depGraph = mutableMapOf<Hash, Set<Hash>>()
-
-                // Load all FunctionIRs from blobs table
-                conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT hash, ir FROM blobs WHERE ir IS NOT NULL").use { rs ->
-                        while (rs.next()) {
-                            val hash = Hash(rs.getString("hash"))
-                            val irBytes = rs.getBytes("ir")
-                            try {
-                                @OptIn(ExperimentalSerializationApi::class)
-                                val fn = kotlinx.serialization.cbor.Cbor.decodeFromByteArray<com.mezze.language.truffleir.FunctionIR>(irBytes)
-                                functions[hash] = fn
-                            } catch (_: Exception) {}
-                        }
-                    }
-                }
-
-                // Load performer records
-                conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT value FROM metadata WHERE key = 'performer_records'").use { rs ->
-                        if (rs.next()) {
-                            val data = rs.getString("value")
-                            if (data != null && data.isNotEmpty()) {
-                                for (record in data.split(";")) {
-                                    performers.add(record.split(",").toTypedArray())
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Load dependency graph
-                conn.createStatement().use { stmt ->
-                    stmt.executeQuery("SELECT key, value FROM metadata WHERE key LIKE 'deps:%'").use { rs ->
-                        while (rs.next()) {
-                            val hash = Hash(rs.getString("key").removePrefix("deps:"))
-                            val deps = rs.getString("value")
-                            if (deps.isNotEmpty()) {
-                                depGraph[hash] = deps.split(";").map { Hash(it) }.toSet()
-                            }
-                        }
-                    }
-                }
-
-                conn.close()
-
-                if (functions.isNotEmpty()) {
-                    PreloweredData(functions, performers, depGraph)
-                } else null
-            } finally {
-                tempFile.delete()
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
 }

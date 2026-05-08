@@ -153,6 +153,8 @@ class InMemoryMezzeStore : MezzeStore {
 
     override fun getMetadata(key: String): String? = metadata[key]
     override fun setMetadata(key: String, value: String) { metadata[key] = value }
+    override fun getMetadataByPrefix(prefix: String): Map<String, String> =
+        metadata.filterKeys { it.startsWith(prefix) }
 
     // ── APPS ──
 

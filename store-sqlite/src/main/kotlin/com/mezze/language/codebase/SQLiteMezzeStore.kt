@@ -1294,6 +1294,20 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    private val getMetadataByPrefixStmt: PreparedStatement by lazy {
+        conn.prepareStatement("SELECT key, value FROM metadata WHERE key LIKE ? ESCAPE '\\'")
+    }
+
+    override fun getMetadataByPrefix(prefix: String): Map<String, String> {
+        val escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        getMetadataByPrefixStmt.setString(1, "$escaped%")
+        return getMetadataByPrefixStmt.executeQuery().use { rs ->
+            buildMap {
+                while (rs.next()) put(rs.getString(1), rs.getString(2))
+            }
+        }
+    }
+
     // ====================================================================
     // APPS
     // ====================================================================

@@ -125,6 +125,9 @@ interface MezzeStore : AutoCloseable {
     fun getMetadata(key: String): String?
     fun setMetadata(key: String, value: String)
 
+    /** Return all metadata entries whose key starts with [prefix]. Empty map if none. */
+    fun getMetadataByPrefix(prefix: String): Map<String, String>
+
     // ====================================================================
     // APPS — per-app entry metadata + function/performer manifests
     // ====================================================================
