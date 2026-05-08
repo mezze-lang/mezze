@@ -253,6 +253,15 @@ data class ConstraintResult(
     val constraints: List<Constraint>,
     val effects: Set<String> = emptySet(),  // Effects used in this expression (simple names without associated types)
     val effectInstances: Set<MezzeType.EffectInstance> = emptySet(),  // Effects with associated type bindings
+    /**
+     * Open row variable carried by this expression's effects. Set when the
+     * expression's value comes from a function call whose declared effect row
+     * has a row var (e.g. `Async.spawn` typed `<Async, ...>`). After
+     * unification with an effectful closure, the substitution will rewrite
+     * this row var into the closure's concrete effects — the mechanism that
+     * propagates closure effects out of HOFs.
+     */
+    val effectRowVar: com.mezze.language.ast.RowVar? = null,
     val performed: Boolean = false,  // True if effects were performed via 'perform' expression
     val abilityConstraints: List<Constraint.AbilityRequired> = emptyList(),  // Ability requirements
     val associatedTypeConstraints: List<Constraint.AssociatedTypeResolution> = emptyList(),  // Associated type resolution constraints

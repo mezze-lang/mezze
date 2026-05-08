@@ -299,16 +299,11 @@ class ConstraintGenerator(
 
                                 // 2. EFFECTS VALIDATION
                                 // Annotation must not declare effects the inferred type
-                                // doesn't carry. Skipped when the body contains function
-                                // calls — #310 wired up shared row vars per signature,
-                                // #312 added row-var-aware substitution + unification, but
-                                // the call-site path doesn't yet apply the resulting
-                                // substitution to inferred effects on the surrounding `do`
-                                // block, so a wrapper like `async_get : … <Http, Async>`
-                                // still trips this check spuriously.
+                                // doesn't carry. Effects propagate through call chains
+                                // (and HOF call sites — #310 / #312), so the inferred
+                                // type is accurate even when the body contains calls.
                                 if (annotation is ParsedFunctionType &&
-                                    annotation.effects != null &&
-                                    !containsFunctionCalls(item.value)) {
+                                    annotation.effects != null) {
                                     validateEffectsNotOverpromised(
                                         preConvertedAnnotationType,
                                         inferredTypeWithAbilities,
