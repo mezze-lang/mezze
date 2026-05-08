@@ -16,7 +16,12 @@ import java.sql.ResultSet
  * - JAR embedded: `blobs.sqlite` (read-only, IR-only)
  * - Tests: `:memory:`
  *
- * Thread safety: WAL mode supports concurrent reads + single writer.
+ * Thread safety: every public override (and `executeRaw`) is `@Synchronized`
+ * on the instance. A single JDBC connection (and its cached PreparedStatements)
+ * is not thread-safe by spec, and concurrent LSP requests would otherwise hit
+ * "ResultSet already requested" from sqlite-jdbc when two threads share the
+ * same statement object. WAL mode helps for inter-process concurrency, not
+ * within a single connection.
  */
 class SQLiteMezzeStore private constructor(
     private val conn: Connection,
@@ -43,6 +48,7 @@ class SQLiteMezzeStore private constructor(
      * INSERT-SELECT batches that don't fit the typed API. Public callers
      * should always go through the typed methods.
      */
+    @Synchronized
     internal fun <T> executeRaw(block: (Connection) -> T): T = block(conn)
 
     /**
@@ -819,6 +825,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent())
     }
 
+    @Synchronized
     override fun putBlob(hash: Hash, kind: BlobKind, visibility: Visibility, typed: ByteArray?, ir: ByteArray?) {
         putBlobStmt.apply {
             setString(1, hash.hex)
@@ -838,6 +845,7 @@ class SQLiteMezzeStore private constructor(
         )
     }
 
+    @Synchronized
     override fun getBlob(hash: Hash): BlobRow? {
         l1Blobs[hash.hex]?.let { return it }
         for (i in 0..2) getBlobStmt.setString(i + 1, hash.hex)
@@ -852,11 +860,13 @@ class SQLiteMezzeStore private constructor(
         )
     }
 
+    @Synchronized
     override fun blobExists(hash: Hash): Boolean {
         for (i in 0..2) blobExistsStmt.setString(i + 1, hash.hex)
         return blobExistsStmt.executeQuery().use { it.next() }
     }
 
+    @Synchronized
     override fun blobsExist(hashes: Collection<Hash>): Set<Hash> {
         if (hashes.isEmpty()) return emptySet()
         val present = HashSet<Hash>(hashes.size)
@@ -884,6 +894,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement(unionAll("SELECT ir FROM <DB>.blobs WHERE hash = ?") + " LIMIT 1")
     }
 
+    @Synchronized
     override fun getIR(hash: Hash): ByteArray? {
         if (hash.hex in l1IR) return l1IR[hash.hex]
         for (i in 0..2) getIRStmt.setString(i + 1, hash.hex)
@@ -915,6 +926,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("INSERT OR REPLACE INTO names (module, name, hash) VALUES (?, ?, ?)")
     }
 
+    @Synchronized
     override fun registerName(module: String, name: String, hash: Hash) {
         registerNameStmt.apply {
             setString(1, module)
@@ -931,6 +943,7 @@ class SQLiteMezzeStore private constructor(
         )
     }
 
+    @Synchronized
     override fun resolveName(module: String, name: String): Hash? {
         val key = nameKey(module, name)
         if (key in l1Names) return l1Names[key]
@@ -949,6 +962,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement(unionAll("SELECT module, name, hash FROM <DB>.names WHERE hash = ?"))
     }
 
+    @Synchronized
     override fun getNamesForHash(hash: Hash): List<NameRow> {
         for (i in 0..2) getNamesForHashStmt.setString(i + 1, hash.hex)
         return getNamesForHashStmt.executeQuery().use { rs -> rs.collectNameRows() }
@@ -964,6 +978,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent()))
     }
 
+    @Synchronized
     override fun getModuleExports(module: String): List<NameRow> {
         for (i in 0..2) getModuleExportsStmt.setString(i + 1, module)
         return getModuleExportsStmt.executeQuery().use { rs -> rs.collectNameRows() }
@@ -977,6 +992,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent()) + " LIMIT 50")
     }
 
+    @Synchronized
     override fun searchExportsByName(query: String): List<NameRow> {
         for (i in 0..2) searchExportsStmt.setString(i + 1, "$query%")
         return searchExportsStmt.executeQuery().use { rs -> rs.collectNameRows() }
@@ -990,6 +1006,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("INSERT OR REPLACE INTO modules (path, file_path, source_hash) VALUES (?, ?, ?)")
     }
 
+    @Synchronized
     override fun putModule(path: String, filePath: String?, sourceHash: String) {
         putModuleStmt.apply {
             setString(1, path)
@@ -1014,6 +1031,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent())
     }
 
+    @Synchronized
     override fun getModule(path: String): ModuleRow? {
         if (path in l1Modules) return l1Modules[path]
         getModuleStmt.setString(1, path)
@@ -1034,6 +1052,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("SELECT 1 FROM modules WHERE file_path = ? AND source_hash = ? LIMIT 1")
     }
 
+    @Synchronized
     override fun isFileStale(filePath: String, currentSourceHash: String): Boolean {
         isFileStaleStmt.setString(1, filePath)
         isFileStaleStmt.setString(2, currentSourceHash)
@@ -1045,6 +1064,7 @@ class SQLiteMezzeStore private constructor(
      * because module paths don't overlap across DBs (std::* lives in
      * stdlib, dep prefixes in deps, everything else in cache).
      */
+    @Synchronized
     override fun getAllModules(): List<ModuleRow> {
         val sql = """
             SELECT path, file_path, source_hash FROM main.modules
@@ -1077,6 +1097,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("INSERT OR IGNORE INTO edges (from_hash, to_hash, kind) VALUES (?, ?, ?)")
     }
 
+    @Synchronized
     override fun addEdge(fromHash: Hash, toHash: Hash, kind: EdgeKind) {
         addEdgeStmt.apply {
             setString(1, fromHash.hex)
@@ -1090,6 +1111,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement(unionAll("SELECT from_hash, to_hash, kind FROM <DB>.edges WHERE from_hash = ?"))
     }
 
+    @Synchronized
     override fun getEdgesFrom(hash: Hash): List<EdgeRow> {
         for (i in 0..2) getEdgesFromStmt.setString(i + 1, hash.hex)
         return getEdgesFromStmt.executeQuery().use { rs -> rs.collectEdgeRows() }
@@ -1099,11 +1121,13 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement(unionAll("SELECT from_hash, to_hash, kind FROM <DB>.edges WHERE to_hash = ?"))
     }
 
+    @Synchronized
     override fun getEdgesTo(hash: Hash): List<EdgeRow> {
         for (i in 0..2) getEdgesToStmt.setString(i + 1, hash.hex)
         return getEdgesToStmt.executeQuery().use { rs -> rs.collectEdgeRows() }
     }
 
+    @Synchronized
     override fun getTransitiveClosure(entryHash: Hash): Set<Hash> {
         val visited = mutableSetOf<Hash>()
         val queue = ArrayDeque<Hash>()
@@ -1129,6 +1153,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("INSERT OR REPLACE INTO ability_impls (hash, ability_hash, target_type, module) VALUES (?, ?, ?, ?)")
     }
 
+    @Synchronized
     override fun putAbilityImpl(hash: Hash, abilityHash: Hash, targetType: String, module: String?) {
         putAbilityImplStmt.apply {
             setString(1, hash.hex)
@@ -1145,6 +1170,7 @@ class SQLiteMezzeStore private constructor(
         ))
     }
 
+    @Synchronized
     override fun getAbilityImpls(abilityHash: Hash): List<AbilityImplRow> {
         for (i in 0..2) getAbilityImplsStmt.setString(i + 1, abilityHash.hex)
         return getAbilityImplsStmt.executeQuery().use { rs ->
@@ -1167,6 +1193,7 @@ class SQLiteMezzeStore private constructor(
         )
     }
 
+    @Synchronized
     override fun getAbilityImplForType(abilityHash: Hash, targetType: String): Hash? {
         for (i in 0..2) {
             getAbilityImplForTypeStmt.setString(i * 2 + 1, abilityHash.hex)
@@ -1181,6 +1208,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("INSERT OR REPLACE INTO effect_performers (hash, effect_hash, performer_name, module) VALUES (?, ?, ?, ?)")
     }
 
+    @Synchronized
     override fun putEffectPerformer(hash: Hash, effectHash: Hash, performerName: String, module: String?) {
         putEffectPerformerStmt.apply {
             setString(1, hash.hex)
@@ -1197,6 +1225,7 @@ class SQLiteMezzeStore private constructor(
         ))
     }
 
+    @Synchronized
     override fun getEffectPerformers(effectHash: Hash): List<EffectPerformerRow> {
         for (i in 0..2) getEffectPerformersStmt.setString(i + 1, effectHash.hex)
         return getEffectPerformersStmt.executeQuery().use { rs ->
@@ -1224,6 +1253,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent())
     }
 
+    @Synchronized
     override fun putUsage(targetHash: Hash, filePath: String, startLine: Int, startCol: Int, endLine: Int, endCol: Int) {
         putUsageStmt.apply {
             setString(1, targetHash.hex)
@@ -1240,6 +1270,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("SELECT target_hash, file_path, start_line, start_col, end_line, end_col FROM usages WHERE target_hash = ?")
     }
 
+    @Synchronized
     override fun getUsages(targetHash: Hash): List<UsageRow> {
         getUsagesStmt.setString(1, targetHash.hex)
         return getUsagesStmt.executeQuery().use { rs ->
@@ -1262,6 +1293,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("DELETE FROM usages WHERE file_path = ?")
     }
 
+    @Synchronized
     override fun clearUsagesForFile(filePath: String) {
         clearUsagesStmt.setString(1, filePath)
         clearUsagesStmt.executeUpdate()
@@ -1275,6 +1307,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("SELECT value FROM metadata WHERE key = ?")
     }
 
+    @Synchronized
     override fun getMetadata(key: String): String? {
         getMetadataStmt.setString(1, key)
         return getMetadataStmt.executeQuery().use { rs ->
@@ -1286,6 +1319,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)")
     }
 
+    @Synchronized
     override fun setMetadata(key: String, value: String) {
         setMetadataStmt.apply {
             setString(1, key)
@@ -1298,6 +1332,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("SELECT key, value FROM metadata WHERE key LIKE ? ESCAPE '\\'")
     }
 
+    @Synchronized
     override fun getMetadataByPrefix(prefix: String): Map<String, String> {
         val escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         getMetadataByPrefixStmt.setString(1, "$escaped%")
@@ -1319,6 +1354,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent())
     }
 
+    @Synchronized
     override fun putApp(name: String, entryName: String, entryModule: String, sourceFile: String?) {
         putAppStmt.apply {
             setString(1, name)
@@ -1333,6 +1369,7 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement("SELECT name, entry_name, entry_module, source_file FROM apps WHERE name = ?")
     }
 
+    @Synchronized
     override fun getApp(name: String): AppRow? {
         getAppStmt.setString(1, name)
         return getAppStmt.executeQuery().use { rs ->
@@ -1345,6 +1382,7 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    @Synchronized
     override fun setAppFunctionHashes(name: String, hashes: List<Hash>) {
         conn.prepareStatement("DELETE FROM app_functions WHERE app_name = ?").use { stmt ->
             stmt.setString(1, name)
@@ -1362,6 +1400,7 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    @Synchronized
     override fun getAppFunctionHashes(name: String): List<Hash> {
         conn.prepareStatement("SELECT hash FROM app_functions WHERE app_name = ? ORDER BY ord").use { stmt ->
             stmt.setString(1, name)
@@ -1373,6 +1412,7 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    @Synchronized
     override fun setAppPerformerRecords(name: String, records: List<Array<String>>) {
         conn.prepareStatement("DELETE FROM app_performers WHERE app_name = ?").use { stmt ->
             stmt.setString(1, name)
@@ -1393,6 +1433,7 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    @Synchronized
     override fun getAppPerformerRecords(name: String): List<Array<String>> {
         conn.prepareStatement(
             "SELECT record_idx, position, hash FROM app_performers WHERE app_name = ? ORDER BY record_idx, position"
@@ -1423,6 +1464,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent())
     }
 
+    @Synchronized
     override fun putImport(
         modulePath: String,
         localName: String,
@@ -1450,6 +1492,7 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    @Synchronized
     override fun clearImportsForModule(modulePath: String) {
         conn.prepareStatement("DELETE FROM imports WHERE module_path = ?").use { stmt ->
             stmt.setString(1, modulePath)
@@ -1481,6 +1524,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent()))
     }
 
+    @Synchronized
     override fun getImportsForModule(modulePath: String): List<ImportRow> {
         for (i in 0..2) getImportsForModuleStmt.setString(i + 1, modulePath)
         return getImportsForModuleStmt.executeQuery().use { rs ->
@@ -1497,6 +1541,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent()))
     }
 
+    @Synchronized
     override fun getImportersOf(targetModule: String, targetName: String): List<ImportRow> {
         for (i in 0..2) {
             getImportersOfStmt.setString(i * 2 + 1, targetModule)
@@ -1520,6 +1565,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent())
     }
 
+    @Synchronized
     override fun putDecl(
         modulePath: String,
         declName: String,
@@ -1549,6 +1595,7 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    @Synchronized
     override fun clearDeclsForModule(modulePath: String) {
         conn.prepareStatement("DELETE FROM decls WHERE module_path = ?").use { stmt ->
             stmt.setString(1, modulePath)
@@ -1579,6 +1626,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent()))
     }
 
+    @Synchronized
     override fun getDeclsForModule(modulePath: String): List<DeclRow> {
         for (i in 0..2) getDeclsForModuleStmt.setString(i + 1, modulePath)
         return getDeclsForModuleStmt.executeQuery().use { rs ->
@@ -1595,6 +1643,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent()) + " ORDER BY decl_name LIMIT 200")
     }
 
+    @Synchronized
     override fun searchDeclsByName(query: String): List<DeclRow> {
         for (i in 0..2) searchDeclsByNameStmt.setString(i + 1, query)
         return searchDeclsByNameStmt.executeQuery().use { rs ->
@@ -1611,6 +1660,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent()))
     }
 
+    @Synchronized
     override fun getDeclsByKind(kind: DeclKind): List<DeclRow> {
         for (i in 0..2) getDeclsByKindStmt.setString(i + 1, kind.dbValue)
         return getDeclsByKindStmt.executeQuery().use { rs ->
@@ -1629,6 +1679,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent()) + " LIMIT 1")
     }
 
+    @Synchronized
     override fun findDeclByHash(hash: Hash): DeclRow? {
         for (i in 0..2) findDeclByHashStmt.setString(i + 1, hash.hex)
         return findDeclByHashStmt.executeQuery().use { rs ->
@@ -1647,6 +1698,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent())
     }
 
+    @Synchronized
     override fun putParsedModule(modulePath: String, sourceHash: String, parsedBlob: ByteArray) {
         putParsedModuleStmt.apply {
             setString(1, modulePath)
@@ -1664,6 +1716,7 @@ class SQLiteMezzeStore private constructor(
         )
     }
 
+    @Synchronized
     override fun getParsedModule(modulePath: String, sourceHash: String): ByteArray? {
         val key = cacheKey(modulePath, sourceHash)
         if (key in l1ParsedModules) return l1ParsedModules[key]
@@ -1678,6 +1731,7 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    @Synchronized
     override fun clearParsedModulesForPath(modulePath: String) {
         conn.prepareStatement("DELETE FROM parsed_modules WHERE module_path = ?").use { stmt ->
             stmt.setString(1, modulePath)
@@ -1697,6 +1751,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent())
     }
 
+    @Synchronized
     override fun putTypedModule(modulePath: String, sourceHash: String, typedBlob: ByteArray) {
         putTypedModuleStmt.apply {
             setString(1, modulePath)
@@ -1721,6 +1776,7 @@ class SQLiteMezzeStore private constructor(
         """.trimIndent())
     }
 
+    @Synchronized
     override fun getTypedModule(modulePath: String, sourceHash: String): ByteArray? {
         val key = cacheKey(modulePath, sourceHash)
         if (key in l1TypedModules) return l1TypedModules[key]
@@ -1735,6 +1791,7 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    @Synchronized
     override fun clearTypedModulesForPath(modulePath: String) {
         conn.prepareStatement("DELETE FROM typed_modules WHERE module_path = ?").use { stmt ->
             stmt.setString(1, modulePath)
@@ -1747,6 +1804,7 @@ class SQLiteMezzeStore private constructor(
     // MONO SPECIALIZATIONS
     // ====================================================================
 
+    @Synchronized
     override fun putMonoSpecialization(specializedHash: Hash, genericHash: Hash, typeArgsCbor: ByteArray) {
         conn.prepareStatement("""
             INSERT OR REPLACE INTO mono_specializations (specialized_hash, generic_hash, type_args_cbor)
@@ -1759,6 +1817,7 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    @Synchronized
     override fun getMonoSpecialization(specializedHash: Hash): MonoSpecializationRow? {
         conn.prepareStatement(
             "SELECT generic_hash, type_args_cbor FROM mono_specializations WHERE specialized_hash = ?"
@@ -1773,6 +1832,7 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    @Synchronized
     override fun getMonoSpecializationsForGeneric(genericHash: Hash): List<MonoSpecializationRow> {
         val out = ArrayList<MonoSpecializationRow>()
         conn.prepareStatement(
@@ -1796,6 +1856,7 @@ class SQLiteMezzeStore private constructor(
     // LIFECYCLE
     // ====================================================================
 
+    @Synchronized
     override fun <T> transaction(block: () -> T): T {
         val wasAutoCommit = conn.autoCommit
         conn.autoCommit = false
@@ -1811,6 +1872,7 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
+    @Synchronized
     override fun close() {
         conn.close()
     }

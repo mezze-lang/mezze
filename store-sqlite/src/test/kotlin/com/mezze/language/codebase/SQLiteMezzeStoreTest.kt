@@ -472,4 +472,54 @@ class SQLiteMezzeStoreTest {
             tempDir.deleteRecursively()
         }
     }
+
+    /**
+     * #302: concurrent reads on a single SQLiteMezzeStore must not throw
+     * "ResultSet already requested" — a sqlite-jdbc error that fires when
+     * two threads share the same cached PreparedStatement.
+     *
+     * This reproduces the LSP failure mode: many `textDocument/hover`
+     * requests arrive in parallel and each does its own getUsages /
+     * findDeclByHash / getModule call.
+     */
+    @Test
+    fun `concurrent reads don't throw ResultSet already requested`() {
+        val targetHash = stubBlob(Hash("c".repeat(64)))
+        store.putModule("std::test", "/tmp/test.mz", "h1")
+        store.registerName("std::test", "thing", targetHash)
+        store.putUsage(targetHash, "/tmp/a.mz", 1, 0, 1, 5)
+        store.putUsage(targetHash, "/tmp/b.mz", 2, 0, 2, 5)
+
+        val threads = 8
+        val iterations = 50
+        val executor = java.util.concurrent.Executors.newFixedThreadPool(threads)
+        val errors = java.util.concurrent.ConcurrentLinkedQueue<Throwable>()
+        val latch = java.util.concurrent.CountDownLatch(threads)
+        try {
+            for (t in 0 until threads) {
+                executor.submit {
+                    try {
+                        repeat(iterations) {
+                            store.getUsages(targetHash)
+                            store.resolveName("std::test", "thing")
+                            store.getModule("std::test")
+                            store.blobExists(targetHash)
+                        }
+                    } catch (e: Throwable) {
+                        errors.add(e)
+                    } finally {
+                        latch.countDown()
+                    }
+                }
+            }
+            assertTrue(latch.await(30, java.util.concurrent.TimeUnit.SECONDS),
+                "concurrent reads timed out")
+        } finally {
+            executor.shutdown()
+        }
+        if (errors.isNotEmpty()) {
+            val first = errors.first()
+            fail<Unit>("concurrent reads raised ${errors.size} error(s); first: $first")
+        }
+    }
 }
