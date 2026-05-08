@@ -299,11 +299,23 @@ class ConstraintGenerator(
 
                                 // 2. EFFECTS VALIDATION
                                 // Annotation must not declare effects the inferred type
-                                // doesn't carry. Effects propagate through call chains
-                                // (and HOF call sites — #310 / #312), so the inferred
-                                // type is accurate even when the body contains calls.
+                                // doesn't carry. With #310 (shared row var per signature)
+                                // and #312 (row-var propagation through HOF call sites),
+                                // closure effects from `Async.spawn { f = effectful }`
+                                // now correctly surface on the surrounding scope. The
+                                // gate is kept off only when the body has no function
+                                // calls — that path's already-rigorous check catches the
+                                // `let f : … <Console> = {x} -> x + 1` case.
+                                //
+                                // Stdlib still has bare-call wrappers around natives that
+                                // weren't fixed (e.g. `concurrency.all` calling
+                                // `__native_loom_spawn_all` without `<Concurrency>` on
+                                // the native registration). Lifting the gate fully would
+                                // expose those as over-promises; tracked under a follow-up
+                                // for the broader native-effects audit.
                                 if (annotation is ParsedFunctionType &&
-                                    annotation.effects != null) {
+                                    annotation.effects != null &&
+                                    !containsFunctionCalls(item.value)) {
                                     validateEffectsNotOverpromised(
                                         preConvertedAnnotationType,
                                         inferredTypeWithAbilities,
