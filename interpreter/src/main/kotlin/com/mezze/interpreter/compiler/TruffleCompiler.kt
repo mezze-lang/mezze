@@ -35,6 +35,14 @@ class TruffleCompiler(
     private val sourceCache = mutableMapOf<String, Source>()
     private val functionRegistry = mutableMapOf<com.mezze.language.typedast.Hash, FunctionIR>()
 
+    /**
+     * Set of function hashes currently being compiled. Used to detect
+     * recursive references in MakeLambdaIR (e.g., a lambda's body that
+     * contains a MakeLambdaIR referencing the lambda itself). Without
+     * this guard, we'd infinitely recurse during compilation.
+     */
+    private val compilingFunctions = mutableSetOf<com.mezze.language.typedast.Hash>()
+
     /** Register all FunctionIRs so MakeLambdaIR can find them */
     fun registerFunctions(functions: List<FunctionIR>) {
         for (fn in functions) {
@@ -245,6 +253,11 @@ class TruffleCompiler(
                 val leftNode = compileNode(node.left, source)
                 val rightNode = compileNode(node.right, source)
                 compileInlineOp(node.op, leftNode, rightNode)
+            }
+
+            is com.mezze.language.truffleir.SpecializedCallIR -> {
+                val argNodes = node.args.map { compileNode(it, source) }.toTypedArray()
+                compileSpecializedOp(node.op, argNodes)
             }
 
             // === Records ===
@@ -462,10 +475,21 @@ class TruffleCompiler(
                 val closureSlots = node.captures.map { it.slot }.toIntArray()
                 val closureKinds = node.captures.map { slotKindToInt(it.kind) }.toIntArray()
 
-                if (fnIR != null) {
+                // RECURSIVE LAMBDA GUARD: if we're already compiling this function
+                // (i.e., this MakeLambdaIR appears inside the function's own body —
+                // a recursive reference from a do-block recursive let), don't
+                // recursively compile. Use the runtime hash lookup path instead.
+                val isRecursiveSelfRef = node.functionHash in compilingFunctions
+
+                if (fnIR != null && !isRecursiveSelfRef) {
                     // Compile the lambda's body from its FunctionIR
                     val fnSource = getOrCreateSource(fnIR.sourceFile)
-                    val bodyNode = compileNode(fnIR.body, fnSource)
+                    compilingFunctions.add(node.functionHash)
+                    val bodyNode = try {
+                        compileNode(fnIR.body, fnSource)
+                    } finally {
+                        compilingFunctions.remove(node.functionHash)
+                    }
                     val innerFd = buildFrameDescriptor(fnIR)
                     FunctionDefinitionNode(
                         fnIR.name,
@@ -479,6 +503,7 @@ class TruffleCompiler(
                     )
                 } else {
                     // Fallback: lookup by hash at runtime
+                    // Used for: (1) function not yet registered, (2) recursive self-references
                     val bodyNode = MonomorphicCallNode(node.functionHash, node.functionHash.toString(), UnitLiteralNode())
                     val innerFd = FrameDescriptor.newBuilder().build()
                     FunctionDefinitionNode(
@@ -695,6 +720,23 @@ class TruffleCompiler(
             InlineOp.OR -> com.mezze.interpreter.nodes.inline.DirectOrNode.create(left, right)
             InlineOp.NEG -> com.mezze.interpreter.nodes.inline.DirectSubtractNode.create(IntLiteralNode(0), left)
             InlineOp.NOT -> com.mezze.interpreter.nodes.inline.DirectEqualNode.create(left, BoolLiteralNode(false))
+        }
+    }
+
+    /**
+     * Maps SpecializedOp enum values to specialized Truffle nodes.
+     * Each case is wired one category at a time as part of the DS-Wire effort.
+     *
+     * TODO: Wire each SpecializedOp to its corresponding pre-built Truffle node.
+     * For now, throw — the typechecker only emits ops we've wired.
+     */
+    private fun compileSpecializedOp(
+        op: com.mezze.language.truffleir.SpecializedOp,
+        args: Array<MezzeNode>
+    ): MezzeNode {
+        return when (op) {
+            // Phase 2 (Map) — wired below as we add them
+            else -> throw IllegalStateException("SpecializedOp not yet wired: $op")
         }
     }
 

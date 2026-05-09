@@ -159,6 +159,9 @@ class MezzeExecutor(
                 collectReferencedHashes(node.left, queue)
                 collectReferencedHashes(node.right, queue)
             }
+            is com.mezze.language.truffleir.SpecializedCallIR -> {
+                node.args.forEach { collectReferencedHashes(it, queue) }
+            }
             is com.mezze.language.truffleir.InterpolatedStringIR -> {
                 for (part in node.parts) {
                     if (part is com.mezze.language.truffleir.StringPartIR.Expr) collectReferencedHashes(part.node, queue)

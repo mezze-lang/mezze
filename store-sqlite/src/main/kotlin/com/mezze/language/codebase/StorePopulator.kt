@@ -724,6 +724,9 @@ object StorePopulator {
                 collectEdgesFromNode(node.left, report)
                 collectEdgesFromNode(node.right, report)
             }
+            is com.mezze.language.truffleir.SpecializedCallIR -> {
+                node.args.forEach { collectEdgesFromNode(it, report) }
+            }
             is com.mezze.language.truffleir.InterpolatedStringIR -> {
                 for (part in node.parts) {
                     if (part is com.mezze.language.truffleir.StringPartIR.Expr) collectEdgesFromNode(part.node, report)

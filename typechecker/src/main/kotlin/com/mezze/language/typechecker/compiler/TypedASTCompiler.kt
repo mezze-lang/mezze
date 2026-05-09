@@ -71,6 +71,21 @@ class TypedASTCompiler(
     /** Number of captures in the current function — offsets param slots in the frame */
     private var currentCaptureCount = 0
 
+    /**
+     * Tracks recursive let-bound lambdas inside do blocks.
+     * When the lambda body references its own binding name, we resolve the reference
+     * to MakeLambdaIR(self_hash, self_captures) instead of ReadCaptureIR — this avoids
+     * the closure-captures-null problem.
+     *
+     * Entry: name -> (lambda_hash, capture_kinds for self-recursive MakeLambda)
+     */
+    private val recursiveLetLambdas = mutableMapOf<String, RecursiveLetInfo>()
+
+    private data class RecursiveLetInfo(
+        val hash: Hash,
+        val captureKinds: List<SlotKind>
+    )
+
     /** File table for source info */
     private val files = mutableSetOf<String>()
 
@@ -898,6 +913,19 @@ class TypedASTCompiler(
                 if (expr.name == "scope") {
                     return ReadScopeIR("scope", src)
                 }
+
+                // RECURSIVE LET: If this references a recursive let-bound lambda from
+                // an outer scope, recreate the lambda inline. The lambda's captures
+                // are accessible from inside its own body via ReadCaptureIR.
+                // This avoids the closure-captures-null problem.
+                val recursiveLet = recursiveLetLambdas[expr.name]
+                if (recursiveLet != null && binding.depth > 0) {
+                    val captures = recursiveLet.captureKinds.mapIndexed { idx, kind ->
+                        CaptureIR(idx, kind)
+                    }
+                    return MakeLambdaIR(recursiveLet.hash, captures, src)
+                }
+
                 // Check if this is a captured variable.
                 // For lambdas: depth > 0 means crossing a lambda boundary.
                 // For performer operation functions: depth may be 0 but the variable is
@@ -1558,11 +1586,22 @@ class TypedASTCompiler(
 
     private fun compileBlock(expr: TypedBlock, src: SourceInfo): NodeIR {
         val savedLocalMappings = localsByName.toMap()
+        val savedRecursiveLets = recursiveLetLambdas.toMap()
         val stmts = expr.statements.map { stmt ->
             when (stmt) {
                 is TypedStatement.Let -> {
                     val slot = forceAllocLocal(stmt.name)
                     val stmtValue = stmt.value
+
+                    // RECURSIVE LET REGISTRATION: If this is a recursive let-bound lambda,
+                    // pre-compute its hash and register so compileVar can resolve self-references
+                    // to MakeLambdaIR(self_hash, self_captures) instead of ReadCaptureIR.
+                    if (stmt.isRecursive && stmtValue is TypedLambda) {
+                        val lambdaHash = com.mezze.language.typedast.TypedASTHasher.hashExpr(stmtValue)
+                        val captureKinds = stmtValue.captures.map { typeToSlotKind(it.type) }
+                        recursiveLetLambdas[stmt.name] = RecursiveLetInfo(lambdaHash, captureKinds)
+                    }
+
                     val valueIR = if (stmtValue is TypedLambda) {
                         // Let-bound lambda: check if it matches a top-level function.
                         // If so, reference the top-level function's hash (not a re-hashed copy).
@@ -1599,6 +1638,8 @@ class TypedASTCompiler(
         val resultIR = compileExpr(expr.result)
         localsByName.clear()
         localsByName.putAll(savedLocalMappings)
+        recursiveLetLambdas.clear()
+        recursiveLetLambdas.putAll(savedRecursiveLets)
         return BlockIR(stmts, resultIR, src)
     }
 

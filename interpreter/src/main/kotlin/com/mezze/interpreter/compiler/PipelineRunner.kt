@@ -311,6 +311,9 @@ object PipelineRunner {
                 collectHashesFromNode(node.left, queue)
                 collectHashesFromNode(node.right, queue)
             }
+            is com.mezze.language.truffleir.SpecializedCallIR -> {
+                node.args.forEach { collectHashesFromNode(it, queue) }
+            }
             is com.mezze.language.truffleir.InterpolatedStringIR -> {
                 for (part in node.parts) {
                     if (part is com.mezze.language.truffleir.StringPartIR.Expr) collectHashesFromNode(part.node, queue)

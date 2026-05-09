@@ -201,7 +201,20 @@ data class TypedBlock(
 
 @Serializable
 sealed interface TypedStatement {
-    @Serializable data class Let(val name: String, val contentHash: Hash, val type: MezzeType, val value: TypedExpr, val loc: Loc) : TypedStatement
+    /**
+     * Let binding inside a do block.
+     * @property isRecursive true if value is a lambda that references its own binding name.
+     *   When true, the compiler emits self-referential MakeLambdaIR for recursive call sites
+     *   instead of capturing the slot value (which would be null at lambda creation time).
+     */
+    @Serializable data class Let(
+        val name: String,
+        val contentHash: Hash,
+        val type: MezzeType,
+        val value: TypedExpr,
+        val loc: Loc,
+        val isRecursive: Boolean = false
+    ) : TypedStatement
     @Serializable data class Expr(val expr: TypedExpr, val loc: Loc) : TypedStatement
 }
 

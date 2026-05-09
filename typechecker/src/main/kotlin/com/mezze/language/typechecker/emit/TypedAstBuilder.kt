@@ -947,13 +947,34 @@ class TypedAstBuilder(
                                 val valueType = stmt.typeAnnotation
                                     ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
                                     ?: MezzeType.VarType(TypeVar("let_$name"))
+
+                                // RECURSIVE LET: For `let name = lambda { ... }` in do blocks,
+                                // pre-register the binding so the lambda body can resolve `name`
+                                // as a local reference. Without this, recursive references fall
+                                // through to BindingRef.Local(0,0) and fail at runtime.
+                                val isLambdaValue = stmt.value is ParsedLambda &&
+                                                     pattern is ParsedVariablePattern
+                                if (isLambdaValue) {
+                                    identifierContext[name] = valueType
+                                    if (lambdaParamScopes.isNotEmpty()) {
+                                        val currentScope = lambdaParamScopes.last()
+                                        if (name !in currentScope) {
+                                            currentScope.add(name)
+                                        }
+                                    }
+                                }
+
                                 val value = buildExpr(stmt.value, file, valueType)
                                 val resolvedType = substitution.apply(value.type)
+
+                                // Detect if this is actually recursive: lambda body references the binding name
+                                val isRecursive = isLambdaValue && value is TypedLambda &&
+                                                   refsName(value.body, name)
 
                                 // Register binding for later references in this block
                                 identifierContext[name] = resolvedType
 
-                                // Also add to current lambda scope so inner lambdas can capture it
+                                // Also add to current lambda scope (no-op if already added above)
                                 if (lambdaParamScopes.isNotEmpty()) {
                                     val currentScope = lambdaParamScopes.last()
                                     if (name !in currentScope) {
@@ -964,7 +985,7 @@ class TypedAstBuilder(
                                 // Use v1 content hash if available, otherwise compute
                                 val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
                                 val contentHash = v1LetHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(stmt.value)
-                                stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc))
+                                stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc, isRecursive))
                             }
                         }
                         is ParsedStatement.Expr -> {
@@ -1175,6 +1196,65 @@ class TypedAstBuilder(
                     loc = loc
                 )
         }
+    }
+
+    /**
+     * Returns true if any TypedVar in [expr] has the given [name].
+     * Used to detect recursive let-bound lambdas where the body refers to
+     * its own binding name. Conservative: false positives are OK (just means
+     * we mark something as recursive that isn't), false negatives are bugs.
+     */
+    private fun refsName(expr: TypedExpr, name: String): Boolean {
+        if (expr is TypedVar && expr.name == name) return true
+        when (expr) {
+            is TypedLambda -> if (refsName(expr.body, name)) return true
+            is TypedCall -> {
+                if (refsName(expr.function, name)) return true
+                if (refsName(expr.arg, name)) return true
+            }
+            is TypedIf -> {
+                if (refsName(expr.condition, name)) return true
+                if (refsName(expr.thenBranch, name)) return true
+                if (refsName(expr.elseBranch, name)) return true
+            }
+            is TypedRecord -> {
+                for (entry in expr.entries) {
+                    when (entry) {
+                        is TypedRecordEntry.Field -> if (refsName(entry.value, name)) return true
+                        is TypedRecordEntry.Spread -> if (refsName(entry.expr, name)) return true
+                    }
+                }
+            }
+            is TypedFieldAccess -> if (refsName(expr.record, name)) return true
+            is TypedBlock -> {
+                for (stmt in expr.statements) {
+                    when (stmt) {
+                        is TypedStatement.Let -> if (refsName(stmt.value, name)) return true
+                        is TypedStatement.Expr -> if (refsName(stmt.expr, name)) return true
+                    }
+                }
+                if (refsName(expr.result, name)) return true
+            }
+            is TypedMatch -> {
+                if (refsName(expr.scrutinee, name)) return true
+                for (case in expr.cases) {
+                    if (refsName(case.body, name)) return true
+                    val guard = case.guard
+                    if (guard != null && refsName(guard, name)) return true
+                }
+            }
+            is TypedRecordUpdate -> {
+                if (refsName(expr.record, name)) return true
+                for (u in expr.updates) {
+                    when (u) {
+                        is TypedRecordEntry.Field -> if (refsName(u.value, name)) return true
+                        is TypedRecordEntry.Spread -> if (refsName(u.expr, name)) return true
+                    }
+                }
+            }
+            else -> {}  // other types (literals, etc) — assume no recursion
+        }
+        return false
     }
 
     /**

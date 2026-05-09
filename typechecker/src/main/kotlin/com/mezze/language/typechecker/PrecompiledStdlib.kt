@@ -126,6 +126,7 @@ object PrecompiledStdlib {
             is com.mezze.language.truffleir.IfIR -> { collectHashRefs(node.cond, refs); collectHashRefs(node.thenBr, refs); collectHashRefs(node.elseBr, refs) }
             is com.mezze.language.truffleir.WriteLocalIR -> collectHashRefs(node.value, refs)
             is com.mezze.language.truffleir.InlineBinaryOpIR -> { collectHashRefs(node.left, refs); collectHashRefs(node.right, refs) }
+            is com.mezze.language.truffleir.SpecializedCallIR -> { node.args.forEach { collectHashRefs(it, refs) } }
             is com.mezze.language.truffleir.InterpolatedStringIR -> {
                 for (p in node.parts) if (p is com.mezze.language.truffleir.StringPartIR.Expr) collectHashRefs(p.node, refs)
             }

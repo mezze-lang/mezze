@@ -3846,13 +3846,46 @@ class ExpressionConstraintGenerator {
                         convertParsedTypeAnnotation(annotation)
                     }
 
-                    // Generate constraints for the expression, with expected type if annotated
-                    val exprContext = if (annotatedType != null) {
-                        currentContext.withExpectedType(annotatedType)
+                    // RECURSIVE LET: For `let name = lambda { ... }` in do blocks, pre-bind
+                    // the variable name so the lambda body can reference itself recursively.
+                    val isRecursiveLetCandidate = stmt.value is ParsedLambda &&
+                                                   stmt.pattern is ParsedVariablePattern
+                    val preBindType: MezzeType? = if (isRecursiveLetCandidate) {
+                        annotatedType ?: MezzeType.VarType(TypeVar.fresh())
+                    } else null
+
+                    val preBindContext = if (preBindType != null) {
+                        val varName = (stmt.pattern as ParsedVariablePattern).name
+                        val preBinding = mapOf(
+                            BindingKey.unqualified(varName) to TypingContext.Binding.Monomorphic(preBindType)
+                        )
+                        currentContext.copy(
+                            typingContext = currentContext.typingContext.extendAll(preBinding)
+                        )
                     } else {
                         currentContext
                     }
+
+                    // Generate constraints for the expression, with expected type if annotated
+                    val exprContext = if (annotatedType != null) {
+                        preBindContext.withExpectedType(annotatedType)
+                    } else {
+                        preBindContext
+                    }
                     val exprResult = generate(stmt.value, exprContext)
+
+                    // RECURSIVE LET: unify pre-bind type with inferred lambda type
+                    if (preBindType != null && annotatedType == null) {
+                        constraints.add(
+                            Constraint.Equality(
+                                left = preBindType,
+                                right = exprResult.type,
+                                context = "Recursive let binding in do block",
+                                loc = stmt.value.loc
+                            )
+                        )
+                    }
+
                     constraints.addAll(exprResult.constraints)
                     undefinedVars.addAll(exprResult.undefinedVariables)
                     effects.addAll(exprResult.effects)

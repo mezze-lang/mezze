@@ -112,6 +112,73 @@ enum class InlineOp {
     NEG, NOT  // Unary ops — rightIR is unused
 }
 
+/** Specialized call to a built-in operation (Map.get, Set.contains, Seq.map, etc.).
+ *  Bypasses native dispatch + @TruffleBoundary cliff — the typechecker recognizes
+ *  the call shape and emits this directly, which TruffleCompiler maps to a
+ *  pre-built specialized Truffle node (MapGetNode, SetContainsNode, etc.). */
+@Serializable data class SpecializedCallIR(
+    val op: SpecializedOp,
+    val args: List<NodeIR>,
+    override val src: SourceInfo
+) : NodeIR
+
+@Serializable
+enum class SpecializedOp {
+    // Map (Phase 1 — proof of concept)
+    MAP_GET, MAP_CONTAINS_KEY,
+
+    // Set
+    SET_CONTAINS,
+
+    // Record field access
+    RECORD_FIELD_GET, RECORD_FIELD_GET_LONG,
+
+    // Seq access
+    SEQ_GET, SEQ_GET_DOUBLE, SEQ_LENGTH, SEQ_APPEND_LONG, SEQ_APPEND_DOUBLE,
+    SEQ_TAKE, SEQ_DROP, SEQ_COPY, SEQ_FILL,
+
+    // Seq HOFs
+    SEQ_MAP, SEQ_MAP_LONG, SEQ_MAP_DOUBLE,
+    SEQ_FILTER, SEQ_FILTER_LONG, SEQ_FILTER_DOUBLE,
+    SEQ_FOLD, SEQ_FOLD_LONG, SEQ_FOLD_DOUBLE,
+    SEQ_REDUCE_LONG, SEQ_REDUCE_DOUBLE,
+    SEQ_SCAN_LONG, SEQ_SCAN_DOUBLE,
+
+    // Seq numeric
+    SEQ_SUM, SEQ_SUM_LONG_SIMD, SEQ_SUM_DOUBLE, SEQ_SUM_DOUBLE_SIMD,
+    SEQ_PRODUCT_LONG, SEQ_PRODUCT_DOUBLE,
+    SEQ_MIN_LONG, SEQ_MIN_DOUBLE, SEQ_MAX_LONG, SEQ_MAX_DOUBLE,
+    SEQ_DOT_PRODUCT, SEQ_COUNT, SEQ_COUNT_LONG,
+
+    // Seq predicates/search
+    SEQ_ANY_LONG, SEQ_ANY_DOUBLE, SEQ_ALL_LONG, SEQ_ALL_DOUBLE,
+    SEQ_FIND_LONG, SEQ_FIND_DOUBLE,
+    SEQ_CONTAINS_LONG, SEQ_CONTAINS_DOUBLE,
+    SEQ_INDEX_OF, SEQ_INDEX_OF_DOUBLE,
+
+    // Seq partition/group/zip/sort
+    SEQ_PARTITION_LONG, SEQ_PARTITION_DOUBLE,
+    SEQ_GROUP_BY,
+    SEQ_ZIP, SEQ_ZIP_WITH_LONG, SEQ_ZIP_WITH_DOUBLE,
+    SEQ_SORT, SEQ_REVERSE_LONG, SEQ_REVERSE_DOUBLE,
+    SEQ_FLAT_MAP_LONG, SEQ_FLAT_MAP_DOUBLE,
+    SEQ_RANGE_LONG, SEQ_CONCAT,
+
+    // List
+    LIST_CONS, LIST_CONS_DOUBLE, LIST_HEAD, LIST_HEAD_DOUBLE,
+
+    // String
+    STRING_CONCAT_BATCH, STRING_JOIN, STRING_SPLIT, STRING_PRIMITIVE,
+
+    // Extra primitive ops not in InlineOp
+    INT_BITWISE, INT_COMPARE_CHAIN,
+    FLOAT_MATH, FLOAT_SQRT, FLOAT_FMA, FLOAT_ABS,
+    BOOL_XOR,
+
+    // Conversion + IO
+    CONVERSION, FILE_READ
+}
+
 // Records
 @Serializable data class MakeRecordIR(val fields: List<FieldIR>, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
 @Serializable data class FieldIR(val name: String, val value: NodeIR)
