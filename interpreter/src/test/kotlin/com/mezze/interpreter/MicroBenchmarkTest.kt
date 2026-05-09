@@ -27,7 +27,8 @@ class MicroBenchmarkTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private fun benchmark(name: String, code: String, iterations: Int): Long {
-        eval(code)  // warmup
+        // Heavier warmup — multiple runs to ensure JIT compilation fires
+        for (w in 0 until 10) eval(code)
         val timings = LongArray(5)
         for (i in 0 until 5) {
             System.gc()
@@ -41,6 +42,96 @@ class MicroBenchmarkTest {
         val perIter = median.toDouble() / iterations
         println("  $name: ${median}ms total, ${"%.4f".format(perIter)}ms/iter ($iterations iters)")
         return median
+    }
+
+    @Test
+    @Timeout(300)
+    fun `00a - simple call - no recursion`() {
+        // What's the cost of a single function call? Compares to recursion.
+        println("\n=== Single call: f {n} returns n ===")
+        for (n in listOf(100, 1000, 10000)) {
+            val code = """
+                let identity: {n: Int} -> Int = {n} -> n
+
+                let bench: {iter: Int, max: Int, sum: Int} -> Int = {iter, max, sum} ->
+                  if iter == max
+                    then sum
+                    else bench {iter = iter + 1, max = max, sum = sum + identity {n = $n}}
+
+                bench {iter = 0, max = ITERATIONS, sum = 0}
+            """.trimIndent().replace("ITERATIONS", "10000")
+            benchmark("call_count=$n (irrelevant, n is data)", code, 10000)
+        }
+    }
+
+    @Test
+    @Timeout(300)
+    fun `00b - tight loop calling the same function`() {
+        // Pure call cost: how much does calling identity 10K times cost?
+        println("\n=== Tight call loop: 10K calls to identity ===")
+        val code = """
+            let identity: {n: Int} -> Int = {n} -> n
+
+            let bench: {iter: Int, max: Int, sum: Int} -> Int = {iter, max, sum} ->
+              if iter == max
+                then sum
+                else bench {iter = iter + 1, max = max, sum = sum + identity {n = iter}}
+
+            bench {iter = 0, max = 10000, sum = 0}
+        """.trimIndent()
+        benchmark("10K calls (1 iter)", code, 1)
+    }
+
+    @Test
+    @Timeout(300)
+    fun `00c - same as 00b but no inner call`() {
+        // Same loop structure, but no inner call. Measures recursion overhead alone.
+        println("\n=== Pure loop, no inner call ===")
+        val code = """
+            let bench: {iter: Int, max: Int, sum: Int} -> Int = {iter, max, sum} ->
+              if iter == max
+                then sum
+                else bench {iter = iter + 1, max = max, sum = sum + iter}
+
+            bench {iter = 0, max = 10000, sum = 0}
+        """.trimIndent()
+        benchmark("10K loop iters (no inner call)", code, 1)
+    }
+
+    @Test
+    @Timeout(600)
+    fun `00d - VERY large recursion to ensure JIT compiles`() {
+        // 1M iterations - JIT will definitely compile
+        println("\n=== 1M recursive calls (JIT should kick in) ===")
+        val code = """
+            let count: {n: Int} -> Int = {n} ->
+              if n == 0 then 0 else count {n = n - 1}
+
+            count {n = 1000000}
+        """.trimIndent()
+        benchmark("1M recursion", code, 1000000)
+    }
+
+    @Test
+    @Timeout(600)
+    fun `00e - run after warmup INSIDE eval (true steady state)`() {
+        // Warmup INSIDE the same eval: run count_down many times before timing
+        // This ensures JIT has compiled by the time we measure.
+        println("\n=== Steady state recursion (warmup inside eval) ===")
+
+        // First test: warmup with 1M, then benchmark with 100K (10K each, 10 iters)
+        val code = """
+            let count: {n: Int} -> Int = {n} ->
+              if n == 0 then 0 else count {n = n - 1}
+
+            # Warmup inside eval — 1M iterations to trigger JIT
+            let warmup = count {n = 1000000}
+
+            # Now measure: 10K iterations to compare to original benchmark
+            let measured = count {n = 10000}
+            measured
+        """.trimIndent()
+        benchmark("warmup 1M then 10K", code, 10000)
     }
 
     @Test
