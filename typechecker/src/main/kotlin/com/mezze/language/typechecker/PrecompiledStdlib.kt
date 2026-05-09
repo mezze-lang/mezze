@@ -116,6 +116,7 @@ object PrecompiledStdlib {
             is com.mezze.language.truffleir.CallLocalIR -> collectHashRefs(node.arg, refs)
             is com.mezze.language.truffleir.CallNativeIR -> collectHashRefs(node.arg, refs)
             is com.mezze.language.truffleir.CallIndirectIR -> { collectHashRefs(node.function, refs); collectHashRefs(node.arg, refs) }
+            is com.mezze.language.truffleir.CallIndirectScalarIR -> { collectHashRefs(node.function, refs); node.args.forEach { collectHashRefs(it, refs) } }
             is com.mezze.language.truffleir.MakeRecordIR -> node.fields.forEach { collectHashRefs(it.value, refs) }
             is com.mezze.language.truffleir.ReadFieldIR -> collectHashRefs(node.record, refs)
             is com.mezze.language.truffleir.RecordUpdateIR -> { collectHashRefs(node.record, refs); node.updates.forEach { collectHashRefs(it.value, refs) } }

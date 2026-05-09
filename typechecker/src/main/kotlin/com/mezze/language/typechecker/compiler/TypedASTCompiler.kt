@@ -1221,7 +1221,7 @@ class TypedASTCompiler(
                     val resolvedSlot = resolveLocalSlot(fn.name, binding.depth)
                     if (resolvedSlot >= 0) {
                         census.indirect++
-                        CallIndirectIR(ReadLocalIR(resolvedSlot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
+                        emitCallIndirect(ReadLocalIR(resolvedSlot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
                     } else {
                         // If depth > 0 and not found locally, check if it's a top-level
                         // declaration. Use CallDirectIR for better performance.
@@ -1233,15 +1233,15 @@ class TypedASTCompiler(
                             }
                         }
                         census.indirect++
-                        CallIndirectIR(fnIR, argIR, expr.isTailCall, src)
+                        emitCallIndirect(fnIR, argIR, expr.isTailCall, src)
                     }
                 }
-                is BindingRef.Param -> { census.indirect++; CallIndirectIR(ReadLocalIR(currentCaptureCount + binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src) }
-                is BindingRef.Capture -> { census.indirect++; CallIndirectIR(ReadCaptureIR(binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src) }
+                is BindingRef.Param -> { census.indirect++; emitCallIndirect(ReadLocalIR(currentCaptureCount + binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src) }
+                is BindingRef.Capture -> { census.indirect++; emitCallIndirect(ReadCaptureIR(binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src) }
             }
         }
         census.indirect++
-        return CallIndirectIR(fnIR, argIR, expr.isTailCall, src)
+        return emitCallIndirect(fnIR, argIR, expr.isTailCall, src)
     }
 
     /**
@@ -2248,5 +2248,32 @@ class TypedASTCompiler(
             }
         }
         return CallDirectIR(targetHash, listOf(argIR), isTailCall, src, typeTag, isScalarABI = false)
+    }
+
+    /** Build a CallIndirectIR or CallIndirectScalarIR based on arg shape.
+     *  Emits scalar form only for 1-field, no-spread record literals — typecheck
+     *  guarantees the single field name matches the callee's single param name,
+     *  so positional binding at index 0 is correct. Wider arities defer to the
+     *  record path because we can't statically know the callee's param order. */
+    private fun emitCallIndirect(
+        fnIR: NodeIR,
+        argIR: NodeIR,
+        isTailCall: Boolean,
+        src: SourceInfo
+    ): NodeIR {
+        // Skip the scalar path when the "function" expression is a record-field
+        // read — this matches the inline-operator pattern (e.g. `x.add {r = y}`,
+        // `x.neg {it = x}`) that TruffleCompiler.tryCompileInlineOp recognizes
+        // and lowers to direct arithmetic / native calls. Going scalar here would
+        // bypass that lowering and try to invoke a non-function value.
+        val isInlineOpShape = fnIR is com.mezze.language.truffleir.ReadFieldIR
+        if (!isInlineOpShape && argIR is MakeRecordIR && argIR.fields.size == 1
+                && argIR.fields[0].name != "__spread__") {
+            val field = argIR.fields[0]
+            return com.mezze.language.truffleir.CallIndirectScalarIR(
+                fnIR, listOf(field.value), listOf(field.name), isTailCall, src
+            )
+        }
+        return CallIndirectIR(fnIR, argIR, isTailCall, src)
     }
 }

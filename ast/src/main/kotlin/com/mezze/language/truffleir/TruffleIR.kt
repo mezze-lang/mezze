@@ -102,6 +102,18 @@ sealed interface StringPartIR {
 @Serializable data class CallNativeIR(val name: String, val arg: NodeIR, override val src: SourceInfo) : NodeIR
 /** Indirect call — evaluate function expression, then invoke */
 @Serializable data class CallIndirectIR(val function: NodeIR, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
+/** Indirect call with positional scalar args — eliminates per-call MezzeRecord
+ *  allocation for HOF callback invocations (e.g. `f {x = n}` inside `map`).
+ *
+ *  Emitted by the typechecker only when:
+ *    - arg expr is a MakeRecordIR with exactly 1 field (no spread, no missing)
+ *    - typecheck guaranteed the single field name matches the callee's single
+ *      param name (so positional binding at index 0 is correct)
+ *
+ *  argFieldNames mirrors args 1:1 — needed for the receiver's fallback path
+ *  (build a single-field MezzeRecord) when the cached callee turns out to want
+ *  a record (e.g. partial application). The fast path doesn't read names. */
+@Serializable data class CallIndirectScalarIR(val function: NodeIR, val args: List<NodeIR>, val argFieldNames: List<String>, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
 
 /** Dictionary-or-dynamic ability method dispatch.
  *  Reads a dict param from the frame: if it holds a MezzeFunction, call it directly.

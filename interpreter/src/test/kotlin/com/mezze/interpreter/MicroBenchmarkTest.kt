@@ -100,6 +100,28 @@ class MicroBenchmarkTest {
 
     @Test
     @Timeout(600)
+    fun `00d4 - HOF callback (indirect call hot path)`() {
+        // Stresses indirect calls: an inner loop that repeatedly calls a
+        // function passed as a parameter. Mirrors what list::map does
+        // internally. Currently goes through the record path even with
+        // scalar enabled — measures whether indirect-call optimization
+        // would be worth pursuing.
+        println("\n=== 1M HOF callback invocations ===")
+        val code = """
+            let apply: {f: {x: Int} -> Int, n: Int, acc: Int, max: Int} -> Int =
+              {f, n, acc, max} ->
+                if n == max
+                  then acc
+                  else apply {f = f, n = n + 1, acc = acc + f {x = n}, max = max}
+
+            let inc: {x: Int} -> Int = {x} -> x + 1
+            apply {f = inc, n = 0, acc = 0, max = 1000000}
+        """.trimIndent()
+        benchmark("1M HOF callback (indirect call to inc)", code, 1000000)
+    }
+
+    @Test
+    @Timeout(600)
     fun `00d3 - tail recursion over Float (typed-DOUBLE tail path)`() {
         // Stresses TailCallDirectScalarNode's typed-DOUBLE path: tail-recursive
         // function over a Float param. All-DOUBLE detection should fire.

@@ -138,6 +138,10 @@ class MezzeExecutor(
                 collectReferencedHashes(node.function, queue)
                 collectReferencedHashes(node.arg, queue)
             }
+            is com.mezze.language.truffleir.CallIndirectScalarIR -> {
+                collectReferencedHashes(node.function, queue)
+                node.args.forEach { collectReferencedHashes(it, queue) }
+            }
             is com.mezze.language.truffleir.MakeRecordIR -> node.fields.forEach { collectReferencedHashes(it.value, queue) }
             is com.mezze.language.truffleir.ReadFieldIR -> collectReferencedHashes(node.record, queue)
             is com.mezze.language.truffleir.RecordUpdateIR -> {

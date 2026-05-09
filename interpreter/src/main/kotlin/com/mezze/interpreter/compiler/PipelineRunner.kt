@@ -288,6 +288,10 @@ object PipelineRunner {
                 collectHashesFromNode(node.function, queue)
                 collectHashesFromNode(node.arg, queue)
             }
+            is com.mezze.language.truffleir.CallIndirectScalarIR -> {
+                collectHashesFromNode(node.function, queue)
+                node.args.forEach { collectHashesFromNode(it, queue) }
+            }
             is com.mezze.language.truffleir.MakeRecordIR -> node.fields.forEach { collectHashesFromNode(it.value, queue) }
             is com.mezze.language.truffleir.ReadFieldIR -> collectHashesFromNode(node.record, queue)
             is com.mezze.language.truffleir.RecordUpdateIR -> {

@@ -281,6 +281,17 @@ class TruffleCompiler(
                     InvokeNode.create(fnNode, arrayOf(argNode))
                 }
             }
+            is com.mezze.language.truffleir.CallIndirectScalarIR -> {
+                // 1-arg indirect call (HOF callback fast path). InvokeScalar1Node
+                // inline-caches the function value and uses typed-LONG/DOUBLE
+                // payload when the cached callee's param is primitive.
+                require(node.args.size == 1 && node.argFieldNames.size == 1) {
+                    "CallIndirectScalarIR only supports 1-arg form for now (got ${node.args.size})"
+                }
+                val fnNode = compileNode(node.function, source)
+                val argNode = compileNode(node.args[0], source)
+                com.mezze.interpreter.nodes.function.InvokeScalar1Node(fnNode, argNode, node.argFieldNames[0])
+            }
             is InlineBinaryOpIR -> {
                 val leftNode = compileNode(node.left, source)
                 val rightNode = compileNode(node.right, source)
