@@ -101,7 +101,11 @@ class MezzeExecutor(
         when (node) {
             is com.mezze.language.truffleir.CallDirectIR -> {
                 queue.add(node.targetHash.hex)
-                collectReferencedHashes(node.arg, queue)
+                node.args.forEach { collectReferencedHashes(it, queue) }
+            }
+            is com.mezze.language.truffleir.PartialApplyDirectIR -> {
+                queue.add(node.targetHash.hex)
+                node.partialFields.forEach { collectReferencedHashes(it.value, queue) }
             }
             is com.mezze.language.truffleir.MakeLambdaIR -> {
                 queue.add(node.functionHash.hex)

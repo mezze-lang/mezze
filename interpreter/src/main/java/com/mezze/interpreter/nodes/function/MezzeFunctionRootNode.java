@@ -157,8 +157,60 @@ public final class MezzeFunctionRootNode extends RootNode {
             }
         }
 
-        // Unpack record argument to parameter slots (slots closureCount..closureCount+paramCount-1)
-        if (parameterCount > 0 && args.length > closureCount) {
+        // FAST PATH: typed-LONG payload — args[closureCount] == LONG_MARKER and
+        // args[closureCount+1] is a long[]. Write primitives straight to LONG slots.
+        if (parameterCount > 0 && args.length > closureCount + 1
+                && args[closureCount] == ScalarLongPayloadMarker.INSTANCE
+                && args[closureCount + 1] instanceof long[] longArgs) {
+            bindLongPayload(frame, longArgs);
+            bindAbilityOpsAfter(frame, args, closureCount + 2);
+            return runBodyLoop(frame);
+        }
+
+        // FAST PATH: typed-DOUBLE payload — symmetric to LONG. Writes to DOUBLE slots.
+        if (parameterCount > 0 && args.length > closureCount + 1
+                && args[closureCount] == ScalarDoublePayloadMarker.INSTANCE
+                && args[closureCount + 1] instanceof double[] doubleArgs) {
+            bindDoublePayload(frame, doubleArgs);
+            bindAbilityOpsAfter(frame, args, closureCount + 2);
+            return runBodyLoop(frame);
+        }
+
+        // Detect ABI: scalar (positional values) vs record (single field-named record).
+        // Discrimination rules — see ScalarABIMarker:
+        //   parameterCount == 0: scalar (no payload). Record ABI passes {} too —
+        //     args.length == closureCount + 1 distinguishes (record has the empty rec).
+        //   parameterCount == 1: scalar caller writes ScalarABIMarker.INSTANCE before
+        //     the scalar value, since arity collides with record ABI here.
+        //   parameterCount >= 2: scalar layout has args.length == closureCount + paramCount,
+        //     record layout has args.length == closureCount + 1. Disambiguates by arity.
+        boolean scalarABI;
+        if (parameterCount == 0) {
+            // Record ABI passes the empty record at args[closureCount];
+            // scalar ABI passes nothing for params (abilityOps may follow).
+            scalarABI = args.length == closureCount;
+        } else if (parameterCount == 1) {
+            // Arity collides (record arg or scalar arg both occupy 1 slot).
+            // Caller writes the marker; receiver checks for it.
+            scalarABI = args.length > closureCount
+                && args[closureCount] == ScalarABIMarker.INSTANCE;
+        } else {
+            // parameterCount >= 2: disambiguate by arity alone.
+            // Record ABI:   args.length == closureCount + 1 (+ abilityCount).
+            // Scalar ABI:   args.length == closureCount + parameterCount (+ abilityCount).
+            // Since parameterCount > 1, these arities are distinct regardless of arg values.
+            int recordArity = closureCount + 1 + abilityCount;
+            int scalarArity = closureCount + parameterCount + abilityCount;
+            scalarABI = args.length == scalarArity && args.length != recordArity;
+        }
+
+        if (scalarABI && parameterCount > 0) {
+            // Scalar ABI: positional values starting at args[scalarValuesStart].
+            // For paramCount == 1 we wrote a marker, so values start one slot later.
+            int valuesStart = (parameterCount == 1) ? closureCount + 1 : closureCount;
+            bindScalarValuesAt(frame, args, valuesStart);
+        } else if (parameterCount > 0 && args.length > closureCount) {
+            // Record ABI: unpack the single record argument by field name
             Object recordArg = args[closureCount];
             if (recordArg instanceof MezzeRecord record) {
                 unpackRecordFast(frame, record);
@@ -172,10 +224,20 @@ public final class MezzeFunctionRootNode extends RootNode {
             }
         }
 
-        // Bind ability operation functions (passed after the record argument)
-        // Layout: [closure0, ..., closureN, recordArg, abilityOp0, ..., abilityOpM]
+        // Bind ability operation functions (passed after the param payload).
+        // Record ABI layout:   [closure..., recordArg, abilityOps...]
+        // Scalar ABI layouts:
+        //   paramCount == 1:   [closure..., MARKER, scalar0, abilityOps...]
+        //   paramCount != 1:   [closure..., scalar0, ..., scalarN-1, abilityOps...]
         if (abilityCount > 0) {
-            int abilityArgStart = closureCount + 1; // After closure args and record arg
+            int abilityArgStart;
+            if (!scalarABI) {
+                abilityArgStart = closureCount + 1;
+            } else if (parameterCount == 1) {
+                abilityArgStart = closureCount + 1 + parameterCount;
+            } else {
+                abilityArgStart = closureCount + parameterCount;
+            }
             for (int i = 0; i < abilityCount; i++) {
                 int argIndex = abilityArgStart + i;
                 if (argIndex < args.length) {
@@ -185,19 +247,94 @@ public final class MezzeFunctionRootNode extends RootNode {
             }
         }
 
-        // Execute body with tail call loop
+        return runBodyLoop(frame);
+    }
+
+    /**
+     * Execute the body, catching tail-call exceptions and rebinding params,
+     * looping until the body returns. Shared between the entry paths so the
+     * fast-path typed-LONG entry can call into it without restructuring.
+     */
+    private Object runBodyLoop(VirtualFrame frame) {
         while (true) {
             try {
                 return bodyNode.execute(frame);
+            } catch (TailCallScalarException tse) {
+                // Typed-payload fast path: read primitives straight to typed slots.
+                // tse carries exactly one of longArgs / doubleArgs (the all-X path that fired).
+                if (tse.longArgs != null) {
+                    bindLongPayload(frame, tse.longArgs);
+                } else if (tse.doubleArgs != null) {
+                    bindDoublePayload(frame, tse.doubleArgs);
+                }
             } catch (TailCallException e) {
-                // Tail call: re-execute with new arguments
+                // Object-payload tail call. The tail-caller's arg layout starts at
+                // index 0 (no closure prefix here, since the body already runs inside
+                // this function's frame — closures don't change).
                 Object[] newArgs = e.getArguments();
                 if (parameterCount > 0 && newArgs.length > 0) {
-                    Object recordArg = newArgs[0];
-                    if (recordArg instanceof MezzeRecord record) {
+                    boolean tailScalarABI;
+                    if (parameterCount == 1) {
+                        tailScalarABI = newArgs[0] == ScalarABIMarker.INSTANCE;
+                    } else {
+                        tailScalarABI = !(newArgs[0] instanceof MezzeRecord);
+                    }
+                    if (tailScalarABI) {
+                        int valuesStart = (parameterCount == 1) ? 1 : 0;
+                        bindScalarValuesAt(frame, newArgs, valuesStart);
+                    } else if (newArgs[0] instanceof MezzeRecord record) {
                         unpackRecordFast(frame, record);
                     }
                 }
+            }
+        }
+    }
+
+    /** Write a typed long[] payload into LONG-typed param slots.
+     *  Used by both the typed-LONG initial entry path and the
+     *  typed tail-call exception path. No boxing, no instanceof. */
+    @ExplodeLoop
+    private void bindLongPayload(VirtualFrame frame, long[] longArgs) {
+        for (int i = 0; i < parameterCount; i++) {
+            if (i < longArgs.length) {
+                frame.setLong(closureCount + i, longArgs[i]);
+            }
+        }
+    }
+
+    /** Symmetric to bindLongPayload for DOUBLE-typed slots. */
+    @ExplodeLoop
+    private void bindDoublePayload(VirtualFrame frame, double[] doubleArgs) {
+        for (int i = 0; i < parameterCount; i++) {
+            if (i < doubleArgs.length) {
+                frame.setDouble(closureCount + i, doubleArgs[i]);
+            }
+        }
+    }
+
+    /** Bind ability-op functions stored at args[abilityArgStart..]. */
+    @ExplodeLoop
+    private void bindAbilityOpsAfter(VirtualFrame frame, Object[] args, int abilityArgStart) {
+        for (int i = 0; i < abilityCount; i++) {
+            int argIndex = abilityArgStart + i;
+            if (argIndex < args.length) {
+                frame.setObject(abilitySlots[i], args[argIndex]);
+            }
+        }
+    }
+
+    /**
+     * Bind {@code parameterCount} positional scalar values starting at
+     * {@code args[valuesStart]} into the param slots.
+     * Maps args[valuesStart + i] -> frame slot closureCount + i.
+     */
+    @ExplodeLoop
+    private void bindScalarValuesAt(VirtualFrame frame, Object[] args, int valuesStart) {
+        for (int i = 0; i < parameterCount; i++) {
+            int srcIndex = valuesStart + i;
+            int slotIndex = closureCount + i;
+            if (srcIndex < args.length) {
+                bindSlot(frame, slotIndex, args[srcIndex]);
             }
         }
     }
@@ -329,6 +466,19 @@ public final class MezzeFunctionRootNode extends RootNode {
 
     public String[] getParameterNames() {
         return parameterNames;
+    }
+
+    /** Slot-kind ints (KIND_LONG=0, DOUBLE=1, BOOLEAN=2, OBJECT=3) for the
+     *  parameter slots, in declaration order. Used by callers (e.g. scalar
+     *  tail-call sites) to choose typed payload paths that skip boxing. */
+    public int[] getParamSlotKinds() {
+        if (parameterCount == 0) return EMPTY_INTS;
+        int[] kinds = new int[parameterCount];
+        for (int i = 0; i < parameterCount; i++) {
+            int idx = closureCount + i;
+            kinds[i] = idx < slotTypes.length ? slotTypes[idx] : 3;
+        }
+        return kinds;
     }
 
     public MezzeNode getBodyNode() {

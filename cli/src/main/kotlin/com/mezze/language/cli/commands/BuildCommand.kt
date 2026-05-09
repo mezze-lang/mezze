@@ -607,7 +607,11 @@ class BuildCommand {
             when (node) {
                 is com.mezze.language.truffleir.CallDirectIR -> {
                     try { store.addEdge(fromHash, node.targetHash, com.mezze.language.codebase.EdgeKind.CALLS) } catch (_: Exception) {}
-                    walk(node.arg)
+                    node.args.forEach { walk(it) }
+                }
+                is com.mezze.language.truffleir.PartialApplyDirectIR -> {
+                    try { store.addEdge(fromHash, node.targetHash, com.mezze.language.codebase.EdgeKind.CALLS) } catch (_: Exception) {}
+                    node.partialFields.forEach { walk(it.value) }
                 }
                 is com.mezze.language.truffleir.MakeLambdaIR -> {
                     try { store.addEdge(fromHash, node.functionHash, com.mezze.language.codebase.EdgeKind.CALLS) } catch (_: Exception) {}

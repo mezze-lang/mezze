@@ -176,10 +176,42 @@ class TruffleCompiler(
 
             // === Calls ===
             is CallDirectIR -> {
-                val argNode = compileNode(node.arg, source)
+                val argNodes = node.args.map { compileNode(it, source) }
+                if (!node.isScalarABI) {
+                    // Record ABI: a single MezzeRecord arg. Existing fast path,
+                    // including partial-application detection at the receiver.
+                    require(argNodes.size == 1) {
+                        "Record-ABI CallDirectIR must have exactly 1 arg (the record); got ${argNodes.size}"
+                    }
+                    val argNode = argNodes[0]
+                    if (node.isTailCall) {
+                        val fnNode = FunctionLookupNode(node.targetHash)
+                        TailCallNode.create(fnNode, arrayOf(argNode))
+                    } else {
+                        MonomorphicCallNode(node.targetHash, node.targetHash.toString(), argNode)
+                    }
+                } else {
+                    // Scalar ABI: positional values in callee param order, no record allocation.
+                    val argsArray = argNodes.toTypedArray()
+                    if (node.isTailCall) {
+                        com.mezze.interpreter.nodes.function.TailCallDirectScalarNode(
+                            node.targetHash, node.targetHash.toString(), argsArray
+                        )
+                    } else {
+                        com.mezze.interpreter.nodes.function.CallDirectScalarNode(
+                            node.targetHash, node.targetHash.toString(), argsArray
+                        )
+                    }
+                }
+            }
+            is com.mezze.language.truffleir.PartialApplyDirectIR -> {
+                // Same runtime path as CallDirectIR with an incomplete record arg —
+                // InvokeNode/MonomorphicCallNode detect partial application and
+                // return a closure capturing the partial fields. We materialize the
+                // partial fields into a MakeRecordIR and reuse the call machinery.
+                val recordIR = com.mezze.language.truffleir.MakeRecordIR(node.partialFields, node.src, node.typeTag)
+                val argNode = compileNode(recordIR, source)
                 if (node.isTailCall) {
-                    // For tail calls, resolve the function without calling it.
-                    // TailCallNode will throw TailCallException with the function's CallTarget.
                     val fnNode = FunctionLookupNode(node.targetHash)
                     TailCallNode.create(fnNode, arrayOf(argNode))
                 } else {

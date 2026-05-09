@@ -86,7 +86,18 @@ sealed interface StringPartIR {
 @Serializable data class ReadScopeIR(val varName: String, override val src: SourceInfo) : NodeIR
 
 // Calls
-@Serializable data class CallDirectIR(val targetHash: Hash, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
+/** Direct call to a known function hash.
+ *  Two ABIs:
+ *    - record (isScalarABI = false): args has exactly 1 element — the MezzeRecord. Receiver
+ *      unpacks fields by name and supports partial application detection at runtime.
+ *    - scalar (isScalarABI = true): args[i] is the value for the callee's paramNames[i],
+ *      in callee-param order. No record allocation. Only emitted when the typechecker
+ *      can prove the call is fully-applied (no partial, no spread). */
+@Serializable data class CallDirectIR(val targetHash: Hash, val args: List<NodeIR>, val isTailCall: Boolean, override val src: SourceInfo, val typeTag: String? = null, val isScalarABI: Boolean = false) : NodeIR
+/** Direct call to a known function hash with INCOMPLETE args (partial application).
+ *  Returns a curried closure capturing partialFields; subsequent calls fill in
+ *  remaining params. Field names matter — runtime matches them against callee paramNames. */
+@Serializable data class PartialApplyDirectIR(val targetHash: Hash, val partialFields: List<FieldIR>, val isTailCall: Boolean, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
 @Serializable data class CallLocalIR(val slot: Int, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
 @Serializable data class CallNativeIR(val name: String, val arg: NodeIR, override val src: SourceInfo) : NodeIR
 /** Indirect call — evaluate function expression, then invoke */

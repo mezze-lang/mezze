@@ -100,6 +100,42 @@ class MicroBenchmarkTest {
 
     @Test
     @Timeout(600)
+    fun `00d3 - tail recursion over Float (typed-DOUBLE tail path)`() {
+        // Stresses TailCallDirectScalarNode's typed-DOUBLE path: tail-recursive
+        // function over a Float param. All-DOUBLE detection should fire.
+        println("\n=== 1M tail recursion over Float (DOUBLE typed payload) ===")
+        val code = """
+            let walk: {x: Float} -> Float = {x} ->
+              if x <= 0.0 then x else walk {x = x - 1.0}
+
+            walk {x = 1000000.0}
+        """.trimIndent()
+        benchmark("1M Float tail recursion", code, 1000000)
+    }
+
+    @Test
+    @Timeout(600)
+    fun `00d2 - non-tail factorial (typed-LONG non-tail path)`() {
+        // Stresses the non-tail self-recursive Long-arg call path:
+        // CallDirectScalarNode with useTypedLongPayload should fire here.
+        // Recursive call is inside `*`, so it's NOT a tail call.
+        println("\n=== 200K-iter factorial-style non-tail recursion ===")
+        val code = """
+            let fact_step: {n: Int} -> Int = {n} ->
+              if n == 0 then 1 else n * fact_step {n = n - 1}
+
+            let bench: {iter: Int, max: Int, sum: Int} -> Int = {iter, max, sum} ->
+              if iter == max
+                then sum
+                else bench {iter = iter + 1, max = max, sum = sum + fact_step {n = 12}}
+
+            bench {iter = 0, max = 200000, sum = 0}
+        """.trimIndent()
+        benchmark("200K iters * 13 fact calls = 2.6M non-tail calls", code, 200000 * 13)
+    }
+
+    @Test
+    @Timeout(600)
     fun `00d - VERY large recursion to ensure JIT compiles`() {
         // 1M iterations - JIT will definitely compile
         println("\n=== 1M recursive calls (JIT should kick in) ===")
@@ -110,6 +146,44 @@ class MicroBenchmarkTest {
             count {n = 1000000}
         """.trimIndent()
         benchmark("1M recursion", code, 1000000)
+    }
+
+    @Test
+    @Timeout(600)
+    fun `00f - allocation count per iteration (EA diagnostic)`() {
+        // Measure allocations per recursion iteration. If escape analysis
+        // is fully eliminating the per-call record, allocation count should
+        // be near zero. If not, we'll see ~4 allocations per call.
+        println("\n=== Allocation diagnostic ===")
+
+        val code = """
+            let count: {n: Int} -> Int = {n} ->
+              if n == 0 then 0 else count {n = n - 1}
+
+            count {n = 100000}
+        """.trimIndent()
+
+        // Warmup
+        for (i in 0 until 5) eval(code)
+
+        // Force GC to baseline
+        repeat(3) {
+            System.gc()
+            Thread.sleep(50)
+        }
+        val rt = Runtime.getRuntime()
+        val beforeMem = rt.totalMemory() - rt.freeMemory()
+
+        // Measure
+        eval(code)
+
+        val afterMem = rt.totalMemory() - rt.freeMemory()
+        val deltaMb = (afterMem - beforeMem) / 1024.0 / 1024.0
+        val deltaPerCall = (afterMem - beforeMem).toDouble() / 100_000
+
+        println("  Memory delta: ${"%.2f".format(deltaMb)} MB total, ${"%.1f".format(deltaPerCall)} bytes/call (100K iters)")
+        println("  (If escape analysis works, this should be close to 0 bytes/call)")
+        println("  (Each MezzeRecord = MezzeRecord obj + long[] + double[] + Object[] = ~80 bytes)")
     }
 
     @Test

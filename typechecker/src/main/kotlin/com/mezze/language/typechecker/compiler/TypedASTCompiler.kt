@@ -71,6 +71,17 @@ class TypedASTCompiler(
     /** Number of captures in the current function — offsets param slots in the frame */
     private var currentCaptureCount = 0
 
+    /** Hash of the function currently being compiled — used to detect self-recursive
+     *  CallDirectIR sites where we statically know the callee's paramNames and can
+     *  emit the scalar calling convention. */
+    private var currentFunctionHash: Hash? = null
+
+    /** Pre-populated at compile() start: hash → callee's paramNames (regular + dict),
+     *  in callee declaration order. Used by emitCallDirect to decide scalar ABI for
+     *  cross-function direct calls (extends self-recursive coverage from #61).
+     *  Source: declIndex (user TypedLetDecls) ∪ PrecompiledStdlib.preloweredFunctions. */
+    private val hashToParamNames = mutableMapOf<Hash, List<String>>()
+
     /**
      * Tracks recursive let-bound lambdas inside do blocks.
      * When the lambda body references its own binding name, we resolve the reference
@@ -442,6 +453,11 @@ class TypedASTCompiler(
         // This must happen before compilation so call sites can inject dict fields.
         prescanForDictMethods(listOf(module) + additionalModules)
 
+        // Populate the hash → paramNames map used for scalar-ABI decisions at
+        // direct-call sites (see emitCallDirect). Must run AFTER dict prescan
+        // so we can include the synthetic __dict_<method> params each callee needs.
+        populateHashToParamNames(listOf(module) + additionalModules)
+
         val functions = mutableListOf<FunctionIR>()
         val compiledHashes = mutableSetOf<Hash>()
 
@@ -593,6 +609,8 @@ class TypedASTCompiler(
         val prevCaptureNames = currentCaptureNames
         val prevCaptureCount = currentCaptureCount
         val prevDictParams = currentDictParams
+        val prevFunctionHash = currentFunctionHash
+        currentFunctionHash = hash
 
         // Check if this function needs dictionary params (pre-scanned).
         // Dictionary params are hidden params appended after regular params,
@@ -638,6 +656,7 @@ class TypedASTCompiler(
         currentParamNames = prevParamNames
         currentCaptureCount = prevCaptureCount
         currentDictParams = prevDictParams
+        currentFunctionHash = prevFunctionHash
 
         val fnIR = FunctionIR(
             hash = hash,
@@ -1035,7 +1054,7 @@ class TypedASTCompiler(
             if (captureIdx != null) return ReadCaptureIR(captureIdx, typeToSlotKind(expr.type), locToSourceInfo(expr.loc))
             // Global reference — auto-call thunk to get value
             census.globalThunk++
-            return CallDirectIR(binding.hash, UnitLitIR(locToSourceInfo(expr.loc)), false, locToSourceInfo(expr.loc))
+            return CallDirectIR(binding.hash, listOf(UnitLitIR(locToSourceInfo(expr.loc))), false, locToSourceInfo(expr.loc))
         }
         return compileExpr(expr)
     }
@@ -1117,7 +1136,7 @@ class TypedASTCompiler(
                     }
                 }
                 val recordIR = MakeRecordIR(fields, src)
-                return CallDirectIR(opHash, recordIR, expr.isTailCall, src)
+                return CallDirectIR(opHash, listOf(recordIR), expr.isTailCall, src)
             }
 
             // VarType receiver — try dictionary passing first, then fall back to dynamic dispatch.
@@ -1177,7 +1196,7 @@ class TypedASTCompiler(
                     val specialized = monoCallSiteRewrites[expr.loc]
                     if (specialized != null) {
                         census.byHashMono++
-                        return CallDirectIR(specialized, argIR, expr.isTailCall, src)
+                        return emitCallDirect(specialized, argIR, expr.isTailCall, src)
                     }
 
                     // Check if the callee needs dictionary params. If so, inject
@@ -1186,14 +1205,14 @@ class TypedASTCompiler(
                     if (calleeDictMethods != null && calleeDictMethods.isNotEmpty()) {
                         val enrichedArgIR = injectDictFields(argIR, expr.arg, calleeDictMethods, src)
                         census.byHashDictInject++
-                        CallDirectIR(calleeHash, enrichedArgIR, expr.isTailCall, src)
+                        emitCallDirect(calleeHash, enrichedArgIR, expr.isTailCall, src)
                     } else {
                         // Always use CallDirectIR for hash-based bindings.
                         // DO NOT check localsByName — a user variable with the same name
                         // (e.g., "let chars = str::chars {s = s}") would shadow the function
                         // reference and read from an uninitialized slot.
                         census.byHashPlain++
-                        CallDirectIR(binding.hash, argIR, expr.isTailCall, src)
+                        emitCallDirect(binding.hash, argIR, expr.isTailCall, src)
                     }
                 }
                 is BindingRef.Native -> { census.native++; CallNativeIR(binding.name, argIR, src) }
@@ -1210,7 +1229,7 @@ class TypedASTCompiler(
                             val topDecl = declIndex?.values?.find { it.name == fn.name }
                             if (topDecl != null) {
                                 census.byHashPlain++
-                                return CallDirectIR(topDecl.hash, argIR, expr.isTailCall, src)
+                                return emitCallDirect(topDecl.hash, argIR, expr.isTailCall, src)
                             }
                         }
                         census.indirect++
@@ -1449,7 +1468,7 @@ class TypedASTCompiler(
             innerArgFields.add(FieldIR(dictEntry.first, ReadLocalIR(i, SlotKind.OBJECT, src)))
         }
         val innerArgIR = MakeRecordIR(innerArgFields, src)
-        val wrapperBodyIR = CallDirectIR(binding.hash, innerArgIR, false, src)
+        val wrapperBodyIR = CallDirectIR(binding.hash, listOf(innerArgIR), false, src)
 
         // Create the wrapper FunctionIR
         val wrapperFnIR = FunctionIR(
@@ -2149,4 +2168,85 @@ class TypedASTCompiler(
      *  call-site lookup paths that need to find a referenced decl. */
     private var declIndex: Map<Hash, TypedLetDecl>? = null
     fun setDeclIndex(decls: Map<Hash, TypedLetDecl>) { declIndex = decls }
+
+    /** Look up param names for a known callee hash. Returns null if unknown.
+     *  Covers: self-recursive calls (currentFunctionHash, freshly available),
+     *  user decls (declIndex via hashToParamNames), and stdlib (PrecompiledStdlib). */
+    private fun paramNamesForHash(hash: Hash): List<String>? {
+        if (hash == currentFunctionHash) return currentParamNames
+        return hashToParamNames[hash]
+    }
+
+    /** Populate hashToParamNames from user decls (lambdas only) and PrecompiledStdlib.
+     *  Each entry pairs a callee hash with its full paramNames list — regular params
+     *  in source order followed by dict params (sorted method names) for callees that
+     *  need them. This mirrors the layout of FunctionIR.paramNames for those decls. */
+    private fun populateHashToParamNames(modules: List<TypedModule>) {
+        hashToParamNames.clear()
+
+        // User decls — only TypedLetDecl whose value is a TypedLambda has a callable
+        // shape that scalar-ABI can target. Non-lambda lets are zero-param thunks.
+        for (mod in modules) {
+            for (decl in mod.decls) {
+                if (decl !is TypedLetDecl) continue
+                val lambda = decl.value as? TypedLambda ?: continue
+                val regular = lambda.params.map { it.name }
+                val dict = (dictMethodsForHash[decl.hash] ?: emptySet())
+                    .sorted()
+                    .map { com.mezze.language.ast.MagicParams.dictParamName(it) }
+                hashToParamNames[decl.hash] = regular + dict
+            }
+        }
+
+        // Stdlib — pre-lowered FunctionIRs already have the canonical paramNames.
+        // Guarded with try/catch because PrecompiledStdlib.preloweredFunctions is
+        // a non-null Kotlin var that gets assigned partway through PrecompiledStdlib.init.
+        // The slow-path init re-enters this compiler before that assignment happens,
+        // so reading the field there would NPE. In that case stdlib hashes simply
+        // aren't available for cross-function scalar emission yet — fine, we just
+        // miss some scalar opportunities for that one bootstrap-time compile pass.
+        try {
+            for ((hash, fnIR) in com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions) {
+                hashToParamNames[hash] = fnIR.paramNames
+            }
+        } catch (_: Throwable) {
+            // PrecompiledStdlib not yet initialized (we're being called during its init).
+            // Skip stdlib entries; user-decl scalar emission still works.
+        }
+    }
+
+    /** Build a CallDirectIR, choosing the scalar ABI when we can statically prove
+     *  the call is fully-applied to a callee whose param names we know. Otherwise
+     *  emit the record-shape (1-element args list) — the runtime path that handles
+     *  partial application, spread, and unknown-arity callees.
+     *
+     *  Scalar emission requires:
+     *    - argIR is a MakeRecordIR (no opaque expression)
+     *    - no `__spread__` field (spread arg)
+     *    - field name set == callee paramNames set (full application)
+     */
+    private fun emitCallDirect(
+        targetHash: Hash,
+        argIR: NodeIR,
+        isTailCall: Boolean,
+        src: SourceInfo,
+        typeTag: String? = null
+    ): CallDirectIR {
+        // Kill switch — MEZZE_DISABLE_SCALAR=true forces the record ABI.
+        val scalarDisabled = System.getenv("MEZZE_DISABLE_SCALAR") == "true"
+        val calleeParams = if (scalarDisabled) null else paramNamesForHash(targetHash)
+        if (calleeParams != null && argIR is MakeRecordIR) {
+            val fields = argIR.fields
+            val hasSpread = fields.any { it.name == "__spread__" }
+            if (!hasSpread) {
+                val callerNames = fields.map { it.name }
+                if (callerNames.size == calleeParams.size && callerNames.toSet() == calleeParams.toSet()) {
+                    val byName = fields.associate { it.name to it.value }
+                    val orderedArgs = calleeParams.map { byName[it]!! }
+                    return CallDirectIR(targetHash, orderedArgs, isTailCall, src, typeTag, isScalarABI = true)
+                }
+            }
+        }
+        return CallDirectIR(targetHash, listOf(argIR), isTailCall, src, typeTag, isScalarABI = false)
+    }
 }

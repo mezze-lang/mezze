@@ -667,7 +667,11 @@ object StorePopulator {
         when (node) {
             is com.mezze.language.truffleir.CallDirectIR -> {
                 report(node.targetHash.hex, EdgeKind.CALLS)
-                collectEdgesFromNode(node.arg, report)
+                node.args.forEach { collectEdgesFromNode(it, report) }
+            }
+            is com.mezze.language.truffleir.PartialApplyDirectIR -> {
+                report(node.targetHash.hex, EdgeKind.CALLS)
+                node.partialFields.forEach { collectEdgesFromNode(it.value, report) }
             }
             is com.mezze.language.truffleir.MakeLambdaIR -> {
                 report(node.functionHash.hex, EdgeKind.CALLS)

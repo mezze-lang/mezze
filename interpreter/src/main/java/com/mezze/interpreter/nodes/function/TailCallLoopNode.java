@@ -96,12 +96,34 @@ public final class TailCallLoopNode extends MezzeNode {
      * Rebind parameter slots from the new arguments.
      * First call computes and caches field indices.
      * All subsequent calls use the fast path.
+     *
+     * ABI dispatch (mirrors MezzeFunctionRootNode.execute):
+     *   parameterCount == 1 + marker present  → scalar (values at closureCount+1..)
+     *   parameterCount != 1 + first arg !record → scalar (values at closureCount..)
+     *   first arg is a MezzeRecord            → record path
      */
     private void rebindArguments(VirtualFrame frame, Object[] newArgs) {
         if (closureCount >= newArgs.length) return;
 
-        Object recordArg = newArgs[closureCount];
-        if (!(recordArg instanceof MezzeRecord record)) return;
+        Object first = newArgs[closureCount];
+        boolean scalarABI;
+        int scalarValuesStart;
+        if (parameterCount == 1) {
+            // Arity collides — caller writes the marker.
+            scalarABI = first == ScalarABIMarker.INSTANCE;
+            scalarValuesStart = closureCount + 1;
+        } else {
+            // parameterCount >= 2: disambiguate by arity (no instanceof).
+            // Scalar arity == closureCount + parameterCount; record arity == closureCount + 1.
+            scalarABI = newArgs.length == closureCount + parameterCount;
+            scalarValuesStart = closureCount;
+        }
+
+        if (scalarABI) {
+            rebindScalar(frame, newArgs, scalarValuesStart);
+            return;
+        }
+        if (!(first instanceof MezzeRecord record)) return;
 
         if (cachedFieldIndices != null) {
             // FAST PATH: Use cached indices - fully JIT-compilable
@@ -110,6 +132,20 @@ public final class TailCallLoopNode extends MezzeNode {
             // SLOW PATH: First call - compute indices and cache
             CompilerDirectives.transferToInterpreterAndInvalidate();
             initializeCacheAndRebind(frame, record);
+        }
+    }
+
+    /**
+     * Scalar ABI rebind — positional, no field-name lookup needed.
+     * After JIT: tight loop, no allocation, no record indirection.
+     */
+    @ExplodeLoop
+    private void rebindScalar(VirtualFrame frame, Object[] newArgs, int valuesStart) {
+        for (int i = 0; i < parameterCount; i++) {
+            int srcIndex = valuesStart + i;
+            if (srcIndex < newArgs.length) {
+                frame.setObject(closureCount + i, newArgs[srcIndex]);
+            }
         }
     }
 

@@ -98,7 +98,8 @@ object PrecompiledStdlib {
     /** Collect all hash references from a NodeIR tree. */
     private fun collectHashRefs(node: com.mezze.language.truffleir.NodeIR, refs: MutableSet<Hash>) {
         when (node) {
-            is com.mezze.language.truffleir.CallDirectIR -> { refs.add(node.targetHash); collectHashRefs(node.arg, refs) }
+            is com.mezze.language.truffleir.CallDirectIR -> { refs.add(node.targetHash); node.args.forEach { collectHashRefs(it, refs) } }
+            is com.mezze.language.truffleir.PartialApplyDirectIR -> { refs.add(node.targetHash); node.partialFields.forEach { collectHashRefs(it.value, refs) } }
             is com.mezze.language.truffleir.MakeLambdaIR -> refs.add(node.functionHash)
             is com.mezze.language.truffleir.HandleIR -> {
                 collectHashRefs(node.body, refs)

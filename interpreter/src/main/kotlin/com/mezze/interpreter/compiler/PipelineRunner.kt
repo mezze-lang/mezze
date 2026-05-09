@@ -255,7 +255,11 @@ object PipelineRunner {
         when (node) {
             is com.mezze.language.truffleir.CallDirectIR -> {
                 queue.add(node.targetHash)
-                collectHashesFromNode(node.arg, queue)
+                node.args.forEach { collectHashesFromNode(it, queue) }
+            }
+            is com.mezze.language.truffleir.PartialApplyDirectIR -> {
+                queue.add(node.targetHash)
+                node.partialFields.forEach { collectHashesFromNode(it.value, queue) }
             }
             is com.mezze.language.truffleir.MakeLambdaIR -> queue.add(node.functionHash)
             is com.mezze.language.truffleir.HandleIR -> {
