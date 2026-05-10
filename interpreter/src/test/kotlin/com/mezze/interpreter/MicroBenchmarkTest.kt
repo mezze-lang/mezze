@@ -120,6 +120,33 @@ class MicroBenchmarkTest {
 
     @Test
     @Timeout(600)
+    fun `00r1 - real workload manual sum of squares of evens via tail recursion`() {
+        // Manual tail-recursive version of: sum of squares of even numbers up to N.
+        // Avoids potential stack-overflow issues in stdlib seq HOF chain. Exercises
+        // every optimization path we've added:
+        //   - Self-rec tail call with mixed-kind callee (acc/i/n: Long, but really just longs)
+        //   - Direct call to inlinable helpers (is_even, square)
+        //   - Long arithmetic
+        // Compared scalar-on vs scalar-off, this should reflect end-to-end win
+        // on a realistic algorithm without HOF-callback or indirect cost.
+        println("\n=== Real workload: manual sum of squares of evens up to 100K ===")
+        val code = """
+            let is_even: {x: Int} -> Bool = {x} -> x % 2 == 0
+            let square: {x: Int} -> Int = {x} -> x * x
+
+            let walk: {acc: Int, i: Int, n: Int} -> Int = {acc, i, n} ->
+              if i == n then acc
+              else if is_even {x = i}
+                then walk {acc = acc + square {x = i}, i = i + 1, n = n}
+                else walk {acc = acc, i = i + 1, n = n}
+
+            walk {acc = 0, i = 0, n = 100000}
+        """.trimIndent()
+        benchmark("sum-squares-evens-rec N=100K", code, 100000)
+    }
+
+    @Test
+    @Timeout(600)
     fun `00d9 - direct call to inlinable helper`() {
         // Hot loop calling a tiny inlinable direct helper.
         // With inlining enabled, the call to inc disappears and the body
