@@ -120,6 +120,27 @@ class MicroBenchmarkTest {
 
     @Test
     @Timeout(600)
+    fun `00d9 - direct call to inlinable helper`() {
+        // Hot loop calling a tiny inlinable direct helper.
+        // With inlining enabled, the call to inc disappears and the body
+        // becomes essentially `n + 1` inside the loop.
+        println("\n=== 1M direct calls to inlinable helper ===")
+        val code = """
+            let inc: {x: Int} -> Int = {x} -> x + 1
+
+            let loop_inc: {n: Int, max: Int, sum: Int} -> Int =
+              {n, max, sum} ->
+                if n == max
+                  then sum
+                  else loop_inc {n = n + 1, max = max, sum = sum + inc {x = n}}
+
+            loop_inc {n = 0, max = 1000000, sum = 0}
+        """.trimIndent()
+        benchmark("1M direct calls to inc {x} -> x + 1", code, 1000000)
+    }
+
+    @Test
+    @Timeout(600)
     fun `00d4 - HOF callback (indirect call hot path)`() {
         // Stresses indirect calls: an inner loop that repeatedly calls a
         // function passed as a parameter. Mirrors what list::map does

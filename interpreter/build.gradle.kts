@@ -75,6 +75,8 @@ tasks.test {
     System.getenv("MEZZE_DISPATCH_CENSUS")?.let { environment("MEZZE_DISPATCH_CENSUS", it) }
     System.getenv("MEZZE_DISABLE_SCALAR")?.let { environment("MEZZE_DISABLE_SCALAR", it) }
     System.getenv("MEZZE_DEBUG_TYPED")?.let { environment("MEZZE_DEBUG_TYPED", it) }
+    System.getenv("MEZZE_DEBUG_INLINE")?.let { environment("MEZZE_DEBUG_INLINE", it) }
+    System.getenv("MEZZE_DISABLE_INLINE")?.let { environment("MEZZE_DISABLE_INLINE", it) }
 
     jvmArgs(
         "--enable-native-access=ALL-UNNAMED",

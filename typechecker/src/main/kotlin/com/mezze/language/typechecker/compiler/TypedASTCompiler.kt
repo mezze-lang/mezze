@@ -82,6 +82,12 @@ class TypedASTCompiler(
      *  Source: declIndex (user TypedLetDecls) ∪ PrecompiledStdlib.preloweredFunctions. */
     private val hashToParamNames = mutableMapOf<Hash, List<String>>()
 
+    /** Populated as we compile each function: hash → its lowered FunctionIR.
+     *  Used by emitCallDirect to inline tiny callees directly into the caller's
+     *  IR (eliminates the call entirely). Limited to functions compiled before
+     *  the current one — self-recursion and forward refs stay on the call path. */
+    private val hashToFunctionIR = mutableMapOf<Hash, FunctionIR>()
+
     /**
      * Tracks recursive let-bound lambdas inside do blocks.
      * When the lambda body references its own binding name, we resolve the reference
@@ -448,6 +454,14 @@ class TypedASTCompiler(
         extractedFunctions.clear()
         performerRecords.clear()
         files.clear()
+        hashToFunctionIR.clear()
+        // Seed inlining index with stdlib FunctionIRs (already compiled).
+        // Guard against init re-entry like populateHashToParamNames does.
+        try {
+            for ((h, fnIR) in com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions) {
+                hashToFunctionIR[h] = fnIR
+            }
+        } catch (_: Throwable) { /* stdlib not yet initialized */ }
 
         // Pre-scan all modules to discover which functions need dictionary params.
         // This must happen before compilation so call sites can inject dict fields.
@@ -464,7 +478,9 @@ class TypedASTCompiler(
         // Compile entry module declarations
         for (decl in module.decls) {
             if (decl is TypedLetDecl && decl.hash !in stdlibHashes) {
-                functions.add(compileLetDecl(decl))
+                val fnIR = compileLetDecl(decl)
+                functions.add(fnIR)
+                hashToFunctionIR[fnIR.hash] = fnIR
                 compiledHashes.add(decl.hash)
             }
         }
@@ -473,7 +489,9 @@ class TypedASTCompiler(
         for (importedModule in additionalModules) {
             for (decl in importedModule.decls) {
                 if (decl is TypedLetDecl && decl.hash !in stdlibHashes && decl.hash !in compiledHashes) {
-                    functions.add(compileLetDecl(decl))
+                    val fnIR = compileLetDecl(decl)
+                    functions.add(fnIR)
+                    hashToFunctionIR[fnIR.hash] = fnIR
                     compiledHashes.add(decl.hash)
                 }
             }
@@ -2231,7 +2249,7 @@ class TypedASTCompiler(
         isTailCall: Boolean,
         src: SourceInfo,
         typeTag: String? = null
-    ): CallDirectIR {
+    ): NodeIR {
         // Kill switch — MEZZE_DISABLE_SCALAR=true forces the record ABI.
         val scalarDisabled = System.getenv("MEZZE_DISABLE_SCALAR") == "true"
         val calleeParams = if (scalarDisabled) null else paramNamesForHash(targetHash)
@@ -2243,11 +2261,120 @@ class TypedASTCompiler(
                 if (callerNames.size == calleeParams.size && callerNames.toSet() == calleeParams.toSet()) {
                     val byName = fields.associate { it.name to it.value }
                     val orderedArgs = calleeParams.map { byName[it]!! }
+
+                    // Inlining: if the callee is a tiny pure-expression function
+                    // with no closure / dict params and the caller's args are
+                    // side-effect-free, splice the callee body directly into
+                    // the caller's IR. The call disappears.
+                    if (!isTailCall) {
+                        val inlined = tryInlineDirectCall(targetHash, orderedArgs)
+                        if (inlined != null) return inlined
+                    }
+
                     return CallDirectIR(targetHash, orderedArgs, isTailCall, src, typeTag, isScalarABI = true)
                 }
             }
         }
         return CallDirectIR(targetHash, listOf(argIR), isTailCall, src, typeTag, isScalarABI = false)
+    }
+
+    /** Inlining cap — keep body size small to prevent IR blowup in callers
+     *  with many call sites. 8 nodes covers helpers like {x} -> x + 1,
+     *  {a, b} -> if a > b then a else b, accessor wrappers, etc. */
+    private val inlineNodeBudget = 8
+
+    /** Try to inline a direct call into the caller's IR. Returns the inlined
+     *  expression, or null if any constraint is violated.
+     *
+     *  Constraints (conservative first cut):
+     *    - Callee FunctionIR is registered (compiled before this site).
+     *    - Callee has 0 captures (no closures to materialize at call site).
+     *    - Callee has 0 locals (body uses only args + literals + arithmetic + If).
+     *    - Callee body is "pure" — no calls, no mutation, no effects, no records.
+     *    - Callee body fits in inlineNodeBudget.
+     *    - Caller args are side-effect-free (Read* / literals) so we can
+     *      duplicate them via param substitution without binding to fresh slots. */
+    private fun tryInlineDirectCall(targetHash: Hash, args: List<NodeIR>): NodeIR? {
+        if (System.getenv("MEZZE_DISABLE_INLINE") == "true") return null
+
+        val callee = hashToFunctionIR[targetHash] ?: return null
+        if (callee.captureSlots.isNotEmpty()) return null
+        if (callee.localSlots.isNotEmpty()) return null
+        if (callee.paramSlots.size != args.size) return null
+
+        for (a in args) if (!isSideEffectFree(a)) return null
+
+        if (!isInlinable(callee.body, callee.paramSlots.size)) return null
+        if (countNodes(callee.body, max = inlineNodeBudget + 1) > inlineNodeBudget) return null
+
+        if (System.getenv("MEZZE_DEBUG_INLINE") == "true") {
+            System.err.println("[inline] HIT: ${callee.name} (hash=${targetHash.hex.take(8)}) args=${args.size}")
+        }
+        return substituteArgs(callee.body, args)
+    }
+
+    /** A NodeIR is "side-effect-free" if duplicating it in multiple positions
+     *  doesn't change semantics. Reads + literals only. */
+    private fun isSideEffectFree(node: NodeIR): Boolean = when (node) {
+        is LongLitIR, is DoubleLitIR, is BoolLitIR, is StringLitIR,
+        is UnitLitIR, is CharLitIR, is FracLitIR -> true
+        is ReadLocalIR, is ReadCaptureIR, is ReadArgIR -> true
+        else -> false
+    }
+
+    /** Body shapes that can be safely substituted: no calls, no allocations,
+     *  no mutation, no effects. Only pure expressions over args + arithmetic.
+     *
+     *  Param reads in Mezze are emitted as ReadLocalIR(slot=closureCount+paramIdx).
+     *  We accept ReadLocalIR if its slot is within the callee's param range
+     *  (paramOk), i.e. it's reading an arg, not a local binding. Since this
+     *  function is called only for callees with 0 captures and 0 locals, every
+     *  ReadLocalIR with slot < paramCount is a param read. */
+    private fun isInlinable(node: NodeIR, paramCount: Int): Boolean = when (node) {
+        is LongLitIR, is DoubleLitIR, is BoolLitIR, is StringLitIR,
+        is UnitLitIR, is CharLitIR, is FracLitIR -> true
+        is ReadArgIR -> true
+        is ReadLocalIR -> node.slot in 0 until paramCount
+        is InlineBinaryOpIR -> isInlinable(node.left, paramCount) && isInlinable(node.right, paramCount)
+        is IfIR -> isInlinable(node.cond, paramCount) && isInlinable(node.thenBr, paramCount) && isInlinable(node.elseBr, paramCount)
+        else -> false
+    }
+
+    /** Bounded node count — bails out as soon as the limit is exceeded. */
+    private fun countNodes(node: NodeIR, max: Int): Int {
+        if (max <= 0) return Int.MAX_VALUE
+        return when (node) {
+            is InlineBinaryOpIR -> {
+                val l = countNodes(node.left, max - 1)
+                if (l >= max) l + 1 else 1 + l + countNodes(node.right, max - 1 - l)
+            }
+            is IfIR -> {
+                val c = countNodes(node.cond, max - 1)
+                if (c >= max) return c + 1
+                val t = countNodes(node.thenBr, max - 1 - c)
+                if (c + t >= max) return c + t + 1
+                1 + c + t + countNodes(node.elseBr, max - 1 - c - t)
+            }
+            else -> 1
+        }
+    }
+
+    /** Substitute callee's param reads with caller's arg expressions.
+     *  Params are at ReadLocalIR(slot=0..paramCount-1) since we required
+     *  the callee to have 0 captures and 0 locals. */
+    private fun substituteArgs(node: NodeIR, args: List<NodeIR>): NodeIR = when (node) {
+        is ReadArgIR -> args.getOrNull(node.index) ?: node
+        is ReadLocalIR -> if (node.slot < args.size) args[node.slot] else node
+        is InlineBinaryOpIR -> InlineBinaryOpIR(
+            node.op, substituteArgs(node.left, args), substituteArgs(node.right, args), node.src
+        )
+        is IfIR -> IfIR(
+            substituteArgs(node.cond, args),
+            substituteArgs(node.thenBr, args),
+            substituteArgs(node.elseBr, args),
+            node.src
+        )
+        else -> node
     }
 
     /** Build a CallIndirectIR or CallIndirectScalarIR based on arg shape.
