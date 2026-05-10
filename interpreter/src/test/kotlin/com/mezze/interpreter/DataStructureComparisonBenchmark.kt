@@ -199,10 +199,14 @@ class DataStructureComparisonBenchmark {
 
     @Test
     @Timeout(600)
-    fun `interpreter overhead - Mezze map workload from inside Mezze code`() {
-        divider("Mezze map workload INSIDE Mezze interpreter")
-        val n = 10_000
-        val code = """
+    fun `interpreter overhead - Mezze map workload, isolating execution from front-end`() {
+        // MezzeTestHelper.run does parse + typecheck + lower + compile EVERY call.
+        // To get pure execution time, run the SAME source with two different N values
+        // and subtract: (time at big N) - (time at small N) ≈ time for the extra ops.
+        // The constant front-end cost cancels out.
+        divider("Mezze map workload — isolating execution from front-end")
+
+        fun mezzeMapCode(n: Int): String = """
             use std::collections::map
 
             let build: {m: Map Int Int, i: Int, n: Int} -> Map Int Int = {m, i, n} ->
@@ -223,8 +227,38 @@ class DataStructureComparisonBenchmark {
               let m = build {m = map::empty {}, i = 0, n = $n}
               lookups {m = m, i = 0, n = $n, acc = 0}
         """.trimIndent()
-        bench("Mezze: build + lookup 10K (interpreter)") {
-            MezzeTestHelper.run(code)
+
+        // Time at small N: front-end cost + small execution cost
+        // Time at big N:   front-end cost + big execution cost
+        // Difference:      execution cost for (big - small) ops
+        val smallN = 100
+        val bigN = 10_000
+        val codeSmall = mezzeMapCode(smallN)
+        val codeBig = mezzeMapCode(bigN)
+
+        val tSmall = bench("Mezze: build + lookup $smallN (FE + execution)") {
+            MezzeTestHelper.run(codeSmall)
+        }
+        val tBig = bench("Mezze: build + lookup $bigN (FE + execution)") {
+            MezzeTestHelper.run(codeBig)
+        }
+        val deltaNs = tBig - tSmall
+        val deltaOps = (bigN - smallN) * 2L  // build + lookup
+        val deltaMs = deltaNs / 1_000_000.0
+        val nsPerOp = deltaNs.toDouble() / deltaOps
+        println("  -- subtraction --")
+        println("  Δ time (big - small): %10.3f ms for %d ops (%.0f ns/op)".format(
+            deltaMs, deltaOps, nsPerOp))
+        println("  -- comparison: same Mezze logic via direct Java calls --")
+        bench("Mezze: same workload, direct Java calls (no interpreter)") {
+            @Suppress("UNCHECKED_CAST")
+            var m = MezzeMap.empty<Any?, Any?>() as MezzeMap<Any?, Any?>
+            for (i in 0 until bigN) m = m.putObject(i.toLong(), (i * 2).toLong())
+            var acc = 0L
+            for (i in 0 until bigN) {
+                val v = m.get(i.toLong()) as? Long ?: 0L
+                acc += v
+            }
         }
     }
 }
