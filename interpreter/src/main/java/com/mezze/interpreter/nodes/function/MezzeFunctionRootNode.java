@@ -176,6 +176,20 @@ public final class MezzeFunctionRootNode extends RootNode {
             return runBodyLoop(frame);
         }
 
+        // FAST PATH: typed-MIXED payload — args[closureCount] == MIXED_MARKER and
+        // the next four slots are paramKinds:byte[], longArgs:long[], doubleArgs:double[],
+        // objArgs:Object[] (any of the bucket arrays may be null).
+        if (parameterCount > 0 && args.length > closureCount + 4
+                && args[closureCount] == ScalarMixedPayloadMarker.INSTANCE
+                && args[closureCount + 1] instanceof byte[] mixedKinds) {
+            long[] mLong = args[closureCount + 2] instanceof long[] l ? l : null;
+            double[] mDouble = args[closureCount + 3] instanceof double[] d ? d : null;
+            Object[] mObj = args[closureCount + 4] instanceof Object[] o ? o : null;
+            bindMixedPayload(frame, mixedKinds, mLong, mDouble, mObj);
+            bindAbilityOpsAfter(frame, args, closureCount + 5);
+            return runBodyLoop(frame);
+        }
+
         // Detect ABI: scalar (positional values) vs record (single field-named record).
         // Discrimination rules — see ScalarABIMarker:
         //   parameterCount == 0: scalar (no payload). Record ABI passes {} too —
@@ -260,9 +274,12 @@ public final class MezzeFunctionRootNode extends RootNode {
             try {
                 return bodyNode.execute(frame);
             } catch (TailCallScalarException tse) {
-                // Typed-payload fast path: read primitives straight to typed slots.
-                // tse carries exactly one of longArgs / doubleArgs (the all-X path that fired).
-                if (tse.longArgs != null) {
+                // Typed-payload fast path. Mode chosen by caller via fill / fillMixed:
+                //   paramKinds != null → mixed: dispatch each param into its bucket.
+                //   else → single-bucket: all params from longArgs OR doubleArgs.
+                if (tse.paramKinds != null) {
+                    bindMixedPayload(frame, tse.paramKinds, tse.longArgs, tse.doubleArgs, tse.objArgs);
+                } else if (tse.longArgs != null) {
                     bindLongPayload(frame, tse.longArgs);
                 } else if (tse.doubleArgs != null) {
                     bindDoublePayload(frame, tse.doubleArgs);
@@ -308,6 +325,28 @@ public final class MezzeFunctionRootNode extends RootNode {
         for (int i = 0; i < parameterCount; i++) {
             if (i < doubleArgs.length) {
                 frame.setDouble(closureCount + i, doubleArgs[i]);
+            }
+        }
+    }
+
+    /** Mixed-kind rebind: paramKinds[i] tells us which bucket to read for
+     *  param i, advancing per-bucket indices as we go. The caller pre-bucketed
+     *  values into longArgs/doubleArgs/objArgs in declaration order, so we
+     *  walk paramKinds and consume buckets sequentially. */
+    @ExplodeLoop
+    private void bindMixedPayload(VirtualFrame frame, byte[] paramKinds,
+                                  long[] longArgs, double[] doubleArgs, Object[] objArgs) {
+        int li = 0, di = 0, oi = 0;
+        for (int i = 0; i < parameterCount; i++) {
+            if (i >= paramKinds.length) break;
+            int slot = closureCount + i;
+            byte k = paramKinds[i];
+            if (k == 0 /* KIND_LONG */) {
+                frame.setLong(slot, longArgs[li++]);
+            } else if (k == 1 /* KIND_DOUBLE */) {
+                frame.setDouble(slot, doubleArgs[di++]);
+            } else {
+                frame.setObject(slot, objArgs[oi++]);
             }
         }
     }

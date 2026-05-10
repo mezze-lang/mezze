@@ -80,6 +80,34 @@ public final class TailCallDirectScalarNode extends MezzeNode {
     @CompilationFinal(dimensions = 1)
     private double[] reusableDoubleArgs;
 
+    /** True iff this self-recursive tail call's callee has a mix of primitive
+     *  (LONG/DOUBLE) and OBJECT params, AND at least one param is primitive.
+     *  Pure-OBJECT callees stay on the existing scalar-Object[] path (no boxing
+     *  to eliminate). Pure-LONG / pure-DOUBLE keep their cheaper single-bucket
+     *  paths above. */
+    @CompilationFinal
+    private boolean useTypedMixedPayload;
+
+    /** Per-param kind (KIND_LONG=0, DOUBLE=1, BOOLEAN=2, OBJECT=3) — used by
+     *  the receiver to dispatch each param into the right bucket. */
+    @CompilationFinal(dimensions = 1)
+    private byte[] mixedParamKinds;
+
+    /** Reusable per-kind buckets for mixed payload. Sized at resolve time
+     *  to the count of params of each kind; null if a kind is absent. */
+    @CompilationFinal(dimensions = 1)
+    private long[] mixedLongArgs;
+    @CompilationFinal(dimensions = 1)
+    private double[] mixedDoubleArgs;
+    @CompilationFinal(dimensions = 1)
+    private Object[] mixedObjArgs;
+
+    /** Per-arg index into the matching bucket. Computed once at resolve time:
+     *  if argumentNodes[i] writes to longArgs, mixedArgBucketIdx[i] is the
+     *  long[] slot to write to. Same for double / object kinds. */
+    @CompilationFinal(dimensions = 1)
+    private int[] mixedArgBucketIdx;
+
     /** Reusable exception for the typed-payload fast path — Truffle
      *  ControlFlowExceptions don't preserve stack traces, so a per-site
      *  singleton is safe and eliminates per-call exception allocation. */
@@ -134,7 +162,23 @@ public final class TailCallDirectScalarNode extends MezzeNode {
             throw reusableScalarException.fill(cachedCallTarget, null, doubleArgs, null);
         }
 
-        // SLOW PATH: object-based payload (mixed kinds, non-self-rec, or callee
+        // FAST PATH: self-recursive tail call to a MIXED-kind callee (e.g.
+        // {f: ..., n: Int, acc: Int}). Each arg is read into the bucket
+        // matching its slot kind — primitives unboxed, OBJECTs as-is.
+        if (useTypedMixedPayload) {
+            try {
+                fillMixedBuckets(frame);
+            } catch (UnexpectedResultException ure) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                useTypedMixedPayload = false;
+                return execute(frame);
+            }
+            throw reusableScalarException.fillMixed(
+                cachedCallTarget, mixedParamKinds,
+                mixedLongArgs, mixedDoubleArgs, mixedObjArgs);
+        }
+
+        // SLOW PATH: object-based payload (non-self-rec, or callee
         // hasn't been resolved yet so we don't know kinds).
         boolean needsMarker = argumentCount == 1;
         int totalLen = cachedClosureLength + (needsMarker ? 1 : 0) + argumentCount;
@@ -215,6 +259,61 @@ public final class TailCallDirectScalarNode extends MezzeNode {
                 useTypedDoublePayload = true;
                 reusableDoubleArgs = new double[argumentCount];
                 reusableScalarException = new TailCallScalarException();
+            } else {
+                // Try mixed-kind path: any LONG/DOUBLE/OBJECT mix is fine.
+                // We only need to skip the BOOLEAN slot — receiver's
+                // bindMixedPayload doesn't have a boolean bucket today.
+                boolean anyPrimitive = false;
+                boolean anyBool = false;
+                for (int i = 0; i < kinds.length; i++) {
+                    if (kinds[i] == 2 /* KIND_BOOLEAN */) anyBool = true;
+                    if (kinds[i] == 0 || kinds[i] == 1) anyPrimitive = true;
+                }
+                if (!anyBool && anyPrimitive) {
+                    setupMixedBuckets(kinds);
+                    reusableScalarException = new TailCallScalarException();
+                    useTypedMixedPayload = true;
+                }
+            }
+        }
+    }
+
+    /** Allocate the per-kind buckets and the per-arg → bucket-slot mapping. */
+    private void setupMixedBuckets(int[] kinds) {
+        int longCount = 0, doubleCount = 0, objCount = 0;
+        for (int i = 0; i < kinds.length; i++) {
+            if (kinds[i] == 0) longCount++;
+            else if (kinds[i] == 1) doubleCount++;
+            else objCount++;
+        }
+        mixedLongArgs = longCount > 0 ? new long[longCount] : null;
+        mixedDoubleArgs = doubleCount > 0 ? new double[doubleCount] : null;
+        mixedObjArgs = objCount > 0 ? new Object[objCount] : null;
+
+        mixedParamKinds = new byte[kinds.length];
+        mixedArgBucketIdx = new int[kinds.length];
+        int li = 0, di = 0, oi = 0;
+        for (int i = 0; i < kinds.length; i++) {
+            mixedParamKinds[i] = (byte) kinds[i];
+            if (kinds[i] == 0) mixedArgBucketIdx[i] = li++;
+            else if (kinds[i] == 1) mixedArgBucketIdx[i] = di++;
+            else mixedArgBucketIdx[i] = oi++;
+        }
+    }
+
+    /** Read each arg via the kind-appropriate execute method into the bucket
+     *  at its precomputed index. JIT-unrolled because all metadata is final. */
+    @ExplodeLoop
+    private void fillMixedBuckets(VirtualFrame frame) throws UnexpectedResultException {
+        for (int i = 0; i < argumentCount; i++) {
+            byte kind = mixedParamKinds[i];
+            int idx = mixedArgBucketIdx[i];
+            if (kind == 0 /* LONG */) {
+                mixedLongArgs[idx] = argumentNodes[i].executeLong(frame);
+            } else if (kind == 1 /* DOUBLE */) {
+                mixedDoubleArgs[idx] = argumentNodes[i].executeDouble(frame);
+            } else {
+                mixedObjArgs[idx] = argumentNodes[i].execute(frame);
             }
         }
     }

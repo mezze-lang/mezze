@@ -80,6 +80,24 @@ public final class CallDirectScalarNode extends MezzeNode {
     @CompilationFinal(dimensions = 1)
     private Object[] reusableTypedArgsWrapper;
 
+    /** Mixed-kind path: callee has both primitive (LONG/DOUBLE) and OBJECT params,
+     *  and at least one primitive param. Eliminates boxing for those primitives. */
+    @CompilationFinal
+    private boolean useTypedMixedPayload;
+    @CompilationFinal(dimensions = 1)
+    private byte[] mixedParamKinds;
+    @CompilationFinal(dimensions = 1)
+    private long[] mixedLongArgs;
+    @CompilationFinal(dimensions = 1)
+    private double[] mixedDoubleArgs;
+    @CompilationFinal(dimensions = 1)
+    private Object[] mixedObjArgs;
+    @CompilationFinal(dimensions = 1)
+    private int[] mixedArgBucketIdx;
+    /** Mixed wrapper layout: [closure..., MIXED_MARKER, paramKinds, longArgs, doubleArgs, objArgs]. */
+    @CompilationFinal(dimensions = 1)
+    private Object[] reusableMixedWrapper;
+
     public CallDirectScalarNode(Hash contentHash, String functionName, MezzeNode[] argumentNodes) {
         this.contentHash = contentHash;
         this.functionName = functionName;
@@ -131,6 +149,24 @@ public final class CallDirectScalarNode extends MezzeNode {
                 return execute(frame);
             }
             Object[] wrapper = reusableTypedArgsWrapper;
+            for (int i = 0; i < cachedClosureLength; i++) {
+                wrapper[i] = cachedClosureValues[i];
+            }
+            return callNode.call(wrapper);
+        }
+
+        // FAST PATH: mixed-kind callee. Each arg goes into the bucket for its
+        // slot kind — primitives unboxed, OBJECTs as-is. Receiver dispatches
+        // via paramKinds (set once at resolve time, lives in the wrapper).
+        if (useTypedMixedPayload) {
+            try {
+                fillMixedBuckets(frame);
+            } catch (UnexpectedResultException ure) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                useTypedMixedPayload = false;
+                return execute(frame);
+            }
+            Object[] wrapper = reusableMixedWrapper;
             for (int i = 0; i < cachedClosureLength; i++) {
                 wrapper[i] = cachedClosureValues[i];
             }
@@ -218,6 +254,70 @@ public final class CallDirectScalarNode extends MezzeNode {
                 reusableTypedArgsWrapper = new Object[cachedClosureLength + 2];
                 reusableTypedArgsWrapper[cachedClosureLength] = ScalarDoublePayloadMarker.INSTANCE;
                 reusableTypedArgsWrapper[cachedClosureLength + 1] = reusableDoubleArgs;
+            } else {
+                // Mixed kind path: allowed for any LONG/DOUBLE/OBJECT mix with at
+                // least one primitive (pure-OBJECT skips this since there's no
+                // boxing to eliminate). BOOLEAN bucket isn't implemented yet —
+                // skip rather than risk a wrong bucket assignment.
+                boolean anyPrimitive = false;
+                boolean anyBool = false;
+                for (int i = 0; i < kinds.length; i++) {
+                    if (kinds[i] == 2 /* KIND_BOOLEAN */) anyBool = true;
+                    if (kinds[i] == 0 || kinds[i] == 1) anyPrimitive = true;
+                }
+                if (!anyBool && anyPrimitive) {
+                    setupMixedBuckets(kinds);
+                }
+            }
+        }
+    }
+
+    /** Build per-kind buckets sized to the kind counts and the per-arg
+     *  index map. Wires the reusable wrapper layout used by execute(). */
+    private void setupMixedBuckets(int[] kinds) {
+        int longCount = 0, doubleCount = 0, objCount = 0;
+        for (int i = 0; i < kinds.length; i++) {
+            if (kinds[i] == 0) longCount++;
+            else if (kinds[i] == 1) doubleCount++;
+            else objCount++;
+        }
+        mixedLongArgs = longCount > 0 ? new long[longCount] : null;
+        mixedDoubleArgs = doubleCount > 0 ? new double[doubleCount] : null;
+        mixedObjArgs = objCount > 0 ? new Object[objCount] : null;
+
+        mixedParamKinds = new byte[kinds.length];
+        mixedArgBucketIdx = new int[kinds.length];
+        int li = 0, di = 0, oi = 0;
+        for (int i = 0; i < kinds.length; i++) {
+            mixedParamKinds[i] = (byte) kinds[i];
+            if (kinds[i] == 0) mixedArgBucketIdx[i] = li++;
+            else if (kinds[i] == 1) mixedArgBucketIdx[i] = di++;
+            else mixedArgBucketIdx[i] = oi++;
+        }
+
+        // Layout: [closure..., MIXED_MARKER, paramKinds, longArgs, doubleArgs, objArgs]
+        reusableMixedWrapper = new Object[cachedClosureLength + 5];
+        reusableMixedWrapper[cachedClosureLength] = ScalarMixedPayloadMarker.INSTANCE;
+        reusableMixedWrapper[cachedClosureLength + 1] = mixedParamKinds;
+        reusableMixedWrapper[cachedClosureLength + 2] = mixedLongArgs;
+        reusableMixedWrapper[cachedClosureLength + 3] = mixedDoubleArgs;
+        reusableMixedWrapper[cachedClosureLength + 4] = mixedObjArgs;
+        useTypedMixedPayload = true;
+    }
+
+    /** Read each arg via the kind-appropriate execute method into the bucket
+     *  at its precomputed index. */
+    @ExplodeLoop
+    private void fillMixedBuckets(VirtualFrame frame) throws UnexpectedResultException {
+        for (int i = 0; i < argumentCount; i++) {
+            byte kind = mixedParamKinds[i];
+            int idx = mixedArgBucketIdx[i];
+            if (kind == 0 /* LONG */) {
+                mixedLongArgs[idx] = argumentNodes[i].executeLong(frame);
+            } else if (kind == 1 /* DOUBLE */) {
+                mixedDoubleArgs[idx] = argumentNodes[i].executeDouble(frame);
+            } else {
+                mixedObjArgs[idx] = argumentNodes[i].execute(frame);
             }
         }
     }

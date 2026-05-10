@@ -122,6 +122,62 @@ class MicroBenchmarkTest {
 
     @Test
     @Timeout(600)
+    fun `00d7 - mixed-kind tail recursion (Object + 3 Long, no inner call)`() {
+        // Pure mixed-kind path: callee is (function-value, n: Int, acc: Int, max: Int)
+        // but the function arg is just passed through, never invoked. Isolates
+        // the outer mixed-kind call cost from the inner HOF callback.
+        println("\n=== 1M mixed-kind tail recursion, no inner call ===")
+        val code = """
+            let walk: {f: {x: Int} -> Int, n: Int, acc: Int, max: Int} -> Int =
+              {f, n, acc, max} ->
+                if n == max then acc
+                else walk {f = f, n = n + 1, acc = acc + n, max = max}
+
+            let inc: {x: Int} -> Int = {x} -> x + 1
+            walk {f = inc, n = 0, acc = 0, max = 1000000}
+        """.trimIndent()
+        benchmark("1M mixed-kind tail recursion (no inner call)", code, 1000000)
+    }
+
+    @Test
+    @Timeout(600)
+    fun `00d6 - 4 Long params tail recursion (mixed-kind path size proxy)`() {
+        // Pure all-LONG callee with 4 params, no HOF callback inside.
+        // Compares against the 1-param recursion to see how the mixed-kind/
+        // multi-param dispatch overhead scales with arity.
+        println("\n=== 1M tail recursion, 4 Long params ===")
+        val code = """
+            let walk: {a: Int, b: Int, c: Int, d: Int} -> Int = {a, b, c, d} ->
+              if a == 0 then b + c + d
+              else walk {a = a - 1, b = b + 1, c = c + 1, d = d + 1}
+
+            walk {a = 1000000, b = 0, c = 0, d = 0}
+        """.trimIndent()
+        benchmark("1M 4-Long tail recursion", code, 1000000)
+    }
+
+    @Test
+    @Timeout(600)
+    fun `00d5 - mixed-kind tail recursion (Object + 3 Long params)`() {
+        // Stresses mixed-kind callee. apply has 4 params: f (OBJECT), n/acc/max (LONG).
+        // Today scalar Object[] boxes the 3 Longs every recursive call.
+        // Step 72 should bucket into (Object[1], long[3]) and skip boxing.
+        println("\n=== 1M mixed-kind (Object+3Long) tail recursion ===")
+        val code = """
+            let apply: {f: {x: Int} -> Int, n: Int, acc: Int, max: Int} -> Int =
+              {f, n, acc, max} ->
+                if n == max
+                  then acc
+                  else apply {f = f, n = n + 1, acc = acc + f {x = n}, max = max}
+
+            let inc: {x: Int} -> Int = {x} -> x + 1
+            apply {f = inc, n = 0, acc = 0, max = 1000000}
+        """.trimIndent()
+        benchmark("1M mixed-kind tail recursion", code, 1000000)
+    }
+
+    @Test
+    @Timeout(600)
     fun `00d3 - tail recursion over Float (typed-DOUBLE tail path)`() {
         // Stresses TailCallDirectScalarNode's typed-DOUBLE path: tail-recursive
         // function over a Float param. All-DOUBLE detection should fire.
