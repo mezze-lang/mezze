@@ -202,6 +202,36 @@ class MicroBenchmarkTest {
 
     @Test
     @Timeout(600)
+    fun `00r3 - data-structure workload Map lookup-only hot loop`() {
+        // Same map built once; stress lookups in tight tail-recursive loop.
+        // Isolates Map.get cost from Map.put cost.
+        println("\n=== DS workload: Map lookup-only, 10K entries × 100K lookups ===")
+        val code = """
+            use std::collections::map
+
+            let build: {m: Map Int Int, i: Int, n: Int} -> Map Int Int = {m, i, n} ->
+              if i == n then m
+              else build {m = map::insert {m = m, k = i, v = i * 2}, i = i + 1, n = n}
+
+            let unwrap: {opt: Option Int} -> Int = {opt} ->
+              match opt is
+                Some {val} -> val
+                None -> 0
+
+            let lookups: {m: Map Int Int, i: Int, n: Int, acc: Int} -> Int =
+              {m, i, n, acc} ->
+                if i == n then acc
+                else lookups {m = m, i = i + 1, n = n, acc = acc + unwrap {opt = map::get {m = m, k = i % 10000}}}
+
+            do
+              let m = build {m = map::empty {}, i = 0, n = 10000}
+              lookups {m = m, i = 0, n = 100000, acc = 0}
+        """.trimIndent()
+        benchmark("Map lookup-only 100K iters", code, 100000)
+    }
+
+    @Test
+    @Timeout(600)
     fun `00r1 - real workload manual sum of squares of evens via tail recursion`() {
         // Manual tail-recursive version of: sum of squares of even numbers up to N.
         // Avoids potential stack-overflow issues in stdlib seq HOF chain. Exercises

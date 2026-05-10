@@ -40,14 +40,20 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
         this.ownerToken = ownerToken;
     }
 
+    /** Latched flag — see HashMapStorage.ownershipRevoked for rationale. */
+    @CompilationFinal
+    private boolean ownershipRevoked;
+
     private boolean isOwner() {
-        return ownerToken != null && ownerToken[0] == this;
+        return !ownershipRevoked && ownerToken != null && ownerToken[0] == this;
     }
 
     private void revokeOwnership() {
+        if (ownershipRevoked) return;
         if (ownerToken != null && ownerToken[0] == this) {
             ownerToken[0] = null;
         }
+        ownershipRevoked = true;
     }
 
     // ===== CONSTRUCTION =====

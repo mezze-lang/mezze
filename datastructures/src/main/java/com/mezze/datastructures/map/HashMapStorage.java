@@ -56,18 +56,33 @@ public final class HashMapStorage implements MapStorage {
         this(table, size, capacity, (Object[]) null);
     }
 
+    /**
+     * Latched flag: true once {@link #revokeOwnership()} has retired this
+     * storage as the table's owner. After the first read on a hot path,
+     * the array-write inside revokeOwnership is skipped, and the JIT can
+     * constant-fold subsequent revoke calls into a no-op via this
+     * {@code @CompilationFinal} flag (PE can't reason through Object[]
+     * contents but it can fold a primitive flag).
+     */
+    @CompilationFinal
+    private boolean ownershipRevoked;
+
     private boolean isOwner() {
-        return ownerToken != null && ownerToken[0] == this;
+        return !ownershipRevoked && ownerToken != null && ownerToken[0] == this;
     }
 
     /**
      * Revoke ownership so the table can never be mutated through this map.
-     * Called before any read operation to ensure safety.
+     * Called before any read operation to ensure safety. Idempotent and
+     * branch-foldable after the first call: {@link #ownershipRevoked}
+     * latches and PE folds the rest of the body away.
      */
     private void revokeOwnership() {
+        if (ownershipRevoked) return;
         if (ownerToken != null && ownerToken[0] == this) {
             ownerToken[0] = null;
         }
+        ownershipRevoked = true;
     }
 
     /**
@@ -102,7 +117,6 @@ public final class HashMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public Object get(Object key) {
         revokeOwnership();
         int hash = hash(key);
@@ -123,7 +137,6 @@ public final class HashMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public boolean containsKey(Object key) {
         revokeOwnership();
         return get(key) != null;

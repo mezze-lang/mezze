@@ -44,14 +44,21 @@ public final class HashSetStorage implements SetStorage {
         this.ownerToken = ownerToken;
     }
 
+    /** Latched flag — see HashMapStorage for the rationale. PE can fold the
+     *  revoke check after the first read on a hot path. */
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+    private boolean ownershipRevoked;
+
     private boolean isOwner() {
-        return ownerToken != null && ownerToken[0] == this;
+        return !ownershipRevoked && ownerToken != null && ownerToken[0] == this;
     }
 
     private void revokeOwnership() {
+        if (ownershipRevoked) return;
         if (ownerToken != null && ownerToken[0] == this) {
             ownerToken[0] = null;
         }
+        ownershipRevoked = true;
     }
 
     /**
@@ -86,7 +93,6 @@ public final class HashSetStorage implements SetStorage {
     }
 
     @Override
-    @TruffleBoundary
     public boolean contains(Object elem) {
         revokeOwnership();
         int hash = hash(elem);
