@@ -690,6 +690,31 @@ class TruffleCompiler(
         // Pull a named field's IR; null when missing (caller falls back to NativeDispatch).
         fun field(name: String): NodeIR? = argRec.fields.firstOrNull { it.name == name }?.value
 
+        // Helper: collect arg expressions in declared order; bail if any missing.
+        fun fields(vararg names: String): Array<MezzeNode>? {
+            val out = arrayOfNulls<MezzeNode>(names.size)
+            for ((i, n) in names.withIndex()) {
+                val expr = field(n) ?: return null
+                out[i] = compileNode(expr, source)
+            }
+            @Suppress("UNCHECKED_CAST")
+            return out as Array<MezzeNode>
+        }
+
+        // Wire a native op by name → typed Natives method. Returns the
+        // NativeBridgeNode that calls the lambda directly, or null if
+        // the arg shape doesn't match.
+        fun bridge(args: Array<MezzeNode>?, h: com.mezze.interpreter.nodes.builtin.NativeBridgeNode.Handler):
+                com.mezze.interpreter.nodes.builtin.NativeBridgeNode? {
+            if (args == null) return null
+            return com.mezze.interpreter.nodes.builtin.NativeBridgeNode.create(args, h)
+        }
+        fun bridgeWithCall(args: Array<MezzeNode>?, h: com.mezze.interpreter.nodes.builtin.NativeBridgeNode.Handler):
+                com.mezze.interpreter.nodes.builtin.NativeBridgeNode? {
+            if (args == null) return null
+            return com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createWithCallNode(args, h)
+        }
+
         return when (node.name) {
             // seq::size {xs} → SeqLengthNode(xs). SeqLengthNode returns plain
             // long for MezzeSeq/MezzeList/Object[]; semantics match SeqNatives.size.
@@ -729,6 +754,119 @@ class TruffleCompiler(
                 com.mezze.interpreter.nodes.seq.SeqFoldCallNode.create(
                     compileNode(xs, source), compileNode(init, source), compileNode(f, source))
             }
+
+            // ===== Map ops =====
+            // m → MapNatives.size(m)
+            "__native_map_size" -> bridge(fields("m")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.size(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>)
+            }
+            "__native_map_is_empty" -> bridge(fields("m")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.isEmpty(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>)
+            }
+            "__native_map_get" -> bridge(fields("m", "k")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.get(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>, args[1])
+            }
+            "__native_map_insert" -> bridge(fields("m", "k", "v")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.insert(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>, args[1], args[2])
+            }
+            "__native_map_remove" -> bridge(fields("m", "k")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.remove(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>, args[1])
+            }
+            "__native_map_contains_key" -> bridge(fields("m", "k")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.containsKey(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>, args[1])
+            }
+            "__native_map_contains_value" -> bridge(fields("m", "v")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.containsValue(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>, args[1])
+            }
+            "__native_map_get_or_default" -> bridge(fields("m", "k", "default")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.getOrDefault(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>, args[1], args[2])
+            }
+            "__native_map_singleton" -> bridge(fields("k", "v")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.singleton(args[0], args[1])
+            }
+            "__native_map_keys" -> bridge(fields("m")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.keys(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>)
+            }
+            "__native_map_values" -> bridge(fields("m")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.values(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>)
+            }
+            "__native_map_keys_seq" -> bridge(fields("m")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.keysSeq(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>)
+            }
+            "__native_map_values_seq" -> bridge(fields("m")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.valuesSeq(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>)
+            }
+            "__native_map_to_seq" -> bridge(fields("m")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.toSeq(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>)
+            }
+            "__native_map_merge" -> bridge(fields("m1", "m2")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.merge(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>,
+                    args[1] as com.mezze.datastructures.map.MezzeMap<*, *>)
+            }
+            "__native_map_equals" -> bridge(fields("m1", "m2")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.MapNatives.equals(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>,
+                    args[1] as com.mezze.datastructures.map.MezzeMap<*, *>)
+            }
+
+            // ===== Set ops =====
+            "__native_set_size" -> bridge(fields("s")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.SetNatives.size(
+                    args[0] as com.mezze.datastructures.set.MezzeSet<*>)
+            }
+            "__native_set_is_empty" -> bridge(fields("s")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.SetNatives.isEmpty(
+                    args[0] as com.mezze.datastructures.set.MezzeSet<*>)
+            }
+            "__native_set_contains" -> bridge(fields("s", "x")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.SetNatives.contains(
+                    args[0] as com.mezze.datastructures.set.MezzeSet<*>, args[1])
+            }
+            "__native_set_insert" -> bridge(fields("s", "x")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.SetNatives.insert(
+                    args[0] as com.mezze.datastructures.set.MezzeSet<*>, args[1])
+            }
+            "__native_set_remove" -> bridge(fields("s", "x")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.SetNatives.remove(
+                    args[0] as com.mezze.datastructures.set.MezzeSet<*>, args[1])
+            }
+
+            // ===== List ops =====
+            "__native_list_length" -> bridge(fields("l")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.ListNatives.length(
+                    args[0] as com.mezze.datastructures.list.MezzeList<*>)
+            }
+            "__native_list_is_empty" -> bridge(fields("l")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.ListNatives.isEmpty(
+                    args[0] as com.mezze.datastructures.list.MezzeList<*>)
+            }
+            "__native_list_cons" -> bridge(fields("h", "t")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.ListNatives.cons(
+                    args[0], args[1] as com.mezze.datastructures.list.MezzeList<*>)
+            }
+            "__native_list_head" -> bridge(fields("l")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.ListNatives.head(
+                    args[0] as com.mezze.datastructures.list.MezzeList<*>)
+            }
+            "__native_list_tail" -> bridge(fields("l")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.collections.ListNatives.tail(
+                    args[0] as com.mezze.datastructures.list.MezzeList<*>)
+            }
+
             else -> null
         }
     }
