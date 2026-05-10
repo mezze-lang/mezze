@@ -389,13 +389,23 @@ public final class LongSetStorage implements SetStorage {
         return new SmallFlatSetStorage(boxed);
     }
 
-    @TruffleBoundary
-    private HashSetStorage transitionToHash() {
-        HashSetStorage hash = new HashSetStorage();
+    /** Promote to {@link LongHashSetStorage} (primitive-keyed, no boxing) when
+     *  every element is sentinel-safe; fall back to {@link HashSetStorage} otherwise. */
+    private SetStorage transitionToHash() {
         for (long elem : elements) {
-            hash = (HashSetStorage) hash.add(elem);
+            if (!LongHashSetStorage.isStorable(elem)) {
+                HashSetStorage hash = new HashSetStorage();
+                for (long e : elements) {
+                    hash = (HashSetStorage) hash.add(e);
+                }
+                return hash;
+            }
         }
-        return hash;
+        LongHashSetStorage out = new LongHashSetStorage();
+        for (long elem : elements) {
+            out = (LongHashSetStorage) out.addLong(elem);
+        }
+        return out;
     }
 
     @Override

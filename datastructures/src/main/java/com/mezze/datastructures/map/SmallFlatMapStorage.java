@@ -74,8 +74,29 @@ public final class SmallFlatMapStorage implements MapStorage {
             return new SmallFlatMapStorage(newKeys, newValues);
         }
 
-        // Transition to HashMapStorage
+        // Transition to LongHashMapStorage if every key is a primitive-storable Long
+        // (no sentinel collision), HashMapStorage otherwise. The Long-specialized
+        // storage skips boxing and Objects.equals on every probe.
+        return transitionToBestHash(newKey, newValue);
+    }
+
+    private MapStorage transitionToBestHash(Object newKey, Object newValue) {
+        if (allLongKeysStorable(newKey)) {
+            LongHashMapStorage out = new LongHashMapStorage();
+            for (int i = 0; i < keys.length; i++) {
+                out = (LongHashMapStorage) out.putLong((Long) keys[i], values[i]);
+            }
+            return out.put(newKey, newValue);
+        }
         return transitionToHash().put(newKey, newValue);
+    }
+
+    private boolean allLongKeysStorable(Object newKey) {
+        if (!(newKey instanceof Long nk) || !LongHashMapStorage.isStorable(nk)) return false;
+        for (Object k : keys) {
+            if (!(k instanceof Long lk) || !LongHashMapStorage.isStorable(lk)) return false;
+        }
+        return true;
     }
 
     @Override

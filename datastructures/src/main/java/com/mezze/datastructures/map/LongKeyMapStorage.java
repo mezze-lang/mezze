@@ -268,13 +268,23 @@ public final class LongKeyMapStorage implements MapStorage {
         return new SmallFlatMapStorage(boxedKeys, values.clone());
     }
 
-    @TruffleBoundary
-    private HashMapStorage transitionToHash() {
-        HashMapStorage hash = new HashMapStorage();
-        for (int i = 0; i < keys.length; i++) {
-            hash = (HashMapStorage) hash.put(keys[i], values[i]);
+    /** Promote to {@link LongHashMapStorage} (primitive-keyed, no boxing) when
+     *  every key is sentinel-safe; fall back to {@link HashMapStorage} otherwise. */
+    private MapStorage transitionToHash() {
+        for (long k : keys) {
+            if (!LongHashMapStorage.isStorable(k)) {
+                HashMapStorage hash = new HashMapStorage();
+                for (int i = 0; i < keys.length; i++) {
+                    hash = (HashMapStorage) hash.put(keys[i], values[i]);
+                }
+                return hash;
+            }
         }
-        return hash;
+        LongHashMapStorage out = new LongHashMapStorage();
+        for (int i = 0; i < keys.length; i++) {
+            out = (LongHashMapStorage) out.putLong(keys[i], values[i]);
+        }
+        return out;
     }
 
     @Override

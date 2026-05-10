@@ -54,8 +54,28 @@ public final class SmallFlatSetStorage implements SetStorage {
             return new SmallFlatSetStorage(newElements);
         }
 
-        // Transition to HashSetStorage
-        return transitionToHash().add(elem);
+        // Transition to LongHashSetStorage if every element is a primitive-storable Long
+        // (no sentinel collision), HashSetStorage otherwise.
+        return transitionToBestHash(elem);
+    }
+
+    private SetStorage transitionToBestHash(Object newElem) {
+        if (allLongElementsStorable(newElem)) {
+            LongHashSetStorage out = new LongHashSetStorage();
+            for (Object e : elements) {
+                out = (LongHashSetStorage) out.addLong((Long) e);
+            }
+            return out.add(newElem);
+        }
+        return transitionToHash().add(newElem);
+    }
+
+    private boolean allLongElementsStorable(Object newElem) {
+        if (!(newElem instanceof Long ne) || !LongHashSetStorage.isStorable(ne)) return false;
+        for (Object e : elements) {
+            if (!(e instanceof Long le) || !LongHashSetStorage.isStorable(le)) return false;
+        }
+        return true;
     }
 
     @Override
