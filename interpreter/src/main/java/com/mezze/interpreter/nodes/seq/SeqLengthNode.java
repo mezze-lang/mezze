@@ -12,14 +12,16 @@ import com.oracle.truffle.api.nodes.UnexpectedResultException;
 /**
  * Seq/List length node - returns primitive long.
  *
- * Type-specialized for MezzeSeq (Vavr Vector) and MezzeList (Vavr List).
+ * Type-specialized for MezzeSeq (persistent vector — typed-storage stack
+ * with Long/Double/Object/Boolean specializations and COW ownership) and
+ * MezzeList (persistent cons list).
  */
 @NodeChild("seqNode")
 @NodeInfo(shortName = "seq-len")
 public abstract class SeqLengthNode extends MezzeNode {
 
     /**
-     * MezzeSeq (Vavr Vector) length.
+     * MezzeSeq (persistent vector) length.
      */
     @Specialization
     protected long lengthSeq(MezzeSeq seq) {
@@ -27,7 +29,7 @@ public abstract class SeqLengthNode extends MezzeNode {
     }
 
     /**
-     * MezzeList (Vavr List) length.
+     * MezzeList (persistent cons list) length.
      */
     @Specialization
     protected long lengthList(MezzeList list) {

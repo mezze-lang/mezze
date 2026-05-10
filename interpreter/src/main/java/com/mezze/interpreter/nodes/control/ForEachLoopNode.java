@@ -25,8 +25,8 @@ import com.oracle.truffle.api.profiles.InlinedBranchProfile;
  * This enables JIT compilation mid-loop for long-running iterations.
  *
  * Type specializations:
- * 1. MezzeSeq (Vavr Vector) - O(log32 n) access per element
- * 2. MezzeList (Vavr List) - O(n) access per element (but O(1) for head/tail iteration)
+ * 1. MezzeSeq (persistent vector) - O(log32 n) access per element
+ * 2. MezzeList (persistent cons list) - O(n) access per element (but O(1) for head/tail iteration)
  * 3. Object[] - Generic object iteration
  *
  * The loop index is stored in a frame slot for proper Truffle semantics.
@@ -259,7 +259,7 @@ public final class ForEachLoopNode extends MezzeNode {
     }
 
     /**
-     * RepeatingNode for MezzeList (Vavr List).
+     * RepeatingNode for MezzeList (persistent cons list).
      * Note: O(n²) total because each get(index) is O(n).
      * For better performance, consider using head/tail iteration in the future.
      */

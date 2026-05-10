@@ -2844,7 +2844,7 @@ public final class ConcurrencyNatives {
     private static MezzeList getList(MezzeRecord args, String fieldName) {
         Object value = getField(args, fieldName);
         if (value instanceof MezzeList list) return list;
-        // Handle MezzeSeq (Vavr Vector) - convert to MezzeList
+        // Handle MezzeSeq (persistent vector) - convert to MezzeList
         if (value instanceof MezzeSeq seq) {
             return MezzeList.of(seq.toArray());
         }

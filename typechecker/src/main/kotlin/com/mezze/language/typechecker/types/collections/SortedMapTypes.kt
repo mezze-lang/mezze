@@ -16,7 +16,7 @@ private fun optionType(elementType: MezzeType): MezzeType {
  * Corresponds to stdlib file:
  * - std/collections/sorted_map.mz
  *
- * SortedMap is backed by Vavr TreeMap for O(log n) operations with keys in sorted order.
+ * SortedMap is backed by sorted-array storage (binary search lookup, O(log n)) with keys in sorted order.
  */
 object SortedMapTypes {
     fun registerAll(context: MutableMap<String, MezzeType>) {

@@ -15,7 +15,9 @@ import com.oracle.truffle.api.profiles.InlinedBranchProfile;
 /**
  * Sequence/List element access node.
  *
- * Type-specialized for MezzeSeq (Vavr Vector) and MezzeList (Vavr List).
+ * Type-specialized for MezzeSeq (persistent vector — typed-storage stack
+ * with Long/Double/Object/Boolean specializations and COW ownership) and
+ * MezzeList (persistent cons list).
  */
 @NodeChild("seqNode")
 @NodeChild("indexNode")
@@ -23,7 +25,7 @@ import com.oracle.truffle.api.profiles.InlinedBranchProfile;
 public abstract class SeqAccessNode extends MezzeNode {
 
     /**
-     * MezzeSeq (Vavr Vector) access - O(log32 n) ≈ O(1)
+     * MezzeSeq (persistent vector) access - O(log32 n) ≈ O(1)
      */
     @Specialization
     protected Object accessSeq(
@@ -41,7 +43,7 @@ public abstract class SeqAccessNode extends MezzeNode {
     }
 
     /**
-     * MezzeList (Vavr List) access - O(n)
+     * MezzeList (persistent cons list) access - O(n)
      */
     @Specialization
     protected Object accessList(

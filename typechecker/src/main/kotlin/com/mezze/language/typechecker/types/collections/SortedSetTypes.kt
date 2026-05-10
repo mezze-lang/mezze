@@ -16,7 +16,7 @@ private fun optionType(elementType: MezzeType): MezzeType {
  * Corresponds to stdlib file:
  * - std/collections/sorted_set.mz
  *
- * SortedSet is backed by Vavr TreeSet for O(log n) operations with elements in sorted order.
+ * SortedSet is backed by sorted-array storage (binary search lookup, O(log n)) with elements in sorted order.
  */
 object SortedSetTypes {
     fun registerAll(context: MutableMap<String, MezzeType>) {

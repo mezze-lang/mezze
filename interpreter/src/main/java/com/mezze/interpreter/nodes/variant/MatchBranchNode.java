@@ -665,7 +665,7 @@ public final class MatchBranchNode extends MezzeNode {
             return; // Fast path for empty pattern []
         }
 
-        // Bind each element position - Vavr List is always boxed, no strategy needed
+        // Bind each element position - MezzeList is always boxed, no strategy needed
         for (int i = 0; i < elementCount; i++) {
             int slot = arrayElementSlots[i];
             if (slot >= 0) {
