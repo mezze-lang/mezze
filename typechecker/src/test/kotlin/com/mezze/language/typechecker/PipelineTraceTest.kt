@@ -126,8 +126,8 @@ class PipelineTraceTest {
     private fun dumpNodeIR(fw: FileWriter, node: NodeIR, indent: String) {
         when (node) {
             is CallDirectIR -> {
-                fw.write("${indent}CallDirect(${node.targetHash.hex.take(16)}... tail=${node.isTailCall})\n")
-                dumpNodeIR(fw, node.arg, "$indent  arg: ")
+                fw.write("${indent}CallDirect(${node.targetHash.hex.take(16)}... tail=${node.isTailCall} scalar=${node.isScalarABI})\n")
+                node.args.forEachIndexed { i, a -> dumpNodeIR(fw, a, "$indent  arg[$i]: ") }
             }
             is ReadLocalIR -> fw.write("${indent}ReadLocal(slot=${node.slot})\n")
             is ReadArgIR -> fw.write("${indent}ReadArg(idx=${node.index})\n")

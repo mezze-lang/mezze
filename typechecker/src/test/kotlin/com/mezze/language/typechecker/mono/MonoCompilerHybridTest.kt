@@ -219,12 +219,14 @@ class MonoCompilerHybridTest {
     private fun walk(node: com.mezze.language.truffleir.NodeIR, out: MutableList<CallDirectIR>) {
         if (node is CallDirectIR) {
             out.add(node)
-            walk(node.arg, out)
+            node.args.forEach { walk(it, out) }
             return
         }
         when (node) {
             is com.mezze.language.truffleir.MakeRecordIR -> for (f in node.fields) walk(f.value, out)
             is com.mezze.language.truffleir.CallIndirectIR -> { walk(node.function, out); walk(node.arg, out) }
+            is com.mezze.language.truffleir.CallIndirectScalarIR -> { walk(node.function, out); node.args.forEach { walk(it, out) } }
+            is com.mezze.language.truffleir.PartialApplyDirectIR -> for (f in node.partialFields) walk(f.value, out)
             else -> { /* leaves and other variants are fine for this test */ }
         }
     }
