@@ -2267,11 +2267,17 @@ class TypedASTCompiler(
         // and lowers to direct arithmetic / native calls. Going scalar here would
         // bypass that lowering and try to invoke a non-function value.
         val isInlineOpShape = fnIR is com.mezze.language.truffleir.ReadFieldIR
-        if (!isInlineOpShape && argIR is MakeRecordIR && argIR.fields.size == 1
-                && argIR.fields[0].name != "__spread__") {
-            val field = argIR.fields[0]
+        if (!isInlineOpShape && argIR is MakeRecordIR && argIR.fields.isNotEmpty()
+                && argIR.fields.none { it.name == "__spread__" }) {
+            // Emit scalar IR for any field-arity ≥ 1. The runtime handles ordering:
+            // it computes a permutation from caller field-name order to callee
+            // param-name order at inline-cache time. Typecheck has guaranteed the
+            // field-name set equals the callee param-name set.
             return com.mezze.language.truffleir.CallIndirectScalarIR(
-                fnIR, listOf(field.value), listOf(field.name), isTailCall, src
+                fnIR,
+                argIR.fields.map { it.value },
+                argIR.fields.map { it.name },
+                isTailCall, src
             )
         }
         return CallIndirectIR(fnIR, argIR, isTailCall, src)

@@ -100,6 +100,26 @@ class MicroBenchmarkTest {
 
     @Test
     @Timeout(600)
+    fun `00d8 - 2-arg HOF callback (fold-style indirect call)`() {
+        // Stresses InvokeScalarNNode for N=2 — fold-style {acc, x} -> acc + x
+        // callback invoked in a tight loop. Validates the permutation-cache path
+        // when caller and callee param order match.
+        println("\n=== 1M 2-arg HOF callback invocations ===")
+        val code = """
+            let fold_loop: {f: {acc: Int, x: Int} -> Int, n: Int, acc: Int, max: Int} -> Int =
+              {f, n, acc, max} ->
+                if n == max
+                  then acc
+                  else fold_loop {f = f, n = n + 1, acc = f {acc = acc, x = n}, max = max}
+
+            let combine: {acc: Int, x: Int} -> Int = {acc, x} -> acc + x
+            fold_loop {f = combine, n = 0, acc = 0, max = 1000000}
+        """.trimIndent()
+        benchmark("1M 2-arg HOF callback (fold-style)", code, 1000000)
+    }
+
+    @Test
+    @Timeout(600)
     fun `00d4 - HOF callback (indirect call hot path)`() {
         // Stresses indirect calls: an inner loop that repeatedly calls a
         // function passed as a parameter. Mirrors what list::map does
