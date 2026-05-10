@@ -109,7 +109,6 @@ public final class MezzeBytes implements TruffleObject {
     /**
      * Returns a slice from start (inclusive) to end (exclusive).
      */
-    @TruffleBoundary
     public MezzeBytes slice(int start, int end) {
         if (start < 0 || end > data.length || start > end) {
             throw new IndexOutOfBoundsException("Invalid slice: " + start + " to " + end);
@@ -152,7 +151,6 @@ public final class MezzeBytes implements TruffleObject {
     /**
      * Concatenates with another bytes.
      */
-    @TruffleBoundary
     public MezzeBytes concat(MezzeBytes other) {
         if (isEmpty()) return other;
         if (other.isEmpty()) return this;
@@ -166,7 +164,6 @@ public final class MezzeBytes implements TruffleObject {
     /**
      * Concatenates multiple bytes.
      */
-    @TruffleBoundary
     public static MezzeBytes concat(MezzeBytes... parts) {
         int totalLength = 0;
         for (MezzeBytes part : parts) {
@@ -211,7 +208,6 @@ public final class MezzeBytes implements TruffleObject {
      * Finds index of pattern, or -1 if not found.
      * Uses KMP algorithm for O(n + m) performance.
      */
-    @TruffleBoundary
     public int indexOf(MezzeBytes pattern) {
         return indexOf(pattern, 0);
     }
@@ -220,7 +216,6 @@ public final class MezzeBytes implements TruffleObject {
      * Finds index of pattern starting from offset.
      * Uses KMP (Knuth-Morris-Pratt) algorithm: O(n + m) instead of O(n * m).
      */
-    @TruffleBoundary
     public int indexOf(MezzeBytes pattern, int fromIndex) {
         byte[] p = pattern.data;
         int pLen = p.length;

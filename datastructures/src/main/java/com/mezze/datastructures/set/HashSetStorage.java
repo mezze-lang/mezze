@@ -113,7 +113,6 @@ public final class HashSetStorage implements SetStorage {
     }
 
     @Override
-    @TruffleBoundary
     public SetStorage add(Object elem) {
         if (containsInternal(elem)) {
             return this;
@@ -161,7 +160,6 @@ public final class HashSetStorage implements SetStorage {
     }
 
     @Override
-    @TruffleBoundary
     public SetStorage remove(Object elem) {
         revokeOwnership();
         int hash = hash(elem);
@@ -194,7 +192,6 @@ public final class HashSetStorage implements SetStorage {
     }
 
     @Override
-    @TruffleBoundary
     public Object[] toArray() {
         revokeOwnership();
         Object[] result = new Object[size];

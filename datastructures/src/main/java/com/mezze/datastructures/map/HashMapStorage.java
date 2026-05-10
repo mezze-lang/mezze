@@ -143,7 +143,6 @@ public final class HashMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public MapStorage put(Object key, Object value) {
         // Check if we need to grow
         if (size >= capacity * LOAD_FACTOR) {
@@ -202,7 +201,6 @@ public final class HashMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public MapStorage remove(Object key) {
         revokeOwnership();
         int hash = hash(key);
@@ -238,7 +236,6 @@ public final class HashMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public Object[] keys() {
         revokeOwnership();
         Object[] result = new Object[size];
@@ -253,7 +250,6 @@ public final class HashMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public Object[] values() {
         revokeOwnership();
         Object[] result = new Object[size];

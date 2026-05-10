@@ -81,7 +81,6 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
     /**
      * Creates a bitset from indices.
      */
-    @TruffleBoundary
     public static MezzeBitSet of(int... indices) {
         if (indices.length == 0) return empty();
         if (indices.length == 1) return of(indices[0]);
@@ -115,7 +114,6 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
      * Creates a bitset for range [start, end).
      * Optimized to set whole words at once instead of bit-by-bit.
      */
-    @TruffleBoundary
     public static MezzeBitSet range(int start, int end) {
         if (start < 0 || start >= end) {
             return empty();
@@ -204,7 +202,6 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
     /**
      * Returns a new bitset with the index added.
      */
-    @TruffleBoundary
     public MezzeBitSet add(int index) {
         if (index < 0) {
             throw new IllegalArgumentException("Index must be non-negative");
@@ -242,7 +239,6 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
     /**
      * Returns a new bitset with the index removed.
      */
-    @TruffleBoundary
     public MezzeBitSet remove(int index) {
         revokeOwnership();
         if (index < 0 || !contains(index)) {
@@ -272,7 +268,6 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
      * Union (OR) with another bitset.
      * Computes cardinality inline: |A ∪ B| = |A| + |B| - |A ∩ B|
      */
-    @TruffleBoundary
     public MezzeBitSet union(MezzeBitSet other) {
         if (isEmpty()) return other;
         if (other.isEmpty()) return this;
@@ -311,7 +306,6 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
      * Intersection (AND) with another bitset.
      * Computes cardinality inline during the AND operation.
      */
-    @TruffleBoundary
     public MezzeBitSet intersect(MezzeBitSet other) {
         if (isEmpty() || other.isEmpty()) return empty();
 
@@ -345,7 +339,6 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
      * Difference (this AND NOT other).
      * Computes cardinality inline during the operation.
      */
-    @TruffleBoundary
     public MezzeBitSet difference(MezzeBitSet other) {
         if (isEmpty()) return this;
         if (other.isEmpty()) return this;
@@ -391,7 +384,6 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
      * Symmetric difference (XOR).
      * Computes cardinality inline during the operation.
      */
-    @TruffleBoundary
     public MezzeBitSet symmetricDifference(MezzeBitSet other) {
         if (isEmpty()) return other;
         if (other.isEmpty()) return this;
@@ -448,7 +440,6 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
     /**
      * Complement (NOT) - flips all bits up to given limit.
      */
-    @TruffleBoundary
     public MezzeBitSet complement(int limit) {
         if (limit <= 0) return empty();
 
@@ -562,7 +553,6 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
     /**
      * Returns all set indices as array.
      */
-    @TruffleBoundary
     public int[] toArray() {
         int[] result = new int[cardinality];
         int idx = 0;

@@ -191,7 +191,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      * Binary search for element.
      * Returns index if found, or -(insertionPoint + 1) if not found.
      */
-    @TruffleBoundary
     private int binarySearch(A elem) {
         return binarySearchObject(elem);
     }
@@ -199,7 +198,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Binary search for element (raw type version).
      */
-    @TruffleBoundary
     private int binarySearchObject(Object elem) {
         int low = 0;
         int high = length - 1;

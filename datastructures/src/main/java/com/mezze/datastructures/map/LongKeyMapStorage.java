@@ -120,7 +120,6 @@ public final class LongKeyMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public MapStorage put(Object key, Object value) {
         if (key instanceof Long l) {
             return putLong(l, value);
@@ -132,7 +131,6 @@ public final class LongKeyMapStorage implements MapStorage {
     /**
      * Unboxed put using binary search. Maintains sorted order.
      */
-    @TruffleBoundary
     public MapStorage putLong(long key, Object value) {
         int idx = binarySearch(key);
 
@@ -165,7 +163,6 @@ public final class LongKeyMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public MapStorage remove(Object key) {
         if (key instanceof Long l) {
             return removeLong(l);
@@ -176,7 +173,6 @@ public final class LongKeyMapStorage implements MapStorage {
     /**
      * Unboxed remove using binary search.
      */
-    @TruffleBoundary
     public MapStorage removeLong(long key) {
         int idx = binarySearch(key);
 

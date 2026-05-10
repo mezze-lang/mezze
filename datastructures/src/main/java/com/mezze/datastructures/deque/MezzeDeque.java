@@ -201,7 +201,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      * Returns a new deque with element added to front.
      * Uses copy-on-write: only copies buffer if not owned.
      */
-    @TruffleBoundary
     public MezzeDeque<A> pushFront(A element) {
         if (size == buffer.length) {
             return grow().pushFront(element);
@@ -229,7 +228,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      * Returns a new deque with element added to back.
      * Uses copy-on-write: only copies buffer if not owned.
      */
-    @TruffleBoundary
     public MezzeDeque<A> pushBack(A element) {
         if (size == buffer.length) {
             return grow().pushBack(element);
@@ -258,7 +256,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      * Returns (front element, rest of deque), or throws if empty.
      * Uses copy-on-write: shares buffer when possible.
      */
-    @TruffleBoundary
     public PopResult<A> popFront() {
         if (isEmpty()) {
             throw new NoSuchElementException("Empty deque");
@@ -282,7 +279,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      * Returns (back element, rest of deque), or throws if empty.
      * Uses copy-on-write: shares buffer when possible.
      */
-    @TruffleBoundary
     public PopResult<A> popBack() {
         if (isEmpty()) {
             throw new NoSuchElementException("Empty deque");
@@ -381,7 +377,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      * Concatenates another deque to the back.
      * Uses bulk System.arraycopy when deques are linearized (head=0).
      */
-    @TruffleBoundary
     public MezzeDeque<A> concat(MezzeDeque<A> other) {
         if (isEmpty()) return other;
         if (other.isEmpty()) return this;
@@ -424,7 +419,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
     /**
      * Reverses the deque.
      */
-    @TruffleBoundary
     public MezzeDeque<A> reverse() {
         if (size <= 1) return this;
 
@@ -441,7 +435,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
     /**
      * Take first n elements.
      */
-    @TruffleBoundary
     public MezzeDeque<A> take(int n) {
         if (n <= 0 || isEmpty()) return empty();
         if (n >= size) return this;
@@ -456,7 +449,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
     /**
      * Drop first n elements.
      */
-    @TruffleBoundary
     public MezzeDeque<A> drop(int n) {
         if (n <= 0) return this;
         if (n >= size) return empty();

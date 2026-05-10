@@ -178,7 +178,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * Gets the value for a key (raw type), or null if not present.
      * For interpreter use with dynamic types.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public Object getObject(Object key) {
         revokeOwnership();
@@ -206,7 +205,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * Returns true if the key is present (raw type).
      * For interpreter use with dynamic types.
      */
-    @TruffleBoundary
     public boolean containsKeyObject(Object key) {
         revokeOwnership();
         return binarySearchObject(key) >= 0;
@@ -215,7 +213,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     /**
      * Binary search for key.
      */
-    @TruffleBoundary
     private int binarySearch(K key) {
         return binarySearchObject(key);
     }
@@ -223,7 +220,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     /**
      * Binary search for key (raw type).
      */
-    @TruffleBoundary
     private int binarySearchObject(Object key) {
         int low = 0;
         int high = length - 1;

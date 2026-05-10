@@ -54,7 +54,6 @@ public final class SmallFlatMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public MapStorage put(Object newKey, Object newValue) {
         // Check if key exists
         for (int i = 0; i < keys.length; i++) {
@@ -80,7 +79,6 @@ public final class SmallFlatMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public MapStorage remove(Object removeKey) {
         int idx = -1;
         for (int i = 0; i < keys.length; i++) {
