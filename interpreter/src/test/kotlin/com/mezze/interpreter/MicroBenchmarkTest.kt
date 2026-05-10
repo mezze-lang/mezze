@@ -120,6 +120,88 @@ class MicroBenchmarkTest {
 
     @Test
     @Timeout(600)
+    fun `00d11 - DS-Wire seq map fold pipeline`() {
+        // seq::fold over a seq::map result. Hits map (HOF), fold (HOF),
+        // and primitive arithmetic. Compares the cost when DS-Wire drops
+        // map/fold into specialized Truffle nodes vs goes through
+        // NativeDispatch (record-allocating handler).
+        println("\n=== Seq map+fold pipeline N=10K ===")
+        val code = """
+            use std::collections::seq
+
+            let pipeline: {n: Int} -> Int = {n} ->
+              do
+                let xs = seq::range {start = 0, end = n}
+                let doubled = seq::map {xs = xs, f = {x} -> x * 2}
+                seq::fold {xs = doubled, init = 0, f = {acc, x} -> acc + x}
+
+            pipeline {n = 10000}
+        """.trimIndent()
+        benchmark("seq map+fold N=10K", code, 1)
+    }
+
+    @Test
+    @Timeout(600)
+    fun `00d10 - DS-Wire seq size in tight loop`() {
+        // Tight loop of seq::size {xs = some_seq}. Measures the dispatch
+        // cost of __native_seq_size — before DS-Wire it goes through
+        // NativeDispatch (HashMap lookup + handler invoke + boundary).
+        // After DS-Wire the call lowers to SeqLengthNode directly.
+        println("\n=== 1M seq::size calls in tight loop ===")
+        val code = """
+            use std::collections::seq
+
+            let walk: {xs: [Int], i: Int, max: Int, acc: Int} -> Int =
+              {xs, i, max, acc} ->
+                if i == max
+                  then acc
+                  else walk {xs = xs, i = i + 1, max = max, acc = acc + seq::size {xs = xs}}
+
+            walk {xs = [1, 2, 3, 4, 5], i = 0, max = 1000000, acc = 0}
+        """.trimIndent()
+        benchmark("1M seq::size calls", code, 1000000)
+    }
+
+    @Test
+    @Timeout(600)
+    fun `00r2 - data-structure workload Map insert + lookup`() {
+        // Builds a Map with 10K entries via tail-recursive insert, then
+        // tail-recursively looks up every key. Touches: map::insert, map::get
+        // — the heavy DS dispatch path the AI flagged as ~50-500 ns per op.
+        // Compares to the call-dispatch wins (which are zero for this code,
+        // since dispatch overhead is dominated by Map storage ops).
+        println("\n=== DS workload: Map build + lookup, 10K entries ===")
+        val code = """
+            use std::collections::map
+
+            let build: {m: Map Int Int, i: Int, n: Int} -> Map Int Int = {m, i, n} ->
+              if i == n
+                then m
+                else build {m = map::insert {m = m, k = i, v = i * 2}, i = i + 1, n = n}
+
+            let unwrap: {opt: Option Int} -> Int = {opt} ->
+              match opt is
+                Some {val} -> val
+                None -> 0
+
+            let sum_lookup: {m: Map Int Int, i: Int, n: Int, acc: Int} -> Int =
+              {m, i, n, acc} ->
+                if i == n
+                  then acc
+                  else sum_lookup {m = m, i = i + 1, n = n, acc = acc + unwrap {opt = map::get {m = m, k = i}}}
+
+            let pipeline: {n: Int} -> Int = {n} ->
+              do
+                let m = build {m = map::empty {}, i = 0, n = n}
+                sum_lookup {m = m, i = 0, n = n, acc = 0}
+
+            pipeline {n = 10000}
+        """.trimIndent()
+        benchmark("Map build + lookup N=10K", code, 10000)
+    }
+
+    @Test
+    @Timeout(600)
     fun `00r1 - real workload manual sum of squares of evens via tail recursion`() {
         // Manual tail-recursive version of: sum of squares of even numbers up to N.
         // Avoids potential stack-overflow issues in stdlib seq HOF chain. Exercises

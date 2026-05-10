@@ -77,6 +77,7 @@ tasks.test {
     System.getenv("MEZZE_DEBUG_TYPED")?.let { environment("MEZZE_DEBUG_TYPED", it) }
     System.getenv("MEZZE_DEBUG_INLINE")?.let { environment("MEZZE_DEBUG_INLINE", it) }
     System.getenv("MEZZE_DISABLE_INLINE")?.let { environment("MEZZE_DISABLE_INLINE", it) }
+    System.getenv("MEZZE_DISABLE_DSWIRE")?.let { environment("MEZZE_DISABLE_DSWIRE", it) }
 
     jvmArgs(
         "--enable-native-access=ALL-UNNAMED",

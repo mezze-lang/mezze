@@ -228,6 +228,14 @@ class TruffleCompiler(
                 }
             }
             is CallNativeIR -> {
+                // DS-Wire fast paths: many stdlib ops compile to a single
+                // CallNativeIR("__native_xxx", record). When the matching
+                // specialized Truffle node exists, lower directly to it
+                // instead of the HashMap-driven NativeDispatch path. Skips
+                // the per-call HashMap.get + handler.apply + record alloc.
+                val dsWired = tryCompileDSWiredNative(node, source)
+                if (dsWired != null) return dsWired
+
                 val argNode = compileNode(node.arg, source)
                 // Use dedicated Truffle nodes for continuation primitives
                 // (matching main branch's convertNativeFunctionCall)
@@ -667,6 +675,62 @@ class TruffleCompiler(
             builder.addSlot(slotKindToFrameKind(ir.localSlots[i]), ir.localNames.getOrElse(i) { "local_$i" }, null)
         }
         return builder.build()
+    }
+
+    /** DS-Wire: lower select CallNativeIR sites directly to specialized Truffle
+     *  nodes, skipping NativeDispatch's HashMap lookup + record indirection.
+     *
+     *  Returns null when the native op isn't wired or the arg shape doesn't
+     *  match the expectation (in which case the regular NativeDispatch path
+     *  takes over and stays correct). */
+    private fun tryCompileDSWiredNative(node: CallNativeIR, source: Source): MezzeNode? {
+        if (System.getenv("MEZZE_DISABLE_DSWIRE") == "true") return null
+        val argRec = node.arg as? MakeRecordIR ?: return null
+
+        // Pull a named field's IR; null when missing (caller falls back to NativeDispatch).
+        fun field(name: String): NodeIR? = argRec.fields.firstOrNull { it.name == name }?.value
+
+        return when (node.name) {
+            // seq::size {xs} → SeqLengthNode(xs). SeqLengthNode returns plain
+            // long for MezzeSeq/MezzeList/Object[]; semantics match SeqNatives.size.
+            "__native_seq_size" -> {
+                val xs = field("xs") ?: return null
+                com.mezze.interpreter.nodes.seq.SeqLengthNode.create(compileNode(xs, source))
+            }
+            // seq::get {xs, i} → SeqGetOptionNode(xs, i). Returns Option-wrapped
+            // result, matching SeqNatives.get exactly (delegates to it under the
+            // hood after extracting positional args).
+            "__native_seq_get" -> {
+                val xs = field("xs") ?: return null
+                val i = field("i") ?: return null
+                com.mezze.interpreter.nodes.seq.SeqGetOptionNode.create(
+                    compileNode(xs, source), compileNode(i, source))
+            }
+            // seq::map {xs, f} → SeqMapCallNode. Matches SeqNatives.map semantics:
+            // both call f {x = element} and rebuild the seq via fromArray.
+            "__native_seq_map" -> {
+                val xs = field("xs") ?: return null
+                val f = field("f") ?: return null
+                com.mezze.interpreter.nodes.seq.SeqMapCallNode.create(
+                    compileNode(xs, source), compileNode(f, source))
+            }
+            // seq::filter {xs, p} → SeqFilterCallNode. Matches SeqNatives.filter.
+            "__native_seq_filter" -> {
+                val xs = field("xs") ?: return null
+                val p = field("p") ?: return null
+                com.mezze.interpreter.nodes.seq.SeqFilterCallNode.create(
+                    compileNode(xs, source), compileNode(p, source))
+            }
+            // seq::fold {xs, init, f} → SeqFoldCallNode. Matches SeqNatives.fold.
+            "__native_seq_fold" -> {
+                val xs = field("xs") ?: return null
+                val init = field("init") ?: return null
+                val f = field("f") ?: return null
+                com.mezze.interpreter.nodes.seq.SeqFoldCallNode.create(
+                    compileNode(xs, source), compileNode(init, source), compileNode(f, source))
+            }
+            else -> null
+        }
     }
 
     private fun slotKindToFrameKind(kind: SlotKind): FrameSlotKind = when (kind) {
