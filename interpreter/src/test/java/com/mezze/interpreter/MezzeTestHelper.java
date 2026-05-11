@@ -26,9 +26,15 @@ public final class MezzeTestHelper {
     private static final MezzeParser parser = new MezzeParser();
     private static final TypeChecker typeChecker = new TypeChecker();
 
-    // Shared engine for test execution performance
+    // Shared engine for test execution performance.
+    // engine.Compilation=false disables Truffle PE/JIT — even though
+    // truffle-runtime is on the classpath (HotSpotTruffleRuntime), tests
+    // run interpreted to avoid per-test JIT warmup (~1-3s each).
+    // Production (mez build output) leaves this on the default (true).
     private static final Engine sharedEngine = Engine.newBuilder()
+        .allowExperimentalOptions(true)
         .option("engine.WarnInterpreterOnly", "false")
+        .option("engine.Compilation", "false")
         .build();
 
     private MezzeTestHelper() {}

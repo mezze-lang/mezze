@@ -231,18 +231,11 @@ tasks.register<Jar>("buildStandaloneJar") {
     from(project(":typechecker").tasks.jar.get().outputs.files.map { zipTree(it) })
     from(project(":interpreter").tasks.jar.get().outputs.files.map { zipTree(it) })
     
-    // Include all runtime dependencies (including Truffle API)
+    // Include all runtime dependencies (including Truffle API + truffle-runtime
+    // which gives us HotSpotTruffleRuntime — without it Truffle falls back to
+    // DefaultTruffleRuntime, i.e. pure interpreter with no JIT).
     from(configurations.runtimeClasspath.get().map { zipTree(it) })
-    
-    // Include Truffle compiler JAR for JIT compilation
-    val truffleCompilerJar = File(System.getenv("JAVA_HOME"), "lib/truffle/truffle-compiler.jar")
-    if (truffleCompilerJar.exists()) {
-        from(zipTree(truffleCompilerJar))
-        println("✅ Including Truffle JIT compiler: ${truffleCompilerJar.name}")
-    } else {
-        println("⚠️  Truffle compiler JAR not found at: ${truffleCompilerJar}")
-    }
-    
+
     // Merge service files properly
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     

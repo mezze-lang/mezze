@@ -89,11 +89,20 @@ object DevRunner {
         // Instrument options (cpusampler, coverage, insight, JIT trace) are
         // registered on the Engine so they survive watch reloads — each run
         // appends to the same profile/coverage output.
+        //
+        // JIT (engine.Compilation) is OFF by default for `mez dev` because
+        // hot-reload edits invalidate compiled code and per-save JIT warmup
+        // (~1-3s) hurts the dev loop feel. Users can opt in with MEZZE_JIT=1
+        // for long-running dev sessions where JIT amortizes.
+        val jitEnabled = System.getenv("MEZZE_JIT")
+            ?.let { it == "1" || it.equals("true", ignoreCase = true) }
+            ?: false
         val engineBuilder = Engine.newBuilder()
             // Required for any Truffle instrumentation tool — these options
             // are all "experimental" and silently no-op without this.
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
+            .option("engine.Compilation", jitEnabled.toString())
 
         if (profile) {
             // CPU sampler. Function-granularity by default (low overhead);

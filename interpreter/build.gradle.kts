@@ -21,6 +21,13 @@ dependencies {
     // Truffle API - for language implementation
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
 
+    // Truffle optimizing runtime (HotSpotTruffleRuntime). Without this,
+    // Truffle falls back to DefaultTruffleRuntime — i.e. pure interpreter,
+    // no PE, no JIT. On GraalVM JDK the compiler module
+    // `org.graalvm.truffle.compiler` is already a jmod in the JDK, so this
+    // single artifact is sufficient — no --upgrade-module-path needed.
+    implementation("org.graalvm.truffle:truffle-runtime:24.2.2")
+
     // Truffle DSL annotation processor - generates specialization code
     annotationProcessor("org.graalvm.truffle:truffle-dsl-processor:24.2.2")
 

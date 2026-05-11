@@ -119,9 +119,18 @@ object StandaloneHelper {
         // Build an explicit Engine so we can attach instruments. Same
         // pattern as DevRunner — keeps the two execution surfaces (dev
         // and standalone) in sync.
+        //
+        // Truffle JIT is ON by default for standalone apps (truffle-runtime
+        // is on the classpath; engine.Compilation defaults to true). Users
+        // can disable with MEZZE_JIT=0 if a startup-sensitive workload
+        // prefers interpreter-only.
+        val jitDisabled = System.getenv("MEZZE_JIT")?.let {
+            it == "0" || it.equals("false", ignoreCase = true)
+        } ?: false
         val engineBuilder = Engine.newBuilder()
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
+            .apply { if (jitDisabled) option("engine.Compilation", "false") }
 
         val profile = args.contains("--profile")
         val coverage = args.contains("--coverage")
