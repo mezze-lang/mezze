@@ -57,7 +57,11 @@ dependencies {
     testImplementation(project(":typechecker"))
 }
 
-tasks.test {
+// Shared config applied to both the default `test` task and the
+// opt-in `bench` task below. Keeps env-passthrough, JVM args, heap, and
+// logging in one place — the only difference between the two is which
+// test classes they include.
+fun org.gradle.api.tasks.testing.Test.applyCommonTestConfig() {
     useJUnitPlatform()
 
     testLogging {
@@ -85,6 +89,8 @@ tasks.test {
     System.getenv("MEZZE_DEBUG_INLINE")?.let { environment("MEZZE_DEBUG_INLINE", it) }
     System.getenv("MEZZE_DISABLE_INLINE")?.let { environment("MEZZE_DISABLE_INLINE", it) }
     System.getenv("MEZZE_DISABLE_DSWIRE")?.let { environment("MEZZE_DISABLE_DSWIRE", it) }
+    // Allow opt-in to Truffle JIT for perf measurement (bench task).
+    System.getenv("MEZZE_JIT")?.let { environment("MEZZE_JIT", it) }
 
     jvmArgs(
         "--enable-native-access=ALL-UNNAMED",
@@ -94,4 +100,35 @@ tasks.test {
     )
 
     maxHeapSize = "2g"
+}
+
+// Names that mark a JUnit class as a benchmark / profiler / stress test
+// rather than a correctness test. Filename convention — any class whose
+// simple name matches one of these is routed to `:interpreter:bench`,
+// not the default `test` task.
+val benchClassPatterns = listOf(
+    "**/*Benchmark*",
+    "**/*Bench*",
+    "**/*ProfileTest*",
+    "**/StdlibHofSoSurveyTest*",
+    "**/MicroBenchmarkTest*",
+)
+
+tasks.test {
+    applyCommonTestConfig()
+    // Default `test` excludes benches so `./gradlew :interpreter:test`
+    // stays a fast feedback loop. Benches live in :interpreter:bench.
+    benchClassPatterns.forEach { exclude(it) }
+}
+
+tasks.register<Test>("bench") {
+    group = "verification"
+    description = "Performance benchmarks and profiling harnesses (excluded from :test)."
+    applyCommonTestConfig()
+    // Bench tests need longer per-test timeout — they're allowed to run
+    // for tens of seconds. Override the strict 120s default applied above.
+    systemProperty("junit.jupiter.execution.timeout.default", "600s")
+    benchClassPatterns.forEach { include(it) }
+    // Always re-run; bench output is informational, never up-to-date.
+    outputs.upToDateWhen { false }
 }
