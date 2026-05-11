@@ -75,10 +75,6 @@ module.exports = grammar({
     // a module_path or starts the use_declaration's inlined group path.
     // GLR explores both; the group form wins when `{` follows.
     [$.use_declaration, $.module_path],
-    // A bare `{x: Int}` in a type position could be a record_type (done)
-    // or the start of a function_type (continues into `->`). GLR explores
-    // both; longer match wins.
-    [$.record_type, $.function_type],
     // type_binding's value `'a = T` — T could be a `_type` (resolved)
     // or the start of a function_type. Explore both.
     [$._type, $.function_type],
