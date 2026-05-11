@@ -8,6 +8,26 @@ import kotlin.test.assertTrue
 class ParserRecoveryTest {
 
     @Test
+    fun `parseWithRecovery surfaces both bodies-only errors`() {
+        // Two `let` decls each with an invalid body. Expected: both errors
+        // reported, not just the first. Without recovery (or with a broken
+        // synchronizer) the parser bails after the first failure and the
+        // user never sees the second.
+        val source = """
+            let bad1 = if then else
+
+            let bad2 = if then else
+        """.trimIndent()
+
+        val result = MezzeParser().parseWithRecovery(source)
+        assertEquals(
+            2,
+            result.errors.size,
+            "expected one error per broken let, got ${result.errors.size}: ${result.errors.map { it.message }}"
+        )
+    }
+
+    @Test
     fun `parseWithRecovery collects multiple errors`() {
         val source = """
             let good1 = 42
