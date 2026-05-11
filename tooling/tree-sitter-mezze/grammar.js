@@ -66,25 +66,30 @@ module.exports = grammar({
     // field. Resolved by whether `->` follows the closing `}`.
     [$.lambda_parameter, $.record_field],
     [$.lambda_parameters, $.record_expression],
-    // {x} on the LHS of `=` could be a record-destructuring pattern. The
-    // closing `=` decides which.
-    [$.record_pattern_field, $.record_field],
-    [$.record_pattern, $.record_expression],
-    // Bare `x` is a variable_pattern in let/match position, otherwise a
-    // variable expression.
-    [$.variable_pattern, $.variable],
     // `Foo {…}` is a variant constructor (e.g. `Some {val = 1}`) but
     // `f {…}` is a function call — the `Foo` upper_identifier alone could
     // be a no-arg variant or a callee. Resolved by lookahead.
     [$.function_call, $.variant_constructor_expression],
+    // `use a::b::c` — the parser must decide whether `a::b::` continues
+    // a module_path or starts the use_declaration's inlined group path.
+    // GLR explores both; the group form wins when `{` follows.
+    [$.use_declaration, $.module_path],
   ],
 
   rules: {
-    source_file: $ => repeat(seq(
+    source_file: $ => seq(
+      optional($._newline),  // tolerate leading blank lines
+      optional(seq(
+        $._top_level_with_metadata,
+        repeat(seq($._newline, $._top_level_with_metadata)),
+        optional($._newline),
+      )),
+    ),
+
+    _top_level_with_metadata: $ => seq(
       optional($.metadata_block),
       $._top_level,
-      $._newline,
-    )),
+    ),
 
     // ===== Comments + metadata =====
 
@@ -133,22 +138,19 @@ module.exports = grammar({
       optional($.visibility_modifier),
       'use',
       choice(
+        // Group form: `use a::b::{c, d}`. We inline the path here so the
+        // greedy `module_path` rule never competes with the `::{` boundary.
         seq(
-          field('path', $.module_path),
-          '::',
+          field('path', alias(repeat1(seq($.lower_identifier, '::')), $.module_path)),
           field('items', $.use_group),
         ),
-        seq(
-          field('path', $.module_path),
-          'as',
-          field('alias', $.lower_identifier),
-        ),
+        seq(field('path', $.module_path), 'as', field('alias', $.lower_identifier)),
         field('path', $.module_path),
       ),
     ),
 
-    // Greedy left-assoc so `a::b::c` is one module_path, not `(a::b)::c` plus
-    // a dangling `::`. The use_declaration disambiguates the final segment.
+    // Module path. Greedy `::`-chain of lower identifiers. Only used by
+    // non-group `use` forms; the group form inlines the path (see above).
     module_path: $ => prec.left(sepBy1('::', $.lower_identifier)),
 
     use_group: $ => seq(
@@ -167,7 +169,7 @@ module.exports = grammar({
       optional($.visibility_modifier),
       'let',
       field('pattern', $._pattern),
-      optional(seq(':', field('type', $._type))),
+      optional(seq(':', field('type', $._signature_type))),
       '=',
       field('body', $._expression),
     ),
@@ -212,6 +214,10 @@ module.exports = grammar({
     effect_operation: $ => seq(
       field('name', $.lower_identifier),
       ':',
+      // Plain _type — effect-op signatures don't use `with` constraints in
+      // the stdlib. If a real example surfaces, add a dedicated rule that
+      // wraps the operation rather than allowing _signature_type here (the
+      // comma between ops is ambiguous against with-clause commas).
       field('type', $._type),
     ),
 
@@ -231,6 +237,9 @@ module.exports = grammar({
     ability_operation: $ => seq(
       field('name', $.lower_identifier),
       ':',
+      // Plain _type — same constraint as effect_operation: with-clause
+      // commas can't disambiguate against op-separator commas inside
+      // the where { } block.
       field('type', $._type),
     ),
 
@@ -311,12 +320,21 @@ module.exports = grammar({
 
     // ===== Types =====
 
+    // `_type` is the everywhere-legal type form (no `with`-clauses).
+    // `_signature_type` adds `constrained_type` and is used ONLY at
+    // top-level binding positions (let, ability/effect op signatures,
+    // impl operations) — places where `with Eq 'a` syntactically binds
+    // the whole signature, not a nested record field.
     _type: $ => choice(
       $.type_variable,
       $.named_type,
       $.type_application,
       $.function_type,
       $.record_type,
+    ),
+
+    _signature_type: $ => choice(
+      $._type,
       $.constrained_type,
     ),
 
@@ -338,12 +356,12 @@ module.exports = grammar({
       seq('(', $._type, ')'),
     ),
 
-    function_type: $ => seq(
+    function_type: $ => prec.right(seq(
       field('parameters', $.record_type),
       '->',
       field('return_type', $._type),
       optional(field('effects', $.effect_row)),
-    ),
+    )),
 
     record_type: $ => seq(
       '{',
@@ -354,21 +372,28 @@ module.exports = grammar({
     record_type_field: $ => seq(
       field('name', $.lower_identifier),
       ':',
+      // _type (NOT _signature_type) — constrained types `with Eq 'a` only
+      // bind at the top-level signature position, not inside record-type
+      // fields. This also breaks the comma ambiguity between with-clause
+      // separators and record-field separators.
       field('type', $._type),
     ),
 
-    // Constrained type: `'a with Eq 'a, Show 'a`. Used in function signatures.
-    constrained_type: $ => seq(
+    // Constrained type: `{Int} -> Str with Eq 'a, Show 'a`. `with` always
+    // binds the whole signature, never just the return. Inner type is
+    // _type (which excludes constrained_type itself, preventing recursive
+    // re-application of `with`).
+    constrained_type: $ => prec(1, seq(
       $._type,
       'with',
       sepBy1(',', $.ability_constraint),
-    ),
+    )),
 
-    ability_constraint: $ => seq(
+    ability_constraint: $ => prec.left(seq(
       field('ability', $.upper_identifier),
       repeat1(field('argument', $._type_atom)),
       optional(seq('having', sepBy1(',', $.type_binding))),
-    ),
+    )),
 
     // <Effect1, Effect2, ...> or <*> or <...> — appears ONLY after a function
     // return type. See TypeParsers.kt:169–267. This is why it can coexist
@@ -383,10 +408,23 @@ module.exports = grammar({
       '>',
     ),
 
-    effect_reference: $ => seq(
+    // Effect reference inside an effect_row `<L1, L2, ...>`. Each ref can
+    // be a bare name (`Log`) or a name with `having` type bindings
+    // (`State having 'state = Int`). The `having` list ends at the next
+    // top-level `,` or `>`. We require type_binding to be left-greedy so
+    // the comma-list terminates as soon as it hits something that doesn't
+    // start a new type_binding.
+    effect_reference: $ => prec.left(seq(
       field('name', $.upper_identifier),
-      optional(seq('having', sepBy1(',', $.type_binding))),
-    ),
+      optional($._having_clause),
+    )),
+
+    // Grouped so the `having ...` list has its own associativity boundary,
+    // separate from the outer effect_row comma list.
+    _having_clause: $ => prec.left(seq(
+      'having',
+      sepBy1(',', $.type_binding),
+    )),
 
     // ===== Expressions =====
 
@@ -398,7 +436,6 @@ module.exports = grammar({
       $.member_access,
       $.method_call,
       $.function_call,
-      $.qualified_call,
       $.qualified_reference,
       $.if_expression,
       $.match_expression,
@@ -494,12 +531,6 @@ module.exports = grammar({
       field('name', choice($.lower_identifier, $.upper_identifier)),
     )),
 
-    // module::name {args}
-    qualified_call: $ => prec(PREC.call, seq(
-      field('callee', $.qualified_reference),
-      field('arguments', $.record_expression),
-    )),
-
     if_expression: $ => seq(
       'if',
       field('condition', $._expression),
@@ -509,12 +540,15 @@ module.exports = grammar({
       field('else', $._expression),
     ),
 
-    match_expression: $ => seq(
+    match_expression: $ => prec.right(seq(
       'match',
       field('scrutinee', $._expression),
       'is',
-      repeat1(seq($.match_arm, optional(','))),
-    ),
+      // arms are comma-separated; trailing comma optional. Using
+      // prec.right pushes ambiguity (where does the match end?) toward
+      // continuing to consume arms — the comma is the only safe terminator.
+      sepBy1(',', $.match_arm),
+    )),
 
     match_arm: $ => seq(
       field('pattern', $._pattern),

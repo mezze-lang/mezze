@@ -1,12 +1,72 @@
 ==================
-scaffold accepts identifiers
+empty let binding
 ==================
 
-foo bar baz
+let x = 1
 
 ---
 
 (source_file
-  (identifier)
-  (identifier)
-  (identifier))
+  (let_declaration
+    pattern: (variable_pattern (lower_identifier))
+    body: (integer_literal)))
+
+==================
+pub let — pub is isolated from let
+==================
+
+pub let answer = 42
+
+---
+
+(source_file
+  (let_declaration
+    (visibility_modifier)
+    pattern: (variable_pattern (lower_identifier))
+    body: (integer_literal)))
+
+==================
+lambda
+==================
+
+let f = {x} -> x
+
+---
+
+(source_file
+  (let_declaration
+    pattern: (variable_pattern (lower_identifier))
+    body: (lambda_expression
+      parameters: (lambda_parameters
+        (lambda_parameter name: (lower_identifier)))
+      body: (variable (lower_identifier)))))
+
+==================
+record literal (not a lambda)
+==================
+
+let r = {x = 1, y = 2}
+
+---
+
+(source_file
+  (let_declaration
+    pattern: (variable_pattern (lower_identifier))
+    body: (record_expression
+      (record_field name: (lower_identifier) value: (integer_literal))
+      (record_field name: (lower_identifier) value: (integer_literal)))))
+
+==================
+use with group
+==================
+
+use std::int::{add, multiply}
+
+---
+
+(source_file
+  (use_declaration
+    path: (module_path (lower_identifier) (lower_identifier))
+    items: (use_group
+      (use_item name: (lower_identifier))
+      (use_item name: (lower_identifier)))))
