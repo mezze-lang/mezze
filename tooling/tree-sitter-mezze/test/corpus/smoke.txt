@@ -1,0 +1,12 @@
+==================
+scaffold accepts identifiers
+==================
+
+foo bar baz
+
+---
+
+(source_file
+  (identifier)
+  (identifier)
+  (identifier))

@@ -1,0 +1,36 @@
+{
+  "name": "tree-sitter-mezze",
+  "version": "0.0.1",
+  "description": "Tree-sitter grammar for the Mezze language",
+  "repository": "github:shriyansbhatnagar/funk",
+  "license": "MIT",
+  "main": "bindings/node",
+  "types": "bindings/node",
+  "keywords": [
+    "incremental",
+    "parsing",
+    "tree-sitter",
+    "mezze"
+  ],
+  "files": [
+    "grammar.js",
+    "binding.gyp",
+    "prebuilds/**",
+    "bindings/node/*",
+    "queries/*",
+    "src/**"
+  ],
+  "scripts": {
+    "build": "tree-sitter generate && tree-sitter build",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.mezze",
+      "file-types": ["mz"],
+      "highlights": "queries/highlights.scm",
+      "injection-regex": "^mezze$"
+    }
+  ]
+}

@@ -69,6 +69,9 @@ in
     graalvm-oracle-linux-prebuilt
     pkgs.zlib
     pkgs.nodejs
+    # tree-sitter CLI for the tooling/tree-sitter-mezze grammar
+    # (generate parser.c, build native lib, run corpus tests).
+    pkgs.tree-sitter
   ] ++ lib.optionals pkgs.stdenv.isLinux [
     pkgs.gcc
   ];
@@ -142,6 +145,20 @@ in
       fi
     '';
 
+    ts-build.exec = ''
+      echo "🌲 Generating + building tree-sitter-mezze..."
+      cd tooling/tree-sitter-mezze
+      tree-sitter generate
+      tree-sitter build
+    '';
+
+    ts-test.exec = ''
+      echo "🌲 Running tree-sitter corpus tests..."
+      cd tooling/tree-sitter-mezze
+      tree-sitter generate
+      tree-sitter test
+    '';
+
     vscode-install.exec = ''
       echo "📦 Packaging VSCode extension..."
       cd tooling/vscode-extension/extension
@@ -179,6 +196,8 @@ in
     echo "🛠️  Tooling:"
     echo "  vscode-install - Package and install VSCode extension"
     echo "  smoke-tests    - Run comprehensive CLI smoke tests"
+    echo "  ts-build       - Generate + build tree-sitter-mezze grammar"
+    echo "  ts-test        - Run tree-sitter corpus tests"
     echo ""
     echo "📝 Examples:"
     echo "  mezze-dev parse examples/basic/hello_world.mezze"

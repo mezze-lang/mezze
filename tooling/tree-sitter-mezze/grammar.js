@@ -1,0 +1,627 @@
+/**
+ * Tree-sitter grammar for the Mezze language.
+ *
+ * Source of truth: parser/src/main/kotlin/com/mezze/language/parser/
+ *   internal/Lexer.kt              — tokens
+ *   internal/ExpressionParsers.kt  — expression precedence + structure
+ *   internal/DeclarationParsers.kt — top-level decls
+ *   internal/TypeParsers.kt        — type annotations + effect rows
+ *
+ * Do NOT consult tooling/vscode-extension/extension/syntaxes/mezze.tmLanguage.json
+ * — the TextMate grammar is broken (`pub` recolors the following keyword) and
+ * exists only until this grammar replaces it.
+ *
+ * Precedence ladder (low → high) mirrors ExpressionParsers.kt 1482–2076:
+ *
+ *   1  ||
+ *   2  &&
+ *   3  |>
+ *   4  == != < > <= >=
+ *   5  + -
+ *   6  * / %
+ *   7  unary - !
+ *   8  . (member access)
+ *   9  :: (module qualification, atomic)
+ */
+
+const PREC = {
+  or: 1,
+  and: 2,
+  pipe: 3,
+  compare: 4,
+  add: 5,
+  mul: 6,
+  unary: 7,
+  member: 8,
+  qualified: 9,
+  // Used to force the lambda-vs-record decision in favor of lambda when an
+  // arrow is present (see ExpressionParsers.kt:13 — `lookAheadForArrowAfterBrace`).
+  lambda: 10,
+  // Variant construction (`Some {val}`) binds tighter than method dispatch
+  // so the receiver of `.method` is the whole constructor.
+  call: 11,
+};
+
+module.exports = grammar({
+  name: 'mezze',
+
+  // The parser uses newline-sensitive layout: a top-level decl ends at the
+  // next NEWLINE that's not consumed by an open delimiter or trailing comma.
+  // Tree-sitter's $._newline is built into `extras` for now; if that turns
+  // out to be wrong (e.g. match arms eat the wrong newline) we'll switch to
+  // explicit newline tokens with an external scanner. Start simple.
+  extras: $ => [
+    /[ \t\r]/,
+    $.line_comment,
+    $.doc_comment,
+  ],
+
+  word: $ => $.lower_identifier,
+
+  // GLR-style conflicts. Tree-sitter explores all listed parses in parallel
+  // and picks whichever yields a complete tree. The disambiguator is always
+  // a token further right (`->` for lambda, `=` for let, etc.).
+  conflicts: $ => [
+    // {x} could be a lambda's parameter list or a record-literal punning
+    // field. Resolved by whether `->` follows the closing `}`.
+    [$.lambda_parameter, $.record_field],
+    [$.lambda_parameters, $.record_expression],
+    // {x} on the LHS of `=` could be a record-destructuring pattern. The
+    // closing `=` decides which.
+    [$.record_pattern_field, $.record_field],
+    [$.record_pattern, $.record_expression],
+    // Bare `x` is a variable_pattern in let/match position, otherwise a
+    // variable expression.
+    [$.variable_pattern, $.variable],
+    // `Foo {…}` is a variant constructor (e.g. `Some {val = 1}`) but
+    // `f {…}` is a function call — the `Foo` upper_identifier alone could
+    // be a no-arg variant or a callee. Resolved by lookahead.
+    [$.function_call, $.variant_constructor_expression],
+  ],
+
+  rules: {
+    source_file: $ => repeat(seq(
+      optional($.metadata_block),
+      $._top_level,
+      $._newline,
+    )),
+
+    // ===== Comments + metadata =====
+
+    line_comment: _ => token(seq('#', /[^#{\n][^\n]*/)),
+
+    doc_comment: _ => token(seq('##', /[^\n]*/)),
+
+    // `#{key = value, …}` — compiler-meaningful annotation attached to the
+    // following declaration. Distinct from a plain `# comment` because the
+    // following char is `{`. Highlighted as @attribute (not @comment).
+    metadata_block: $ => seq(
+      '#{',
+      sepBy(',', $.metadata_entry),
+      '}',
+    ),
+
+    metadata_entry: $ => seq(
+      field('key', $.lower_identifier),
+      ':',
+      field('value', $._expression),
+    ),
+
+    _newline: _ => /\n+/,
+
+    // ===== Top-level declarations =====
+
+    _top_level: $ => choice(
+      $.use_declaration,
+      $.let_declaration,
+      $.type_declaration,
+      $.effect_declaration,
+      $.ability_declaration,
+      $.impl_declaration,
+    ),
+
+    // Public visibility — its OWN node so highlights.scm can tag it as
+    // @keyword.modifier without ever wrapping the following keyword.
+    // This is the entire fix for the broken-TextMate `pub` cascade.
+    visibility_modifier: _ => 'pub',
+
+    // ----- use -----
+    // Split by trailing form so the path-vs-group choice isn't a shift/reduce
+    // tug-of-war. The path is a `::`-separated chain of lowercase identifiers
+    // (matching parser: stdlib::collections::seq).
+    use_declaration: $ => seq(
+      optional($.visibility_modifier),
+      'use',
+      choice(
+        seq(
+          field('path', $.module_path),
+          '::',
+          field('items', $.use_group),
+        ),
+        seq(
+          field('path', $.module_path),
+          'as',
+          field('alias', $.lower_identifier),
+        ),
+        field('path', $.module_path),
+      ),
+    ),
+
+    // Greedy left-assoc so `a::b::c` is one module_path, not `(a::b)::c` plus
+    // a dangling `::`. The use_declaration disambiguates the final segment.
+    module_path: $ => prec.left(sepBy1('::', $.lower_identifier)),
+
+    use_group: $ => seq(
+      '{',
+      sepBy1(',', $.use_item),
+      '}',
+    ),
+
+    use_item: $ => seq(
+      field('name', choice($.lower_identifier, $.upper_identifier)),
+      optional(seq('as', field('alias', choice($.lower_identifier, $.upper_identifier)))),
+    ),
+
+    // ----- let -----
+    let_declaration: $ => seq(
+      optional($.visibility_modifier),
+      'let',
+      field('pattern', $._pattern),
+      optional(seq(':', field('type', $._type))),
+      '=',
+      field('body', $._expression),
+    ),
+
+    // ----- type -----
+    type_declaration: $ => seq(
+      optional($.visibility_modifier),
+      'type',
+      field('name', $.upper_identifier),
+      repeat(field('parameter', $.type_variable)),
+      '=',
+      field('definition', $._type_definition),
+    ),
+
+    _type_definition: $ => choice(
+      $.variant_type,
+      $._type,
+    ),
+
+    variant_type: $ => seq(
+      '|',
+      sepBy1(',', $.variant_constructor),
+      '|',
+    ),
+
+    variant_constructor: $ => seq(
+      field('name', $.upper_identifier),
+      optional(field('payload', $.record_type)),
+    ),
+
+    // ----- effect -----
+    effect_declaration: $ => seq(
+      'effect',
+      field('name', $.upper_identifier),
+      optional(seq('having', sepBy1(',', $.type_variable))),
+      'where',
+      '{',
+      sepBy(',', $.effect_operation),
+      '}',
+    ),
+
+    effect_operation: $ => seq(
+      field('name', $.lower_identifier),
+      ':',
+      field('type', $._type),
+    ),
+
+    // ----- ability -----
+    ability_declaration: $ => seq(
+      'ability',
+      field('name', $.upper_identifier),
+      repeat(field('parameter', $.type_variable)),
+      'for',
+      field('self', $.type_variable),
+      'where',
+      '{',
+      sepBy(',', $.ability_operation),
+      '}',
+    ),
+
+    ability_operation: $ => seq(
+      field('name', $.lower_identifier),
+      ':',
+      field('type', $._type),
+    ),
+
+    // ----- impl (ability or effect) -----
+    // Effect impls have an optional `{config}` record after the performer
+    // name (e.g. `impl Log for ConsoleLogger {} where …`). Ability impls
+    // skip that and use a full _type for the target (`impl Eq for List Int`).
+    // We unify them here; the typechecker distinguishes by looking up the
+    // name in the ability/effect registry.
+    impl_declaration: $ => seq(
+      'impl',
+      field('name', $.upper_identifier),
+      'for',
+      field('target', $._type),
+      optional(field('performer_args', $.record_type)),
+      optional(seq('having', sepBy1(',', $.type_binding))),
+      'where',
+      '{',
+      sepBy(',', $.impl_operation),
+      '}',
+    ),
+
+    impl_operation: $ => seq(
+      field('name', $.lower_identifier),
+      '=',
+      field('body', $._expression),
+    ),
+
+    type_binding: $ => seq(
+      field('var', $.type_variable),
+      '=',
+      field('type', $._type),
+    ),
+
+    // ===== Patterns =====
+
+    _pattern: $ => choice(
+      $.variable_pattern,
+      $.wildcard_pattern,
+      $.literal_pattern,
+      $.record_pattern,
+      $.variant_pattern,
+      $.sequence_pattern,
+    ),
+
+    variable_pattern: $ => $.lower_identifier,
+    wildcard_pattern: _ => '_',
+    literal_pattern: $ => choice($.integer_literal, $.string_literal, $.bool_literal),
+
+    record_pattern: $ => seq(
+      '{',
+      sepBy(',', $.record_pattern_field),
+      '}',
+    ),
+
+    record_pattern_field: $ => choice(
+      // pun: {x, y} means {x = x, y = y}
+      field('name', $.lower_identifier),
+      seq(
+        field('name', $.lower_identifier),
+        '=',
+        field('pattern', $._pattern),
+      ),
+    ),
+
+    variant_pattern: $ => seq(
+      field('constructor', $.upper_identifier),
+      optional(field('payload', $.record_pattern)),
+    ),
+
+    sequence_pattern: $ => seq(
+      '[',
+      sepBy(',', choice($._pattern, $.rest_pattern)),
+      ']',
+    ),
+
+    rest_pattern: $ => seq('...', optional($.lower_identifier)),
+
+    // ===== Types =====
+
+    _type: $ => choice(
+      $.type_variable,
+      $.named_type,
+      $.type_application,
+      $.function_type,
+      $.record_type,
+      $.constrained_type,
+    ),
+
+    // 'a — leading single quote distinguishes from upper_identifier in type
+    // position.
+    type_variable: _ => /'[a-zA-Z_][a-zA-Z0-9_]*/,
+
+    named_type: $ => $.upper_identifier,
+
+    type_application: $ => prec.left(PREC.call, seq(
+      field('constructor', $.upper_identifier),
+      repeat1(field('argument', $._type_atom)),
+    )),
+
+    _type_atom: $ => choice(
+      $.type_variable,
+      $.named_type,
+      $.record_type,
+      seq('(', $._type, ')'),
+    ),
+
+    function_type: $ => seq(
+      field('parameters', $.record_type),
+      '->',
+      field('return_type', $._type),
+      optional(field('effects', $.effect_row)),
+    ),
+
+    record_type: $ => seq(
+      '{',
+      sepBy(',', $.record_type_field),
+      '}',
+    ),
+
+    record_type_field: $ => seq(
+      field('name', $.lower_identifier),
+      ':',
+      field('type', $._type),
+    ),
+
+    // Constrained type: `'a with Eq 'a, Show 'a`. Used in function signatures.
+    constrained_type: $ => seq(
+      $._type,
+      'with',
+      sepBy1(',', $.ability_constraint),
+    ),
+
+    ability_constraint: $ => seq(
+      field('ability', $.upper_identifier),
+      repeat1(field('argument', $._type_atom)),
+      optional(seq('having', sepBy1(',', $.type_binding))),
+    ),
+
+    // <Effect1, Effect2, ...> or <*> or <...> — appears ONLY after a function
+    // return type. See TypeParsers.kt:169–267. This is why it can coexist
+    // with comparison `<` in expressions: the function_type rule consumes it.
+    effect_row: $ => seq(
+      '<',
+      choice(
+        '*',
+        '...',
+        sepBy(',', $.effect_reference),
+      ),
+      '>',
+    ),
+
+    effect_reference: $ => seq(
+      field('name', $.upper_identifier),
+      optional(seq('having', sepBy1(',', $.type_binding))),
+    ),
+
+    // ===== Expressions =====
+
+    _expression: $ => choice(
+      $.lambda_expression,
+      $.binary_expression,
+      $.unary_expression,
+      $.pipe_expression,
+      $.member_access,
+      $.method_call,
+      $.function_call,
+      $.qualified_call,
+      $.qualified_reference,
+      $.if_expression,
+      $.match_expression,
+      $.do_expression,
+      $.perform_expression,
+      $.record_expression,
+      $.sequence_expression,
+      $.variant_constructor_expression,
+      $.pipe_placeholder,
+      $.variable,
+      $._literal,
+      seq('(', $._expression, ')'),
+    ),
+
+    // {x} -> body  vs  {x = 1}: tree-sitter handles via dynamic prec.
+    // The `->` after `}` makes lambda the strictly higher-precedence choice.
+    lambda_expression: $ => prec(PREC.lambda, seq(
+      field('parameters', $.lambda_parameters),
+      '->',
+      field('body', $._expression),
+    )),
+
+    lambda_parameters: $ => seq(
+      '{',
+      sepBy(',', $.lambda_parameter),
+      '}',
+    ),
+
+    lambda_parameter: $ => seq(
+      field('name', $.lower_identifier),
+      optional(seq(':', field('type', $._type))),
+    ),
+
+    binary_expression: $ => choice(
+      ...[
+        ['||', PREC.or],
+        ['&&', PREC.and],
+        ['==', PREC.compare],
+        ['!=', PREC.compare],
+        ['<',  PREC.compare],
+        ['>',  PREC.compare],
+        ['<=', PREC.compare],
+        ['>=', PREC.compare],
+        ['+',  PREC.add],
+        ['-',  PREC.add],
+        ['*',  PREC.mul],
+        ['/',  PREC.mul],
+        ['%',  PREC.mul],
+      ].map(([op, p]) => prec.left(p, seq(
+        field('left', $._expression),
+        field('operator', op),
+        field('right', $._expression),
+      ))),
+    ),
+
+    unary_expression: $ => prec.right(PREC.unary, seq(
+      field('operator', choice('-', '!')),
+      field('operand', $._expression),
+    )),
+
+    // value |> f {x = @}
+    pipe_expression: $ => prec.left(PREC.pipe, seq(
+      field('left', $._expression),
+      '|>',
+      field('right', $._expression),
+    )),
+
+    pipe_placeholder: _ => '@',
+
+    member_access: $ => prec.left(PREC.member, seq(
+      field('receiver', $._expression),
+      '.',
+      field('field', $.lower_identifier),
+    )),
+
+    method_call: $ => prec.left(PREC.member, seq(
+      field('receiver', $._expression),
+      '.',
+      field('method', $.lower_identifier),
+      field('arguments', $.record_expression),
+    )),
+
+    // f {args}
+    function_call: $ => prec(PREC.call, seq(
+      field('callee', choice($.variable, $.qualified_reference, $.upper_identifier)),
+      field('arguments', $.record_expression),
+    )),
+
+    // module::name
+    qualified_reference: $ => prec(PREC.qualified, seq(
+      field('module', $.lower_identifier),
+      '::',
+      field('name', choice($.lower_identifier, $.upper_identifier)),
+    )),
+
+    // module::name {args}
+    qualified_call: $ => prec(PREC.call, seq(
+      field('callee', $.qualified_reference),
+      field('arguments', $.record_expression),
+    )),
+
+    if_expression: $ => seq(
+      'if',
+      field('condition', $._expression),
+      'then',
+      field('then', $._expression),
+      'else',
+      field('else', $._expression),
+    ),
+
+    match_expression: $ => seq(
+      'match',
+      field('scrutinee', $._expression),
+      'is',
+      repeat1(seq($.match_arm, optional(','))),
+    ),
+
+    match_arm: $ => seq(
+      field('pattern', $._pattern),
+      optional(seq('if', field('guard', $._expression))),
+      '->',
+      field('body', $._expression),
+    ),
+
+    do_expression: $ => seq(
+      'do',
+      '{',
+      sepBy($._newline, $._expression),
+      '}',
+    ),
+
+    perform_expression: $ => seq(
+      'perform',
+      sepBy1(',', $.handler),
+      'in',
+      field('body', $._expression),
+    ),
+
+    handler: $ => seq(
+      field('name', $.upper_identifier),
+      optional(field('args', $.record_expression)),
+    ),
+
+    record_expression: $ => seq(
+      '{',
+      sepBy(',', $.record_field),
+      '}',
+    ),
+
+    record_field: $ => choice(
+      // pun
+      field('name', $.lower_identifier),
+      seq(
+        field('name', $.lower_identifier),
+        '=',
+        field('value', $._expression),
+      ),
+    ),
+
+    sequence_expression: $ => seq(
+      '[',
+      sepBy(',', $._expression),
+      ']',
+    ),
+
+    variant_constructor_expression: $ => prec(PREC.call, seq(
+      field('constructor', $.upper_identifier),
+      optional(field('payload', $.record_expression)),
+    )),
+
+    variable: $ => $.lower_identifier,
+
+    // ===== Literals =====
+
+    _literal: $ => choice(
+      $.integer_literal,
+      $.float_literal,
+      $.string_literal,
+      $.bool_literal,
+      $.unit_literal,
+    ),
+
+    integer_literal: _ => /-?\d+/,
+    float_literal: _ => /-?\d+\.\d+/,
+    bool_literal: _ => choice('True', 'False'),
+    unit_literal: _ => seq('(', ')'),
+
+    string_literal: $ => seq(
+      '"',
+      repeat(choice(
+        $.string_content,
+        $.escape_sequence,
+        $.string_interpolation,
+      )),
+      '"',
+    ),
+
+    string_content: _ => /[^"\\$]+/,
+
+    escape_sequence: _ => token(seq('\\', /./)),
+
+    // $(expr) inside "...".
+    string_interpolation: $ => seq(
+      '$(',
+      $._expression,
+      ')',
+    ),
+
+    // ===== Identifiers =====
+
+    lower_identifier: _ => /[a-z_][a-zA-Z0-9_]*/,
+    upper_identifier: _ => /[A-Z][a-zA-Z0-9_]*/,
+  },
+});
+
+/**
+ * sepBy(sep, rule) — zero or more `rule` separated by `sep`, optional
+ * trailing separator allowed. Matches the parser's permissive comma handling.
+ */
+function sepBy(sep, rule) {
+  return optional(seq(rule, repeat(seq(sep, rule)), optional(sep)));
+}
+
+function sepBy1(sep, rule) {
+  return seq(rule, repeat(seq(sep, rule)), optional(sep));
+}
