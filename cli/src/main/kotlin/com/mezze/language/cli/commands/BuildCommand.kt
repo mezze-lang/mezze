@@ -80,12 +80,22 @@ class BuildCommand {
             val modulePath = manifest.`package`.name
 
             val parser = MezzeParser()
-            val ast = try {
-                parser.parseParsedModule(source, file = appFile.name)
-            } catch (e: com.mezze.language.parser.ParseException) {
-                println("Parse Error: ${e.message}")
+            // mez build is strict-no-errors: if ANY parse error exists,
+            // refuse to write the JAR. But surface ALL parse errors at
+            // once via parseWithRecovery — better DX than fix-one-at-a-time.
+            val parseResult = parser.parseWithRecovery(source, file = appFile.name)
+            if (parseResult.errors.isNotEmpty()) {
+                for ((idx, e) in parseResult.errors.withIndex()) {
+                    if (idx > 0) println()
+                    println("Parse Error: ${e.message}")
+                }
+                if (parseResult.errors.size > 1) {
+                    println()
+                    println("(${parseResult.errors.size} parse errors — refusing to build)")
+                }
                 kotlin.system.exitProcess(3)
             }
+            val ast = parseResult.module
             if (timing) System.err.println("[${ms()}ms] parsed")
 
             val typeChecker = TypeChecker()

@@ -479,13 +479,26 @@ object DevRunner {
         }
 
         // Compile — parse + typecheck + lower.
+        // mez dev: show all parse errors at once (parseWithRecovery), and
+        // refuse to execute if any are present. Running with broken code
+        // would crash at runtime in confusing ways; better to report all
+        // errors and wait for the next save.
         val parser = com.mezze.language.parser.MezzeParser()
-        val ast = try {
-            parser.parseParsedModule(source, sourceFile.name)
-        } catch (e: com.mezze.language.parser.ParseException) {
-            printError("Parse Error", e.message ?: "Unknown parse error")
+        val parseResult = parser.parseWithRecovery(source, sourceFile.name)
+        if (parseResult.errors.isNotEmpty()) {
+            val combined = buildString {
+                for ((idx, e) in parseResult.errors.withIndex()) {
+                    if (idx > 0) append("\n\n")
+                    append(e.message ?: "Unknown parse error")
+                }
+                if (parseResult.errors.size > 1) {
+                    append("\n\n(${parseResult.errors.size} parse errors)")
+                }
+            }
+            printError("Parse Error", combined)
             return
         }
+        val ast = parseResult.module
         if (timing) System.err.println("[${ms()}ms] parsed")
 
         // Slice F: incremental skip. On WATCH_RELOAD, before running the

@@ -69,7 +69,14 @@ class IndexCommand {
 
                 val source = entryFile.readText()
                 val parser = MezzeParser()
-                val ast = parser.parseParsedModule(source, file = entryFile.name)
+                // parseWithRecovery: gather every parse error across the
+                // app file in one pass, then still typecheck the partial AST.
+                val parseResult = parser.parseWithRecovery(source, file = entryFile.name)
+                val ast = parseResult.module
+                if (parseResult.errors.isNotEmpty()) {
+                    println("  ${entry.path}: ${parseResult.errors.size} parse error(s)")
+                    totalErrors += parseResult.errors.size
+                }
 
                 val typeChecker = TypeChecker()
                 val rawResult = typeChecker.checkParsedModule(ast, currentDir.toPath(), enablePrelude = true)
