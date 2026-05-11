@@ -75,6 +75,13 @@ module.exports = grammar({
     // a module_path or starts the use_declaration's inlined group path.
     // GLR explores both; the group form wins when `{` follows.
     [$.use_declaration, $.module_path],
+    // A bare `{x: Int}` in a type position could be a record_type (done)
+    // or the start of a function_type (continues into `->`). GLR explores
+    // both; longer match wins.
+    [$.record_type, $.function_type],
+    // type_binding's value `'a = T` — T could be a `_type` (resolved)
+    // or the start of a function_type. Explore both.
+    [$._type, $.function_type],
   ],
 
   rules: {
@@ -308,11 +315,11 @@ module.exports = grammar({
       field('body', $._expression),
     ),
 
-    type_binding: $ => seq(
+    type_binding: $ => prec.left(seq(
       field('var', $.type_variable),
       '=',
       field('type', $._type),
-    ),
+    )),
 
     // ===== Patterns =====
 
@@ -380,10 +387,14 @@ module.exports = grammar({
     //   list_directory: ... -> Result [Str] FileSystemError
     sequence_type: $ => seq('[', $._type, ']'),
 
-    _signature_type: $ => choice(
-      $._type,
-      $.constrained_type,
-    ),
+    // _signature_type is the type form valid at top-level signature
+    // positions. Previously distinct from _type to host `constrained_type`,
+    // but `with` now lives inside function_type itself (right after the
+    // params record). Kept as an alias so the grammar's intent stays
+    // documented at let/effect-op/ability-op call sites — and so a future
+    // top-level-only constraint form can be added here without churning
+    // every reference.
+    _signature_type: $ => $._type,
 
     // 'a — leading single quote distinguishes from upper_identifier in type
     // position.
@@ -404,8 +415,12 @@ module.exports = grammar({
       seq('(', $._type, ')'),
     ),
 
+    // Function type. `with`-clause sits BETWEEN params and `->`:
+    //   { l: 'a, r: 'a } with Ord 'a -> 'a
+    //   { x: Int } -> Bool <Log>
     function_type: $ => prec.right(seq(
       field('parameters', $.record_type),
+      optional(seq('with', sepBy1(',', $.ability_constraint))),
       '->',
       field('return_type', $._type),
       optional(field('effects', $.effect_row)),
@@ -426,16 +441,6 @@ module.exports = grammar({
       // separators and record-field separators.
       field('type', $._type),
     ),
-
-    // Constrained type: `{Int} -> Str with Eq 'a, Show 'a`. `with` always
-    // binds the whole signature, never just the return. Inner type is
-    // _type (which excludes constrained_type itself, preventing recursive
-    // re-application of `with`).
-    constrained_type: $ => prec(1, seq(
-      $._type,
-      'with',
-      sepBy1(',', $.ability_constraint),
-    )),
 
     ability_constraint: $ => prec.left(seq(
       field('ability', $.upper_identifier),
@@ -605,15 +610,25 @@ module.exports = grammar({
       field('body', $._expression),
     ),
 
-    // do { expr1; expr2; final_expr } — sequence of expressions where the
-    // last is the result. The parser allows newline-or-semicolon as
-    // separator; we accept either for tolerance (the typechecker enforces
-    // exactly what's allowed semantically).
-    do_expression: $ => seq(
+    // `do <stmt>* <result-expr>` — sequence of let-statements + final
+    // expression, terminated by the enclosing context's closing token.
+    // The parser handles this with newline-driven layout; we use prec.right
+    // to keep the do-block consuming let-statements as long as one starts
+    // the next token, then a single trailing expression.
+    do_expression: $ => prec.right(seq(
       'do',
-      '{',
-      sepBy(optional(';'), $._expression),
-      '}',
+      repeat($.let_statement),
+      field('result', $._expression),
+    )),
+
+    // Inline let in a do-block. Same shape as let_declaration minus the
+    // `pub` modifier (which only makes sense at top level).
+    let_statement: $ => seq(
+      'let',
+      field('pattern', $._pattern),
+      optional(seq(':', field('type', $._signature_type))),
+      '=',
+      field('value', $._expression),
     ),
 
     perform_expression: $ => seq(
