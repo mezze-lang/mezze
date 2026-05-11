@@ -120,6 +120,10 @@ module.exports = grammar({
 
     // ===== Top-level declarations =====
 
+    // Top-level forms. Mezze allows bare expressions at module root —
+    // they're wrapped into the implicit `__entry__` function. Parser tests
+    // routinely use this for short examples: `match xs is …`, `perform
+    // Console in …`, etc.
     _top_level: $ => choice(
       $.use_declaration,
       $.let_declaration,
@@ -128,6 +132,7 @@ module.exports = grammar({
       $.effect_declaration,
       $.ability_declaration,
       $.impl_declaration,
+      $._expression,
     ),
 
     // Public visibility — its OWN node so highlights.scm can tag it as
@@ -194,7 +199,11 @@ module.exports = grammar({
     // opaque native handle into a named type. Body is a single
     // constructor (upper_identifier) followed by zero or more type atoms
     // (usually a single native-marker like __NativePromise).
-    newtype_declaration: $ => seq(
+    // newtype Foo 'a = Bar __NativeBar. Right-associative so the trailing
+    // `repeat(_type_atom)` is greedy — without prec.right, a following
+    // top-level expression starting with `{` looks like another type
+    // argument.
+    newtype_declaration: $ => prec.right(seq(
       optional($.visibility_modifier),
       'newtype',
       field('name', $.upper_identifier),
@@ -202,7 +211,7 @@ module.exports = grammar({
       '=',
       field('constructor', $.upper_identifier),
       repeat(field('argument', $._type_atom)),
-    ),
+    )),
 
     _type_definition: $ => choice(
       $.variant_type,
@@ -507,6 +516,11 @@ module.exports = grammar({
       field('body', $._expression),
     )),
 
+    // Lambda parameters — accepts empty braces (`{}`) for nullary lambdas
+    // (`{} -> 42`) plus the usual `{x, y, …}` form. The `sepBy` helper
+    // already permits empty, but the rest of the grammar previously
+    // disambiguated `{}` away from a record_expression; the lambda
+    // precedence (PREC.lambda) ensures arrow-followed `{}` parses here.
     lambda_parameters: $ => seq(
       '{',
       sepBy(',', $.lambda_parameter),
@@ -601,7 +615,18 @@ module.exports = grammar({
 
     match_arm: $ => seq(
       field('pattern', $._pattern),
-      optional(seq('if', field('guard', $._expression))),
+      optional(choice(
+        // Plain boolean guard: `pat if x > 0 -> body`
+        seq('if', field('guard', $._expression)),
+        // if-let guard: `pat if let Some {v} = expr -> body`. The inner
+        // let binds patterns from a fallible match — a common idiom.
+        seq(
+          'if', 'let',
+          field('let_pattern', $._pattern),
+          '=',
+          field('let_value', $._expression),
+        ),
+      )),
       '->',
       field('body', $._expression),
     ),
@@ -678,8 +703,11 @@ module.exports = grammar({
       $.unit_literal,
     ),
 
-    integer_literal: _ => /-?\d+/,
-    float_literal: _ => /-?\d+\.\d+/,
+    // Numeric literals allow `_` as a digit separator (1_000_000). The
+    // parser strips them at lex time; we keep them in the token text. No
+    // leading underscore — `_x` is an identifier.
+    integer_literal: _ => /-?\d[\d_]*[nN]?/,
+    float_literal: _ => /-?\d[\d_]*\.\d[\d_]*/,
     bool_literal: _ => choice('True', 'False'),
     unit_literal: _ => seq('(', ')'),
 
