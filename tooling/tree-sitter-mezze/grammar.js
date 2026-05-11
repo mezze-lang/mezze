@@ -314,8 +314,13 @@ module.exports = grammar({
       ),
     ),
 
+    // Impl operations can optionally carry a type annotation:
+    //   eq = {it, r} -> ...
+    //   encode : {val: Int} -> Str = {val} -> ...
+    // The parser stores both shapes as ParsedImplOp.
     impl_operation: $ => seq(
       field('name', $.lower_identifier),
+      optional(seq(':', field('type', $._type))),
       '=',
       field('body', $._expression),
     ),
@@ -336,6 +341,18 @@ module.exports = grammar({
       $.variant_pattern,
       $.sequence_pattern,
     ),
+
+    // `pat1 | pat2 | pat3` — alternative patterns in a match arm. Falls
+    // through to a single _pattern when there's no `|`.
+    _pattern_or: $ => choice(
+      $._pattern,
+      $.or_pattern,
+    ),
+
+    or_pattern: $ => prec.left(seq(
+      $._pattern,
+      repeat1(seq('|', $._pattern)),
+    )),
 
     variable_pattern: $ => $.lower_identifier,
     wildcard_pattern: _ => '_',
@@ -615,7 +632,10 @@ module.exports = grammar({
     )),
 
     match_arm: $ => seq(
-      field('pattern', $._pattern),
+      // Alternative patterns: `1 | 2 | 3 -> "small"` matches any of three
+      // values. Pipe-OR in patterns is left-associative; the alternatives
+      // share the same arm body.
+      field('pattern', $._pattern_or),
       optional(choice(
         // Plain boolean guard: `pat if x > 0 -> body`
         seq('if', field('guard', $._expression)),
@@ -660,8 +680,18 @@ module.exports = grammar({
       field('body', $._expression),
     ),
 
+    // Effect handler in a `perform` block. Can be a simple upper name
+    // (Console) or a qualified ref (log::Console). May carry an optional
+    // arg record for parameterized handlers (`FileLogger {path = "/tmp"}`).
     handler: $ => seq(
-      field('name', $.upper_identifier),
+      field('name', choice(
+        $.upper_identifier,
+        seq(
+          field('module', $.lower_identifier),
+          '::',
+          field('item', $.upper_identifier),
+        ),
+      )),
       optional(field('args', $.record_expression)),
     ),
 
