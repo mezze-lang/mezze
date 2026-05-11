@@ -1,0 +1,144 @@
+==================
+inherent impl (no for)
+==================
+
+impl Bool where {
+  to_int = { it } -> if it then 1 else 0,
+}
+
+---
+
+(source_file
+  (impl_declaration
+    target: (named_type (upper_identifier))
+    (impl_operation
+      name: (lower_identifier)
+      body: (lambda_expression
+        parameters: (lambda_parameters
+          (lambda_parameter name: (lower_identifier)))
+        body: (if_expression
+          condition: (variable (lower_identifier))
+          then: (integer_literal)
+          else: (integer_literal))))))
+
+==================
+ability impl with type argument
+==================
+
+impl Into Str for Bool where {
+  into = { it } -> "yes"
+}
+
+---
+
+(source_file
+  (impl_declaration
+    name: (upper_identifier)
+    argument: (named_type (upper_identifier))
+    target: (named_type (upper_identifier))
+    (impl_operation
+      name: (lower_identifier)
+      body: (lambda_expression
+        parameters: (lambda_parameters
+          (lambda_parameter name: (lower_identifier)))
+        body: (string_literal (string_content))))))
+
+==================
+newtype
+==================
+
+pub newtype Promise 'a = Promise __NativePromise
+
+---
+
+(source_file
+  (newtype_declaration
+    (visibility_modifier)
+    name: (upper_identifier)
+    parameter: (type_variable)
+    constructor: (upper_identifier)
+    argument: (named_type (upper_identifier))))
+
+==================
+variant type with type parameters
+==================
+
+type Maybe 'a = | Some { val: 'a }, None |
+
+---
+
+(source_file
+  (type_declaration
+    name: (upper_identifier)
+    parameter: (type_variable)
+    definition: (variant_type
+      (variant_constructor
+        name: (upper_identifier)
+        payload: (record_type
+          (record_type_field
+            name: (lower_identifier)
+            type: (type_variable))))
+      (variant_constructor
+        name: (upper_identifier)))))
+
+==================
+ability declaration
+==================
+
+ability Eq for 'a where {
+  eq: { it: 'a, r: 'a } -> Bool
+}
+
+---
+
+(source_file
+  (ability_declaration
+    name: (upper_identifier)
+    self: (type_variable)
+    (ability_operation
+      name: (lower_identifier)
+      type: (function_type
+        parameters: (record_type
+          (record_type_field
+            name: (lower_identifier)
+            type: (type_variable))
+          (record_type_field
+            name: (lower_identifier)
+            type: (type_variable)))
+        return_type: (named_type (upper_identifier))))))
+
+==================
+effect declaration with associated type
+==================
+
+effect State having 'state where {
+  get: {} -> 'state
+}
+
+---
+
+(source_file
+  (effect_declaration
+    name: (upper_identifier)
+    (type_variable)
+    (effect_operation
+      name: (lower_identifier)
+      type: (function_type
+        parameters: (record_type)
+        return_type: (type_variable)))))
+
+==================
+use with renamed item
+==================
+
+use std::math::{ sin as sine }
+
+---
+
+(source_file
+  (use_declaration
+    path: (module_path (lower_identifier) (lower_identifier))
+    items: (use_group
+      (use_item
+        name: (lower_identifier)
+        alias: (lower_identifier)))))

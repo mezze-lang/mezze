@@ -1,0 +1,138 @@
+==================
+binary operators
+==================
+
+let x = 1 + 2 * 3
+
+---
+
+(source_file
+  (let_declaration
+    pattern: (variable_pattern (lower_identifier))
+    body: (binary_expression
+      left: (integer_literal)
+      right: (binary_expression
+        left: (integer_literal)
+        right: (integer_literal)))))
+
+==================
+pipe with placeholder
+==================
+
+let r = 5 |> f { x = @ }
+
+---
+
+(source_file
+  (let_declaration
+    pattern: (variable_pattern (lower_identifier))
+    body: (pipe_expression
+      left: (integer_literal)
+      right: (function_call
+        callee: (variable (lower_identifier))
+        arguments: (record_expression
+          (record_field
+            name: (lower_identifier)
+            value: (pipe_placeholder)))))))
+
+==================
+qualified call
+==================
+
+let r = math::add { x = 1, y = 2 }
+
+---
+
+(source_file
+  (let_declaration
+    pattern: (variable_pattern (lower_identifier))
+    body: (function_call
+      callee: (qualified_reference
+        module: (lower_identifier)
+        name: (lower_identifier))
+      arguments: (record_expression
+        (record_field
+          name: (lower_identifier)
+          value: (integer_literal))
+        (record_field
+          name: (lower_identifier)
+          value: (integer_literal))))))
+
+==================
+method call chain
+==================
+
+let r = x.add { y = 1 }
+
+---
+
+(source_file
+  (let_declaration
+    pattern: (variable_pattern (lower_identifier))
+    body: (method_call
+      receiver: (variable (lower_identifier))
+      method: (lower_identifier)
+      arguments: (record_expression
+        (record_field
+          name: (lower_identifier)
+          value: (integer_literal))))))
+
+==================
+match with multiple arms
+==================
+
+let r = match x is
+  Some { val } -> val,
+  None -> 0
+
+---
+
+(source_file
+  (let_declaration
+    pattern: (variable_pattern (lower_identifier))
+    body: (match_expression
+      scrutinee: (variable (lower_identifier))
+      (match_arm
+        pattern: (variant_pattern
+          constructor: (upper_identifier)
+          payload: (record_pattern
+            (record_pattern_field
+              name: (lower_identifier))))
+        body: (variable (lower_identifier)))
+      (match_arm
+        pattern: (variant_pattern
+          constructor: (upper_identifier))
+        body: (integer_literal)))))
+
+==================
+string interpolation
+==================
+
+let s = "Hello, $(name)!"
+
+---
+
+(source_file
+  (let_declaration
+    pattern: (variable_pattern (lower_identifier))
+    body: (string_literal
+      (string_content)
+      (string_interpolation
+        (variable (lower_identifier)))
+      (string_content))))
+
+==================
+sequence literal
+==================
+
+let xs = [1, 2, 3]
+
+---
+
+(source_file
+  (let_declaration
+    pattern: (variable_pattern (lower_identifier))
+    body: (sequence_expression
+      (integer_literal)
+      (integer_literal)
+      (integer_literal))))
