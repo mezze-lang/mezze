@@ -314,6 +314,44 @@ class LspFeaturesTest {
         )
     }
 
+    @Test
+    fun `parse-error diagnostic carries PARSE_ERROR code`() {
+        // Regression for #313: clients need a stable code to distinguish
+        // syntax errors from type errors without parsing the message text.
+        val ws = mkProject("app.mz" to "let broken = {} -> ::: nonsense")
+        openProject(ws)
+        val uri = ws.resolve("src/app.mz").toUri().toString()
+        openFile(uri, ws.resolve("src/app.mz").toFile().readText())
+
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags, "expected publishDiagnostics for malformed source")
+        val parseDiag = diags!!.diagnostics.firstOrNull()
+            ?: fail("expected at least one diagnostic")
+        val code = parseDiag.code?.left
+        assertEquals("PARSE_ERROR", code, "parse-error diagnostic should carry code=PARSE_ERROR, got $code")
+    }
+
+    @Test
+    fun `type-error diagnostic carries errorType code and metadata`() {
+        // Regression for #313 step 7: the typechecker's rich errorType +
+        // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"
+        // hints) must reach LSP clients via Diagnostic.code and .data,
+        // not just be collapsed into the message string. Without this
+        // forwarding, editors can't offer e.g. typo-fix code actions.
+        val (uri, _) = openSingleFile("""
+            let r = {x = 1, y = 2}
+            let bad = r.z
+        """.trimIndent())
+
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags, "expected publishDiagnostics for type-error file")
+        val typeDiag = diags!!.diagnostics.firstOrNull { it.code?.left != "PARSE_ERROR" }
+            ?: fail("expected a type-error diagnostic among ${diags.diagnostics.map { it.message }}")
+        val code = typeDiag.code?.left
+        assertNotNull(code, "type-error diagnostic should carry a non-null code")
+        assertNotEquals("GENERAL", code, "expected specific errorType code (e.g. UNDEFINED_VARIABLE / TYPE_MISMATCH), not GENERAL — got: ${typeDiag.message}")
+    }
+
     // ===== Cross-module go-to-definition (in-memory fallback) =========
 
     // Disabled for the same reason as

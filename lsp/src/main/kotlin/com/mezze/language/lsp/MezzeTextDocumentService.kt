@@ -376,14 +376,17 @@ class MezzeTextDocumentService(
         val parseResult = parser.parseWithRecovery(content, file = fileName)
         val parsedModule = parseResult.module
 
-        // Collect all parse errors as diagnostics
+        // Collect all parse errors as diagnostics. Tag with a stable `code`
+        // so clients can branch (e.g. show a different inline hint for syntax
+        // vs. type errors) without parsing the message. See #313.
         parseResult.errors.forEach { e ->
             diagnostics.add(createDiagnostic(
                 message = e.errorMessage,
                 severity = DiagnosticSeverity.Error,
                 line = e.line - 1,  // LSP is 0-indexed
                 column = e.column - 1,
-                endColumn = e.column + e.length
+                endColumn = e.column + e.length,
+                code = "PARSE_ERROR"
             ))
         }
 
@@ -525,26 +528,10 @@ class MezzeTextDocumentService(
                     }
                 }
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> {
+                    // Route through createDiagnosticFromRecoveryError so
+                    // errorType + metadata reach the client (see #313).
                     result.errors.forEach { error ->
-                        // Mezze Loc is 1-indexed inclusive on both ends.
-                        // LSP wants 0-indexed half-open [start, end), so:
-                        //   start = (line-1, col-1)
-                        //   end   = (endLine-1, endCol)        ← exclusive
-                        // Passing only `line + column` shrinks the squiggle to
-                        // a single character — see #228 / user report.
-                        val loc = error.loc
-                        val line = loc?.startLine?.minus(1) ?: 0
-                        val column = loc?.startCol?.minus(1) ?: 0
-                        val endLine = loc?.endLine?.minus(1)
-                        val endColumn = loc?.endCol
-                        diagnostics.add(createDiagnostic(
-                            message = error.message,
-                            severity = DiagnosticSeverity.Error,
-                            line = line,
-                            column = column,
-                            endLine = endLine,
-                            endColumn = endColumn
-                        ))
+                        diagnostics.add(createDiagnosticFromRecoveryError(error))
                     }
                     // Even on Failure, the typechecker may emit a partial
                     // typedModule for the decls that DID solve. Hand it to
@@ -905,18 +892,28 @@ class MezzeTextDocumentService(
 
     /**
      * Create a diagnostic from a recovery error.
+     *
+     * `code` carries `errorType.name` so clients can branch on diagnostic
+     * kind (e.g. CLOSED_RECORD_FIELD_MISMATCH) without parsing the message.
+     * `data` forwards the typechecker's `metadata` map — fields like
+     * "availableFields" / "field" let editors offer typo fixes without
+     * re-deriving them from the message text. (#313 step 7.)
      */
     private fun createDiagnosticFromRecoveryError(error: TypeChecker.TypeCheckError): Diagnostic {
         val loc = error.loc
-        return createDiagnostic(
+        val diag = createDiagnostic(
             message = error.message,
             severity = DiagnosticSeverity.Error,
             line = (loc?.startLine ?: 1) - 1,
             column = (loc?.startCol ?: 1) - 1,
             endLine = loc?.endLine?.minus(1),
             endColumn = loc?.endCol,
-            code = error.phase
+            code = error.errorType.name
         )
+        if (error.metadata.isNotEmpty()) {
+            diag.data = error.metadata
+        }
+        return diag
     }
 
     /**
