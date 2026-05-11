@@ -39,7 +39,6 @@ public final class SmallFlatSetStorage implements SetStorage {
     }
 
     @Override
-    @TruffleBoundary
     public SetStorage add(Object elem) {
         // Check if already present
         for (int i = 0; i < elements.length; i++) {
@@ -67,6 +66,20 @@ public final class SmallFlatSetStorage implements SetStorage {
             }
             return out.add(newElem);
         }
+        if (allDoubleElements(newElem)) {
+            DoubleHashSetStorage out = new DoubleHashSetStorage();
+            for (Object e : elements) {
+                out = (DoubleHashSetStorage) out.addDouble((Double) e);
+            }
+            return out.add(newElem);
+        }
+        if (allStringElements(newElem)) {
+            StringHashSetStorage out = new StringHashSetStorage();
+            for (Object e : elements) {
+                out = (StringHashSetStorage) out.addString((String) e);
+            }
+            return out.add(newElem);
+        }
         return transitionToHash().add(newElem);
     }
 
@@ -78,8 +91,23 @@ public final class SmallFlatSetStorage implements SetStorage {
         return true;
     }
 
+    private boolean allDoubleElements(Object newElem) {
+        if (!(newElem instanceof Double)) return false;
+        for (Object e : elements) {
+            if (!(e instanceof Double)) return false;
+        }
+        return true;
+    }
+
+    private boolean allStringElements(Object newElem) {
+        if (!(newElem instanceof String)) return false;
+        for (Object e : elements) {
+            if (!(e instanceof String)) return false;
+        }
+        return true;
+    }
+
     @Override
-    @TruffleBoundary
     public SetStorage remove(Object elem) {
         int idx = -1;
         for (int i = 0; i < elements.length; i++) {
@@ -126,7 +154,6 @@ public final class SmallFlatSetStorage implements SetStorage {
         return elements[index];
     }
 
-    @TruffleBoundary
     private HashSetStorage transitionToHash() {
         HashSetStorage hash = new HashSetStorage();
         for (Object elem : elements) {
@@ -136,7 +163,6 @@ public final class SmallFlatSetStorage implements SetStorage {
     }
 
     @Override
-    @TruffleBoundary
     public String toString() {
         return "SmallFlatSetStorage" + Arrays.toString(elements);
     }

@@ -146,6 +146,126 @@ class DataStructureComparisonBenchmark {
         }
     }
 
+    // ===== Double-keyed Map / Set =====
+
+    @Test
+    @Timeout(300)
+    fun `double map vs HashMap - lookup 1M times in 10K-entry map`() {
+        divider("Lookup 1M times in 10K-entry Double->Double map")
+        val size = 10_000
+        val iters = 1_000_000
+
+        val javaMap = java.util.HashMap<Double, Double>(size * 2).apply {
+            for (i in 0 until size) put(i.toDouble(), (i * 2).toDouble())
+        }
+        @Suppress("UNCHECKED_CAST")
+        var mezze = MezzeMap.empty<Any?, Any?>() as MezzeMap<Any?, Any?>
+        for (i in 0 until size) mezze = mezze.putObject(i.toDouble(), (i * 2).toDouble())
+        val mezzeFinal = mezze
+
+        bench("java.util.HashMap<Double,Double>.get") {
+            var sum = 0.0
+            for (i in 0 until iters) {
+                val v = javaMap[(i % size).toDouble()] ?: 0.0
+                sum += v
+            }
+        }
+        bench("MezzeMap.get (Double keys)") {
+            var sum = 0.0
+            for (i in 0 until iters) {
+                val v = (mezzeFinal.get((i % size).toDouble()) as? Double) ?: 0.0
+                sum += v
+            }
+        }
+    }
+
+    @Test
+    @Timeout(300)
+    fun `double set vs HashSet - contains 1M times in 10K-element set`() {
+        divider("Contains 1M times in 10K-element Double set")
+        val size = 10_000
+        val iters = 1_000_000
+
+        val javaSet = java.util.HashSet<Double>(size * 2).apply {
+            for (i in 0 until size) add(i.toDouble())
+        }
+        @Suppress("UNCHECKED_CAST")
+        var mezzeSet = MezzeSet.empty<Any?>() as MezzeSet<Any?>
+        for (i in 0 until size) mezzeSet = mezzeSet.addObject(i.toDouble())
+        val mezzeFinal = mezzeSet
+
+        bench("java.util.HashSet<Double>.contains") {
+            var hits = 0
+            for (i in 0 until iters) if (javaSet.contains((i % size).toDouble())) hits++
+        }
+        bench("MezzeSet.contains (Double elements)") {
+            var hits = 0
+            for (i in 0 until iters) if (mezzeFinal.contains((i % size).toDouble())) hits++
+        }
+    }
+
+    // ===== String-keyed Map / Set =====
+
+    @Test
+    @Timeout(300)
+    fun `string map vs HashMap - lookup 1M times in 10K-entry map`() {
+        divider("Lookup 1M times in 10K-entry String->Long map")
+        val size = 10_000
+        val iters = 1_000_000
+
+        val keys = Array(size) { "key-$it" }
+
+        val javaMap = java.util.HashMap<String, Long>(size * 2).apply {
+            for (i in 0 until size) put(keys[i], (i * 2).toLong())
+        }
+        @Suppress("UNCHECKED_CAST")
+        var mezze = MezzeMap.empty<Any?, Any?>() as MezzeMap<Any?, Any?>
+        for (i in 0 until size) mezze = mezze.putObject(keys[i], (i * 2).toLong())
+        val mezzeFinal = mezze
+
+        bench("java.util.HashMap<String,Long>.get") {
+            var sum = 0L
+            for (i in 0 until iters) {
+                val v = javaMap[keys[i % size]] ?: 0L
+                sum += v
+            }
+        }
+        bench("MezzeMap.get (String keys)") {
+            var sum = 0L
+            for (i in 0 until iters) {
+                val v = (mezzeFinal.get(keys[i % size]) as? Long) ?: 0L
+                sum += v
+            }
+        }
+    }
+
+    @Test
+    @Timeout(300)
+    fun `string set vs HashSet - contains 1M times in 10K-element set`() {
+        divider("Contains 1M times in 10K-element String set")
+        val size = 10_000
+        val iters = 1_000_000
+
+        val keys = Array(size) { "el-$it" }
+
+        val javaSet = java.util.HashSet<String>(size * 2).apply {
+            for (i in 0 until size) add(keys[i])
+        }
+        @Suppress("UNCHECKED_CAST")
+        var mezzeSet = MezzeSet.empty<Any?>() as MezzeSet<Any?>
+        for (i in 0 until size) mezzeSet = mezzeSet.addObject(keys[i])
+        val mezzeFinal = mezzeSet
+
+        bench("java.util.HashSet<String>.contains") {
+            var hits = 0
+            for (i in 0 until iters) if (javaSet.contains(keys[i % size])) hits++
+        }
+        bench("MezzeSet.contains (String elements)") {
+            var hits = 0
+            for (i in 0 until iters) if (mezzeFinal.contains(keys[i % size])) hits++
+        }
+    }
+
     // ===== Set: contains =====
 
     @Test

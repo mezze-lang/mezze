@@ -88,6 +88,20 @@ public final class SmallFlatMapStorage implements MapStorage {
             }
             return out.put(newKey, newValue);
         }
+        if (allDoubleKeys(newKey)) {
+            DoubleHashMapStorage out = new DoubleHashMapStorage();
+            for (int i = 0; i < keys.length; i++) {
+                out = (DoubleHashMapStorage) out.putDouble((Double) keys[i], values[i]);
+            }
+            return out.put(newKey, newValue);
+        }
+        if (allStringKeys(newKey)) {
+            StringHashMapStorage out = new StringHashMapStorage();
+            for (int i = 0; i < keys.length; i++) {
+                out = (StringHashMapStorage) out.putString((String) keys[i], values[i]);
+            }
+            return out.put(newKey, newValue);
+        }
         return transitionToHash().put(newKey, newValue);
     }
 
@@ -95,6 +109,22 @@ public final class SmallFlatMapStorage implements MapStorage {
         if (!(newKey instanceof Long nk) || !LongHashMapStorage.isStorable(nk)) return false;
         for (Object k : keys) {
             if (!(k instanceof Long lk) || !LongHashMapStorage.isStorable(lk)) return false;
+        }
+        return true;
+    }
+
+    private boolean allDoubleKeys(Object newKey) {
+        if (!(newKey instanceof Double)) return false;
+        for (Object k : keys) {
+            if (!(k instanceof Double)) return false;
+        }
+        return true;
+    }
+
+    private boolean allStringKeys(Object newKey) {
+        if (!(newKey instanceof String)) return false;
+        for (Object k : keys) {
+            if (!(k instanceof String)) return false;
         }
         return true;
     }
@@ -161,7 +191,6 @@ public final class SmallFlatMapStorage implements MapStorage {
         return values[index];
     }
 
-    @TruffleBoundary
     private HashMapStorage transitionToHash() {
         HashMapStorage hash = new HashMapStorage();
         for (int i = 0; i < keys.length; i++) {
@@ -171,7 +200,6 @@ public final class SmallFlatMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("SmallFlatMapStorage{");
         for (int i = 0; i < keys.length; i++) {

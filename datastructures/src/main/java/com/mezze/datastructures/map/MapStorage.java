@@ -9,6 +9,8 @@ public sealed interface MapStorage permits
         SmallFlatMapStorage,
         LongKeyMapStorage,
         LongHashMapStorage,
+        DoubleHashMapStorage,
+        StringHashMapStorage,
         HashMapStorage {
 
     /**

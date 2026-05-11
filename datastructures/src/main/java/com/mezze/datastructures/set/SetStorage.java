@@ -9,6 +9,8 @@ public sealed interface SetStorage permits
         SmallFlatSetStorage,
         LongSetStorage,
         LongHashSetStorage,
+        DoubleHashSetStorage,
+        StringHashSetStorage,
         HashSetStorage {
 
     /**
