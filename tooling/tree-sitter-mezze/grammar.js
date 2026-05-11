@@ -121,6 +121,7 @@ module.exports = grammar({
       $.use_declaration,
       $.let_declaration,
       $.type_declaration,
+      $.newtype_declaration,
       $.effect_declaration,
       $.ability_declaration,
       $.impl_declaration,
@@ -185,6 +186,21 @@ module.exports = grammar({
       field('definition', $._type_definition),
     ),
 
+    // ----- newtype ----
+    // `pub newtype Promise 'a = Promise __NativePromise` — wraps an
+    // opaque native handle into a named type. Body is a single
+    // constructor (upper_identifier) followed by zero or more type atoms
+    // (usually a single native-marker like __NativePromise).
+    newtype_declaration: $ => seq(
+      optional($.visibility_modifier),
+      'newtype',
+      field('name', $.upper_identifier),
+      repeat(field('parameter', $.type_variable)),
+      '=',
+      field('constructor', $.upper_identifier),
+      repeat(field('argument', $._type_atom)),
+    ),
+
     _type_definition: $ => choice(
       $.variant_type,
       $._type,
@@ -192,9 +208,13 @@ module.exports = grammar({
 
     variant_type: $ => seq(
       '|',
-      sepBy1(',', $.variant_constructor),
+      // `| Red, Green, Blue, ... |` — trailing `...` allowed as a
+      // "non-exhaustive" placeholder (see log.mz LogLevel).
+      sepBy1(',', choice($.variant_constructor, $.variant_ellipsis)),
       '|',
     ),
+
+    variant_ellipsis: _ => '...',
 
     variant_constructor: $ => seq(
       field('name', $.upper_identifier),
@@ -351,7 +371,14 @@ module.exports = grammar({
       $.type_application,
       $.function_type,
       $.record_type,
+      $.sequence_type,
     ),
+
+    // [T] — sequence (list) of T. Used freely in type position:
+    //   pub let to_seq : { s: Set 'a } -> ['a] = ...
+    //   methods: [Method]
+    //   list_directory: ... -> Result [Str] FileSystemError
+    sequence_type: $ => seq('[', $._type, ']'),
 
     _signature_type: $ => choice(
       $._type,
@@ -373,6 +400,7 @@ module.exports = grammar({
       $.type_variable,
       $.named_type,
       $.record_type,
+      $.sequence_type,
       seq('(', $._type, ')'),
     ),
 
@@ -667,8 +695,12 @@ module.exports = grammar({
 
     // ===== Identifiers =====
 
-    lower_identifier: _ => /[a-z_][a-zA-Z0-9_]*/,
-    upper_identifier: _ => /[A-Z][a-zA-Z0-9_]*/,
+    // Identifier kinds. Mezze convention: `__NativeFoo` is upper-style
+    // (the alpha character after any leading underscores is uppercase),
+    // `__native_foo` is lower-style. So we split on the first
+    // alpha-character's case, ignoring any leading underscore run.
+    lower_identifier: _ => /_*[a-z][a-zA-Z0-9_]*/,
+    upper_identifier: _ => /_*[A-Z][a-zA-Z0-9_]*/,
   },
 });
 
