@@ -45,13 +45,14 @@ const PREC = {
 module.exports = grammar({
   name: 'mezze',
 
-  // The parser uses newline-sensitive layout: a top-level decl ends at the
-  // next NEWLINE that's not consumed by an open delimiter or trailing comma.
-  // Tree-sitter's $._newline is built into `extras` for now; if that turns
-  // out to be wrong (e.g. match arms eat the wrong newline) we'll switch to
-  // explicit newline tokens with an external scanner. Start simple.
+  // Newlines as plain whitespace. Mezze isn't truly newline-significant —
+  // top-level decls terminate by syntactic balance (close-brace, end of
+  // expression). If we later need newline-as-terminator (e.g. for do-blocks
+  // with stmt sequences), we'll add an external scanner that emits a
+  // virtual NEWLINE token only in those contexts. For now, simpler is
+  // better: \s eats everything, the corpus tests will catch the gaps.
   extras: $ => [
-    /[ \t\r]/,
+    /\s/,
     $.line_comment,
     $.doc_comment,
   ],
@@ -77,14 +78,11 @@ module.exports = grammar({
   ],
 
   rules: {
-    source_file: $ => seq(
-      optional($._newline),  // tolerate leading blank lines
-      optional(seq(
-        $._top_level_with_metadata,
-        repeat(seq($._newline, $._top_level_with_metadata)),
-        optional($._newline),
-      )),
-    ),
+    // Decls are separated implicitly by whitespace (extras eat newlines).
+    // No explicit separator needed — the inner _top_level rules
+    // self-terminate at their closing tokens (`= expr` for let/impl op,
+    // `}` for impl/ability/effect bodies, etc.).
+    source_file: $ => repeat($._top_level_with_metadata),
 
     _top_level_with_metadata: $ => seq(
       optional($.metadata_block),
@@ -93,9 +91,14 @@ module.exports = grammar({
 
     // ===== Comments + metadata =====
 
-    line_comment: _ => token(seq('#', /[^#{\n][^\n]*/)),
-
+    // Order matters in tree-sitter token resolution: longer tokens (##, #{)
+    // beat shorter (#). Doc comments must precede line comments because
+    // they share the `#` prefix.
     doc_comment: _ => token(seq('##', /[^\n]*/)),
+
+    // Line comment: `#` followed by anything except another `#` (doc) or
+    // `{` (metadata). The negative-set `[^#{\n]` keeps these tokens disjoint.
+    line_comment: _ => token(seq('#', /[^#{\n][^\n]*/)),
 
     // `#{key = value, …}` — compiler-meaningful annotation attached to the
     // following declaration. Distinct from a plain `# comment` because the
@@ -111,8 +114,6 @@ module.exports = grammar({
       ':',
       field('value', $._expression),
     ),
-
-    _newline: _ => /\n+/,
 
     // ===== Top-level declarations =====
 
@@ -246,20 +247,39 @@ module.exports = grammar({
     // ----- impl (ability or effect) -----
     // Effect impls have an optional `{config}` record after the performer
     // name (e.g. `impl Log for ConsoleLogger {} where …`). Ability impls
-    // skip that and use a full _type for the target (`impl Eq for List Int`).
+    // can take type arguments on the ability (`impl Into Str for Bool`)
+    // and use a full _type for the target (`impl Eq for List Int`).
     // We unify them here; the typechecker distinguishes by looking up the
     // name in the ability/effect registry.
-    impl_declaration: $ => seq(
-      'impl',
-      field('name', $.upper_identifier),
-      'for',
-      field('target', $._type),
-      optional(field('performer_args', $.record_type)),
-      optional(seq('having', sepBy1(',', $.type_binding))),
-      'where',
-      '{',
-      sepBy(',', $.impl_operation),
-      '}',
+    impl_declaration: $ => choice(
+      // Inherent impl: `impl Bool where { … }` — adds methods directly to
+      // a type, no ability/effect involved. Distinguished by no `for`.
+      seq(
+        'impl',
+        field('target', $._type),
+        'where',
+        '{',
+        sepBy(',', $.impl_operation),
+        '}',
+      ),
+      // Ability or effect impl: `impl Eq for Bool where { … }`. Ability
+      // names can carry type arguments (`impl Into Str for Bool …`).
+      // Effect impls have an optional performer-config record after the
+      // target (`impl Log for ConsoleLogger {} where …`). Unified here;
+      // the typechecker disambiguates via name lookup.
+      seq(
+        'impl',
+        field('name', $.upper_identifier),
+        repeat(field('argument', $._type_atom)),
+        'for',
+        field('target', $._type),
+        optional(field('performer_args', $.record_type)),
+        optional($._having_clause),
+        'where',
+        '{',
+        sepBy(',', $.impl_operation),
+        '}',
+      ),
     ),
 
     impl_operation: $ => seq(
@@ -557,10 +577,14 @@ module.exports = grammar({
       field('body', $._expression),
     ),
 
+    // do { expr1; expr2; final_expr } — sequence of expressions where the
+    // last is the result. The parser allows newline-or-semicolon as
+    // separator; we accept either for tolerance (the typechecker enforces
+    // exactly what's allowed semantically).
     do_expression: $ => seq(
       'do',
       '{',
-      sepBy($._newline, $._expression),
+      sepBy(optional(';'), $._expression),
       '}',
     ),
 
