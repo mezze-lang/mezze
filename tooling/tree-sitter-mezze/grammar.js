@@ -607,10 +607,11 @@ module.exports = grammar({
       'match',
       field('scrutinee', $._expression),
       'is',
-      // arms are comma-separated; trailing comma optional. Using
-      // prec.right pushes ambiguity (where does the match end?) toward
-      // continuing to consume arms — the comma is the only safe terminator.
-      sepBy1(',', $.match_arm),
+      // Arms may be separated by `,` or just newlines/whitespace (parser
+      // accepts both). Tree-sitter has no concept of "newline as
+      // separator" here, so we make the comma optional via repeat1 with
+      // a `,?` between arms. prec.right keeps the match greedy on arms.
+      repeat1(seq($.match_arm, optional(','))),
     )),
 
     match_arm: $ => seq(
