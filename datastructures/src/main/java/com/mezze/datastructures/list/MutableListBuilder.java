@@ -33,7 +33,6 @@ public final class MutableListBuilder<A> {
      * Creates a mutable builder from a MezzeList.
      * Copies all elements into an array.
      */
-    @TruffleBoundary
     public static <A> MutableListBuilder<A> fromList(MezzeList<A> list) {
         int size = list.size();
         Object[] data = new Object[Math.max(size, 8)];
@@ -103,7 +102,6 @@ public final class MutableListBuilder<A> {
     /**
      * Appends element to end.
      */
-    @TruffleBoundary
     public void mutPush(A value) {
         ensureCapacity(size + 1);
         data[size++] = value;
@@ -140,7 +138,6 @@ public final class MutableListBuilder<A> {
     /**
      * Sorts elements in place using natural ordering.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public void mutSort() {
         Arrays.sort(data, 0, size, (a, b) -> ((Comparable<Object>) a).compareTo(b));
@@ -157,7 +154,6 @@ public final class MutableListBuilder<A> {
     /**
      * Clears all elements.
      */
-    @TruffleBoundary
     public void mutClear() {
         Arrays.fill(data, 0, size, null);
         size = 0;
@@ -179,7 +175,6 @@ public final class MutableListBuilder<A> {
      * Converts back to an immutable MezzeList.
      * Builds the list from back to front for O(n) construction.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public MezzeList<A> toList() {
         MezzeList<A> result = MezzeList.empty();
@@ -206,7 +201,6 @@ public final class MutableListBuilder<A> {
     }
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("MutableListBuilder(");
         for (int i = 0; i < size; i++) {

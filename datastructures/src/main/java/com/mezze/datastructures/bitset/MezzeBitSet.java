@@ -570,7 +570,6 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
     // ===== OBJECT METHODS =====
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("BitSet{");
         boolean first = true;

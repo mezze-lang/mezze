@@ -259,7 +259,6 @@ public final class LongKeyMapStorage implements MapStorage {
         return values[index];
     }
 
-    @TruffleBoundary
     private SmallFlatMapStorage transitionToGeneric() {
         Object[] boxedKeys = new Object[keys.length];
         for (int i = 0; i < keys.length; i++) {
@@ -288,7 +287,6 @@ public final class LongKeyMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("LongKeyMapStorage{");
         for (int i = 0; i < keys.length; i++) {

@@ -254,7 +254,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     /**
      * Returns a new sequence with element inserted at index.
      */
-    @TruffleBoundary
     public MezzeSeq<A> insert(int index, A value) {
         if (index < 0 || index > size()) {
             throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + size());
@@ -271,7 +270,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     /**
      * Returns a new sequence with element at index removed.
      */
-    @TruffleBoundary
     public MezzeSeq<A> remove(int index) {
         if (index < 0 || index >= size()) {
             throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + size());
@@ -621,7 +619,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     /**
      * Find index of element.
      */
-    @TruffleBoundary
     public int indexOf(A elem) {
         if (storage instanceof LongSeqStorage longStorage && elem instanceof Long l) {
             return longStorage.indexOf(l);
@@ -715,7 +712,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     /**
      * Sort using natural ordering.
      */
-    @TruffleBoundary
     public MezzeSeq<A> sort() {
         if (size() <= 1) return this;
 
@@ -735,7 +731,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     /**
      * Remove duplicates (keeps first occurrence).
      */
-    @TruffleBoundary
     public MezzeSeq<A> distinct() {
         if (size() <= 1) return this;
 
@@ -786,7 +781,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
      * Flatten a sequence of sequences.
      * Optimized: Uses initial size estimate and grows array as needed.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public <B> MezzeSeq<B> flatten() {
         if (isEmpty()) return empty();
@@ -851,7 +845,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
      * Unzip a sequence of pairs into two sequences.
      * Assumes elements are Object[2] pairs.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public MezzeSeq<Object>[] unzip() {
         if (isEmpty()) {
@@ -883,7 +876,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     /**
      * Insert a separator between each element.
      */
-    @TruffleBoundary
     public MezzeSeq<A> intersperse(A separator) {
         if (size() <= 1) return this;
 
@@ -921,7 +913,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     /**
      * Split into chunks of given size.
      */
-    @TruffleBoundary
     public MezzeSeq<MezzeSeq<A>> chunk(int chunkSize) {
         if (chunkSize <= 0) {
             throw new IllegalArgumentException("Chunk size must be positive");
@@ -943,7 +934,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     /**
      * Sliding window of given size.
      */
-    @TruffleBoundary
     public MezzeSeq<MezzeSeq<A>> sliding(int windowSize) {
         if (windowSize <= 0) {
             throw new IllegalArgumentException("Window size must be positive");
@@ -1026,7 +1016,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     /**
      * Zip with another sequence.
      */
-    @TruffleBoundary
     public <B> MezzeSeq<Object[]> zip(MezzeSeq<B> other) {
         int minSize = Math.min(size(), other.size());
         if (minSize == 0) return empty();
@@ -1041,7 +1030,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     /**
      * Zip with indices.
      */
-    @TruffleBoundary
     public MezzeSeq<Object[]> zipWithIndex() {
         if (isEmpty()) return empty();
 
@@ -1089,7 +1077,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     /**
      * Convert to Object array.
      */
-    @TruffleBoundary
     public Object[] toArray() {
         Object[] result = new Object[size()];
         for (int i = 0; i < size(); i++) {
@@ -1239,7 +1226,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
      * In-place sort - mutates the underlying array.
      * Only safe within LocalMut context.
      */
-    @TruffleBoundary
     public void mutSort() {
         if (storage instanceof LongSeqStorage longStorage) {
             longStorage.mutSort();
@@ -1346,7 +1332,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     }
 
     @ExportMessage
-    @TruffleBoundary
     Object getIterator() {
         return new SeqIterator(iterator());
     }
@@ -1365,13 +1350,11 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
         }
 
         @ExportMessage
-        @TruffleBoundary
         boolean hasIteratorNextElement() {
             return iterator.hasNext();
         }
 
         @ExportMessage
-        @TruffleBoundary
         Object getIteratorNextElement() throws UnsupportedMessageException {
             if (!iterator.hasNext()) {
                 throw UnsupportedMessageException.create();
@@ -1383,7 +1366,6 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     // ===== OBJECT METHODS =====
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < size(); i++) {

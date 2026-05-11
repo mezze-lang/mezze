@@ -98,7 +98,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      * Creates a sorted set from varargs.
      */
     @SafeVarargs
-    @TruffleBoundary
     public static <A extends Comparable<A>> MezzeSortedSet<A> of(A... elements) {
         if (elements.length == 0) return empty();
         if (elements.length == 1) return of(elements[0]);
@@ -112,7 +111,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Creates a sorted set of longs.
      */
-    @TruffleBoundary
     public static MezzeSortedSet<Long> ofLongs(long... elements) {
         if (elements.length == 0) return empty();
 
@@ -224,7 +222,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns true if the element is present (raw type version).
      */
-    @TruffleBoundary
     public boolean containsObject(Object elem) {
         revokeOwnership();
         return binarySearchObject(elem) >= 0;
@@ -233,7 +230,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns a new sorted set with the element added (raw type version).
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public MezzeSortedSet<A> addObject(Object elem) {
         int idx = binarySearchObject(elem);
@@ -281,7 +277,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns a new sorted set with the element removed (raw type version).
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public MezzeSortedSet<A> removeObject(Object elem) {
         int idx = binarySearchObject(elem);
@@ -303,7 +298,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Creates a sorted set from raw Object iterable (for interpreter use).
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public static <A extends Comparable<A>> MezzeSortedSet<A> fromIterable(Iterable<?> elements) {
         MezzeSortedSet<A> result = empty();
@@ -348,7 +342,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns a new sorted set with the element added.
      */
-    @TruffleBoundary
     public MezzeSortedSet<A> add(A elem) {
         return addObject(elem);
     }
@@ -356,7 +349,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns a new sorted set with the element removed.
      */
-    @TruffleBoundary
     public MezzeSortedSet<A> remove(A elem) {
         int idx = binarySearch(elem);
         if (idx < 0) {
@@ -379,7 +371,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns elements in range [from, to].
      */
-    @TruffleBoundary
     public MezzeSortedSet<A> range(A from, A to) {
         int fromIdx = binarySearch(from);
         if (fromIdx < 0) fromIdx = -(fromIdx + 1);
@@ -401,7 +392,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns elements >= from.
      */
-    @TruffleBoundary
     public MezzeSortedSet<A> rangeFrom(A from) {
         int idx = binarySearch(from);
         if (idx < 0) idx = -(idx + 1);
@@ -416,7 +406,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns elements <= to.
      */
-    @TruffleBoundary
     public MezzeSortedSet<A> rangeTo(A to) {
         int idx = binarySearch(to);
         if (idx < 0) {
@@ -437,7 +426,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns the greatest element <= given, or null if none.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public A floor(A elem) {
         int idx = binarySearch(elem);
@@ -454,7 +442,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns the smallest element >= given, or null if none.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public A ceiling(A elem) {
         int idx = binarySearch(elem);
@@ -471,7 +458,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns the greatest element < given, or null if none.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public A lower(A elem) {
         int idx = binarySearch(elem);
@@ -489,7 +475,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     /**
      * Returns the smallest element > given, or null if none.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public A higher(A elem) {
         int idx = binarySearch(elem);
@@ -532,7 +517,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      * Union with another sorted set.
      * Optimized: uses specialized comparison for common types.
      */
-    @TruffleBoundary
     public MezzeSortedSet<A> union(MezzeSortedSet<A> other) {
         if (isEmpty()) return other;
         if (other.isEmpty()) return this;
@@ -567,7 +551,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      * Intersection with another sorted set.
      * Optimized: uses specialized comparison for common types.
      */
-    @TruffleBoundary
     public MezzeSortedSet<A> intersect(MezzeSortedSet<A> other) {
         if (isEmpty() || other.isEmpty()) return empty();
 
@@ -594,7 +577,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      * Difference (this - other).
      * Optimized: uses specialized comparison for common types.
      */
-    @TruffleBoundary
     public MezzeSortedSet<A> difference(MezzeSortedSet<A> other) {
         if (isEmpty()) return this;
         if (other.isEmpty()) return this;
@@ -659,7 +641,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
      * Creates a mutable copy of this sorted set.
      * Used by to_mut to get a fresh copy that can be mutated.
      */
-    @TruffleBoundary
     public MezzeSortedSet<A> copyToMutable() {
         return new MezzeSortedSet<>(elements.clone(), comparator);
     }
@@ -700,7 +681,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     // ===== OBJECT METHODS =====
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("SortedSet(");
         for (int i = 0; i < length; i++) {
@@ -777,7 +757,6 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
     }
 
     @ExportMessage
-    @TruffleBoundary
     Object getIterator() {
         return new SortedSetIterator(iterator());
     }
@@ -796,13 +775,11 @@ public final class MezzeSortedSet<A extends Comparable<A>> implements TruffleObj
         }
 
         @ExportMessage
-        @TruffleBoundary
         boolean hasIteratorNextElement() {
             return iterator.hasNext();
         }
 
         @ExportMessage
-        @TruffleBoundary
         Object getIteratorNextElement() throws UnsupportedMessageException {
             if (!iterator.hasNext()) {
                 throw UnsupportedMessageException.create();

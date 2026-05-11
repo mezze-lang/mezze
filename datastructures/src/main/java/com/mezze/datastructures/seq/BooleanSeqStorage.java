@@ -162,7 +162,6 @@ public final class BooleanSeqStorage implements SeqStorage {
     /**
      * Unboxed prepend - shifts all bits by 1.
      */
-    @TruffleBoundary
     public BooleanSeqStorage prependBoolean(boolean value) {
         int newSize = size + 1;
         int requiredWords = (newSize + 63) >>> 6;
@@ -188,7 +187,6 @@ public final class BooleanSeqStorage implements SeqStorage {
     }
 
     @Override
-    @TruffleBoundary
     public SeqStorage slice(int start, int end) {
         if (start < 0 || end > size || start > end) {
             throw new IndexOutOfBoundsException("Invalid slice range: " + start + " to " + end);
@@ -209,7 +207,6 @@ public final class BooleanSeqStorage implements SeqStorage {
     }
 
     @Override
-    @TruffleBoundary
     public SeqStorage concat(SeqStorage other) {
         if (other.isEmpty()) {
             return this;
@@ -223,7 +220,6 @@ public final class BooleanSeqStorage implements SeqStorage {
     /**
      * Concat two boolean storages.
      */
-    @TruffleBoundary
     public BooleanSeqStorage concatBoolean(BooleanSeqStorage other) {
         int newSize = size + other.size;
         boolean[] result = new boolean[newSize];
@@ -319,7 +315,6 @@ public final class BooleanSeqStorage implements SeqStorage {
     /**
      * Reverse the sequence.
      */
-    @TruffleBoundary
     public BooleanSeqStorage reverse() {
         boolean[] result = new boolean[size];
         for (int i = 0; i < size; i++) {
@@ -331,7 +326,6 @@ public final class BooleanSeqStorage implements SeqStorage {
     /**
      * Logical AND with another boolean sequence.
      */
-    @TruffleBoundary
     public BooleanSeqStorage and(BooleanSeqStorage other) {
         if (size != other.size) {
             throw new IllegalArgumentException("Sequences must have same size");
@@ -347,7 +341,6 @@ public final class BooleanSeqStorage implements SeqStorage {
     /**
      * Logical OR with another boolean sequence.
      */
-    @TruffleBoundary
     public BooleanSeqStorage or(BooleanSeqStorage other) {
         if (size != other.size) {
             throw new IllegalArgumentException("Sequences must have same size");
@@ -375,7 +368,6 @@ public final class BooleanSeqStorage implements SeqStorage {
     /**
      * Transition to ObjectStorage when type changes.
      */
-    @TruffleBoundary
     private ObjectSeqStorage transitionToObject() {
         Object[] objects = new Object[size];
         for (int i = 0; i < size; i++) {
@@ -385,7 +377,6 @@ public final class BooleanSeqStorage implements SeqStorage {
     }
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("BooleanSeqStorage[");
         for (int i = 0; i < size; i++) {

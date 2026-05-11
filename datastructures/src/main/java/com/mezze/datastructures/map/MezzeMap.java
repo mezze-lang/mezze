@@ -58,7 +58,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Creates a map from key-value pairs.
      */
     @SafeVarargs
-    @TruffleBoundary
     public static <K, V> MezzeMap<K, V> of(Entry<K, V>... entries) {
         if (entries.length == 0) {
             return empty();
@@ -164,7 +163,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Returns a new map with the key-value pair added/updated (raw type).
      * For interpreter use with dynamic types.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public MezzeMap<K, V> putObject(Object key, Object value) {
         return new MezzeMap<>(storage.put(key, value));
@@ -174,7 +172,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Returns a new map with all entries from other map added.
      * Optimized: uses mutable builder for batch operations.
      */
-    @TruffleBoundary
     public MezzeMap<K, V> putAll(MezzeMap<K, V> other) {
         if (other.isEmpty()) return this;
         if (isEmpty()) return other;
@@ -376,7 +373,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     /**
      * Returns all entries as array.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public Entry<K, V>[] entries() {
         Object[] keys = storage.keys();
@@ -413,7 +409,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     // ===== ITERATION =====
 
     @Override
-    @TruffleBoundary
     public Iterator<Entry<K, V>> iterator() {
         Object[] keys = storage.keys();
         Object[] values = storage.values();
@@ -454,7 +449,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     /**
      * Creates a MezzeMap from a Java Map.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public static <K, V> MezzeMap<K, V> fromJavaMap(java.util.Map<K, V> map) {
         MezzeMap<K, V> result = empty();
@@ -467,7 +461,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     /**
      * Converts to a Java HashMap.
      */
-    @TruffleBoundary
     public java.util.Map<K, V> toJavaMap() {
         java.util.HashMap<K, V> result = new java.util.HashMap<>(size());
         for (Entry<K, V> entry : this) {
@@ -482,7 +475,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Creates a mutable copy of this map.
      * Used by to_mut to get a fresh copy that can be mutated.
      */
-    @TruffleBoundary
     public MezzeMap<K, V> copyToMutable() {
         if (storage instanceof HashMapStorage hashStorage) {
             return new MezzeMap<>(hashStorage.copyToMutable());
@@ -495,7 +487,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Creates a mutable map with given initial capacity.
      * Use this when you know the approximate final size.
      */
-    @TruffleBoundary
     public static <K, V> MezzeMap<K, V> mutableWithCapacity(int capacity) {
         // Pre-create a HashMapStorage with enough room
         java.util.HashMap<Object, Object> temp = new java.util.HashMap<>(capacity);
@@ -507,7 +498,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Only safe within LocalMut context.
      * Returns true if key was new, false if updated.
      */
-    @TruffleBoundary
     public boolean mutPut(K key, V value) {
         if (storage instanceof HashMapStorage hashStorage) {
             return hashStorage.mutPut(key, value);
@@ -520,7 +510,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Only safe within LocalMut context.
      * Returns true if key was found and removed.
      */
-    @TruffleBoundary
     public boolean mutRemove(K key) {
         if (storage instanceof HashMapStorage hashStorage) {
             return hashStorage.mutRemove(key);
@@ -533,7 +522,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Only safe within LocalMut context.
      * Returns true if key was found and updated.
      */
-    @TruffleBoundary
     public boolean mutUpdate(K key, V value) {
         if (storage instanceof HashMapStorage hashStorage) {
             return hashStorage.mutUpdate(key, value);
@@ -545,7 +533,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * In-place clear - mutates the underlying storage.
      * Only safe within LocalMut context.
      */
-    @TruffleBoundary
     public void mutClear() {
         if (storage instanceof HashMapStorage hashStorage) {
             hashStorage.mutClear();
@@ -590,13 +577,11 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     }
 
     @ExportMessage
-    @TruffleBoundary
     boolean isHashEntryReadable(Object key) {
         return storage.containsKey(key);
     }
 
     @ExportMessage
-    @TruffleBoundary
     Object readHashValue(Object key) throws UnknownKeyException {
         Object value = storage.get(key);
         if (value == null && !storage.containsKey(key)) {
@@ -626,13 +611,11 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     }
 
     @ExportMessage
-    @TruffleBoundary
     Object getIterator() {
         return new MapEntryIterator(iterator());
     }
 
     @ExportMessage
-    @TruffleBoundary
     Object getHashEntriesIterator() {
         return new MapEntryIterator(iterator());
     }
@@ -651,13 +634,11 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
         }
 
         @ExportMessage
-        @TruffleBoundary
         boolean hasIteratorNextElement() {
             return iterator.hasNext();
         }
 
         @ExportMessage
-        @TruffleBoundary
         Object getIteratorNextElement() throws UnsupportedMessageException {
             if (!iterator.hasNext()) {
                 throw UnsupportedMessageException.create();
@@ -669,7 +650,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     // ===== OBJECT METHODS =====
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("{");
         boolean first = true;
@@ -683,7 +663,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     }
 
     @Override
-    @TruffleBoundary
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof MezzeMap<?, ?> other)) return false;
@@ -699,7 +678,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     }
 
     @Override
-    @TruffleBoundary
     public int hashCode() {
         int result = 0;
         for (Entry<K, V> entry : this) {

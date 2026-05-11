@@ -65,7 +65,6 @@ public final class HashSetStorage implements SetStorage {
      * Creates a HashSetStorage directly from a collection.
      * More efficient than adding elements one by one.
      */
-    @TruffleBoundary
     public static HashSetStorage fromCollection(java.util.Collection<?> collection) {
         int size = collection.size();
         if (size == 0) return new HashSetStorage();
@@ -241,7 +240,6 @@ public final class HashSetStorage implements SetStorage {
         return h;
     }
 
-    @TruffleBoundary
     private HashSetStorage grow() {
         int newCapacity = capacity * 2;
         Object[] newTable = new Object[newCapacity];
@@ -258,7 +256,6 @@ public final class HashSetStorage implements SetStorage {
         return result;
     }
 
-    @TruffleBoundary
     private HashSetStorage shrink(Object[] oldTable, int newSize) {
         int newCapacity = Math.max(MIN_CAPACITY, capacity / 2);
         Object[] newTable = new Object[newCapacity];
@@ -285,7 +282,6 @@ public final class HashSetStorage implements SetStorage {
     }
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("HashSetStorage{");
         boolean first = true;
@@ -302,7 +298,6 @@ public final class HashSetStorage implements SetStorage {
     }
 
     @Override
-    @TruffleBoundary
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof HashSetStorage other)) return false;
@@ -346,7 +341,6 @@ public final class HashSetStorage implements SetStorage {
      * Only safe within LocalMut context.
      * Returns true if element was new, false if already present.
      */
-    @TruffleBoundary
     public boolean mutAdd(Object elem) {
         if (contains(elem)) {
             return false;
@@ -373,7 +367,6 @@ public final class HashSetStorage implements SetStorage {
      * Only safe within LocalMut context.
      * Returns true if element was found and removed.
      */
-    @TruffleBoundary
     public boolean mutRemove(Object elem) {
         int hash = hash(elem);
         int index = hash & (capacity - 1);
@@ -397,7 +390,6 @@ public final class HashSetStorage implements SetStorage {
      * In-place clear - mutates the underlying table.
      * Only safe within LocalMut context.
      */
-    @TruffleBoundary
     public void mutClear() {
         java.util.Arrays.fill(table, null);
     }

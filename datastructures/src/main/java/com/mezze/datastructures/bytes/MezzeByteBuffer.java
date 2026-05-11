@@ -163,7 +163,6 @@ public final class MezzeByteBuffer implements TruffleObject {
     /**
      * Writes a string as UTF-8 bytes.
      */
-    @TruffleBoundary
     public MezzeByteBuffer writeString(String str) {
         return writeString(str, StandardCharsets.UTF_8);
     }
@@ -179,7 +178,6 @@ public final class MezzeByteBuffer implements TruffleObject {
     /**
      * Writes a length-prefixed string (4-byte length + UTF-8 data).
      */
-    @TruffleBoundary
     public MezzeByteBuffer writeLengthPrefixedString(String str) {
         byte[] bytes = str.getBytes(StandardCharsets.UTF_8);
         writeInt(bytes.length);
@@ -236,7 +234,6 @@ public final class MezzeByteBuffer implements TruffleObject {
         }
     }
 
-    @TruffleBoundary
     private void grow(int minCapacity) {
         int newCapacity = data.length + (data.length >> 1);  // 1.5x
         if (newCapacity < minCapacity) {

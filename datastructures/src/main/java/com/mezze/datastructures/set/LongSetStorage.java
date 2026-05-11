@@ -95,7 +95,6 @@ public final class LongSetStorage implements SetStorage {
     }
 
     @Override
-    @TruffleBoundary
     public SetStorage add(Object elem) {
         if (elem instanceof Long l) {
             return addLong(l);
@@ -107,7 +106,6 @@ public final class LongSetStorage implements SetStorage {
     /**
      * Unboxed add. Maintains sorted order for binary search.
      */
-    @TruffleBoundary
     public SetStorage addLong(long elem) {
         int idx = binarySearch(elem);
         if (idx >= 0) {
@@ -129,7 +127,6 @@ public final class LongSetStorage implements SetStorage {
     }
 
     @Override
-    @TruffleBoundary
     public SetStorage remove(Object elem) {
         if (elem instanceof Long l) {
             return removeLong(l);
@@ -140,7 +137,6 @@ public final class LongSetStorage implements SetStorage {
     /**
      * Unboxed remove using binary search.
      */
-    @TruffleBoundary
     public SetStorage removeLong(long elem) {
         int idx = binarySearch(elem);
 
@@ -218,7 +214,6 @@ public final class LongSetStorage implements SetStorage {
      * Union with another LongSetStorage.
      * Uses two-pointer merge on sorted arrays: O(n + m) instead of O(n * m).
      */
-    @TruffleBoundary
     public LongSetStorage unionLong(LongSetStorage other) {
         if (elements.length == 0) return other;
         if (other.elements.length == 0) return this;
@@ -260,7 +255,6 @@ public final class LongSetStorage implements SetStorage {
      * Intersection with another LongSetStorage.
      * Uses two-pointer scan on sorted arrays: O(n + m) instead of O(n * m).
      */
-    @TruffleBoundary
     public LongSetStorage intersectLong(LongSetStorage other) {
         if (elements.length == 0 || other.elements.length == 0) {
             return fromSorted(new long[0]);
@@ -296,7 +290,6 @@ public final class LongSetStorage implements SetStorage {
      * Difference (this - other).
      * Uses two-pointer scan on sorted arrays: O(n + m) instead of O(n * m).
      */
-    @TruffleBoundary
     public LongSetStorage differenceLong(LongSetStorage other) {
         if (elements.length == 0) {
             return this;
@@ -380,7 +373,6 @@ public final class LongSetStorage implements SetStorage {
         return result;
     }
 
-    @TruffleBoundary
     private SmallFlatSetStorage transitionToGeneric() {
         Object[] boxed = new Object[elements.length];
         for (int i = 0; i < elements.length; i++) {
@@ -409,7 +401,6 @@ public final class LongSetStorage implements SetStorage {
     }
 
     @Override
-    @TruffleBoundary
     public String toString() {
         return "LongSetStorage" + Arrays.toString(elements);
     }

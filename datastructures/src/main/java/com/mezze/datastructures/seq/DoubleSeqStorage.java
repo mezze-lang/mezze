@@ -179,7 +179,6 @@ public final class DoubleSeqStorage implements SeqStorage {
     /**
      * Sum all elements using SIMD.
      */
-    @TruffleBoundary
     public double sum() {
         return VectorOps.sumDouble(trimmedData());
     }
@@ -199,7 +198,6 @@ public final class DoubleSeqStorage implements SeqStorage {
     /**
      * Product of all elements using SIMD.
      */
-    @TruffleBoundary
     public double product() {
         return VectorOps.productDouble(trimmedData());
     }
@@ -207,7 +205,6 @@ public final class DoubleSeqStorage implements SeqStorage {
     /**
      * Minimum element using SIMD.
      */
-    @TruffleBoundary
     public double min() {
         if (length == 0) {
             throw new IllegalStateException("Empty sequence has no minimum");
@@ -218,7 +215,6 @@ public final class DoubleSeqStorage implements SeqStorage {
     /**
      * Maximum element using SIMD.
      */
-    @TruffleBoundary
     public double max() {
         if (length == 0) {
             throw new IllegalStateException("Empty sequence has no maximum");
@@ -229,7 +225,6 @@ public final class DoubleSeqStorage implements SeqStorage {
     /**
      * Average of all elements using SIMD sum.
      */
-    @TruffleBoundary
     public double average() {
         if (length == 0) {
             throw new IllegalStateException("Empty sequence has no average");
@@ -240,7 +235,6 @@ public final class DoubleSeqStorage implements SeqStorage {
     /**
      * Dot product with another array using SIMD.
      */
-    @TruffleBoundary
     public double dotProduct(DoubleSeqStorage other) {
         return VectorOps.dotProduct(trimmedData(), other.trimmedData());
     }
@@ -248,7 +242,6 @@ public final class DoubleSeqStorage implements SeqStorage {
     /**
      * Element-wise addition with another array using SIMD.
      */
-    @TruffleBoundary
     public DoubleSeqStorage add(DoubleSeqStorage other) {
         return new DoubleSeqStorage(VectorOps.addDouble(trimmedData(), other.trimmedData()));
     }
@@ -256,7 +249,6 @@ public final class DoubleSeqStorage implements SeqStorage {
     /**
      * Scale all elements by a factor using SIMD.
      */
-    @TruffleBoundary
     public DoubleSeqStorage scale(double factor) {
         return new DoubleSeqStorage(VectorOps.scaleDouble(trimmedData(), factor));
     }
@@ -264,7 +256,6 @@ public final class DoubleSeqStorage implements SeqStorage {
     /**
      * Fused multiply-add: this * other + addend
      */
-    @TruffleBoundary
     public DoubleSeqStorage fma(DoubleSeqStorage other, DoubleSeqStorage addend) {
         return new DoubleSeqStorage(VectorOps.fmaDouble(trimmedData(), other.trimmedData(), addend.trimmedData()));
     }
@@ -273,7 +264,6 @@ public final class DoubleSeqStorage implements SeqStorage {
      * Find index of element, or -1 if not found.
      * Uses exact equality for doubles.
      */
-    @TruffleBoundary
     public int indexOf(double value) {
         for (int i = 0; i < length; i++) {
             if (data[i] == value) {
@@ -318,7 +308,6 @@ public final class DoubleSeqStorage implements SeqStorage {
     /**
      * Sort in ascending order.
      */
-    @TruffleBoundary
     public DoubleSeqStorage sort() {
         double[] newData = Arrays.copyOf(data, length);
         Arrays.sort(newData);
@@ -328,7 +317,6 @@ public final class DoubleSeqStorage implements SeqStorage {
     /**
      * Transition to ObjectStorage when type changes.
      */
-    @TruffleBoundary
     private ObjectSeqStorage transitionToObject() {
         Object[] objects = new Object[length];
         for (int i = 0; i < length; i++) {
@@ -338,7 +326,6 @@ public final class DoubleSeqStorage implements SeqStorage {
     }
 
     @Override
-    @TruffleBoundary
     public String toString() {
         return "DoubleSeqStorage" + Arrays.toString(trimmedData());
     }
@@ -395,7 +382,6 @@ public final class DoubleSeqStorage implements SeqStorage {
      * In-place sort - mutates the underlying array.
      * Only safe within LocalMut context.
      */
-    @TruffleBoundary
     public void mutSort() {
         Arrays.sort(data, 0, length);
     }

@@ -238,7 +238,6 @@ public final class MezzeDoubleCons implements MezzeList<Double> {
     }
 
     @ExportMessage
-    @TruffleBoundary
     Object readArrayElement(long index) throws InvalidArrayIndexException {
         if (index < 0 || index >= size()) {
             throw InvalidArrayIndexException.create(index);
@@ -267,7 +266,6 @@ public final class MezzeDoubleCons implements MezzeList<Double> {
     }
 
     @ExportMessage
-    @TruffleBoundary
     Object getIterator() {
         return new ListInteropHelper.ListIterator(iterator());
     }

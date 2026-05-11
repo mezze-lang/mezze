@@ -29,7 +29,6 @@ public final class SeqStorageFactory {
      * Create storage from an array of objects.
      * Detects if all elements are the same primitive type and uses specialized storage.
      */
-    @TruffleBoundary
     public static SeqStorage fromArray(Object[] elements) {
         if (elements.length == 0) {
             return EmptySeqStorage.INSTANCE;
@@ -87,7 +86,6 @@ public final class SeqStorageFactory {
      * Caller must guarantee the array won't be modified.
      * This is faster than fromArray() but unsafe if the array is mutated.
      */
-    @TruffleBoundary
     public static SeqStorage fromArrayUnsafe(Object[] elements) {
         if (elements.length == 0) {
             return EmptySeqStorage.INSTANCE;

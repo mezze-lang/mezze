@@ -116,7 +116,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * Creates a sorted map from entries.
      */
     @SafeVarargs
-    @TruffleBoundary
     public static <K extends Comparable<K>, V> MezzeSortedMap<K, V> of(Entry<K, V>... entries) {
         if (entries.length == 0) return empty();
         if (entries.length == 1) return of(entries[0].key, entries[0].value);
@@ -282,7 +281,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     /**
      * Returns a new sorted map with the entry added/updated.
      */
-    @TruffleBoundary
     public MezzeSortedMap<K, V> put(K key, V value) {
         return putObject(key, value);
     }
@@ -291,7 +289,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * Returns a new sorted map with the entry added/updated (raw type).
      * For interpreter use with dynamic types.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public MezzeSortedMap<K, V> putObject(Object key, Object value) {
         int idx = binarySearchObject(key);
@@ -353,7 +350,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     /**
      * Returns a new sorted map with the key removed.
      */
-    @TruffleBoundary
     public MezzeSortedMap<K, V> remove(K key) {
         return removeObject(key);
     }
@@ -362,7 +358,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * Returns a new sorted map with the key removed (raw type).
      * For interpreter use with dynamic types.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public MezzeSortedMap<K, V> removeObject(Object key) {
         revokeOwnership();
@@ -388,7 +383,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     /**
      * Returns entries with keys in range [fromKey, toKey].
      */
-    @TruffleBoundary
     public MezzeSortedMap<K, V> range(K fromKey, K toKey) {
         int fromIdx = binarySearch(fromKey);
         if (fromIdx < 0) fromIdx = -(fromIdx + 1);
@@ -412,7 +406,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     /**
      * Returns entries with keys >= fromKey.
      */
-    @TruffleBoundary
     public MezzeSortedMap<K, V> rangeFrom(K fromKey) {
         int idx = binarySearch(fromKey);
         if (idx < 0) idx = -(idx + 1);
@@ -429,7 +422,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     /**
      * Returns entries with keys <= toKey.
      */
-    @TruffleBoundary
     public MezzeSortedMap<K, V> rangeTo(K toKey) {
         int idx = binarySearch(toKey);
         if (idx < 0) {
@@ -452,7 +444,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     /**
      * Returns entry with greatest key <= given, or null if none.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public Entry<K, V> floorEntry(K key) {
         int idx = binarySearch(key);
@@ -467,7 +458,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     /**
      * Returns entry with smallest key >= given, or null if none.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public Entry<K, V> ceilingEntry(K key) {
         int idx = binarySearch(key);
@@ -546,7 +536,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * Creates a mutable copy of this sorted map.
      * Used by to_mut to get a fresh copy that can be mutated.
      */
-    @TruffleBoundary
     public MezzeSortedMap<K, V> copyToMutable() {
         return new MezzeSortedMap<>(keys.clone(), values.clone(), comparator);
     }
@@ -558,7 +547,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * Only safe within LocalMut context.
      * Returns true if key was found and updated.
      */
-    @TruffleBoundary
     public boolean mutUpdate(K key, V value) {
         int idx = binarySearch(key);
         if (idx >= 0) {
@@ -572,7 +560,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * In-place update by key (raw type).
      * Only safe within LocalMut context.
      */
-    @TruffleBoundary
     public boolean mutUpdateObject(Object key, Object value) {
         int idx = binarySearchObject(key);
         if (idx >= 0) {
@@ -586,7 +573,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
      * In-place clear - sets all values to null.
      * Only safe within LocalMut context.
      */
-    @TruffleBoundary
     public void mutClearValues() {
         Arrays.fill(values, null);
     }
@@ -610,7 +596,6 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     // ===== OBJECT METHODS =====
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("SortedMap(");
         for (int i = 0; i < length; i++) {
@@ -646,13 +631,11 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     }
 
     @ExportMessage
-    @TruffleBoundary
     boolean isHashEntryReadable(Object key) {
         return containsKeyObject(key);
     }
 
     @ExportMessage
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     Object readHashValue(Object key) throws UnknownKeyException {
         try {
@@ -687,13 +670,11 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
     }
 
     @ExportMessage
-    @TruffleBoundary
     Object getIterator() {
         return new SortedMapIterator(iterator());
     }
 
     @ExportMessage
-    @TruffleBoundary
     Object getHashEntriesIterator() {
         return new SortedMapIterator(iterator());
     }
@@ -712,13 +693,11 @@ public final class MezzeSortedMap<K extends Comparable<K>, V> implements Truffle
         }
 
         @ExportMessage
-        @TruffleBoundary
         boolean hasIteratorNextElement() {
             return iterator.hasNext();
         }
 
         @ExportMessage
-        @TruffleBoundary
         Object getIteratorNextElement() throws UnsupportedMessageException {
             if (!iterator.hasNext()) {
                 throw UnsupportedMessageException.create();

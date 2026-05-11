@@ -89,7 +89,6 @@ public final class HashMapStorage implements MapStorage {
      * Creates a HashMapStorage directly from a Java Map.
      * More efficient than adding entries one by one.
      */
-    @TruffleBoundary
     public static HashMapStorage fromMap(java.util.Map<?, ?> map) {
         int size = map.size();
         if (size == 0) return new HashMapStorage();
@@ -299,7 +298,6 @@ public final class HashMapStorage implements MapStorage {
         return h;
     }
 
-    @TruffleBoundary
     private HashMapStorage grow() {
         int newCapacity = capacity * 2;
         Object[] newTable = new Object[newCapacity * 2];
@@ -317,7 +315,6 @@ public final class HashMapStorage implements MapStorage {
         return result;
     }
 
-    @TruffleBoundary
     private HashMapStorage shrink(Object[] oldTable, int newSize) {
         int newCapacity = Math.max(MIN_CAPACITY, capacity / 2);
         Object[] newTable = new Object[newCapacity * 2];
@@ -346,7 +343,6 @@ public final class HashMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("HashMapStorage{");
         boolean first = true;
@@ -363,7 +359,6 @@ public final class HashMapStorage implements MapStorage {
     }
 
     @Override
-    @TruffleBoundary
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof HashMapStorage other)) return false;
@@ -408,7 +403,6 @@ public final class HashMapStorage implements MapStorage {
      * Only safe within LocalMut context.
      * Returns true if key was new, false if updated.
      */
-    @TruffleBoundary
     public boolean mutPut(Object key, Object value) {
         // Check if we need to grow (not supported for mutable - preallocate capacity)
         if (size >= capacity * LOAD_FACTOR) {
@@ -455,7 +449,6 @@ public final class HashMapStorage implements MapStorage {
      * Only safe within LocalMut context.
      * Returns true if key was found and removed.
      */
-    @TruffleBoundary
     public boolean mutRemove(Object key) {
         int hash = hash(key);
         int index = (hash & (capacity - 1)) * 2;
@@ -481,7 +474,6 @@ public final class HashMapStorage implements MapStorage {
      * Only safe within LocalMut context.
      * Returns true if key was found and updated.
      */
-    @TruffleBoundary
     public boolean mutUpdate(Object key, Object value) {
         int hash = hash(key);
         int index = (hash & (capacity - 1)) * 2;
@@ -505,7 +497,6 @@ public final class HashMapStorage implements MapStorage {
      * In-place clear - mutates the underlying table.
      * Only safe within LocalMut context.
      */
-    @TruffleBoundary
     public void mutClear() {
         Arrays.fill(table, null);
     }

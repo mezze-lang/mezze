@@ -186,7 +186,6 @@ public final class LongSeqStorage implements SeqStorage {
     /**
      * Sum all elements using SIMD.
      */
-    @TruffleBoundary
     public long sum() {
         return VectorOps.sumLong(trimmedData());
     }
@@ -206,7 +205,6 @@ public final class LongSeqStorage implements SeqStorage {
     /**
      * Product of all elements using SIMD.
      */
-    @TruffleBoundary
     public long product() {
         return VectorOps.productLong(trimmedData());
     }
@@ -214,7 +212,6 @@ public final class LongSeqStorage implements SeqStorage {
     /**
      * Minimum element using SIMD.
      */
-    @TruffleBoundary
     public long min() {
         if (length == 0) {
             throw new IllegalStateException("Empty sequence has no minimum");
@@ -225,7 +222,6 @@ public final class LongSeqStorage implements SeqStorage {
     /**
      * Maximum element using SIMD.
      */
-    @TruffleBoundary
     public long max() {
         if (length == 0) {
             throw new IllegalStateException("Empty sequence has no maximum");
@@ -236,7 +232,6 @@ public final class LongSeqStorage implements SeqStorage {
     /**
      * Find index of element using SIMD, or -1 if not found.
      */
-    @TruffleBoundary
     public int indexOf(long value) {
         return VectorOps.indexOfLong(trimmedData(), value);
     }
@@ -264,7 +259,6 @@ public final class LongSeqStorage implements SeqStorage {
     /**
      * Element-wise addition with another array using SIMD.
      */
-    @TruffleBoundary
     public LongSeqStorage add(LongSeqStorage other) {
         return new LongSeqStorage(VectorOps.addLong(trimmedData(), other.trimmedData()));
     }
@@ -272,7 +266,6 @@ public final class LongSeqStorage implements SeqStorage {
     /**
      * Scale all elements by a factor using SIMD.
      */
-    @TruffleBoundary
     public LongSeqStorage scale(long factor) {
         return new LongSeqStorage(VectorOps.scaleLong(trimmedData(), factor));
     }
@@ -292,7 +285,6 @@ public final class LongSeqStorage implements SeqStorage {
     /**
      * Sort in ascending order.
      */
-    @TruffleBoundary
     public LongSeqStorage sort() {
         long[] newData = Arrays.copyOf(data, length);
         Arrays.sort(newData);
@@ -302,7 +294,6 @@ public final class LongSeqStorage implements SeqStorage {
     /**
      * Transition to ObjectStorage when type changes.
      */
-    @TruffleBoundary
     private ObjectSeqStorage transitionToObject() {
         Object[] objects = new Object[length];
         for (int i = 0; i < length; i++) {
@@ -312,7 +303,6 @@ public final class LongSeqStorage implements SeqStorage {
     }
 
     @Override
-    @TruffleBoundary
     public String toString() {
         return "LongSeqStorage" + Arrays.toString(trimmedData());
     }
@@ -369,7 +359,6 @@ public final class LongSeqStorage implements SeqStorage {
      * In-place sort - mutates the underlying array.
      * Only safe within LocalMut context.
      */
-    @TruffleBoundary
     public void mutSort() {
         Arrays.sort(data, 0, length);
     }

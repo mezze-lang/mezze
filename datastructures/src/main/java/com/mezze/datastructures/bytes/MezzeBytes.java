@@ -44,7 +44,6 @@ public final class MezzeBytes implements TruffleObject {
     /**
      * Creates bytes from a string using UTF-8 encoding.
      */
-    @TruffleBoundary
     public static MezzeBytes fromString(String str) {
         return fromString(str, StandardCharsets.UTF_8);
     }
@@ -351,7 +350,6 @@ public final class MezzeBytes implements TruffleObject {
     /**
      * Converts to string using UTF-8 encoding.
      */
-    @TruffleBoundary
     public String toStringUtf8() {
         return new String(data, StandardCharsets.UTF_8);
     }
@@ -366,7 +364,6 @@ public final class MezzeBytes implements TruffleObject {
     /**
      * Returns hex string representation.
      */
-    @TruffleBoundary
     public String toHexString() {
         StringBuilder sb = new StringBuilder(data.length * 2);
         for (byte b : data) {
@@ -456,7 +453,6 @@ public final class MezzeBytes implements TruffleObject {
      * In-place XOR with another bytes - mutates the underlying array.
      * Only safe within LocalMut context.
      */
-    @TruffleBoundary
     public void mutXor(MezzeBytes other) {
         int len = Math.min(data.length, other.data.length);
         for (int i = 0; i < len; i++) {
@@ -467,7 +463,6 @@ public final class MezzeBytes implements TruffleObject {
     // ===== OBJECT METHODS =====
 
     @Override
-    @TruffleBoundary
     public String toString() {
         if (data.length <= 32) {
             return "Bytes(" + toHexString() + ")";

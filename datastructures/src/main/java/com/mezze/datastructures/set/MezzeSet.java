@@ -49,7 +49,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      * Creates a set from varargs.
      */
     @SafeVarargs
-    @TruffleBoundary
     public static <A> MezzeSet<A> of(A... elements) {
         if (elements.length == 0) {
             return empty();
@@ -156,7 +155,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      * Returns a new set with the element added (raw type).
      * For interpreter use with dynamic types.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public MezzeSet<A> addObject(Object elem) {
         return new MezzeSet<>(storage.add(elem));
@@ -166,7 +164,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      * Returns a new set with all elements from other set added.
      * Optimized: uses mutable HashSet for batch operations.
      */
-    @TruffleBoundary
     public MezzeSet<A> addAll(MezzeSet<A> other) {
         if (other.isEmpty()) return this;
         if (isEmpty()) return other;
@@ -211,7 +208,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     /**
      * Union of two sets.
      */
-    @TruffleBoundary
     public MezzeSet<A> union(MezzeSet<A> other) {
         if (isEmpty()) return other;
         if (other.isEmpty()) return this;
@@ -227,7 +223,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     /**
      * Intersection of two sets.
      */
-    @TruffleBoundary
     public MezzeSet<A> intersect(MezzeSet<A> other) {
         if (isEmpty() || other.isEmpty()) return empty();
 
@@ -253,7 +248,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     /**
      * Difference (this - other).
      */
-    @TruffleBoundary
     public MezzeSet<A> difference(MezzeSet<A> other) {
         if (isEmpty()) return this;
         if (other.isEmpty()) return this;
@@ -277,7 +271,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     /**
      * Symmetric difference (elements in either but not both).
      */
-    @TruffleBoundary
     public MezzeSet<A> symmetricDifference(MezzeSet<A> other) {
         return union(other).difference(intersect(other));
     }
@@ -285,7 +278,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     /**
      * Returns true if this is a subset of other.
      */
-    @TruffleBoundary
     public boolean isSubsetOf(MezzeSet<A> other) {
         if (size() > other.size()) return false;
 
@@ -307,7 +299,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     /**
      * Returns true if sets have no common elements.
      */
-    @TruffleBoundary
     public boolean isDisjoint(MezzeSet<A> other) {
         MezzeSet<A> smaller = size() <= other.size() ? this : other;
         MezzeSet<A> larger = size() > other.size() ? this : other;
@@ -477,7 +468,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     // ===== ITERATION =====
 
     @Override
-    @TruffleBoundary
     public Iterator<A> iterator() {
         Object[] elements = storage.toArray();
 
@@ -536,7 +526,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      * Creates a mutable copy of this set.
      * Used by to_mut to get a fresh copy that can be mutated.
      */
-    @TruffleBoundary
     public MezzeSet<A> copyToMutable() {
         if (storage instanceof HashSetStorage hashStorage) {
             return new MezzeSet<>(hashStorage.copyToMutable());
@@ -553,7 +542,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      * Creates a mutable set with given initial capacity.
      * Use this when you know the approximate final size.
      */
-    @TruffleBoundary
     public static <A> MezzeSet<A> mutableWithCapacity(int capacity) {
         // Pre-create a HashSetStorage with enough room
         java.util.HashSet<Object> temp = new java.util.HashSet<>(capacity);
@@ -565,7 +553,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      * Only safe within LocalMut context.
      * Returns true if element was new, false if already present.
      */
-    @TruffleBoundary
     public boolean mutAdd(A elem) {
         if (storage instanceof HashSetStorage hashStorage) {
             return hashStorage.mutAdd(elem);
@@ -578,7 +565,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      * Only safe within LocalMut context.
      * Returns true if element was found and removed.
      */
-    @TruffleBoundary
     public boolean mutRemove(A elem) {
         if (storage instanceof HashSetStorage hashStorage) {
             return hashStorage.mutRemove(elem);
@@ -590,7 +576,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      * In-place clear - mutates the underlying storage.
      * Only safe within LocalMut context.
      */
-    @TruffleBoundary
     public void mutClear() {
         if (storage instanceof HashSetStorage hashStorage) {
             hashStorage.mutClear();
@@ -640,7 +625,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     }
 
     @ExportMessage
-    @TruffleBoundary
     Object readArrayElement(long index) {
         return storage.toArray()[(int) index];
     }
@@ -666,7 +650,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     }
 
     @ExportMessage
-    @TruffleBoundary
     Object getIterator() {
         return new SetIterator(iterator());
     }
@@ -685,13 +668,11 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
         }
 
         @ExportMessage
-        @TruffleBoundary
         boolean hasIteratorNextElement() {
             return iterator.hasNext();
         }
 
         @ExportMessage
-        @TruffleBoundary
         Object getIteratorNextElement() throws UnsupportedMessageException {
             if (!iterator.hasNext()) {
                 throw UnsupportedMessageException.create();
@@ -703,7 +684,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     // ===== OBJECT METHODS =====
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("{");
         boolean first = true;
@@ -717,7 +697,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     }
 
     @Override
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public boolean equals(Object obj) {
         if (this == obj) return true;
@@ -734,7 +713,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     }
 
     @Override
-    @TruffleBoundary
     public int hashCode() {
         int result = 0;
         for (A elem : this) {

@@ -183,7 +183,6 @@ public final class ObjectSeqStorage implements SeqStorage {
     /**
      * Sort using natural ordering (elements must be Comparable).
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public ObjectSeqStorage sort() {
         Object[] newData = Arrays.copyOf(data, length);
@@ -204,7 +203,6 @@ public final class ObjectSeqStorage implements SeqStorage {
     /**
      * Remove duplicates (keeping first occurrence).
      */
-    @TruffleBoundary
     public ObjectSeqStorage distinct() {
         java.util.LinkedHashSet<Object> seen = new java.util.LinkedHashSet<>();
         for (Object elem : data) {
@@ -215,7 +213,6 @@ public final class ObjectSeqStorage implements SeqStorage {
 
     // ===== Helper methods for boxing =====
 
-    @TruffleBoundary
     private static Object[] boxLongArray(long[] longs) {
         Object[] result = new Object[longs.length];
         for (int i = 0; i < longs.length; i++) {
@@ -224,7 +221,6 @@ public final class ObjectSeqStorage implements SeqStorage {
         return result;
     }
 
-    @TruffleBoundary
     private static Object[] boxDoubleArray(double[] doubles) {
         Object[] result = new Object[doubles.length];
         for (int i = 0; i < doubles.length; i++) {
@@ -233,7 +229,6 @@ public final class ObjectSeqStorage implements SeqStorage {
         return result;
     }
 
-    @TruffleBoundary
     private static Object[] boxBooleanStorage(BooleanSeqStorage bools) {
         Object[] result = new Object[bools.size()];
         for (int i = 0; i < bools.size(); i++) {
@@ -243,7 +238,6 @@ public final class ObjectSeqStorage implements SeqStorage {
     }
 
     @Override
-    @TruffleBoundary
     public String toString() {
         return "ObjectSeqStorage" + Arrays.toString(trimmedData());
     }

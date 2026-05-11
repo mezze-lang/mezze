@@ -108,7 +108,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      * Creates a deque from varargs.
      */
     @SafeVarargs
-    @TruffleBoundary
     public static <A> MezzeDeque<A> of(A... elements) {
         if (elements.length == 0) return empty();
         if (elements.length == 1) return of(elements[0]);
@@ -123,7 +122,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
     /**
      * Creates a deque of longs.
      */
-    @TruffleBoundary
     public static MezzeDeque<Long> ofLongs(long... elements) {
         if (elements.length == 0) return empty();
 
@@ -466,7 +464,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
     /**
      * Creates a deque from an iterable.
      */
-    @TruffleBoundary
     public static <A> MezzeDeque<A> fromIterable(Iterable<? extends A> elements) {
         MezzeDeque<A> result = empty();
         for (A elem : elements) {
@@ -481,7 +478,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      * Creates a mutable copy of this deque.
      * Used by to_mut to get a fresh copy that can be mutated.
      */
-    @TruffleBoundary
     public MezzeDeque<A> copyToMutable() {
         // Linearize into a new buffer for easy mutation
         Object[] newBuffer = new Object[buffer.length];
@@ -508,7 +504,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      * Only safe within LocalMut context.
      * Returns false if buffer is full.
      */
-    @TruffleBoundary
     public boolean mutPushFront(A element) {
         if (size >= buffer.length) {
             return false; // Buffer full, can't grow in mutable mode
@@ -524,7 +519,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      * Only safe within LocalMut context.
      * Returns false if buffer is full.
      */
-    @TruffleBoundary
     public boolean mutPushBack(A element) {
         if (size >= buffer.length) {
             return false; // Buffer full, can't grow in mutable mode
@@ -567,14 +561,12 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      * In-place clear - sets all elements to null.
      * Only safe within LocalMut context.
      */
-    @TruffleBoundary
     public void mutClear() {
         Arrays.fill(buffer, null);
     }
 
     // ===== INTERNAL =====
 
-    @TruffleBoundary
     private MezzeDeque<A> grow() {
         int newCapacity = buffer.length * 2;
         Object[] newBuffer = new Object[newCapacity];
@@ -627,7 +619,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
      * Returns all elements as array.
      * Uses bulk copy when deque is linearized.
      */
-    @TruffleBoundary
     @SuppressWarnings("unchecked")
     public A[] toArray() {
         Object[] result = new Object[size];
@@ -651,7 +642,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
     // ===== OBJECT METHODS =====
 
     @Override
-    @TruffleBoundary
     public String toString() {
         StringBuilder sb = new StringBuilder("Deque(");
         for (int i = 0; i < size; i++) {
@@ -663,7 +653,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
     }
 
     @Override
-    @TruffleBoundary
     public boolean equals(Object obj) {
         if (this == obj) return true;
         if (!(obj instanceof MezzeDeque<?> other)) return false;
@@ -678,7 +667,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
     }
 
     @Override
-    @TruffleBoundary
     public int hashCode() {
         int result = 1;
         for (int i = 0; i < size; i++) {
@@ -733,7 +721,6 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
     }
 
     @ExportMessage
-    @TruffleBoundary
     Object getIterator() {
         return new DequeIterator(iterator());
     }
@@ -752,13 +739,11 @@ public final class MezzeDeque<A> implements TruffleObject, Iterable<A> {
         }
 
         @ExportMessage
-        @TruffleBoundary
         boolean hasIteratorNextElement() {
             return iterator.hasNext();
         }
 
         @ExportMessage
-        @TruffleBoundary
         Object getIteratorNextElement() throws UnsupportedMessageException {
             if (!iterator.hasNext()) {
                 throw UnsupportedMessageException.create();
