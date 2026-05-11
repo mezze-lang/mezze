@@ -156,12 +156,17 @@ class TypeChecker(
     /**
      * Type checking error.
      *
-     * Wraps errors from different phases.
+     * Wraps errors from different phases. Carries the same rich info as the
+     * thrown [com.mezze.language.typechecker.TypeCheckError] exception so
+     * callers using the result-style API (CLI, LSP) get full diagnostic
+     * fidelity — not just message+loc. See #114 / recovery work.
      */
     data class TypeCheckError(
         val phase: String,
         val message: String,
-        val loc: com.mezze.language.parsedast.Loc? = null
+        val loc: com.mezze.language.parsedast.Loc? = null,
+        val errorType: ErrorType = ErrorType.GENERAL,
+        val metadata: Map<String, Any> = emptyMap()
     )
 
     /**
@@ -367,18 +372,18 @@ class TypeChecker(
 
         // Check for collected TypeCheckErrors (from recovery — preserves metadata)
         if (collectedTypeCheckErrors.isNotEmpty()) {
-            // When there's exactly one collected error, throw it as-is —
-            // tests assert on .metadata / .errorType which only the
-            // exception form carries. When multiple, return Failure so
-            // result-API callers (mez check) can display them all (#218).
-            if (collectedTypeCheckErrors.size == 1) {
-                throw collectedTypeCheckErrors.first()
-            }
+            // Always go through Failure, never throw — Failure.errors carries
+            // errorType + metadata since #313, so result-API callers (CLI,
+            // LSP) get full diagnostic fidelity. Throwing on the size==1 case
+            // (the old behavior) defeated multi-error reporting whenever there
+            // also happened to be exactly one collected exception.
             collectedErrors.addAll(collectedTypeCheckErrors.map { e ->
                 TypeCheckError(
                     phase = "Type Checking",
                     message = e.message ?: "Type checking failed",
-                    loc = e.loc
+                    loc = e.loc,
+                    errorType = e.errorType,
+                    metadata = e.metadata
                 )
             })
             // Don't return early — keep flowing so we can emit a partial
@@ -1290,7 +1295,10 @@ class TypeChecker(
             is TypeCheckResult.Failure -> {
                 val error = result.errors.firstOrNull()
                     ?: throw TypeCheckError("Type checking failed with unknown error")
-                throw TypeCheckError(error.message, error.loc)
+                // Preserve errorType + metadata so callers using the throwing
+                // entry point (legacy tests) see the same rich info that
+                // result-style callers get via Failure.errors. See #313.
+                throw TypeCheckError(error.message, error.loc, error.errorType, error.metadata)
             }
         }
     }
@@ -1341,7 +1349,9 @@ class TypeChecker(
             is TypeCheckResult.Failure -> {
                 val error = result.errors.firstOrNull()
                     ?: throw TypeCheckError("Type checking failed with unknown error")
-                throw TypeCheckError(error.message, error.loc)
+                // Preserve errorType + metadata (see #313 — throwing entry
+                // points keep parity with the Failure.errors list).
+                throw TypeCheckError(error.message, error.loc, error.errorType, error.metadata)
             }
         }
     }
