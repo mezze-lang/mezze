@@ -93,7 +93,7 @@ object DevRunner {
         // typed_modules / IR blobs in cache.sqlite that reference old stdlib
         // helper hashes are stale and would crash at runtime. Wipe them now
         // so the rest of startup proceeds from a clean cache.
-        invalidateOnStdlibVersionShift(store)
+        invalidateOnVersionShift(store)
 
         // Hydrate cached typed-modules into the typechecker cache. Slice G:
         // restrict to the entry module's transitive import closure plus
@@ -790,18 +790,24 @@ object DevRunner {
     }
 
     /**
-     * Bridge to StoreHydration.invalidateOnStdlibVersionShift: feed it the
-     * running binary's PrecompiledStdlib hashes, log if it actually wiped.
+     * Bridge to StoreHydration.invalidateOnVersionShift: feed it the
+     * running mez binary's version+sha identity.
+     *
+     * The identity we use: BuildInfo.VERSION + GIT_SHA. Both bump on
+     * every build (VERSION includes a fresh timestamp), so ANY mez
+     * rebuild — whether it touched the typechecker or not — triggers a
+     * wipe. Conservative: a rebuild that didn't actually change hash
+     * conventions will cause one unneeded recompile (~300ms). Worth it
+     * for never seeing a stale-cache crash again.
      */
-    private fun invalidateOnStdlibVersionShift(store: SQLiteMezzeStore) {
-        val current = com.mezze.language.typechecker.PrecompiledStdlib
-            .stdlibModuleHashes.joinToString(";") { it.hex }
+    private fun invalidateOnVersionShift(store: SQLiteMezzeStore) {
+        val current = "${com.mezze.language.cli.BuildInfo.VERSION}+${com.mezze.language.cli.BuildInfo.GIT_SHA}"
         val wiped = store.transaction {
             com.mezze.language.codebase.StoreHydration
-                .invalidateOnStdlibVersionShift(store, current)
+                .invalidateOnVersionShift(store, current)
         }
         if (wiped && System.getenv("MEZZE_TIMING") != null) {
-            System.err.println("[cache] stdlib version shift — wiped stale typed modules")
+            System.err.println("[cache] mez version shift — wiped typecheck-derived state")
         }
     }
 

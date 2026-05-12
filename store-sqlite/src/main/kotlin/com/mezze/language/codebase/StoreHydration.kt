@@ -149,9 +149,10 @@ object StoreHydration {
      * referencing hashes nothing else recognises, and the runtime
      * crashed with `expected MezzeFunction got null`.
      *
-     * What's preserved: `modules` (path/file/mtime — pure user-source
-     * observations), `parsed_modules` (parser output, upstream of
-     * typecheck), and `metadata` (where the stamp itself lives).
+     * What's preserved: `modules` (path/file/source_hash — pure
+     * user-source observations), `parsed_modules` (parser output,
+     * upstream of typecheck), and `metadata` (where the stamp itself
+     * lives).
      *
      * Two trigger cases — both should wipe:
      *   1. recorded != null && recorded != current → real upgrade.
@@ -160,14 +161,18 @@ object StoreHydration {
      *      this version stamp. We can't tell if its hashes are
      *      compatible with ours, so assume not.
      *
+     * The stamp string is opaque to this function — the caller chooses
+     * what represents "binary identity" (typically BuildInfo.VERSION +
+     * GIT_SHA). Any change to that string triggers a wipe.
+     *
      * Returns true if a wipe happened (caller may want to log).
      */
-    fun invalidateOnStdlibVersionShift(
+    fun invalidateOnVersionShift(
         store: MezzeStore,
-        currentStdlibHashes: String,
+        currentVersion: String,
     ): Boolean {
-        val recorded = store.getMetadata("project_stdlib_module_hashes")
-        if (recorded == currentStdlibHashes) return false
+        val recorded = store.getMetadata("mez_version")
+        if (recorded == currentVersion) return false
 
         // Detect "no stamp yet but cache already has typecheck output" —
         // legacy state from a pre-stamp binary; treat the same as a shift.
@@ -177,11 +182,11 @@ object StoreHydration {
 
         if (recorded != null || hasLegacyOutput) {
             wipeAllTypecheckDerivedState(store)
-            store.setMetadata("project_stdlib_module_hashes", currentStdlibHashes)
+            store.setMetadata("mez_version", currentVersion)
             return true
         }
         // Truly fresh project — first-time stamp, nothing to wipe.
-        store.setMetadata("project_stdlib_module_hashes", currentStdlibHashes)
+        store.setMetadata("mez_version", currentVersion)
         return false
     }
 

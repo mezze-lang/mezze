@@ -80,14 +80,13 @@ class BuildCommand {
 
         // Same cache-invalidation gate as mez dev — if this build is run
         // against a project whose .mz/ was last typechecked by an older
-        // mez binary, the cached IR has stale stdlib helper hashes and
-        // would produce a JAR that crashes at runtime. Nuke and rebuild.
+        // mez binary, the cached IR has stale hashes and would produce a
+        // JAR that crashes at runtime. Nuke and rebuild.
         run {
-            val current = com.mezze.language.typechecker.PrecompiledStdlib
-                .stdlibModuleHashes.joinToString(";") { it.hex }
+            val current = "${com.mezze.language.cli.BuildInfo.VERSION}+${com.mezze.language.cli.BuildInfo.GIT_SHA}"
             store.transaction {
                 com.mezze.language.codebase.StoreHydration
-                    .invalidateOnStdlibVersionShift(store, current)
+                    .invalidateOnVersionShift(store, current)
             }
         }
 
