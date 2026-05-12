@@ -1473,10 +1473,28 @@ private fun MezzeParser.parseIfLetBindingsAndBody(
     }
 }
 
-    // Expression with operator precedence
+    // Expression with operator precedence.
+    //
+    // Rewriting "Expected 'perform' ..." failures into a generic
+    // "expected an expression" message:
+    //   The expression alternation chain ends with `perform`, so when no
+    //   alternative matches (most commonly: empty input, EOF where an
+    //   expression should be, or starts-with-unexpected-keyword), the
+    //   deepest failure ends up being from the perform-keyword parser.
+    //   That bubbles out as "Expected 'perform' but got X" — which is
+    //   incomprehensible to anyone who isn't reading the parser source.
+    //   We catch that specific shape and replace it with a user-relevant
+    //   message about the actual missing thing (an expression).
 internal val MezzeParser.expression: Parser<ParsedExpr>
     get() = { stream ->
-        logicalOrExpression(stream)
+        val r = logicalOrExpression(stream)
+        if (r is ParseResult.Failure && r.message.startsWith("Expected 'perform'")) {
+            val got = tokenGotDescription(stream.current())
+            ParseResult.Failure(
+                "Expected an expression, but got $got",
+                r.position, r.line, r.column, r.isFatal,
+            )
+        } else r
     }
 
     // Logical OR operator: ||
@@ -2443,6 +2461,16 @@ internal fun MezzeParser.parseParsedInterpolatedString(
                 j++
             }
             val exprText = content.substring(i + 2, j - 1)
+            // Empty $() is a common typo — give a clear error rather than
+            // letting the empty token stream hit some random "expected X"
+            // deep in the expression parser (which surfaces confusing
+            // messages like "Expected 'perform' but got end of file").
+            if (exprText.isBlank()) {
+                return remaining.failure(
+                    "Empty interpolation \$(): nothing between the parens. " +
+                    "Did you mean to put an expression there, or write \\\$() to escape the dollar sign?"
+                )
+            }
             // Parse the expression inside $(...)
             val exprResult = try {
                 val lexer = Lexer(exprText)
@@ -2450,14 +2478,14 @@ internal fun MezzeParser.parseParsedInterpolatedString(
                 val exprStream = TokenStream(tokens)
                 expression(exprStream)
             } catch (e: Exception) {
-                return remaining.failure("Failed to parse interpolated expression: $exprText")
+                return remaining.failure("Failed to parse interpolated expression \$($exprText): ${e.message ?: "internal parser error"}")
             }
             when (exprResult) {
                 is ParseResult.Success -> {
                     parts.add(ParsedStringPart.Interpolation(exprResult.value))
                 }
                 is ParseResult.Failure -> {
-                    return remaining.failure("Failed to parse interpolated expression: ${exprResult.message}")
+                    return remaining.failure("Failed to parse interpolated expression \$($exprText): ${exprResult.message}")
                 }
             }
             i = j
