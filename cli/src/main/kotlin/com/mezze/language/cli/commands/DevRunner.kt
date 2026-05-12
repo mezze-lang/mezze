@@ -211,9 +211,20 @@ object DevRunner {
             System.exit(1)
         }
 
+        // Build one Truffle Context for the watch session — keeps the
+        // optimizing Engine warm AND the per-context caches (module
+        // resolver, parser, typechecker instances) alive across reloads.
+        // Saves ~30-50ms per reload vs building+closing a Context every
+        // time. MezzeLanguage.parse calls ctx.clearUserState() on each
+        // fresh Source eval, so per-run state isolation is preserved.
+        val sharedContext = buildWatchContext(engine, inspect, inspectBrk)
+        Runtime.getRuntime().addShutdownHook(Thread {
+            try { sharedContext.close(true) } catch (_: Throwable) { /* best-effort */ }
+        })
+
         // First run — always execute (use cache if present, else compile).
         printHeader(appName, entryFile)
-        compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, appName, inspect, inspectBrk, ReloadMode.COLD_START)
+        compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, appName, inspect, inspectBrk, ReloadMode.COLD_START, sharedContext)
         printWatching()
 
         // Watch only the dirs containing files this app depends on.
@@ -242,14 +253,14 @@ object DevRunner {
                     invalidateChangedModules(coalesced, projectRoot)
                     if (!noClear) System.err.print(ANSI_CLEAR)
                     printReloadBanner(appName, coalesced)
-                    compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, appName, inspect, inspectBrk, ReloadMode.WATCH_RELOAD)
+                    compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, appName, inspect, inspectBrk, ReloadMode.WATCH_RELOAD, sharedContext)
                     syncWatchedDirs(watcher, watchedDirs, sourceFile, projectRoot)
                     printWatching(keyboardActive)
                 }
                 DevEvent.Rerun -> {
                     if (!noClear) System.err.print(ANSI_CLEAR)
                     printForceRunBanner(appName)
-                    compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, appName, inspect, inspectBrk, ReloadMode.FORCE_RUN)
+                    compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, appName, inspect, inspectBrk, ReloadMode.FORCE_RUN, sharedContext)
                     syncWatchedDirs(watcher, watchedDirs, sourceFile, projectRoot)
                     printWatching(keyboardActive)
                 }
@@ -453,7 +464,8 @@ object DevRunner {
         store: SQLiteMezzeStore, engine: Engine,
         sourceFile: File, projectRoot: File, entryName: String, modulePath: String,
         appName: String, inspect: Boolean, inspectBrk: Boolean,
-        mode: ReloadMode
+        mode: ReloadMode,
+        sharedContext: Context? = null,
     ) {
         val startTime = System.nanoTime()
         val source = sourceFile.readText()
@@ -484,7 +496,7 @@ object DevRunner {
                 val unresolved = validateCachedHashes(cached, store)
                 if (unresolved.isEmpty()) {
                     val performers = loadPerformerRecords(store, appName)
-                    executeAndReport(cached, performers, projectRoot, entryName, inspect, inspectBrk, engine, startTime)
+                    executeAndReport(cached, performers, projectRoot, entryName, inspect, inspectBrk, engine, startTime, sharedContext)
                     return
                 } else if (timing) {
                     System.err.println("[${ms()}ms] cache stale: ${unresolved.size} unresolvable hash refs (first: ${unresolved.first().hex.take(8)}…); recompiling")
@@ -621,7 +633,7 @@ object DevRunner {
         lastDelta = delta
 
         executeAndReport(result.loweredFunctions, result.performerRecords,
-            projectRoot, entryName, inspect, inspectBrk, engine, startTime)
+            projectRoot, entryName, inspect, inspectBrk, engine, startTime, sharedContext)
     }
 
     /**
@@ -678,10 +690,11 @@ object DevRunner {
     private fun executeAndReport(
         functions: List<FunctionIR>, performers: List<Array<String>>,
         projectRoot: File, entryName: String, inspect: Boolean, inspectBrk: Boolean,
-        engine: Engine, startTime: Long
+        engine: Engine, startTime: Long,
+        sharedContext: Context? = null,
     ) {
         try {
-            executeWithTruffle(functions, performers, projectRoot.toPath(), entryName, inspect, inspectBrk, engine)
+            executeWithTruffle(functions, performers, projectRoot.toPath(), entryName, inspect, inspectBrk, engine, sharedContext)
         } catch (e: org.graalvm.polyglot.PolyglotException) {
             printError("Runtime Error", e.message ?: "Unknown error")
             return
@@ -702,31 +715,57 @@ object DevRunner {
         entryName: String,
         inspect: Boolean,
         inspectBrk: Boolean,
-        engine: Engine
+        engine: Engine,
+        sharedContext: Context? = null,
     ) {
-        val builder = Context.newBuilder(MezzeLanguage.ID)
-            .engine(engine)
-            .allowAllAccess(true)
-            .allowCreateThread(true)
-            // Required for any of Truffle's instrumentation tools — inspect,
-            // cpusampler, coverage, memtracer, insight, engine.Trace*. Without
-            // this, every option flag silently no-ops.
-            .allowExperimentalOptions(true)
+        // If the caller provided a shared Context (watch mode), reuse it.
+        // MezzeLanguage.parse already clears per-context user state on each
+        // new Source eval (ctx.clearUserState()), so re-execution is safe.
+        // Otherwise (one-shot / --no-watch), build+close as before so the
+        // process can exit cleanly with all instruments flushed.
+        val context = sharedContext ?: run {
+            val builder = Context.newBuilder(MezzeLanguage.ID)
+                .engine(engine)
+                .allowAllAccess(true)
+                .allowCreateThread(true)
+                // Required for any of Truffle's instrumentation tools — inspect,
+                // cpusampler, coverage, memtracer, insight, engine.Trace*. Without
+                // this, every option flag silently no-ops.
+                .allowExperimentalOptions(true)
 
-        if (inspect || inspectBrk) {
-            builder.option("inspect", "true")
-            if (inspectBrk) builder.option("inspect.Suspend", "true")
+            if (inspect || inspectBrk) {
+                builder.option("inspect", "true")
+                if (inspectBrk) builder.option("inspect.Suspend", "true")
+            }
+            builder.build()
         }
-
-        val context = builder.build()
         try {
             MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot, entryName)
             val runId = runCounter.incrementAndGet()
             val source = Source.newBuilder(MezzeLanguage.ID, "# DevRunner $runId", "__dev_runner_${runId}__.mz").buildLiteral()
             context.eval(source)
         } finally {
-            context.close(true)
+            // Only close the context we owned; the shared one outlives us.
+            if (sharedContext == null) context.close(true)
         }
+    }
+
+    /**
+     * Build a watch-mode Truffle Context that survives across reloads.
+     * Same builder as the per-run path in executeWithTruffle, just held
+     * open. Closed by the JVM shutdown hook.
+     */
+    private fun buildWatchContext(engine: Engine, inspect: Boolean, inspectBrk: Boolean): Context {
+        val builder = Context.newBuilder(MezzeLanguage.ID)
+            .engine(engine)
+            .allowAllAccess(true)
+            .allowCreateThread(true)
+            .allowExperimentalOptions(true)
+        if (inspect || inspectBrk) {
+            builder.option("inspect", "true")
+            if (inspectBrk) builder.option("inspect.Suspend", "true")
+        }
+        return builder.build()
     }
 
     private fun sha256(content: String): String {
