@@ -71,12 +71,22 @@ object StoreHydration {
             } else {
                 val filePath = mod.filePath ?: run { misses++; continue }
                 val file = File(filePath).takeIf { it.exists() } ?: run { misses++; continue }
-                val onDiskHash = sha256(file.readText())
-                if (onDiskHash != mod.sourceHash) {
-                    misses++
-                    continue
+                // Fast path: if the cached mtime matches the file's current
+                // mtime, the source can't have changed since we hashed it —
+                // trust the cached hash without re-reading the file.
+                // Falls through to the hash check if mtime is missing
+                // (rows from before the column was added) or differs.
+                val onDiskMtime = file.lastModified()
+                if (mod.mtime != null && mod.mtime == onDiskMtime) {
+                    mod.sourceHash
+                } else {
+                    val onDiskHash = sha256(file.readText())
+                    if (onDiskHash != mod.sourceHash) {
+                        misses++
+                        continue
+                    }
+                    onDiskHash
                 }
-                onDiskHash
             }
 
             val blob = store.getTypedModule(mod.path, cachedHash) ?: run {
