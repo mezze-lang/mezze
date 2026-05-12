@@ -78,6 +78,14 @@ module.exports = grammar({
     // type_binding's value `'a = T` — T could be a `_type` (resolved)
     // or the start of a function_type. Explore both.
     [$._type, $.function_type],
+    // `having 'a = T, ...` inside an effect_reference vs ability_constraint:
+    // after the first type_binding, the comma could continue the binding
+    // list OR terminate the effect/constraint and start the next sibling.
+    // GLR picks the longer match (continue bindings) when `'` follows the
+    // comma, since type_binding starts with a type_variable.
+    [$.having_clause],
+    [$.having_clause, $.effect_reference],
+    [$.having_clause, $.ability_constraint],
   ],
 
   rules: {
@@ -306,7 +314,7 @@ module.exports = grammar({
         'for',
         field('target', $._type),
         optional(field('performer_args', $.record_type)),
-        optional($._having_clause),
+        optional($.having_clause),
         'where',
         '{',
         sepBy(',', $.impl_operation),
@@ -494,15 +502,18 @@ module.exports = grammar({
     // start a new type_binding.
     effect_reference: $ => prec.left(seq(
       field('name', $.upper_identifier),
-      optional($._having_clause),
+      optional($.having_clause),
     )),
 
-    // Grouped so the `having ...` list has its own associativity boundary,
-    // separate from the outer effect_row comma list.
-    _having_clause: $ => prec.left(seq(
+    // `having 'a = T, 'b = U` — multiple type bindings comma-separated.
+    // Declared as an explicit GLR conflict against ability_constraint
+    // and effect_reference (both of which can also follow `having ...`
+    // with comma-continuation in their parent rule). Public name (not
+    // underscore-prefixed) so the conflict can reference it.
+    having_clause: $ => seq(
       'having',
       sepBy1(',', $.type_binding),
-    )),
+    ),
 
     // ===== Expressions =====
 
