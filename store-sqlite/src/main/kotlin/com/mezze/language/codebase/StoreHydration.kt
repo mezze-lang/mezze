@@ -140,4 +140,36 @@ object StoreHydration {
         val digest = MessageDigest.getInstance("SHA-256")
         return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
     }
+
+    /**
+     * If the project's cache was last typechecked against a different
+     * stdlib version (different content hashes for stdlib modules),
+     * wipe stale typed_modules so the next typecheck rebuilds against
+     * the binary's current stdlib.
+     *
+     * Caller passes [currentStdlibHashes] — the running binary's idea
+     * of the stdlib's module hashes, semicolon-joined. We compare to
+     * the project's last-stamped value (stored in cache.sqlite metadata
+     * under key `project_stdlib_module_hashes`).
+     *
+     * Returns true if a wipe happened (caller may want to log).
+     */
+    fun invalidateOnStdlibVersionShift(
+        store: MezzeStore,
+        currentStdlibHashes: String,
+    ): Boolean {
+        val recorded = store.getMetadata("project_stdlib_module_hashes")
+        if (recorded == currentStdlibHashes) return false
+        if (recorded != null) {
+            for (mod in store.getAllModules()) {
+                if (mod.path.startsWith("std::")) continue
+                store.clearTypedModulesForPath(mod.path)
+            }
+            store.setMetadata("project_stdlib_module_hashes", currentStdlibHashes)
+            return true
+        }
+        // First-time stamp — no recorded value yet, no wipe needed.
+        store.setMetadata("project_stdlib_module_hashes", currentStdlibHashes)
+        return false
+    }
 }

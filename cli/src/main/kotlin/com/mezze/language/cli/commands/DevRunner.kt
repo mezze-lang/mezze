@@ -78,6 +78,13 @@ object DevRunner {
         com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
         com.mezze.language.typechecker.ModuleResolver.setStore(store)
 
+        // Validate the project cache against the current binary's stdlib.
+        // If the user upgraded mez (changing PrecompiledStdlib hashes), any
+        // typed_modules / IR blobs in cache.sqlite that reference old stdlib
+        // helper hashes are stale and would crash at runtime. Wipe them now
+        // so the rest of startup proceeds from a clean cache.
+        invalidateOnStdlibVersionShift(store)
+
         // Hydrate cached typed-modules into the typechecker cache. Slice G:
         // restrict to the entry module's transitive import closure plus
         // stdlib (any decl in any imported module may reference stdlib).
@@ -770,6 +777,22 @@ object DevRunner {
     private fun sha256(content: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
         return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Bridge to StoreHydration.invalidateOnStdlibVersionShift: feed it the
+     * running binary's PrecompiledStdlib hashes, log if it actually wiped.
+     */
+    private fun invalidateOnStdlibVersionShift(store: SQLiteMezzeStore) {
+        val current = com.mezze.language.typechecker.PrecompiledStdlib
+            .stdlibModuleHashes.joinToString(";") { it.hex }
+        val wiped = store.transaction {
+            com.mezze.language.codebase.StoreHydration
+                .invalidateOnStdlibVersionShift(store, current)
+        }
+        if (wiped && System.getenv("MEZZE_TIMING") != null) {
+            System.err.println("[cache] stdlib version shift — wiped stale typed modules")
+        }
     }
 
     /**

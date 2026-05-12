@@ -78,6 +78,19 @@ class BuildCommand {
         com.mezze.language.typechecker.PrecompiledStdlib.setStore(store)
         com.mezze.language.typechecker.ModuleResolver.setStore(store)
 
+        // Same cache-invalidation gate as mez dev — if this build is run
+        // against a project whose .mz/ was last typechecked by an older
+        // mez binary, the cached IR has stale stdlib helper hashes and
+        // would produce a JAR that crashes at runtime. Nuke and rebuild.
+        run {
+            val current = com.mezze.language.typechecker.PrecompiledStdlib
+                .stdlibModuleHashes.joinToString(";") { it.hex }
+            store.transaction {
+                com.mezze.language.codebase.StoreHydration
+                    .invalidateOnStdlibVersionShift(store, current)
+            }
+        }
+
         try {
             val startTime = System.nanoTime()
             val timing = System.getenv("MEZZE_TIMING") != null
