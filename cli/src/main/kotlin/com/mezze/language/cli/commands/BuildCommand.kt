@@ -271,17 +271,31 @@ class BuildCommand {
             createStandaloneJar(blobsFile, jarFile)
             if (timing) System.err.println("[${ms()}ms] standalone JAR packed")
 
+            // 6b. Clean up the intermediate blobs.sqlite — it's already
+            //     packed into the jar at META-INF; the file on disk was
+            //     just a staging artifact. Same for any sqlite WAL/SHM
+            //     sidecars sqlite leaves behind.
+            blobsFile.delete()
+            File(blobsFile.absolutePath + "-wal").delete()
+            File(blobsFile.absolutePath + "-shm").delete()
+            File(blobsFile.absolutePath + "-journal").delete()
+
             // 7. Generate launcher scripts (Unix sh + Windows bat).
             //    These pre-set production-grade JVM flags so users don't have
             //    to remember them. They invoke `java -jar <app>.jar` with:
-            //      -XX:+UseZGC -XX:+ZGenerational
+            //      -XX:+UseZGC
             //          → <2ms GC pauses (vs G1's ~200ms). Functional code
             //            generates a lot of short-lived values; generational
-            //            ZGC is built for exactly that.
+            //            ZGC (default on JDK 24+) is built for exactly that.
             //      -Xmx4g
             //          → sane default heap; user can override.
+            //      --enable-native-access=ALL-UNNAMED
+            //      --sun-misc-unsafe-memory-access=allow
+            //          → silences the JVM warnings that SQLite (JNI load) and
+            //            Truffle (sun.misc.Unsafe.objectFieldOffset) trigger
+            //            on every startup. Both uses are legitimate.
             //    Users can still run the bare jar with `java -jar` if they
-            //    want different flags.
+            //    want different flags (will see the warnings, code still works).
             val unixLauncher = File(targetDir, outputJarName)
             writeUnixLauncher(unixLauncher, jarFile.name)
             val winLauncher = File(targetDir, "$outputJarName.bat")
@@ -317,10 +331,12 @@ class BuildCommand {
     ) {
         if (outputFile.exists()) outputFile.delete()
 
-        // Create file-based store directly
-        val targetStore = SQLiteMezzeStore.forProject(outputFile.parentFile)
-        // Actually we need a fresh DB at the output path, not .mz/cache.sqlite
-        // Use a direct connection
+        // Open a raw sqlite connection on the output file. We previously
+        // called SQLiteMezzeStore.forProject(outputFile.parentFile) here as
+        // dead code — it created an unused target/.mz/cache.sqlite as a side
+        // effect of the standard "open a project store" path. The actual
+        // store we want is a single self-contained file at outputFile, with
+        // just the schema this app needs at runtime.
         val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${outputFile.absolutePath}")
         conn.createStatement().use { s ->
             s.executeUpdate("PRAGMA journal_mode=WAL")
@@ -380,8 +396,14 @@ class BuildCommand {
      *
      * Flags chosen for FP-style workloads (high allocation, short-lived
      * values, recursive call patterns):
-     *   -XX:+UseZGC -XX:+ZGenerational  → <2ms GC pauses
+     *   -XX:+UseZGC                     → <2ms GC pauses (generational by
+     *                                     default on JDK 24+; older flag
+     *                                     +ZGenerational was removed in 24).
      *   -Xmx4g                          → sane default heap
+     *   --enable-native-access=ALL-...  → silences the SQLite + sun.misc.Unsafe
+     *                                     warnings that otherwise print on every
+     *                                     JVM start. Truffle and SQLite both use
+     *                                     JNI/Unsafe legitimately.
      *
      * Users override with env var MEZZE_JAVA_OPTS for one-off tuning.
      */
@@ -404,7 +426,7 @@ class BuildCommand {
             fi
 
             JAVA="${'$'}{MEZZE_JAVA:-java}"
-            DEFAULT_OPTS="-XX:+UseZGC -XX:+ZGenerational -Xmx4g"
+            DEFAULT_OPTS="-XX:+UseZGC -Xmx4g --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
             OPTS="${'$'}{MEZZE_JAVA_OPTS:-${'$'}DEFAULT_OPTS}"
 
             exec "${'$'}JAVA" ${'$'}OPTS -jar "${'$'}JAR" "${'$'}@"
@@ -429,7 +451,7 @@ class BuildCommand {
                 exit /b 1
             )
             if "%MEZZE_JAVA%"=="" set "MEZZE_JAVA=java"
-            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-XX:+UseZGC -XX:+ZGenerational -Xmx4g"
+            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-XX:+UseZGC -Xmx4g --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
             "%MEZZE_JAVA%" %MEZZE_JAVA_OPTS% -jar "%JAR%" %*
         """.trimIndent() + "\r\n"
         launcher.writeText(script)

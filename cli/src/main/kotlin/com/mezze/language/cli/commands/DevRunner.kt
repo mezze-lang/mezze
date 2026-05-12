@@ -163,13 +163,11 @@ object DevRunner {
 
         val engine = engineBuilder.build()
 
-        // Close the engine on JVM exit so instrument onDispose() runs.
-        // Without this, the allocations / coverage / profile output files
-        // stay empty: the JVM exits, the engine is never closed, the
-        // instruments never get a chance to flush their data.
-        Runtime.getRuntime().addShutdownHook(Thread {
-            try { engine.close() } catch (_: Throwable) { /* best-effort */ }
-        })
+        // Truffle's polyglot engine registers its OWN shutdown hook that
+        // disposes instruments and flushes their output. Adding our own
+        // engine.close() hook here would race with Truffle's, producing a
+        // spurious "log handler is closed" stack trace at JVM exit. Trust
+        // Truffle's hook — it handles instrument flush correctly.
 
         if (noWatch) {
             runOnce(store, engine, projectRoot, entryFile, entryName, modulePath, appName, inspect, inspectBrk)
@@ -217,10 +215,11 @@ object DevRunner {
         // Saves ~30-50ms per reload vs building+closing a Context every
         // time. MezzeLanguage.parse calls ctx.clearUserState() on each
         // fresh Source eval, so per-run state isolation is preserved.
+        //
+        // No shutdown hook to close it — Truffle's own Engine shutdown
+        // hook handles context cleanup. Adding ours races and produces a
+        // "log handler is closed" stack trace at exit.
         val sharedContext = buildWatchContext(engine, inspect, inspectBrk)
-        Runtime.getRuntime().addShutdownHook(Thread {
-            try { sharedContext.close(true) } catch (_: Throwable) { /* best-effort */ }
-        })
 
         // First run — always execute (use cache if present, else compile).
         printHeader(appName, entryFile)

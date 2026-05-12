@@ -182,11 +182,10 @@ object StandaloneHelper {
 
         val engine = engineBuilder.build()
 
-        // Close engine on JVM exit so onDispose flushes profile / coverage /
-        // allocation output. Without this, those files stay empty.
-        Runtime.getRuntime().addShutdownHook(Thread {
-            try { engine.close() } catch (_: Throwable) { /* best-effort */ }
-        })
+        // Truffle's polyglot engine registers its OWN shutdown hook that
+        // disposes instruments and flushes their output. Adding our own
+        // engine.close() hook races with Truffle's and produces a spurious
+        // "log handler is closed" stack trace at exit.
 
         val context = Context.newBuilder(MezzeLanguage.ID)
             .engine(engine)
