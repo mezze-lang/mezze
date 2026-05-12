@@ -327,13 +327,15 @@ class InitCommand {
 
     private fun createGitignore(file: File) {
         val content = """
-            # Mezze build artifacts
+            # Mezze build artifacts (default — change `out` in Mezze.toml's
+            # [build] section if you use a different output directory).
+            .build/
             *.jar
             Mezze.lock
             mezze_packages/
 
-            # Mezze codebase (generated)
-            .mez/
+            # Mezze project cache (generated; safe to delete, will be rebuilt).
+            .mz/
 
             # IDE
             .idea/

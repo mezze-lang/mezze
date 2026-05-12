@@ -37,10 +37,33 @@ data class MezzeToml(
     val `package`: PackageMetadata,
     val lib: LibraryConfig? = null,
     val app: List<AppConfig>? = null,
+    val build: BuildConfig = BuildConfig(),
     val dependencies: Map<String, String> = emptyMap(),
     @SerialName("dev-dependencies")
     val devDependencies: Map<String, String> = emptyMap()
 )
+
+/**
+ * Build-output configuration. `mez build` writes JARs / launchers under
+ * the [out] directory. Override with `--out=<path>` on the CLI or with
+ * a `[build]` section in Mezze.toml:
+ *
+ *     [build]
+ *     out = "dist"
+ *
+ * The default lives in [BuildConfig.DEFAULT_OUT] — single source of
+ * truth, so callers that want to display "the default would be X" can
+ * reference it instead of hard-coding the string.
+ */
+@Serializable
+data class BuildConfig(
+    val out: String = DEFAULT_OUT,
+) {
+    companion object {
+        /** Default directory `mez build` writes to when no override is set. */
+        const val DEFAULT_OUT: String = ".build"
+    }
+}
 
 @Serializable
 data class PackageMetadata(

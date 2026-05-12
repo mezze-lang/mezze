@@ -50,6 +50,15 @@ class BuildCommand {
         val appName = args.find { it.startsWith("--app=") }?.substringAfter("=")
             ?: args.getOrNull(args.indexOf("--app") + 1)?.takeIf { !it.startsWith("--") }
 
+        // Output directory precedence (highest first):
+        //   1. CLI flag:    --out=<path> or -o <path>
+        //   2. Mezze.toml:  [build] out = "..."
+        //   3. Default:     BuildConfig.DEFAULT_OUT (".build")
+        val cliOut = args.find { it.startsWith("--out=") }?.substringAfter("=")
+            ?: args.getOrNull(args.indexOf("--out") + 1)?.takeIf { !it.startsWith("--") }
+            ?: args.getOrNull(args.indexOf("-o") + 1)?.takeIf { !it.startsWith("--") && !it.startsWith("-o") }
+        val outDirName = cliOut ?: manifest.build.out
+
         val appConfig = if (appName != null) {
             manifest.app.find { it.name == appName } ?: run {
                 println("Error: App '$appName' not found. Available: ${manifest.app.map { it.name }}")
@@ -179,8 +188,13 @@ class BuildCommand {
             val reachable = store.getTransitiveClosure(entryHash)
             println("Compiled: ${reachable.size} definitions reachable from entry point")
 
-            // 5. Create target directory and minimal blobs.sqlite
-            val targetDir = File(currentDir, "target")
+            // 5. Resolve output directory + create it.
+            //    Layout:
+            //      single app:  <out>/<package>.jar + <out>/<package> launcher
+            //      multi app:   <out>/<app-name>/<app-name>.jar + ../<app-name>
+            //                   (nested so multiple apps don't collide flat)
+            val outRoot = File(currentDir, outDirName)
+            val targetDir = if (manifest.app.size > 1) File(outRoot, appConfig.name) else outRoot
             targetDir.mkdirs()
 
             val outputJarName = if (manifest.app.size == 1) "${manifest.`package`.name}" else appConfig.name
@@ -304,10 +318,18 @@ class BuildCommand {
 
             val buildTime = (System.nanoTime() - startTime) / 1_000_000
 
+            // Show paths relative to the project root so the user sees
+            // exactly what to type. targetDir is either <out> (single
+            // app) or <out>/<app-name> (multi).
+            val relTarget = currentDir.toPath().relativize(targetDir.toPath()).toString()
+            val launcherRel = "$relTarget/${unixLauncher.name}"
+            val jarRel = "$relTarget/${jarFile.name}"
+
             println()
             println("Build complete: ${jarFile.name} (${jarFile.length() / 1024}KB)")
-            println("Run: ./target/${unixLauncher.name}     (Unix — preconfigured)")
-            println("     java -jar target/${jarFile.name}  (any JVM, default settings)")
+            println("Output: $relTarget/")
+            println("Run: ./$launcherRel     (Unix — preconfigured)")
+            println("     java -jar $jarRel  (any JVM, default settings)")
             println("Time: ${buildTime}ms")
 
         } catch (e: Exception) {
