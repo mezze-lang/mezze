@@ -213,28 +213,22 @@ object StoreHydration {
             }
             return
         }
+        // Caller wraps us in store.transaction { ... } for atomicity, so
+        // we just emit DDL here — touching autoCommit ourselves conflicts
+        // with the outer transaction's bookkeeping.
         val preserved = setOf("modules", "parsed_modules", "metadata", "schema_version", "sqlite_sequence")
         store.executeRaw { conn ->
-            conn.autoCommit = false
-            try {
-                val tables = mutableListOf<String>()
-                conn.createStatement().use { s ->
-                    s.executeQuery("SELECT name FROM main.sqlite_master WHERE type='table'").use { rs ->
-                        while (rs.next()) tables.add(rs.getString(1))
-                    }
+            val tables = mutableListOf<String>()
+            conn.createStatement().use { s ->
+                s.executeQuery("SELECT name FROM main.sqlite_master WHERE type='table'").use { rs ->
+                    while (rs.next()) tables.add(rs.getString(1))
                 }
-                conn.createStatement().use { s ->
-                    for (t in tables) {
-                        if (t in preserved) continue
-                        s.executeUpdate("DELETE FROM main.\"$t\"")
-                    }
+            }
+            conn.createStatement().use { s ->
+                for (t in tables) {
+                    if (t in preserved) continue
+                    s.executeUpdate("DELETE FROM main.\"$t\"")
                 }
-                conn.commit()
-            } catch (e: Exception) {
-                conn.rollback()
-                throw e
-            } finally {
-                conn.autoCommit = true
             }
         }
     }
