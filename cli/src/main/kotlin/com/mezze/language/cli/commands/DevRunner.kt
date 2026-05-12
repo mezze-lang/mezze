@@ -799,6 +799,10 @@ object DevRunner {
             val filePath = mod.filePath ?: continue
             val file = File(filePath)
             if (!file.exists()) return true
+            // Fast path: if mtime is recorded and matches the file's current
+            // mtime, the source can't have changed since we hashed it.
+            val onDiskMtime = file.lastModified()
+            if (mod.mtime != null && mod.mtime == onDiskMtime) continue
             if (sha256(file.readText()) != mod.sourceHash) return true
         }
         return false
