@@ -39,8 +39,9 @@ object ErrorFormatter {
         colorize: Boolean = false
     ): String {
         return buildString {
-            // Header
-            appendLine("❌ Type Error [${error.phase}]")
+            // Header — show the specific phase only if it's informative.
+            // The TypeChecker.TypeCheckError variant always has a phase.
+            appendLine("❌ Type Error: ${error.phase}")
             appendLine("━".repeat(50))
 
             // Location
@@ -74,9 +75,19 @@ object ErrorFormatter {
         colorize: Boolean = false
     ): String {
         return buildString {
-            // Header - use errorType for phase info
-            val phase = error.errorType.name.lowercase().replace("_", " ").replaceFirstChar { it.uppercase() }
-            appendLine("❌ Type Error [$phase]")
+            // Header — only show the category subtitle when it's
+            // informative. GENERAL means "we didn't bother classifying
+            // this," so it adds noise; drop the bracket entirely for that.
+            val header = if (error.errorType == ErrorType.GENERAL) {
+                "❌ Type Error"
+            } else {
+                // TYPE_MISMATCH -> "Type Mismatch"
+                val human = error.errorType.name.split('_').joinToString(" ") {
+                    it.lowercase().replaceFirstChar { c -> c.uppercase() }
+                }
+                "❌ Type Error: $human"
+            }
+            appendLine(header)
             appendLine("━".repeat(50))
 
             val location = error.loc

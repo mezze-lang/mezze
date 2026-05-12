@@ -16,6 +16,7 @@ import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parser.ParseException
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
+import com.mezze.language.typechecker.ErrorType
 import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.services.LanguageClient
@@ -908,7 +909,12 @@ class MezzeTextDocumentService(
             column = (loc?.startCol ?: 1) - 1,
             endLine = loc?.endLine?.minus(1),
             endColumn = loc?.endCol,
-            code = error.errorType.name
+            // GENERAL means "we didn't bother classifying" — surfacing it
+            // as `mezze(GENERAL)` in editor UI is pure noise. Omit so the
+            // editor just shows `mezze` for these. Specific categories
+            // (TYPE_MISMATCH, MISSING_FIELD, etc.) still carry through so
+            // clients can pattern-match on them.
+            code = error.errorType.name.takeUnless { it == ErrorType.GENERAL.name }
         )
         if (error.metadata.isNotEmpty()) {
             diag.data = error.metadata
@@ -935,7 +941,7 @@ class MezzeTextDocumentService(
             column = (loc?.startCol ?: 1) - 1,
             endLine = loc?.endLine?.minus(1),
             endColumn = loc?.endCol,
-            code = error.errorType.name
+            code = error.errorType.name.takeUnless { it == ErrorType.GENERAL.name }
         )
     }
 
