@@ -633,9 +633,22 @@ object DevRunner {
      * ModuleTypeChecker.globalCache.
      */
     private fun hydrateTypedModulesFromStore(store: SQLiteMezzeStore, entryModulePath: String) {
-        // Compute the entry's transitive imports up-front. Always include
-        // stdlib — typechecker / executor cross-reference stdlib decls
-        // even when the entry doesn't directly `use std::*`.
+        // STDLIB FAST PATH — PrecompiledStdlib already holds every stdlib
+        // TypedModule in memory at JVM startup. Pump those directly into
+        // ModuleTypeChecker's cache instead of round-tripping through
+        // sqlite + CBOR deserialize for each one. Saves ~80-100ms on
+        // small projects (most of the hydrate cost was stdlib).
+        val stdlibStart = System.nanoTime()
+        var stdlibHydrated = 0
+        for (v2Module in com.mezze.language.typechecker.PrecompiledStdlib.stdlibTypedModules.values) {
+            com.mezze.language.typechecker.module.ModuleTypeChecker
+                .hydrateFromV2Module(v2Module.path, v2Module)
+            stdlibHydrated++
+        }
+        val stdlibMs = (System.nanoTime() - stdlibStart) / 1_000_000
+
+        // USER MODULES — walk the project store for the entry's import
+        // closure only. Stdlib is excluded (handled above).
         val closure = com.mezze.language.codebase.StoreHydration
             .computeImportClosure(store, entryModulePath)
         val stats = com.mezze.language.codebase.StoreHydration.hydrateTypedModules(
@@ -651,14 +664,14 @@ object DevRunner {
                 }
             },
             include = { mod ->
-                // Stdlib (std::*) lives in stdlib.sqlite — always pre-warm
-                // since most code references it. User modules: only what
-                // the entry's import closure reaches.
-                mod.path.startsWith("std::") || mod.path in closure
+                // Stdlib is already hydrated above from PrecompiledStdlib —
+                // skip the sqlite round-trip for std::* modules.
+                !mod.path.startsWith("std::") && mod.path in closure
             }
         )
         if (System.getenv("MEZZE_TIMING") != null) {
-            System.err.println("[${stats.elapsedMs}ms] hydrated typed modules: ${stats.hits} hit, ${stats.misses} miss (closure=${closure.size})")
+            System.err.println("[${stdlibMs}ms] hydrated $stdlibHydrated stdlib modules from PrecompiledStdlib")
+            System.err.println("[${stats.elapsedMs}ms] hydrated user modules: ${stats.hits} hit, ${stats.misses} miss (closure=${closure.size})")
         }
     }
 
