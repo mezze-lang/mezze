@@ -143,14 +143,29 @@ object StoreHydration {
 
     /**
      * If the project's cache was last typechecked against a different
-     * stdlib version (different content hashes for stdlib modules),
-     * wipe stale typed_modules so the next typecheck rebuilds against
-     * the binary's current stdlib.
+     * mezze version (different stdlib module hashes), wipe ALL
+     * typecheck-derived state so the next compile produces fresh IR
+     * against the current binary's hashes.
      *
-     * Caller passes [currentStdlibHashes] — the running binary's idea
-     * of the stdlib's module hashes, semicolon-joined. We compare to
-     * the project's last-stamped value (stored in cache.sqlite metadata
-     * under key `project_stdlib_module_hashes`).
+     * Why everything: a typechecker/lowerer change shifts the content
+     * hashes of user decls. After such a shift, EVERY table that keys
+     * by hash holds stale references — not just typed_modules but also
+     * blobs (per-decl IR), app_functions (the manifest the runtime
+     * reads), names, decls, usages, imports, edges, performer/mono
+     * rows. Wiping only typed_modules left blobs and app_functions
+     * referencing hashes nothing else recognises, and the runtime
+     * crashed with `expected MezzeFunction got null`.
+     *
+     * What's preserved: `modules` (path/file/mtime — pure user-source
+     * observations), `parsed_modules` (parser output, upstream of
+     * typecheck), and `metadata` (where the stamp itself lives).
+     *
+     * Two trigger cases — both should wipe:
+     *   1. recorded != null && recorded != current → real upgrade.
+     *   2. recorded == null but typecheck output already exists →
+     *      project was populated by an older binary that pre-dates
+     *      this version stamp. We can't tell if its hashes are
+     *      compatible with ours, so assume not.
      *
      * Returns true if a wipe happened (caller may want to log).
      */
@@ -160,18 +175,65 @@ object StoreHydration {
     ): Boolean {
         val recorded = store.getMetadata("project_stdlib_module_hashes")
         if (recorded == currentStdlibHashes) return false
-        if (recorded != null) {
-            for (mod in store.getAllModules()) {
-                // Stdlib lives in its own attached DB; cache.sqlite shouldn't
-                // hold std:: typed_modules anyway, but skip them defensively.
-                if (mod.path.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) continue
-                store.clearTypedModulesForPath(mod.path)
-            }
+
+        // Detect "no stamp yet but cache already has typecheck output" —
+        // legacy state from a pre-stamp binary; treat the same as a shift.
+        val hasLegacyOutput = recorded == null && store.getAllModules().any {
+            !it.path.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)
+        }
+
+        if (recorded != null || hasLegacyOutput) {
+            wipeAllTypecheckDerivedState(store)
             store.setMetadata("project_stdlib_module_hashes", currentStdlibHashes)
             return true
         }
-        // First-time stamp — no recorded value yet, no wipe needed.
+        // Truly fresh project — first-time stamp, nothing to wipe.
         store.setMetadata("project_stdlib_module_hashes", currentStdlibHashes)
         return false
+    }
+
+    /**
+     * Truncate every table in [store] that depends on typechecker/lowerer
+     * output. Leaves modules + parsed_modules + metadata + apps registry
+     * (which is just name→entry mapping, restored on next build/run).
+     */
+    private fun wipeAllTypecheckDerivedState(store: MezzeStore) {
+        // We need raw SQL since some of these tables aren't exposed by
+        // the MezzeStore interface as "clear all" operations. Cast where
+        // we have to.
+        if (store is com.mezze.language.codebase.SQLiteMezzeStore) {
+            // Wipe only the project DB ("main." prefix). Attached stdlib
+            // and deps DBs are read-only and re-seeded separately; we'd
+            // get a "table is locked" error trying to DELETE from them
+            // anyway. Tables not in the project schema are silently
+            // skipped via try/catch.
+            store.executeRaw { conn ->
+                conn.autoCommit = false
+                try {
+                    conn.createStatement().use { s ->
+                        for (table in listOf(
+                            "typed_modules", "blobs", "app_functions",
+                            "app_performers", "names", "decls", "usages",
+                            "imports", "edges", "mono_specializations",
+                        )) {
+                            try { s.executeUpdate("DELETE FROM main.$table") } catch (_: Exception) {}
+                        }
+                    }
+                    conn.commit()
+                } catch (e: Exception) {
+                    conn.rollback()
+                    throw e
+                } finally {
+                    conn.autoCommit = true
+                }
+            }
+        } else {
+            // In-memory / other stores: best-effort per-module clear.
+            // No tests rely on this path being a full wipe.
+            for (mod in store.getAllModules()) {
+                if (mod.path.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) continue
+                store.clearTypedModulesForPath(mod.path)
+            }
+        }
     }
 }
