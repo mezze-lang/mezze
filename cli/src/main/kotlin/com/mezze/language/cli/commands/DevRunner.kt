@@ -34,8 +34,18 @@ object DevRunner {
     private const val ANSI_BOLD = "[1m"
     private const val ANSI_CLEAR = "[2J[H"  // clear screen + cursor home
 
-    /** TTY-aware: don't emit ANSI escapes if stderr isn't a terminal (e.g. piped to a file). */
-    private val isTty: Boolean by lazy { System.console() != null }
+    /** TTY-aware: don't emit ANSI escapes if stderr isn't a terminal (e.g. piped to a file).
+     *  System.console() is unreliable in native-image binaries — returns null even in
+     *  a real terminal on macOS GraalVM. Fall back to the TERM env var: any sane
+     *  terminal sets TERM=xterm-256color or similar; pipes / dumb shells set TERM=dumb
+     *  or leave it unset. Pretty reliable as a "real terminal" heuristic. */
+    private val isTty: Boolean by lazy {
+        if (System.console() != null) true
+        else {
+            val term = System.getenv("TERM")
+            term != null && term.isNotBlank() && term != "dumb"
+        }
+    }
     private val noClear: Boolean by lazy { System.getenv("MEZZE_NO_CLEAR") != null || !isTty }
     private const val ANSI_RED = "\u001b[31m"
     private const val ANSI_GREEN = "\u001b[32m"
