@@ -746,10 +746,27 @@ object DevRunner {
     }
 
     private fun loadFunctions(store: SQLiteMezzeStore, appName: String): List<FunctionIR> {
-        return store.getAppFunctionHashes(appName).mapNotNull { hash ->
+        var corrupt = 0
+        val result = store.getAppFunctionHashes(appName).mapNotNull { hash ->
             val irBytes = store.getIR(hash) ?: return@mapNotNull null
-            CodebaseSerialization.deserializeFunctionIR(irBytes)
+            try {
+                CodebaseSerialization.deserializeFunctionIR(irBytes)
+            } catch (e: Exception) {
+                // Cached IR blob is unreadable (older serializer format, on-disk
+                // corruption, etc.). Treat as a cache miss — caller will fall
+                // through to the recompile path. Returning empty here causes
+                // executeFromCache to bail out and recompile from source.
+                corrupt++
+                null
+            }
         }
+        if (corrupt > 0 && System.getenv("MEZZE_TIMING") != null) {
+            System.err.println("[cache] $corrupt corrupt IR blobs — will recompile")
+        }
+        // If any blob failed to deserialize, return an empty list so the
+        // caller treats it as a cache miss (rather than running with a
+        // partial set that would fail at runtime).
+        return if (corrupt > 0) emptyList() else result
     }
 
     private fun loadPerformerRecords(store: SQLiteMezzeStore, appName: String): List<Array<String>> =
