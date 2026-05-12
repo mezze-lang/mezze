@@ -87,6 +87,42 @@ class MezzeExecutor(
         return stores.any { it.blobExists(hash) }
     }
 
+    /**
+     * Walk every node in [bodies], collect referenced hashes, and check
+     * each against the predicate. Returns the set of hashes that the
+     * predicate rejected — i.e. cannot be resolved by the running runtime.
+     *
+     * Use to validate cached IR: if any references are unresolvable
+     * against (loaded set ∪ PrecompiledStdlib ∪ store), the cache is
+     * stale (typically: built by an older mez whose internal/stdlib
+     * helper hashes have since changed) and must be invalidated rather
+     * than executed — executing it leads to runtime
+     * `CallDirectScalarNode: expected MezzeFunction got null` crashes
+     * on the first call to a missing hash.
+     */
+    fun collectUnresolvedHashes(
+        bodies: List<FunctionIR>,
+        resolves: (Hash) -> Boolean
+    ): Set<Hash> {
+        val visited = mutableSetOf<String>()
+        val queue = ArrayDeque<String>()
+        val ownHashes = bodies.mapTo(mutableSetOf()) { it.hash.hex }
+        for (fn in bodies) {
+            collectReferencedHashes(fn.body, queue)
+        }
+        val unresolved = mutableSetOf<Hash>()
+        while (queue.isNotEmpty()) {
+            val hex = queue.removeFirst()
+            if (!visited.add(hex)) continue
+            // Hash is fine if it's one of the bodies we're checking
+            // (function calls another in the same set).
+            if (hex in ownHashes) continue
+            val hash = try { Hash(hex) } catch (_: Exception) { continue }
+            if (!resolves(hash)) unresolved.add(hash)
+        }
+        return unresolved
+    }
+
     private fun loadIRByHex(hex: String): FunctionIR? {
         val hash = try { Hash(hex) } catch (_: Exception) { return null }
         return loadIR(hash)

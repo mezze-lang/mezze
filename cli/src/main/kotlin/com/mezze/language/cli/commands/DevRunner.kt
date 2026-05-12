@@ -463,18 +463,32 @@ object DevRunner {
         fun ms() = (System.nanoTime() - startTime) / 1_000_000
 
         // COLD_START fast path — if cache is populated AND every module's
-        // file on disk still matches its stored sourceHash, use the cached
-        // functions and skip the compile.
+        // file on disk still matches its stored sourceHash AND every
+        // referenced hash still resolves against this binary's stdlib, use
+        // the cached functions and skip the compile.
         //
         // Checking only the entry file isn't enough: a transitive import
         // (e.g. `watchtest::utils`) may have changed while `app.mz` didn't.
         // Walking every row in `modules` is cheap (sub-ms for tens of files).
+        //
+        // The hash-resolves check protects against `mez` upgrades: an older
+        // binary may have cached IR whose internal helper hashes don't
+        // exist in the current PrecompiledStdlib. Trusting that cache
+        // blindly leads to runtime `expected MezzeFunction got null`
+        // crashes. If we detect any unresolvable hashes, fall through to
+        // the recompile path which produces fresh IR for the current
+        // binary's stdlib hashes.
         if (mode == ReloadMode.COLD_START) {
             val cached = loadFunctions(store, appName)
             if (cached.isNotEmpty() && !anyProjectFileStale(store)) {
-                val performers = loadPerformerRecords(store, appName)
-                executeAndReport(cached, performers, projectRoot, entryName, inspect, inspectBrk, engine, startTime)
-                return
+                val unresolved = validateCachedHashes(cached, store)
+                if (unresolved.isEmpty()) {
+                    val performers = loadPerformerRecords(store, appName)
+                    executeAndReport(cached, performers, projectRoot, entryName, inspect, inspectBrk, engine, startTime)
+                    return
+                } else if (timing) {
+                    System.err.println("[${ms()}ms] cache stale: ${unresolved.size} unresolvable hash refs (first: ${unresolved.first().hex.take(8)}…); recompiling")
+                }
             }
         }
 
@@ -705,6 +719,30 @@ object DevRunner {
     private fun sha256(content: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
         return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Return the set of hashes referenced by [cached] that the current
+     * binary cannot resolve (not in PrecompiledStdlib, not in [cached]
+     * itself, not in the project store).
+     *
+     * Empty result = cache is fresh enough to trust.
+     * Non-empty = cache was populated by an older mez whose helper hashes
+     * have since changed; recompile from source.
+     */
+    private fun validateCachedHashes(
+        cached: List<FunctionIR>,
+        store: SQLiteMezzeStore
+    ): Set<Hash> {
+        val stdlib = com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions
+        val executor = com.mezze.language.codebase.MezzeExecutor(listOf(store))
+        return executor.collectUnresolvedHashes(cached) { hash ->
+            // Resolves if any of:
+            //   - stdlib bakes it (current binary knows about it)
+            //   - the project store has it (compiled by current binary)
+            // The "cached" set itself is excluded inside collectUnresolvedHashes.
+            stdlib.containsKey(hash) || store.blobExists(hash)
+        }
     }
 
     private fun loadFunctions(store: SQLiteMezzeStore, appName: String): List<FunctionIR> {
