@@ -591,7 +591,10 @@ module.exports = grammar({
       field('field', $.lower_identifier),
     )),
 
-    method_call: $ => prec.left(PREC.member, seq(
+    // x.method {args} — strictly higher precedence than member_access so
+    // when both `x.field` and `x.method {args}` parses are possible, the
+    // method_call (longer/more specific) wins.
+    method_call: $ => prec.left(PREC.member + 1, seq(
       field('receiver', $._expression),
       '.',
       field('method', $.lower_identifier),
