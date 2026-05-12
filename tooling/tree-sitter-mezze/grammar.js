@@ -449,10 +449,12 @@ module.exports = grammar({
     //   { x: 'a } -> Str with Eq 'a, Show 'a
     //   { x: Int } -> Bool <Log>
     //   { c: 'c } -> 'item with Container 'c having 'item = Int
+    //   'a -> 'b                  -- single bare param (no record wrapper)
+    //   Int -> Int                -- bare concrete param
     // Effect row goes between return type and `with`. Constraints chain
     // with `,` and each may carry `having 'assoc = T`.
     function_type: $ => prec.right(seq(
-      field('parameters', $.record_type),
+      field('parameters', choice($.record_type, $.type_variable, $.named_type)),
       '->',
       field('return_type', $._type),
       optional(field('effects', $.effect_row)),
@@ -484,12 +486,19 @@ module.exports = grammar({
     // <Effect1, Effect2, ...> or <*> or <...> — appears ONLY after a function
     // return type. See TypeParsers.kt:169–267. This is why it can coexist
     // with comparison `<` in expressions: the function_type rule consumes it.
+    // Effect row: `<>`, `<*>`, `<...>`, `<Log, State>`, `<Log, ...>`.
+    // The trailing `...` makes the row polymorphic (open) — it can carry
+    // additional effects beyond those listed.
     effect_row: $ => seq(
       '<',
       choice(
         '*',
         '...',
-        sepBy(',', $.effect_reference),
+        seq(
+          sepBy1(',', $.effect_reference),
+          optional(seq(',', '...')),
+        ),
+        // empty `<>`
       ),
       '>',
     ),
