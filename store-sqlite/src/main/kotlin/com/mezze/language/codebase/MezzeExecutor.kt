@@ -88,39 +88,144 @@ class MezzeExecutor(
     }
 
     /**
-     * Walk every node in [bodies], collect referenced hashes, and check
-     * each against the predicate. Returns the set of hashes that the
-     * predicate rejected — i.e. cannot be resolved by the running runtime.
+     * Walk [bodies] and collect direct-call/lambda target hashes that
+     * the predicate rejects.
      *
-     * Use to validate cached IR: if any references are unresolvable
-     * against (loaded set ∪ PrecompiledStdlib ∪ store), the cache is
-     * stale (typically: built by an older mez whose internal/stdlib
-     * helper hashes have since changed) and must be invalidated rather
-     * than executed — executing it leads to runtime
-     * `CallDirectScalarNode: expected MezzeFunction got null` crashes
-     * on the first call to a missing hash.
+     * Only validates IR node kinds whose runtime resolution crashes
+     * loudly if the hash is missing:
+     *   CallDirectIR.targetHash       → CallDirectScalarNode
+     *   PartialApplyDirectIR.targetHash
+     *   MakeLambdaIR.functionHash
+     *   CallDirectIR variants in BlockIR statements
+     *
+     * NOT validated (resolved via other runtime paths that don't crash
+     * on missing-hash, or that always-true-by-construction):
+     *   effectHash, handlerHash — bound at perform/handle time
+     *   DictMethodCallIR — ability dispatch via dictionary slot
+     *   ReadGlobalByHashIR / ReadGlobalFnByHashIR — may be runtime-only
+     *   native function hashes — resolved by name via NativeDispatch
+     *
+     * Returns the set of unresolvable direct-call targets, which signals
+     * the cache is stale (typically: built by an older mez whose helper
+     * hashes have since shifted). Recompile from source.
      */
     fun collectUnresolvedHashes(
         bodies: List<FunctionIR>,
         resolves: (Hash) -> Boolean
     ): Set<Hash> {
-        val visited = mutableSetOf<String>()
-        val queue = ArrayDeque<String>()
         val ownHashes = bodies.mapTo(mutableSetOf()) { it.hash.hex }
-        for (fn in bodies) {
-            collectReferencedHashes(fn.body, queue)
-        }
         val unresolved = mutableSetOf<Hash>()
-        while (queue.isNotEmpty()) {
-            val hex = queue.removeFirst()
-            if (!visited.add(hex)) continue
-            // Hash is fine if it's one of the bodies we're checking
-            // (function calls another in the same set).
-            if (hex in ownHashes) continue
-            val hash = try { Hash(hex) } catch (_: Exception) { continue }
-            if (!resolves(hash)) unresolved.add(hash)
+        val visited = mutableSetOf<String>()
+        for (fn in bodies) {
+            collectDirectCallTargets(fn.body, ownHashes, visited, resolves, unresolved)
         }
         return unresolved
+    }
+
+    /** Walk only the call/lambda-target ref kinds that crash on missing hash. */
+    private fun collectDirectCallTargets(
+        node: com.mezze.language.truffleir.NodeIR,
+        ownHashes: Set<String>,
+        visited: MutableSet<String>,
+        resolves: (Hash) -> Boolean,
+        out: MutableSet<Hash>
+    ) {
+        fun check(hash: Hash) {
+            val hex = hash.hex
+            if (!visited.add(hex)) return
+            if (hex in ownHashes) return
+            if (!resolves(hash)) out.add(hash)
+        }
+        when (node) {
+            is com.mezze.language.truffleir.CallDirectIR -> {
+                check(node.targetHash)
+                node.args.forEach { collectDirectCallTargets(it, ownHashes, visited, resolves, out) }
+            }
+            is com.mezze.language.truffleir.PartialApplyDirectIR -> {
+                check(node.targetHash)
+                node.partialFields.forEach { collectDirectCallTargets(it.value, ownHashes, visited, resolves, out) }
+            }
+            is com.mezze.language.truffleir.MakeLambdaIR -> {
+                check(node.functionHash)
+            }
+            // Compound nodes: just recurse into their bodies, don't validate their own hashes.
+            is com.mezze.language.truffleir.HandleIR -> {
+                collectDirectCallTargets(node.body, ownHashes, visited, resolves, out)
+                for (h in node.handlers) h.params?.let { collectDirectCallTargets(it, ownHashes, visited, resolves, out) }
+            }
+            is com.mezze.language.truffleir.PerformOpIR -> collectDirectCallTargets(node.arg, ownHashes, visited, resolves, out)
+            is com.mezze.language.truffleir.BlockIR -> {
+                for (stmt in node.stmts) when (stmt) {
+                    is com.mezze.language.truffleir.StmtIR.Let -> collectDirectCallTargets(stmt.value, ownHashes, visited, resolves, out)
+                    is com.mezze.language.truffleir.StmtIR.Expr -> collectDirectCallTargets(stmt.node, ownHashes, visited, resolves, out)
+                }
+                collectDirectCallTargets(node.result, ownHashes, visited, resolves, out)
+            }
+            is com.mezze.language.truffleir.CallLocalIR -> collectDirectCallTargets(node.arg, ownHashes, visited, resolves, out)
+            is com.mezze.language.truffleir.CallNativeIR -> collectDirectCallTargets(node.arg, ownHashes, visited, resolves, out)
+            is com.mezze.language.truffleir.CallIndirectIR -> {
+                collectDirectCallTargets(node.function, ownHashes, visited, resolves, out)
+                collectDirectCallTargets(node.arg, ownHashes, visited, resolves, out)
+            }
+            is com.mezze.language.truffleir.CallIndirectScalarIR -> {
+                collectDirectCallTargets(node.function, ownHashes, visited, resolves, out)
+                node.args.forEach { collectDirectCallTargets(it, ownHashes, visited, resolves, out) }
+            }
+            is com.mezze.language.truffleir.MakeRecordIR -> node.fields.forEach { collectDirectCallTargets(it.value, ownHashes, visited, resolves, out) }
+            is com.mezze.language.truffleir.ReadFieldIR -> collectDirectCallTargets(node.record, ownHashes, visited, resolves, out)
+            is com.mezze.language.truffleir.RecordUpdateIR -> {
+                collectDirectCallTargets(node.record, ownHashes, visited, resolves, out)
+                node.updates.forEach { collectDirectCallTargets(it.value, ownHashes, visited, resolves, out) }
+            }
+            is com.mezze.language.truffleir.MakeVariantIR -> node.payload?.let { collectDirectCallTargets(it, ownHashes, visited, resolves, out) }
+            is com.mezze.language.truffleir.MatchIR -> {
+                collectDirectCallTargets(node.scrutinee, ownHashes, visited, resolves, out)
+                for (c in node.cases) {
+                    collectDirectCallTargets(c.body, ownHashes, visited, resolves, out)
+                    c.guard?.let { collectDirectCallTargets(it, ownHashes, visited, resolves, out) }
+                    for (ilb in c.ifLetBindings) collectDirectCallTargets(ilb.expr, ownHashes, visited, resolves, out)
+                }
+            }
+            is com.mezze.language.truffleir.IfIR -> {
+                collectDirectCallTargets(node.cond, ownHashes, visited, resolves, out)
+                collectDirectCallTargets(node.thenBr, ownHashes, visited, resolves, out)
+                collectDirectCallTargets(node.elseBr, ownHashes, visited, resolves, out)
+            }
+            is com.mezze.language.truffleir.WriteLocalIR -> collectDirectCallTargets(node.value, ownHashes, visited, resolves, out)
+            is com.mezze.language.truffleir.InlineBinaryOpIR -> {
+                collectDirectCallTargets(node.left, ownHashes, visited, resolves, out)
+                collectDirectCallTargets(node.right, ownHashes, visited, resolves, out)
+            }
+            is com.mezze.language.truffleir.SpecializedCallIR -> node.args.forEach { collectDirectCallTargets(it, ownHashes, visited, resolves, out) }
+            is com.mezze.language.truffleir.InterpolatedStringIR -> {
+                for (part in node.parts) if (part is com.mezze.language.truffleir.StringPartIR.Expr) collectDirectCallTargets(part.node, ownHashes, visited, resolves, out)
+            }
+            is com.mezze.language.truffleir.MakeSeqIR -> {
+                for (elem in node.elements) when (elem) {
+                    is com.mezze.language.truffleir.SeqElementIR.Regular -> collectDirectCallTargets(elem.node, ownHashes, visited, resolves, out)
+                    is com.mezze.language.truffleir.SeqElementIR.Spread -> collectDirectCallTargets(elem.node, ownHashes, visited, resolves, out)
+                }
+            }
+            is com.mezze.language.truffleir.SeqGetIR -> {
+                collectDirectCallTargets(node.seq, ownHashes, visited, resolves, out)
+                collectDirectCallTargets(node.index, ownHashes, visited, resolves, out)
+            }
+            is com.mezze.language.truffleir.DictMethodCallIR -> collectDirectCallTargets(node.arg, ownHashes, visited, resolves, out)
+            // Leaves / effect-hash / read-global — not validated, no recursion.
+            is com.mezze.language.truffleir.ReadGlobalByHashIR -> {}
+            is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> {}
+            is com.mezze.language.truffleir.ReadScopeIR -> {}
+            is com.mezze.language.truffleir.ReadLocalIR -> {}
+            is com.mezze.language.truffleir.ReadCaptureIR -> {}
+            is com.mezze.language.truffleir.ReadArgIR -> {}
+            is com.mezze.language.truffleir.LongLitIR -> {}
+            is com.mezze.language.truffleir.DoubleLitIR -> {}
+            is com.mezze.language.truffleir.BoolLitIR -> {}
+            is com.mezze.language.truffleir.StringLitIR -> {}
+            is com.mezze.language.truffleir.UnitLitIR -> {}
+            is com.mezze.language.truffleir.CharLitIR -> {}
+            is com.mezze.language.truffleir.FracLitIR -> {}
+        }
     }
 
     private fun loadIRByHex(hex: String): FunctionIR? {
