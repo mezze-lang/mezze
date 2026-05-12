@@ -80,11 +80,7 @@ object StorePopulator {
 
         store.transaction {
             // Register the module — always update (file may have new sourceHash).
-            // Pass mtime so the next hydrate can skip re-hashing if the file
-            // is unchanged. java.io.File.lastModified() returns 0 on missing
-            // file; we treat that as "no mtime available".
-            val mtime = if (filePath != null) java.io.File(filePath).lastModified().takeIf { it > 0 } else null
-            store.putModule(modulePath, filePath, sourceHash, mtime)
+            store.putModule(modulePath, filePath, sourceHash)
 
             // Persist the entry ParsedModule first so reads can skip the parser
             // even if typecheck/lower below fails. Comments are part of the
@@ -144,8 +140,7 @@ object StorePopulator {
                 val file = File(src.filePath).takeIf { it.exists() } ?: continue
                 val depSource = file.readText()
                 val sha256 = sha256Hex(depSource)
-                val mtime = file.lastModified().takeIf { it > 0 }
-                store.putModule(loadedPath, src.filePath, sha256, mtime)
+                store.putModule(loadedPath, src.filePath, sha256)
                 val blob = CodebaseSerialization.serializeTypedModule(loadedTyped)
                 store.putTypedModule(loadedPath, sha256, blob)
 

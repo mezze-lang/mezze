@@ -62,7 +62,7 @@ object StoreHydration {
         for (mod in store.getAllModules()) {
             if (!include(mod)) continue
 
-            val cachedHash = if (mod.path.startsWith("std::")) {
+            val cachedHash = if (mod.path.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) {
                 // Stdlib modules: trust the cached source_hash. Their
                 // file_path is a JVM-temp path from build time that's
                 // gone at runtime; the seed copy guarantees the blob
@@ -71,22 +71,15 @@ object StoreHydration {
             } else {
                 val filePath = mod.filePath ?: run { misses++; continue }
                 val file = File(filePath).takeIf { it.exists() } ?: run { misses++; continue }
-                // Fast path: if the cached mtime matches the file's current
-                // mtime, the source can't have changed since we hashed it —
-                // trust the cached hash without re-reading the file.
-                // Falls through to the hash check if mtime is missing
-                // (rows from before the column was added) or differs.
-                val onDiskMtime = file.lastModified()
-                if (mod.mtime != null && mod.mtime == onDiskMtime) {
-                    mod.sourceHash
-                } else {
-                    val onDiskHash = sha256(file.readText())
-                    if (onDiskHash != mod.sourceHash) {
-                        misses++
-                        continue
-                    }
-                    onDiskHash
+                // Content hash is the ground truth. Cheap enough for the
+                // file sizes we see (~1ms per file); not worth the
+                // correctness hole of mtime-based shortcuts.
+                val onDiskHash = sha256(file.readText())
+                if (onDiskHash != mod.sourceHash) {
+                    misses++
+                    continue
                 }
+                onDiskHash
             }
 
             val blob = store.getTypedModule(mod.path, cachedHash) ?: run {
@@ -193,46 +186,50 @@ object StoreHydration {
     }
 
     /**
-     * Truncate every table in [store] that depends on typechecker/lowerer
-     * output. Leaves modules + parsed_modules + metadata + apps registry
-     * (which is just name→entry mapping, restored on next build/run).
+     * Truncate every table in [store]'s project DB except the three that
+     * are NOT derived from typechecker output:
+     *   - modules            (user-source observations: path/file/hash)
+     *   - parsed_modules     (parser output, upstream of typecheck)
+     *   - metadata           (where the stamp itself lives)
+     *
+     * Discovered dynamically from sqlite_master, so a future table added
+     * to the schema is wiped automatically without needing to update a
+     * hardcoded list here. The set of "preserved" tables is what we
+     * curate, and it's tiny.
      */
     private fun wipeAllTypecheckDerivedState(store: MezzeStore) {
-        // We need raw SQL since some of these tables aren't exposed by
-        // the MezzeStore interface as "clear all" operations. Cast where
-        // we have to.
-        if (store is com.mezze.language.codebase.SQLiteMezzeStore) {
-            // Wipe only the project DB ("main." prefix). Attached stdlib
-            // and deps DBs are read-only and re-seeded separately; we'd
-            // get a "table is locked" error trying to DELETE from them
-            // anyway. Tables not in the project schema are silently
-            // skipped via try/catch.
-            store.executeRaw { conn ->
-                conn.autoCommit = false
-                try {
-                    conn.createStatement().use { s ->
-                        for (table in listOf(
-                            "typed_modules", "blobs", "app_functions",
-                            "app_performers", "names", "decls", "usages",
-                            "imports", "edges", "mono_specializations",
-                        )) {
-                            try { s.executeUpdate("DELETE FROM main.$table") } catch (_: Exception) {}
-                        }
-                    }
-                    conn.commit()
-                } catch (e: Exception) {
-                    conn.rollback()
-                    throw e
-                } finally {
-                    conn.autoCommit = true
-                }
-            }
-        } else {
-            // In-memory / other stores: best-effort per-module clear.
-            // No tests rely on this path being a full wipe.
+        if (store !is com.mezze.language.codebase.SQLiteMezzeStore) {
+            // Non-SQLite stores (InMemoryMezzeStore in tests): best-effort
+            // per-module typed-module clear via the public API. Coverage
+            // is intentionally weaker; only the SQLite path is production.
             for (mod in store.getAllModules()) {
                 if (mod.path.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) continue
                 store.clearTypedModulesForPath(mod.path)
+            }
+            return
+        }
+        val preserved = setOf("modules", "parsed_modules", "metadata", "schema_version", "sqlite_sequence")
+        store.executeRaw { conn ->
+            conn.autoCommit = false
+            try {
+                val tables = mutableListOf<String>()
+                conn.createStatement().use { s ->
+                    s.executeQuery("SELECT name FROM main.sqlite_master WHERE type='table'").use { rs ->
+                        while (rs.next()) tables.add(rs.getString(1))
+                    }
+                }
+                conn.createStatement().use { s ->
+                    for (t in tables) {
+                        if (t in preserved) continue
+                        s.executeUpdate("DELETE FROM main.\"$t\"")
+                    }
+                }
+                conn.commit()
+            } catch (e: Exception) {
+                conn.rollback()
+                throw e
+            } finally {
+                conn.autoCommit = true
             }
         }
     }

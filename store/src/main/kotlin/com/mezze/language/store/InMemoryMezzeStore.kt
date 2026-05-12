@@ -77,8 +77,8 @@ class InMemoryMezzeStore : MezzeStore {
 
     // ── MODULES ──
 
-    override fun putModule(path: String, filePath: String?, sourceHash: String, mtime: Long?) {
-        modules[path] = ModuleRow(path, filePath, sourceHash, mtime)
+    override fun putModule(path: String, filePath: String?, sourceHash: String) {
+        modules[path] = ModuleRow(path, filePath, sourceHash)
     }
 
     override fun getModule(path: String): ModuleRow? = modules[path]

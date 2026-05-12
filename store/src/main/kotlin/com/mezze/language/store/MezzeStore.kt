@@ -58,9 +58,9 @@ interface MezzeStore : AutoCloseable {
     // MODULES — source file tracking for incremental compilation
     // ====================================================================
 
-    /** Register a module (source file). [mtime] (epoch millis) lets the
-     *  hydration fast path skip re-hashing when the file is unchanged. */
-    fun putModule(path: String, filePath: String?, sourceHash: String, mtime: Long? = null)
+    /** Register a module (source file). Cache validity is determined by
+     *  comparing sha256 of the file's current bytes against [sourceHash]. */
+    fun putModule(path: String, filePath: String?, sourceHash: String)
 
     /** Get module info. */
     fun getModule(path: String): ModuleRow?
@@ -274,10 +274,6 @@ data class ModuleRow(
     val path: String,
     val filePath: String?,
     val sourceHash: String,
-    /** File mtime in epoch millis at the time source_hash was computed.
-     *  Nullable for rows written before the column existed.
-     *  Cache-hit path uses this to skip re-hashing when mtime is unchanged. */
-    val mtime: Long? = null,
 )
 data class EdgeRow(val fromHash: Hash, val toHash: Hash, val kind: EdgeKind)
 data class AbilityImplRow(val hash: Hash, val abilityHash: Hash, val targetType: String, val module: String?)

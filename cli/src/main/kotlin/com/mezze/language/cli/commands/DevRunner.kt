@@ -866,14 +866,12 @@ object DevRunner {
      */
     private fun anyProjectFileStale(store: SQLiteMezzeStore): Boolean {
         for (mod in store.getAllModules()) {
-            if (mod.path.startsWith("std::")) continue
+            if (mod.path.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) continue
             val filePath = mod.filePath ?: continue
             val file = File(filePath)
             if (!file.exists()) return true
-            // Fast path: if mtime is recorded and matches the file's current
-            // mtime, the source can't have changed since we hashed it.
-            val onDiskMtime = file.lastModified()
-            if (mod.mtime != null && mod.mtime == onDiskMtime) continue
+            // Content-hash always — mtime is unreliable across git checkouts,
+            // backup restores, etc., and the sha256 cost is sub-ms per file.
             if (sha256(file.readText()) != mod.sourceHash) return true
         }
         return false

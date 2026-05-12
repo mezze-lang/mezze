@@ -390,20 +390,15 @@ class SQLiteMezzeStore private constructor(
                     value TEXT NOT NULL
                 ) WITHOUT ROWID
             """.trimIndent())
-            // Modules
+            // Modules. Cache validity is purely sha256-based; if the file's
+            // current sha256 matches source_hash, the cache is valid.
             s.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS $alias.modules (
                     path TEXT PRIMARY KEY,
                     file_path TEXT,
-                    source_hash TEXT NOT NULL,
-                    mtime INTEGER
+                    source_hash TEXT NOT NULL
                 ) WITHOUT ROWID
             """.trimIndent())
-            // mtime column was added later — backfill for pre-existing DBs.
-            // ALTER fails harmlessly if already present (caught via try).
-            try {
-                s.executeUpdate("ALTER TABLE $alias.modules ADD COLUMN mtime INTEGER")
-            } catch (_: Exception) { /* column already exists */ }
             // Blobs
             s.executeUpdate("""
                 CREATE TABLE IF NOT EXISTS $alias.blobs (
@@ -571,15 +566,11 @@ class SQLiteMezzeStore private constructor(
             s.executeUpdate("""
                 -- modules: every Mezze source file this DB knows about.
                 -- Keyed by namespaced module path (not raw filename).
-                -- `mtime` is the file's mtime (epoch millis) at the time
-                -- `source_hash` was computed. The hydration fast path uses
-                -- mtime to skip re-hashing when the file is unchanged —
-                -- O(stat) instead of O(read + sha256).
+                -- Cache validity: sha256(current file bytes) == source_hash.
                 CREATE TABLE modules (
                     path        TEXT PRIMARY KEY,
                     file_path   TEXT,
-                    source_hash TEXT NOT NULL,
-                    mtime       INTEGER
+                    source_hash TEXT NOT NULL
                 ) WITHOUT ROWID
             """.trimIndent())
 
@@ -1014,19 +1005,18 @@ class SQLiteMezzeStore private constructor(
     // ====================================================================
 
     private val putModuleStmt: PreparedStatement by lazy {
-        conn.prepareStatement("INSERT OR REPLACE INTO modules (path, file_path, source_hash, mtime) VALUES (?, ?, ?, ?)")
+        conn.prepareStatement("INSERT OR REPLACE INTO modules (path, file_path, source_hash) VALUES (?, ?, ?)")
     }
 
     @Synchronized
-    override fun putModule(path: String, filePath: String?, sourceHash: String, mtime: Long?) {
+    override fun putModule(path: String, filePath: String?, sourceHash: String) {
         putModuleStmt.apply {
             setString(1, path)
             setString(2, filePath)
             setString(3, sourceHash)
-            if (mtime != null) setLong(4, mtime) else setNull(4, java.sql.Types.INTEGER)
             executeUpdate()
         }
-        l1Modules[path] = ModuleRow(path, filePath, sourceHash, mtime)
+        l1Modules[path] = ModuleRow(path, filePath, sourceHash)
     }
 
     private val getModuleStmt: PreparedStatement by lazy {
@@ -1034,11 +1024,11 @@ class SQLiteMezzeStore private constructor(
         // overlap (std::* in stdlib, dep prefixes in deps, else cache),
         // so the result is at most one row.
         conn.prepareStatement("""
-            SELECT path, file_path, source_hash, mtime FROM main.modules WHERE path = ?
+            SELECT path, file_path, source_hash FROM main.modules WHERE path = ?
             UNION ALL
-            SELECT path, file_path, source_hash, mtime FROM stdlib.modules WHERE path = ?
+            SELECT path, file_path, source_hash FROM stdlib.modules WHERE path = ?
             UNION ALL
-            SELECT path, file_path, source_hash, mtime FROM deps.modules WHERE path = ?
+            SELECT path, file_path, source_hash FROM deps.modules WHERE path = ?
             LIMIT 1
         """.trimIndent())
     }
@@ -1054,7 +1044,6 @@ class SQLiteMezzeStore private constructor(
                 path = rs.getString("path"),
                 filePath = rs.getString("file_path"),
                 sourceHash = rs.getString("source_hash"),
-                mtime = rs.getLong("mtime").takeUnless { rs.wasNull() },
             ) else null
             l1Modules[path] = row
             row
@@ -1080,11 +1069,11 @@ class SQLiteMezzeStore private constructor(
     @Synchronized
     override fun getAllModules(): List<ModuleRow> {
         val sql = """
-            SELECT path, file_path, source_hash, mtime FROM main.modules
+            SELECT path, file_path, source_hash FROM main.modules
             UNION ALL
-            SELECT path, file_path, source_hash, mtime FROM stdlib.modules
+            SELECT path, file_path, source_hash FROM stdlib.modules
             UNION ALL
-            SELECT path, file_path, source_hash, mtime FROM deps.modules
+            SELECT path, file_path, source_hash FROM deps.modules
         """.trimIndent()
         return conn.createStatement().use { s ->
             s.executeQuery(sql).use { rs ->
@@ -1094,7 +1083,6 @@ class SQLiteMezzeStore private constructor(
                         path = rs.getString("path"),
                         filePath = rs.getString("file_path"),
                         sourceHash = rs.getString("source_hash"),
-                        mtime = rs.getLong("mtime").takeUnless { rs.wasNull() },
                     ))
                 }
                 list

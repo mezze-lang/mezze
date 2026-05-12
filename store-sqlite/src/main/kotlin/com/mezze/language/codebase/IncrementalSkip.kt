@@ -162,10 +162,7 @@ object IncrementalSkip {
             if (!depFile.exists()) {
                 return Result.Miss(MissReason.DEP_FILE_STALE, detail = "$depPath: file missing")
             }
-            // Fast path: trust the cached source_hash if mtime is unchanged.
-            // Falls through to full sha256 if mtime is null or differs.
-            val onDiskMtime = depFile.lastModified()
-            if (depMod.mtime != null && depMod.mtime == onDiskMtime) continue
+            // Content-hash always; never trust filesystem mtime here.
             val onDiskHash = sha256(depFile.readText())
             if (onDiskHash != depMod.sourceHash) {
                 return Result.Miss(MissReason.DEP_FILE_STALE, detail = depPath)
