@@ -437,15 +437,18 @@ module.exports = grammar({
       seq('(', $._type, ')'),
     ),
 
-    // Function type. `with`-clause sits BETWEEN params and `->`:
-    //   { l: 'a, r: 'a } with Ord 'a -> 'a
+    // Function type. `with`-clause sits AFTER the return type:
+    //   { x: 'a } -> Str with Eq 'a, Show 'a
     //   { x: Int } -> Bool <Log>
+    //   { c: 'c } -> 'item with Container 'c having 'item = Int
+    // Effect row goes between return type and `with`. Constraints chain
+    // with `,` and each may carry `having 'assoc = T`.
     function_type: $ => prec.right(seq(
       field('parameters', $.record_type),
-      optional(seq('with', sepBy1(',', $.ability_constraint))),
       '->',
       field('return_type', $._type),
       optional(field('effects', $.effect_row)),
+      optional(seq('with', sepBy1(',', $.ability_constraint))),
     )),
 
     record_type: $ => seq(
