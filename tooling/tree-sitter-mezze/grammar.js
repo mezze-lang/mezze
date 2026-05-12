@@ -626,15 +626,18 @@ module.exports = grammar({
       field('else', $._expression),
     ),
 
+    // match `<expr>` is <arm>... Arms can be separated by `,` or by
+    // nothing (just whitespace). Without an external scanner, we can't
+    // tell "end of match" from "start of next arm at the parent scope"
+    // — both look like a new pattern. Use prec.dynamic so when a
+    // following top-level _expression would be valid, GLR can prefer
+    // ending the match. prec.right keeps multi-arm matches greedy
+    // INSIDE a let body where nothing else competes.
     match_expression: $ => prec.right(seq(
       'match',
       field('scrutinee', $._expression),
       'is',
-      // Arms may be separated by `,` or just newlines/whitespace (parser
-      // accepts both). Tree-sitter has no concept of "newline as
-      // separator" here, so we make the comma optional via repeat1 with
-      // a `,?` between arms. prec.right keeps the match greedy on arms.
-      repeat1(seq($.match_arm, optional(','))),
+      repeat1(prec.dynamic(1, seq($.match_arm, optional(',')))),
     )),
 
     match_arm: $ => seq(
