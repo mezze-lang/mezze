@@ -162,7 +162,9 @@ object StoreHydration {
         if (recorded == currentStdlibHashes) return false
         if (recorded != null) {
             for (mod in store.getAllModules()) {
-                if (mod.path.startsWith("std::")) continue
+                // Stdlib lives in its own attached DB; cache.sqlite shouldn't
+                // hold std:: typed_modules anyway, but skip them defensively.
+                if (mod.path.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) continue
                 store.clearTypedModulesForPath(mod.path)
             }
             store.setMetadata("project_stdlib_module_hashes", currentStdlibHashes)
