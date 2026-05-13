@@ -242,8 +242,13 @@ object PipelineRunner {
      * Collect all function hashes referenced transitively by the user's FunctionIRs.
      * Walks the IR tree to find CallDirectIR, MakeLambdaIR, HandleIR, and PerformOpIR
      * references, then follows them into stdlib to collect the full transitive closure.
+     *
+     * Public so `mez build` can compute the precise reachable-from-IR closure
+     * for trimming the standalone JAR's `blobs.sqlite` to only what the
+     * program actually needs (#169).
      */
-    private fun collectReferencedHashes(
+    @JvmStatic
+    fun collectReferencedHashes(
         userFunctions: List<com.mezze.language.truffleir.FunctionIR>
     ): Set<com.mezze.language.typedast.Hash> {
         val timing = System.getenv("MEZZE_TIMING") != null

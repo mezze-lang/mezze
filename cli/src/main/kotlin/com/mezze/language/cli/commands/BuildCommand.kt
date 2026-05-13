@@ -218,12 +218,16 @@ class BuildCommand {
             createMinimalBlobsDb(store, reachable, entryHash, blobsFile, entryName)
             if (timing) System.err.println("[${ms()}ms] blobs.sqlite created (reachable subset)")
 
-            // The standalone JAR's blobs.sqlite needs every blob the program
-            // could ever look up at runtime — including stdlib hashes that
-            // weren't statically reachable (ability dispatch, effect performers
-            // resolved at runtime, etc.). createMinimalBlobsDb wrote the
-            // reachable subset; pad it with any remaining stdlib + user blobs
-            // that aren't already present in blobs.sqlite.
+            // Write the user's lowered functions + ANY hash referenced by
+            // them that wasn't in the reachable-closure set. The closure
+            // walk uses store edges; impl-op hashes and freshly-emitted
+            // user IR aren't always edge-linked at build time, so we top
+            // up explicitly. Stdlib functions that *aren't* referenced are
+            // omitted — the runtime resolves them through the same store
+            // (open blobs.sqlite as MezzeStore at runtime), so unused
+            // stdlib doesn't ship. This is the foundation for hash-based
+            // remote fetching (#169): the JAR carries exactly what the
+            // program reaches, nothing more.
             val allBlobsConn = java.sql.DriverManager.getConnection("jdbc:sqlite:${blobsFile.absolutePath}")
             try {
                 allBlobsConn.autoCommit = false
@@ -234,23 +238,36 @@ class BuildCommand {
                     }
                 }
                 val insertBlob = allBlobsConn.prepareStatement("INSERT OR IGNORE INTO blobs (hash, ir) VALUES (?, ?)")
-                var stdlibAdded = 0
-                for ((hash, fnIR) in com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions) {
-                    if (hash.hex in existing) continue
-                    val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
-                    insertBlob.setString(1, hash.hex)
-                    insertBlob.setBytes(2, irBytes)
-                    insertBlob.executeUpdate()
-                    stdlibAdded++
-                }
+                // Write user-emitted IR not already in the closure.
                 for (fn in typeCheckResult.loweredFunctions) {
                     if (fn.hash.hex in existing) continue
                     val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fn)
                     insertBlob.setString(1, fn.hash.hex)
                     insertBlob.setBytes(2, irBytes)
                     insertBlob.executeUpdate()
+                    existing.add(fn.hash.hex)
                 }
-                if (stdlibAdded > 0) println("Padded blobs.sqlite with $stdlibAdded extra stdlib blobs (out of ${com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions.size})")
+                // Top up with stdlib hashes that the user's IR transitively
+                // references but that aren't in the closure. PipelineRunner's
+                // helper walks user IR + follows stdlib dependency edges —
+                // the same closure the runtime computes on cold start.
+                val needed = com.mezze.interpreter.compiler.PipelineRunner
+                    .collectReferencedHashes(typeCheckResult.loweredFunctions)
+                val stdlibFns = com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions
+                var stdlibAdded = 0
+                for (hash in needed) {
+                    if (hash.hex in existing) continue
+                    val fnIR = stdlibFns[hash] ?: continue
+                    val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
+                    insertBlob.setString(1, hash.hex)
+                    insertBlob.setBytes(2, irBytes)
+                    insertBlob.executeUpdate()
+                    existing.add(hash.hex)
+                    stdlibAdded++
+                }
+                if (stdlibAdded > 0 && timing) {
+                    System.err.println("[${ms()}ms] added $stdlibAdded referenced stdlib blobs")
+                }
 
                 // Store user function manifest in app_functions table (ordered)
                 allBlobsConn.prepareStatement(

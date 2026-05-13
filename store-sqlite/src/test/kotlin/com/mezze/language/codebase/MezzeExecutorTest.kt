@@ -92,7 +92,7 @@ class MezzeExecutorTest {
 
         // A calls B
         val irA = simpleFunctionIR(hashA, "fn_a",
-            CallDirectIR(hashB, LongLitIR(1, src), false, src))
+            CallDirectIR(hashB, listOf(LongLitIR(1, src)), false, src))
         val irB = simpleFunctionIR(hashB, "fn_b", LongLitIR(2, src))
 
         storeFunctionIR(hashA, irA)
@@ -129,8 +129,8 @@ class MezzeExecutorTest {
         val src = SourceInfo(0, 1, 1, 1, 5)
 
         // A → B → C
-        val irA = simpleFunctionIR(hashA, "a", CallDirectIR(hashB, UnitLitIR(src), false, src))
-        val irB = simpleFunctionIR(hashB, "b", CallDirectIR(hashC, UnitLitIR(src), false, src))
+        val irA = simpleFunctionIR(hashA, "a", CallDirectIR(hashB, listOf(UnitLitIR(src)), false, src))
+        val irB = simpleFunctionIR(hashB, "b", CallDirectIR(hashC, listOf(UnitLitIR(src)), false, src))
         val irC = simpleFunctionIR(hashC, "c", LongLitIR(1, src))
 
         storeFunctionIR(hashA, irA)
@@ -148,8 +148,8 @@ class MezzeExecutorTest {
         val src = SourceInfo(0, 1, 1, 1, 5)
 
         // A → B → A (cycle)
-        val irA = simpleFunctionIR(hashA, "a", CallDirectIR(hashB, UnitLitIR(src), false, src))
-        val irB = simpleFunctionIR(hashB, "b", CallDirectIR(hashA, UnitLitIR(src), false, src))
+        val irA = simpleFunctionIR(hashA, "a", CallDirectIR(hashB, listOf(UnitLitIR(src)), false, src))
+        val irB = simpleFunctionIR(hashB, "b", CallDirectIR(hashA, listOf(UnitLitIR(src)), false, src))
 
         storeFunctionIR(hashA, irA)
         storeFunctionIR(hashB, irB)
@@ -166,7 +166,7 @@ class MezzeExecutorTest {
 
         // A calls missing hash (could be a native function)
         val irA = simpleFunctionIR(hashA, "a",
-            CallDirectIR(hashMissing, UnitLitIR(src), false, src))
+            CallDirectIR(hashMissing, listOf(UnitLitIR(src)), false, src))
 
         storeFunctionIR(hashA, irA)
 

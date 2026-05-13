@@ -179,7 +179,7 @@ class StorePopulatorTest {
             localNames = emptyList(),
             captureSlots = emptyList(),
             captureNames = emptyList(),
-            body = CallDirectIR(fnB, LongLitIR(1, src), false, src),
+            body = CallDirectIR(fnB, listOf(LongLitIR(1, src)), false, src),
             sourceFile = "test.mz",
             sourceSection = src
         )
