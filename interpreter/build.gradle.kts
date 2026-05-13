@@ -15,6 +15,7 @@ dependencies {
     // Core project dependencies
     implementation(project(":ast"))
     implementation(project(":parser"))
+    implementation(project(":store"))
     implementation(project(":typechecker"))
     implementation(project(":datastructures"))
 

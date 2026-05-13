@@ -73,6 +73,24 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private final java.util.concurrent.ConcurrentHashMap<Hash, CallTarget> stdlibCallTargetCache =
         new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * Optional content-addressed store for resolving stdlib (and eventually
+     * remote) hashes at runtime. When set, `getCachedStdlibCallTarget`
+     * checks the store before falling back to PrecompiledStdlib's
+     * in-memory map. The seam for hash-based remote fetching (#169):
+     * point this at a `ChainedMezzeStore(local, remote)` and missing
+     * hashes get fetched transparently.
+     */
+    private static volatile com.mezze.language.store.MezzeStore runtimeStore = null;
+
+    public static void setRuntimeStore(com.mezze.language.store.MezzeStore store) {
+        runtimeStore = store;
+    }
+
+    public static com.mezze.language.store.MezzeStore getRuntimeStore() {
+        return runtimeStore;
+    }
+
     /** Expose cache for FunctionDefinitionNode to store lambda CallTargets by content hash. */
     public java.util.concurrent.ConcurrentHashMap<Hash, CallTarget> getCachedStdlibCallTargetCache() {
         return stdlibCallTargetCache;
@@ -87,6 +105,14 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 
     /**
      * Get a cached CallTarget by hash — checks stdlib cache first, then compiles user IR on demand.
+     *
+     * Resolution order:
+     *   1. CallTarget cache (already compiled stdlib hash)
+     *   2. Per-context user CallTarget cache
+     *   3. Per-context user FunctionIR (compile on demand)
+     *   4. PrecompiledStdlib in-memory map (the JVM warm path)
+     *   5. Runtime MezzeStore (#169: the seam for hash-based remote fetching —
+     *      a ChainedStore(local, remote) makes step 5 transparently network)
      */
     public CallTarget getCachedStdlibCallTarget(Hash hash) {
         // 1. Check shared stdlib cache
@@ -110,7 +136,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             }
         }
 
-        // 3. Compile from stdlib FunctionIR on demand
+        // 3. Compile from stdlib FunctionIR on demand (in-memory map)
         var stdlibIR = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE.getPreloweredFunctions().get(hash);
         if (stdlibIR != null) {
             var compiler = new com.mezze.interpreter.compiler.TruffleCompiler(this);
@@ -118,6 +144,29 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             ct = rootNode.getCallTarget();
             stdlibCallTargetCache.put(hash, ct);
             return ct;
+        }
+
+        // 4. Last resort: ask the runtime MezzeStore. Used by standalone JAR
+        //    when blobs.sqlite holds hashes that PrecompiledStdlib's snapshot
+        //    doesn't (impl-op IRs not registered in the snapshot, or — in
+        //    the future — hashes fetched from a remote registry by a
+        //    ChainedStore wrapper).
+        var store = runtimeStore;
+        if (store != null) {
+            byte[] irBytes = store.getIR(hash);
+            if (irBytes != null) {
+                try {
+                    var fnIR = com.mezze.language.store.StoreSerialization.INSTANCE.deserializeFunctionIR(irBytes);
+                    var compiler = new com.mezze.interpreter.compiler.TruffleCompiler(this);
+                    var rootNode = compiler.compile(fnIR);
+                    ct = rootNode.getCallTarget();
+                    stdlibCallTargetCache.put(hash, ct);
+                    return ct;
+                } catch (Exception e) {
+                    // Fall through — caller will throw the standard
+                    // "Function not found" error with full context.
+                }
+            }
         }
         return null;
     }

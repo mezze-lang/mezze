@@ -39,11 +39,25 @@ object StandaloneHelper {
 
         // Write to temp file so SQLite can open it
         val tempFile = java.io.File.createTempFile("mezze-blobs", ".sqlite")
+        var runtimeStore: com.mezze.language.store.MezzeStore? = null
         try {
             tempFile.writeBytes(sqliteBytes)
             mark("blobs.sqlite written to tempfile")
 
-            // Open the SQLite database
+            // Expose blobs.sqlite as a MezzeStore so MezzeLanguage's
+            // runtime hash lookups can resolve hashes not in
+            // PrecompiledStdlib's in-memory snapshot (e.g. user-emitted
+            // impl-op IRs, or — eventually — hashes fetched from a
+            // remote registry via a ChainedStore wrapper). This is the
+            // #169 seam. We keep the bespoke JDBC SELECT below for the
+            // app_functions / app_performers metadata tables, which
+            // aren't in the MezzeStore interface today; that's fine —
+            // they're tiny and read once.
+            runtimeStore = com.mezze.language.codebase.SQLiteMezzeStore.readOnly(tempFile)
+            com.mezze.interpreter.runtime.MezzeLanguage.setRuntimeStore(runtimeStore)
+
+            // Open the SQLite database (for app_functions / app_performers
+            // / metadata reads — see comment above).
             val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${tempFile.absolutePath}")
             mark("sqlite connection opened")
             conn.use { db ->
@@ -98,6 +112,8 @@ object StandaloneHelper {
                 executeWithTruffle(functions, performers, entryName, args, timing, t0)
             }
         } finally {
+            try { runtimeStore?.close() } catch (_: Exception) {}
+            com.mezze.interpreter.runtime.MezzeLanguage.setRuntimeStore(null)
             tempFile.delete()
         }
     }
