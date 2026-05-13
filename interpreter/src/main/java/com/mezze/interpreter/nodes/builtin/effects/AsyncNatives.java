@@ -7,6 +7,7 @@ import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
 import com.mezze.interpreter.nodes.continuation.EffectFiber;
 import com.mezze.interpreter.nodes.continuation.OpCall;
+import com.mezze.interpreter.nodes.continuation.SpawnSupport;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.*;
@@ -987,12 +988,12 @@ public final class AsyncNatives {
 
         // Spawn Truffle-aware threads for both computations
         Thread leftThread = env.newTruffleThreadBuilder(
-            () -> runJoinTask(handlerChain, leftFuture,
+            () -> SpawnSupport.runJoinTask(handlerChain, leftFuture,
                 () -> callNode.call(leftTarget, leftArgs))
         ).virtual(true).build();
 
         Thread rightThread = env.newTruffleThreadBuilder(
-            () -> runJoinTask(handlerChain, rightFuture,
+            () -> SpawnSupport.runJoinTask(handlerChain, rightFuture,
                 () -> callNode.call(rightTarget, rightArgs))
         ).virtual(true).build();
 
@@ -1033,15 +1034,15 @@ public final class AsyncNatives {
         CompletableFuture<Object> cFuture = new CompletableFuture<>();
 
         Thread aThread = env.newTruffleThreadBuilder(
-            () -> runJoinTask(handlerChain, aFuture, () -> callThunkFunction(a, callNode))
+            () -> SpawnSupport.runJoinTask(handlerChain, aFuture, () -> callThunkFunction(a, callNode))
         ).virtual(true).build();
 
         Thread bThread = env.newTruffleThreadBuilder(
-            () -> runJoinTask(handlerChain, bFuture, () -> callThunkFunction(b, callNode))
+            () -> SpawnSupport.runJoinTask(handlerChain, bFuture, () -> callThunkFunction(b, callNode))
         ).virtual(true).build();
 
         Thread cThread = env.newTruffleThreadBuilder(
-            () -> runJoinTask(handlerChain, cFuture, () -> callThunkFunction(c, callNode))
+            () -> SpawnSupport.runJoinTask(handlerChain, cFuture, () -> callThunkFunction(c, callNode))
         ).virtual(true).build();
 
         aThread.start();
@@ -1127,7 +1128,7 @@ public final class AsyncNatives {
             final int batchStart = b * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, xs.length);
 
-            threads[b] = env.newTruffleThreadBuilder(() -> runBatchTask(handlerChain, opSink, errSink, () -> {
+            threads[b] = env.newTruffleThreadBuilder(() -> SpawnSupport.runBatchTask(handlerChain, opSink, errSink, () -> {
                 Object[] callArgs = getCallArgsBuffer(closureLen + 1);
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
                 for (int i = batchStart; i < batchEnd; i++) {
@@ -1149,7 +1150,7 @@ public final class AsyncNatives {
             }
         }
 
-        propagateBatchFailure(opSink, errSink, "parallel map");
+        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel map");
         return MezzeSeq.fromArray(results);
     }
 
@@ -1226,7 +1227,7 @@ public final class AsyncNatives {
             final int batchStart = b * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, xs.length);
 
-            threads[b] = env.newTruffleThreadBuilder(() -> runBatchTask(handlerChain, opSink, errSink, () -> {
+            threads[b] = env.newTruffleThreadBuilder(() -> SpawnSupport.runBatchTask(handlerChain, opSink, errSink, () -> {
                 Object[] callArgs = getCallArgsBuffer(closureLen + 1);
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
                 for (int i = batchStart; i < batchEnd; i++) {
@@ -1247,7 +1248,7 @@ public final class AsyncNatives {
             }
         }
 
-        propagateBatchFailure(opSink, errSink, "parallel forEach");
+        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel forEach");
         return MezzeUnit.INSTANCE;
     }
 
@@ -1324,7 +1325,7 @@ public final class AsyncNatives {
             final int batchStart = b * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, xs.length);
 
-            threads[b] = env.newTruffleThreadBuilder(() -> runBatchTask(handlerChain, opSink, errSink, () -> {
+            threads[b] = env.newTruffleThreadBuilder(() -> SpawnSupport.runBatchTask(handlerChain, opSink, errSink, () -> {
                 Object[] callArgs = getCallArgsBuffer(closureLen + 1);
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
                 for (int i = batchStart; i < batchEnd; i++) {
@@ -1346,7 +1347,7 @@ public final class AsyncNatives {
             }
         }
 
-        propagateBatchFailure(opSink, errSink, "parallel filter");
+        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel filter");
 
         List<Object> results = new ArrayList<>();
         for (int i = 0; i < xs.length; i++) {
@@ -1672,11 +1673,11 @@ public final class AsyncNatives {
         CompletableFuture<Object> rightFuture = new CompletableFuture<>();
 
         Thread leftThread = env.newTruffleThreadBuilder(
-            () -> runJoinTask(handlerChain, leftFuture, () -> callThunkFunction(left, callNode))
+            () -> SpawnSupport.runJoinTask(handlerChain, leftFuture, () -> callThunkFunction(left, callNode))
         ).build();
 
         Thread rightThread = env.newTruffleThreadBuilder(
-            () -> runJoinTask(handlerChain, rightFuture, () -> callThunkFunction(right, callNode))
+            () -> SpawnSupport.runJoinTask(handlerChain, rightFuture, () -> callThunkFunction(right, callNode))
         ).build();
 
         leftThread.start();
@@ -1715,15 +1716,15 @@ public final class AsyncNatives {
         CompletableFuture<Object> cFuture = new CompletableFuture<>();
 
         Thread aThread = env.newTruffleThreadBuilder(
-            () -> runJoinTask(handlerChain, aFuture, () -> callThunkFunction(a, callNode))
+            () -> SpawnSupport.runJoinTask(handlerChain, aFuture, () -> callThunkFunction(a, callNode))
         ).build();
 
         Thread bThread = env.newTruffleThreadBuilder(
-            () -> runJoinTask(handlerChain, bFuture, () -> callThunkFunction(b, callNode))
+            () -> SpawnSupport.runJoinTask(handlerChain, bFuture, () -> callThunkFunction(b, callNode))
         ).build();
 
         Thread cThread = env.newTruffleThreadBuilder(
-            () -> runJoinTask(handlerChain, cFuture, () -> callThunkFunction(c, callNode))
+            () -> SpawnSupport.runJoinTask(handlerChain, cFuture, () -> callThunkFunction(c, callNode))
         ).build();
 
         aThread.start();
@@ -2002,71 +2003,6 @@ public final class AsyncNatives {
         }
     }
 
-    /**
-     * Body for a join-style spawn (CompletableFuture-based). Same chain
-     * dance as {@link #runPromiseTask}, but completes a future instead of
-     * a promise. {@link TaskUnhandledOpException} is re-raised wrapped so
-     * the awaiter's {@code future.get()} sees it as the ExecutionException
-     * cause.
-     */
-    private static void runJoinTask(MezzeRecord[] chain, CompletableFuture<Object> future, TaskBody body) {
-        try {
-            EffectFiber.runWithHandlerChain(chain, () -> future.complete(body.run()));
-        } catch (Throwable e) {
-            future.completeExceptionally(e);
-        }
-    }
-
-    /**
-     * Body for a parallel-batch spawn (results written directly into a
-     * shared array; barrier via {@code Thread.join}). Installs {@code chain}
-     * and captures any failure (regular throwable or unhandled effect-op)
-     * into the corresponding sink. After all batches join, call
-     * {@link #propagateBatchFailure} on the main thread to raise.
-     */
-    private static void runBatchTask(
-        MezzeRecord[] chain,
-        java.util.concurrent.atomic.AtomicReference<TaskUnhandledOpException> opSink,
-        java.util.concurrent.atomic.AtomicReference<Throwable> errSink,
-        Runnable body
-    ) {
-        try {
-            EffectFiber.runWithHandlerChain(chain, body);
-        } catch (TaskUnhandledOpException tue) {
-            opSink.compareAndSet(null, tue);
-        } catch (Throwable e) {
-            errSink.compareAndSet(null, e);
-        }
-    }
-
-    /**
-     * Raise the first failure from a parallel batch. Effect-ops re-issue
-     * via {@code parentFiber.suspend(opCall)} so an enclosing perform can
-     * dispatch them; regular throwables are rethrown wrapped. Returns
-     * normally if both sinks are empty. May yield the parent fiber.
-     */
-    private static Object propagateBatchFailure(
-        java.util.concurrent.atomic.AtomicReference<TaskUnhandledOpException> opSink,
-        java.util.concurrent.atomic.AtomicReference<Throwable> errSink,
-        String opLabel
-    ) {
-        TaskUnhandledOpException tue = opSink.get();
-        if (tue != null) {
-            EffectFiber parent = EffectFiber.current();
-            if (parent != null) {
-                return parent.suspend(tue.opCall);
-            }
-            throw new RuntimeException(
-                opLabel + " task raised effect operation '"
-                + tue.opCall.opName() + "' with no handler available.");
-        }
-        Throwable err = errSink.get();
-        if (err != null) {
-            if (err instanceof RuntimeException re) throw re;
-            throw new RuntimeException(opLabel + " task failed: " + err.getMessage(), err);
-        }
-        return null;
-    }
 
     private static Object loomAwaitPromise(MezzePromise promise) {
         Object result;

@@ -2,6 +2,9 @@ package com.mezze.interpreter.nodes.builtin.concurrency;
 
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.nodes.MezzeNode;
+import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
+import com.mezze.interpreter.nodes.continuation.EffectFiber;
+import com.mezze.interpreter.nodes.continuation.SpawnSupport;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.*;
@@ -989,9 +992,13 @@ public final class ConcurrencyNatives {
     // ==================== Agent ====================
 
     /**
-     * Agent action - wraps a function and its Truffle environment.
+     * Agent action - wraps a function, its Truffle environment, and the
+     * effect-handler chain captured at send time. The chain is installed
+     * on the worker thread when this action runs so effect-ops inside
+     * the function dispatch through the same handlers that were in scope
+     * at the send site.
      */
-    private record AgentAction(MezzeFunction func, com.oracle.truffle.api.TruffleLanguage.Env env) {}
+    private record AgentAction(MezzeFunction func, com.oracle.truffle.api.TruffleLanguage.Env env, MezzeRecord[] chain) {}
 
     /**
      * Clojure-style Agent for async state updates.
@@ -1032,7 +1039,7 @@ public final class ConcurrencyNatives {
                 throw new RuntimeException("Agent is in error state: " + error.get());
             }
 
-            actionQueue.add(new AgentAction(func, env));
+            actionQueue.add(new AgentAction(func, env, EffectFiber.snapshotHandlerChain()));
             processQueue();
         }
 
@@ -1073,10 +1080,16 @@ public final class ConcurrencyNatives {
                             System.arraycopy(closureValues, 0, callArgs, 0, closureValues.length);
                             callArgs[closureValues.length] = argRecord;
 
-                            Object newState = func.getCallTarget().call(callArgs);
-                            state.set(newState);
+                            Object[] newStateHolder = new Object[1];
+                            EffectFiber.runWithHandlerChain(action.chain, () ->
+                                newStateHolder[0] = func.getCallTarget().call(callArgs));
+                            state.set(newStateHolder[0]);
                         } catch (Throwable e) {
-                            // Set error state
+                            // Set error state. Unhandled effect-ops are surfaced
+                            // as TaskUnhandledOpException; their op name lands
+                            // in the agent's error field — a future enhancement
+                            // could re-issue on a fiber, but agents are
+                            // fire-and-forget so we just record and stop.
                             error.set(e.getMessage() != null ? e.getMessage() : e.getClass().getName());
                             // Stop processing on error
                             break;
@@ -1701,6 +1714,10 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
+        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
+        AtomicReference<Throwable> errSink = new AtomicReference<>();
+
         Thread[] threads = new Thread[numBatches];
         final int finalBatchSize = batchSize;
 
@@ -1708,16 +1725,14 @@ public final class ConcurrencyNatives {
             final int batchStart = b * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
 
-            threads[b] = env.newTruffleThreadBuilder(() -> {
+            threads[b] = env.newTruffleThreadBuilder(() -> SpawnSupport.runBatchTask(chain, opSink, errSink, () -> {
                 Object[] callArgs = getCallArgsBuffer(closureLen + 1);
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
-
                 for (int i = batchStart; i < batchEnd; i++) {
-                    // Wrap element in record - callbacks expect {x} -> ...
                     callArgs[closureLen] = MezzeRecord.wrapX(store[i]);
                     results[i] = callNode.call(callTarget, callArgs);
                 }
-            }).virtual(true).build();
+            })).virtual(true).build();
             threads[b].start();
         }
 
@@ -1731,6 +1746,7 @@ public final class ConcurrencyNatives {
             throw new RuntimeException("Parallel map interrupted", e);
         }
 
+        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel map");
         return MezzeSeq.fromArray(results);
     }
 
@@ -1776,6 +1792,10 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
+        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
+        AtomicReference<Throwable> errSink = new AtomicReference<>();
+
         Thread[] threads = new Thread[numBatches];
         final int finalBatchSize = batchSize;
 
@@ -1783,17 +1803,15 @@ public final class ConcurrencyNatives {
             final int batchStart = batch * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
 
-            threads[batch] = env.newTruffleThreadBuilder(() -> {
+            threads[batch] = env.newTruffleThreadBuilder(() -> SpawnSupport.runBatchTask(chain, opSink, errSink, () -> {
                 Object[] callArgs = getCallArgsBuffer(closureLen + 1);
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
-
                 for (int i = batchStart; i < batchEnd; i++) {
-                    // Wrap element in record - callbacks expect {x} -> ...
                     callArgs[closureLen] = MezzeRecord.wrapX(store[i]);
                     Object result = callNode.call(callTarget, callArgs);
                     keep[i] = result instanceof Boolean b && b;
                 }
-            }).virtual(true).build();
+            })).virtual(true).build();
             threads[batch].start();
         }
 
@@ -1807,7 +1825,8 @@ public final class ConcurrencyNatives {
             throw new RuntimeException("Parallel filter interrupted", e);
         }
 
-        // Count matches first, then allocate exact-sized array
+        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel filter");
+
         int count = 0;
         for (boolean k : keep) if (k) count++;
         Object[] results = new Object[count];
@@ -1876,6 +1895,10 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
+        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
+        AtomicReference<Throwable> errSink = new AtomicReference<>();
+
         Thread[] threads = new Thread[numBatches];
         final int finalBatchSize = batchSize;
 
@@ -1883,16 +1906,14 @@ public final class ConcurrencyNatives {
             final int batchStart = b * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
 
-            threads[b] = env.newTruffleThreadBuilder(() -> {
+            threads[b] = env.newTruffleThreadBuilder(() -> SpawnSupport.runBatchTask(chain, opSink, errSink, () -> {
                 Object[] callArgs = getCallArgsBuffer(mapClosureLen + 1);
                 System.arraycopy(mapClosure, 0, callArgs, 0, mapClosureLen);
-
                 for (int i = batchStart; i < batchEnd; i++) {
-                    // Wrap element in record - callbacks expect {x} -> ...
                     callArgs[mapClosureLen] = MezzeRecord.wrapX(store[i]);
                     mapped[i] = callNode.call(mapTarget, callArgs);
                 }
-            }).virtual(true).build();
+            })).virtual(true).build();
             threads[b].start();
         }
 
@@ -1905,6 +1926,8 @@ public final class ConcurrencyNatives {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Parallel fold map phase interrupted", e);
         }
+
+        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel fold");
 
         // Sequential reduce phase (combine is typically not parallelizable)
         Object acc = zero;
@@ -1995,6 +2018,10 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
+        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
+        AtomicReference<Throwable> errSink = new AtomicReference<>();
+
         Thread[] threads = new Thread[numBatches];
         final int finalBatchSize = batchSize;
 
@@ -2002,14 +2029,11 @@ public final class ConcurrencyNatives {
             final int batchStart = b * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
 
-            threads[b] = env.newTruffleThreadBuilder(() -> {
-                if (!allTrue.get()) return; // Early exit if already found false
-
+            threads[b] = env.newTruffleThreadBuilder(() -> SpawnSupport.runBatchTask(chain, opSink, errSink, () -> {
+                if (!allTrue.get()) return;
                 Object[] callArgs = getCallArgsBuffer(closureLen + 1);
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
-
                 for (int i = batchStart; i < batchEnd && allTrue.get(); i++) {
-                    // Wrap element in record - callbacks expect {x} -> ...
                     callArgs[closureLen] = MezzeRecord.wrapX(store[i]);
                     Object result = callNode.call(callTarget, callArgs);
                     if (!(result instanceof Boolean bool && bool)) {
@@ -2017,7 +2041,7 @@ public final class ConcurrencyNatives {
                         return;
                     }
                 }
-            }).virtual(true).build();
+            })).virtual(true).build();
             threads[b].start();
         }
 
@@ -2031,6 +2055,7 @@ public final class ConcurrencyNatives {
             throw new RuntimeException("Parallel all interrupted", e);
         }
 
+        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel all");
         return allTrue.get();
     }
 
@@ -2078,6 +2103,10 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
+        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
+        AtomicReference<Throwable> errSink = new AtomicReference<>();
+
         Thread[] threads = new Thread[numBatches];
         final int finalBatchSize = batchSize;
 
@@ -2085,14 +2114,11 @@ public final class ConcurrencyNatives {
             final int batchStart = b * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
 
-            threads[b] = env.newTruffleThreadBuilder(() -> {
-                if (foundTrue.get()) return; // Early exit if already found true
-
+            threads[b] = env.newTruffleThreadBuilder(() -> SpawnSupport.runBatchTask(chain, opSink, errSink, () -> {
+                if (foundTrue.get()) return;
                 Object[] callArgs = getCallArgsBuffer(closureLen + 1);
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
-
                 for (int i = batchStart; i < batchEnd && !foundTrue.get(); i++) {
-                    // Wrap element in record - callbacks expect {x} -> ...
                     callArgs[closureLen] = MezzeRecord.wrapX(store[i]);
                     Object result = callNode.call(callTarget, callArgs);
                     if (result instanceof Boolean bool && bool) {
@@ -2100,7 +2126,7 @@ public final class ConcurrencyNatives {
                         return;
                     }
                 }
-            }).virtual(true).build();
+            })).virtual(true).build();
             threads[b].start();
         }
 
@@ -2114,6 +2140,7 @@ public final class ConcurrencyNatives {
             throw new RuntimeException("Parallel any interrupted", e);
         }
 
+        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel any");
         return foundTrue.get();
     }
 
@@ -2438,6 +2465,10 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
+        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
+        AtomicReference<Throwable> errSink = new AtomicReference<>();
+
         Thread[] threads = new Thread[numBatches];
         final int finalBatchSize = batchSize;
 
@@ -2445,14 +2476,11 @@ public final class ConcurrencyNatives {
             final int batchStart = b * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
 
-            threads[b] = env.newTruffleThreadBuilder(() -> {
+            threads[b] = env.newTruffleThreadBuilder(() -> SpawnSupport.runBatchTask(chain, opSink, errSink, () -> {
                 if (found.get() != null) return;
-
                 Object[] callArgs = getCallArgsBuffer(closureLen + 1);
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
-
                 for (int i = batchStart; i < batchEnd && found.get() == null; i++) {
-                    // Wrap element in record - callbacks expect {x} -> ...
                     callArgs[closureLen] = MezzeRecord.wrapX(store[i]);
                     Object result = callNode.call(callTarget, callArgs);
                     if (result instanceof Boolean bool && bool) {
@@ -2460,7 +2488,7 @@ public final class ConcurrencyNatives {
                         return;
                     }
                 }
-            }).virtual(true).build();
+            })).virtual(true).build();
             threads[b].start();
         }
 
@@ -2473,6 +2501,8 @@ public final class ConcurrencyNatives {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Parallel find interrupted", e);
         }
+
+        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel find");
 
         Object result = found.get();
         return result != null ? createSome(result) : createNone();
@@ -2527,6 +2557,10 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
+        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
+        AtomicReference<Throwable> errSink = new AtomicReference<>();
+
         Thread[] threads = new Thread[numBatches];
         final int finalBatchSize = batchSize;
 
@@ -2534,17 +2568,15 @@ public final class ConcurrencyNatives {
             final int batchStart = b * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
 
-            threads[b] = env.newTruffleThreadBuilder(() -> {
+            threads[b] = env.newTruffleThreadBuilder(() -> SpawnSupport.runBatchTask(chain, opSink, errSink, () -> {
                 Object[] callArgs = getCallArgsBuffer(closureLen + 1);
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
-
                 for (int i = batchStart; i < batchEnd; i++) {
-                    // Wrap element in record - callbacks expect {x} -> ...
                     callArgs[closureLen] = MezzeRecord.wrapX(store[i]);
                     Object result = callNode.call(callTarget, callArgs);
                     matches[i] = result instanceof Boolean bool && bool;
                 }
-            }).virtual(true).build();
+            })).virtual(true).build();
             threads[b].start();
         }
 
@@ -2557,6 +2589,8 @@ public final class ConcurrencyNatives {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Parallel partition interrupted", e);
         }
+
+        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel partition");
 
         // Count matches first, then allocate exact-sized arrays
         int matchCount = 0;
@@ -2626,24 +2660,19 @@ public final class ConcurrencyNatives {
 
         Env env = MezzeContext.get(node).getEnv();
 
+        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
         CompletableFuture<Object> leftFuture = new CompletableFuture<>();
         CompletableFuture<Object> rightFuture = new CompletableFuture<>();
 
-        Thread leftThread = env.newTruffleThreadBuilder(() -> {
-            try {
-                leftFuture.complete(callNode.call(left.getCallTarget(), left.getClosureValues()));
-            } catch (Throwable e) {
-                leftFuture.completeExceptionally(e);
-            }
-        }).virtual(true).build();
+        Thread leftThread = env.newTruffleThreadBuilder(
+            () -> SpawnSupport.runJoinTask(chain, leftFuture,
+                () -> callNode.call(left.getCallTarget(), left.getClosureValues()))
+        ).virtual(true).build();
 
-        Thread rightThread = env.newTruffleThreadBuilder(() -> {
-            try {
-                rightFuture.complete(callNode.call(right.getCallTarget(), right.getClosureValues()));
-            } catch (Throwable e) {
-                rightFuture.completeExceptionally(e);
-            }
-        }).virtual(true).build();
+        Thread rightThread = env.newTruffleThreadBuilder(
+            () -> SpawnSupport.runJoinTask(chain, rightFuture,
+                () -> callNode.call(right.getCallTarget(), right.getClosureValues()))
+        ).virtual(true).build();
 
         leftThread.start();
         rightThread.start();
@@ -2675,33 +2704,25 @@ public final class ConcurrencyNatives {
 
         Env env = MezzeContext.get(node).getEnv();
 
+        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
         CompletableFuture<Object> aFuture = new CompletableFuture<>();
         CompletableFuture<Object> bFuture = new CompletableFuture<>();
         CompletableFuture<Object> cFuture = new CompletableFuture<>();
 
-        Thread aThread = env.newTruffleThreadBuilder(() -> {
-            try {
-                aFuture.complete(callNode.call(a.getCallTarget(), a.getClosureValues()));
-            } catch (Throwable e) {
-                aFuture.completeExceptionally(e);
-            }
-        }).virtual(true).build();
+        Thread aThread = env.newTruffleThreadBuilder(
+            () -> SpawnSupport.runJoinTask(chain, aFuture,
+                () -> callNode.call(a.getCallTarget(), a.getClosureValues()))
+        ).virtual(true).build();
 
-        Thread bThread = env.newTruffleThreadBuilder(() -> {
-            try {
-                bFuture.complete(callNode.call(b.getCallTarget(), b.getClosureValues()));
-            } catch (Throwable e) {
-                bFuture.completeExceptionally(e);
-            }
-        }).virtual(true).build();
+        Thread bThread = env.newTruffleThreadBuilder(
+            () -> SpawnSupport.runJoinTask(chain, bFuture,
+                () -> callNode.call(b.getCallTarget(), b.getClosureValues()))
+        ).virtual(true).build();
 
-        Thread cThread = env.newTruffleThreadBuilder(() -> {
-            try {
-                cFuture.complete(callNode.call(c.getCallTarget(), c.getClosureValues()));
-            } catch (Throwable e) {
-                cFuture.completeExceptionally(e);
-            }
-        }).virtual(true).build();
+        Thread cThread = env.newTruffleThreadBuilder(
+            () -> SpawnSupport.runJoinTask(chain, cFuture,
+                () -> callNode.call(c.getCallTarget(), c.getClosureValues()))
+        ).virtual(true).build();
 
         aThread.start();
         bThread.start();
