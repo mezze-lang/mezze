@@ -1,8 +1,10 @@
 package com.mezze.interpreter.nodes.continuation;
 
+import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
+import java.util.ArrayDeque;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -153,18 +155,19 @@ public final class EffectFiber {
      * first" dispatch). Returns an array so callers can safely iterate
      * after thread boundaries.
      */
-    public static com.mezze.interpreter.values.MezzeRecord[] snapshotHandlerChain() {
-        java.util.ArrayDeque<com.mezze.interpreter.values.MezzeRecord> chain = HANDLER_CHAIN.get();
-        return chain.toArray(new com.mezze.interpreter.values.MezzeRecord[0]);
+    public static MezzeRecord[] snapshotHandlerChain() {
+        ArrayDeque<MezzeRecord> chain = HANDLER_CHAIN.get();
+        return chain.toArray(new MezzeRecord[0]);
     }
 
     /**
      * Install a captured handler chain on the current thread. Caller is
      * responsible for {@link #clearHandlerChain()} on the same thread
-     * when done (typically in a finally block).
+     * when done (typically in a finally block). For one-shot scope use,
+     * {@link #runWithHandlerChain} is safer.
      */
-    public static void installHandlerChain(com.mezze.interpreter.values.MezzeRecord[] chain) {
-        java.util.ArrayDeque<com.mezze.interpreter.values.MezzeRecord> stack = HANDLER_CHAIN.get();
+    public static void installHandlerChain(MezzeRecord[] chain) {
+        ArrayDeque<MezzeRecord> stack = HANDLER_CHAIN.get();
         // Push in reverse so the innermost (snapshot[0]) ends up on top.
         for (int i = chain.length - 1; i >= 0; i--) {
             stack.push(chain[i]);
@@ -173,6 +176,24 @@ public final class EffectFiber {
 
     public static void clearHandlerChain() {
         HANDLER_CHAIN.get().clear();
+    }
+
+    /**
+     * Install {@code chain} on the current thread, run {@code body}, then
+     * clear. Use this in spawned-task bodies that need to inherit the
+     * parent's handler chain. Empty chain is a no-op fast path.
+     */
+    public static void runWithHandlerChain(MezzeRecord[] chain, Runnable body) {
+        if (chain.length == 0) {
+            body.run();
+            return;
+        }
+        installHandlerChain(chain);
+        try {
+            body.run();
+        } finally {
+            clearHandlerChain();
+        }
     }
 
     private EffectFiber(Object scope, Object continuation) {
