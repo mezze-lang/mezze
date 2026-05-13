@@ -4,6 +4,7 @@ import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpEx
 import com.mezze.interpreter.values.MezzeRecord;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -57,6 +58,33 @@ public final class SpawnSupport {
         } catch (Throwable e) {
             future.completeExceptionally(e);
         }
+    }
+
+    /**
+     * Unwrap an {@link ExecutionException} produced by
+     * {@code CompletableFuture.get()}. If the cause is a
+     * {@link TaskUnhandledOpException}, re-issue the op-call on the
+     * current fiber (or rethrow if this thread is itself a spawned task
+     * with chain-dispatch). Otherwise rethrow the cause wrapped.
+     *
+     * @param opLabel short name used in error messages
+     */
+    public static Object propagateJoinFailure(ExecutionException e, String opLabel) {
+        Throwable cause = e.getCause();
+        if (cause instanceof TaskUnhandledOpException tue) {
+            EffectFiber parent = EffectFiber.current();
+            if (parent != null) {
+                return parent.suspend(tue.opCall);
+            }
+            if (EffectFiber.handlerChainDepth() > 0) {
+                throw new TaskUnhandledOpException(tue.opCall);
+            }
+            throw new RuntimeException(
+                opLabel + " task raised effect operation '"
+                + tue.opCall.opName() + "' with no handler available.");
+        }
+        if (cause instanceof RuntimeException re) throw re;
+        throw new RuntimeException(opLabel + " failed: " + (cause != null ? cause.getMessage() : "null"), cause);
     }
 
     /**

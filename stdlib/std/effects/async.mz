@@ -249,12 +249,12 @@ impl Async for CoopAsync where {
 }
 
 ## Spawn and immediately await (synchronous helper).
-pub let run : { f: {} -> 'a } -> 'a <Async> = { f } -> do
+pub let run : { f: {} -> 'a <...> } -> 'a <Async, ...> = { f } -> do
   let p = Async.spawn { f = f }
   Async.await { p = p }
 
 ## Spawn and detach (fire and forget).
-pub let go : { f: {} -> 'a } -> {} <Async> = { f } -> do
+pub let go : { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
   let _ = Async.spawn { f = f }
   {}
 

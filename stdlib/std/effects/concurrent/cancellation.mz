@@ -65,5 +65,5 @@ pub let create_child : { token: CancellationToken } -> CancellationToken = { tok
   __native_cancellation_token_create_child { token = token }
 
 ## Run f if not cancelled, returning Some on success, None if cancelled.
-pub let with_cancellation : { token: CancellationToken, f: {} -> 'a } -> Option 'a = { token, f } ->
+pub let with_cancellation : { token: CancellationToken, f: {} -> 'a <...> } -> Option 'a <...> = { token, f } ->
   if is_cancelled { token = token } then None else Some { val = f {} }

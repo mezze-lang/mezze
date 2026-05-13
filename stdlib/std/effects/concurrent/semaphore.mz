@@ -50,5 +50,5 @@ pub let available : { sem: Semaphore } -> Int = { sem } ->
   __native_semaphore_available { sem = sem }
 
 ## Acquire a permit, run f, release automatically.
-pub let with_permit : { sem: Semaphore, f: {} -> 'a } -> 'a = { sem, f } ->
+pub let with_permit : { sem: Semaphore, f: {} -> 'a <...> } -> 'a <...> = { sem, f } ->
   __native_semaphore_with_permit { sem = sem, f = f }

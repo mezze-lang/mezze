@@ -283,7 +283,9 @@ public final class AsyncNatives {
             }
 
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
-            waiter = Thread.currentThread();
+            // Match await(): VarHandle setRelease so completion-side
+            // getAcquire on the waiter sees a consistent thread reference.
+            WAITER.setRelease(this, Thread.currentThread());
             try {
                 while (state == PENDING) {
                     long remaining = deadline - System.nanoTime();
@@ -296,7 +298,7 @@ public final class AsyncNatives {
                     }
                 }
             } finally {
-                waiter = null;
+                WAITER.setRelease(this, null);
             }
 
             return getResultOrThrow();
@@ -1014,7 +1016,7 @@ public final class AsyncNatives {
         } catch (ExecutionException e) {
             leftThread.interrupt();
             rightThread.interrupt();
-            throw new RuntimeException("Join failed: " + e.getCause().getMessage(), e.getCause());
+            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "join");
         }
     }
 
@@ -1064,7 +1066,7 @@ public final class AsyncNatives {
             aThread.interrupt();
             bThread.interrupt();
             cThread.interrupt();
-            throw new RuntimeException("Join3 failed: " + e.getCause().getMessage(), e.getCause());
+            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "join3");
         }
     }
 
@@ -1696,7 +1698,7 @@ public final class AsyncNatives {
         } catch (ExecutionException e) {
             leftThread.interrupt();
             rightThread.interrupt();
-            throw new RuntimeException("Join failed: " + e.getCause().getMessage(), e.getCause());
+            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "join");
         }
     }
 
@@ -1740,7 +1742,7 @@ public final class AsyncNatives {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Join3 interrupted", e);
         } catch (ExecutionException e) {
-            throw new RuntimeException("Join3 failed: " + e.getCause().getMessage(), e.getCause());
+            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "join3");
         }
     }
 
@@ -2025,13 +2027,23 @@ public final class AsyncNatives {
         }
         // 2. If the task ran via the captured handler chain and an op-call
         //    propagated past the entire chain, it was stashed via
-        //    setUnhandledOpCall. Re-issue on the parent fiber.
+        //    setUnhandledOpCall. Re-issue here. Three cases by location:
+        //    a) Awaiter has a current fiber (the common case — parent is
+        //       inside a `perform Handler in ...`): yield to the driver
+        //       with the op-call so its handler chain dispatches.
+        //    b) Awaiter has no fiber but a handler chain (this thread is
+        //       itself a spawned task): re-throw TaskUnhandledOpException
+        //       so the surrounding runPromiseTask / runBatchTask catches
+        //       it and propagates one level further up.
+        //    c) Neither: nowhere to send the op. Wrap as RuntimeException.
         OpCall pending = promise.getUnhandledOpCall();
         if (pending != null) {
-            EffectFiber parentFiber =
-                EffectFiber.current();
+            EffectFiber parentFiber = EffectFiber.current();
             if (parentFiber != null) {
                 return parentFiber.suspend(pending);
+            }
+            if (EffectFiber.handlerChainDepth() > 0) {
+                throw new EffectHandlerDriver.TaskUnhandledOpException(pending);
             }
             throw new RuntimeException(
                 "Spawned task raised effect operation '" + pending.opName()

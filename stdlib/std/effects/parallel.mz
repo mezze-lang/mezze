@@ -2,31 +2,37 @@ use std::collections::seq
 use std::int
 
 ## Data parallelism effect for parallel collection operations.
+##
+## Callbacks are effect-polymorphic (`<...>`) so they can perform other
+## effects (Exception, Async, etc.) and have the surrounding handler chain
+## dispatch them. The runtime captures the chain at spawn time; an op-call
+## that propagates past all inherited handlers re-issues on the parent
+## fiber when the parallel op joins.
 effect Parallel where {
   ## Apply f to each element in parallel, results in input order.
-  map: { xs: ['a], f: { x: 'a } -> 'b } -> ['b] <Parallel>,
+  map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Parallel, ...>,
   ## Run f on each element in parallel for side effects.
-  for_each: { xs: ['a], f: { x: 'a } -> {} } -> {} <Parallel>,
+  for_each: { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Parallel, ...>,
   ## Filter elements with predicate evaluated in parallel.
-  filter: { xs: ['a], f: { x: 'a } -> Bool } -> ['a] <Parallel>,
+  filter: { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Parallel, ...>,
   ## Reduce with an associative operation in parallel.
-  reduce: { xs: ['a], f: { l: 'a, r: 'a } -> 'a } -> Option 'a <Parallel>,
+  reduce: { xs: ['a], f: { l: 'a, r: 'a } -> 'a <...> } -> Option 'a <Parallel, ...>,
   ## Parallel fold: map each element then combine with associative combiner.
-  fold: { xs: ['a], zero: 'b, map_fn: { x: 'a } -> 'b, combine: { l: 'b, r: 'b } -> 'b } -> 'b <Parallel>,
+  fold: { xs: ['a], zero: 'b, map_fn: { x: 'a } -> 'b <...>, combine: { l: 'b, r: 'b } -> 'b <...> } -> 'b <Parallel, ...>,
   ## Run two computations in parallel.
-  both: { l: {} -> 'a, r: {} -> 'b } -> { l: 'a, r: 'b } <Parallel>,
+  both: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Parallel, ...>,
   ## Run three computations in parallel.
-  both3: { a: {} -> 'a, b: {} -> 'b, c: {} -> 'c } -> { a: 'a, b: 'b, c: 'c } <Parallel>,
+  both3: { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: 'a, b: 'b, c: 'c } <Parallel, ...>,
   ## Find first element matching predicate (short-circuits).
-  find: { xs: ['a], f: { x: 'a } -> Bool } -> Option 'a <Parallel>,
+  find: { xs: ['a], f: { x: 'a } -> Bool <...> } -> Option 'a <Parallel, ...>,
   ## Check if any element matches predicate (short-circuits).
-  any: { xs: ['a], f: { x: 'a } -> Bool } -> Bool <Parallel>,
+  any: { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...>,
   ## Check if all elements match predicate (short-circuits).
-  all: { xs: ['a], f: { x: 'a } -> Bool } -> Bool <Parallel>,
+  all: { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...>,
   ## Partition elements by predicate into {pass, fail}.
-  partition: { xs: ['a], f: { x: 'a } -> Bool } -> { pass: ['a], fail: ['a] } <Parallel>,
+  partition: { xs: ['a], f: { x: 'a } -> Bool <...> } -> { pass: ['a], fail: ['a] } <Parallel, ...>,
   ## Group elements by key function.
-  group_by: { xs: ['a], f: { x: 'a } -> 'k } -> [{ key: 'k, values: ['a] }] <Parallel>
+  group_by: { xs: ['a], f: { x: 'a } -> 'k <...> } -> [{ key: 'k, values: ['a] }] <Parallel, ...>
 }
 
 ## Default implementation using virtual threads for parallelism.
@@ -274,7 +280,7 @@ pub let product : { xs: [Int] } -> Int <Parallel> = { xs } -> match Parallel.red
 
 
 ## Count elements matching a predicate in parallel.
-pub let count : { xs: ['a], f: { x: 'a } -> Bool } -> Int <Parallel> = { xs, f } ->
+pub let count : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Int <Parallel, ...> = { xs, f } ->
   Parallel.fold {
     xs = xs,
     zero = 0,
@@ -295,5 +301,5 @@ pub let flatten : { xs: [['a]] } -> ['a] <Parallel> = { xs } ->
   }
 
 ## Map then flatten in parallel.
-pub let flat_map : { xs: ['a], f: { x: 'a } -> ['b] } -> ['b] <Parallel> = { xs, f } ->
+pub let flat_map : { xs: ['a], f: { x: 'a } -> ['b] <...> } -> ['b] <Parallel, ...> = { xs, f } ->
   flatten { xs = Parallel.map { xs = xs, f = f } }

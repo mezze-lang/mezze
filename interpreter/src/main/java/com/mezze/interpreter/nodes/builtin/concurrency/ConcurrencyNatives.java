@@ -2689,7 +2689,10 @@ public final class ConcurrencyNatives {
         } catch (ExecutionException e) {
             leftThread.interrupt();
             rightThread.interrupt();
-            throw new RuntimeException("Parallel both failed: " + e.getCause().getMessage(), e.getCause());
+            // Returns Object — for parallelBoth the propagated path is
+            // either a fiber suspend (Object return) or a throw, so the
+            // cast to MezzeRecord is safe when not throwing.
+            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "parallel both");
         }
     }
 
@@ -2741,7 +2744,7 @@ public final class ConcurrencyNatives {
             aThread.interrupt();
             bThread.interrupt();
             cThread.interrupt();
-            throw new RuntimeException("Parallel both3 failed: " + e.getCause().getMessage(), e.getCause());
+            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "parallel both3");
         }
     }
 

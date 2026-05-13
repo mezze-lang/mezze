@@ -67,4 +67,119 @@ class AsyncExceptionCompositionTest {
         val payload = result.payloadValue as MezzeRecord
         assertEquals(42L, payload.getField("val"))
     }
+
+    @Test
+    fun `raise inside Parallel map callback is caught by outer ExceptionToResult`() {
+        // The parallel map runs on a virtual-thread pool. The callback at
+        // index 2 raises. The outer ExceptionToResult must observe it via
+        // chain-inheritance + propagateBatchFailure → fiber.suspend on the
+        // parent.
+        val source = """
+            use std::effects::exception::{Exception, ExceptionToResult}
+            use std::effects::parallel::{Parallel, VirtualParallel}
+
+            perform ExceptionToResult in perform VirtualParallel in do
+              let r = Parallel.map { xs = [1, 2, 3, 4, 5], f = { x } ->
+                if x == 3 then Exception.throw { error = "three" } else x * 10
+              }
+              Ok { val = r }
+        """.trimIndent()
+
+        val result = eval(source)
+        assertTrue(result is MezzeVariant) { "expected MezzeVariant, got ${result::class.simpleName}" }
+        assertEquals("Err", (result as MezzeVariant).constructorName)
+        val payload = result.payloadValue as MezzeRecord
+        assertEquals("three", payload.getField("error"))
+    }
+
+    @Test
+    fun `raise inside Parallel both lands on outer handler`() {
+        val source = """
+            use std::effects::exception::{Exception, ExceptionToResult}
+            use std::effects::parallel::{Parallel, VirtualParallel}
+
+            perform ExceptionToResult in perform VirtualParallel in do
+              let _ = Parallel.both {
+                l = {} -> Exception.throw { error = "left-fail" },
+                r = {} -> 42,
+              }
+              Ok { val = 0 }
+        """.trimIndent()
+
+        val result = eval(source)
+        assertTrue(result is MezzeVariant)
+        assertEquals("Err", (result as MezzeVariant).constructorName)
+        val payload = result.payloadValue as MezzeRecord
+        assertEquals("left-fail", payload.getField("error"))
+    }
+
+    @Test
+    fun `multiple spawns where one raises - await of failing promise raises`() {
+        // Two spawns. Awaiting the failing one re-issues the op on the
+        // parent fiber. The successful one is never awaited; that's OK,
+        // its result is discarded.
+        val source = """
+            use std::effects::exception::{Exception, ExceptionToResult}
+            use std::effects::async::{Async, LoomAsync}
+
+            perform ExceptionToResult in perform LoomAsync in do
+              let good = Async.spawn { f = {} -> 100 }
+              let bad = Async.spawn { f = {} -> Exception.throw { error = "bad" } }
+              let _ = Async.await { p = good }
+              let v = Async.await { p = bad }
+              Ok { val = v }
+        """.trimIndent()
+
+        val result = eval(source)
+        assertTrue(result is MezzeVariant)
+        assertEquals("Err", (result as MezzeVariant).constructorName)
+        val payload = result.payloadValue as MezzeRecord
+        assertEquals("bad", payload.getField("error"))
+    }
+
+    @Test
+    fun `nested spawn raises - innermost handler wins`() {
+        // outer task spawns inner. Inner raises. Inner's await is inside
+        // the outer task body; outer handler is on the parent fiber.
+        // The raise propagates through outer's await all the way to the
+        // ExceptionToResult outside.
+        val source = """
+            use std::effects::exception::{Exception, ExceptionToResult}
+            use std::effects::async::{Async, LoomAsync}
+
+            perform ExceptionToResult in perform LoomAsync in do
+              let outer = Async.spawn { f = {} -> do
+                let inner = Async.spawn { f = {} -> Exception.throw { error = "inner-bad" } }
+                Async.await { p = inner }
+              }
+              let v = Async.await { p = outer }
+              Ok { val = v }
+        """.trimIndent()
+
+        val result = eval(source)
+        assertTrue(result is MezzeVariant)
+        assertEquals("Err", (result as MezzeVariant).constructorName)
+        val payload = result.payloadValue as MezzeRecord
+        assertEquals("inner-bad", payload.getField("error"))
+    }
+
+    @Test
+    fun `Parallel for_each whose callback raises surfaces on the handler`() {
+        val source = """
+            use std::effects::exception::{Exception, ExceptionToResult}
+            use std::effects::parallel::{Parallel, VirtualParallel}
+
+            perform ExceptionToResult in perform VirtualParallel in do
+              let _ = Parallel.for_each { xs = [1, 2, 3], f = { x } ->
+                if x == 2 then Exception.throw { error = "two-fail" } else {}
+              }
+              Ok { val = 0 }
+        """.trimIndent()
+
+        val result = eval(source)
+        assertTrue(result is MezzeVariant)
+        assertEquals("Err", (result as MezzeVariant).constructorName)
+        val payload = result.payloadValue as MezzeRecord
+        assertEquals("two-fail", payload.getField("error"))
+    }
 }

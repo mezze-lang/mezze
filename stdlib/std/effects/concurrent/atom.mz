@@ -48,7 +48,7 @@ pub let get_and_swap : { atom: Atom 'a, f: { current: 'a } -> 'a } -> { old: 'a,
   __native_atom_get_and_swap { atom = atom, f = f }
 
 ## Register a watch callback invoked on every state change.
-pub let add_watch : { atom: Atom 'a, key: Str, f: { key: Str, old: 'a, new: 'a } -> {} } -> {} = { atom, key, f } ->
+pub let add_watch : { atom: Atom 'a, key: Str, f: { key: Str, old: 'a, new: 'a } -> {} <...> } -> {} <...> = { atom, key, f } ->
   __native_atom_add_watch { atom = atom, key = key, f = f }
 
 ## Remove a watch by its key.

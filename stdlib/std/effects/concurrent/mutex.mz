@@ -20,7 +20,7 @@ impl Mutex where {
 pub let mutex : {} -> Mutex = {} -> __native_mutex_new {}
 
 ## Acquire lock, run f, release lock automatically (recommended).
-pub let with_lock : { mutex: Mutex, f: {} -> 'a } -> 'a = { mutex, f } ->
+pub let with_lock : { mutex: Mutex, f: {} -> 'a <...> } -> 'a <...> = { mutex, f } ->
   __native_mutex_with_lock { mutex = mutex, f = f }
 
 ## Acquire the lock (blocking). You must call unlock when done.
