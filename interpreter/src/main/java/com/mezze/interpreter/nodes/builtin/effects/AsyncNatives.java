@@ -3,6 +3,7 @@ package com.mezze.interpreter.nodes.builtin.effects;
 import com.mezze.datastructures.list.MezzeList;
 
 import com.mezze.interpreter.nodes.MezzeNode;
+import com.mezze.interpreter.nodes.builtin.BuiltinFieldNames;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
 import com.mezze.interpreter.nodes.continuation.EffectFiber;
@@ -563,10 +564,12 @@ public final class AsyncNatives {
     // Batch size for chunked parallel operations - ALL parallel ops use batching now
     private static final int BATCH_SIZE = 64;
 
-    // Pre-allocated field name arrays to avoid allocation in hot paths
-    private static final String[] X_FIELD = new String[]{"x"};
-    private static final String[] LEFT_RIGHT_FIELDS = new String[]{"l", "r"};
-    private static final String[] ABC_FIELDS = new String[]{"a", "b", "c"};
+    // Pre-allocated field-name arrays live in BuiltinFieldNames so they
+    // can be shared across natives without each file defining its own
+    // (sometimes with a different name — ABC_FIELDS vs A_B_C_FIELDS).
+    private static final String[] X_FIELD = BuiltinFieldNames.X;
+    private static final String[] LEFT_RIGHT_FIELDS = BuiltinFieldNames.LEFT_RIGHT;
+    private static final String[] ABC_FIELDS = BuiltinFieldNames.ABC;
 
     // ==================== OPTIMIZATION: Thread-Local Argument Buffers ====================
 

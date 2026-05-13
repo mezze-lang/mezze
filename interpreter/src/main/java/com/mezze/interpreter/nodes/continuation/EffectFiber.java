@@ -18,9 +18,68 @@ import java.util.concurrent.atomic.AtomicLong;
  * what was suspended via {@link #takeSuspendedValue()}, decides what to
  * do (stash, drop, eventually call run again), etc.
  *
- * <p>One-shot semantics: HotSpot's {@code Continuation} is one-shot.
- * After {@link #isDone()} is true, no further {@link #run()} calls are
- * valid. Calling {@link #run()} when already closed throws.
+ * <h2>Lifecycle invariants</h2>
+ *
+ * <p><b>One-shot.</b> HotSpot's {@code Continuation} is one-shot: once
+ * the body returns naturally, the fiber is closed and any further
+ * {@link #run()} call throws {@link IllegalStateException}. The driver
+ * marks completion by stashing a {@code BodyResult} via
+ * {@link #setSuspendedValue(Object)}; subsequent {@code run()} would
+ * crash, so the driver checks {@link #isDone()} or the suspend payload
+ * type before recursing.
+ *
+ * <p><b>Thread-locals.</b> Two distinct ThreadLocals track fiber state.
+ * {@link #CURRENT} points to the fiber whose continuation is on top of
+ * the current thread's stack — the one {@link #suspend(Object)} would
+ * yield from. {@link #DISPATCH} points to the fiber whose op handler
+ * the driver is invoking on its own stack — set during
+ * {@link #enterDispatch()}/{@link #exitDispatch(EffectFiber)} so the op
+ * handler body can read this fiber's resume/abort handles via
+ * {@code EffectBindingNode}, while NOT pretending its continuation is
+ * suspendable. They are always disjoint: a fiber is either running or
+ * being dispatched-into, never both at the same time on the same thread.
+ *
+ * <p><b>Cross-scope yields.</b> When an inner perform's body performs an
+ * op that propagates past the inner handler, the driver's
+ * {@link #suspend(Object)} on the inner fiber bypasses the outer
+ * fiber's continuation frame on the same thread. The outer fiber's
+ * Java-side try/finally blocks DO NOT fire during this yield — control
+ * goes straight back to whoever last called {@link #run()} on the outer
+ * fiber. {@code EffectHandlerDriver.run} works around this with
+ * {@link #handlerChainDepth()} + {@link #truncateHandlerChainTo(int)} in
+ * an outer finally that fires only when control finally returns.
+ *
+ * <p><b>Handler chain.</b> Independent of fiber state, every thread has
+ * a {@link #HANDLER_CHAIN} stack of effect-handler records that
+ * spawned tasks inherit at spawn time
+ * ({@link #snapshotHandlerChain()} +
+ * {@link #installHandlerChain(MezzeRecord[])}). The chain participates
+ * in {@link com.mezze.interpreter.nodes.effect.OpCallNode}'s fiber-less
+ * dispatch path: when there's no current fiber but a chain is
+ * installed, the op-call walks the chain to find a matching handler and
+ * invokes it directly. Unhandled ops at the chain bottom are surfaced
+ * as {@code TaskUnhandledOpException} for the spawning code to
+ * re-issue on the parent fiber at await time. See
+ * {@link com.mezze.interpreter.nodes.continuation.SpawnSupport}.
+ *
+ * <p><b>Late resume.</b> A {@code resume} reference captured inside an
+ * abort payload (the OCaml-5 style "captured continuation" pattern,
+ * e.g. Generator's Stream consumer) outlives the original op-handler
+ * body. Re-entering the cached resume CallTarget calls back into
+ * {@link com.mezze.interpreter.nodes.builtin.EffectHandlerDriver#drive
+ * drive}, which catches {@link
+ * com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException
+ * AbortPerformException} so later aborts during the deferred resume
+ * surface as resume's return value rather than escaping past the
+ * resume call site.
+ *
+ * <p><b>Dispatch-only fibers.</b>
+ * {@link #createDispatchOnly()} produces a fiber with no continuation —
+ * useful when {@code OpCallNode}'s chain-dispatch path wants to invoke
+ * an inherited op handler that calls {@code abort}/{@code resume}. The
+ * handler body needs a dispatch fiber to bind those handles to, but
+ * there's no surrounding {@code perform} to suspend back into. The
+ * dispatch-only fiber's {@code resume {val = X}} just returns X.
  */
 public final class EffectFiber {
 

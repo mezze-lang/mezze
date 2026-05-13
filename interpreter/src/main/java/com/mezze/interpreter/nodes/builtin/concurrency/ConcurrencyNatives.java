@@ -2,6 +2,7 @@ package com.mezze.interpreter.nodes.builtin.concurrency;
 
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.nodes.MezzeNode;
+import com.mezze.interpreter.nodes.builtin.BuiltinFieldNames;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
 import com.mezze.interpreter.nodes.continuation.EffectFiber;
 import com.mezze.interpreter.nodes.continuation.SpawnSupport;
@@ -499,7 +500,7 @@ public final class ConcurrencyNatives {
         return atom.swap(val, callNode);
     }
 
-    private static final String[] CURRENT_FIELD = new String[]{"current"};
+    private static final String[] CURRENT_FIELD = BuiltinFieldNames.CURRENT;
 
     @TruffleBoundary
     public static Object atomSwapFunc(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
@@ -1007,7 +1008,7 @@ public final class ConcurrencyNatives {
      * CallTargets can be properly invoked from spawned threads.
      */
     public static class MezzeAgent {
-        private static final String[] CURRENT_FIELD = new String[]{"current"};
+        private static final String[] CURRENT_FIELD = BuiltinFieldNames.CURRENT;
 
         private final AtomicReference<Object> state;
         private final AtomicReference<String> error = new AtomicReference<>(null);
@@ -1863,7 +1864,7 @@ public final class ConcurrencyNatives {
         return MezzeSeq.fromArray(results);
     }
 
-    private static final String[] LEFT_RIGHT_FIELDS = new String[]{"l", "r"};
+    private static final String[] LEFT_RIGHT_FIELDS = BuiltinFieldNames.LEFT_RIGHT;
 
     /**
      * Parallel fold using parallel map phase + sequential reduce.
@@ -2525,7 +2526,7 @@ public final class ConcurrencyNatives {
         return createNone();
     }
 
-    private static final String[] PASS_FAIL_FIELDS = new String[]{"pass", "fail"};
+    private static final String[] PASS_FAIL_FIELDS = BuiltinFieldNames.PASS_FAIL;
 
     /**
      * Parallel partition - split elements by predicate.
@@ -2648,7 +2649,7 @@ public final class ConcurrencyNatives {
         return sequentialGroupBy(args, callNode);
     }
 
-    private static final String[] A_B_C_FIELDS = new String[]{"a", "b", "c"};
+    private static final String[] A_B_C_FIELDS = BuiltinFieldNames.ABC;
 
     /**
      * Parallel both - run two functions in parallel.

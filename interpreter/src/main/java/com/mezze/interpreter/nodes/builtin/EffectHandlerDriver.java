@@ -194,12 +194,10 @@ public final class EffectHandlerDriver {
 
         // Find the innermost handler in the chain whose record has a
         // field matching this op-name.
-        MezzeRecord matchingHandler = null;
         MezzeFunction opHandler = null;
         for (int i = 0; i < chain.length; i++) {
             Object f = chain[i].getField(opCall.opName());
             if (f instanceof MezzeFunction mf) {
-                matchingHandler = chain[i];
                 opHandler = mf;
                 break;
             }
@@ -208,50 +206,69 @@ public final class EffectHandlerDriver {
             throw new TaskUnhandledOpException(opCall);
         }
 
-        // Standard per-op dispatch: push resume/abort, call handler op,
-        // decide fall-through vs explicit-resume.
-        final MezzeRecord matchedHandler = matchingHandler;
-        MezzeFunction resumeFn = makeChainResumeFunction(chain, fiber, callNode);
-        MezzeFunction abortFn = makeAbortFunction();
-        fiber.pushEffectHandles(resumeFn, abortFn);
-
-        EffectFiber prevDispatch = fiber.enterDispatch();
-        Object opResult;
-        try {
-            Object[] cv = opHandler.getClosureValues();
-            Object[] opArgs = new Object[cv.length + 1];
-            System.arraycopy(cv, 0, opArgs, 0, cv.length);
-            opArgs[cv.length] = opCall.args();
-            opResult = callNode.call(opHandler.getCallTarget(), opArgs);
-        } finally {
-            EffectFiber.exitDispatch(prevDispatch);
+        OpDispatchResult result = dispatchOp(
+            opHandler, opCall, fiber,
+            makeChainResumeFunction(chain, fiber, callNode),
+            makeAbortFunction(),
+            callNode);
+        if (result.resumed()) {
+            return result.opResult();
         }
-
-        boolean resumed = fiber.wasResumedAtCurrentFrame();
-        fiber.popEffectHandles();
-        if (resumed) {
-            return opResult;
-        }
-        return driveWithChain(chain, fiber, opResult, callNode);
+        return driveWithChain(chain, fiber, result.opResult(), callNode);
     }
+
+    // Cache one CallTarget for chain-dispatch resume, mirroring the
+    // CACHED_RESUME_TARGET pattern from #88 for the in-perform resume.
+    // Per-dispatch state (chain, fiber, callNode) flows through the
+    // MezzeFunction's closure values; the shared body reads them from
+    // frame.getArguments(). Saves a FrameDescriptor + MezzeRootNode +
+    // RootCallTarget allocation per chain-dispatched op-call. #101.
+    private static volatile RootCallTarget CACHED_CHAIN_RESUME_TARGET = null;
 
     private static MezzeFunction makeChainResumeFunction(
             MezzeRecord[] chain,
             EffectFiber fiber,
             IndirectCallNode callNode) {
+        RootCallTarget target = CACHED_CHAIN_RESUME_TARGET;
+        if (target == null) target = buildAndCacheChainResumeTarget();
+        // Closure layout matches the order the shared body reads them in
+        // frame.getArguments(): [chain, fiber, callNode] followed by the
+        // user arg ({val = X}).
+        return new MezzeFunction(
+            target,
+            ScopedEffectConstants.RESUME,
+            new Object[]{chain, fiber, callNode}
+        );
+    }
+
+    @TruffleBoundary
+    private static synchronized RootCallTarget buildAndCacheChainResumeTarget() {
+        if (CACHED_CHAIN_RESUME_TARGET != null) return CACHED_CHAIN_RESUME_TARGET;
         FrameDescriptor fd = FrameDescriptor.newBuilder().build();
         MezzeNode resumeBody = new MezzeNode() {
             @Override
             public Object execute(VirtualFrame frame) {
                 Object[] frameArgs = frame.getArguments();
+                // frameArgs layout: [chain, fiber, callNode, argRecord]
+                MezzeRecord[] chain = (MezzeRecord[]) frameArgs[0];
+                EffectFiber fiber = (EffectFiber) frameArgs[1];
+                IndirectCallNode callNode = (IndirectCallNode) frameArgs[2];
                 int recordIdx = frameArgs.length - 1;
-                if (recordIdx < 0 || !(frameArgs[recordIdx] instanceof MezzeRecord rec)) {
+                if (recordIdx < 3 || !(frameArgs[recordIdx] instanceof MezzeRecord rec)) {
                     throw new RuntimeException(
                         "resume expects record argument {val = ...}");
                 }
                 Object val = rec.getField(ScopedEffectConstants.VAL_FIELD);
                 fiber.markResumedAtCurrentFrame();
-                return driveWithChain(chain, fiber, val, callNode);
+                // Symmetric with the in-perform resume: catch AbortPerform
+                // so a deferred chain-dispatch resume re-entry (resume
+                // captured inside an abort payload) translates a later
+                // abort into the value resume returns.
+                try {
+                    return driveWithChain(chain, fiber, val, callNode);
+                } catch (AbortPerformException abort) {
+                    return abort.value;
+                }
             }
         };
         RootCallTarget target = new MezzeRootNode(
@@ -263,7 +280,8 @@ public final class EffectHandlerDriver {
             1,
             new int[0]
         ).getCallTarget();
-        return new MezzeFunction(target, ScopedEffectConstants.RESUME, new Object[0]);
+        CACHED_CHAIN_RESUME_TARGET = target;
+        return target;
     }
 
     /**
@@ -339,6 +357,52 @@ public final class EffectHandlerDriver {
     }
 
     /**
+     * Result of one op-handler invocation. {@code resumed} is true when the
+     * handler explicitly called {@code resume {val = ...}} during its body
+     * — in that case it already drove the fiber forward, and {@code opResult}
+     * is whatever value came back. When false, the handler fell through —
+     * its return value should be fed back into the fiber as the op-call's
+     * suspend value.
+     */
+    private record OpDispatchResult(boolean resumed, Object opResult) {}
+
+    /**
+     * Shared op-call dispatch step: push runtime-supplied {@code resume}/
+     * {@code abort} handles for this invocation, pin the fiber as the
+     * dispatch fiber, call the matched op handler, pop and unpin. Caller
+     * decides what to do with the result (return it to the perform if
+     * resumed, or drive the fiber forward with it on fall-through).
+     *
+     * <p>The op handler's body reads {@code resume}/{@code abort} via
+     * {@link com.mezze.interpreter.nodes.effect.EffectBindingNode}, which
+     * pulls from the dispatch fiber's effect-handle stack. Nested op
+     * calls each push their own frame.
+     */
+    private static OpDispatchResult dispatchOp(
+            MezzeFunction opHandler,
+            OpCall opCall,
+            EffectFiber fiber,
+            MezzeFunction resumeFn,
+            MezzeFunction abortFn,
+            IndirectCallNode callNode) {
+        fiber.pushEffectHandles(resumeFn, abortFn);
+        EffectFiber prevDispatch = fiber.enterDispatch();
+        Object opResult;
+        try {
+            Object[] cv = opHandler.getClosureValues();
+            Object[] opArgs = new Object[cv.length + 1];
+            System.arraycopy(cv, 0, opArgs, 0, cv.length);
+            opArgs[cv.length] = opCall.args();
+            opResult = callNode.call(opHandler.getCallTarget(), opArgs);
+        } finally {
+            EffectFiber.exitDispatch(prevDispatch);
+        }
+        boolean resumed = fiber.wasResumedAtCurrentFrame();
+        fiber.popEffectHandles();
+        return new OpDispatchResult(resumed, opResult);
+    }
+
+    /**
      * Drive the fiber forward by one cycle. If the fiber is fresh, calls
      * {@code run()}; otherwise injects {@code resumeWith} via setResumeValue
      * and then runs. After the fiber suspends or completes, decides:
@@ -398,48 +462,26 @@ public final class EffectHandlerDriver {
             return drive(handler, fiber, outerFiber, resumedWith, callNode);
         }
 
-        // Build runtime-supplied `resume` and `abort` handles for this op
-        // invocation. They're not passed as record fields — the op handler
-        // body reads them via EffectBindingNode, which pulls from the
-        // current fiber's effect-handle stack. We push here and pop after.
-        // Nested op calls each push their own frame.
-        MezzeFunction resumeFn = makeResumeFunction(handler, fiber, outerFiber, callNode);
-        MezzeFunction abortFn = makeAbortFunction();
-        fiber.pushEffectHandles(resumeFn, abortFn);
-        // Pin this fiber as "current" for the duration of the op handler
-        // call. The op handler runs on the driver's stack (outside the
-        // continuation), so EffectFiber.current() wouldn't otherwise see
-        // anything — but the op handler's body needs to read resume/abort
-        // off this fiber.
-        EffectFiber prevDispatch = fiber.enterDispatch();
-        Object opResult;
-        try {
-            // Op handler's lambda takes the op's args record directly
-            // (the args field shape is the op's declared parameter type,
-            // e.g. {error} for `raise`). resume/abort flow through the
-            // fiber's handle stack, not the argument record.
-            Object[] cv = opHandler.getClosureValues();
-            Object[] opArgs = new Object[cv.length + 1];
-            System.arraycopy(cv, 0, opArgs, 0, cv.length);
-            opArgs[cv.length] = opCall.args();
-            opResult = callNode.call(opHandler.getCallTarget(), opArgs);
-        } finally {
-            EffectFiber.exitDispatch(prevDispatch);
-        }
+        // Dispatch the op. resume/abort handles flow through the fiber's
+        // handle stack — not the op handler's argument record — and the
+        // op handler body reads them via EffectBindingNode.
+        OpDispatchResult result = dispatchOp(
+            opHandler, opCall, fiber,
+            makeResumeFunction(handler, fiber, outerFiber, callNode),
+            makeAbortFunction(),
+            callNode);
 
-        // Decide fall-through vs explicit-resume semantics:
+        // Fall-through vs explicit-resume:
         //   - If the op handler explicitly called resume during its body,
-        //     it already drove the fiber forward; opResult is the value
-        //     it produced and that becomes the perform's result.
+        //     it already drove the fiber forward; the value it produced
+        //     becomes this perform's result.
         //   - Otherwise the handler "fell through" — implicitly equivalent
         //     to `resume {val = opResult}`. Drive the fiber forward with
         //     opResult as the suspend's return value.
-        boolean resumed = fiber.wasResumedAtCurrentFrame();
-        fiber.popEffectHandles();
-        if (resumed) {
-            return opResult;
+        if (result.resumed()) {
+            return result.opResult();
         }
-        return drive(handler, fiber, outerFiber, opResult, callNode);
+        return drive(handler, fiber, outerFiber, result.opResult(), callNode);
     }
 
     // ----------------------------------------------------------------
