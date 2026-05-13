@@ -150,11 +150,11 @@ object PrecompiledStdlib {
             is com.mezze.language.truffleir.SeqGetIR -> { collectHashRefs(node.seq, refs); collectHashRefs(node.index, refs) }
             is com.mezze.language.truffleir.DictMethodCallIR -> collectHashRefs(node.arg, refs)
             // ReadGlobalByHash{,Fn}IR carry a Hash directly — feed it into the
-            // dep graph. ReadScopeIR is a runtime-injected local (e.g. "scope"
-            // from HandleNode); not a global, so no hash ref.
+            // dep graph. EffectBindingIR is a runtime-injected effect-handler
+            // binding (`scope`/`resume`/`abort`); not a global, so no hash ref.
             is com.mezze.language.truffleir.ReadGlobalByHashIR -> refs.add(node.hash)
             is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> refs.add(node.hash)
-            is com.mezze.language.truffleir.ReadScopeIR -> {}
+            is com.mezze.language.truffleir.EffectBindingIR -> {}
             else -> {} // leaf nodes
         }
     }

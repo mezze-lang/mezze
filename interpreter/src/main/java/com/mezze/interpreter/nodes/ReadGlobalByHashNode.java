@@ -62,22 +62,24 @@ public final class ReadGlobalByHashNode extends MezzeNode {
         if (value instanceof MezzeFunction fn) {
             value = autoEvaluateThunk(fn, context);
         }
-        // Force MezzeSuspended values when inside an active handler scope
-        // This implements lazy effect semantics: suspended computations from
-        // outside a perform block are evaluated when read inside one.
-        if (value instanceof MezzeSuspended suspended && context.hasHandlers()) {
-            value = forceSuspended(suspended, context);
+        // Force MezzeSuspended values when inside an active handler scope.
+        // Lazy effects: suspended computations from outside a perform block
+        // are evaluated when read inside one. force() returns the suspension
+        // unchanged when no fiber is current, so this is safe to call
+        // unconditionally.
+        if (value instanceof MezzeSuspended suspended) {
+            value = forceSuspended(suspended);
         }
         return value;
     }
 
     @TruffleBoundary
-    private Object forceSuspended(MezzeSuspended suspended, MezzeContext context) {
+    private Object forceSuspended(MezzeSuspended suspended) {
         if (suspendedCallNode == null) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
             suspendedCallNode = insert(IndirectCallNode.create());
         }
-        return suspended.executeWith(context.getCurrentHandlers(), context, suspendedCallNode);
+        return suspended.force(suspendedCallNode);
     }
 
     /**

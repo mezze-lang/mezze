@@ -23,10 +23,9 @@ class AsyncModuleTest {
     // Helper to wrap code in CoopAsync handler
     private fun withCoopAsync(body: String): String = """
         use std::effects::async::{Async, CoopAsync}
-        use std::control::continuation
         use std::collections::seq
 
-        perform CoopAsync {cont = continuation::new {}} in do
+        perform CoopAsync in do
             $body
     """
 
@@ -208,9 +207,8 @@ class AsyncModuleTest {
     fun `test run helper spawns and awaits`() {
         val result = eval("""
             use std::effects::async::{Async, CoopAsync, run}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 run {f = {} -> 42}
         """)
         assertEquals(42L, result)
@@ -222,9 +220,8 @@ class AsyncModuleTest {
     fun `test go helper fires and forgets`() {
         val result = eval("""
             use std::effects::async::{Async, CoopAsync, go}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 go {f = {} -> 42}
                 100
         """)

@@ -552,7 +552,7 @@ class BuildCommand {
                 is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> {
                     try { store.addEdge(fromHash, node.hash, com.mezze.language.codebase.EdgeKind.REFERENCES) } catch (_: Exception) {}
                 }
-                is com.mezze.language.truffleir.ReadScopeIR -> {} // local scope, not a global ref
+                is com.mezze.language.truffleir.EffectBindingIR -> {} // runtime-supplied effect binding, not a global ref
                 else -> {} // leaf nodes
             }
         }

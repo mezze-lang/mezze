@@ -115,7 +115,12 @@ public class MezzeThunk implements TruffleObject {
     }
 
     public boolean isDeferredEffectCall() {
-        return effectName != null;
+        // A deferred effect-call thunk has an operation to dispatch
+        // (operationName) but no callable function — it must be resolved
+        // through an effect handler. The legacy check used effectName, but
+        // the new dispatch design doesn't need an effect name (op names
+        // are dispatched directly on the handler record).
+        return function == null;
     }
 
     /**

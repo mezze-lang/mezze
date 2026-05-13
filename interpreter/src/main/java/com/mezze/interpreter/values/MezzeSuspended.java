@@ -2,7 +2,6 @@ package com.mezze.interpreter.values;
 
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.control.BlockNode;
-import com.mezze.interpreter.nodes.continuation.MezzeContinuationSuspended;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -108,208 +107,87 @@ public final class MezzeSuspended implements TruffleObject {
     }
 
     /**
-     * Execute the suspended computation with provided handlers.
-     * This is called by perform when handlers become available.
+     * Force this suspended computation under the currently-active effect
+     * handler chain, if any.
      *
-     * @param handlers Map of effect name to handler record
-     * @param context The Mezze context
-     * @param callNode Indirect call node for executing thunks
-     * @return The result, or a new MezzeSuspended if effects remain unhandled
+     * <p>Under the new dispatch design (post-rewrite), effect-handler
+     * lookup happens via the current fiber, not via a context-wide handler
+     * map. So forcing a deferred effect call just re-issues the op on the
+     * current fiber: {@code fiber.suspend(new OpCall(opName, args))}.
+     * The surrounding {@code HandleNode}'s driver dispatches it like any
+     * other op call.
+     *
+     * <p>If no fiber is current (we're still outside any {@code perform}),
+     * returns {@code this} so the suspension persists.
      */
     @TruffleBoundary
-    public Object executeWith(Map<Hash, Object> handlers, MezzeContext context, IndirectCallNode callNode) {
-        // Merge captured handlers with new handlers
-        Map<Hash, Object> allHandlers = new HashMap<>(capturedHandlers);
-        allHandlers.putAll(handlers);
-
-        // Check if all required effects are now handled.
-        // (performerHandlesEffect bails are skipped — handlers are keyed by hash now,
-        //  not by performer name, so the old name-based fallback no longer applies.)
-        Set<Hash> stillUnhandled = new HashSet<>();
-        for (Hash effect : unhandledEffects) {
-            if (!allHandlers.containsKey(effect)) {
-                stillUnhandled.add(effect);
-            }
+    public Object force(IndirectCallNode callNode) {
+        com.mezze.interpreter.nodes.continuation.EffectFiber fiber =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.current();
+        if (fiber == null) {
+            return this;
         }
-
-        if (!stillUnhandled.isEmpty()) {
-            // Still missing handlers - return new MezzeSuspended with remaining effects
-            return new MezzeSuspended(computation, stillUnhandled, allHandlers);
+        if (computation instanceof BlockNode.ComposedBlockThunk composedThunk) {
+            return forceComposedBlock(composedThunk, fiber, callNode);
         }
-
-        // All handlers available - execute the thunk!
-        // Push handlers onto effect handler stack
-        context.pushHandlers(allHandlers);
-
-        try {
-            // Check if this is a composed block thunk
-            if (computation instanceof BlockNode.ComposedBlockThunk composedThunk) {
-                return executeComposedBlockThunk(composedThunk, allHandlers, context, callNode);
-            } else if (computation.isDeferredEffectCall()) {
-                // Execute deferred effect call by looking up handler and calling operation
-                return executeDeferredEffectCall(allHandlers, context, callNode);
-            } else {
-                // Execute regular function thunk
-                return computation.execute(callNode);
-            }
-        } finally {
-            context.popHandlers();
+        if (computation.isDeferredEffectCall()) {
+            return fiber.suspend(new com.mezze.interpreter.nodes.continuation.OpCall(
+                computation.getOperationName(),
+                computation.getArguments()
+            ));
         }
+        // Regular function thunk — no effect to dispatch, just execute.
+        return computation.execute(callNode);
     }
 
     /**
-     * Execute a composed block thunk.
-     * This executes the original effect, then the remaining statements.
+     * Force a composed block thunk under the current fiber: execute the
+     * original effect (which yields to the driver), then run the
+     * remaining statements that were closed over the original
+     * MaterializedFrame.
      */
     @TruffleBoundary
-    private Object executeComposedBlockThunk(
+    private Object forceComposedBlock(
             BlockNode.ComposedBlockThunk composedThunk,
-            Map<Hash, Object> handlers,
-            MezzeContext context,
-            IndirectCallNode callNode
-    ) {
+            com.mezze.interpreter.nodes.continuation.EffectFiber fiber,
+            IndirectCallNode callNode) {
         MezzeThunk originalThunk = composedThunk.getOriginalThunk();
         MezzeNode[] remainingStatements = composedThunk.getRemainingStatements();
-        MaterializedFrame materializedFrame = composedThunk.getMaterializedFrame();
+        MaterializedFrame frame = composedThunk.getMaterializedFrame();
 
-        // Execute the original suspended effect
         Object effectResult;
-        if (originalThunk instanceof BlockNode.ComposedBlockThunk nestedComposed) {
-            // Nested composed thunk - recurse
-            effectResult = executeComposedBlockThunk(nestedComposed, handlers, context, callNode);
+        if (originalThunk instanceof BlockNode.ComposedBlockThunk nested) {
+            effectResult = forceComposedBlock(nested, fiber, callNode);
         } else if (originalThunk.isDeferredEffectCall()) {
-            // Deferred effect call - use content hash for O(1) lookup
-            Hash effectContentHash = originalThunk.getEffectContentHash();
-            String operationName = originalThunk.getOperationName();
-            Object argument = originalThunk.getArguments();
-
-            // Content hash lookup - no fallbacks
-            if (effectContentHash == null) {
-                throw new RuntimeException("No effect content hash available for composed block effect call. " +
-                    "Operation: " + operationName);
-            }
-
-            Object handler = handlers.get(effectContentHash);
-            if (handler == null) {
-                throw new RuntimeException("No handler found for effect hash " + effectContentHash.getHex() + " in composed block");
-            }
-
-            if (!(handler instanceof MezzeRecord handlerRecord)) {
-                throw new RuntimeException("Handler for effect hash " + effectContentHash.getHex() + " must be a record");
-            }
-
-            Object operation = handlerRecord.getField(operationName);
-            if (!(operation instanceof MezzeFunction opFunc)) {
-                throw new RuntimeException("Operation " + operationName + " not found in handler (hash: " + effectContentHash.getHex() + ")");
-            }
-
-            effectResult = callFunction(opFunc, argument, callNode);
+            effectResult = fiber.suspend(new com.mezze.interpreter.nodes.continuation.OpCall(
+                originalThunk.getOperationName(),
+                originalThunk.getArguments()
+            ));
         } else {
-            // Regular function thunk
             effectResult = originalThunk.execute(callNode);
         }
 
-        // If the effect result is still suspended, we need to compose again
-        if (effectResult instanceof MezzeSuspended) {
-            // The effect itself returned another suspension - compose with remaining
+        // If the effect result is still suspended (no fiber was current at
+        // the recursive force), preserve the composition for later.
+        if (effectResult instanceof MezzeSuspended ms) {
             return new MezzeSuspended(
                 new BlockNode.ComposedBlockThunk(
-                    ((MezzeSuspended) effectResult).getComputation(),
+                    ms.getComputation(),
                     remainingStatements,
-                    materializedFrame
+                    frame
                 ),
-                ((MezzeSuspended) effectResult).getUnhandledEffects(),
-                handlers
+                ms.getUnhandledEffects()
             );
         }
 
-        // Execute remaining statements
         Object result = MezzeUnit.INSTANCE;
         for (MezzeNode stmt : remainingStatements) {
-            result = stmt.execute(materializedFrame);
-
-            // Handle suspended results in remaining statements
+            result = stmt.execute(frame);
             if (result instanceof MezzeSuspended) {
                 return result;
             }
-            if (result instanceof MezzeContinuationSuspended) {
-                return result;
-            }
         }
-
         return result;
-    }
-
-    /**
-     * Call a function with closure values prepended.
-     */
-    private Object callFunction(MezzeFunction func, Object argument, IndirectCallNode callNode) {
-        Object[] closureValues = func.getClosureValues();
-        int closureLength = closureValues.length;
-
-        Object[] fullArgs;
-        if (closureLength == 0) {
-            fullArgs = new Object[]{argument};
-        } else {
-            fullArgs = new Object[closureLength + 1];
-            for (int i = 0; i < closureLength; i++) {
-                fullArgs[i] = closureValues[i];
-            }
-            fullArgs[closureLength] = argument;
-        }
-
-        return callNode.call(func.getCallTarget(), fullArgs);
-    }
-
-    /**
-     * Execute a deferred effect call by resolving the handler and calling the operation.
-     * Uses content hash for O(1) collision-free lookup - no effect name fallbacks.
-     */
-    @TruffleBoundary
-    private Object executeDeferredEffectCall(Map<Hash, Object> handlers, MezzeContext context, IndirectCallNode callNode) {
-        Hash effectContentHash = computation.getEffectContentHash();
-        String operationName = computation.getOperationName();
-        Object argument = computation.getArguments();
-
-        // Content hash lookup - no fallbacks
-        if (effectContentHash == null) {
-            throw new RuntimeException("No effect content hash available for deferred effect call. " +
-                "Operation: " + operationName);
-        }
-
-        Object handler = handlers.get(effectContentHash);
-        if (handler == null) {
-            throw new RuntimeException("No handler found for effect hash " + effectContentHash.getHex() +
-                " in deferred call. Operation: " + operationName);
-        }
-
-        if (!(handler instanceof MezzeRecord handlerRecord)) {
-            throw new RuntimeException("Handler for effect hash " + effectContentHash.getHex() + " must be a record, got: " +
-                handler.getClass().getSimpleName());
-        }
-
-        // Get the operation function
-        Object operation = handlerRecord.getField(operationName);
-        if (!(operation instanceof MezzeFunction opFunc)) {
-            throw new RuntimeException("Operation " + operationName + " not found or not a function in handler (hash: " + effectContentHash.getHex() + ")");
-        }
-
-        // Call the operation with closure values prepended
-        Object[] closureValues = opFunc.getClosureValues();
-        int closureLength = closureValues.length;
-
-        Object[] fullArgs;
-        if (closureLength == 0) {
-            fullArgs = new Object[]{argument};
-        } else {
-            fullArgs = new Object[closureLength + 1];
-            for (int i = 0; i < closureLength; i++) {
-                fullArgs[i] = closureValues[i];
-            }
-            fullArgs[closureLength] = argument;
-        }
-
-        return callNode.call(opFunc.getCallTarget(), fullArgs);
     }
 
     /**

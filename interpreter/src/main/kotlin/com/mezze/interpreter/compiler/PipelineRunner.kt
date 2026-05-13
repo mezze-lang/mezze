@@ -12,43 +12,13 @@ import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.FrameSlotKind
 import com.mezze.language.truffleir.SlotKind
 import java.nio.file.Path
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * V2 Pipeline Runner — compiles Mezze source through the full v2 pipeline.
  *
  * Parse → Typecheck → Wrap top-level → Monomorphize → Resolve → Lower → TruffleCompiler
- *
- * Caches converted TypedModules and compiled CallTargets by content hash so stdlib
- * modules are only converted/compiled once across test runs.
  */
 object PipelineRunner {
-
-    // Cache converted v2 TypedModules by content hash (module.hash.hex).
-    // Hash-based identity means the same module content at different paths shares one cache entry.
-    private val typedModuleCache = ConcurrentHashMap<String, TypedModule>()
-
-    // Cache compiled CallTargets by function hash
-    private val compiledFunctionCache = ConcurrentHashMap<String, CallTarget>()
-
-    @JvmStatic
-    fun clearCache() {
-        typedModuleCache.clear()
-        compiledFunctionCache.clear()
-    }
-
-    /**
-     * Evict entries for the given hashes. Hash-keyed caches are content-addressed,
-     * so unchanged hashes can stay; only changed hashes need to go.
-     * Used by DevRunner watch mode to keep stdlib warm across reloads.
-     */
-    @JvmStatic
-    fun invalidateHashes(hashes: Collection<String>) {
-        for (h in hashes) {
-            typedModuleCache.remove(h)
-            compiledFunctionCache.remove(h)
-        }
-    }
 
     // tryCompile deleted — TypedASTCompiler replaces the old Mono→Resolve→Lower pipeline
 
@@ -144,15 +114,48 @@ object PipelineRunner {
 
         // Eagerly compile performer factory functions so they're available via HashModuleLoaderNode.
         // Performer factories are identified by their hash appearing in performer records.
+        //
+        // Also promote the compiled CallTarget into the Language-level
+        // stdlibCallTargetCache. Without this, the factory only lives on the
+        // current MezzeContext's per-context user-IR registry; subsequent
+        // evals in the same JVM use a fresh MezzeContext (whose registry is
+        // empty), and ParameterizedHandlerLookupNode's lookup misses with
+        // "factory not found" — the impl factory is in stdlib but the
+        // precompiled-stdlib path only covers prelude modules, so anything
+        // under stdlib/std/effects/* slips through unless we cache here.
         val performerFactoryHashes = mutableSetOf<com.mezze.language.typedast.Hash>()
+        val performerOpHashes = mutableSetOf<com.mezze.language.typedast.Hash>()
         for (pr in performerRecords) {
             if (pr.isNotEmpty()) performerFactoryHashes.add(com.mezze.language.typedast.Hash(pr[0]))
+            // performer record layout: [performerHash, effectHash, opHash1, opName1, opHash2, opName2, ...]
+            // Collect op-function hashes so we can also promote them.
+            if (pr.size >= 4) {
+                var i = 2
+                while (i + 1 < pr.size) {
+                    performerOpHashes.add(com.mezze.language.typedast.Hash(pr[i]))
+                    i += 2
+                }
+            }
         }
         for (fn in functions) {
+            // Parameterized performer factories — compile eagerly + cache the
+            // CallTarget so ParameterizedHandlerLookupNode finds it.
             if (fn.hash in performerFactoryHashes && fn.paramSlots.isNotEmpty()) {
-                // This is a parameterized performer factory — compile eagerly
                 val rootNode = compiler.compile(fn)
                 compiledFunctions[fn.hash] = rootNode.callTarget
+                language.getCachedStdlibCallTargetCache()[fn.hash] = rootNode.callTarget
+            }
+            // Non-parameterized impl op functions — compile eagerly + cache so
+            // HashModuleLoaderNode.constructPerformerRecord can resolve them
+            // on subsequent contexts. Without this, a fresh context after the
+            // first eval has an empty per-context user-IR registry, op funcs
+            // resolve to null, and the handler record becomes all-MezzeUnit
+            // (or constructPerformerRecord skips publishing entirely under
+            // our "write-once" rule).
+            if (fn.hash in performerOpHashes) {
+                val rootNode = compiler.compile(fn)
+                compiledFunctions[fn.hash] = rootNode.callTarget
+                language.getCachedStdlibCallTargetCache()[fn.hash] = rootNode.callTarget
             }
         }
         mark("performer factories compiled (${compiledFunctions.size})")
@@ -374,7 +377,7 @@ object PipelineRunner {
             is com.mezze.language.truffleir.ReadArgIR -> {}
             is com.mezze.language.truffleir.ReadGlobalByHashIR -> queue.add(node.hash)
             is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> queue.add(node.hash)
-            is com.mezze.language.truffleir.ReadScopeIR -> {} // local scope variable, not a function ref
+            is com.mezze.language.truffleir.EffectBindingIR -> {} // runtime-supplied effect binding, not a function ref
             is com.mezze.language.truffleir.LongLitIR -> {}
             is com.mezze.language.truffleir.DoubleLitIR -> {}
             is com.mezze.language.truffleir.BoolLitIR -> {}

@@ -3,6 +3,7 @@ package com.mezze.interpreter.nodes.builtin.effects;
 import com.mezze.datastructures.list.MezzeList;
 
 import com.mezze.interpreter.nodes.MezzeNode;
+import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.*;
@@ -25,10 +26,12 @@ import java.util.concurrent.locks.LockSupport;
 /**
  * High-performance native async operations.
  *
- * Three implementations:
+ * Two implementations:
  * 1. LoomAsync - Virtual threads (Project Loom) - millions of concurrent tasks
  * 2. OSThreadAsync - Platform threads - true CPU parallelism
- * 3. CoopAsync - Cooperative scheduling - single-threaded, deterministic
+ *
+ * Cooperative scheduling lives in CoopScheduler / SchedulerNatives and is
+ * wired into stdlib via the __native_scheduler_* family.
  *
  * Performance optimizations:
  * - Lock-free promise state management via VarHandle
@@ -103,9 +106,27 @@ public final class AsyncNatives {
         final Thread executingThread; // For cancellation
         final Semaphore semaphore; // For concurrency limiting (may be null)
 
+        // Set by Async.spawn when the spawned task body terminated because
+        // an op-call propagated past all inherited handlers. Read by
+        // Async.await, which re-raises the op-call on the parent fiber so
+        // the parent's handler chain can dispatch it.
+        private volatile com.mezze.interpreter.nodes.continuation.OpCall unhandledOpCall;
+
         public MezzePromise(Thread executingThread, Semaphore semaphore) {
             this.executingThread = executingThread;
             this.semaphore = semaphore;
+        }
+
+        public void setUnhandledOpCall(com.mezze.interpreter.nodes.continuation.OpCall op) {
+            this.unhandledOpCall = op;
+        }
+
+        public com.mezze.interpreter.nodes.continuation.OpCall getUnhandledOpCall() {
+            // Walk through delegates (await() follows them) to find the
+            // originating promise's stored op-call.
+            MezzePromise d = delegate;
+            if (d != null) return d.getUnhandledOpCall();
+            return unhandledOpCall;
         }
 
         /**
@@ -433,19 +454,20 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
 
-        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
-        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
+        // Capture the parent's effect-handler chain at spawn time so the
+        // spawned task's OpCallNode (fiber-less dispatch path) can find
+        // the same handlers that were in scope at the spawn site.
+        com.mezze.interpreter.values.MezzeRecord[] handlerChain =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChain();
 
         MezzePromise promise = new MezzePromise(null, semaphore);
 
         Thread vThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
-
                 try {
                     if (semaphore != null) {
                         semaphore.acquireUninterruptibly();
@@ -459,11 +481,19 @@ public final class AsyncNatives {
                         }
                     }
                 } finally {
-                    // LAZY EFFECTS: Pop handlers when thread completes
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
+            } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException tue) {
+                // Chain dispatch on this thread invoked an inherited handler
+                // that called `abort`. The actual `perform` lives on the
+                // parent fiber — stash the op-call on the promise so
+                // Async.await re-issues it where the parent's driver can
+                // run the handler again and terminate the parent's perform.
+                promise.setUnhandledOpCall(tue.opCall);
+                promise.complete(null);
             } catch (Throwable e) {
                 promise.fail(e);
             }
@@ -517,27 +547,28 @@ public final class AsyncNatives {
         System.arraycopy(closureValues, 0, fullArgs, 0, closureValues.length);
         fullArgs[closureValues.length] = MezzeRecord.empty();
 
-        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
-        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
+        // Capture the parent's effect-handler chain at spawn time so the
+        // spawned task's OpCallNode (fiber-less dispatch path) can find
+        // the same handlers that were in scope at the spawn site.
+        com.mezze.interpreter.values.MezzeRecord[] handlerChain =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChain();
 
         MezzePromise promise = new MezzePromise(null, null);
 
         // Platform thread (not virtual)
         Thread thread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
-
                 try {
                     Object result = callNode.call(callTarget, fullArgs);
                     promise.complete(result);
                 } finally {
-                    // LAZY EFFECTS: Pop handlers when thread completes
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -555,19 +586,6 @@ public final class AsyncNatives {
 
         return tracked;
     }
-
-    // ==================== Executors ====================
-
-    // Virtual thread executor - unbounded, uses ForkJoinPool carrier threads
-    private static final ExecutorService VIRTUAL_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
-
-    // OS thread executor - work-stealing for better CPU utilization
-    private static final ForkJoinPool OS_EXECUTOR = new ForkJoinPool(
-        Runtime.getRuntime().availableProcessors(),
-        ForkJoinPool.defaultForkJoinWorkerThreadFactory,
-        null,
-        true // asyncMode for better throughput with async tasks
-    );
 
     // Semaphore cache for concurrency limiting
     private static final ConcurrentHashMap<Integer, Semaphore> SEMAPHORE_CACHE = new ConcurrentHashMap<>();
@@ -641,38 +659,50 @@ public final class AsyncNatives {
         MezzeFunction f = getFunction(args, "f");
 
         Object[] closureValues = f.getClosureValues();
-        var callTarget = f.getCallTarget();
-        MezzeContext context = MezzeContext.get(node);
-        Env env = context.getEnv();
 
-        // Build argument array: closure values + empty record argument
-        // Thunk functions expect {} as argument
+        // Build argument array: closure values + empty record argument.
         Object[] fullArgs = new Object[closureValues.length + 1];
         System.arraycopy(closureValues, 0, fullArgs, 0, closureValues.length);
         fullArgs[closureValues.length] = MezzeRecord.empty();
 
-        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
-        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
+
+        // Capture the parent's effect-handler chain at spawn time so the
+        // spawned task dispatches op-calls through the same handlers that
+        // were in scope here. Snapshot copy is safe to ship across threads.
+        com.mezze.interpreter.values.MezzeRecord[] handlerChain =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChain();
 
         MezzePromise promise = new MezzePromise(null, null);
 
         Thread vThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                // Install the parent's handler chain on this virtual
+                // thread so OpCallNode's fiber-less dispatch path
+                // (chainDispatch) can find handlers for effect-ops
+                // inside the task body.
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
-
                 try {
-                    Object result = callNode.call(callTarget, fullArgs);
+                    Object result = callNode.call(f.getCallTarget(), fullArgs);
                     promise.complete(result);
                 } finally {
-                    // LAZY EFFECTS: Pop handlers when thread completes
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
+            } catch (EffectHandlerDriver.TaskUnhandledOpException tue) {
+                // An op-call propagated past all the handlers we inherited.
+                // Stash on the promise so Async.await can re-issue it on
+                // the parent fiber, where outer handlers can dispatch it.
+                // Completion (not failure) so await() doesn't throw — it
+                // re-raises explicitly.
+                promise.setUnhandledOpCall(tue.opCall);
+                promise.complete(null);
             } catch (Throwable e) {
                 promise.fail(e);
             }
@@ -693,8 +723,11 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
 
-        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
-        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
+        // Capture the parent's effect-handler chain at spawn time so each
+        // spawned task's OpCallNode (fiber-less dispatch path) can find
+        // the same handlers that were in scope at the spawn site.
+        com.mezze.interpreter.values.MezzeRecord[] handlerChain =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChain();
 
         // Pre-sized array - we know exactly how many promises we'll create
         int numFunctions = functions.length;
@@ -719,19 +752,17 @@ public final class AsyncNatives {
 
             Thread vThread = env.newTruffleThreadBuilder(() -> {
                 try {
-                    // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                    MezzeContext threadContext = MezzeContext.get(node);
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.pushHandlers(parentHandlers);
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .installHandlerChain(handlerChain);
                     }
-
                     try {
                         Object result = callNode.call(callTarget, fullArgs);
                         promise.complete(result);
                     } finally {
-                        // LAZY EFFECTS: Pop handlers when thread completes
-                        if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                            threadContext.popHandlers();
+                        if (handlerChain.length > 0) {
+                            com.mezze.interpreter.nodes.continuation.EffectFiber
+                                .clearHandlerChain();
                         }
                     }
                 } catch (Throwable e) {
@@ -774,8 +805,11 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
 
-        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
-        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
+        // Capture the parent's effect-handler chain at spawn time so the
+        // spawned task's OpCallNode (fiber-less dispatch path) can find
+        // the same handlers that were in scope at the spawn site.
+        com.mezze.interpreter.values.MezzeRecord[] handlerChain =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChain();
 
         // Create promise first with placeholder thread
         MezzePromise promise = new MezzePromise(null, semaphore);
@@ -784,12 +818,10 @@ public final class AsyncNatives {
         // This avoids "Invalid sharing of AST nodes detected" errors
         Thread vThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
-
                 try {
                     if (semaphore != null) {
                         semaphore.acquireUninterruptibly();
@@ -803,9 +835,9 @@ public final class AsyncNatives {
                         }
                     }
                 } finally {
-                    // LAZY EFFECTS: Pop handlers when thread completes
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -822,12 +854,7 @@ public final class AsyncNatives {
     @TruffleBoundary
     public static Object loomAwait(MezzeRecord args) {
         MezzePromise promise = getPromise(args, "p");
-        try {
-            return promise.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while awaiting", e);
-        }
+        return loomAwaitPromise(promise);
     }
 
     /**
@@ -1049,8 +1076,8 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
 
-        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
-        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
+        com.mezze.interpreter.values.MezzeRecord[] handlerChain =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChain();
 
         // Use CompletableFuture for result coordination
         CompletableFuture<Object> leftFuture = new CompletableFuture<>();
@@ -1059,16 +1086,16 @@ public final class AsyncNatives {
         // Spawn Truffle-aware threads for both computations
         Thread leftThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
                 try {
                     leftFuture.complete(callNode.call(leftTarget, leftArgs));
                 } finally {
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -1078,16 +1105,16 @@ public final class AsyncNatives {
 
         Thread rightThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
                 try {
                     rightFuture.complete(callNode.call(rightTarget, rightArgs));
                 } finally {
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -1125,8 +1152,8 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
 
-        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
-        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
+        com.mezze.interpreter.values.MezzeRecord[] handlerChain =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChain();
 
         CompletableFuture<Object> aFuture = new CompletableFuture<>();
         CompletableFuture<Object> bFuture = new CompletableFuture<>();
@@ -1134,16 +1161,16 @@ public final class AsyncNatives {
 
         Thread aThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
                 try {
                     aFuture.complete(callThunkFunction(a, callNode));
                 } finally {
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -1153,16 +1180,16 @@ public final class AsyncNatives {
 
         Thread bThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
                 try {
                     bFuture.complete(callThunkFunction(b, callNode));
                 } finally {
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -1172,16 +1199,16 @@ public final class AsyncNatives {
 
         Thread cThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
                 try {
                     cFuture.complete(callThunkFunction(c, callNode));
                 } finally {
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -1664,20 +1691,18 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = scope.env != null ? scope.env : context.getEnv();
 
-        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
-        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
+        com.mezze.interpreter.values.MezzeRecord[] handlerChain =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChain();
 
         MezzePromise promise = new MezzePromise(null, null);
         scope.addChild(promise);
 
         Thread vThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
-
                 try {
                     if (scope.isCancelled()) {
                         promise.cancel();
@@ -1686,9 +1711,9 @@ public final class AsyncNatives {
                     Object result = callNode.call(callTarget, closure);
                     promise.complete(result);
                 } finally {
-                    // LAZY EFFECTS: Pop handlers when thread completes
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -1742,8 +1767,8 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
 
-        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
-        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
+        com.mezze.interpreter.values.MezzeRecord[] handlerChain =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChain();
 
         MezzePromise promise = new MezzePromise(null, null);
 
@@ -1751,19 +1776,17 @@ public final class AsyncNatives {
         // Note: .virtual(false) for OS threads (platform threads)
         Thread thread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
-
                 try {
                     Object result = callNode.call(callTarget, fullArgs);
                     promise.complete(result);
                 } finally {
-                    // LAZY EFFECTS: Pop handlers when thread completes
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -1832,24 +1855,24 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
 
-        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
-        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
+        com.mezze.interpreter.values.MezzeRecord[] handlerChain =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChain();
 
         CompletableFuture<Object> leftFuture = new CompletableFuture<>();
         CompletableFuture<Object> rightFuture = new CompletableFuture<>();
 
         Thread leftThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
                 try {
                     leftFuture.complete(callThunkFunction(left, callNode));
                 } finally {
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -1859,16 +1882,16 @@ public final class AsyncNatives {
 
         Thread rightThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
                 try {
                     rightFuture.complete(callThunkFunction(right, callNode));
                 } finally {
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -1905,8 +1928,8 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
 
-        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
-        java.util.Map<Hash, Object> parentHandlers = context.getAllCurrentHandlers();
+        com.mezze.interpreter.values.MezzeRecord[] handlerChain =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChain();
 
         CompletableFuture<Object> aFuture = new CompletableFuture<>();
         CompletableFuture<Object> bFuture = new CompletableFuture<>();
@@ -1914,16 +1937,16 @@ public final class AsyncNatives {
 
         Thread aThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
                 try {
                     aFuture.complete(callThunkFunction(a, callNode));
                 } finally {
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -1933,16 +1956,16 @@ public final class AsyncNatives {
 
         Thread bThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
                 try {
                     bFuture.complete(callThunkFunction(b, callNode));
                 } finally {
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -1952,16 +1975,16 @@ public final class AsyncNatives {
 
         Thread cThread = env.newTruffleThreadBuilder(() -> {
             try {
-                // LAZY EFFECTS: Push parent handlers onto this thread's stack
-                MezzeContext threadContext = MezzeContext.get(node);
-                if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                    threadContext.pushHandlers(parentHandlers);
+                if (handlerChain.length > 0) {
+                    com.mezze.interpreter.nodes.continuation.EffectFiber
+                        .installHandlerChain(handlerChain);
                 }
                 try {
                     cFuture.complete(callThunkFunction(c, callNode));
                 } finally {
-                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
-                        threadContext.popHandlers();
+                    if (handlerChain.length > 0) {
+                        com.mezze.interpreter.nodes.continuation.EffectFiber
+                            .clearHandlerChain();
                     }
                 }
             } catch (Throwable e) {
@@ -2200,243 +2223,6 @@ public final class AsyncNatives {
         return loomScoped(args, callNode, node);
     }
 
-    // ==================== Coop Async Operations ====================
-    // Cooperative scheduling using continuation-based execution
-
-    /**
-     * Coop promise - wraps result for cooperative scheduler.
-     */
-    public static final class CoopPromise {
-        Object result;
-        boolean completed = false;
-        Runnable continuation;
-    }
-
-    @TruffleBoundary
-    public static CoopPromise coopSpawn(MezzeRecord args, IndirectCallNode callNode) {
-        MezzeFunction f = getFunction(args, "f");
-        // MezzeCont cont = getContinuation(args, "cont"); // For full coop support
-
-        CoopPromise promise = new CoopPromise();
-
-        // In coop mode, we execute immediately (cooperative = no true parallelism)
-        try {
-            // Build argument array: closure values + empty record argument
-            Object[] closureValues = f.getClosureValues();
-            Object[] fullArgs = new Object[closureValues.length + 1];
-            System.arraycopy(closureValues, 0, fullArgs, 0, closureValues.length);
-            fullArgs[closureValues.length] = MezzeRecord.empty();
-
-            promise.result = callNode.call(f.getCallTarget(), fullArgs);
-            promise.completed = true;
-        } catch (Throwable e) {
-            promise.result = e;
-            promise.completed = true;
-        }
-
-        return promise;
-    }
-
-    @TruffleBoundary
-    public static Object coopAwait(MezzeRecord args) {
-        CoopPromise promise = getCoopPromise(args, "p");
-
-        if (!promise.completed) {
-            throw new RuntimeException("Coop promise not ready - scheduler error");
-        }
-
-        if (promise.result instanceof Throwable t) {
-            throw new RuntimeException("Task failed: " + t.getMessage(), t);
-        }
-
-        return promise.result;
-    }
-
-    @TruffleBoundary
-    public static Object coopRace(MezzeRecord args) {
-        Object[] promises = getArray(args, "ps");
-        if (promises.length == 0) {
-            throw new RuntimeException("race requires at least one promise");
-        }
-
-        // In coop mode, first one wins (all are already completed)
-        CoopPromise first = (CoopPromise) promises[0];
-        if (first.result instanceof Throwable t) {
-            throw new RuntimeException("Task failed: " + t.getMessage(), t);
-        }
-        return first.result;
-    }
-
-    @TruffleBoundary
-    public static MezzeSeq coopAll(MezzeRecord args) {
-        Object[] promises = getArray(args, "ps");
-        Object[] results = new Object[promises.length];
-
-        for (int i = 0; i < promises.length; i++) {
-            CoopPromise p = (CoopPromise) promises[i];
-            if (p.result instanceof Throwable t) {
-                throw new RuntimeException("Task failed: " + t.getMessage(), t);
-            }
-            results[i] = p.result;
-        }
-
-        return MezzeSeq.fromArray(results);
-    }
-
-    @TruffleBoundary
-    public static MezzeVariant coopTimeout(MezzeRecord args) {
-        // In coop mode, timeouts don't really apply (synchronous execution)
-        CoopPromise promise = getCoopPromise(args, "p");
-        if (promise.result instanceof Throwable) {
-            return MezzeVariant.none();
-        }
-        return MezzeVariant.some(promise.result);
-    }
-
-    @TruffleBoundary
-    public static MezzeUnit coopSleep(MezzeRecord args) {
-        // In coop mode, sleep is a no-op (or could yield to scheduler)
-        return MezzeUnit.INSTANCE;
-    }
-
-    // OPTIMIZATION 5: No @TruffleBoundary - simple field access
-    public static boolean coopIsDone(MezzeRecord args) {
-        return getCoopPromise(args, "p").completed;
-    }
-
-    @TruffleBoundary
-    public static MezzeRecord coopJoin(MezzeRecord args, IndirectCallNode callNode) {
-        MezzeFunction left = getFunction(args, "l");
-        MezzeFunction right = getFunction(args, "r");
-
-        Object leftResult = callThunkFunction(left, callNode);
-        Object rightResult = callThunkFunction(right, callNode);
-
-        return MezzeRecord.fromFields(
-            LEFT_RIGHT_FIELDS,
-            new Object[]{leftResult, rightResult}
-        );
-    }
-
-    @TruffleBoundary
-    public static MezzeRecord coopJoin3(MezzeRecord args, IndirectCallNode callNode) {
-        MezzeFunction a = getFunction(args, "a");
-        MezzeFunction b = getFunction(args, "b");
-        MezzeFunction c = getFunction(args, "c");
-
-        return MezzeRecord.fromFields(
-            ABC_FIELDS,
-            new Object[]{
-                callThunkFunction(a, callNode),
-                callThunkFunction(b, callNode),
-                callThunkFunction(c, callNode)
-            }
-        );
-    }
-
-    @TruffleBoundary
-    public static MezzeSeq coopMap(MezzeRecord args, IndirectCallNode callNode) {
-        Object[] xs = getArray(args, "xs");
-        MezzeFunction f = getFunction(args, "f");
-
-        Object[] results = new Object[xs.length];
-        var callTarget = f.getCallTarget();
-        Object[] closure = f.getClosureValues();
-
-        for (int i = 0; i < xs.length; i++) {
-            MezzeRecord arg = MezzeRecord.fromFields(new String[]{"x"}, new Object[]{xs[i]});
-            results[i] = callNode.call(callTarget, appendArg(closure, arg));
-        }
-
-        return MezzeSeq.fromArray(results);
-    }
-
-    @TruffleBoundary
-    public static MezzeUnit coopForEach(MezzeRecord args, IndirectCallNode callNode) {
-        Object[] xs = getArray(args, "xs");
-        MezzeFunction f = getFunction(args, "f");
-
-        var callTarget = f.getCallTarget();
-        Object[] closure = f.getClosureValues();
-
-        for (Object x : xs) {
-            MezzeRecord arg = MezzeRecord.fromFields(new String[]{"x"}, new Object[]{x});
-            callNode.call(callTarget, appendArg(closure, arg));
-        }
-
-        return MezzeUnit.INSTANCE;
-    }
-
-    @TruffleBoundary
-    public static MezzeSeq coopFilter(MezzeRecord args, IndirectCallNode callNode) {
-        Object[] xs = getArray(args, "xs");
-        MezzeFunction f = getFunction(args, "f");
-
-        var callTarget = f.getCallTarget();
-        Object[] closure = f.getClosureValues();
-
-        List<Object> results = new ArrayList<>();
-        for (Object x : xs) {
-            // Use fast wrapper - no @TruffleBoundary
-            MezzeRecord arg = MezzeRecord.wrapX(x);
-            Object result = callNode.call(callTarget, appendArg(closure, arg));
-            if (result instanceof Boolean && (Boolean) result) {
-                results.add(x);
-            }
-        }
-
-        return MezzeSeq.fromArray(results.toArray());
-    }
-
-    @TruffleBoundary
-    public static Object coopAny(MezzeRecord args) {
-        Object[] promises = getArray(args, "ps");
-        if (promises.length == 0) {
-            throw new RuntimeException("any requires at least one promise");
-        }
-
-        for (Object p : promises) {
-            CoopPromise promise = (CoopPromise) p;
-            if (!(promise.result instanceof Throwable)) {
-                return promise.result;
-            }
-        }
-
-        CoopPromise first = (CoopPromise) promises[0];
-        Throwable t = (Throwable) first.result;
-        throw new RuntimeException("All tasks failed: " + t.getMessage(), t);
-    }
-
-    @TruffleBoundary
-    public static MezzeSeq coopSettle(MezzeRecord args) {
-        Object[] promises = getArray(args, "ps");
-        Object[] results = new Object[promises.length];
-
-        for (int i = 0; i < promises.length; i++) {
-            CoopPromise p = (CoopPromise) promises[i];
-            if (p.result instanceof Throwable t) {
-                results[i] = MezzeVariant.err(createAsyncFailed(t.getMessage()));
-            } else {
-                results[i] = MezzeVariant.ok(p.result);
-            }
-        }
-
-        return MezzeSeq.fromArray(results);
-    }
-
-    @TruffleBoundary
-    public static Object coopScoped(MezzeRecord args, IndirectCallNode callNode) {
-        MezzeFunction f = getFunction(args, "f");
-        MezzeScope scope = new MezzeScope();
-
-        MezzeRecord scopeArg = MezzeRecord.fromFields(
-            new String[]{"sc"},
-            new Object[]{scope}
-        );
-
-        return callNode.call(f.getCallTarget(), appendArg(f.getClosureValues(), scopeArg));
-    }
-
     // ==================== AsyncError Variant Helpers ====================
 
     private static MezzeVariant createAsyncCancelled() {
@@ -2456,12 +2242,39 @@ public final class AsyncNatives {
     // ==================== Helper Methods ====================
 
     private static Object loomAwaitPromise(MezzePromise promise) {
+        Object result;
         try {
-            return promise.await();
+            result = promise.await();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted while awaiting", e);
         }
+        // Effect propagation across the spawn boundary:
+        //
+        // 1. If the spawned task's body invoked an effect-op with no fiber
+        //    current on its thread, OpCallNode wrapped the call as a
+        //    MezzeSuspended thunk. When await retrieves it on the parent
+        //    thread, the parent IS in a perform — force the thunk so the
+        //    op-call dispatches on the parent fiber. This handles the
+        //    common `perform ExceptionToResult in spawn (raise)` case.
+        if (result instanceof com.mezze.interpreter.values.MezzeSuspended suspended) {
+            return suspended.force(com.oracle.truffle.api.nodes.IndirectCallNode.getUncached());
+        }
+        // 2. If the task ran via the captured handler chain and an op-call
+        //    propagated past the entire chain, it was stashed via
+        //    setUnhandledOpCall. Re-issue on the parent fiber.
+        com.mezze.interpreter.nodes.continuation.OpCall pending = promise.getUnhandledOpCall();
+        if (pending != null) {
+            com.mezze.interpreter.nodes.continuation.EffectFiber parentFiber =
+                com.mezze.interpreter.nodes.continuation.EffectFiber.current();
+            if (parentFiber != null) {
+                return parentFiber.suspend(pending);
+            }
+            throw new RuntimeException(
+                "Spawned task raised effect operation '" + pending.opName()
+                + "' with no handler available at await site.");
+        }
+        return result;
     }
 
     private static Object[] appendArg(Object[] closure, Object arg) {
@@ -2531,17 +2344,6 @@ public final class AsyncNatives {
         }
         if (val instanceof MezzePromise p) return p;
         throw new RuntimeException("Expected Promise for '" + name + "'");
-    }
-
-    private static CoopPromise getCoopPromise(MezzeRecord r, String name) {
-        int idx = r.getFieldIndex(name);
-        if (idx < 0) throw new RuntimeException("Missing field '" + name + "'");
-        Object val = r.getField(idx);
-        if (val instanceof MezzeVariant v) {
-            val = v.getPayloadValue();
-        }
-        if (val instanceof CoopPromise p) return p;
-        throw new RuntimeException("Expected CoopPromise for '" + name + "'");
     }
 
     private static MezzeScope getScope(MezzeRecord r, String name) {

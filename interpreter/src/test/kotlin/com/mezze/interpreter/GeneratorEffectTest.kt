@@ -5,10 +5,18 @@ import com.mezze.interpreter.values.MezzeRecord
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Disabled
 
 /**
- * Tests for the userland Generator effect using suspend_and_resume.
+ * Tests for the userland Generator effect.
+ *
+ * Disabled while the Generator stdlib is being redesigned on the new
+ * effect-handler dispatch (task #82). The original `Collect` handler
+ * used `scope.cont.suspend_and_resume` + `take_collected` in
+ * `finalize_scope`, which doesn't translate to the new design's
+ * no-return-clause model. Re-enable once `Generator` is re-implemented.
  */
+@Disabled("Generator stdlib under redesign — see task #82")
 class GeneratorEffectTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 

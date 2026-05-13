@@ -94,8 +94,6 @@ public abstract class WriteLocalNode extends MezzeNode {
         return create(valueNode, slot, KIND_OBJECT);
     }
 
-    // ContinuationSuspendedException MUST propagate to HandleNode.
-    // Do NOT catch it — it's the mechanism for suspend_with to escape.
     @Override
     public Object execute(VirtualFrame frame) {
         return executeGeneric(frame);

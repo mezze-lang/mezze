@@ -7,6 +7,7 @@ import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.VariantAliases
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.truffleir.*
+import com.mezze.language.typechecker.scope.ScopedEffectConstants
 import com.mezze.language.typedast.*
 
 /**
@@ -946,9 +947,14 @@ class TypedASTCompiler(
     private fun compileVar(expr: TypedVar, src: SourceInfo): NodeIR {
         return when (val binding = expr.binding) {
             is BindingRef.Local -> {
-                // "scope" is a runtime-injected variable from HandleNode (scoped effects)
-                if (expr.name == "scope") {
-                    return ReadScopeIR("scope", src)
+                // Names contributed by the effect-handler runtime inside op
+                // handler bodies (`scope`, `resume`, `abort`). See
+                // EffectBindingIR / EffectBindingNode for the lookup rules.
+                if (expr.name == ScopedEffectConstants.SCOPE
+                    || expr.name == ScopedEffectConstants.RESUME
+                    || expr.name == ScopedEffectConstants.ABORT
+                ) {
+                    return EffectBindingIR(expr.name, src)
                 }
 
                 // RECURSIVE LET: If this references a recursive let-bound lambda from

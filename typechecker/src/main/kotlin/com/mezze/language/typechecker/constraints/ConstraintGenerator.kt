@@ -1895,6 +1895,11 @@ class ConstraintGenerator(
                     bodyContext = bodyContext.extendMono(name, type)
                 }
 
+                // Bind runtime-contributed `resume` and `abort` in op handler body scope.
+                // See EffectHandlerBindings for the type shape and rationale.
+                bodyContext = com.mezze.language.typechecker.types.effects.EffectHandlerBindings
+                    .extendWithAbortAndResume(bodyContext, expectedReturnType)
+
                 // SCOPED EFFECTS: Add 'scope' to recordLiteralBindings for field access validation
                 // This enables "field not found" errors with suggestions for scope.fieldName
                 // Only add if scope is available (scopeType is set and this is not initialize_scope)

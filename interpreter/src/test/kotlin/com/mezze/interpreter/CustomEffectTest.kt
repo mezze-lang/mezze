@@ -29,7 +29,6 @@ class CustomEffectTest {
     @Test
     fun `test custom Error effect with ErrorToResult handler returns Ok on success`() {
         val source = """
-            use std::control::continuation
 
             # Define custom Error effect (NOT using stdlib Exception)
             effect Error having 'e where {
@@ -38,9 +37,7 @@ class CustomEffectTest {
 
             # Define handler that converts errors to Result
             impl Error for ErrorToResult having 'e = 'err where {
-                initialize_scope = {} -> { cont = continuation::new {} },
-                finalize_scope = {} -> scope.cont.reset {},
-                raise = {err} -> scope.cont.suspend_with {value = Err {error = err}}
+                raise = {err} -> abort {val = Err {error = err}}
             }
 
             let safe_div = {a, b} ->
@@ -64,16 +61,13 @@ class CustomEffectTest {
     @Test
     fun `test custom Error effect with ErrorToResult handler returns Err on error`() {
         val source = """
-            use std::control::continuation
 
             effect Error having 'e where {
                 raise: {err: 'e} -> 'a <Error>
             }
 
             impl Error for ErrorToResult having 'e = 'err where {
-                initialize_scope = {} -> { cont = continuation::new {} },
-                finalize_scope = {} -> scope.cont.reset {},
-                raise = {err} -> scope.cont.suspend_with {value = Err {error = err}}
+                raise = {err} -> abort {val = Err {error = err}}
             }
 
             let safe_div = {a, b} ->
@@ -97,7 +91,6 @@ class CustomEffectTest {
     @Test
     fun `test custom Error effect with ErrorToOption handler returns None on error`() {
         val source = """
-            use std::control::continuation
 
             effect Error having 'e where {
                 raise: {err: 'e} -> 'a <Error>
@@ -105,9 +98,7 @@ class CustomEffectTest {
 
             # Handler that converts errors to Option (None on error)
             impl Error for ErrorToOption having 'e = 'err where {
-                initialize_scope = {} -> { cont = continuation::new {} },
-                finalize_scope = {} -> scope.cont.reset {},
-                raise = {err} -> scope.cont.suspend_with {value = None}
+                raise = {err} -> abort {val = None}
             }
 
             let safe_div = {a, b} ->
@@ -129,16 +120,13 @@ class CustomEffectTest {
     @Test
     fun `test custom Error effect with ErrorToOption handler returns Some on success`() {
         val source = """
-            use std::control::continuation
 
             effect Error having 'e where {
                 raise: {err: 'e} -> 'a <Error>
             }
 
             impl Error for ErrorToOption having 'e = 'err where {
-                initialize_scope = {} -> { cont = continuation::new {} },
-                finalize_scope = {} -> scope.cont.reset {},
-                raise = {err} -> scope.cont.suspend_with {value = None}
+                raise = {err} -> abort {val = None}
             }
 
             let safe_div = {a, b} ->
@@ -164,16 +152,13 @@ class CustomEffectTest {
         // This tests that suspend_with properly escapes to the delimiter boundary
         // and doesn't get wrapped by intermediate expressions like Ok { val = ... }
         val source = """
-            use std::control::continuation
 
             effect Error having 'e where {
                 raise: {err: 'e} -> 'a <Error>
             }
 
             impl Error for ErrorToResult having 'e = 'err where {
-                initialize_scope = {} -> { cont = continuation::new {} },
-                finalize_scope = {} -> scope.cont.reset {},
-                raise = {err} -> scope.cont.suspend_with {value = Err {error = err}}
+                raise = {err} -> abort {val = Err {error = err}}
             }
 
             let safe_div = {a, b} ->
@@ -199,16 +184,13 @@ class CustomEffectTest {
     @Test
     fun `test custom Error effect success path through nested expression`() {
         val source = """
-            use std::control::continuation
 
             effect Error having 'e where {
                 raise: {err: 'e} -> 'a <Error>
             }
 
             impl Error for ErrorToResult having 'e = 'err where {
-                initialize_scope = {} -> { cont = continuation::new {} },
-                finalize_scope = {} -> scope.cont.reset {},
-                raise = {err} -> scope.cont.suspend_with {value = Err {error = err}}
+                raise = {err} -> abort {val = Err {error = err}}
             }
 
             let safe_div = {a, b} ->
@@ -233,16 +215,13 @@ class CustomEffectTest {
     @Test
     fun `test custom Error effect with multiple perform blocks`() {
         val source = """
-            use std::control::continuation
 
             effect Error having 'e where {
                 raise: {err: 'e} -> 'a <Error>
             }
 
             impl Error for ErrorToResult having 'e = 'err where {
-                initialize_scope = {} -> { cont = continuation::new {} },
-                finalize_scope = {} -> scope.cont.reset {},
-                raise = {err} -> scope.cont.suspend_with {value = Err {error = err}}
+                raise = {err} -> abort {val = Err {error = err}}
             }
 
             let safe_div = {a, b} ->
@@ -273,16 +252,13 @@ class CustomEffectTest {
     @Test
     fun `test custom Error effect with record error type`() {
         val source = """
-            use std::control::continuation
 
             effect Error having 'e where {
                 raise: {err: 'e} -> 'a <Error>
             }
 
             impl Error for ErrorToResult having 'e = 'err where {
-                initialize_scope = {} -> { cont = continuation::new {} },
-                finalize_scope = {} -> scope.cont.reset {},
-                raise = {err} -> scope.cont.suspend_with {value = Err {error = err}}
+                raise = {err} -> abort {val = Err {error = err}}
             }
 
             type AppError = {code: Int, message: Str}
@@ -313,7 +289,6 @@ class CustomEffectTest {
     @Test
     fun `test custom Error effect with ignore handler`() {
         val source = """
-            use std::control::continuation
 
             effect Error having 'e where {
                 raise: {err: 'e} -> 'a <Error>
@@ -321,9 +296,7 @@ class CustomEffectTest {
 
             # Handler that ignores errors and returns unit
             impl Error for IgnoreError having 'e = 'err where {
-                initialize_scope = {} -> { cont = continuation::new {} },
-                finalize_scope = {} -> scope.cont.reset {},
-                raise = {err} -> scope.cont.suspend_with {value = {}}
+                raise = {err} -> abort {val = {}}
             }
 
             # Returns unit on both success and error paths
@@ -346,7 +319,6 @@ class CustomEffectTest {
     @Test
     fun `test two different custom effects in same program`() {
         val source = """
-            use std::control::continuation
 
             # Define Error effect
             effect Error having 'e where {
@@ -354,9 +326,7 @@ class CustomEffectTest {
             }
 
             impl Error for ErrorToResult having 'e = 'err where {
-                initialize_scope = {} -> { cont = continuation::new {} },
-                finalize_scope = {} -> scope.cont.reset {},
-                raise = {err} -> scope.cont.suspend_with {value = Err {error = err}}
+                raise = {err} -> abort {val = Err {error = err}}
             }
 
             # Define a completely different Abort effect
@@ -365,9 +335,7 @@ class CustomEffectTest {
             }
 
             impl Abort for AbortToNone where {
-                initialize_scope = {} -> { cont = continuation::new {} },
-                finalize_scope = {} -> scope.cont.reset {},
-                abort = {} -> scope.cont.suspend_with {value = None}
+                abort = {} -> abort {val = None}
             }
 
             let safe_div = {a, b} ->
@@ -400,7 +368,6 @@ class CustomEffectTest {
     @Test
     fun `test custom EarlyReturn effect`() {
         val source = """
-            use std::control::continuation
 
             # Define custom early return effect (NOT using stdlib Return)
             effect EarlyReturn having 'r where {
@@ -408,9 +375,7 @@ class CustomEffectTest {
             }
 
             impl EarlyReturn for EarlyReturnHandler having 'r = 'result where {
-                initialize_scope = {} -> { cont = continuation::new {} },
-                finalize_scope = {} -> scope.cont.reset {},
-                return_early = {val} -> scope.cont.suspend_with {value = val}
+                return_early = {val} -> abort {val = val}
             }
 
             let find_first_even = {xs} -> do
@@ -434,7 +399,6 @@ class CustomEffectTest {
     @Test
     fun `test custom effect with multiple operations`() {
         val source = """
-            use std::control::continuation
 
             # Effect with two operations
             effect Logger where {
@@ -443,10 +407,10 @@ class CustomEffectTest {
             }
 
             impl Logger for LoggerToResult where {
-                initialize_scope = {} -> { cont = continuation::new {}, logs = [] },
-                finalize_scope = {} -> scope.cont.reset {},
+                initialize_scope = {} -> { logs = [] },
+                finalize_scope = {} -> {},
                 warn = {msg} -> {},  # Just return unit, don't suspend
-                fail = {msg} -> scope.cont.suspend_with {value = Err {error = msg}}
+                fail = {msg} -> abort {val = Err {error = msg}}
             }
 
             let process = {should_fail} ->

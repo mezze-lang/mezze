@@ -73,9 +73,6 @@ public final class WriteLocalWithContextNode extends MezzeNode {
 
     @Override
     public Object execute(VirtualFrame frame) {
-        // ContinuationSuspendedException MUST propagate to HandleNode.
-        // Do NOT catch it here — it's the mechanism for suspend_with to escape
-        // back to the perform boundary (e.g., Exception.throw, Return.return).
         Object value = valueNode.execute(frame);
 
         // If value is a MezzeSuspended and we have handlers, try to force it first.
@@ -141,17 +138,10 @@ public final class WriteLocalWithContextNode extends MezzeNode {
      */
     @TruffleBoundary
     private Object forceSuspendedValue(MezzeSuspended suspended) {
-        MezzeContext context;
-        try {
-            context = MezzeContext.get(this);
-        } catch (AssertionError e) {
-            return suspended;
-        }
-        if (!context.hasHandlers()) {
-            return suspended;
-        }
-        var callNode = com.oracle.truffle.api.nodes.IndirectCallNode.getUncached();
-        return suspended.executeWith(context.getCurrentHandlers(), context, callNode);
+        // Under the new dispatch design, forcing routes through the current
+        // fiber rather than a context-wide handler map. force() returns the
+        // suspension unchanged when no fiber is current.
+        return suspended.force(com.oracle.truffle.api.nodes.IndirectCallNode.getUncached());
     }
 
     @TruffleBoundary

@@ -2,6 +2,7 @@ package com.mezze.interpreter.nodes;
 
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.values.MezzeFunction;
+import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -178,26 +179,34 @@ public final class HashModuleLoaderNode extends MezzeNode {
         }
 
         // Pass 2: Construct performer records.
-        // For parameterized performers (whose hash maps to a factory function that takes params),
-        // keep the function as-is — it will be called with actual params at perform time.
+        //
+        // Performer records live in MezzeContext.handlersByHash, NOT in
+        // globals. This is the single source of truth for `perform Handler in
+        // body` to resolve handlers — HandleNode.lookupInContext goes there
+        // and nowhere else. Keeping them out of `globals` means a later
+        // re-load can't overwrite a good handler record with a worse one if
+        // op-function resolution flakes between context resets.
+        //
+        // For parameterized performers (whose hash maps to a factory
+        // function that takes params), keep the factory function and skip —
+        // ParameterizedHandlerLookupNode invokes it with the actual params
+        // at perform time.
         for (PerformerInfo info : performerInfos) {
             if (info.ops.length == 0) continue;
             Hash performerHash = info.performerHash;
             Hash effectHash = info.effectHash;
-            // Check if performer hash maps to a factory function (parameterized performer).
-            Object existing = context.lookupGlobal(performerHash);
-            if (existing instanceof MezzeFunction fn) {
-                // Parameterized performer factory — leave it.
+            // Skip parameterized factories: their hash maps to a MezzeFunction
+            // in globals (pass 1 above). They're resolved per-call with params.
+            Object globalEntry = context.lookupGlobal(performerHash);
+            if (globalEntry instanceof MezzeFunction) {
                 continue;
             }
-            // Check cache
-            Object cached = context.getCachedClosure(performerHash);
-            if (cached instanceof com.mezze.interpreter.values.MezzeRecord) {
-                context.defineGlobal(performerHash, cached);
-                if (effectHash != null) context.defineGlobal(effectHash, cached);
-            } else {
-                constructPerformerRecord(context, info);
+            // Write-once: a good record under this hash already wins. Don't
+            // let a later load corrupt it.
+            if (context.lookupHandler(performerHash) instanceof MezzeRecord) {
+                continue;
             }
+            constructPerformerRecord(context, info);
         }
 
         modulesLoaded = true;
@@ -214,26 +223,28 @@ public final class HashModuleLoaderNode extends MezzeNode {
         for (int i = 0; i < opCount; i++) {
             Hash opHash = info.ops[i].hash;
             opNames[i] = info.ops[i].name;
-            // Look up the compiled operation function — try context, then Language cache
+            // Resolve the op function: first the context's globals (set by
+            // pass 1 from THIS loader), then the Language stdlib cache
+            // (compiled on demand from PrecompiledStdlib).
             Object opFunc = context.lookupGlobal(opHash);
             if (opFunc == null) {
-                // Fall back to Language-level stdlib cache
                 var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
                 var ct = lang.getCachedStdlibCallTarget(opHash);
                 if (ct != null) {
                     opFunc = MezzeFunction.create(ct, opHash.getHex());
                 }
             }
-
-            if (opFunc instanceof MezzeFunction fn) {
-                Object cached = context.getCachedClosure(opHash);
-                if (cached instanceof MezzeFunction) {
-                    opFunc = cached;
-                }
+            if (opFunc == null) {
+                // Don't publish a partial handler. The op function isn't
+                // available yet on this context — a later module-load pass
+                // (with the missing function pre-registered) will see the
+                // entry still empty and try again. Better an explicit
+                // "Handler not found" at perform time than a silent dispatch
+                // to MezzeUnit fields.
+                return;
             }
-            opValues[i] = opFunc != null ? opFunc : com.mezze.interpreter.values.MezzeUnit.INSTANCE;
+            opValues[i] = opFunc;
         }
-        // Create performer record with operation functions as fields
         var locations = new com.mezze.interpreter.values.MezzeRecord.FieldLocation[opCount];
         for (int i = 0; i < opCount; i++) {
             locations[i] = new com.mezze.interpreter.values.MezzeRecord.FieldLocation(
@@ -241,11 +252,11 @@ public final class HashModuleLoaderNode extends MezzeNode {
         }
         var shape = new com.mezze.interpreter.values.MezzeRecord.Shape(opNames, locations);
         var record = com.mezze.interpreter.values.MezzeRecord.withAllObjects(shape, opValues);
-        // Register under performer hash AND effect hash, and cache
-        context.defineGlobal(info.performerHash, record);
-        context.putCachedClosure(info.performerHash, record);
+        // Publish under performer hash AND effect hash in handlersByHash.
+        // This is the single source HandleNode consults.
+        context.defineHandler(info.performerHash, record);
         if (info.effectHash != null) {
-            context.defineGlobal(info.effectHash, record);
+            context.defineHandler(info.effectHash, record);
         }
     }
 

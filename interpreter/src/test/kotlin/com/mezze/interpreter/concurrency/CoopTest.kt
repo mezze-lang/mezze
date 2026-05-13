@@ -27,7 +27,6 @@ class CoopTest {
     // Setup code for Coop operations using stdlib
     private val coopSetup = """
         use std::effects::async::{Async, CoopAsync}
-        use std::control::continuation
     """.trimIndent()
 
     // =============================================================================
@@ -54,7 +53,7 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
                 Async.await {p = p}
         """
@@ -67,7 +66,7 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 10 + 20 + 12}
                 Async.await {p = p}
         """
@@ -80,7 +79,7 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 # In Coop, sleep is a no-op (single-threaded)
                 let _ = Async.sleep {ms = 1000}
                 True
@@ -94,7 +93,7 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 # In single-threaded Coop, cancellation is not applicable
                 Async.is_cancelled {}
         """
@@ -107,7 +106,7 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let _ = Async.check {}
                 True
         """
@@ -124,7 +123,7 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 # In Coop, spawn stores computation, await executes it
                 # This is deterministic and sequential
                 let p1 = Async.spawn {f = {} -> 1}
@@ -146,7 +145,7 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let outer = Async.spawn {f = {} -> do
                     let inner = Async.spawn {f = {} -> 21}
                     let x = Async.await {p = inner}

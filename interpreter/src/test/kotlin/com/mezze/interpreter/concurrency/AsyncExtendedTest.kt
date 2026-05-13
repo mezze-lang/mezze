@@ -105,9 +105,8 @@ class AsyncExtendedTest {
         // Use CoopAsync for deterministic behavior (avoids Truffle thread issues)
         val code = """
             use std::effects::async::{Async, CoopAsync}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let result = Async.join3 {
                     a = {} -> "first",
                     b = {} -> 2,
@@ -146,9 +145,8 @@ class AsyncExtendedTest {
         // Use CoopAsync for deterministic ordering
         val code = """
             use std::effects::async::{Async, CoopAsync}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let xs = [5, 4, 3, 2, 1]
                 let result = Async.map {xs = xs, f = {x} -> x + 10}
                 # Verify order is preserved by checking first element is 15
@@ -395,9 +393,8 @@ class AsyncExtendedTest {
     fun `test CoopAsync join executes sequentially`() {
         val code = """
             use std::effects::async::{Async, CoopAsync}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let result = Async.join {
                     l = {} -> 5,
                     r = {} -> 10
@@ -412,9 +409,8 @@ class AsyncExtendedTest {
     fun `test CoopAsync map executes sequentially`() {
         val code = """
             use std::effects::async::{Async, CoopAsync}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let xs = [1, 2, 3]
                 let result = Async.map {xs = xs, f = {x} -> x * 10}
                 match result is
@@ -429,9 +425,8 @@ class AsyncExtendedTest {
     fun `test CoopAsync filter works correctly`() {
         val code = """
             use std::effects::async::{Async, CoopAsync}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let xs = [1, 2, 3, 4, 5]
                 let result = Async.filter {xs = xs, f = {x} -> x > 2}
                 match result is

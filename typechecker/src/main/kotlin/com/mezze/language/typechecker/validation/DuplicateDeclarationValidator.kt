@@ -5,6 +5,7 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.typechecker.scope.ScopedEffectConstants
 
 /**
  * Validates that declarations are not duplicated within a parsed module.
@@ -68,6 +69,36 @@ object DuplicateDeclarationValidator {
                 )
             }
             declaredTypes.add(item.name)
+        }
+    }
+
+    /**
+     * Names reserved by the effect-handler runtime: `abort` and `resume`
+     * are bound inside op handler bodies (via `EffectBindingNode`) and
+     * `scope` is the value produced by `initialize_scope`. User code must
+     * not declare let-bindings, performers, parameters, or other named
+     * entities with these names — doing so would shadow the runtime
+     * bindings and silently break effect dispatch.
+     *
+     * Enforced at every binding site that participates in the value
+     * namespace (let decls, lambda params, performer params, op handler
+     * params, etc.). See callers below.
+     */
+    private val RUNTIME_RESERVED_NAMES = setOf(
+        ScopedEffectConstants.ABORT,
+        ScopedEffectConstants.RESUME,
+        ScopedEffectConstants.SCOPE
+    )
+
+    private fun rejectReservedName(name: String, loc: com.mezze.language.parsedast.Loc) {
+        if (name in RUNTIME_RESERVED_NAMES) {
+            throw TypeCheckError(
+                "Name '$name' is reserved by the effect-handler runtime. " +
+                "It's bound inside op handler bodies (call site of " +
+                "`abort {val = ...}` / `resume {val = ...}` / `scope`) and " +
+                "cannot be used as a user-defined binding.",
+                loc
+            )
         }
     }
 
@@ -414,6 +445,7 @@ object DuplicateDeclarationValidator {
             val boundNames = item.pattern.extractBindings()
 
             for (name in boundNames) {
+                rejectReservedName(name, item.value.loc)
                 if (declaredVariables.contains(name)) {
                     throw TypeCheckError(
                         "Duplicate variable declaration: '$name' is already defined in this scope",
@@ -439,6 +471,12 @@ object DuplicateDeclarationValidator {
                 }
                 declaredVariables.add(name)
             }
+        }
+
+        // Reject reserved names at performer declaration site too —
+        // `perform abort {seed = 42} in body` would be incoherent.
+        for (perfDecl in module.decls.filterIsInstance<ParsedPerformerDecl>()) {
+            rejectReservedName(perfDecl.performerName, perfDecl.loc)
         }
     }
 

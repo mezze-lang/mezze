@@ -20,14 +20,13 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * The registry is thread-safe using ConcurrentHashMap and CopyOnWriteArrayList.
  *
- * This mirrors V1's EffectHandler pattern for effect resolution:
+ * Lookup strategy:
  * 1. Direct lookup by effect name (e.g., handlers.get("Log"))
  * 2. Indirect lookup by performer name (e.g., handlers.get("Console") when Console implements Log)
  *
- * Integration points:
- * - HandleNode registers handlers and pushes them onto the handler stack
- * - DynamicEffectCallNode looks up handlers using getHandlerFor()
- * - PerformNode uses pre-resolved handlers from frame slots
+ * Used by HandleNode/OpCallNode to resolve a performer record's effect at
+ * call site; runtime handler dispatch is driven by EffectFiber's handler
+ * chain, not this registry.
  *
  * Example usage:
  *   // At effect declaration time:

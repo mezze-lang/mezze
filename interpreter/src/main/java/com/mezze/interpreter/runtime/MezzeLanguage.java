@@ -378,25 +378,18 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         @CompilerDirectives.TruffleBoundary
         private Object forceSuspended(com.mezze.interpreter.values.MezzeSuspended suspended) {
             try {
-                MezzeContext context = MezzeContext.get(this);
                 if (forceCallNode == null) {
                     CompilerDirectives.transferToInterpreterAndInvalidate();
                     forceCallNode = insert(com.oracle.truffle.api.nodes.IndirectCallNode.create());
                 }
-                // Try to execute with handlers from the handler stack
-                java.util.Map<Hash, Object> handlers = new java.util.HashMap<>();
-                // Collect all available handlers from context
-                for (Hash effect : suspended.getUnhandledEffects()) {
-                    Object handler = context.getHandlerFor(effect);
-                    if (handler != null) {
-                        handlers.put(effect, handler);
-                    }
-                }
-                if (!handlers.isEmpty()) {
-                    Object forced = suspended.executeWith(handlers, context, forceCallNode);
-                    if (!(forced instanceof com.mezze.interpreter.values.MezzeSuspended)) {
-                        return forced;
-                    }
+                // Under the new dispatch design, forcing routes through the
+                // current fiber rather than a context-wide handler map. At the
+                // top level no fiber is current, so force() will typically
+                // return the suspension unchanged — which is fine, the user
+                // sees the suspension explicitly.
+                Object forced = suspended.force(forceCallNode);
+                if (!(forced instanceof com.mezze.interpreter.values.MezzeSuspended)) {
+                    return forced;
                 }
             } catch (Exception e) {
                 // Force failed — return suspended as-is
@@ -479,10 +472,6 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      */
     public static void clearLastResult() {
         lastResultStore.set(null);
-        // Clear delimiter stack to ensure clean state between tests
-        com.mezze.interpreter.nodes.continuation.DelimiterStack.clear();
-        // Clear state machine context to prevent stale continuation state between tests
-        com.mezze.interpreter.nodes.statemachine.StateMachineContext.clearCurrentContext();
     }
 
     /**

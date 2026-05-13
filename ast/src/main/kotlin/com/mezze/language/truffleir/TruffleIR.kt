@@ -82,8 +82,19 @@ sealed interface StringPartIR {
 /** Read a function from the global registry by content hash WITHOUT auto-evaluating thunks.
  *  Used for dictionary passing where we need the raw MezzeFunction, not its return value. */
 @Serializable data class ReadGlobalFnByHashIR(val hash: Hash, override val src: SourceInfo) : NodeIR
-/** Read a runtime-injected scope variable (e.g., `scope` from HandleNode) by name. */
-@Serializable data class ReadScopeIR(val varName: String, override val src: SourceInfo) : NodeIR
+/**
+ * Reference to a name contributed by the effect-handler runtime inside an
+ * op handler body. The set of names is fixed: `scope`, `resume`, `abort`.
+ *
+ *  - `scope`  — the value `initialize_scope` returned for the surrounding
+ *    perform. One value per perform; lives on the MezzeContext.
+ *  - `resume` — handle to drive body forward for *this* op invocation.
+ *  - `abort`  — handle to terminate the perform with a value.
+ *
+ *  `resume` and `abort` are per-op-invocation: nested op calls each get
+ *  fresh handles. They live on the current fiber's effect-handle stack.
+ */
+@Serializable data class EffectBindingIR(val name: String, override val src: SourceInfo) : NodeIR
 
 // Calls
 /** Direct call to a known function hash.

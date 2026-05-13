@@ -1,20 +1,64 @@
-use std::control::continuation
-use std::control::continuation::{ Continuation }
-
 ## Generator effect for yielding values from a computation.
-effect Generator having 'a where {
-  ## Yield a value to the caller, suspending execution.
-  yield: { value: 'a } -> {} <Generator>
-}
+##
+## Userland implementation built on the runtime continuation primitive.
+## A generator body is a function that performs `Generator.yield`. The
+## `AsStream` impl converts the body into a lazy `Stream`: each call to
+## `Stream.next` resumes the body until its next yield (or completion),
+## returning `Some {val, rest}` per yielded value and `None` when the
+## body completes.
+##
+## The `resume` reference inside the `yield` handler escapes inside the
+## `abort` payload: we capture it in `Stream`'s next-thunk so the consumer
+## can drive the suspended body forward on demand. The `EffectHandlerDriver`
+## catches `AbortPerformException` on resume re-entry, so chained `abort`s
+## from successive yields produce successive stream elements.
 
-## Collect handler that gathers all yielded values into a sequence.
-impl Generator for Collect having 'a = 'x where {
-  initialize_scope = {} -> { cont = continuation::new {} },
-  finalize_scope = {} -> do
-    let collected = scope.cont.take_collected {}
-    scope.cont.suspend_with { value = collected },
-  yield = { value } -> scope.cont.suspend_and_resume { value = value },
+effect Generator having 'a where {
+  ## Yield a value to the caller. Body suspends; the consumer's next call
+  ## resumes here with `{}` (yield's return value is unit).
+  yield: { value: 'a } -> {} <Generator>
 }
 
 ## Shorthand for Generator.yield.
 pub let yield = { value } -> Generator.yield { value }
+
+## Lazy stream of `'a`. The thunk returns `None` when exhausted, or
+## `Some { val, rest }` with the next element and a continuation stream.
+pub newtype Stream 'a = Stream { next: {} -> Option { val: 'a, rest: Stream 'a } }
+
+## Materialize a stream eagerly into a finite Seq. Stops at the first
+## `None` (so unsafe to call on infinite streams).
+pub let to_seq : { stream: Stream 'a } -> [ 'a ] = { stream } ->
+  match stream is
+    Stream { next } -> match next {} is
+      None -> []
+      Some { val, rest } -> [val, ...to_seq { stream = rest }]
+
+## Convert a `Generator`-using body into a lazy `Stream`. Each call to
+## `Stream.next` runs the body up to the next yield (or to completion).
+##
+## Implementation: `yield` aborts the surrounding perform with
+## `Some { val, rest }` where `rest` is a Stream whose `next` thunk calls
+## `resume {val = {}}`. When body completes naturally (no more yields),
+## the body's final expression — must be `None` — becomes resume's
+## return value, which becomes the stream's next value.
+impl Generator for AsStream where {
+  yield = { value } ->
+    abort { val = Some { val = value, rest = Stream { next = {} -> resume { val = {} } } } }
+}
+
+## Convenience: build a `Stream` from a generator body.
+##
+## Performs `AsStream` on the body. If the body yields immediately, the
+## perform's result is `Some {val, rest}`; the user wraps that in a
+## `Stream`. If the body completes without yielding, the body's final
+## expression must be `None` and the resulting stream is empty.
+##
+## Use `to_seq` on the returned stream to materialize all values.
+pub let make_stream : { f: {} -> Option { val: 'a, rest: Stream 'a } <Generator, ...> } -> Stream 'a =
+  { f } -> Stream { next = {} -> perform AsStream in f {} }
+
+## Convenience: run a generator body and return all values as a Seq.
+## Equivalent to `to_seq { stream = make_stream { f = f } }`.
+pub let collect : { f: {} -> Option { val: 'a, rest: Stream 'a } <Generator, ...> } -> [ 'a ] =
+  { f } -> to_seq { stream = make_stream { f = f } }

@@ -12,7 +12,6 @@ import com.mezze.interpreter.nodes.variant.MatchNode
 import com.mezze.interpreter.nodes.variant.MatchBranchNode
 import com.mezze.interpreter.nodes.variant.VariantConstructNode
 import com.mezze.interpreter.nodes.effect.HandleNode
-import com.mezze.interpreter.nodes.effect.DynamicEffectCallNode
 import com.mezze.interpreter.converter.InterpolatedStringNode
 import com.mezze.interpreter.nodes.builtin.NativeDispatch
 import com.mezze.interpreter.runtime.MezzeLanguage
@@ -163,9 +162,9 @@ class TruffleCompiler(
                 // thunks. Used for dictionary passing to inject ability op functions as hidden params.
                 com.mezze.interpreter.nodes.ReadGlobalFnByHashNode(node.hash)
             }
-            is ReadScopeIR -> {
-                // Read a runtime-injected scope variable (e.g., `scope` from HandleNode) by name.
-                com.mezze.interpreter.nodes.ReadScopeNode(node.varName)
+            is EffectBindingIR -> {
+                // Effect-handler runtime name (`scope`, `resume`, `abort`).
+                com.mezze.interpreter.nodes.effect.EffectBindingNode(node.name)
             }
             is WriteLocalIR -> {
                 val valueNode = compileNode(node.value, source)
@@ -237,45 +236,7 @@ class TruffleCompiler(
                 if (dsWired != null) return dsWired
 
                 val argNode = compileNode(node.arg, source)
-                // Use dedicated Truffle nodes for continuation primitives
-                // (matching main branch's convertNativeFunctionCall)
-                when (node.name) {
-                    "__native_continuation_delimit" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationDelimitNode.create()
-                    "__native_continuation_activate" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationActivateNode.create(argNode)
-                    "__native_continuation_capture" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationCaptureNode.create(argNode)
-                    "__native_continuation_suspend" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationSuspendNode.create()
-                    "__native_continuation_suspend_with" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationSuspendWithNode(argNode)
-                    "__native_continuation_resume" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationResumeNode.create(argNode)
-                    "__native_continuation_abort" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationAbortNode.create(argNode)
-                    "__native_continuation_extract_suspended" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationExtractSuspendedNode.create(argNode)
-                    "__native_continuation_deactivate" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationDeactivateNode.create(argNode)
-                    "__native_continuation_run_suspendable" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationRunSuspendableNode.create(argNode)
-                    "__native_continuation_suspend_and_resume" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationSuspendAndResumeNode.create(argNode)
-                    "__native_continuation_get_collected" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationGetCollectedNode.create(argNode)
-                    "__native_continuation_take_collected" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationTakeCollectedNode.create(argNode)
-                    "__native_continuation_collected_count" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationCollectedCountNode.create(argNode)
-                    "__native_continuation_snapshot" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationSnapshotNode.create(argNode)
-                    "__native_continuation_restore" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationRestoreNode.create(argNode)
-                    "__native_continuation_is_serializable" ->
-                        com.mezze.interpreter.nodes.continuation.ContinuationIsSerializableNode.create(argNode)
-                    else -> NativeDispatch.create(node.name, argNode)
-                }
+                NativeDispatch.create(node.name, argNode)
             }
             is CallIndirectIR -> {
                 // Check for inline operator pattern: CallIndirect(ReadField(receiver, "add"), {r=...})
@@ -578,30 +539,22 @@ class TruffleCompiler(
             is HandleIR -> {
                 val bodyNode = compileNode(node.body, source)
                 if (node.handlers.isNotEmpty()) {
-                    // Nest HandleNodes for multiple handlers: outermost handler wraps
-                    // the next handler which wraps ... which wraps the body.
+                    // Nest HandleNodes for multiple handlers: outermost handler
+                    // wraps the next which wraps ... which wraps the body.
                     // Process from last to first so the first handler is outermost.
                     var currentBody: MezzeNode = bodyNode
                     for (handler in node.handlers.reversed()) {
-                        val contentHashes = arrayOf(handler.handlerHash, handler.effectHash)
                         val handlerNode: MezzeNode = if (handler.params != null) {
                             val paramsNode = compileNode(handler.params!!, source)
-                            HandleNode.createParameterizedHandlerLookup(-1, handler.handlerHash, handler.performerName, paramsNode)
+                            HandleNode.createParameterizedHandlerLookup(
+                                -1, handler.handlerHash, handler.performerName, paramsNode
+                            )
                         } else {
-                            HandleNode.createHandlerLookup(-1, handler.handlerHash, handler.performerName)
+                            HandleNode.createHandlerLookup(
+                                -1, handler.handlerHash, handler.performerName
+                            )
                         }
-                        currentBody = HandleNode(
-                            -1,                     // no local slot
-                            handler.performerName,
-                            contentHashes,
-                            handlerNode,
-                            currentBody,
-                            -1,     // no scope slot
-                            null,   // no initialize_scope
-                            null,   // no finalize_scope
-                            false,  // no initialize
-                            false   // no finalize
-                        )
+                        currentBody = HandleNode(handlerNode, currentBody)
                     }
                     currentBody
                 } else {
@@ -609,13 +562,13 @@ class TruffleCompiler(
                 }
             }
             is PerformOpIR -> {
-                // Effect operation — runtime dispatch via DynamicEffectCallNode
+                // Effect operation — fiber-yield via OpCallNode; the surrounding
+                // HandleNode's driver dispatches by op name. The effect hash is
+                // only used to build a MezzeSuspended thunk when there is no
+                // fiber in scope (the lazy-effects fallback).
                 val argNode = compileNode(node.arg, source)
-                DynamicEffectCallNode.create(
-                    node.operationName,     // operation name for handler record lookup
-                    node.operationName,     // operation name
-                    argNode,
-                    node.effectHash         // effect content hash
+                com.mezze.interpreter.nodes.effect.OpCallNode.create(
+                    node.operationName, node.effectHash, argNode
                 )
             }
             is DictMethodCallIR -> {

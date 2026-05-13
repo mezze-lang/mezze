@@ -1,35 +1,22 @@
 package com.mezze.interpreter.nodes.effect;
 
-import com.oracle.truffle.api.nodes.ControlFlowException;
+import com.oracle.truffle.api.exception.AbstractTruffleException;
 
 /**
- * Exception thrown by finalize_scope to signal that the scoped block should be retried.
+ * Thrown by STM transactions on optimistic-concurrency conflict to trigger
+ * automatic retry of the surrounding {@code perform} block.
  *
- * This is used by STM to implement automatic retry on transaction conflicts.
- * When finalize_scope (commit) detects a conflict, it throws this exception.
- * The HandleNode catches it and re-executes the entire scoped block
- * (initialize_scope -> body -> finalize_scope).
- *
- * This extends ControlFlowException so Truffle can optimize it (no stack trace).
+ * <p>Caught by {@link HandleNode} so the body re-executes against fresh
+ * scope state. Not related to the effect-handler op-call dispatch path —
+ * this is STM-specific retry signaling.
  */
-public final class RetryingScopeException extends ControlFlowException {
-    private static final long serialVersionUID = 1L;
+public final class RetryingScopeException extends AbstractTruffleException {
 
-    /** Maximum number of retries before giving up (0 = unlimited) */
     private final int maxRetries;
-
-    /** Optional message describing why retry is needed */
     private final String reason;
 
-    public RetryingScopeException() {
-        this(0, null);
-    }
-
-    public RetryingScopeException(int maxRetries) {
-        this(maxRetries, null);
-    }
-
     public RetryingScopeException(int maxRetries, String reason) {
+        super(reason);
         this.maxRetries = maxRetries;
         this.reason = reason;
     }
@@ -40,13 +27,5 @@ public final class RetryingScopeException extends ControlFlowException {
 
     public String getReason() {
         return reason;
-    }
-
-    @Override
-    public String getMessage() {
-        if (reason != null) {
-            return "Scoped block needs retry: " + reason;
-        }
-        return "Scoped block needs retry";
     }
 }

@@ -331,7 +331,7 @@ class MezzeExecutor(
             is com.mezze.language.truffleir.DictMethodCallIR -> collectReferencedHashes(node.arg, queue)
             is com.mezze.language.truffleir.ReadGlobalByHashIR -> queue.add(node.hash.hex)
             is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> queue.add(node.hash.hex)
-            is com.mezze.language.truffleir.ReadScopeIR -> {}
+            is com.mezze.language.truffleir.EffectBindingIR -> {}
             // Leaf nodes
             is com.mezze.language.truffleir.ReadLocalIR -> {}
             is com.mezze.language.truffleir.ReadCaptureIR -> {}

@@ -1,17 +1,12 @@
-use std::control::continuation
-use std::control::continuation::{ Continuation }
-
 ## Early return effect for escaping computations with a value.
 effect Return having 'result where {
   ## Return a value, exiting the current perform block.
   return: { val: 'result } -> 'a <Return>
 }
 
-## Handler that implements early return via scoped continuations.
+## Handler that implements early return by aborting the perform.
 impl Return for EarlyReturn having 'result = 'r where {
-  initialize_scope = {} -> { cont = continuation::new {} },
-  finalize_scope = {} -> scope.cont.reset {},
-  return = { val } -> scope.cont.suspend_with { value = val },
+  return = { val } -> abort { val = val },
 }
 
 ## Shorthand for Return.return.

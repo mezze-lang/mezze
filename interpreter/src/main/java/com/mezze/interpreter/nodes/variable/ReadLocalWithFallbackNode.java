@@ -91,27 +91,14 @@ public final class ReadLocalWithFallbackNode extends MezzeNode {
 
     @TruffleBoundary
     private Object forceSuspended(MezzeSuspended suspended) {
-        MezzeContext context;
-        try {
-            context = MezzeContext.get(this);
-        } catch (AssertionError e) {
-            // No context - return suspended as-is
-            return suspended;
-        }
-
-        // Check if there are any handlers in scope
-        if (!context.hasHandlers()) {
-            // No handlers - return suspended as-is
-            return suspended;
-        }
-
-        // Force the suspended computation with current handlers
+        // Under the new dispatch design, forcing routes through the current
+        // fiber rather than a context-wide handler map. force() returns the
+        // suspension unchanged when no fiber is current.
         if (callNode == null) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
             callNode = insert(IndirectCallNode.create());
         }
-
-        return suspended.executeWith(context.getCurrentHandlers(), context, callNode);
+        return suspended.force(callNode);
     }
 
     private Object lookupGlobal() {

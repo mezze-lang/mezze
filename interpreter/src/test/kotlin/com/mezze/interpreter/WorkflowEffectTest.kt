@@ -2,6 +2,7 @@ package com.mezze.interpreter
 
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Assertions.*
 import com.mezze.datastructures.seq.MezzeSeq
 
@@ -13,6 +14,7 @@ import com.mezze.datastructures.seq.MezzeSeq
  * - Checkpointed to storage
  * - Restored and resumed
  */
+@Disabled("Workflow rewrite (journal-replay) deprioritized; std::control::continuation deleted in Phase 6. Tasks #65-67 will re-enable these.")
 class WorkflowEffectTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 

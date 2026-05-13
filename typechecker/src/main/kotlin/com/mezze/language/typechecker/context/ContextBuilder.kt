@@ -5,6 +5,7 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.Visibility as ParsedVisibility
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashes
+import com.mezze.language.typechecker.scope.ScopedEffectConstants
 import com.mezze.language.typechecker.validation.AbilityValidator
 import com.mezze.language.typechecker.validation.DuplicateDeclarationValidator
 import com.mezze.language.parsedast.diagnostics.ErrorCode
@@ -515,14 +516,20 @@ class ContextBuilder {
     }
 
     /**
-     * Analyze an impl body to find calls to `suspend_with` and extract the suspension type.
+     * Analyze an impl body to find an escape call and extract the perform's
+     * suspension type from it.
      *
-     * The suspension type is what's passed as `value` to `suspend_with`. This determines
-     * what the perform expression should return.
+     * Two patterns recognized:
+     *   - Legacy: `scope.cont.suspend_with {value = expr}` — old continuation API.
+     *   - Current: `abort {val = expr}` — runtime-contributed name available
+     *     inside op handler bodies.
      *
-     * Example: For `throw = {error} -> cont.suspend_with {value = Err {error}}`
+     * In both cases `expr` is the value the perform returns when the op
+     * handler escapes, so it determines the perform expression's type.
+     *
+     * Example: For `throw = {error} -> abort {val = Err {error}}`
      *   - The suspension expression is `Err {error}`
-     *   - We infer the type pattern `| Err { error: 'error } |` → `Result 'val 'error`
+     *   - We infer `| Err { error: 'error } |` → `Result 'val 'error`
      *
      * @param implDecl The impl declaration to analyze
      * @param associatedTypes Map of associated type names to their bound types
@@ -545,26 +552,23 @@ class ContextBuilder {
     }
 
     /**
-     * Recursively find the value expression passed to suspend_with in parsed AST.
-     * Looks for patterns like: cont.suspend_with {value = expr}
+     * Recursively find the escape-value expression in a parsed AST.
+     *
+     * Looks for `abort {val = expr}` — the runtime-contributed escape inside
+     * op handler bodies. Returns the `expr` so the perform's return type
+     * can be inferred from what the handler escapes with.
      */
     private fun findSuspendWithValueParsed(expr: ParsedExpr): ParsedExpr? {
         return when (expr) {
             is ParsedFunctionCall -> {
-                // Check if this is a call to suspend_with
                 val callee = expr.function
-                if (callee is ParsedMemberAccess && callee.member == "suspend_with") {
-                    // Found suspend_with call, extract the value from arguments
-                    val args = expr.arguments
-                    if (args is ParsedRecordLit) {
-                        for (entry in args.entries) {
-                            if (entry is ParsedRecordEntry.Field && entry.name == "value") {
-                                return entry.value
-                            }
-                        }
-                    }
+                if (callee is ParsedIdentifier
+                    && callee.localName == ScopedEffectConstants.ABORT
+                ) {
+                    val v = extractRecordField(expr.arguments, ScopedEffectConstants.VAL_FIELD)
+                    if (v != null) return v
                 }
-                // Not a suspend_with call, recurse into arguments
+                // Not an abort call — recurse into arguments for nested cases.
                 findSuspendWithValueParsed(expr.arguments)
             }
             is ParsedDo -> {
@@ -604,7 +608,22 @@ class ContextBuilder {
     }
 
     /**
-     * Infer the suspension type from a parsed expression passed to suspend_with.
+     * Return the value bound to `fieldName` in a record-literal argument, or
+     * null if the argument isn't a record literal or doesn't contain that field.
+     * Used to peek inside calls like `abort {val = expr}` for type inference.
+     */
+    private fun extractRecordField(args: ParsedExpr, fieldName: String): ParsedExpr? {
+        if (args !is ParsedRecordLit) return null
+        for (entry in args.entries) {
+            if (entry is ParsedRecordEntry.Field && entry.name == fieldName) {
+                return entry.value
+            }
+        }
+        return null
+    }
+
+    /**
+     * Infer the suspension type from a parsed expression passed to abort.
      *
      * For variant constructors like `Err {error}`, we create a variant type.
      * For other expressions, we try to infer a reasonable type.

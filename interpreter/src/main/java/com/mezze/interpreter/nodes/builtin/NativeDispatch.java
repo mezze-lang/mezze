@@ -14,9 +14,6 @@ import com.mezze.interpreter.nodes.builtin.concurrency.*;
 import com.mezze.interpreter.nodes.builtin.effects.*;
 import com.mezze.interpreter.nodes.builtin.io.*;
 import com.mezze.interpreter.nodes.builtin.primitives.*;
-import com.mezze.interpreter.nodes.continuation.ContinuationAbortedException;
-import com.mezze.interpreter.nodes.continuation.ContinuationSuspendedException;
-import com.mezze.interpreter.nodes.continuation.DelimiterStack;
 import com.mezze.interpreter.values.*;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -189,8 +186,6 @@ public final class NativeDispatch extends MezzeNode {
         registerIOHandlers();
         // Crash function - terminates program with error message
         registerCrashHandler();
-        // Continuation primitives (delimited continuations for effects)
-        registerContinuationHandlers();
         // Mutation primitives (safe local mutation)
         registerMutationHandlers();
         // Note: Comptime is handled at conversion time, no runtime handler needed
@@ -2547,24 +2542,6 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_os_any", (r, c) -> AsyncNatives.osAny(r));
         HANDLERS.put("__native_os_settle", (r, c) -> AsyncNatives.osSettle(r));
 
-        // === Coop (Cooperative) - single-threaded, deterministic ===
-        // Coop runs synchronously on the same thread, so no HANDLERS_WITH_NODE needed
-        HANDLERS.put("__native_coop_spawn", (r, c) -> AsyncNatives.coopSpawn(r, c));
-        HANDLERS.put("__native_coop_await", (r, c) -> AsyncNatives.coopAwait(r));
-        HANDLERS.put("__native_coop_race", (r, c) -> AsyncNatives.coopRace(r));
-        HANDLERS.put("__native_coop_all", (r, c) -> AsyncNatives.coopAll(r));
-        HANDLERS.put("__native_coop_timeout", (r, c) -> AsyncNatives.coopTimeout(r));
-        HANDLERS.put("__native_coop_sleep", (r, c) -> AsyncNatives.coopSleep(r));
-        HANDLERS.put("__native_coop_is_done", (r, c) -> AsyncNatives.coopIsDone(r));
-        HANDLERS.put("__native_coop_join", (r, c) -> AsyncNatives.coopJoin(r, c));
-        HANDLERS.put("__native_coop_join3", (r, c) -> AsyncNatives.coopJoin3(r, c));
-        HANDLERS.put("__native_coop_map", (r, c) -> AsyncNatives.coopMap(r, c));
-        HANDLERS.put("__native_coop_for_each", (r, c) -> AsyncNatives.coopForEach(r, c));
-        HANDLERS.put("__native_coop_filter", (r, c) -> AsyncNatives.coopFilter(r, c));
-        HANDLERS.put("__native_coop_any", (r, c) -> AsyncNatives.coopAny(r));
-        HANDLERS.put("__native_coop_settle", (r, c) -> AsyncNatives.coopSettle(r));
-        HANDLERS.put("__native_coop_scoped", (r, c) -> AsyncNatives.coopScoped(r, c));
-
         // === Cooperative Scheduler - real continuation-based coop async ===
         HANDLERS.put("__native_scheduler_new", (r, c) -> SchedulerNatives.schedulerNew());
         HANDLERS.put("__native_scheduler_spawn", (r, c) -> SchedulerNatives.schedulerSpawn(r, c));
@@ -2578,90 +2555,6 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_scheduler_serialize", (r, c) -> SchedulerNatives.schedulerSerialize(r));
         HANDLERS.put("__native_scheduler_deserialize", (r, c) -> SchedulerNatives.schedulerDeserialize(r));
 
-        // === Generator - continuation-based generators ===
-        // TODO: Generator natives need MezzoCont implementation
-        // HANDLERS.put("__native_generator_collect", (r, c) -> GeneratorNatives.collect(r, c));
-        // HANDLERS.put("__native_generator_take", (r, c) -> GeneratorNatives.take(r, c));
-
-        // === Adaptive Async - intelligent strategy selection ===
-        // Adaptive handlers need node context for Truffle thread creation
-        HANDLERS_WITH_NODE.put("__native_adaptive_spawn", (r, c, n) -> {
-            AdaptiveAsyncHandler handler = getOrCreateAdaptiveHandler(r);
-            return handler.spawn(r, c, n);
-        });
-        HANDLERS_WITH_NODE.put("__native_adaptive_join", (r, c, n) -> {
-            AdaptiveAsyncHandler handler = getOrCreateAdaptiveHandler(r);
-            return handler.join(r, c, n);
-        });
-        HANDLERS_WITH_NODE.put("__native_adaptive_map", (r, c, n) -> {
-            AdaptiveAsyncHandler handler = getOrCreateAdaptiveHandler(r);
-            return handler.map(r, c, n);
-        });
-        // Simple handlers don't need node context
-        HANDLERS.put("__native_adaptive_await", (r, c) -> {
-            AdaptiveAsyncHandler handler = getOrCreateAdaptiveHandler(r);
-            return handler.await(r);
-        });
-        HANDLERS.put("__native_adaptive_race", (r, c) -> {
-            AdaptiveAsyncHandler handler = getOrCreateAdaptiveHandler(r);
-            return handler.race(r);
-        });
-        HANDLERS.put("__native_adaptive_all", (r, c) -> {
-            AdaptiveAsyncHandler handler = getOrCreateAdaptiveHandler(r);
-            return handler.all(r);
-        });
-        HANDLERS.put("__native_adaptive_sleep", (r, c) -> {
-            AdaptiveAsyncHandler handler = getOrCreateAdaptiveHandler(r);
-            return handler.sleep(r);
-        });
-        HANDLERS.put("__native_adaptive_is_done", (r, c) -> {
-            AdaptiveAsyncHandler handler = getOrCreateAdaptiveHandler(r);
-            return handler.isDone(r);
-        });
-        // Scope lifecycle
-        HANDLERS.put("__native_adaptive_init_scope", (r, c) -> {
-            // Create a new handler with AUTO strategy
-            return new AdaptiveAsyncHandler();
-        });
-        HANDLERS.put("__native_adaptive_init_scope_loom", (r, c) -> {
-            return new AdaptiveAsyncHandler(AdaptiveAsyncHandler.LOOM_ONLY);
-        });
-        HANDLERS.put("__native_adaptive_init_scope_coop", (r, c) -> {
-            return new AdaptiveAsyncHandler(AdaptiveAsyncHandler.COOP_ONLY);
-        });
-        HANDLERS.put("__native_adaptive_init_scope_adaptive", (r, c) -> {
-            return new AdaptiveAsyncHandler(new AdaptiveAsyncHandler.AdaptiveStrategy());
-        });
-        HANDLERS.put("__native_adaptive_finalize_scope", (r, c) -> {
-            AdaptiveAsyncHandler handler = getOrCreateAdaptiveHandler(r);
-            return handler.finalizeScope(r);
-        });
-        HANDLERS.put("__native_adaptive_get_stats", (r, c) -> {
-            AdaptiveAsyncHandler handler = getOrCreateAdaptiveHandler(r);
-            AdaptiveAsyncHandler.AdaptiveStats stats = handler.getStats();
-            return MezzeRecord.fromFields(
-                new String[]{"total", "loom", "coop", "loom_pct", "avg_loom_ns", "avg_coop_ns"},
-                new Object[]{
-                    stats.getTotalOperations(),
-                    stats.getLoomOperations(),
-                    stats.getCoopOperations(),
-                    stats.getLoomPercentage(),
-                    stats.getAvgLoomNanos(),
-                    stats.getAvgCoopNanos()
-                }
-            );
-        });
-    }
-
-    // Helper to extract AdaptiveAsyncHandler from record
-    private static AdaptiveAsyncHandler getOrCreateAdaptiveHandler(MezzeRecord r) {
-        int idx = r.getFieldIndex("handler");
-        if (idx >= 0) {
-            Object val = r.getField(idx);
-            if (val instanceof AdaptiveAsyncHandler h) return h;
-        }
-        // Fallback to AUTO strategy
-        return new AdaptiveAsyncHandler();
     }
 
     // ==================== Concurrency Primitives ====================
@@ -2903,195 +2796,6 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_http_client_create", (r, c) -> IONatives.httpClientCreate(r));
         HANDLERS.put("__native_http_client_close", (r, c) -> IONatives.httpClientClose(r));
         HANDLERS.put("__native_http_request", (r, c) -> IONatives.httpRequest(r));
-    }
-
-    // ==================== Continuation Primitives ====================
-
-    private static void registerContinuationHandlers() {
-        // __native_continuation_delimit - Creates a new delimiter
-        HANDLERS.put("__native_continuation_delimit", (r, c) -> com.mezze.interpreter.nodes.continuation.MezzeCont.create());
-
-        // __native_continuation_activate - Pushes delimiter onto thread-local stack
-        HANDLERS.put("__native_continuation_activate", (r, c) -> {
-            Object delimObj = getField(r, "delim");
-            if (!(delimObj instanceof com.mezze.interpreter.nodes.continuation.MezzeCont delim)) {
-                throw new RuntimeException("__native_continuation_activate expects 'delim' field as MezzeCont");
-            }
-            DelimiterStack.push(delim);
-            return MezzeUnit.INSTANCE;
-        });
-
-        // __native_continuation_deactivate - Pops delimiter from stack
-        HANDLERS.put("__native_continuation_deactivate", (r, c) -> {
-            DelimiterStack.pop();
-            return MezzeUnit.INSTANCE;
-        });
-
-        // __native_continuation_capture - Captures current continuation
-        HANDLERS.put("__native_continuation_capture", (r, c) -> {
-            Object delimObj = getField(r, "delim");
-            if (!(delimObj instanceof com.mezze.interpreter.nodes.continuation.MezzeCont delim)) {
-                throw new RuntimeException("__native_continuation_capture expects 'delim' field as MezzeCont");
-            }
-
-            DelimiterStack.DelimiterEntry entry = DelimiterStack.find(delim.getId());
-
-            if (entry != null && entry.capturedContinuation != null) {
-                // Return captured continuation wrapped as function
-                com.mezze.interpreter.nodes.continuation.MezzeContinuation cont = entry.capturedContinuation;
-                return new MezzeFunction(
-                    cont.getCallTarget(),
-                    "continuation@" + cont.getDelimiterId(),
-                    cont.getCapturedValues()
-                );
-            }
-
-            // Return trivial identity continuation
-            return createTrivialContinuation(delim.getId());
-        });
-
-        // __native_continuation_suspend - Suspends without a value
-        HANDLERS.put("__native_continuation_suspend", (r, c) -> {
-            DelimiterStack.DelimiterEntry entry = DelimiterStack.current();
-            long delimiterId = entry != null ? entry.delimiter.getId() : 0;
-            com.mezze.interpreter.nodes.continuation.MezzeContinuation continuation = createResumableContinuation(delimiterId);
-            return new com.mezze.interpreter.nodes.continuation.MezzeContinuationSuspended(MezzeNull.INSTANCE, continuation);
-        });
-
-        // __native_continuation_suspend_with - Suspends with a value
-        HANDLERS.put("__native_continuation_suspend_with", (r, c) -> {
-            Object delimObj = getField(r, "delim");
-            if (!(delimObj instanceof com.mezze.interpreter.nodes.continuation.MezzeCont delim)) {
-                throw new RuntimeException("__native_continuation_suspend_with expects 'delim' field as MezzeCont");
-            }
-            Object value = getField(r, "value");
-            com.mezze.interpreter.nodes.continuation.MezzeContinuation continuation = createResumableContinuation(delim.getId());
-            return new com.mezze.interpreter.nodes.continuation.MezzeContinuationSuspended(value, continuation);
-        });
-
-        // __native_continuation_resume - Resumes a continuation with a value
-        HANDLERS.put("__native_continuation_resume", (r, c) -> {
-            Object contObj = getField(r, "cont");
-            Object value = getField(r, "value");
-
-            MezzeRecord valueRecord = MezzeRecord.fromFields(
-                new String[]{"value"},
-                new Object[]{value}
-            );
-
-            if (contObj instanceof MezzeFunction func) {
-                Object[] closureValues = func.getClosureValues();
-                int closureLen = closureValues.length;
-                Object[] callArgs = new Object[closureLen + 1];
-                System.arraycopy(closureValues, 0, callArgs, 0, closureLen);
-                callArgs[closureLen] = valueRecord;
-                return func.getCallTarget().call(callArgs);
-            }
-
-            if (contObj instanceof com.mezze.interpreter.nodes.continuation.MezzeContinuation cont) {
-                return cont.resume(valueRecord);
-            }
-
-            throw new RuntimeException("__native_continuation_resume expects 'cont' field as function or continuation");
-        });
-
-        // __native_continuation_abort - Aborts current continuation
-        HANDLERS.put("__native_continuation_abort", (r, c) -> {
-            Object delimObj = getField(r, "delim");
-            if (!(delimObj instanceof com.mezze.interpreter.nodes.continuation.MezzeCont delim)) {
-                throw new RuntimeException("__native_continuation_abort expects 'delim' field as MezzeCont");
-            }
-            throw new ContinuationAbortedException("Continuation aborted for delimiter " + delim.getId());
-        });
-
-        // __native_continuation_is_suspended - Check if value is suspended
-        HANDLERS.put("__native_continuation_is_suspended", (r, c) -> {
-            Object value = getField(r, "value");
-            return value instanceof com.mezze.interpreter.nodes.continuation.MezzeContinuationSuspended;
-        });
-
-        // __native_continuation_extract_suspended - Extract value and continuation from suspended
-        HANDLERS.put("__native_continuation_extract_suspended", (r, c) -> {
-            Object suspended = getField(r, "suspended");
-
-            if (suspended instanceof com.mezze.interpreter.nodes.continuation.MezzeContinuationSuspended susp) {
-                Object value = susp.getSuspendedValue();
-                com.mezze.interpreter.nodes.continuation.MezzeContinuation cont = susp.getContinuation();
-
-                MezzeFunction contFunc = new MezzeFunction(
-                    cont.getCallTarget(),
-                    "extracted_continuation",
-                    cont.getCapturedValues()
-                );
-
-                MezzeRecord innerRecord = MezzeRecord.fromFields(
-                    new String[]{"value", "cont"},
-                    new Object[]{value, contFunc}
-                );
-
-                return MezzeVariant.some(innerRecord);
-            }
-
-            return MezzeVariant.none();
-        });
-
-        // __native_continuation_run_suspendable - Run thunk and catch suspension
-        // Note: This is a simplified fallback. The specialized node handles this better.
-        HANDLERS.put("__native_continuation_run_suspendable", (r, c) -> {
-            Object thunkObj = getField(r, "thunk");
-            if (!(thunkObj instanceof MezzeFunction thunk)) {
-                throw new RuntimeException("__native_continuation_run_suspendable expects 'thunk' field as function");
-            }
-
-            Object[] closureValues = thunk.getClosureValues();
-            int closureLen = closureValues.length;
-            Object[] callArgs = new Object[closureLen + 1];
-            System.arraycopy(closureValues, 0, callArgs, 0, closureLen);
-            callArgs[closureLen] = MezzeRecord.empty();
-
-            try {
-                Object result = c.call(thunk.getCallTarget(), callArgs);
-
-                // Check if result is MezzeContinuationSuspended
-                if (result instanceof com.mezze.interpreter.nodes.continuation.MezzeContinuationSuspended suspended) {
-                    Object value = suspended.getSuspendedValue();
-                    com.mezze.interpreter.nodes.continuation.MezzeContinuation cont = suspended.getContinuation();
-                    MezzeFunction contFunc = new MezzeFunction(
-                        cont.getCallTarget(),
-                        "suspended_continuation",
-                        cont.getCapturedValues()
-                    );
-                    MezzeRecord inner = MezzeRecord.fromFields(
-                        new String[]{"value", "cont"},
-                        new Object[]{value, contFunc}
-                    );
-                    int suspTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Suspended");
-                    return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), suspTag, inner);
-                }
-
-                // Normal completion
-                MezzeRecord inner = MezzeRecord.fromFields(
-                    new String[]{"value"},
-                    new Object[]{result}
-                );
-                int compTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Completed");
-                return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), compTag, inner);
-            } catch (ContinuationSuspendedException e) {
-                Object value = e.getSuspendedValue();
-                com.mezze.interpreter.nodes.continuation.MezzeContinuation cont = e.getContinuation();
-                MezzeFunction contFunc = new MezzeFunction(
-                    cont.getCallTarget(),
-                    "suspended_continuation",
-                    cont.getCapturedValues()
-                );
-                MezzeRecord inner = MezzeRecord.fromFields(
-                    new String[]{"value", "cont"},
-                    new Object[]{value, contFunc}
-                );
-                int suspTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Suspended");
-                return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), suspTag, inner);
-            }
-        });
     }
 
     // ==================== Mutation Operations ====================
@@ -4305,49 +4009,6 @@ public final class NativeDispatch extends MezzeNode {
         }
     }
 
-    // Helper for creating trivial continuation that returns its input
-    @TruffleBoundary
-    private static MezzeFunction createTrivialContinuation(long delimiterId) {
-        // Create a function that extracts { value } and returns value
-        return new MezzeFunction(
-            TrivialContinuationCallTarget.INSTANCE,
-            "trivial_continuation@" + delimiterId,
-            new Object[0]
-        );
-    }
-
-    // Helper for creating resumable continuation
-    @TruffleBoundary
-    private static com.mezze.interpreter.nodes.continuation.MezzeContinuation createResumableContinuation(long delimiterId) {
-        return com.mezze.interpreter.nodes.continuation.MezzeContinuation.create(TrivialContinuationCallTarget.INSTANCE, delimiterId);
-    }
-
-    // Singleton call target for trivial continuations
-    private static final class TrivialContinuationCallTarget {
-        static final com.oracle.truffle.api.CallTarget INSTANCE;
-
-        static {
-            // Create a simple call target that extracts value from record
-            INSTANCE = new com.oracle.truffle.api.RootCallTarget() {
-                @Override
-                public Object call(Object... arguments) {
-                    if (arguments.length > 0) {
-                        Object last = arguments[arguments.length - 1];
-                        if (last instanceof MezzeRecord record) {
-                            Object value = record.getField("value");
-                            return value != null ? value : MezzeRecord.empty();
-                        }
-                    }
-                    return MezzeRecord.empty();
-                }
-
-                @Override
-                public com.oracle.truffle.api.nodes.RootNode getRootNode() {
-                    return null;
-                }
-            };
-        }
-    }
 
     // ========================================================================
     // Codec native implementations
@@ -4464,5 +4125,6 @@ public final class NativeDispatch extends MezzeNode {
         );
         return MezzeVariant.err(errorRecord);
     }
+
 
 }

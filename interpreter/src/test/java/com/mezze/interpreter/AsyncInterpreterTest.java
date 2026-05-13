@@ -20,9 +20,8 @@ public class AsyncInterpreterTest {
     void testCoopSpawnAndAwait() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, CoopAsync}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
                 Async.await {p = p}
         """);
@@ -33,9 +32,8 @@ public class AsyncInterpreterTest {
     void testCoopSpawnMultipleTasks() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, CoopAsync}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let r1 = Async.await {p = p1}
@@ -49,9 +47,8 @@ public class AsyncInterpreterTest {
     void testCoopJoinTwoComputations() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, CoopAsync}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let r = Async.join {
                     l = {} -> 10,
                     r = {} -> 20
@@ -65,9 +62,8 @@ public class AsyncInterpreterTest {
     void testCoopJoin3ThreeComputations() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, CoopAsync}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let r = Async.join3 {
                     a = {} -> 1,
                     b = {} -> 2,
@@ -82,9 +78,8 @@ public class AsyncInterpreterTest {
     void testCoopSleep() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, CoopAsync}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 Async.sleep {ms = 1}
                 42
         """);
@@ -95,9 +90,8 @@ public class AsyncInterpreterTest {
     void testCoopIsDone() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, CoopAsync}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
                 let _ = Async.await {p = p}
                 Async.is_done {p = p}

@@ -117,6 +117,9 @@ fun org.gradle.api.tasks.testing.Test.applyCommonTestConfig() {
         "--enable-native-access=ALL-UNNAMED",
         "--add-opens=java.base/java.lang=ALL-UNNAMED",
         "--add-opens=java.base/sun.misc=ALL-UNNAMED",
+        // Required for EffectFiber — wraps jdk.internal.vm.Continuation
+        // for Loom-backed effect handlers (effect-design v2 prototype).
+        "--add-opens=java.base/jdk.internal.vm=ALL-UNNAMED",
         "--add-modules=jdk.incubator.vector"
     )
 

@@ -1,6 +1,3 @@
-use std::control::continuation
-use std::control::continuation::{ Continuation }
-
 ## Typed exception effect for recoverable errors.
 effect Exception having 'error where {
   ## Throw an error, aborting normal control flow.
@@ -9,30 +6,22 @@ effect Exception having 'error where {
 
 ## Converts exceptions to Result values (Ok on success, Err on throw).
 impl Exception for ExceptionToResult having 'error = 'e where {
-  initialize_scope = {} -> { cont = continuation::new {} },
-  finalize_scope = {} -> scope.cont.reset {},
-  throw = { error } -> scope.cont.suspend_with { value = Err { error } },
+  throw = { error } -> abort { val = Err { error } },
 }
 
 ## Converts exceptions to Option (Some on success, None on throw).
 impl Exception for ExceptionToOption having 'error = 'e where {
-  initialize_scope = {} -> { cont = continuation::new {} },
-  finalize_scope = {} -> scope.cont.reset {},
-  throw = { error } -> scope.cont.suspend_with { value = None },
+  throw = { error } -> abort { val = None },
 }
 
-## Aborts current computation via continuation on throw.
+## Aborts current computation on throw, returning unit.
 impl Exception for AbortException having 'error = 'e where {
-  initialize_scope = {} -> { cont = continuation::new {} },
-  finalize_scope = {} -> scope.cont.reset {},
-  throw = { error } -> scope.cont.abort {},
+  throw = { error } -> abort { val = {} },
 }
 
 ## Silently ignores all errors, returning unit on throw.
 impl Exception for IgnoreException having 'error = 'e where {
-  initialize_scope = {} -> { cont = continuation::new {} },
-  finalize_scope = {} -> scope.cont.reset {},
-  throw = { error } -> scope.cont.suspend_with { value = {} },
+  throw = { error } -> abort { val = {} },
 }
 
 ## Terminates the program immediately on throw. Use for fatal errors only.

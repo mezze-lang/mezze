@@ -73,48 +73,6 @@ class StateMachineExecutionTest {
     }
 
     @Test
-    fun `test continuation module loads`() {
-        // Test that continuation infrastructure is available
-        val code = """
-            use std::control::continuation
-
-            let cont = continuation::new {}
-            {}
-        """.trimIndent()
-        val result = eval(code)
-        assertTrue(result is MezzeRecord)
-    }
-
-    @Test
-    fun `test continuation capture`() {
-        // Test capturing a continuation
-        val code = """
-            use std::control::continuation
-
-            let cont = continuation::new {}
-            let k = cont.capture {}
-            {}
-        """.trimIndent()
-        val result = eval(code)
-        assertTrue(result is MezzeRecord)
-    }
-
-    @Test
-    fun `test continuation resume with value`() {
-        // Test resuming a continuation with a value
-        val code = """
-            use std::control::continuation
-
-            let cont = continuation::new {}
-            let k = cont.capture {}
-            let result = cont.resume { cont = k, value = 100 }
-            {}
-        """.trimIndent()
-        val result = eval(code)
-        assertTrue(result is MezzeRecord)
-    }
-
-    @Test
     fun `test effect handler context`() {
         // Test effect handling with handlers
         val code = """

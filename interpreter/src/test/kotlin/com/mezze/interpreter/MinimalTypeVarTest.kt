@@ -76,9 +76,8 @@ class MinimalTypeVarTest {
         // Test type variables with cooperative async (single-threaded, no multi-thread support needed)
         val code = """
             use std::effects::async::{Async, CoopAsync}
-            use std::control::continuation
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 1 * 2}
                 let p2 = Async.spawn {f = {} -> 2 * 2}
                 let p3 = Async.spawn {f = {} -> 3 * 2}

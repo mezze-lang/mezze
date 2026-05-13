@@ -1,187 +1,89 @@
 package com.mezze.interpreter.nodes.effect;
 
 import com.mezze.interpreter.nodes.MezzeNode;
-import com.mezze.interpreter.runtime.ImplSignature;
+import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver;
 import com.mezze.interpreter.runtime.MezzeContext;
-import com.mezze.interpreter.nodes.continuation.ContinuationSuspendedException;
-import com.mezze.interpreter.nodes.continuation.ForkedExecutionException;
-import com.mezze.interpreter.nodes.continuation.MezzeContinuationSuspended;
-import com.mezze.datastructures.list.MezzeList;
+import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
-import com.mezze.interpreter.values.MezzeSuspended;
-import com.mezze.interpreter.values.MezzeVariant;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
-import com.oracle.truffle.api.frame.FrameSlotKind;
 import com.oracle.truffle.api.frame.VirtualFrame;
-import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.NodeInfo;
 
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
-
-/**
- * ThreadLocal reusable map to avoid allocation in hot paths.
- * Each thread gets its own map that is cleared and reused.
- */
-final class HandlerMapPool {
-    private static final ThreadLocal<Map<Hash, Object>> POOL = ThreadLocal.withInitial(HashMap::new);
-
-    static Map<Hash, Object> acquire() {
-        Map<Hash, Object> map = POOL.get();
-        map.clear();
-        return map;
-    }
-
-    // Note: No release needed - the map stays in ThreadLocal and is reused
-}
-
 /**
  * Node that looks up a handler by content hash.
- * Tries local frame slot first, then context lookup.
+ *
+ * <p>Tries the Language-level stdlib cache, then context handlers, then
+ * context globals. Returns the resolved handler record (a
+ * {@link MezzeRecord} whose fields are the op handler functions).
+ *
+ * <p>Kept independent of {@link HandleNode} so the compiler can compose
+ * a handler-resolution sub-tree separately from the perform site.
  */
 @NodeInfo(shortName = "handler-lookup")
 final class HandlerLookupNode extends MezzeNode {
 
-    @CompilationFinal
-    private final int localSlot;
+    @CompilationFinal private final Hash contentHash;
+    @CompilationFinal private final String performerName;
 
-    @CompilationFinal
-    private final Hash contentHash;
-
-    @CompilationFinal
-    private final String performerName;
-
-    HandlerLookupNode(int localSlot, Hash contentHash) {
-        this(localSlot, contentHash, null);
+    HandlerLookupNode(Hash contentHash) {
+        this(contentHash, null);
     }
 
-    HandlerLookupNode(int localSlot, Hash contentHash, String performerName) {
-        this.localSlot = localSlot;
+    HandlerLookupNode(Hash contentHash, String performerName) {
         this.contentHash = contentHash;
         this.performerName = performerName;
     }
 
     @Override
     public Object execute(VirtualFrame frame) {
-        // Try local slot first
-        if (localSlot >= 0) {
-            Object handler = frame.getObject(localSlot);
-            if (handler != null) {
-                return handler;
-            }
-        }
-        // Fall back to context lookup
         return lookupInContext(MezzeRecord.empty());
     }
 
     /**
-     * Look up handler in context and evaluate it with the given params record.
-     * For non-parameterized performers, pass MezzeRecord.empty().
-     * For parameterized performers (e.g., SeededRandom {seed = 42}), pass the params.
+     * Resolve the handler record for this performer's content hash. Single
+     * source of truth: {@code MezzeContext.handlersByHash}, populated by
+     * {@code HashModuleLoaderNode.constructPerformerRecord}. No fallbacks
+     * — if the entry isn't a {@code MezzeRecord}, the perform site is
+     * invalid (module mis-load, hash mismatch, parameterized impl resolved
+     * the wrong way) and we surface that loudly rather than silently
+     * dispatch into a partial or stale value.
+     *
+     * <p>Parameterized performers go through {@link ParameterizedHandlerLookupNode},
+     * which takes a different path (factory invocation with user params).
      */
     @TruffleBoundary
     Object lookupInContext(Object paramsRecord) {
         MezzeContext context = MezzeContext.get(this);
-        // Try by content hash — handlers map (installed by HandleNode) then globals.
         Object handler = context.lookupHandler(contentHash);
-        if (handler == null) {
-            handler = context.lookupGlobal(contentHash);
-        }
-        // Fall back to Language-level stdlib cache
-        if (handler == null) {
-            var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
-            var ct = lang.getCachedStdlibCallTarget(contentHash);
-            if (ct != null) {
-                handler = com.mezze.interpreter.values.MezzeFunction.create(ct, contentHash.getHex());
-            }
-        }
-        // If handler is a MezzeFunction (from HashModuleLoaderNode), evaluate it
-        // to get the performer record. Performer functions are closure factories
-        // that return a record with operation closures.
-        if (handler instanceof com.mezze.interpreter.values.MezzeFunction fn) {
-            handler = evaluateHandlerFunction(fn, paramsRecord, context);
-        }
-        if (handler == null) {
-            throw new RuntimeException("Handler not found for: " + contentHash.getHex() +
-                (performerName != null ? " (performer: " + performerName + ")" : ""));
+        if (!(handler instanceof MezzeRecord)) {
+            throw new RuntimeException("Handler not found for: " + contentHash.getHex()
+                + (performerName != null ? " (performer: " + performerName + ")" : ""));
         }
         return handler;
-    }
-
-    /**
-     * Evaluate a handler function (closure factory) with the given params to get a performer record.
-     * Handles both non-parameterized (params = empty record) and parameterized performers.
-     * Also handles double-wrapped closure factories.
-     */
-    @TruffleBoundary
-    static Object evaluateHandlerFunction(MezzeFunction fn, Object paramsRecord, MezzeContext context) {
-        try {
-            Object[] closureValues = fn.getClosureValues();
-            int closureLength = closureValues.length;
-            Object[] callArgs;
-            if (closureLength == 0) {
-                callArgs = new Object[] { paramsRecord };
-            } else {
-                callArgs = new Object[closureLength + 1];
-                System.arraycopy(closureValues, 0, callArgs, 0, closureLength);
-                callArgs[closureLength] = paramsRecord;
-            }
-            Object result = fn.getCallTarget().call(callArgs);
-            if (result instanceof com.mezze.interpreter.values.MezzeFunction innerFn) {
-                // Double-wrapped closure factory — evaluate again with same params
-                Object[] innerClosureValues = innerFn.getClosureValues();
-                int innerClosureLength = innerClosureValues.length;
-                Object[] innerCallArgs;
-                if (innerClosureLength == 0) {
-                    innerCallArgs = new Object[] { paramsRecord };
-                } else {
-                    innerCallArgs = new Object[innerClosureLength + 1];
-                    System.arraycopy(innerClosureValues, 0, innerCallArgs, 0, innerClosureLength);
-                    innerCallArgs[innerClosureLength] = paramsRecord;
-                }
-                result = innerFn.getCallTarget().call(innerCallArgs);
-            }
-            if (result instanceof com.mezze.interpreter.values.MezzeRecord) {
-                return result;
-            }
-            // Not a record — return the original function for lazy evaluation
-            return fn;
-        } catch (Exception e) {
-            // Evaluation failed (missing captures, etc.) — return the raw MezzeFunction.
-            // DynamicEffectCallNode will evaluate it lazily when handler operations are called.
-            return fn;
-        }
     }
 }
 
 /**
- * Node that looks up a parameterized handler by content hash and calls it with
- * user-provided parameters. For example, `perform SeededRandom {seed = 42} in body`
- * will evaluate {seed = 42} and pass it to the performer factory function.
+ * Node that looks up a parameterized handler by content hash and calls
+ * it with the user-provided params record (e.g. {@code SeededRandom {seed = 42}}).
+ *
+ * <p>Different params produce different performer records, so this never
+ * caches — it always re-evaluates the factory.
  */
 @NodeInfo(shortName = "parameterized-handler-lookup")
 final class ParameterizedHandlerLookupNode extends MezzeNode {
 
-    @CompilationFinal
-    private final int localSlot;
+    @CompilationFinal private final Hash contentHash;
+    @CompilationFinal private final String performerName;
 
-    @CompilationFinal
-    private final Hash contentHash;
+    @Child private MezzeNode paramsNode;
 
-    @CompilationFinal
-    private final String performerName;
-
-    @Child
-    private MezzeNode paramsNode;
-
-    ParameterizedHandlerLookupNode(int localSlot, Hash contentHash, String performerName, MezzeNode paramsNode) {
-        this.localSlot = localSlot;
+    ParameterizedHandlerLookupNode(Hash contentHash, String performerName, MezzeNode paramsNode) {
         this.contentHash = contentHash;
         this.performerName = performerName;
         this.paramsNode = paramsNode;
@@ -189,781 +91,117 @@ final class ParameterizedHandlerLookupNode extends MezzeNode {
 
     @Override
     public Object execute(VirtualFrame frame) {
-        // Evaluate the params (e.g., {seed = 42})
         Object params = paramsNode.execute(frame);
-
-        // Try local slot first — but for parameterized performers, we need to
-        // re-evaluate with the new params each time (different seeds produce different performers)
-        // So skip the local slot cache.
-
-        // Fall back to context lookup with the params
         return lookupInContextWithParams(params);
     }
 
+    /**
+     * Resolve the handler for {@code perform Performer params in body}.
+     *
+     * <p>Two-step single path:
+     * <ol>
+     *   <li>If a factory {@code CallTarget} exists for this hash (via
+     *       {@link com.mezze.interpreter.runtime.MezzeLanguage#getCachedStdlibCallTarget(Hash)},
+     *       which handles both stdlib precompiled and per-context user IR),
+     *       invoke it with {@code params} and return the resulting record.</li>
+     *   <li>Otherwise, fall back to the pre-constructed performer record in
+     *       {@code handlersByHash} — used when the performer has no real
+     *       parameters and the typechecker still chose this node (e.g.
+     *       {@code perform LoomAsync {} in body}).</li>
+     * </ol>
+     */
     @TruffleBoundary
     private Object lookupInContextWithParams(Object params) {
-        MezzeContext context = MezzeContext.get(this);
-        // For parameterized performers, we need the FUNCTION (closure factory), not a cached record.
-        // The function must be re-evaluated with the actual params each time, because
-        // different params (e.g., seed=42 vs seed=99) produce different performer records.
-        //
-        // Strategy: check Language-level stdlib cache FIRST (always has the function),
-        // then fall back to context (where it might be cached as a record from non-parameterized path).
-        MezzeFunction handlerFn = null;
-
-        // 1. Language-level stdlib cache — always has the original function
-        var lang = com.mezze.interpreter.runtime.MezzeLanguage.get(this);
+        var lang = MezzeLanguage.get(this);
         var ct = lang.getCachedStdlibCallTarget(contentHash);
         if (ct != null) {
-            handlerFn = com.mezze.interpreter.values.MezzeFunction.create(ct, contentHash.getHex());
+            MezzeFunction handlerFn = MezzeFunction.create(ct, contentHash.getHex());
+            Object[] closure = handlerFn.getClosureValues();
+            Object[] callArgs = new Object[closure.length + 1];
+            System.arraycopy(closure, 0, callArgs, 0, closure.length);
+            callArgs[closure.length] = params;
+            Object result = handlerFn.getCallTarget().call(callArgs);
+            if (result instanceof MezzeFunction innerFn) {
+                // Double-wrapped factory — invoke inner with same params.
+                Object[] innerClosure = innerFn.getClosureValues();
+                Object[] innerCallArgs = new Object[innerClosure.length + 1];
+                System.arraycopy(innerClosure, 0, innerCallArgs, 0, innerClosure.length);
+                innerCallArgs[innerClosure.length] = params;
+                result = innerFn.getCallTarget().call(innerCallArgs);
+            }
+            if (result instanceof MezzeRecord) {
+                return result;
+            }
         }
-
-        // 2. Context lookup — only use if it's a function (skip cached records)
-        if (handlerFn == null) {
-            Object candidate = context.lookupHandler(contentHash);
-            if (candidate == null) candidate = context.lookupGlobal(contentHash);
-            if (candidate instanceof MezzeFunction fn) handlerFn = fn;
-        }
-
-        if (handlerFn != null) {
-            // Evaluate the handler function with the actual params
-            Object handler = HandlerLookupNode.evaluateHandlerFunction(handlerFn, params, context);
-            if (handler != null) return handler;
-        }
-
-        // 3. Fallback: the performer may not actually be parameterized
-        // (e.g., `perform TestLogger {} in ...` where {} is just empty params).
-        // In that case, no factory function exists — only a pre-constructed MezzeRecord
-        // from HashModuleLoaderNode Pass 2. Use it directly.
+        // Non-parameterized performer routed through this node — use the
+        // pre-constructed record from HashModuleLoaderNode (same source
+        // HandlerLookupNode reads from).
+        MezzeContext context = MezzeContext.get(this);
         Object record = context.lookupHandler(contentHash);
-        if (record == null) record = context.lookupGlobal(contentHash);
         if (record instanceof MezzeRecord) {
             return record;
         }
-        // Also try HandlerLookupNode's full lookup (which includes stdlib call target → evaluate)
-        try {
-            var lookupNode = new HandlerLookupNode(-1, contentHash, performerName);
-            return lookupNode.lookupInContext(params);
-        } catch (Exception e) {
-            // Fall through to error
-        }
-
-        // 4. Search performer records for the correct stdlib hash.
-        // The contentHash from the user module's compilation may differ from the stdlib's
-        // hash for the same performer. Performer records link performerHash → opHashes.
-        if (performerName != null) {
-            var stdlibPerformers = lang.getStdlibPerformerRecords();
-            var nameMap = lang.getStdlibHashToName();
-            for (var info : stdlibPerformers) {
-                if (info.length < 2) continue;
-                Hash pHash = new Hash(info[0]);
-                String registeredName = nameMap.get(pHash);
-                if (performerName.equals(registeredName)) {
-                    // Found the stdlib hash for this performer — try to get its factory function
-                    ct = lang.getCachedStdlibCallTarget(pHash);
-                    if (ct != null) {
-                        handlerFn = MezzeFunction.create(ct, pHash.getHex());
-                        Object handler = HandlerLookupNode.evaluateHandlerFunction(handlerFn, params, context);
-                        if (handler != null) return handler;
-                    }
-                }
-            }
-            // Also try: scan prelowered functions by name (factory functions have name = performerName)
-            var precompiled = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE;
-            var prelowered = precompiled.getPreloweredFunctions();
-            for (var entry : prelowered.entrySet()) {
-                if (performerName.equals(entry.getValue().getName())) {
-                    Hash entryHash = entry.getKey();
-                    ct = lang.getCachedStdlibCallTarget(entryHash);
-                    if (ct != null) {
-                        handlerFn = MezzeFunction.create(ct, entryHash.getHex());
-                        Object handler = HandlerLookupNode.evaluateHandlerFunction(handlerFn, params, context);
-                        if (handler != null) return handler;
-                    }
-                }
-            }
-        }
-
-        // 5. Direct user function IR lookup — compile on demand
-        // The factory function may be registered as a user FunctionIR
-        // that hasn't been compiled yet
-        if (handlerFn == null) {
-            var userIR = context.getUserFunctionIR(contentHash);
-            if (userIR != null) {
-                var compiler = new com.mezze.interpreter.compiler.TruffleCompiler(lang);
-                compiler.registerFunctions(new java.util.ArrayList<>(context.getAllUserFunctionIRs()));
-                var rootNode = compiler.compile(userIR);
-                ct = rootNode.getCallTarget();
-                context.cacheUserCallTarget(contentHash, ct);
-                handlerFn = MezzeFunction.create(ct, contentHash.getHex());
-                Object handler = HandlerLookupNode.evaluateHandlerFunction(handlerFn, params, context);
-                if (handler != null) return handler;
-            }
-        }
-
-        throw new RuntimeException("Handler function not found for parameterized performer: " + contentHash.getHex() +
-            (performerName != null ? " (performer: " + performerName + ")" : ""));
+        throw new RuntimeException("Parameterized performer factory not found for: "
+            + contentHash.getHex()
+            + (performerName != null ? " (performer: " + performerName + ")" : ""));
     }
 }
 
 /**
- * Handle effect node - FULLY JIT-COMPILABLE.
+ * Lowers {@code perform Handler in body}.
  *
- * The handler is stored in a frame slot that PerformNode reads from.
- * This avoids any runtime lookups or @TruffleBoundary calls.
+ * <p>Evaluates the handler expression (which produces a {@link MezzeRecord}
+ * whose fields are op handler functions, plus optional
+ * {@code initialize_scope} / {@code finalize_scope}), then drives body
+ * inside a Loom-backed fiber via {@link EffectHandlerDriver#run}.
  *
- * Flow:
- * 1. Evaluate handler expression
- * 2. Store handler in the pre-allocated frame slot AND context (for effect name lookup)
- * 3. Execute body
- * 4. Restore previous handler (if nested)
- *
- * The handler slot is determined statically by the typechecker/converter
- * and passed via the handlerSlot parameter.
+ * <p>Effect-operation call sites inside body are emitted as
+ * {@link OpCallNode}, which calls
+ * {@code EffectFiber.current().suspend(new OpCall(opName, args))}. The
+ * driver catches the suspend, looks up the op on the handler record, and
+ * dispatches with {@code {args, resume, abort}}.
  */
 @NodeInfo(shortName = "handle")
 public final class HandleNode extends MezzeNode {
 
-    @CompilationFinal
-    private final int handlerSlot;
+    @Child private MezzeNode handlerNode;
+    @Child private MezzeNode bodyNode;
+    @Child private IndirectCallNode callNode;
 
-    @CompilationFinal
-    private final String handlerName;
-
-    // Content hashes for handler lookup and registration (preferred over string name)
-    // First hash is typically the impl hash (for handler lookup)
-    // Additional hashes may include effect hash (for effect operation lookup)
-    @CompilationFinal(dimensions = 1)
-    private final Hash[] contentHashes;
-
-    @Child
-    private MezzeNode handlerNode;
-
-    @Child
-    private MezzeNode bodyNode;
-
-    // SCOPED EFFECTS: Slot for storing the scope record in the frame
-    // Operations access scope via this slot
-    @CompilationFinal
-    private final int scopeSlot;
-
-    // SCOPED EFFECTS: Node to execute initialize_scope (may be null)
-    @Child
-    private MezzeNode initializeScopeNode;
-
-    // SCOPED EFFECTS: Node to execute finalize_scope (may be null)
-    @Child
-    private MezzeNode finalizeScopeNode;
-
-    // SCOPED EFFECTS: Direct call node for initialize_scope (for parameterized impls)
-    @Child
-    private DirectCallNode initializeScopeCallNode;
-
-    // SCOPED EFFECTS: Direct call node for finalize_scope (for parameterized impls)
-    @Child
-    private DirectCallNode finalizeScopeCallNode;
-
-    // SCOPED EFFECTS: Flags for compile-time optimization
-    @CompilationFinal
-    private final boolean hasInitializeScope;
-
-    @CompilationFinal
-    private final boolean hasFinalizeScope;
-
-    // Cached slot validity - set on first execution, then constant for JIT
-    @CompilationFinal
-    private boolean slotValidityChecked = false;
-
-    @CompilationFinal
-    private boolean slotIsValid = false;
-
-    @CompilationFinal
-    private boolean scopeSlotIsValid = false;
-
-    // Dynamic scope detection: when compile-time scope nodes aren't available
-    // (v2 pipeline), detect initialize_scope/finalize_scope on handler record at runtime
-    @CompilationFinal
-    private boolean dynamicScopeChecked = false;
-
-    @CompilationFinal
-    private boolean hasDynamicScope = false;
-
-    // For executing suspended computations and dynamic scope functions
-    @Child
-    private IndirectCallNode indirectCallNode;
-
-    /**
-     * Full constructor with scoped effect support and content hashes.
-     */
-    public HandleNode(
-            int handlerSlot,
-            String handlerName,
-            Hash[] contentHashes,
-            MezzeNode handlerNode,
-            MezzeNode bodyNode,
-            int scopeSlot,
-            MezzeNode initializeScopeNode,
-            MezzeNode finalizeScopeNode,
-            boolean hasInitializeScope,
-            boolean hasFinalizeScope
-    ) {
-        this.handlerSlot = handlerSlot;
-        this.handlerName = handlerName;
-        this.contentHashes = contentHashes != null ? contentHashes : new Hash[0];
+    public HandleNode(MezzeNode handlerNode, MezzeNode bodyNode) {
         this.handlerNode = handlerNode;
         this.bodyNode = bodyNode;
-        this.scopeSlot = scopeSlot;
-        this.initializeScopeNode = initializeScopeNode;
-        this.finalizeScopeNode = finalizeScopeNode;
-        this.hasInitializeScope = hasInitializeScope;
-        this.hasFinalizeScope = hasFinalizeScope;
-    }
-
-    /**
-     * Create a HandlerLookupNode that finds a handler by content hash.
-     * Tries local frame slot first, then falls back to context lookup.
-     * Used by TruffleCompiler for the v2 pipeline.
-     */
-    public static MezzeNode createHandlerLookup(int localSlot, Hash contentHash) {
-        return new HandlerLookupNode(localSlot, contentHash);
-    }
-
-    public static MezzeNode createHandlerLookup(int localSlot, Hash contentHash, String performerName) {
-        return new HandlerLookupNode(localSlot, contentHash, performerName);
-    }
-
-    /**
-     * Create a ParameterizedHandlerLookupNode that finds a handler by content hash
-     * and calls it with the user-provided params record.
-     * Used for parameterized performers like `perform SeededRandom {seed = 42} in body`.
-     */
-    public static MezzeNode createParameterizedHandlerLookup(int localSlot, Hash contentHash, String performerName, MezzeNode paramsNode) {
-        return new ParameterizedHandlerLookupNode(localSlot, contentHash, performerName, paramsNode);
-    }
-
-    /**
-     * Create a handle node for a statically resolved handler.
-     * The handler is looked up by content hash from the frame slot or context.
-     */
-    public static HandleNode create(int handlerSlot, Hash contentHash, MezzeNode bodyChild) {
-        MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
-        Hash[] hashes = contentHash != null ? new Hash[]{contentHash} : new Hash[0];
-        return new HandleNode(handlerSlot, null, hashes, handlerNode, bodyChild,
-                -1, null, null, false, false);
-    }
-
-    /**
-     * Create a handle node for context registration.
-     */
-    public static HandleNode create(int handlerSlot, Hash contentHash, String handlerName, MezzeNode bodyChild) {
-        MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
-        Hash[] hashes = contentHash != null ? new Hash[]{contentHash} : new Hash[0];
-        return new HandleNode(handlerSlot, handlerName, hashes, handlerNode, bodyChild,
-                -1, null, null, false, false);
-    }
-
-    /**
-     * Create a handle node with multiple content hashes for registration.
-     * Use this for cases where handler needs to be found by multiple hashes
-     * (e.g., both impl hash and effect hash).
-     */
-    public static HandleNode create(int handlerSlot, Hash[] contentHashes, String handlerName, MezzeNode bodyChild) {
-        Hash primaryHash = (contentHashes != null && contentHashes.length > 0) ? contentHashes[0] : null;
-        MezzeNode handlerNode = primaryHash != null
-            ? new HandlerLookupNode(handlerSlot, primaryHash)
-            : null;
-        return new HandleNode(handlerSlot, handlerName, contentHashes, handlerNode, bodyChild,
-                -1, null, null, false, false);
-    }
-
-    /**
-     * Create a handle node for scoped effects with a single content hash.
-     *
-     * @param handlerSlot Frame slot for storing the handler
-     * @param contentHash Content hash for handler lookup
-     * @param handlerName The handler/performer name
-     * @param bodyChild The body to execute
-     * @param scopeSlot Frame slot for storing the scope record
-     * @param initializeScopeNode Node to execute initialize_scope
-     * @param finalizeScopeNode Node to execute finalize_scope
-     */
-    public static HandleNode createScoped(
-            int handlerSlot,
-            Hash contentHash,
-            String handlerName,
-            MezzeNode bodyChild,
-            int scopeSlot,
-            MezzeNode initializeScopeNode,
-            MezzeNode finalizeScopeNode
-    ) {
-        Hash[] hashes = contentHash != null ? new Hash[]{contentHash} : new Hash[0];
-        return createScoped(handlerSlot, hashes, handlerName, bodyChild, scopeSlot, initializeScopeNode, finalizeScopeNode);
-    }
-
-    /**
-     * Create a handle node for scoped effects with multiple content hashes.
-     * Use this when the handler needs to be found by both impl hash and effect hash.
-     *
-     * @param handlerSlot Frame slot for storing the handler
-     * @param contentHashes Content hashes for handler lookup and registration
-     * @param handlerName The handler/performer name
-     * @param bodyChild The body to execute
-     * @param scopeSlot Frame slot for storing the scope record
-     * @param initializeScopeNode Node to execute initialize_scope
-     * @param finalizeScopeNode Node to execute finalize_scope
-     */
-    public static HandleNode createScoped(
-            int handlerSlot,
-            Hash[] contentHashes,
-            String handlerName,
-            MezzeNode bodyChild,
-            int scopeSlot,
-            MezzeNode initializeScopeNode,
-            MezzeNode finalizeScopeNode
-    ) {
-        Hash primaryHash = (contentHashes != null && contentHashes.length > 0) ? contentHashes[0] : null;
-        MezzeNode handlerNode = primaryHash != null
-            ? new HandlerLookupNode(handlerSlot, primaryHash)
-            : null;
-        return new HandleNode(
-                handlerSlot,
-                handlerName,
-                contentHashes,  // Pass all content hashes for registration
-                handlerNode,
-                bodyChild,
-                scopeSlot,
-                initializeScopeNode,
-                finalizeScopeNode,
-                initializeScopeNode != null,
-                finalizeScopeNode != null
-        );
-    }
-
-    /**
-     * Check if this handle node uses scoped effects.
-     */
-    public boolean isScopedEffect() {
-        return hasInitializeScope;
-    }
-
-    /**
-     * Get the scope slot (for operations to access).
-     */
-    public int getScopeSlot() {
-        return scopeSlot;
+        this.callNode = IndirectCallNode.create();
     }
 
     @Override
     public Object execute(VirtualFrame frame) {
-        // Evaluate the handler (may be parameterized impl call)
-        Object handler = handlerNode.execute(frame);
-
-        // Handler resolved
-
-        // Cache slot validity on first execution - becomes constant for JIT
-        if (!slotValidityChecked) {
+        Object handlerValue = handlerNode.execute(frame);
+        if (!(handlerValue instanceof MezzeRecord handler)) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
-            int frameSlotCount = frame.getFrameDescriptor().getNumberOfSlots();
-            slotIsValid = handlerSlot >= 0 && handlerSlot < frameSlotCount;
-            scopeSlotIsValid = scopeSlot >= 0 && scopeSlot < frameSlotCount;
-            slotValidityChecked = true;
+            throw new RuntimeException("Handler must be a record, got: "
+                + (handlerValue == null ? "null" : handlerValue.getClass().getSimpleName()));
         }
-
-        // Save previous handler value (for nested handlers)
-        Object previousHandler = null;
-        boolean hadPrevious = false;
-
-        // Fast path: slot validity is now a compile-time constant
-        if (slotIsValid && frame.isObject(handlerSlot)) {
-            previousHandler = frame.getObject(handlerSlot);
-            hadPrevious = true;
-        }
-
-        // Only set frame slot if valid
-        if (slotIsValid) {
-            frame.setObject(handlerSlot, handler);
-        }
-
-        // Also register in context so DynamicEffectCallNode can find it
-        // AND push onto handler stack for lazy effects
-        registerHandlerInContext(handler);
-        pushHandlersToStack(handler);
-
-        // SCOPED EFFECTS: Execute initialize_scope if present
-        Object scope = null;
-        boolean usedDynamicScope = false;
-        if (hasInitializeScope && initializeScopeNode != null) {
-            scope = initializeScopeNode.execute(frame);
-
-            // Store scope in frame slot so operations can access it
-            if (scopeSlotIsValid) {
-                frame.setObject(scopeSlot, scope);
-            }
-
-            // Also register scope in context under the name "scope"
-            registerScopeInContext(scope);
-        } else if (!hasInitializeScope && handler instanceof MezzeRecord handlerRecord) {
-            // Dynamic scope detection for v2 pipeline: check handler record for
-            // initialize_scope/finalize_scope fields at runtime
-            if (!dynamicScopeChecked) {
-                CompilerDirectives.transferToInterpreterAndInvalidate();
-                // Check both naming conventions: user-facing and internal double-underscore
-                hasDynamicScope = handlerRecord.getField("initialize_scope") instanceof MezzeFunction
-                    || handlerRecord.getField("__initialize_scope__") instanceof MezzeFunction;
-                dynamicScopeChecked = true;
-            }
-            if (hasDynamicScope) {
-                scope = callDynamicInitializeScope(handlerRecord);
-                if (scope != null) {
-                    registerScopeInContext(scope);
-                    usedDynamicScope = true;
-                }
-            }
-        }
-
-        Throwable bodyException = null;
-        Object result = null;
-        Object forkedResults = null;
-
-        Object suspendedValue = null;  // For ContinuationSuspendedException
-
-        Object finalizeSuspendedValue = null;  // For ContinuationSuspendedException from finalize_scope
-
-        try {
-            // Execute the body with the handler (and scope if scoped effect) installed
-            result = bodyNode.execute(frame);
-        } catch (ContinuationSuspendedException e) {
-            // Continuation was suspended via suspend_with - extract the suspended value
-            // This is how continuation-based effects (Exception, Return, etc.) escape
-            // to the perform boundary without being wrapped by intermediate expressions
-            suspendedValue = e.getSuspendedValue();
-        } catch (ForkedExecutionException e) {
-            // Fork completed - capture results (MezzeSeq), run finalize_scope, then return values
-            forkedResults = e.values;
-        } catch (Throwable t) {
-            bodyException = t;
-        } finally {
-            // SCOPED EFFECTS: Execute finalize_scope in finally block
-            // This ensures cleanup even if body throws
-            Throwable finalizeException = null;
-            if (hasFinalizeScope && finalizeScopeNode != null) {
-                try {
-                    Object finalizeResult = finalizeScopeNode.execute(frame);
-                    // Check if finalize_scope returned a suspended continuation
-                    // This happens when finalize_scope uses a state machine with YieldState
-                    if (finalizeResult instanceof MezzeContinuationSuspended suspended) {
-                        finalizeSuspendedValue = suspended.getSuspendedValue();
-                    }
-                } catch (ContinuationSuspendedException e) {
-                    // finalize_scope can call suspend_with to transform/return the collected values
-                    // This is how Generator returns collected values: finalize_scope calls
-                    // suspend_with {value = collected} and we capture that value here
-                    finalizeSuspendedValue = e.getSuspendedValue();
-                } catch (Throwable t) {
-                    finalizeException = t;
-                }
-            } else if (usedDynamicScope && handler instanceof MezzeRecord handlerRecord) {
-                // Dynamic finalize_scope for v2 pipeline
-                try {
-                    Object finalizeResult = callDynamicFinalizeScope(handlerRecord);
-                    if (finalizeResult instanceof MezzeContinuationSuspended suspended) {
-                        finalizeSuspendedValue = suspended.getSuspendedValue();
-                    }
-                } catch (ContinuationSuspendedException e) {
-                    finalizeSuspendedValue = e.getSuspendedValue();
-                } catch (Throwable t) {
-                    finalizeException = t;
-                }
-            }
-
-            // Clear scope from frame
-            if (scopeSlotIsValid) {
-                frame.setObject(scopeSlot, null);
-            }
-
-            // Pop handler from stack (for lazy effects)
-            popHandlersFromStack();
-
-            // Restore previous handler (or clear if none) - only if slot is valid
-            if (slotIsValid) {
-                if (hadPrevious) {
-                    frame.setObject(handlerSlot, previousHandler);
-                } else {
-                    // Clear the slot to indicate no handler
-                    frame.setObject(handlerSlot, null);
-                }
-            }
-
-            // Handle exceptions: body exception takes priority, but log finalize exception
-            // This matches try-with-resources semantics in Java
-            if (bodyException != null) {
-                if (finalizeException != null && finalizeException != bodyException) {
-                    // Add finalize exception as suppressed
-                    bodyException.addSuppressed(finalizeException);
-                }
-                // Re-throw body exception
-                if (bodyException instanceof RuntimeException) {
-                    throw (RuntimeException) bodyException;
-                } else if (bodyException instanceof Error) {
-                    throw (Error) bodyException;
-                } else {
-                    throw new RuntimeException(bodyException);
-                }
-            } else if (finalizeException != null) {
-                // Only finalize failed - throw it
-                if (finalizeException instanceof RuntimeException) {
-                    throw (RuntimeException) finalizeException;
-                } else if (finalizeException instanceof Error) {
-                    throw (Error) finalizeException;
-                } else {
-                    throw new RuntimeException(finalizeException);
-                }
-            }
-        }
-
-        // If fork completed successfully, return the forked results
-        if (forkedResults != null) {
-            return forkedResults;
-        }
-
-        // If finalize_scope suspended (for Generator returning collected values),
-        // that takes priority - return the suspended value from finalize_scope
-        if (finalizeSuspendedValue != null) {
-            return finalizeSuspendedValue;
-        }
-
-        // If body continuation was suspended, return the suspended value directly
-        // This is how continuation-based effects (Exception, Return, etc.) work:
-        // the handler calls suspend_with {value = ...} and we return that value
-        if (suspendedValue != null) {
-            return suspendedValue;
-        }
-
-        return processResult(result, handler);
+        // Body executes inside a Loom continuation, which may yield back to
+        // the driver across the frame boundary. Materialize so body's frame
+        // survives the suspend/resume cycles.
+        return EffectHandlerDriver.run(handler, bodyNode, frame.materialize(), callNode, this);
     }
 
-    /**
-     * Process the result:
-     * - For MezzeSuspended (lazy effects), try to execute with our handlers
-     * - For MezzeContinuationSuspended, extract the suspended value (this is how
-     *   continuation-based effects like Exception.throw and Return.return work)
-     *
-     * NOTE: We do NOT wrap results in Ok - the user code is responsible for
-     * wrapping success values explicitly. This keeps effects as pure userland
-     * constructs without hardcoded effect names in the interpreter.
-     *
-     * @param resolvedHandler the handler object that was active during body execution
-     *                        (passed directly since handler stack is already popped by finally block)
-     */
-    @TruffleBoundary
-    private Object processResult(Object result, Object resolvedHandler) {
-        // Handle lazy effects: if result is MezzeSuspended, try to execute with our handlers
-        if (result instanceof MezzeSuspended suspended) {
-            return processSuspended(suspended, resolvedHandler);
-        }
+    // ------------------------------------------------------------------
+    // Factories used by TruffleCompiler — kept stable so callers don't change.
+    // ------------------------------------------------------------------
 
-        // Handle suspended continuations - extract the suspended value.
-        // This is how continuation-based effects (Exception, Return, etc.) work:
-        // the handler calls suspend_with {value = ...} and we extract that value.
-        if (result instanceof MezzeContinuationSuspended suspended) {
-            return suspended.getSuspendedValue();
-        }
-
-        return result;
+    public static MezzeNode createHandlerLookup(int unusedSlot, Hash contentHash) {
+        return new HandlerLookupNode(contentHash);
     }
 
-    /**
-     * Process a MezzeSuspended result by executing it with our handlers.
-     * Uses the resolved handler object directly since the handler stack has already
-     * been popped by the finally block.
-     */
-    @TruffleBoundary
-    private Object processSuspended(MezzeSuspended suspended, Object resolvedHandler) {
-        MezzeContext context;
-        try {
-            context = MezzeContext.get(this);
-        } catch (AssertionError e) {
-            // No context - return suspended as-is
-            return suspended;
-        }
-
-        // Build handler map using the resolved handler directly
-        // (can't look up from context — handler stack already popped)
-        Map<Hash, Object> handlers = HandlerMapPool.acquire();
-
-        for (Hash hash : contentHashes) {
-            if (hash != null) {
-                if (resolvedHandler != null) {
-                    handlers.put(hash, resolvedHandler);
-                } else {
-                    // Fallback: try context lookup (may work for nested handlers)
-                    Object h = context.getHandlerFor(hash);
-                    if (h != null) {
-                        handlers.put(hash, h);
-                    }
-                }
-            }
-        }
-
-        // Execute the suspended computation with our handlers
-        if (indirectCallNode == null) {
-            CompilerDirectives.transferToInterpreterAndInvalidate();
-            indirectCallNode = insert(IndirectCallNode.create());
-        }
-
-        Object executedResult = suspended.executeWith(handlers, context, indirectCallNode);
-
-        // Return the executed result (may still be suspended or a final value)
-        return executedResult;
+    public static MezzeNode createHandlerLookup(int unusedSlot, Hash contentHash, String performerName) {
+        return new HandlerLookupNode(contentHash, performerName);
     }
 
-    @TruffleBoundary
-    private void registerHandlerInContext(Object handler) {
-        if (handler == null) return;
-
-        MezzeContext context;
-        try {
-            context = MezzeContext.get(this);
-        } catch (AssertionError e) {
-            // No polyglot context available (e.g., in isolated unit tests)
-            // Skip context registration - frame slot registration is sufficient
-            return;
-        }
-
-        // Register under all content hashes (O(1) lookup) - no effect names
-        for (Hash hash : contentHashes) {
-            if (hash != null) {
-                context.defineHandler(hash, handler);
-            }
-        }
-    }
-
-    /**
-     * Push handlers onto the context's handler stack for lazy effects.
-     * Registers under all content hashes.
-     */
-    @TruffleBoundary
-    private void pushHandlersToStack(Object handler) {
-        if (handler == null) return;
-
-        MezzeContext context;
-        try {
-            context = MezzeContext.get(this);
-        } catch (AssertionError e) {
-            return;
-        }
-
-        // Build handler map - reuse pooled map to avoid allocation
-        Map<Hash, Object> handlers = HandlerMapPool.acquire();
-
-        for (Hash hash : contentHashes) {
-            if (hash != null) {
-                handlers.put(hash, handler);
-            }
-        }
-
-        if (!handlers.isEmpty()) {
-            // Note: pushHandlers may copy the map if it needs to retain it
-            context.pushHandlers(handlers);
-        }
-    }
-
-    /**
-     * Pop handlers from the context's handler stack.
-     */
-    @TruffleBoundary
-    private void popHandlersFromStack() {
-        MezzeContext context;
-        try {
-            context = MezzeContext.get(this);
-        } catch (AssertionError e) {
-            return;
-        }
-
-        context.popHandlers();
-    }
-
-    /**
-     * Dynamically call initialize_scope on a handler record.
-     * Used by v2 pipeline where scope nodes aren't available at compile time.
-     */
-    @TruffleBoundary
-    private Object callDynamicInitializeScope(MezzeRecord handlerRecord) {
-        Object initFn = handlerRecord.getField("initialize_scope");
-        if (initFn == null) {
-            initFn = handlerRecord.getField("__initialize_scope__");
-        }
-        if (!(initFn instanceof MezzeFunction func)) {
-            return null;
-        }
-        if (indirectCallNode == null) {
-            CompilerDirectives.transferToInterpreterAndInvalidate();
-            indirectCallNode = insert(IndirectCallNode.create());
-        }
-        // Call initialize_scope with {} (empty record) as argument
-        Object[] closureValues = func.getClosureValues();
-        int closureLength = closureValues.length;
-        // The empty record argument for {} -> ...
-        Object emptyRecord = MezzeRecord.empty();
-        Object[] fullArgs;
-        if (closureLength == 0) {
-            fullArgs = new Object[]{emptyRecord};
-        } else {
-            fullArgs = new Object[closureLength + 1];
-            System.arraycopy(closureValues, 0, fullArgs, 0, closureLength);
-            fullArgs[closureLength] = emptyRecord;
-        }
-        return indirectCallNode.call(func.getCallTarget(), fullArgs);
-    }
-
-    /**
-     * Dynamically call finalize_scope on a handler record.
-     * Used by v2 pipeline where scope nodes aren't available at compile time.
-     */
-    @TruffleBoundary
-    private Object callDynamicFinalizeScope(MezzeRecord handlerRecord) {
-        Object finalizeFn = handlerRecord.getField("finalize_scope");
-        if (finalizeFn == null) {
-            finalizeFn = handlerRecord.getField("__finalize_scope__");
-        }
-        if (!(finalizeFn instanceof MezzeFunction func)) {
-            return null;
-        }
-        if (indirectCallNode == null) {
-            CompilerDirectives.transferToInterpreterAndInvalidate();
-            indirectCallNode = insert(IndirectCallNode.create());
-        }
-        Object[] closureValues = func.getClosureValues();
-        int closureLength = closureValues.length;
-        Object emptyRecord = MezzeRecord.empty();
-        Object[] fullArgs;
-        if (closureLength == 0) {
-            fullArgs = new Object[]{emptyRecord};
-        } else {
-            fullArgs = new Object[closureLength + 1];
-            System.arraycopy(closureValues, 0, fullArgs, 0, closureLength);
-            fullArgs[closureLength] = emptyRecord;
-        }
-        return indirectCallNode.call(func.getCallTarget(), fullArgs);
-    }
-
-    /**
-     * Register scope in context so operations can access it.
-     * The scope is registered under the name "scope".
-     */
-    @TruffleBoundary
-    private void registerScopeInContext(Object scope) {
-        if (scope == null) return;
-
-        MezzeContext context;
-        try {
-            context = MezzeContext.get(this);
-        } catch (AssertionError e) {
-            // No polyglot context available (e.g., in isolated unit tests)
-            return;
-        }
-
-        // Register scope under the reserved name "scope"
-        context.defineScopeVar("scope", scope);
+    public static MezzeNode createParameterizedHandlerLookup(
+            int unusedSlot, Hash contentHash, String performerName, MezzeNode paramsNode) {
+        return new ParameterizedHandlerLookupNode(contentHash, performerName, paramsNode);
     }
 }
