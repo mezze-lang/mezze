@@ -1,0 +1,2 @@
+error[M0801]: Module not found: std::doesnotexist. Searched in: stdlib/std/doesnotexist.mz
+  = hint: check the module path spelling and ensure the file exists

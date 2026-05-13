@@ -54,6 +54,35 @@ object DevRunner {
 
     @JvmStatic
     fun main(args: Array<String>) {
+        try {
+            mainImpl(args)
+        } catch (e: NoClassDefFoundError) {
+            // Most common cause: runtime jar at ~/.mezze/lib was updated
+            // while this `mez dev` process was running, so the JVM tries
+            // to lazy-load a class from a jar that no longer matches what
+            // it had at startup. Avoid dumping a Java stack on the user.
+            System.err.println()
+            System.err.println("${ANSI_RED}mez dev: runtime mismatch${ANSI_RESET}")
+            System.err.println("${ANSI_GRAY}Class not found: ${e.message}${ANSI_RESET}")
+            System.err.println("${ANSI_GRAY}This usually means the Mezze runtime was upgraded mid-session.${ANSI_RESET}")
+            System.err.println("${ANSI_GRAY}Press Ctrl+C and run \"mez dev\" again to pick up the new runtime.${ANSI_RESET}")
+            System.exit(1)
+        } catch (e: Throwable) {
+            // Any other unexpected error — show the message, not the stack.
+            // Set MEZZE_DEBUG=1 to see the full stack for debugging.
+            System.err.println()
+            System.err.println("${ANSI_RED}mez dev: internal error${ANSI_RESET}")
+            System.err.println("${ANSI_GRAY}${e.javaClass.simpleName}: ${e.message ?: "no message"}${ANSI_RESET}")
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                e.printStackTrace(System.err)
+            } else {
+                System.err.println("${ANSI_GRAY}Set MEZZE_DEBUG=1 to see the full stack trace.${ANSI_RESET}")
+            }
+            System.exit(1)
+        }
+    }
+
+    private fun mainImpl(args: Array<String>) {
         val parsed = parseArgs(args)
 
         val projectRoot = File(parsed["project-root"] ?: ".")
@@ -257,7 +286,9 @@ object DevRunner {
         while (true) {
             when (val event = events.take()) {
                 is DevEvent.FilesChanged -> {
-                    Thread.sleep(50) // debounce — collect any near-simultaneous events
+                    // No upfront debounce — feedback should be immediate.
+                    // Take what arrived already; we drain duplicate events
+                    // from the same save AFTER compile (below).
                     val coalesced = mutableSetOf<String>().apply { addAll(event.files) }
                     while (true) {
                         val next = events.poll() ?: break
@@ -272,6 +303,17 @@ object DevRunner {
                     compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, appName, inspect, inspectBrk, ReloadMode.WATCH_RELOAD, sharedContext)
                     syncWatchedDirs(watcher, watchedDirs, sourceFile, projectRoot)
                     printWatching(keyboardActive)
+                    // Drain any FilesChanged events that arrived while we were
+                    // compiling/executing. macOS in particular fires multiple
+                    // WatchService events for a single save (one for metadata,
+                    // one for content). Without this drain, the next loop
+                    // iteration would clear the screen mid-error-output for
+                    // duplicate events from the SAME save. Non-FilesChanged
+                    // events (keyboard) are preserved.
+                    while (true) {
+                        val next = events.poll() ?: break
+                        if (next !is DevEvent.FilesChanged) { events.add(next); break }
+                    }
                 }
                 DevEvent.Rerun -> {
                     if (!noClear) System.err.print(ANSI_CLEAR)
@@ -528,16 +570,7 @@ object DevRunner {
         val parser = com.mezze.language.parser.MezzeParser()
         val parseResult = parser.parseWithRecovery(source, sourceFile.name)
         if (parseResult.errors.isNotEmpty()) {
-            val combined = buildString {
-                for ((idx, e) in parseResult.errors.withIndex()) {
-                    if (idx > 0) append("\n\n")
-                    append(e.message ?: "Unknown parse error")
-                }
-                if (parseResult.errors.size > 1) {
-                    append("\n\n(${parseResult.errors.size} parse errors)")
-                }
-            }
-            printError("Parse Error", combined)
+            printError("", ParseErrorFormatter.formatAll(parseResult.errors))
             return
         }
         val ast = parseResult.module
@@ -583,8 +616,10 @@ object DevRunner {
         com.mezze.language.typechecker.module.ModuleTypeChecker.invalidateModulePaths(listOf(modulePath))
 
         val typeChecker = com.mezze.language.typechecker.TypeChecker()
-        val result = try {
-            typeChecker.typeCheck(ast, projectRoot.toPath(), enablePrelude = true)
+        // Use the result-returning lower-level API so we can show ALL collected
+        // errors (matching `mez check` + LSP behavior), not just the first one.
+        val rawResult = try {
+            typeChecker.checkParsedModule(ast, projectRoot.toPath(), enablePrelude = true)
         } catch (e: com.mezze.language.typechecker.TypeCheckError) {
             val formatted = try {
                 com.mezze.language.typechecker.printing.ErrorFormatter.format(e, source)
@@ -592,6 +627,13 @@ object DevRunner {
             printError("", formatted)
             return
         }
+        if (rawResult is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure) {
+            printError("", TypeCheckRunner.formatErrors(rawResult, source))
+            return
+        }
+        val result = TypeCheckRunner.wrapSuccess(
+            rawResult as com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success
+        )
         if (timing) System.err.println("[${ms()}ms] typechecked + lowered (${result.loweredFunctions.size} fns)")
 
         if (result.loweredFunctions.isEmpty()) {

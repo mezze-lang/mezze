@@ -1,0 +1,9 @@
+error[P0112]: Do block must end with a result expression, not the 'let y = ...' statement
+  --> do-block-ends-with-let.mz:3:3
+  |
+3 |   let y = 2
+  |   ^
+  |
+  = hint: add a final expression after the let; e.g. `return-value`
+
+error: aborting due to 1 previous parse error

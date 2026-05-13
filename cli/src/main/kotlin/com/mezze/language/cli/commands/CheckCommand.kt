@@ -4,6 +4,7 @@ import com.akuleshov7.ktoml.Toml
 import com.mezze.language.cli.`package`.MezzeToml
 import com.mezze.language.codebase.SQLiteMezzeStore
 import com.mezze.language.codebase.StorePopulator
+import com.mezze.language.parsedast.diagnostics.display
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
@@ -64,9 +65,8 @@ class CheckCommand {
             val parseTime = (System.nanoTime() - startTime) / 1_000_000.0
 
             // Print parse errors first, then continue to typecheck the partial.
-            for ((idx, err) in parseResult.errors.withIndex()) {
-                if (idx > 0) println()
-                println("Parse Error: ${err.message}")
+            if (parseResult.errors.isNotEmpty()) {
+                println(ParseErrorFormatter.formatAll(parseResult.errors))
             }
 
             val typeCheckStart = System.nanoTime()
@@ -85,9 +85,10 @@ class CheckCommand {
                         ?: throw TypeCheckError("V2 pipeline did not emit a TypedModule")
                     if (parseResult.errors.isNotEmpty()) {
                         // Surviving decls typechecked, but parse errors mean
-                        // some code is missing. Refuse to claim success.
-                        println()
-                        println("(${parseResult.errors.size} parse error(s); typecheck ran on the partial AST)")
+                        // some code is missing. The "aborting due to N
+                        // previous parse errors" footer from
+                        // ParseErrorFormatter.formatAll already says it;
+                        // exit non-zero so callers see a failure.
                         kotlin.system.exitProcess(3)
                     }
                     if (quiet) {
@@ -113,16 +114,24 @@ class CheckCommand {
                         }
                         println("($total errors: ${parts.joinToString(" + ")})")
                     }
+                    printExplainHint(result.errors.map { it.code })
                     kotlin.system.exitProcess(if (parseResult.errors.isNotEmpty()) 3 else 4)
                 }
             }
         } catch (e: TypeCheckError) {
             println(ErrorFormatter.format(e, source))
+            printExplainHint(listOf(e.code))
+            kotlin.system.exitProcess(4)
+        } catch (e: com.mezze.language.typechecker.module.ModuleError) {
+            // Module errors carry their own ErrorCode + hints now; route
+            // through the canonical formatter so users see `error[M0801]:`.
+            println(ErrorFormatter.formatModuleError(e))
+            printExplainHint(listOf(e.code))
             kotlin.system.exitProcess(4)
         } catch (e: com.mezze.language.parser.ParseException) {
             // Should be rare now (parseWithRecovery doesn't throw), but
             // keep as a safety net for unrecoverable lex errors.
-            println("Parse Error: ${e.message}")
+            println(ParseErrorFormatter.format(e))
             kotlin.system.exitProcess(3)
         }
     }
@@ -178,9 +187,8 @@ class CheckCommand {
 
             // Print parse errors first; typecheck the partial regardless so
             // independent errors in surviving decls also surface.
-            for ((idx, err) in parseResult.errors.withIndex()) {
-                if (idx > 0) println()
-                println("Parse Error: ${err.message}")
+            if (parseResult.errors.isNotEmpty()) {
+                println(ParseErrorFormatter.formatAll(parseResult.errors))
             }
 
             val typeChecker = TypeChecker()
@@ -193,33 +201,28 @@ class CheckCommand {
             when (rawResult) {
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> {
                     if (parseResult.errors.isNotEmpty()) println()
-                    for ((idx, err) in rawResult.errors.withIndex()) {
-                        if (idx > 0) println()
-                        // Convert TypeChecker.TypeCheckError (data class) → exception
-                        // for ErrorFormatter (which expects the exception form).
-                        // Preserve errorType + metadata (see #313).
-                        println(ErrorFormatter.format(
-                            TypeCheckError(err.message, err.loc, err.errorType, err.metadata),
-                            source
-                        ))
-                    }
-                    val total = parseResult.errors.size + rawResult.errors.size
-                    if (total > 1) {
-                        println()
-                        val parts = buildList {
-                            if (parseResult.errors.isNotEmpty()) add("${parseResult.errors.size} parse")
-                            if (rawResult.errors.isNotEmpty()) add("${rawResult.errors.size} type")
+                    println(TypeCheckRunner.formatErrors(rawResult, source))
+                    if (parseResult.errors.isNotEmpty()) {
+                        // Re-print combined summary that includes parse counts.
+                        // (formatErrors already prints "(N errors: N type)" when N > 1,
+                        // but we need the parse breakdown too.)
+                        val total = parseResult.errors.size + rawResult.errors.size
+                        if (total > 1) {
+                            val parts = buildList {
+                                if (parseResult.errors.isNotEmpty()) add("${parseResult.errors.size} parse")
+                                if (rawResult.errors.isNotEmpty()) add("${rawResult.errors.size} type")
+                            }
+                            println("\n($total errors: ${parts.joinToString(" + ")})")
                         }
-                        println("($total errors: ${parts.joinToString(" + ")})")
                     }
                     kotlin.system.exitProcess(if (parseResult.errors.isNotEmpty()) 3 else 4)
                 }
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success -> {
                     if (parseResult.errors.isNotEmpty()) {
                         // Parse errors but typecheck succeeded on the
-                        // partial AST. Refuse to claim success.
-                        println()
-                        println("(${parseResult.errors.size} parse error(s); typecheck ran on the partial AST)")
+                        // partial AST. The footer from
+                        // ParseErrorFormatter.formatAll already says it;
+                        // exit non-zero so callers see a failure.
                         kotlin.system.exitProcess(3)
                     }
                     /* fall through */
@@ -227,24 +230,8 @@ class CheckCommand {
             }
 
             // Convert Success to the TypeCheckOutput shape StorePopulator expects.
-            val success = rawResult as com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success
-            val typeCheckResult = com.mezze.language.typechecker.TypeCheckResult(
-                resolvedImports = buildList { /* populated below if needed */ },
-                warnings = success.warnings.map {
-                    com.mezze.language.typechecker.TypeCheckWarning(it.message, it.loc)
-                },
-                importedAbilities = success.importContext?.importedAbilities ?: emptyMap(),
-                importedEffects = success.importContext?.importedEffects ?: emptyMap(),
-                loweredFunctions = success.loweredFunctions ?: emptyList(),
-                typedModule = success.typedModule,
-                performerRecords = success.loweredPerformers,
-                loadedModules = success.loadedModules.mapValues { (_, m) -> m.typedModule }.filterValues { it != null }.mapValues { (_, v) -> v!! },
-                loadedModuleSources = success.loadedModules
-                    .mapNotNull { (path, m) ->
-                        val fp = m.filePath ?: return@mapNotNull null
-                        val sh = m.sourceHash ?: return@mapNotNull null
-                        path to com.mezze.language.typechecker.LoadedModuleSource(fp, sh)
-                    }.toMap()
+            val typeCheckResult = TypeCheckRunner.wrapSuccess(
+                rawResult as com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success
             )
 
             // Scatter into store, including the entry + per-import ParsedModules.
@@ -271,12 +258,21 @@ class CheckCommand {
         } catch (e: TypeCheckError) {
             println(ErrorFormatter.format(e, source))
             kotlin.system.exitProcess(4)
+        } catch (e: com.mezze.language.typechecker.module.ModuleError) {
+            println(ErrorFormatter.formatModuleError(e))
+            kotlin.system.exitProcess(4)
         } catch (e: com.mezze.language.parser.ParseException) {
-            println("Parse Error: ${e.message}")
+            println(ParseErrorFormatter.format(e))
             kotlin.system.exitProcess(3)
         } finally {
             store.close()
         }
+    }
+
+    private fun printExplainHint(codes: List<com.mezze.language.parsedast.diagnostics.ErrorCode>) {
+        val first = codes.firstOrNull { ExplainDocs.hasDoc(it) } ?: return
+        println()
+        println("For more information about this error, try `mez --explain ${first.display()}`.")
     }
 
     private fun printTypedModuleSummary(module: com.mezze.language.typedast.TypedModule) {

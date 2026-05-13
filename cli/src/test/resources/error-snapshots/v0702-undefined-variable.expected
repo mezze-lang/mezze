@@ -1,0 +1,19 @@
+error[V0702]: Undefined variable or function: foo_bar
+  --> v0702-undefined-variable.mz:1:18
+   |
+ 1 | let main = {} -> foo_bar
+                      ^^^^^^^
+ 2 | 
+   |
+
+error[V0702]: 'foo_bar' is not defined. Check the spelling or make sure it's declared before use.
+  --> v0702-undefined-variable.mz:1:18
+   |
+ 1 | let main = {} -> foo_bar
+                      ^^^^^^^
+ 2 | 
+   |
+
+error: aborting due to 2 previous errors
+
+For more information about this error, try `mez --explain V0702`.

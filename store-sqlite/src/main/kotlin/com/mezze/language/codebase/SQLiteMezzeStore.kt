@@ -262,10 +262,22 @@ class SQLiteMezzeStore private constructor(
             }
         }
 
-        /** Open read-only store (for deps.sqlite, JAR blobs.sqlite). */
+        /**
+         * Open read-only store (for deps.sqlite, JAR blobs.sqlite, bundled
+         * stdlib.sqlite).
+         *
+         * Attaches in-memory empty stdlib + deps aux dbs because every read
+         * path UNION-ALLs across `main`, `stdlib`, `deps`. Without the aux
+         * attaches, queries against a single-file store fail with
+         * `no such table: stdlib.blobs` / `no such table: deps.blobs`.
+         * The aux dbs stay empty — the data lives in `main` — but the
+         * schema needs to exist so the UNION ALL parses and runs.
+         */
         fun readOnly(path: File): SQLiteMezzeStore {
             val conn = DriverManager.getConnection("jdbc:sqlite:file:${path.absolutePath}?mode=ro")
-            return SQLiteMezzeStore(conn, readOnly = true)
+            return SQLiteMezzeStore(conn, readOnly = true).also {
+                it.attachInMemoryAux()
+            }
         }
 
         /**
@@ -908,7 +920,7 @@ class SQLiteMezzeStore private constructor(
     }
 
     /** Get all blob hashes in the store. */
-    fun getAllBlobHashes(): List<Hash> {
+    override fun getAllBlobHashes(): List<Hash> {
         val result = mutableListOf<Hash>()
         conn.createStatement().use { stmt ->
             stmt.executeQuery("SELECT hash FROM blobs").use { rs ->

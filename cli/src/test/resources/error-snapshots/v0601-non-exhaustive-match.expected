@@ -1,0 +1,14 @@
+error[V0601]: This match expression doesn't handle all cases. Missing case: Blue. Add the missing patterns or use `_ ->` as a catch-all.
+  --> v0601-non-exhaustive-match.mz:2:32
+   |
+ 1 | type Color = | Red, Green, Blue |
+ 2 | let describe = { c: Color } -> match c is
+                                    ^
+ 3 |   Red -> "warm"
+ 4 |   Green -> "cool"
+   |
+  = hint: add a case for: Blue
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `mez --explain V0601`.

@@ -106,26 +106,29 @@ class BuildCommand {
             // once via parseWithRecovery — better DX than fix-one-at-a-time.
             val parseResult = parser.parseWithRecovery(source, file = appFile.name)
             if (parseResult.errors.isNotEmpty()) {
-                for ((idx, e) in parseResult.errors.withIndex()) {
-                    if (idx > 0) println()
-                    println("Parse Error: ${e.message}")
-                }
-                if (parseResult.errors.size > 1) {
-                    println()
-                    println("(${parseResult.errors.size} parse errors — refusing to build)")
-                }
+                println(ParseErrorFormatter.formatAll(parseResult.errors))
                 kotlin.system.exitProcess(3)
             }
             val ast = parseResult.module
             if (timing) System.err.println("[${ms()}ms] parsed")
 
             val typeChecker = TypeChecker()
-            val typeCheckResult = try {
-                typeChecker.typeCheck(ast, currentDir.toPath(), enablePrelude = true)
+            // Use the result-returning lower-level API so we surface ALL
+            // collected errors (matching `mez check` + `mez dev` + LSP),
+            // not just the first one.
+            val rawResult = try {
+                typeChecker.checkParsedModule(ast, currentDir.toPath(), enablePrelude = true)
             } catch (e: TypeCheckError) {
                 println(ErrorFormatter.format(e, source))
                 kotlin.system.exitProcess(4)
             }
+            if (rawResult is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure) {
+                println(TypeCheckRunner.formatErrors(rawResult, source))
+                kotlin.system.exitProcess(4)
+            }
+            val typeCheckResult = TypeCheckRunner.wrapSuccess(
+                rawResult as com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success
+            )
             if (timing) System.err.println("[${ms()}ms] typechecked + lowered (${typeCheckResult.loweredFunctions.size} fns)")
 
             // 2. Scatter into store. populate() returns a delta — only blobs
@@ -521,36 +524,34 @@ class BuildCommand {
             println("Warning: No JARs found in ${libDir.absolutePath}")
             return
         }
-        if (libJars.size > 1) {
-            // We expect a single shadow JAR. If more, fall back to the legacy extract+repack path.
-            println("Warning: ${libJars.size} JARs in $libDir; expected 1 shadow JAR. Falling back to legacy packing.")
-            createStandaloneJarLegacy(libJars, blobsFile, outputJar)
-            return
-        }
 
-        val sourceJar = libJars.first()
-
-        // Stream entries from the source JAR into the output JAR using
-        // `copyRawEntries` — no extract, no recompression. Just byte copy.
-        // Then append blobs.sqlite + a fresh MANIFEST pointing at StandaloneMain.
+        // Stream entries from each source JAR into the output JAR using
+        // `copyRawEntries` — no extract, no recompression, just byte copy.
+        // Tracks seen entry names so when multiple sources contain the same
+        // path (rare — e.g. duplicate META-INF/services entries) we skip the
+        // later copy. Then append blobs.sqlite + a fresh MANIFEST.
+        val seen = HashSet<String>()
         org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream(
             java.io.FileOutputStream(outputJar).buffered(64 * 1024)
         ).use { out ->
-            @Suppress("DEPRECATION")
-            val src = org.apache.commons.compress.archivers.zip.ZipFile(sourceJar)
-            try {
-                src.copyRawEntries(out, org.apache.commons.compress.archivers.zip.ZipArchiveEntryPredicate { e ->
-                    val name = e.name
-                    when {
-                        name == "META-INF/MANIFEST.MF" -> false  // we'll write our own
-                        name.startsWith("META-INF/") &&
-                            (name.endsWith(".SF") || name.endsWith(".RSA") ||
-                             name.endsWith(".DSA") || name.endsWith(".EC")) -> false
-                        else -> true
-                    }
-                })
-            } finally {
-                src.close()
+            for (sourceJar in libJars) {
+                @Suppress("DEPRECATION")
+                val src = org.apache.commons.compress.archivers.zip.ZipFile(sourceJar)
+                try {
+                    src.copyRawEntries(out, org.apache.commons.compress.archivers.zip.ZipArchiveEntryPredicate { e ->
+                        val name = e.name
+                        when {
+                            name == "META-INF/MANIFEST.MF" -> false  // we'll write our own
+                            name.startsWith("META-INF/") &&
+                                (name.endsWith(".SF") || name.endsWith(".RSA") ||
+                                 name.endsWith(".DSA") || name.endsWith(".EC")) -> false
+                            !seen.add(name) -> false  // already copied from an earlier jar
+                            else -> true
+                        }
+                    })
+                } finally {
+                    src.close()
+                }
             }
 
             // Append the user's blobs.sqlite under the resource path StandaloneHelper expects.
@@ -568,42 +569,6 @@ class BuildCommand {
         }
 
         println("Created ${outputJar.name} (${outputJar.length() / 1024}KB)")
-    }
-
-    /**
-     * Legacy extract+repack path. Used only when the lib dir contains multiple
-     * JARs (development / non-shadow builds). Slow (~7s) but supports merging.
-     */
-    private fun createStandaloneJarLegacy(libJars: List<File>, blobsFile: File, outputJar: File) {
-        val tempDir = kotlin.io.path.createTempDirectory("mez-build").toFile()
-        try {
-            for (jar in libJars) {
-                ProcessBuilder("jar", "xf", jar.absolutePath)
-                    .directory(tempDir).redirectErrorStream(true).start().waitFor()
-            }
-            File(tempDir, "META-INF").listFiles()?.filter {
-                it.name.endsWith(".SF") || it.name.endsWith(".RSA") || it.name.endsWith(".DSA") || it.name.endsWith(".EC")
-            }?.forEach { it.delete() }
-            val resourceDir = File(tempDir, "com/mezze/standalone")
-            resourceDir.mkdirs()
-            blobsFile.copyTo(File(resourceDir, "blobs.sqlite"), overwrite = true)
-            val metaInf = File(tempDir, "META-INF")
-            metaInf.mkdirs()
-            File(metaInf, "MANIFEST.MF").writeText(
-                "Manifest-Version: 1.0\nMain-Class: com.mezze.language.cli.standalone.StandaloneMain\n\n"
-            )
-            val manifest = File(metaInf, "MANIFEST.MF")
-            val jarProc = ProcessBuilder("jar", "cfm", outputJar.absolutePath,
-                manifest.absolutePath, "-C", tempDir.absolutePath, ".")
-                .directory(tempDir).redirectErrorStream(true).start()
-            if (jarProc.waitFor() != 0) {
-                println("Warning: jar creation failed")
-                return
-            }
-            println("Created ${outputJar.name} (${outputJar.length() / 1024}KB)")
-        } finally {
-            tempDir.deleteRecursively()
-        }
     }
 
     /**

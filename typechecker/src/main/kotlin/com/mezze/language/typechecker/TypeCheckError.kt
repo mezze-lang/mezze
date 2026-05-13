@@ -14,7 +14,12 @@ class TypeCheckError(
     override val message: String,
     val loc: Loc? = null,
     val errorType: ErrorType = ErrorType.GENERAL,
-    val metadata: Map<String, Any> = emptyMap()
+    val metadata: Map<String, Any> = emptyMap(),
+    /** Stable error code — see ErrorCode. */
+    val code: com.mezze.language.parsedast.diagnostics.ErrorCode =
+        com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED,
+    /** Zero or more "what to do next" hints. */
+    val hints: List<String> = emptyList(),
 ) : Exception(message) {
 
     override fun toString(): String {

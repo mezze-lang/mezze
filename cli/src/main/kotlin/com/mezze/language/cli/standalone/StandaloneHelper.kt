@@ -28,13 +28,24 @@ object StandaloneHelper {
      */
     @JvmStatic
     fun executeFromBlobsSqlite(sqliteBytes: ByteArray, args: List<String> = emptyList()) {
+        executeFromBlobsSqlite(sqliteBytes, args, timing = System.getenv("MEZZE_TIMING") != null, t0 = System.nanoTime())
+    }
+
+    @JvmStatic
+    fun executeFromBlobsSqlite(sqliteBytes: ByteArray, args: List<String>, timing: Boolean, t0: Long) {
+        fun mark(label: String) {
+            if (timing) System.err.println("[${(System.nanoTime() - t0) / 1_000_000}ms] $label")
+        }
+
         // Write to temp file so SQLite can open it
         val tempFile = java.io.File.createTempFile("mezze-blobs", ".sqlite")
         try {
             tempFile.writeBytes(sqliteBytes)
+            mark("blobs.sqlite written to tempfile")
 
             // Open the SQLite database
             val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${tempFile.absolutePath}")
+            mark("sqlite connection opened")
             conn.use { db ->
                 // Single scalar metadata: app_name, entry_hash, entry_name.
                 fun meta(key: String): String? = db.createStatement().use { stmt ->
@@ -66,6 +77,7 @@ object StandaloneHelper {
                 if (functions.isEmpty()) {
                     throw RuntimeException("No executable functions in blobs.sqlite for app '$appName'")
                 }
+                mark("FunctionIRs deserialized (${functions.size})")
 
                 // Performer records from app_performers, grouped by record_idx, ordered by position.
                 val byRecord = mutableMapOf<Int, MutableList<String>>()
@@ -80,9 +92,10 @@ object StandaloneHelper {
                     }
                 }
                 val performers = byRecord.toSortedMap().values.map { it.toTypedArray() }.toMutableList()
+                mark("performers loaded (${performers.size} records)")
 
                 // Execute via Truffle
-                executeWithTruffle(functions, performers, entryName, args)
+                executeWithTruffle(functions, performers, entryName, args, timing, t0)
             }
         } finally {
             tempFile.delete()
@@ -111,8 +124,13 @@ object StandaloneHelper {
         functions: List<FunctionIR>,
         performers: List<Array<String>> = emptyList(),
         entryName: String? = null,
-        args: List<String> = emptyList()
+        args: List<String> = emptyList(),
+        timing: Boolean = false,
+        t0: Long = System.nanoTime(),
     ) {
+        fun mark(label: String) {
+            if (timing) System.err.println("[${(System.nanoTime() - t0) / 1_000_000}ms] $label")
+        }
         System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
         System.setProperty("polyglot.log.level", "OFF")
 
@@ -181,6 +199,7 @@ object StandaloneHelper {
         }
 
         val engine = engineBuilder.build()
+        mark("Engine built (JIT ${if (jitDisabled) "OFF" else "ON"})")
 
         // Truffle's polyglot engine registers its OWN shutdown hook that
         // disposes instruments and flushes their output. Adding our own
@@ -192,6 +211,7 @@ object StandaloneHelper {
             .allowAllAccess(true)
             .allowCreateThread(true)
             .build()
+        mark("Context built")
 
         try {
             val projectRoot = java.nio.file.Paths.get(".")
@@ -200,16 +220,20 @@ object StandaloneHelper {
             } else {
                 MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot)
             }
+            mark("functions registered with MezzeLanguage")
 
             val source = Source.newBuilder(
                 MezzeLanguage.ID,
                 "# Standalone execution",
                 "__standalone__.mz"
             ).buildLiteral()
+            mark("source built — calling context.eval()")
 
             context.eval(source)
+            mark("context.eval() returned")
         } finally {
             context.close(true)
+            mark("context closed")
         }
     }
 }

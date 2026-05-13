@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.constraints
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
+import com.mezze.language.parsedast.Loc
 
 /**
  * Ability constraint generator - generates ability requirements.
@@ -34,7 +35,8 @@ class AbilityConstraintGenerator {
      */
     fun generateFromFunctionType(
         functionType: MezzeType.FunctionType,
-        typeSubstitution: Map<TypeVar, MezzeType> = emptyMap()
+        typeSubstitution: Map<TypeVar, MezzeType> = emptyMap(),
+        loc: Loc? = null,
     ): List<Constraint.AbilityRequired> {
         val constraints = mutableListOf<Constraint.AbilityRequired>()
 
@@ -54,7 +56,8 @@ class AbilityConstraintGenerator {
                             typeVar = actualType.variable,
                             abilityName = abilityConstraint.abilityName,
                             typeArgs = abilityConstraint.typeArgs,
-                            context = "Function ability constraint"
+                            context = "Function ability constraint",
+                            loc = loc,
                         )
                     )
                 }
@@ -74,7 +77,8 @@ class AbilityConstraintGenerator {
         type: MezzeType,
         abilityName: String,
         typeArgs: List<MezzeType> = emptyList(),
-        context: String? = null
+        context: String? = null,
+        loc: Loc? = null,
     ): Constraint.AbilityRequired? {
         // Only generate constraint if type is a type variable
         return when (type) {
@@ -82,7 +86,8 @@ class AbilityConstraintGenerator {
                 typeVar = type.variable,
                 abilityName = abilityName,
                 typeArgs = typeArgs,
-                context = context
+                context = context,
+                loc = loc,
             )
             // For concrete types, validation will check ability satisfaction
             else -> null

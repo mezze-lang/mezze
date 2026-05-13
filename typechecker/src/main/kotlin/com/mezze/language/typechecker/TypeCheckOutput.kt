@@ -3,6 +3,7 @@ package com.mezze.language.typechecker
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.Loc
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * Public output types from the typechecker.
@@ -25,7 +26,16 @@ data class TypeCheckResult(
      * row for every module, not just the entry. modulePath is keyed the same
      * way as `loadedModules` above.
      */
-    val loadedModuleSources: Map<com.mezze.language.ast.ModulePath, LoadedModuleSource> = emptyMap()
+    val loadedModuleSources: Map<com.mezze.language.ast.ModulePath, LoadedModuleSource> = emptyMap(),
+    /**
+     * Per-source-position "expected type" hint, populated by the constraint
+     * generator wherever a constraint with a Loc fires. After global
+     * substitution the values are concrete types. Used by the LSP ranker
+     * for type-aware completion ranking. Transient — not persisted; the
+     * LSP recomputes it on every typecheck.
+     */
+    @Transient
+    val expectedTypeAt: Map<Loc, MezzeType> = emptyMap(),
 ) {
     fun getVariableType(name: String): MezzeType? {
         return typedModule?.decls

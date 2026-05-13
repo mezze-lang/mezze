@@ -221,7 +221,17 @@ class ConstraintSolver(
     data class ConstraintError(
         val message: String,
         val constraint: Constraint,
-        val context: String? = null
+        val context: String? = null,
+        /**
+         * Stable error code — see [com.mezze.language.parsedast.diagnostics.ErrorCode].
+         * Defaults to `UNCATEGORIZED` during the Phase B migration; sites
+         * that have been migrated set a real code so the formatter can
+         * surface it.
+         */
+        val code: com.mezze.language.parsedast.diagnostics.ErrorCode =
+            com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED,
+        /** Zero or more "what to do next" hints rendered as `= hint: …` lines. */
+        val hints: List<String> = emptyList(),
     )
 
     /**
@@ -946,6 +956,130 @@ class ConstraintSolver(
     }
 
     /**
+     * Append a structured "missing/unexpected" reason to a solver header
+     * when the unifier failed on a closed-record field-set mismatch
+     * (possibly nested inside function/record wrappers).
+     *
+     * Discriminates structurally on the failed types — NOT on message
+     * prefixes. Walks `failure.type1` and `failure.type2` in lockstep,
+     * descending through matching function/record wrappers, until it
+     * finds the deepest pair of closed records with mismatched field
+     * sets. Returns the diff (missing on the expected side, extra on
+     * the actual side) as actionable wording.
+     *
+     * Falls back to the bare header when no such mismatch is found —
+     * the header's expected/actual type rendering already says enough
+     * for primitive or compatible-shape mismatches.
+     */
+    private fun appendStructuredReason(header: String, failure: UnificationResult.Failure): String {
+        val t1 = failure.type1 ?: return header
+        val t2 = failure.type2 ?: return header
+
+        // Prefer the finest-grained reason: a single field whose type
+        // disagrees between actual and expected. Falls back to the
+        // field-set diff for missing/unexpected fields.
+        findFieldTypeMismatch(t1, t2)?.let { (path, actualLeaf, expectedLeaf) ->
+            val expectedStr = TypeDiffPrinter.formatType(expectedLeaf)
+            val actualStr = TypeDiffPrinter.formatType(actualLeaf)
+            return "$header — field `$path` expects $expectedStr but got $actualStr"
+        }
+        val mismatch = findClosedRecordMismatch(t1, t2) ?: return header
+        val (expected, actual) = mismatch
+        val missing = (expected.fields.keys - actual.fields.keys).map { "'$it'" }
+        val extra = (actual.fields.keys - expected.fields.keys).map { "'$it'" }
+        val parts = mutableListOf<String>()
+        if (missing.isNotEmpty()) parts.add("missing ${missing.joinToString(", ")}")
+        if (extra.isNotEmpty()) parts.add("unexpected ${extra.joinToString(", ")}")
+        return if (parts.isEmpty()) header else "$header — ${parts.joinToString("; ")}"
+    }
+
+    /**
+     * Walk two types in lockstep, looking for the deepest record field
+     * whose leaf types concretely disagree (e.g. `Int` vs `Str`).
+     *
+     * Returns (fieldPath, actualLeaf, expectedLeaf) on hit, or null when
+     * the disagreement isn't pinpointable to a single field (e.g. tyvars
+     * involved, or shapes differ above the field level — which the
+     * existing [findClosedRecordMismatch] already handles).
+     *
+     * Descends through matching function wrappers (param and return type)
+     * and matching record wrappers (only when the field sets are identical,
+     * so we're past the field-set-diff case).
+     */
+    private fun findFieldTypeMismatch(
+        actual: MezzeType,
+        expected: MezzeType,
+        path: String = "",
+    ): Triple<String, MezzeType, MezzeType>? {
+        // Skip when either side is a tyvar — we want concrete disagreement.
+        if (actual is MezzeType.VarType || expected is MezzeType.VarType) return null
+
+        if (actual is MezzeType.FunctionType && expected is MezzeType.FunctionType) {
+            findFieldTypeMismatch(actual.paramType, expected.paramType, path)?.let { return it }
+            findFieldTypeMismatch(actual.returnType, expected.returnType, path)?.let { return it }
+            return null
+        }
+        if (actual is MezzeType.RecordType && expected is MezzeType.RecordType) {
+            if (actual.fields.keys != expected.fields.keys) return null  // field-set diff handled elsewhere
+            for (fieldName in actual.fields.keys) {
+                val childPath = if (path.isEmpty()) fieldName else "$path.$fieldName"
+                val a = actual.fields[fieldName]!!
+                val e = expected.fields[fieldName]!!
+                // Deeper hit takes priority — keep walking even if the
+                // current pair already disagrees, so we report the most
+                // specific path.
+                findFieldTypeMismatch(a, e, childPath)?.let { return it }
+                // No deeper record mismatch; if this leaf disagrees and
+                // neither side is a tyvar, report it.
+                if (a !is MezzeType.RecordType && a !is MezzeType.FunctionType &&
+                    e !is MezzeType.RecordType && e !is MezzeType.FunctionType &&
+                    a !is MezzeType.VarType && e !is MezzeType.VarType &&
+                    a != e
+                ) {
+                    return Triple(childPath, a, e)
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Walk two types in lockstep looking for the deepest pair of closed
+     * records with mismatched field sets. Returns (expected, actual) or
+     * null when the shapes don't reveal a record-field mismatch.
+     *
+     * Convention: `actual` came from the user (the "got" side), `expected`
+     * came from the signature (the "wanted" side). Matches the way the
+     * solver labels type1=actual / type2=expected at its call sites.
+     */
+    private fun findClosedRecordMismatch(
+        actual: MezzeType,
+        expected: MezzeType,
+    ): Pair<MezzeType.RecordType, MezzeType.RecordType>? {
+        // Both records, both closed, different field sets — found it.
+        if (actual is MezzeType.RecordType && expected is MezzeType.RecordType) {
+            if (actual.rowVar == null && expected.rowVar == null && actual.fields.keys != expected.fields.keys) {
+                return expected to actual
+            }
+            // Same field set — descend into matching fields looking for a deeper one.
+            if (actual.fields.keys == expected.fields.keys) {
+                for (fieldName in actual.fields.keys) {
+                    val nested = findClosedRecordMismatch(actual.fields[fieldName]!!, expected.fields[fieldName]!!)
+                    if (nested != null) return nested
+                }
+            }
+            return null
+        }
+        // Both functions — descend into params (most common path), then return type.
+        if (actual is MezzeType.FunctionType && expected is MezzeType.FunctionType) {
+            findClosedRecordMismatch(actual.paramType, expected.paramType)?.let { return it }
+            findClosedRecordMismatch(actual.returnType, expected.returnType)?.let { return it }
+            return null
+        }
+        return null
+    }
+
+    /**
      * Generate a user-friendly error message based on structured error context.
      *
      * Uses ErrorContext when available, falls back to string-based context parsing
@@ -965,10 +1099,27 @@ class ConstraintSolver(
             is ErrorContext.FunctionArgument -> {
                 val argName = errorContext.argumentName
                 val funcName = errorContext.functionName
+
+                // Prefer a focused field-level message when we can pinpoint
+                // a single field whose leaf type disagrees. Skips the noisy
+                // full function-type rendering (and any fresh tyvar names
+                // like `'m296`) for the common case.
+                val fieldMismatch = findFieldTypeMismatch(type1, type2)
+                if (fieldMismatch != null) {
+                    val (path, actualLeaf, expectedLeaf) = fieldMismatch
+                    val expectedStr = TypeDiffPrinter.formatType(expectedLeaf)
+                    val actualStr = TypeDiffPrinter.formatType(actualLeaf)
+                    val callSite = when {
+                        funcName != null -> " in call to `$funcName`"
+                        else -> ""
+                    }
+                    return "Field `$path` expects $expectedStr but got $actualStr$callSite"
+                }
+
                 val expected = TypeDiffPrinter.formatType(type2)
                 val actual = TypeDiffPrinter.formatType(type1)
 
-                return if (argName != null && funcName != null) {
+                val header = if (argName != null && funcName != null) {
                     "Type mismatch for argument '$argName' in call to '$funcName': expected $expected but got $actual"
                 } else if (argName != null) {
                     "Type mismatch for argument '$argName': expected $expected but got $actual"
@@ -977,6 +1128,12 @@ class ConstraintSolver(
                 } else {
                     "Function argument type mismatch: expected $expected but got $actual"
                 }
+                // Append the unifier's structured reason when it carries
+                // user-friendly info (e.g. "record fields don't match:
+                // missing 'x'; unexpected 'y'"). Without this, downstream
+                // sees the full record types in the header but loses the
+                // exact "missing/unexpected" wording that pinpoints the fix.
+                return appendStructuredReason(header, failure)
             }
             is ErrorContext.TypeAnnotation -> {
                 val bindingName = errorContext.bindingName
@@ -3237,7 +3394,8 @@ class ConstraintSolver(
                 right = substitution.apply(constraint.right),
                 context = constraint.context,
                 loc = constraint.loc,
-                isMatchCaseContext = constraint.isMatchCaseContext
+                isMatchCaseContext = constraint.isMatchCaseContext,
+                errorContext = constraint.errorContext,  // preserve structured discriminator
             )
 
             is Constraint.AbilityRequired -> Constraint.AbilityRequired(

@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.constraints
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.parsedast.Loc
 
 /**
  * Effect constraint generator - generates effect usage constraints.
@@ -61,11 +62,13 @@ class EffectConstraintGenerator {
      */
     fun generateConstraint(
         effect: String,
-        context: String? = null
+        context: String? = null,
+        loc: Loc? = null,
     ): Constraint.EffectUsed {
         return Constraint.EffectUsed(
             effect = effect,
-            context = context
+            context = context,
+            loc = loc,
         )
     }
 }

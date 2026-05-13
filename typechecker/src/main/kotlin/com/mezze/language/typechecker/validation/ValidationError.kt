@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.validation
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.ast.prettyPrintType
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.util.StringDistance
 
 /**
@@ -39,6 +40,20 @@ sealed interface ValidationError {
     fun location(): Loc?
 
     /**
+     * Stable error code for this validation error. Each subtype overrides
+     * with its assigned [ErrorCode] from the global enum. Used for the
+     * Rust-style `error[Vxxxx]` header in [ErrorFormatter].
+     */
+    val code: ErrorCode
+
+    /**
+     * Optional Rust-style hint lines appended after the source snippet.
+     * Each entry is one `= hint: <text>` line.
+     */
+    val hints: List<String>
+        get() = emptyList()
+
+    /**
      * Ability constraint not satisfied.
      *
      * Example: Trying to use + on String (doesn't have NumAdd ability)
@@ -50,6 +65,10 @@ sealed interface ValidationError {
         val availableAbilities: List<String> = emptyList(),
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0402_ABILITY_NOT_SATISFIED
+        override val hints: List<String>
+            get() = listOf("implement `impl $abilityName for ${formatType(type)} where { ... }`")
+
         override fun message(): String = buildString {
             val typeName = formatType(type)
             val friendlyAbility = friendlyAbilityName(abilityName)
@@ -89,6 +108,19 @@ sealed interface ValidationError {
         val availableHandlers: List<String> = emptyList(),
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0501_EFFECT_NOT_HANDLED
+        override val hints: List<String>
+            get() = buildList {
+                add("wrap the expression in `perform $effectName in do ...` or install a handler")
+                // Did-you-mean: if a handler in scope looks similar to the
+                // effect name, the user may have a typo on the effect name.
+                if (availableHandlers.isNotEmpty()) {
+                    val closest = com.mezze.language.parsedast.diagnostics.LevenshteinSuggest
+                        .closest(effectName, availableHandlers)
+                    if (closest != null) add("did you mean `$closest`?")
+                }
+            }
+
         override fun message(): String = buildString {
             append("Effect '$effectName' is not handled")
             if (usedBy != null) {
@@ -114,6 +146,14 @@ sealed interface ValidationError {
         val missingConstructors: List<String>,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0601_NON_EXHAUSTIVE_MATCH
+        override val hints: List<String>
+            get() = if (missingConstructors.isNotEmpty()) {
+                listOf("add a case for: ${missingConstructors.joinToString(", ")}")
+            } else {
+                emptyList()
+            }
+
         override fun message(): String = buildString {
             append("This match expression doesn't handle all cases")
             if (missingConstructors.isNotEmpty()) {
@@ -136,6 +176,10 @@ sealed interface ValidationError {
         val reason: String,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0603_UNREACHABLE_PATTERN
+        override val hints: List<String>
+            get() = listOf("this pattern can never match because an earlier pattern already covers it")
+
         override fun message(): String = buildString {
             append("Unreachable pattern")
             append(": $reason")
@@ -155,6 +199,14 @@ sealed interface ValidationError {
         val recordType: MezzeType,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0602_NON_EXHAUSTIVE_RECORD_PATTERN
+        override val hints: List<String>
+            get() = if (missingFields.isNotEmpty()) {
+                listOf("add the missing fields: ${missingFields.joinToString(", ")}")
+            } else {
+                emptyList()
+            }
+
         override fun message(): String = buildString {
             append("Record pattern is missing fields")
             if (missingFields.isNotEmpty()) {
@@ -178,6 +230,10 @@ sealed interface ValidationError {
         val actualArity: Int,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0705_TYPE_ARITY_MISMATCH
+        override val hints: List<String>
+            get() = listOf("$constructor expects $expectedArity type arguments")
+
         override fun message(): String {
             return "Type constructor '$constructor' expects $expectedArity type arguments, but got $actualArity"
         }
@@ -195,6 +251,8 @@ sealed interface ValidationError {
         val reason: String,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0706_INVALID_RECURSIVE_TYPE
+
         override fun message(): String {
             return "Invalid recursive type '$typeName': $reason"
         }
@@ -213,6 +271,8 @@ sealed interface ValidationError {
         val availableFields: List<String>,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0703_UNKNOWN_FIELD
+
         override fun message(): String = buildString {
             append("'$fieldName' is not a field of this record")
             if (availableFields.isNotEmpty()) {
@@ -235,6 +295,8 @@ sealed interface ValidationError {
         val availableConstructors: List<String>,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0704_UNKNOWN_CONSTRUCTOR
+
         override fun message(): String = buildString {
             append("'$constructorName' is not a valid constructor for this type")
             if (availableConstructors.isNotEmpty()) {
@@ -256,6 +318,8 @@ sealed interface ValidationError {
         val similarNames: List<String> = emptyList(),
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0702_UNDEFINED_VARIABLE
+
         override fun message(): String = buildString {
             append("'$variableName' is not defined")
             if (similarNames.isNotEmpty()) {
@@ -279,6 +343,8 @@ sealed interface ValidationError {
         val context: String? = null,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0409_ABILITY_USED_AS_VALUE
+
         override fun message(): String = buildString {
             append("Ability '$abilityName' cannot be used as a value")
             if (context != null) {
@@ -301,6 +367,8 @@ sealed interface ValidationError {
         val context: String? = null,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.T0201_TYPE_MISMATCH
+
         override fun message(): String = buildString {
             append("Type mismatch")
             if (context != null) {
@@ -323,6 +391,8 @@ sealed interface ValidationError {
         val inferredType: MezzeType,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH
+
         override fun message(): String = buildString {
             append("Type annotation for '$bindingName' doesn't match inferred type: ")
             append("annotation says ${prettyPrintType(annotatedType)}, ")
@@ -341,6 +411,11 @@ sealed interface ValidationError {
         val typeNames: List<String>,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0709_CIRCULAR_TYPE_DEPENDENCY
+        override val hints: List<String> = listOf(
+            "break the cycle by introducing an indirection (e.g. wrap one side in an Option or a function)"
+        )
+
         override fun message(): String {
             return "Circular dependency in type definitions: ${typeNames.joinToString(" -> ")}"
         }
@@ -358,6 +433,8 @@ sealed interface ValidationError {
         val typeName: String,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0406_ORPHAN_INSTANCE
+
         override fun message(): String {
             return "Orphan instance: implementing ability '$abilityName' for type '$typeName' from different module. " +
                    "Implement in the module that defines either the ability or the type."
@@ -377,6 +454,8 @@ sealed interface ValidationError {
         val existingLocation: Loc? = null,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0407_OVERLAPPING_INSTANCE
+
         override fun message(): String = buildString {
             append("Overlapping instance: ability '$abilityName' already implemented for type '$typeName'")
             if (existingLocation != null) {
@@ -398,6 +477,10 @@ sealed interface ValidationError {
         val context: String? = null,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0408_NO_IMPLEMENTATION
+        override val hints: List<String>
+            get() = listOf("define: `impl $abilityName for $typeName where { ... }`")
+
         override fun message(): String = buildString {
             append("No implementation found for ability '$abilityName' with type '$typeName'")
             if (context != null) {
@@ -421,6 +504,8 @@ sealed interface ValidationError {
         val actualType: MezzeType,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0501_EFFECT_NOT_HANDLED
+
         override fun message(): String = buildString {
             append("Handler type mismatch for effect '$effectName':\n")
             append("  Handler '$handlerName' expects '${formatType(expectedType)}'\n")
@@ -442,6 +527,8 @@ sealed interface ValidationError {
         val variantType: MezzeType,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0604_CONSTRUCTOR_NO_PAYLOAD
+
         override fun message(): String = buildString {
             append("Constructor '$constructorName' has no payload, but pattern attempts to destructure it")
         }
@@ -462,6 +549,8 @@ sealed interface ValidationError {
         val effectRow: MezzeType.EffectRow,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0502_TOP_LEVEL_PERFORM
+
         override fun message(): String = buildString {
             append("Top-level value '$bindingName' cannot have performed effects <*>. ")
             append("Effects can only be performed inside 'main' or inside functions. ")
@@ -483,6 +572,8 @@ sealed interface ValidationError {
         val effectRow: MezzeType.EffectRow,
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0503_BARE_EFFECT_EXPR
+
         override fun message(): String = buildString {
             append("Bare expression with performed effects <*> is not allowed at module level. ")
             append("This would execute effects when the module loads, which is not permitted. ")
@@ -505,6 +596,8 @@ sealed interface ValidationError {
         val kind: String,  // "identifier", "ability call", "effect handler", etc.
         val loc: Loc? = null
     ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.I0003_MISSING_CONTENT_HASH
+
         override fun message(): String = buildString {
             append("Internal error: $kind '$identifierName' has no content hash. ")
             append("This is a bug in the typechecker - content hashes should be populated for all top-level/imported bindings.")

@@ -631,11 +631,12 @@ internal val MezzeParser.variantTypeParser: Parser<ParsedTypeDef> get() = { stre
                                         nextToken.text.first().isUpperCase()) {
                                         // There's a constructor name immediately after the closing |
                                         // This is invalid - they probably meant to use comma separation
-                                        ParseResult.Failure(
+                                        afterPipe.failure(
                                             "Invalid variant syntax: found '${nextToken.text}' after closing '|'. " +
                                             "Variant constructors must be comma-separated within | ... |. " +
                                             "Example: type Option 'a = | Some { val: 'a }, None |",
-                                            afterPipe.position
+                                            code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0111_INVALID_VARIANT_SYNTAX,
+                                            hints = listOf("comma-separate constructors inside | ... |")
                                         )
                                     } else {
                                         val loc = spanLoc(pipe1.value, pipe2.value, file)

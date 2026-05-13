@@ -68,6 +68,15 @@ dependencies {
 
     // Store module for content-addressed storage (SQLite implementation)
     implementation(project(":store-sqlite"))
+
+    testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.2")
+    testImplementation("org.junit.jupiter:junit-jupiter-params:5.10.2")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.named<Test>("test") {
+    useJUnitPlatform()
 }
 
 // ----------------------------------------------------------------------------

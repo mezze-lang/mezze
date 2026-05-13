@@ -1,0 +1,2 @@
+let plus = { a: Int, b: Int } -> a + b
+let go = {} -> plus { a = 1, b = "two" }

@@ -64,6 +64,14 @@ private fun printHelp() {
  * `mez --version`; tests / direct main() default to "dev".
  */
 fun startServer(input: InputStream, output: OutputStream, version: String = "dev") {
+    // Register the SQLite-backed store opener so PrecompiledStdlib can
+    // hydrate from `stdlib.sqlite` without reflection. See CLI Main for
+    // the full rationale (#168). Safe to call repeatedly when the LSP is
+    // launched via `mez lsp` (CLI Main already registered).
+    com.mezze.language.store.MezzeStoreOpener.register { file ->
+        com.mezze.language.codebase.SQLiteMezzeStore.readOnly(file)
+    }
+
     // Echo version + git sha to stderr at boot. Useful when an editor
     // (Cursor / VS Code / Neovim) doesn't surface the LSP-channel
     // logInfo() messages prominently — stderr typically lands in the

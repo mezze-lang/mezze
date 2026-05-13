@@ -467,20 +467,45 @@ class Monomorphizer(
             val b = MezzeHashBuilder()
             b.append(byteArrayOf(MONO_SPEC_TAG))
             b.append(genericHash.hex)
+            // Bundle every type input into a single synthetic record so
+            // [normalizeTypeVariables] walks all of them under one
+            // typevar numbering. Without this, two type args that share
+            // an unsubstituted TypeVar would get normalized to '`a` in
+            // each leaf — but their identity link would be lost, making
+            // `spec<T, T>` and `spec<T, U>` hash identically.
+            // Zero-pad indices so lexical field-key sort matches numeric
+            // order — `appendTypeInScope` walks RecordType fields in
+            // sorted order, so a0..a10 must sort as 0..10, not 0..1,10,11..
+            fun key(prefix: String, i: Int) = "$prefix${i.toString().padStart(6, '0')}"
+            val bundleFields = LinkedHashMap<String, MezzeType>()
+            for ((i, t) in typeArgs.withIndex()) bundleFields[key("a", i)] = t
+            for ((i, impl) in abilityImpls.withIndex()) bundleFields[key("i", i)] = impl.targetType
+            val bundle = MezzeType.RecordType(bundleFields, rowVar = null)
+            val canonical = com.mezze.language.ast.normalizeTypeVariables(bundle) as MezzeType.RecordType
+
             b.appendInt(typeArgs.size)
-            for (t in typeArgs) com.mezze.language.ast.hashing.appendType(b, t)
+            for (i in typeArgs.indices) {
+                com.mezze.language.ast.hashing.appendTypeInScope(b, canonical.fields[key("a", i)]!!)
+            }
             b.appendInt(abilityImpls.size)
-            for (impl in abilityImpls) appendImplBinding(b, impl)
+            for (i in abilityImpls.indices) {
+                appendImplBindingInScope(b, abilityImpls[i], canonical.fields[key("i", i)]!!)
+            }
             return b.buildHash()
         }
 
         /** Hash an ability-impl binding. Three resolved hashes + the
-         *  impl's target type; everything is concrete after typecheck. */
-        private fun appendImplBinding(b: MezzeHashBuilder, impl: AbilityImplRef) {
+         *  impl's target type. The targetType has already been
+         *  normalized in the enclosing scope by [specializedHash]. */
+        private fun appendImplBindingInScope(
+            b: MezzeHashBuilder,
+            impl: AbilityImplRef,
+            normalizedTargetType: MezzeType,
+        ) {
             b.append(byteArrayOf(HashTags.IMPL_ABILITY_DECLARATION, 0x01))
             b.append(impl.abilityHash.hex)
             b.append(impl.implHash.hex)
-            com.mezze.language.ast.hashing.appendType(b, impl.targetType)
+            com.mezze.language.ast.hashing.appendTypeInScope(b, normalizedTargetType)
         }
     }
 }

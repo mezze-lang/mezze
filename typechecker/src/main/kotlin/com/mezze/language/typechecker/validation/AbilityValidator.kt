@@ -5,6 +5,7 @@ import com.mezze.language.parsedast.Loc
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.ast.PrimitiveTypes
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 
 
 /**
@@ -50,7 +51,8 @@ object AbilityValidator {
             throw TypeCheckError(
                 "Ability '${ability.name}' uses ability-level constraints ('with $constraintsList'), " +
                 "but only method-level constraints are allowed.\n\n$suggestion",
-                sourceLocation
+                sourceLocation,
+                code = ErrorCode.V0410_ABILITY_LEVEL_CONSTRAINT_FORBIDDEN,
             )
         }
 
@@ -61,7 +63,8 @@ object AbilityValidator {
                     "Ability operation '${operation.name}' in '${ability.name}' cannot have polymorphic effects (<...>). " +
                     "Ability operations must declare concrete effects to define a clear contract. " +
                     "Use specific effects like <Mut> or no effects for pure operations.",
-                    sourceLocation
+                    sourceLocation,
+                    code = ErrorCode.V0411_POLYMORPHIC_EFFECT_IN_ABILITY_OP,
                 )
             }
             if (effects.isPerformed) {
@@ -69,7 +72,8 @@ object AbilityValidator {
                     "Ability operation '${operation.name}' in '${ability.name}' cannot have performed marker (<*>). " +
                     "Ability operations declare what effects they perform, not that effects are handled. " +
                     "The <*> marker is only valid at call sites where effects are handled with 'perform'.",
-                    sourceLocation
+                    sourceLocation,
+                    code = ErrorCode.V0412_PERFORMED_MARKER_IN_ABILITY_OP,
                 )
             }
         }
@@ -120,7 +124,8 @@ object AbilityValidator {
             ?: throw TypeCheckError(
                 "Ability '$qualifiedAbilityName' is not defined or not imported. " +
                 "Did you forget to import it with 'use'?",
-                sourceLocation
+                sourceLocation,
+                code = ErrorCode.V0401_ABILITY_NOT_DEFINED,
             )
 
         // Rule 1: Check type parameter count matches
@@ -132,7 +137,8 @@ object AbilityValidator {
                 "Type parameter count mismatch in ability implementation for '${abilityName}': " +
                 "ability expects ${abilityDeclaration.typeParams.size} type parameters, " +
                 "but implementation provides ${totalTypeParams}",
-                sourceLocation
+                sourceLocation,
+                code = ErrorCode.V0705_TYPE_ARITY_MISMATCH,
             )
         }
 
@@ -147,7 +153,8 @@ object AbilityValidator {
                 "but implementation does not provide bindings. " +
                 "Use: impl ${abilityName} ${impl.targetTypes.joinToString(" ") { parsedTypeAnnotationToString(it) }} " +
                 "having ${abilityAssociatedTypes.joinToString(", ") { "$it = <Type>" }} where { ... }",
-                sourceLocation
+                sourceLocation,
+                code = ErrorCode.V0413_MISSING_ASSOCIATED_TYPE_BINDING,
             )
         }
 
@@ -157,7 +164,8 @@ object AbilityValidator {
                 "Implementation provides associated type bindings [$bindingsList] " +
                 "but ability '${abilityName}' does not declare associated types. " +
                 "Remove the 'having' clause or add it to the ability declaration.",
-                sourceLocation
+                sourceLocation,
+                code = ErrorCode.V0414_EXTRA_ASSOCIATED_TYPE_BINDING,
             )
         }
 
@@ -167,7 +175,8 @@ object AbilityValidator {
                 "Ability '${abilityName}' declares associated types ${abilityAssociatedTypes.joinToString(", ")} " +
                 "but implementation is missing bindings for: ${missingBindings.joinToString(", ")}. " +
                 "All associated types must be bound in the implementation.",
-                sourceLocation
+                sourceLocation,
+                code = ErrorCode.V0413_MISSING_ASSOCIATED_TYPE_BINDING,
             )
         }
 
@@ -177,7 +186,8 @@ object AbilityValidator {
                 "Implementation provides bindings for ${extraBindings.joinToString(", ")} " +
                 "but ability '${abilityName}' only declares: ${abilityAssociatedTypes.joinToString(", ")}. " +
                 "Remove the extra bindings or add them to the ability declaration.",
-                sourceLocation
+                sourceLocation,
+                code = ErrorCode.V0414_EXTRA_ASSOCIATED_TYPE_BINDING,
             )
         }
 
@@ -192,7 +202,8 @@ object AbilityValidator {
             throw TypeCheckError(
                 "Implementation of '${abilityName}' is missing required ${if (missingOps.size == 1) "method" else "methods"}: $missing. " +
                 "Add: $example = {args} -> ...",
-                sourceLocation
+                sourceLocation,
+                code = ErrorCode.V0404_IMPL_MISSING_METHOD,
             )
         }
 
@@ -205,7 +216,8 @@ object AbilityValidator {
             throw TypeCheckError(
                 "Implementation of '${abilityName}' has extra ${if (extraOps.size == 1) "method" else "methods"} not in ability: $extra. " +
                 "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the ability declaration.",
-                extraOpLocation
+                extraOpLocation,
+                code = ErrorCode.V0405_IMPL_EXTRA_METHOD,
             )
         }
 
@@ -238,7 +250,8 @@ object AbilityValidator {
                     "Operation '${implOp.name}' in impl ${impl.abilityName} must be a function (lambda), " +
                     "but got ${implOp.implementation::class.simpleName}. " +
                     "Use: ${implOp.name} = {${if (declOp.paramType is com.mezze.language.parsedast.ParsedRecordType) (declOp.paramType as com.mezze.language.parsedast.ParsedRecordType).entries.joinToString(", ") { it.name } else "it"}} -> ...",
-                    opSourceLocation
+                    opSourceLocation,
+                    code = ErrorCode.V0415_IMPL_OP_MUST_BE_LAMBDA,
                 )
             }
 
@@ -249,7 +262,9 @@ object AbilityValidator {
                     "using record syntax: {it: ${parsedTypeAnnotationToString(declOp.paramType)}} -> ${parsedTypeAnnotationToString(declOp.returnType)}. " +
                     "Bare type '${parsedTypeAnnotationToString(declOp.paramType)} -> ...' is not supported — " +
                     "Mezze uses record-based calling convention.",
-                    declOp.loc
+                    declOp.loc,
+                    code = ErrorCode.V0416_ABILITY_OP_RECORD_PARAM_REQUIRED,
+                    hints = listOf("declare the param as a record: `{ ... } -> ReturnType`"),
                 )
             }
 
@@ -275,7 +290,8 @@ object AbilityValidator {
                     "Type variables not allowed in ability implementation: " +
                     "operation '${implOp.name}' parameter type contains type variables. " +
                     "All type variables must be replaced with concrete types.",
-                    sourceLocation
+                    sourceLocation,
+                    code = ErrorCode.V0417_TYPE_VAR_FORBIDDEN_IN_CONCRETE_IMPL,
                 )
             }
             if (implOp.returnType != null && hasTypeVariables(actualReturnType, allowedTypeVars)) {
@@ -283,7 +299,8 @@ object AbilityValidator {
                     "Type variables not allowed in ability implementation: " +
                     "operation '${implOp.name}' return type contains type variables. " +
                     "All type variables must be replaced with concrete types.",
-                    sourceLocation
+                    sourceLocation,
+                    code = ErrorCode.V0417_TYPE_VAR_FORBIDDEN_IN_CONCRETE_IMPL,
                 )
             }
 
@@ -293,7 +310,8 @@ object AbilityValidator {
                     "Wrong parameter type for '${implOp.name}' in impl ${impl.abilityName}: " +
                     "expected ${parsedTypeAnnotationToString(expectedParamType)}, " +
                     "but got ${parsedTypeAnnotationToString(actualParamType)}.",
-                    sourceLocation
+                    sourceLocation,
+                    code = ErrorCode.T0201_TYPE_MISMATCH,
                 )
             }
 
@@ -303,7 +321,8 @@ object AbilityValidator {
                     "Wrong return type for '${implOp.name}' in impl ${impl.abilityName}: " +
                     "expected ${parsedTypeAnnotationToString(expectedReturnType)}, " +
                     "but got ${parsedTypeAnnotationToString(actualReturnType)}.",
-                    sourceLocation
+                    sourceLocation,
+                    code = ErrorCode.T0201_TYPE_MISMATCH,
                 )
             }
         }
@@ -520,7 +539,9 @@ object AbilityValidator {
             "in this module. An impl must be in the same module as either the ability declaration " +
             "or at least one of the target types. Move this impl to the module where '$abilityName' " +
             "or one of [$typesList] is defined.",
-            sourceLocation
+            sourceLocation,
+            code = ErrorCode.V0406_ORPHAN_INSTANCE,
+            hints = listOf("define the impl in the same module as either the ability or the type"),
         )
     }
 
@@ -561,7 +582,10 @@ object AbilityValidator {
         if (dependencies.any { it.abilityName == abilityDeclaration.name }) {
             throw TypeCheckError(
                 "Ability '${abilityDeclaration.name}' cannot depend on itself. " +
-                "Remove the self-dependency from the 'requires' clause."
+                "Remove the self-dependency from the 'requires' clause.",
+                loc = abilityDeclaration.loc,
+                code = ErrorCode.M0802_CIRCULAR_DEPENDENCY,
+                hints = listOf("break the cycle by removing one of the imports"),
             )
         }
 
@@ -605,7 +629,10 @@ object AbilityValidator {
             if (detectCycle(dep.abilityName)) {
                 throw TypeCheckError(
                     "Circular dependency detected in ability '${abilityDeclaration.name}'. " +
-                    "Ability '${dep.abilityName}' (directly or indirectly) depends on '${abilityDeclaration.name}'."
+                    "Ability '${dep.abilityName}' (directly or indirectly) depends on '${abilityDeclaration.name}'.",
+                    loc = dep.loc,
+                    code = ErrorCode.M0802_CIRCULAR_DEPENDENCY,
+                    hints = listOf("break the cycle by removing one of the imports"),
                 )
             }
         }
@@ -625,39 +652,47 @@ object AbilityValidator {
      * @throws TypeCheckError if name collision detected
      */
     fun validateNameCollisions(
-        abilityDeclarations: Map<String, *>,
+        abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
         typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
-        effectDeclarations: Map<String, *>
+        effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>
     ) {
-        for (typeName in typeDeclarations.keys) {
+        for ((typeName, typeDecl) in typeDeclarations) {
             if (BuiltInAbilities.isBuiltInAbility(typeName)) {
                 throw TypeCheckError(
                     "Cannot define type '$typeName': name conflicts with built-in ability '$typeName'. " +
-                    "Types and built-in abilities must have unique names."
+                    "Types and built-in abilities must have unique names.",
+                    loc = typeDecl.loc,
+                    code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                 )
             }
         }
-        for (abilityName in abilityDeclarations.keys) {
+        for ((abilityName, abilityDecl) in abilityDeclarations) {
             if (typeDeclarations.containsKey(abilityName)) {
                 throw TypeCheckError(
                     "Cannot define type '$abilityName': name conflicts with ability '$abilityName'. " +
-                    "Abilities and types must have unique names."
+                    "Abilities and types must have unique names.",
+                    loc = typeDeclarations[abilityName]?.loc ?: abilityDecl.loc,
+                    code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                 )
             }
         }
-        for (abilityName in abilityDeclarations.keys) {
+        for ((abilityName, abilityDecl) in abilityDeclarations) {
             if (effectDeclarations.containsKey(abilityName)) {
                 throw TypeCheckError(
                     "Cannot define effect '$abilityName': name conflicts with ability '$abilityName'. " +
-                    "Abilities and effects must have unique names."
+                    "Abilities and effects must have unique names.",
+                    loc = effectDeclarations[abilityName]?.loc ?: abilityDecl.loc,
+                    code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                 )
             }
         }
-        for (typeName in typeDeclarations.keys) {
+        for ((typeName, typeDecl) in typeDeclarations) {
             if (effectDeclarations.containsKey(typeName)) {
                 throw TypeCheckError(
                     "Cannot define type '$typeName': name conflicts with effect '$typeName'. " +
-                    "Types and effects must have unique names."
+                    "Types and effects must have unique names.",
+                    loc = typeDecl.loc,
+                    code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                 )
             }
         }
@@ -671,21 +706,27 @@ object AbilityValidator {
                         throw TypeCheckError(
                             "Cannot define variant constructor '$constructorName' in type '$typeName': " +
                             "name conflicts with built-in ability '$constructorName'. " +
-                            "Variant constructors and abilities must have unique names."
+                            "Variant constructors and abilities must have unique names.",
+                            loc = constructor.loc,
+                            code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                         )
                     }
                     if (abilityDeclarations.containsKey(constructorName)) {
                         throw TypeCheckError(
                             "Cannot define variant constructor '$constructorName' in type '$typeName': " +
                             "name conflicts with ability '$constructorName'. " +
-                            "Variant constructors and abilities must have unique names."
+                            "Variant constructors and abilities must have unique names.",
+                            loc = constructor.loc,
+                            code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                         )
                     }
                     if (effectDeclarations.containsKey(constructorName)) {
                         throw TypeCheckError(
                             "Cannot define variant constructor '$constructorName' in type '$typeName': " +
                             "name conflicts with effect '$constructorName'. " +
-                            "Variant constructors and effects must have unique names."
+                            "Variant constructors and effects must have unique names.",
+                            loc = constructor.loc,
+                            code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                         )
                     }
                 }
@@ -715,7 +756,8 @@ object AbilityValidator {
                 throw TypeCheckError(
                     "Cannot define inherent impl for unknown type '$typeName'. " +
                     "The type must be declared before implementing methods on it.",
-                    sourceLocation
+                    sourceLocation,
+                    code = ErrorCode.V0418_INHERENT_IMPL_ON_UNDEFINED_TYPE,
                 )
             }
         }
@@ -737,7 +779,9 @@ object AbilityValidator {
                     "Cannot define inherent impl for type '$typeName' in this module. " +
                     "Inherent impls can only be defined where the type is defined. " +
                     "Move this impl to the module where '$typeName' is declared.",
-                    sourceLocation
+                    sourceLocation,
+                    code = ErrorCode.V0406_ORPHAN_INSTANCE,
+                    hints = listOf("define the impl in the same module as either the ability or the type"),
                 )
             }
         }
@@ -771,7 +815,8 @@ object AbilityValidator {
                         "Cannot implement ${if (impl.isInherent) "methods" else "ability '${impl.abilityName}'"} " +
                             "for type '$typeName': method names $conflictList conflict with fields " +
                             "already defined on '$typeName'. Rename the fields or the ability methods to avoid ambiguity.",
-                        sourceLocation
+                        sourceLocation,
+                        code = ErrorCode.V0419_IMPL_METHOD_FIELD_CONFLICT,
                     )
                 }
             }

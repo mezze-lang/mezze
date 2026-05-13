@@ -55,7 +55,10 @@ internal val MezzeParser.recordTypeEntryParser: Parser<ParsedRecordTypeEntry>
                                 "Record type field '$fieldName' is missing a type annotation. " +
                                         "Expected ':' followed by a type, but got ${tokenGotDescription(nextToken)}"
                         }
-                        ident.remaining.failure(message)
+                        ident.remaining.failure(
+                            message,
+                            code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0117_RECORD_FIELD_MISSING_TYPE
+                        )
                     }
                 }
             }
@@ -465,7 +468,10 @@ internal val MezzeParser.recordTypeAnnotationParser: Parser<ParsedTypeAnnotation
                             val fieldName = stream2.current()?.text ?: "field"
                             val message = "Record type field '$fieldName' is missing a type annotation.\n" +
                                     "Expected format: { $fieldName: Type }"
-                            stream2.failure(message)
+                            stream2.failure(
+                                message,
+                                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0117_RECORD_FIELD_MISSING_TYPE
+                            )
                         } else {
                             val afterComma = if (stream2.current()?.type == TokenType.COMMA) {
                                 skipNewlines(stream2.advance())
@@ -493,7 +499,10 @@ internal val MezzeParser.recordTypeAnnotationParser: Parser<ParsedTypeAnnotation
                                     when (currentToken?.type) {
                                         TokenType.IDENTIFIER -> {
                                             val fieldName = currentToken.text
-                                            stream3.failure("Record type field '$fieldName' is missing a type annotation.\nExpected format: { $fieldName: Type }")
+                                            stream3.failure(
+                                                "Record type field '$fieldName' is missing a type annotation (expected `$fieldName: Type`)",
+                                                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0117_RECORD_FIELD_MISSING_TYPE
+                                            )
                                         }
                                         TokenType.COMMA -> stream3.failure("Unexpected comma in record type. Record type fields must have format: { field: Type }")
                                         else -> stream3.failure("Expected '}' to close record type, but got ${tokenGotDescription(currentToken)}. Record type format: { field: Type }")

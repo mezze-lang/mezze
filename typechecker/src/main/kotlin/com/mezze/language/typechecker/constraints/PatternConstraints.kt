@@ -4,6 +4,7 @@ import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.ErrorType
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 
 /**
  * Pattern constraint generator - generates constraints for pattern matching.
@@ -104,7 +105,9 @@ class PatternConstraintGenerator {
                 "Use a constructor pattern like '$firstConstructor' instead, " +
                 "or use a variable pattern to catch all cases.",
                 sourceLoc,
-                errorType = ErrorType.INVALID_PATTERN
+                errorType = ErrorType.INVALID_PATTERN,
+                code = ErrorCode.T0208_LITERAL_PATTERN_ON_VARIANT,
+                hints = listOf("use a constructor pattern like `Some { ... }`"),
             )
         }
 
@@ -115,7 +118,9 @@ class PatternConstraintGenerator {
                 "Cannot match type '${scrutineeType.constructor}' with $literalDesc. " +
                 "Use a constructor pattern instead, or use a variable pattern to catch all cases.",
                 sourceLoc,
-                errorType = ErrorType.INVALID_PATTERN
+                errorType = ErrorType.INVALID_PATTERN,
+                code = ErrorCode.T0208_LITERAL_PATTERN_ON_VARIANT,
+                hints = listOf("use a constructor pattern like `Some { ... }`"),
             )
         }
 
@@ -201,7 +206,9 @@ class PatternConstraintGenerator {
                 "Cannot match variant type [${constructors.joinToString(", ")}] with a string interpolation pattern. " +
                 "Use a constructor pattern like '${constructors.firstOrNull() ?: "ConstructorName"}' instead.",
                 sourceLoc ?: pattern.loc,
-                errorType = ErrorType.INVALID_PATTERN
+                errorType = ErrorType.INVALID_PATTERN,
+                code = ErrorCode.T0208_LITERAL_PATTERN_ON_VARIANT,
+                hints = listOf("use a constructor pattern like `Some { ... }`"),
             )
         }
 
@@ -211,7 +218,8 @@ class PatternConstraintGenerator {
                 "Cannot match type '${scrutineeType.constructor}' with a string interpolation pattern. " +
                 "String patterns can only match String type values.",
                 sourceLoc ?: pattern.loc,
-                errorType = ErrorType.INVALID_PATTERN
+                errorType = ErrorType.INVALID_PATTERN,
+                code = ErrorCode.T0208_LITERAL_PATTERN_ON_VARIANT,
             )
         }
 
@@ -342,7 +350,8 @@ class PatternConstraintGenerator {
                     throw TypeCheckError(
                         "Non-exhaustive record pattern: missing field${if (uncoveredFields.size > 1) "s" else ""} $fieldList. " +
                         "Use { ${patternFieldNames.joinToString(", ")}, ... } to ignore extra fields.",
-                        sourceLoc
+                        sourceLoc,
+                        code = ErrorCode.V0602_NON_EXHAUSTIVE_RECORD_PATTERN,
                     )
                 }
             } else {

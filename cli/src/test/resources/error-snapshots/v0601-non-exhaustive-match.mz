@@ -1,0 +1,4 @@
+type Color = | Red, Green, Blue |
+let describe = { c: Color } -> match c is
+  Red -> "warm"
+  Green -> "cool"

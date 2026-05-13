@@ -129,7 +129,10 @@ object TypeDiffPrinter {
             " [${type.abilityConstraints.joinToString { it.abilityName }}]"
         } else ""
 
-        return "{$params} ->$effects$abilities $result"
+        // If the param is a record, its own formatter already emitted braces;
+        // don't double-wrap (`{{x: Int}}` → `{x: Int}`).
+        val paramFmt = if (type.paramType is MezzeType.RecordType) params else "{$params}"
+        return "$paramFmt ->$effects$abilities $result"
     }
 
     private fun formatRecordType(type: MezzeType.RecordType, indent: Int): String {

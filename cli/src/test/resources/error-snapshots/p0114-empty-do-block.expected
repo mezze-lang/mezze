@@ -1,0 +1,9 @@
+error[P0114]: Do block is empty; needs at least one expression
+  --> p0114-empty-do-block.mz:2:1
+  |
+1 | let main = {} -> do
+  |                    ^ unexpected end of file
+  |
+  = hint: add at least one expression inside the do block
+
+error: aborting due to 1 previous parse error

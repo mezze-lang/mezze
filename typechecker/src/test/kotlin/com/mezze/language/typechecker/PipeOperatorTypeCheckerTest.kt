@@ -170,7 +170,8 @@ let result = 5 |> combine {x = @, y = @}
             parser.parseParsedModule(source, "test.mz")
         }
         assertTrue(exception.message?.contains("multiple") == true ||
-                   exception.message?.contains("only one") == true,
+                   exception.message?.contains("only one") == true ||
+                   exception.message?.contains("exactly one") == true,
                    "Error should mention multiple placeholders: ${exception.message}")
     }
 

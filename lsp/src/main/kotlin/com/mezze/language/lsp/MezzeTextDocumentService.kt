@@ -440,7 +440,8 @@ class MezzeTextDocumentService(
                         loweredFunctions = result.loweredFunctions ?: emptyList(),
                         warnings = result.warnings.map {
                             com.mezze.language.typechecker.TypeCheckWarning(it.message, it.loc)
-                        }
+                        },
+                        expectedTypeAt = result.expectedTypeAt,
                     )
                     lastSuccessfulResult[uri] = typeCheckResult!!
 
@@ -542,7 +543,8 @@ class MezzeTextDocumentService(
                     val partialTyped = result.typedModule
                     if (partialTyped != null) {
                         typeCheckResult = TypeCheckResult(
-                            typedModule = partialTyped
+                            typedModule = partialTyped,
+                            expectedTypeAt = result.expectedTypeAt,
                         )
                     }
                 }
@@ -1076,7 +1078,18 @@ class MezzeTextDocumentService(
                 ?.find { it.name == word }
 
             if (typedBinding != null) {
-                val bindingType = typedBinding.scheme.type
+                // Prefer the user's explicit annotation when present: it
+                // reflects intent and stays stable when the body has a type
+                // error (in which case the inferred scheme is the wrong type).
+                val annotated = state.parsedModule?.decls
+                    ?.filterIsInstance<ParsedLetDecl>()
+                    ?.firstOrNull { it.isSimpleBinding && it.variableName == word }
+                    ?.typeAnnotation
+                    ?.let {
+                        try { com.mezze.language.typechecker.util.TypeAnnotationConverter.convert(it) }
+                        catch (_: Exception) { null }
+                    }
+                val bindingType = annotated ?: typedBinding.scheme.type
                 if (bindingType !is MezzeType.VarType) {
                     val doc = findDocForDecl(state.parsedModule, word)
                     val meta = findMetadataForDecl(state.parsedModule, word)
@@ -1914,7 +1927,23 @@ class MezzeTextDocumentService(
 
             val items = mutableListOf<CompletionItem>()
 
-            // Check if we're after a dot (method completion: x.|)
+            // Detect dot-context BEFORE asking getDotCompletions, so we can
+            // short-circuit when the dot completions are empty (e.g. the
+            // receiver type couldn't be inferred). Without this, the
+            // fallback paths below (`getStdlibCompletions`, bindings,
+            // keywords) get a shot at matching the partial method name
+            // after the dot — and happily suggest things like
+            // `use std::int::{to_string, abs}` for `name.to_`, which then
+            // inserts the entire `use ...` blob over the user's cursor.
+            val isDotContext = state != null && run {
+                val lines = state.content.lines()
+                if (position.line >= lines.size) false
+                else {
+                    val before = lines[position.line].substring(0, minOf(position.character, lines[position.line].length))
+                    Regex("""\.\w*$""").containsMatchIn(before)
+                }
+            }
+
             val dotCompletions = if (state != null) {
                 getDotCompletions(state, position)
             } else {
@@ -1924,6 +1953,12 @@ class MezzeTextDocumentService(
             if (dotCompletions.isNotEmpty()) {
                 items.addAll(dotCompletions)
                 Either.forLeft<List<CompletionItem>, CompletionList>(items)
+            } else if (isDotContext) {
+                // Dot context but no candidates — return empty rather than
+                // falling through to keyword/binding/stdlib paths whose
+                // matches would be applied to the post-dot range, polluting
+                // the editor with garbage suggestions.
+                Either.forLeft<List<CompletionItem>, CompletionList>(emptyList())
             }
             // Check if we're inside a match expression (after 'match X is')
             else if (state != null && getMatchPatternCompletions(state, position).let { matchCompletions ->
@@ -1956,9 +1991,6 @@ class MezzeTextDocumentService(
                         // Add variant constructors from visible types
                         items.addAll(getVariantConstructorCompletions(state))
                     }
-
-                    // Add stdlib suggestions
-                    items.addAll(getStdlibCompletions())
                 }
 
                 Either.forLeft(items)
@@ -2189,6 +2221,24 @@ class MezzeTextDocumentService(
      *
      * If `paramNames` is empty, returns just `name {}`.
      */
+    /**
+     * Snippet for a top-level function or imported function call:
+     * `foo { field1 = ${1:field1}, field2 = ${2:field2} }`. Returns null
+     * if the binding isn't a function (no wrap needed — just insert the
+     * name). Mirrors the `buildMethodSnippet` shape but uses ALL fields,
+     * not the method-shape stripping `it`.
+     */
+    internal fun callInsertSnippet(name: String, type: MezzeType): String? {
+        val fnType = type as? MezzeType.FunctionType ?: return null
+        val paramRecord = fnType.paramType as? MezzeType.RecordType
+        if (paramRecord == null) return "$name { $0 }"
+        if (paramRecord.fields.isEmpty()) return "$name {}"
+        val body = paramRecord.fields.entries.toList().mapIndexed { idx, (fieldName, fieldType) ->
+            "$fieldName = ${renderFieldPlaceholder(fieldName, fieldType, idx + 1)}"
+        }.joinToString(", ")
+        return "$name { $body }"
+    }
+
     internal fun buildMethodSnippet(
         methodName: String,
         paramNames: List<MethodParamHint>
@@ -2308,6 +2358,26 @@ class MezzeTextDocumentService(
     }
 
     /**
+     * Return type of an inherent impl op, derived from the post-solve typed
+     * impl. Used by the type-aware completion ranker to know what each
+     * candidate produces (`to_str` -> `Str`, `to_float` -> `Frac`, etc.).
+     */
+    private fun lookupTypedImplOpReturnType(
+        precompiled: com.mezze.language.typechecker.PrecompiledStdlib,
+        targetTypeName: String,
+        opName: String
+    ): MezzeType? {
+        for (impl in precompiled.stdlibAbilityImpls) {
+            val target = impl.targetTypes.firstOrNull() ?: continue
+            if (getTypeName(target) != targetTypeName) continue
+            val opBody = impl.operations[opName] ?: continue
+            val lambda = opBody as? com.mezze.language.typedast.TypedLambda ?: continue
+            return lambda.body.type
+        }
+        return null
+    }
+
+    /**
      * Build hints from a ParsedImplOp by inspecting the implementation
      * lambda's params. Inherent impls in stdlib usually omit explicit param
      * types, but the lambda `{ it, p } -> ...` still names them. We strip
@@ -2411,6 +2481,12 @@ class MezzeTextDocumentService(
         val items = mutableListOf<CompletionItem>()
         val typeName = getTypeName(baseType)
         val addedMethods = mutableSetOf<String>()  // Deduplicate
+        // Side-map for type-aware ranking: candidate label → its return type.
+        // Used by rankByExpectedType to unify against the expected type at
+        // the cursor. Populated wherever we know the candidate's return type
+        // (ability methods, inherent impls). Candidates without a known
+        // return type are ranked as "non-match" (fall to the bottom).
+        val candidateReturnTypes = mutableMapOf<String, MezzeType>()
 
         // 1. Collect ability methods available for this type
         // Use both imported abilities (from prelude) and local program abilities
@@ -2462,6 +2538,10 @@ class MezzeTextDocumentService(
                     insertTextFormat = InsertTextFormat.Snippet
                 })
                 addedMethods.add(op.name)
+                try {
+                    candidateReturnTypes[op.name] =
+                        com.mezze.language.typechecker.util.TypeAnnotationConverter.convert(op.returnType)
+                } catch (_: Exception) { /* unconvertible — skip for ranking */ }
             }
         }
 
@@ -2490,6 +2570,12 @@ class MezzeTextDocumentService(
                     insertTextFormat = InsertTextFormat.Snippet
                 })
                 addedMethods.add(op.name)
+                try {
+                    op.returnType?.let { rt ->
+                        candidateReturnTypes[op.name] =
+                            com.mezze.language.typechecker.util.TypeAnnotationConverter.convert(rt)
+                    }
+                } catch (_: Exception) {}
             }
         }
 
@@ -2533,6 +2619,23 @@ class MezzeTextDocumentService(
                         insertTextFormat = InsertTextFormat.Snippet
                     })
                     addedMethods.add(op.name)
+                    // For section 3 (prelude inherent impls) the parsed
+                    // ImplOp.returnType is usually null — types are inferred.
+                    // Pull the solved return type from the typed impl body.
+                    val typedReturnType = lookupTypedImplOpReturnType(
+                        precompiledForInherent, implTargetName, op.name
+                    )
+                    if (typedReturnType != null) {
+                        candidateReturnTypes[op.name] = typedReturnType
+                    } else {
+                        // Fall back to parsed annotation (rare for inherent prelude impls).
+                        try {
+                            op.returnType?.let { rt ->
+                                candidateReturnTypes[op.name] =
+                                    com.mezze.language.typechecker.util.TypeAnnotationConverter.convert(rt)
+                            }
+                        } catch (_: Exception) {}
+                    }
                 }
             }
         } catch (_: Exception) { /* prelude may not be loaded in tests */ }
@@ -2609,13 +2712,86 @@ class MezzeTextDocumentService(
         }
 
         // Filter by partial method name if the user already started typing
-        val final = if (partialMethod.isNotEmpty()) {
+        val filtered = if (partialMethod.isNotEmpty()) {
             items.filter { it.label.startsWith(partialMethod, ignoreCase = true) }
         } else {
             items
         }
-        server.logInfo("[dot-completion] returning ${final.size} method completions for type '${getTypeName(baseType) ?: baseType::class.simpleName}': ${final.take(20).map { it.label }}${if (final.size > 20) "..." else ""}")
-        return final
+
+        // Type-aware ranking. The typechecker pre-computes `expectedTypeAt`
+        // for every source position where a constraint is emitted. Look up
+        // the smallest enclosing loc at the cursor; if we find an expected
+        // type, score each candidate by unifying its return type against
+        // that expected. Matches get sortText "0_<label>", non-matches
+        // "5_<label>". Editors sort lexicographically on sortText, so
+        // matches float to the top.
+        val rankedItems = rankByExpectedType(
+            items = filtered,
+            cursorLine = position.line + 1,
+            cursorCol = position.character + 1,
+            result = result,
+            candidateReturnTypes = candidateReturnTypes,
+        )
+
+        server.logInfo("[dot-completion] returning ${rankedItems.size} method completions for type '${getTypeName(baseType) ?: baseType::class.simpleName}': ${rankedItems.take(20).map { it.label }}${if (rankedItems.size > 20) "..." else ""}")
+        return rankedItems
+    }
+
+    /**
+     * Type-aware completion ranking. For each candidate whose return type is
+     * known, unify it with the expected type at the cursor; matches sort
+     * first. Falls through to identity ordering when there's no expected
+     * type (typechecker didn't pin one) or no candidate return type.
+     */
+    private fun rankByExpectedType(
+        items: List<CompletionItem>,
+        cursorLine: Int,
+        cursorCol: Int,
+        result: TypeCheckResult,
+        candidateReturnTypes: Map<String, MezzeType>,
+    ): List<CompletionItem> {
+        val expectedTypeAt = result.expectedTypeAt
+        server.logInfo("[rank] cursor=$cursorLine:$cursorCol expectedTypeAt size=${expectedTypeAt.size} candidateReturnTypes size=${candidateReturnTypes.size}")
+        if (expectedTypeAt.isEmpty()) return items
+
+        // Find the smallest enclosing Loc that contains the cursor.
+        //
+        // We loosen the end-check by `slack` chars on the same line to
+        // accommodate completion at e.g. `x.` where the cursor sits just
+        // past the recorded expression body — without slack, the body's
+        // loc (`x`) ends before the cursor and we miss the enclosing
+        // annotation hint.
+        val slack = 3
+        val expectedEntry = expectedTypeAt
+            .filterKeys { loc ->
+                val startsBefore = loc.startLine < cursorLine ||
+                    (loc.startLine == cursorLine && loc.startCol <= cursorCol)
+                val endsAfter = loc.endLine > cursorLine ||
+                    (loc.endLine == cursorLine && loc.endCol + slack >= cursorCol)
+                startsBefore && endsAfter
+            }
+            .entries
+            .minByOrNull { (loc, _) ->
+                // Span size — smaller = tighter enclosing scope.
+                (loc.endLine - loc.startLine) * 1_000_000 + (loc.endCol - loc.startCol)
+            }
+        server.logInfo("[rank] enclosing entry=${expectedEntry?.key} expected=${expectedEntry?.value ?: "<none>"}")
+        val expected = expectedEntry?.value ?: return items
+
+        // Unification works structurally for primitives and type vars without
+        // needing typeDeclarations; alias resolution would require them, but
+        // we're matching against ability-method return types here which are
+        // built-in shapes (Int -> Str etc.). Empty map is fine.
+        return items
+            .map { item ->
+                val candType = candidateReturnTypes[item.label]
+                val rank = if (candType == null) "5"
+                else when (com.mezze.language.typechecker.solving.unify(candType, expected, emptyMap())) {
+                    is com.mezze.language.typechecker.solving.UnificationResult.Success -> "0"
+                    is com.mezze.language.typechecker.solving.UnificationResult.Failure -> "5"
+                }
+                item.apply { sortText = "${rank}_${label}" }
+            }
     }
 
     /** Check if a MezzeType matches a TypedAST type (simplified matching). */
@@ -2823,10 +2999,14 @@ class MezzeTextDocumentService(
         typedModule?.decls
             ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
             ?.forEach { decl ->
+                val ty = decl.scheme.type
                 items.add(CompletionItem(decl.name).apply {
-                    kind = CompletionItemKind.Function
-                    detail = decl.scheme.type.let {
-                        prettyPrintTypeWithAliases(it, state.typeAliases)
+                    kind = if (ty is MezzeType.FunctionType) CompletionItemKind.Function else CompletionItemKind.Variable
+                    detail = prettyPrintTypeWithAliases(ty, state.typeAliases)
+                    val snippet = callInsertSnippet(decl.name, ty)
+                    if (snippet != null) {
+                        insertText = snippet
+                        insertTextFormat = InsertTextFormat.Snippet
                     }
                 })
             }
@@ -2866,6 +3046,13 @@ class MezzeTextDocumentService(
                     ImportKind.PERFORMER -> CompletionItemKind.Class
                 }
                 detail = prettyPrintTypeWithAliases(import.type, state.typeAliases)
+                if (import.kind == ImportKind.FUNCTION) {
+                    val snippet = callInsertSnippet(import.localName, import.type)
+                    if (snippet != null) {
+                        insertText = snippet
+                        insertTextFormat = InsertTextFormat.Snippet
+                    }
+                }
             })
         }
 
@@ -3195,24 +3382,6 @@ class MezzeTextDocumentService(
         })
 
         return items
-    }
-
-    private fun getStdlibCompletions(): List<CompletionItem> {
-        // Common stdlib imports
-        val suggestions = listOf(
-            "std::effects::log::{println, Console}" to "Print to console",
-            "std::int::{to_string, abs}" to "Integer utilities",
-            "std::option::{map, get_or_else}" to "Option utilities",
-            "std::collections::seq::{length, map}" to "Seq utilities"
-        )
-
-        return suggestions.map { (import, desc) ->
-            CompletionItem("use $import").apply {
-                kind = CompletionItemKind.Module
-                detail = desc
-                insertText = "use $import"
-            }
-        }
     }
 
     override fun resolveCompletionItem(item: CompletionItem): CompletableFuture<CompletionItem> {

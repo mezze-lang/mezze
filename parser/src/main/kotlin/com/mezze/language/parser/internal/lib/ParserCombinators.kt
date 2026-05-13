@@ -1,5 +1,6 @@
 package com.mezze.language.parser.internal.lib
 
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parser.*
 import com.mezze.language.parser.internal.Token
 import com.mezze.language.parser.internal.TokenType
@@ -17,7 +18,12 @@ sealed class ParseResult<out T> {
         // consuming a successful left operand) — such errors describe the real
         // problem and should not be hidden by a competing alternative's
         // shallower "Expected X but got Y" message.
-        val isFatal: Boolean = false
+        val isFatal: Boolean = false,
+        // Stable error code (Phase B migration). Defaults to UNCATEGORIZED so
+        // existing call sites that haven't been migrated still compile.
+        val code: ErrorCode = ErrorCode.UNCATEGORIZED,
+        // Optional list of "= hint:" lines rendered after the source snippet.
+        val hints: List<String> = emptyList()
     ) : ParseResult<Nothing>()
 }
 
@@ -34,11 +40,17 @@ data class TokenStream(
     fun getSourceLine(): Int = current()?.line ?: tokens.lastOrNull()?.line ?: 1
     fun getSourceColumn(): Int = current()?.column ?: tokens.lastOrNull()?.column ?: 1
 
-    fun failure(message: String): ParseResult.Failure = ParseResult.Failure(
+    fun failure(
+        message: String,
+        code: ErrorCode = ErrorCode.UNCATEGORIZED,
+        hints: List<String> = emptyList()
+    ): ParseResult.Failure = ParseResult.Failure(
         message,
         getSourcePosition(),
         getSourceLine(),
-        getSourceColumn()
+        getSourceColumn(),
+        code = code,
+        hints = hints
     )
 }
 

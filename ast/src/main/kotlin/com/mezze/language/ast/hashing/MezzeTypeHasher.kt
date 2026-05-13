@@ -1,6 +1,7 @@
 package com.mezze.language.ast.hashing
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.normalizeTypeVariables
 
 /**
  * Canonical byte encoder for [MezzeType] used by every content hasher in
@@ -17,15 +18,31 @@ import com.mezze.language.ast.MezzeType
  * derived hash in the system (impl hashes, op hashes, mono spec hashes).
  * Bump the cache schema version if you change anything here.
  *
- * **TypeVar caveat**: TypeVars carry non-portable ids (the constraint
- * solver allocates fresh ids each run). We hash by name only — meaning
- * two TypeVars with the same name but different ids hash equal. Callers
- * that hash for content-addressed identity must ensure types are
- * substituted to concrete form *before* hashing; passing an
- * unsubstituted type will produce a hash that's only valid within one
- * solver run.
+ * **TypeVar normalization**: [appendType] is the public entry point and
+ * always normalizes type variable names to first-occurrence positional
+ * form (`'a, 'b, 'c, …`) before encoding. This makes hashes stable
+ * across solver runs — without it, the same source program produces
+ * different hashes when the constraint solver allocates fresh-var
+ * counters in a different order (the historical cause of stdlib drift
+ * between mezze-build-time and user-build-time, task #127).
+ *
+ * If you have a chain of `appendType` calls inside a single hashed
+ * value, prefer [appendTypeInScope] to avoid re-normalizing typevars at
+ * every leaf — re-normalizing per call would re-number the same TypeVar
+ * differently at each site.
  */
 fun appendType(b: MezzeHashBuilder, type: MezzeType) {
+    appendTypeInScope(b, normalizeTypeVariables(type))
+}
+
+/**
+ * Append a type whose typevars are already normalized in the enclosing
+ * scope. Use this when the caller has done a single top-level
+ * [normalizeTypeVariables] across a composite structure (e.g. a list of
+ * type args that should share a typevar numbering) and is feeding the
+ * sub-parts in.
+ */
+fun appendTypeInScope(b: MezzeHashBuilder, type: MezzeType) {
     when (type) {
         is MezzeType.IntType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x01))
         is MezzeType.FloatType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x02))
@@ -37,41 +54,41 @@ fun appendType(b: MezzeHashBuilder, type: MezzeType) {
         is MezzeType.BytesType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x09))
         is MezzeType.ByteBufferType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x0A))
         is MezzeType.OrderingType -> b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x0B))
-        is MezzeType.SeqType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE)); appendType(b, type.elementType) }
-        is MezzeType.ListType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x01)); appendType(b, type.elementType) }
-        is MezzeType.SetType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x02)); appendType(b, type.elementType) }
+        is MezzeType.SeqType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE)); appendTypeInScope(b, type.elementType) }
+        is MezzeType.ListType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x01)); appendTypeInScope(b, type.elementType) }
+        is MezzeType.SetType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x02)); appendTypeInScope(b, type.elementType) }
         is MezzeType.MapType -> {
             b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x03))
-            appendType(b, type.keyType); appendType(b, type.valueType)
+            appendTypeInScope(b, type.keyType); appendTypeInScope(b, type.valueType)
         }
         is MezzeType.SortedMapType -> {
             b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x04))
-            appendType(b, type.keyType); appendType(b, type.valueType)
+            appendTypeInScope(b, type.keyType); appendTypeInScope(b, type.valueType)
         }
-        is MezzeType.SortedSetType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x05)); appendType(b, type.elementType) }
-        is MezzeType.SuspendedType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x06)); appendType(b, type.valueType) }
+        is MezzeType.SortedSetType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x05)); appendTypeInScope(b, type.elementType) }
+        is MezzeType.SuspendedType -> { b.append(byteArrayOf(HashTags.SEQ_TYPE, 0x06)); appendTypeInScope(b, type.valueType) }
         is MezzeType.NewtypeType -> {
             b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR, 0x10))
             b.append(type.name); b.append(type.constructor)
-            appendType(b, type.wrappedType)
+            appendTypeInScope(b, type.wrappedType)
         }
         is MezzeType.TypeApplication -> {
             b.append(byteArrayOf(HashTags.TYPE_CONSTRUCTOR))
             b.append(type.constructor)
             type.typeHash?.let { b.appendBoolean(true); b.append(it.hex) } ?: b.appendBoolean(false)
             b.appendInt(type.args.size)
-            for (arg in type.args) appendType(b, arg)
+            for (arg in type.args) appendTypeInScope(b, arg)
         }
         is MezzeType.FunctionType -> {
             b.append(byteArrayOf(HashTags.FUNCTION_TYPE))
-            appendType(b, type.paramType); appendType(b, type.returnType)
+            appendTypeInScope(b, type.paramType); appendTypeInScope(b, type.returnType)
         }
         is MezzeType.RecordType -> {
             b.append(byteArrayOf(HashTags.RECORD_TYPE))
             type.typeHash?.let { b.appendBoolean(true); b.append(it.hex) } ?: b.appendBoolean(false)
             b.appendInt(type.fields.size)
             for (name in type.fields.keys.sorted()) {
-                b.append(name); appendType(b, type.fields[name]!!)
+                b.append(name); appendTypeInScope(b, type.fields[name]!!)
             }
         }
         is MezzeType.VariantType -> {
@@ -82,12 +99,14 @@ fun appendType(b: MezzeHashBuilder, type: MezzeType) {
                 b.append(name)
                 val payload = type.constructors[name]
                 b.appendBoolean(payload != null)
-                payload?.let { appendType(b, it) }
+                payload?.let { appendTypeInScope(b, it) }
             }
         }
         is MezzeType.VarType -> {
-            // Defensive — should never appear in a fully-substituted type.
-            // Hash deterministically by name only (id is non-portable).
+            // Typevars are normalized to positional first-occurrence names
+            // (`'a, 'b, 'c, …`) by the public [appendType] entry point. By
+            // the time we get here, `type.variable.name` is canonical
+            // regardless of which solver run produced it.
             b.append(byteArrayOf(HashTags.TYPE_VAR))
             b.append(type.variable.name)
         }

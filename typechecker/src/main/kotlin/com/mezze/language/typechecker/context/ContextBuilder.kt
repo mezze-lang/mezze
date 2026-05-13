@@ -7,6 +7,7 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.typechecker.validation.AbilityValidator
 import com.mezze.language.typechecker.validation.DuplicateDeclarationValidator
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 
 /**
  * Builds immutable typing context from program declarations.
@@ -1412,7 +1413,8 @@ class ContextBuilder {
                         "$hermeticEffect must be the only effect in scope to prevent data races. " +
                         "Either handle the other effects before entering the $hermeticEffect scope, " +
                         "or restructure the code to separate $hermeticEffect from other effectful operations.",
-                    sourceLoc
+                    sourceLoc,
+                    code = ErrorCode.V0504_HERMETIC_EFFECT_CONFLICT,
                 )
             }
         }

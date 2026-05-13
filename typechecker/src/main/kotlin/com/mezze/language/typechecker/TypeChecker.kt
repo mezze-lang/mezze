@@ -21,6 +21,7 @@ import com.mezze.language.typechecker.validation.TypeValidator
 import com.mezze.language.typechecker.validation.ValidationResult
 import com.mezze.language.typechecker.printing.ErrorFormatter
 import com.mezze.language.typechecker.cache.TypeCheckCache
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.hashing.ContentHashComputer
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -135,7 +136,15 @@ class TypeChecker(
             /** Extracted type context: binding name -> resolved MezzeType. Built from constraint results + substitution. */
             val typeContext: Map<String, MezzeType> = emptyMap(),
             /** The resolved ParsedModule (after ContextBuilder resolves performer->ability impls). */
-            val resolvedParsedModule: com.mezze.language.parsedast.ParsedModule? = null
+            val resolvedParsedModule: com.mezze.language.parsedast.ParsedModule? = null,
+            /**
+             * Per-source-position "expected type" hint after substitution.
+             * Populated by the constraint generator at every emission site
+             * with a Loc (annotations, fields, function args). LSP ranker
+             * uses this for type-aware completion ranking — independent of
+             * whether errors fired.
+             */
+            val expectedTypeAt: Map<com.mezze.language.parsedast.Loc, MezzeType> = emptyMap(),
         ) : TypeCheckResult()
 
         /**
@@ -149,7 +158,9 @@ class TypeChecker(
          */
         data class Failure(
             val errors: List<TypeCheckError>,
-            val typedModule: com.mezze.language.typedast.TypedModule? = null
+            val typedModule: com.mezze.language.typedast.TypedModule? = null,
+            /** See `Success.expectedTypeAt` — populated on partial-typed Failure too. */
+            val expectedTypeAt: Map<com.mezze.language.parsedast.Loc, MezzeType> = emptyMap(),
         ) : TypeCheckResult()
     }
 
@@ -166,7 +177,20 @@ class TypeChecker(
         val message: String,
         val loc: com.mezze.language.parsedast.Loc? = null,
         val errorType: ErrorType = ErrorType.GENERAL,
-        val metadata: Map<String, Any> = emptyMap()
+        val metadata: Map<String, Any> = emptyMap(),
+        /**
+         * Stable error code — see [com.mezze.language.parsedast.diagnostics.ErrorCode].
+         * Defaults to `UNCATEGORIZED` during the Phase B migration; sites
+         * that have been migrated pass a real code so the formatter can
+         * surface it as `error[T0210]: …`.
+         */
+        val code: com.mezze.language.parsedast.diagnostics.ErrorCode =
+            com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED,
+        /**
+         * Zero or more "what to do next" hints. Rendered as `= hint: …`
+         * lines under the source snippet.
+         */
+        val hints: List<String> = emptyList(),
     )
 
     /**
@@ -383,7 +407,9 @@ class TypeChecker(
                     message = e.message ?: "Type checking failed",
                     loc = e.loc,
                     errorType = e.errorType,
-                    metadata = e.metadata
+                    metadata = e.metadata,
+                    code = e.code,
+                    hints = e.hints,
                 )
             })
             // Don't return early — keep flowing so we can emit a partial
@@ -395,11 +421,7 @@ class TypeChecker(
         // Check for per-binding solve errors
         if (perBindingSolveErrors.isNotEmpty()) {
             collectedErrors.addAll(perBindingSolveErrors.map { error ->
-                TypeCheckError(
-                    phase = "Constraint Solving",
-                    message = error.message,
-                    loc = error.constraint.loc
-                )
+                classifyConstraintError(error)
             })
         }
 
@@ -472,7 +494,8 @@ class TypeChecker(
                 TypeCheckError(
                     phase = "Validation",
                     message = message,
-                    loc = undefinedVar.loc
+                    loc = undefinedVar.loc,
+                    code = ErrorCode.V0702_UNDEFINED_VARIABLE,
                 )
             }
             collectedErrors.addAll(errors)
@@ -488,7 +511,8 @@ class TypeChecker(
                 TypeCheckError(
                     phase = "Validation",
                     message = "Duplicate binding: '${duplicate.name}' is already defined in this scope",
-                    loc = duplicate.loc
+                    loc = duplicate.loc,
+                    code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                 )
             })
         }
@@ -520,21 +544,45 @@ class TypeChecker(
                 // Global solve failed. Per-binding solving in
                 // ConstraintGenerator already recorded a per-decl error
                 // for the same root cause; the global pass typically
-                // re-discovers it via ability/has-field constraints. So
-                // dedupe and bail. We don't have a typedModule yet (it's
-                // built later in the Success branch) — for editors,
-                // they'll keep seeing the LAST successful typedModule
-                // via lastSuccessfulResult, which is good enough.
+                // re-discovers it via ability/has-field constraints.
+                //
+                // Editor support: even though the solve failed, we still
+                // try to emit a *partial* TypedModule using only the
+                // per-binding substitution. Decls whose own constraints
+                // solved cleanly get their real types; decls whose body
+                // failed get `VarType("unknown")` placeholders. The LSP
+                // (#149) uses this so hover/completion on UNRELATED
+                // surviving decls keep working when ONE decl is broken.
                 collectedErrors.addAll(solveResult.errors.map { error ->
-                    TypeCheckError(
-                        phase = "Constraint Solving",
-                        message = error.message,
-                        loc = error.constraint.loc
-                    )
+                    classifyConstraintError(error)
                 })
                 val seen = mutableSetOf<Pair<com.mezze.language.parsedast.Loc?, String>>()
                 val deduped = collectedErrors.filter { e -> seen.add(e.loc to e.message) }
-                return TypeCheckResult.Failure(errors = deduped, typedModule = null)
+                val partialTyped = buildPartialTypedModule(
+                    parsedModule = parsedModule,
+                    substitution = perBindingSubstitution,
+                    constraintResults = constraintResults,
+                    context = context,
+                    buildResult = buildResult,
+                    importContext = importContext,
+                    allTypeDeclarations = allTypeDeclarations,
+                    allAbilityDeclarations = allAbilityDeclarations,
+                    allEffectDeclarations = allEffectDeclarations,
+                )
+                // expectedTypeAt resolved through whatever substitution we
+                // have. Even on global-solve failure, per-binding solves
+                // already applied to the union so this gives the LSP usable
+                // types on surviving bindings.
+                val partialExpectedTypeAt = constraintResults.values
+                    .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType>()) { acc, r ->
+                        acc + r.expectedTypeAt
+                    }
+                    .mapValues { (_, type) -> perBindingSubstitution.apply(type) }
+                return TypeCheckResult.Failure(
+                    errors = deduped,
+                    typedModule = partialTyped,
+                    expectedTypeAt = partialExpectedTypeAt,
+                )
             }
             is ConstraintSolver.SolveResult.Success -> {
                 val substitution = solveResult.substitution.compose(perBindingSubstitution)
@@ -573,6 +621,15 @@ class TypeChecker(
                         acc + r.callReturnTypes
                     }
 
+                // expectedTypeAt union — applied through the final
+                // substitution so the LSP ranker sees concrete types,
+                // not raw TypeVars from the constraint generator.
+                val allExpectedTypeAt = constraintResults.values
+                    .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType>()) { acc, r ->
+                        acc + r.expectedTypeAt
+                    }
+                    .mapValues { (_, type) -> substitution.apply(type) }
+
                 // PHASE 4: Validate Constraints
                 val validator = TypeValidator(
                     context,
@@ -592,7 +649,9 @@ class TypeChecker(
                             TypeCheckError(
                                 phase = "Validation",
                                 message = error.message(),
-                                loc = error.location()
+                                loc = error.location(),
+                                code = error.code,
+                                hints = error.hints,
                             )
                         })
                     }
@@ -832,7 +891,13 @@ class TypeChecker(
                 val v2ValidationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution)
                 if (v2ValidationResult is ValidationResult.Failure) {
                     collectedErrors.addAll(v2ValidationResult.errors.map { error ->
-                        TypeCheckError(phase = "Validation", message = error.message(), loc = error.location())
+                        TypeCheckError(
+                            phase = "Validation",
+                            message = error.message(),
+                            loc = error.location(),
+                            code = error.code,
+                            hints = error.hints,
+                        )
                     })
                 }
 
@@ -859,7 +924,8 @@ class TypeChecker(
                     }
                     return TypeCheckResult.Failure(
                         errors = deduped,
-                        typedModule = emittedTypedModule
+                        typedModule = emittedTypedModule,
+                        expectedTypeAt = allExpectedTypeAt,
                     )
                 }
                 return TypeCheckResult.Success(
@@ -872,9 +938,162 @@ class TypeChecker(
                     loweredFunctions = loweredFns,
                     loweredPerformers = loweredPerformers,
                     typeContext = typeContext,
-                    resolvedParsedModule = parsedModule
+                    resolvedParsedModule = parsedModule,
+                    expectedTypeAt = allExpectedTypeAt,
                 )
             }
+        }
+    }
+
+    /**
+     * Emit a best-effort partial TypedModule when global constraint solving
+     * failed but per-binding solving had already resolved most decls.
+     *
+     * Decls whose own constraints solved cleanly (recorded in
+     * `perBindingSubstitution` / `constraintResults`) get their real types.
+     * Decls whose body failed end up with `VarType("unknown")` placeholders
+     * inside the resulting TypedAST — `TypedAstBuilder.build` handles this
+     * gracefully and emits a TypedLetDecl regardless. The LSP uses the
+     * partial module for hover/completion on unrelated surviving decls
+     * (see #149).
+     *
+     * Wrapped in a single try/catch — if the partial pass itself blows up
+     * (e.g. an unrelated invariant the builder enforces), we just return
+     * null and the caller falls back to the LSP's last-successful cache.
+     */
+    /**
+     * Convert a raw solver [ConstraintError] into a [TypeCheckError] with
+     * stable error code + hints when we can classify it. This is the
+     * Phase A2 entry point for the new diagnostic shape — Phase B will
+     * grow the match arms until every error has a real code.
+     *
+     * Sites NOT yet classified fall through with `code = UNCATEGORIZED`,
+     * so output stays identical to before until each kind is migrated.
+     */
+    private fun classifyConstraintError(
+        error: com.mezze.language.typechecker.solving.ConstraintSolver.ConstraintError
+    ): TypeCheckError {
+        // Dispatch on the constraint's structured ErrorContext, NOT message
+        // prefixes. ErrorContext is the discriminator the solver itself uses
+        // to pick its message wording in `generateBetterErrorMessage`; reusing
+        // it here keeps the code-classification in lockstep — rewording a
+        // message doesn't accidentally break code/hint assignment.
+        val constraint = error.constraint
+        val ctx = (constraint as? com.mezze.language.typechecker.constraints.Constraint.Equality)
+            ?.errorContext
+
+        val annotationHint = listOf(
+            "either change the annotation to match the body, or change the body to produce the annotated type"
+        )
+
+        val (code, hints) = when (ctx) {
+            is com.mezze.language.typechecker.constraints.ErrorContext.TypeAnnotation ->
+                com.mezze.language.parsedast.diagnostics.ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH to annotationHint
+            is com.mezze.language.typechecker.constraints.ErrorContext.ReturnType ->
+                com.mezze.language.parsedast.diagnostics.ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH to annotationHint
+            is com.mezze.language.typechecker.constraints.ErrorContext.FunctionArgument ->
+                com.mezze.language.parsedast.diagnostics.ErrorCode.T0201_TYPE_MISMATCH to emptyList()
+            is com.mezze.language.typechecker.constraints.ErrorContext.BinaryOperation ->
+                com.mezze.language.parsedast.diagnostics.ErrorCode.T0201_TYPE_MISMATCH to listOf(
+                    "the operator expects both operands to have the same type"
+                )
+            is com.mezze.language.typechecker.constraints.ErrorContext.FieldAccess ->
+                com.mezze.language.parsedast.diagnostics.ErrorCode.T0205_FIELD_NOT_FOUND to emptyList()
+            is com.mezze.language.typechecker.constraints.ErrorContext.PatternMatch ->
+                com.mezze.language.parsedast.diagnostics.ErrorCode.T0201_TYPE_MISMATCH to listOf(
+                    "the pattern's type must match the scrutinee's type"
+                )
+            is com.mezze.language.typechecker.constraints.ErrorContext.SeqElement ->
+                com.mezze.language.parsedast.diagnostics.ErrorCode.T0201_TYPE_MISMATCH to listOf(
+                    "all seq elements must have the same type"
+                )
+            is com.mezze.language.typechecker.constraints.ErrorContext.StringInterpolation ->
+                com.mezze.language.parsedast.diagnostics.ErrorCode.T0201_TYPE_MISMATCH to listOf(
+                    "interpolated expressions must produce a `Str` (use `.to_str {}` or `.to_dbg_str {}`)"
+                )
+            is com.mezze.language.typechecker.constraints.ErrorContext.Simple,
+            null -> {
+                // No structured context. Fall back to message-based detection
+                // for the few cases produced outside generateBetterErrorMessage
+                // (e.g. occurs-check from Unification, row-field equality from
+                // operator desugar). Each branch here is a TODO: trace the
+                // emission site, attach an ErrorContext, then drop the branch.
+                val msg = error.message
+                when {
+                    msg.startsWith("Infinite type: ") ->
+                        com.mezze.language.parsedast.diagnostics.ErrorCode.T0207_INFINITE_TYPE to listOf(
+                            "this usually means a recursive let-binding is missing a type annotation"
+                        )
+                    // Row-field equality (operator desugar): "Field '<name>'
+                    // type mismatch: expected X but got Y". Not classified
+                    // structurally because the constraint here is on a fresh
+                    // RecordType field, not a user-visible field access.
+                    msg.startsWith("Field '") && msg.contains("type mismatch") ->
+                        com.mezze.language.parsedast.diagnostics.ErrorCode.T0201_TYPE_MISMATCH to emptyList<String>()
+                    else -> com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED to emptyList()
+                }
+            }
+        }
+
+        return TypeCheckError(
+            phase = "Constraint Solving",
+            message = error.message,
+            loc = error.constraint.loc,
+            code = code,
+            hints = hints,
+        )
+    }
+
+    private fun buildPartialTypedModule(
+        parsedModule: ParsedModule,
+        substitution: com.mezze.language.typechecker.solving.Substitution,
+        constraintResults: Map<String, com.mezze.language.typechecker.constraints.ConstraintResult>,
+        context: com.mezze.language.typechecker.context.TypingContext,
+        buildResult: com.mezze.language.typechecker.context.ContextBuilder.BuildResult,
+        importContext: ModuleImportContext?,
+        allTypeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
+        allAbilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
+        allEffectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
+    ): com.mezze.language.typedast.TypedModule? {
+        return try {
+            val resolvedResults = constraintResults.mapValues { (_, r) ->
+                r.copy(type = substitution.apply(r.type))
+            }
+            val methodCallResolutions = constraintResults.values
+                .fold(emptyMap<Pair<com.mezze.language.parsedast.Loc, String>, com.mezze.language.typechecker.constraints.ConstraintResult.MethodCallInfo>()) { acc, r ->
+                    acc + r.methodCallResolutions
+                }
+            val callReturnTypes = constraintResults.values
+                .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType>()) { acc, r ->
+                    acc + r.callReturnTypes
+                }
+            val tailCallLocations = constraintResults.values
+                .flatMap { it.tailCalls }
+                .filterNotNull()
+                .toSet()
+            val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
+                substitution = substitution,
+                constraintResults = resolvedResults,
+                abilityImpls = context.getAllAbilityImpls(),
+                typeDeclarations = allTypeDeclarations,
+                abilityDeclarations = allAbilityDeclarations,
+                effectDeclarations = allEffectDeclarations,
+                performerToEffect = buildResult.performerToEffect,
+                importContext = importContext,
+                identifierContentHashes = context.getContentHashes(),
+                implDeclarations = buildResult.implDeclarations,
+                tailCallLocations = tailCallLocations,
+                mustBeOpenRowVars = emptySet(),
+                methodCallResolutions = methodCallResolutions,
+                callReturnTypes = callReturnTypes,
+            )
+            builder.build(parsedModule)
+        } catch (e: Exception) {
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                System.err.println("[partial-builder] ${e.javaClass.simpleName}: ${e.message}")
+                e.printStackTrace(System.err)
+            }
+            null
         }
     }
 
@@ -1289,16 +1508,27 @@ class TypeChecker(
                             val fp = m.filePath ?: return@mapNotNull null
                             val sh = m.sourceHash ?: return@mapNotNull null
                             path to com.mezze.language.typechecker.LoadedModuleSource(fp, sh)
-                        }.toMap()
+                        }.toMap(),
+                    expectedTypeAt = result.expectedTypeAt,
                 )
             }
             is TypeCheckResult.Failure -> {
                 val error = result.errors.firstOrNull()
-                    ?: throw TypeCheckError("Type checking failed with unknown error")
+                    ?: throw TypeCheckError(
+                        "Type checking failed with unknown error",
+                        code = ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE,
+                    )
                 // Preserve errorType + metadata so callers using the throwing
                 // entry point (legacy tests) see the same rich info that
                 // result-style callers get via Failure.errors. See #313.
-                throw TypeCheckError(error.message, error.loc, error.errorType, error.metadata)
+                throw TypeCheckError(
+                    error.message,
+                    error.loc,
+                    error.errorType,
+                    error.metadata,
+                    code = error.code,
+                    hints = error.hints,
+                )
             }
         }
     }
@@ -1343,15 +1573,28 @@ class TypeChecker(
         return when (result) {
             is TypeCheckResult.Success -> {
                 val typedModule = result.typedModule
-                    ?: throw TypeCheckError("V2 pipeline did not emit a TypedModule")
+                    ?: throw TypeCheckError(
+                        "V2 pipeline did not emit a TypedModule",
+                        code = ErrorCode.I0002_PIPELINE_NO_TYPED_MODULE,
+                    )
                 ParsedModuleCheckResult(typedModule, result.loadedModules)
             }
             is TypeCheckResult.Failure -> {
                 val error = result.errors.firstOrNull()
-                    ?: throw TypeCheckError("Type checking failed with unknown error")
+                    ?: throw TypeCheckError(
+                        "Type checking failed with unknown error",
+                        code = ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE,
+                    )
                 // Preserve errorType + metadata (see #313 — throwing entry
                 // points keep parity with the Failure.errors list).
-                throw TypeCheckError(error.message, error.loc, error.errorType, error.metadata)
+                throw TypeCheckError(
+                    error.message,
+                    error.loc,
+                    error.errorType,
+                    error.metadata,
+                    code = error.code,
+                    hints = error.hints,
+                )
             }
         }
     }

@@ -4,6 +4,7 @@ import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 
 /**
  * Validates that declarations are not duplicated within a parsed module.
@@ -62,7 +63,8 @@ object DuplicateDeclarationValidator {
             if (declaredTypes.contains(item.name)) {
                 throw TypeCheckError(
                     "Duplicate type declaration: type '${item.name}' is already declared",
-                    item.loc
+                    item.loc,
+                    code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                 )
             }
             declaredTypes.add(item.name)
@@ -98,7 +100,8 @@ object DuplicateDeclarationValidator {
                             throw TypeCheckError(
                                 "Cannot redefine built-in constructor: '$constructorName' is already defined " +
                                 "in built-in type '$builtinType'. Use the built-in '$builtinType' type or choose a different constructor name.",
-                                typeDecl.loc
+                                typeDecl.loc,
+                                code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                             )
                         }
 
@@ -107,7 +110,8 @@ object DuplicateDeclarationValidator {
                             throw TypeCheckError(
                                 "Duplicate constructor name: constructor '$constructorName' is already defined " +
                                 "in type '$existingType', cannot reuse in type '${typeDecl.name}'",
-                                typeDecl.loc
+                                typeDecl.loc,
+                                code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                             )
                         }
                         constructorToTypeMap[constructorName] = typeDecl.name
@@ -121,7 +125,8 @@ object DuplicateDeclarationValidator {
                         throw TypeCheckError(
                             "Cannot redefine built-in constructor: '$constructorName' is already defined " +
                             "in built-in type '$builtinType'. Use the built-in '$builtinType' type or choose a different constructor name.",
-                            typeDecl.loc
+                            typeDecl.loc,
+                            code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                         )
                     }
 
@@ -130,7 +135,8 @@ object DuplicateDeclarationValidator {
                         throw TypeCheckError(
                             "Duplicate constructor name: constructor '$constructorName' is already defined " +
                             "in type '$existingType', cannot reuse in type '${typeDecl.name}'",
-                            typeDecl.loc
+                            typeDecl.loc,
+                            code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                         )
                     }
                     constructorToTypeMap[constructorName] = typeDecl.name
@@ -154,14 +160,18 @@ object DuplicateDeclarationValidator {
                 if (!constructorName.first().isUpperCase()) {
                     throw TypeCheckError(
                         "Newtype constructor '$constructorName' must start with an uppercase letter",
-                        typeDecl.loc
+                        typeDecl.loc,
+                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0707_CONSTRUCTOR_MUST_BE_UPPERCASE,
+                        hints = listOf("rename to `${constructorName.replaceFirstChar { it.uppercase() }}`"),
                     )
                 }
 
                 if (BuiltInAbilities.isBuiltInAbility(constructorName)) {
                     throw TypeCheckError(
                         "Newtype constructor '$constructorName' is already used by a built-in ability",
-                        typeDecl.loc
+                        typeDecl.loc,
+                        code = ErrorCode.V0701_DUPLICATE_DECLARATION,
+                        hints = listOf("pick a different name — `$constructorName` is reserved for a built-in ability"),
                     )
                 }
             }
@@ -188,7 +198,9 @@ object DuplicateDeclarationValidator {
                 val errorLocation = freeTypeVars.firstNotNullOfOrNull { it.second } ?: typeDecl.loc
                 throw TypeCheckError(
                     "Type '${typeDecl.name}' has undeclared type variable(s): $freeVarList. $suggestion",
-                    errorLocation
+                    errorLocation,
+                    code = ErrorCode.T0301_UNBOUND_TYPE_VAR,
+                    hints = listOf("add an explicit type annotation to fix the type"),
                 )
             }
         }
@@ -265,7 +277,8 @@ object DuplicateDeclarationValidator {
             if (declaredEffects.contains(effect.name)) {
                 throw TypeCheckError(
                     "Duplicate effect declaration: effect '${effect.name}' is already defined",
-                    effect.loc
+                    effect.loc,
+                    code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                 )
             }
             declaredEffects.add(effect.name)
@@ -282,7 +295,8 @@ object DuplicateDeclarationValidator {
             if (declaredPerformers.contains(impl.performerName)) {
                 throw TypeCheckError(
                     "Duplicate effect handler declaration: performer '${impl.performerName}' is already defined",
-                    impl.loc
+                    impl.loc,
+                    code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                 )
             }
             declaredPerformers.add(impl.performerName)
@@ -299,7 +313,8 @@ object DuplicateDeclarationValidator {
             if (declaredAbilities.contains(ability.name)) {
                 throw TypeCheckError(
                     "Duplicate ability declaration: ability '${ability.name}' is already defined",
-                    ability.loc
+                    ability.loc,
+                    code = ErrorCode.V0403_DUPLICATE_ABILITY_DECL,
                 )
             }
             declaredAbilities.add(ability.name)
@@ -323,7 +338,8 @@ object DuplicateDeclarationValidator {
                 throw TypeCheckError(
                     "Duplicate ${if (impl.isInherent) "inherent" else "ability"} implementation: '${implLabel}' is already implemented " +
                     "for type(s) ${allTypeNames.joinToString(", ")}",
-                    impl.loc
+                    impl.loc,
+                    code = ErrorCode.V0407_OVERLAPPING_INSTANCE,
                 )
             }
             abilityImplKeys.add(key)
@@ -350,7 +366,8 @@ object DuplicateDeclarationValidator {
                     throw TypeCheckError(
                         "Duplicate method '${op.name}' in inherent impl for type(s) ${targetTypeNames.joinToString(", ")}. " +
                         "Each method name must be unique across all inherent impls for a type.",
-                        op.loc
+                        op.loc,
+                        code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                     )
                 }
                 existingMethods[op.name] = op.loc
@@ -400,21 +417,24 @@ object DuplicateDeclarationValidator {
                 if (declaredVariables.contains(name)) {
                     throw TypeCheckError(
                         "Duplicate variable declaration: '$name' is already defined in this scope",
-                        item.value.loc
+                        item.value.loc,
+                        code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                     )
                 }
                 if (name in performerNames) {
                     throw TypeCheckError(
                         "Name '$name' collides with an effect performer of the same name. " +
                             "Performers and let bindings share the value namespace; rename one.",
-                        item.value.loc
+                        item.value.loc,
+                        code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                     )
                 }
                 if (name in constructorNames) {
                     throw TypeCheckError(
                         "Name '$name' collides with a variant or newtype constructor of the same name. " +
                             "Constructors and let bindings share the value namespace; rename one.",
-                        item.value.loc
+                        item.value.loc,
+                        code = ErrorCode.V0701_DUPLICATE_DECLARATION,
                     )
                 }
                 declaredVariables.add(name)

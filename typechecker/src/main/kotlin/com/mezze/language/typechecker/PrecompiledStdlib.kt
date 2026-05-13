@@ -403,31 +403,29 @@ object PrecompiledStdlib {
             val modHashStr = s.getMetadata("stdlib_module_hashes") ?: ""
             val moduleHashes = if (modHashStr.isNotEmpty()) modHashStr.split(";").map { Hash(it) }.toSet() else emptySet()
 
-            // Load FunctionIRs from blobs table via store
+            // Load FunctionIRs from blobs table via store. We want EVERY
+            // blob the store has, not just declHashes — internal lambdas,
+            // performer factories, and synthetic helpers all live as blobs
+            // without a corresponding decl. Loading only declHashes leaves
+            // gaps that surface at runtime as "expected MezzeFunction, got
+            // null" when a CallDirectScalarNode tries to dispatch.
             val functions = mutableMapOf<Hash, com.mezze.language.truffleir.FunctionIR>()
             val decodeFailures = mutableListOf<Pair<Hash, String>>()
-            // We need all blob hashes to iterate — use the module's known decl hashes
-            // plus any reachable via edges. Since we have declHashes, load their IR.
-            for (declHash in declHashes) {
+            // getAllBlobHashes is cheap for sqlite-backed stores (single
+            // SELECT). Falls back to declHashes ∪ moduleHashes for stores
+            // that don't implement it. Loading every blob (not just decl
+            // hashes) is required — internal lambdas, performer factories,
+            // and synthetic helpers all live as blobs without a
+            // corresponding decl. Loading only declHashes leaves gaps
+            // that surface at runtime as "expected MezzeFunction got null"
+            // when CallDirectScalarNode tries to dispatch.
+            val allHashes = s.getAllBlobHashes().ifEmpty { (declHashes + moduleHashes).toList() }
+            for (h in allHashes) {
                 try {
-                    val irBytes = s.getIR(declHash) ?: continue
-                    functions[declHash] = cbor.decodeFromByteArray(irBytes)
+                    val irBytes = s.getIR(h) ?: continue
+                    functions[h] = cbor.decodeFromByteArray(irBytes)
                 } catch (e: Exception) {
-                    // Surface FunctionIR decode failures under MEZZE_DEBUG. Per-hash
-                    // failures are non-fatal individually but indicate stdlib.sqlite
-                    // serialized-shape mismatch with the running build (#308).
-                    decodeFailures.add(declHash to "${e.javaClass.simpleName}: ${e.message}")
-                }
-            }
-
-            // Also load any blobs not in declHashes (performer functions, etc.)
-            // by iterating module hashes and their edges
-            for (mHash in moduleHashes) {
-                try {
-                    val irBytes = s.getIR(mHash) ?: continue
-                    functions[mHash] = cbor.decodeFromByteArray(irBytes)
-                } catch (e: Exception) {
-                    decodeFailures.add(mHash to "${e.javaClass.simpleName}: ${e.message}")
+                    decodeFailures.add(h to "${e.javaClass.simpleName}: ${e.message}")
                 }
             }
 
@@ -530,23 +528,31 @@ object PrecompiledStdlib {
     // ====================================================================
 
     /**
-     * Open the bundled `stdlib.sqlite` resource as a read-only MezzeStore.
-     * Returns null if the resource is missing or SQLiteMezzeStore is not on
-     * the classpath. Uses reflection to keep :typechecker free of a hard
-     * dependency on :store-sqlite (which itself depends on :typechecker).
+     * Open the bundled `stdlib.sqlite` resource as a read-only [MezzeStore].
+     *
+     * Goes through [com.mezze.language.store.MezzeStoreOpener.current] —
+     * the entry point (CLI / LSP / test harness) registers an opener
+     * during bootstrap (typically `SQLiteMezzeStore::readOnly`). Without
+     * a registered opener, this returns null and the slow compile-from-
+     * source path takes over.
+     *
+     * This used to bridge the `:typechecker` → `:store-sqlite` dep cycle
+     * with reflection (`Class.forName(...).getMethod("readOnly", ...)`).
+     * The reflective lookup silently failed under native-image (no
+     * reflect-config registration), causing native binaries to recompile
+     * stdlib from source on every startup and producing a different hash
+     * set than JVM runs (#168). The SPI approach is native-image friendly
+     * and lets each surface choose its own backing store.
      */
     private fun openStdlibResourceAsStore(): com.mezze.language.store.MezzeStore? {
+        val opener = com.mezze.language.store.MezzeStoreOpener.current() ?: return null
         return try {
             val stream = PrecompiledStdlib::class.java.classLoader
                 .getResourceAsStream(STDLIB_SQLITE_RESOURCE) ?: return null
             val tempFile = java.io.File.createTempFile("mezze-stdlib", ".sqlite")
             tempFile.deleteOnExit()
             tempFile.writeBytes(stream.readAllBytes())
-
-            val cls = Class.forName("com.mezze.language.codebase.SQLiteMezzeStore")
-            val companion = cls.getField("Companion").get(null)
-            val readOnlyMethod = companion.javaClass.getMethod("readOnly", java.io.File::class.java)
-            readOnlyMethod.invoke(companion, tempFile) as com.mezze.language.store.MezzeStore
+            opener.openReadOnly(tempFile)
         } catch (e: Exception) {
             if (System.getenv("MEZZE_DEBUG") != null) {
                 System.err.println(

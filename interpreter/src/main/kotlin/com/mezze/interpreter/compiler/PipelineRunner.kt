@@ -68,6 +68,13 @@ object PipelineRunner {
         performerRecords: List<Array<String>> = emptyList(),
         entryName: String? = null
     ): CallTarget {
+        val timing = System.getenv("MEZZE_TIMING") != null
+        val tStart = System.nanoTime()
+        fun mark(label: String) {
+            if (timing) System.err.println("[${(System.nanoTime() - tStart) / 1_000_000}ms] PipelineRunner: $label")
+        }
+        mark("compileFromIR enter (${functions.size} fns)")
+
         if (functions.isEmpty()) {
             val fd = FrameDescriptor.newBuilder().build()
             val body: MezzeNode = UnitLiteralNode()
@@ -78,22 +85,27 @@ object PipelineRunner {
         // Compile only REFERENCED stdlib functions (lazy, per-Language instance).
         // ~35 per test instead of 1044. Each Language instance (=Context) compiles its own.
         val compiler = TruffleCompiler(language)
+        mark("TruffleCompiler constructed")
         val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
+        mark("PrecompiledStdlib object referenced (class init triggered)")
         val compiledFunctions = mutableMapOf<com.mezze.language.typedast.Hash, CallTarget>()
 
         val userHashes = functions.map { it.hash }.toSet()
         val referencedHashes = collectReferencedHashes(functions)
+        mark("referenced hashes collected (${referencedHashes.size})")
         language.compileReferencedStdlib(
             compiler,
             referencedHashes,
             userHashes
         )
+        mark("stdlib compiled (referenced subset)")
 
         // Register user functions for lazy compilation — DON'T pre-compile CallTargets.
         // Each test has unique functions; pre-compiling creates CallTargets that persist on
         // the shared Engine and cause OOM over thousands of tests. Instead, register FunctionIRs
         // and let MonomorphicCallNode compile on-demand via Language.getCachedStdlibCallTarget.
         compiler.registerFunctions(functions)
+        mark("user functions registered")
 
         // Resolve function aliases: `let toggle_bool = toggle` compiles to a FunctionIR whose
         // body is ReadGlobalByHashIR(toggle_hash). Register the alias hash → target's FunctionIR
@@ -145,6 +157,7 @@ object PipelineRunner {
                 compiledFunctions[fn.hash] = rootNode.callTarget
             }
         }
+        mark("performer factories compiled (${compiledFunctions.size})")
 
         // Find the entry point and compile it.
         //
@@ -212,7 +225,7 @@ object PipelineRunner {
             fdBuilder.addSlot(FrameSlotKind.Illegal, mainFn.localNames.getOrElse(i) { "l$i" }, null)
         }
 
-        return MezzeRootNode(
+        val target = MezzeRootNode(
             language,
             fdBuilder.build(),
             wrapped,
@@ -221,6 +234,8 @@ object PipelineRunner {
             0,
             IntArray(0)
         ).callTarget
+        mark("entry CallTarget built — compileFromIR returning")
+        return target
     }
 
     /**
@@ -231,6 +246,11 @@ object PipelineRunner {
     private fun collectReferencedHashes(
         userFunctions: List<com.mezze.language.truffleir.FunctionIR>
     ): Set<com.mezze.language.typedast.Hash> {
+        val timing = System.getenv("MEZZE_TIMING") != null
+        val tStart = System.nanoTime()
+        fun mark(label: String) {
+            if (timing) System.err.println("[${(System.nanoTime() - tStart) / 1_000_000}ms]   collectReferencedHashes: $label")
+        }
         val referenced = mutableSetOf<com.mezze.language.typedast.Hash>()
         val queue = ArrayDeque<com.mezze.language.typedast.Hash>()
 
@@ -238,8 +258,10 @@ object PipelineRunner {
             referenced.add(fn.hash)
             collectHashesFromNode(fn.body, queue)
         }
+        mark("user fn IR walked (queue=${queue.size})")
 
         val depGraph = com.mezze.language.typechecker.PrecompiledStdlib.stdlibDependencyGraph
+        mark("stdlibDependencyGraph loaded (size=${depGraph.size})")
 
         while (queue.isNotEmpty()) {
             val hash = queue.removeFirst()
@@ -247,6 +269,7 @@ object PipelineRunner {
             referenced.add(hash)
             depGraph[hash]?.let { queue.addAll(it) }
         }
+        mark("transitive closure done (${referenced.size} hashes)")
 
         return referenced
     }

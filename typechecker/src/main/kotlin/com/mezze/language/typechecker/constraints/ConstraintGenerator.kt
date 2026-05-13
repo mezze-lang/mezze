@@ -11,6 +11,7 @@ import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.scope.ScopedEffectConstants
 import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.ast.Keywords
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 
 
 /**
@@ -136,7 +137,8 @@ class ConstraintGenerator(
                             throw com.mezze.language.typechecker.TypeCheckError(
                                 "Ability '$name' referenced in 'with' constraint is not defined or not imported. " +
                                 "Did you forget to import it with 'use'?",
-                                constraint.loc
+                                constraint.loc,
+                                code = ErrorCode.V0401_ABILITY_NOT_DEFINED,
                             )
                         }
                     }
@@ -579,7 +581,7 @@ class ConstraintGenerator(
                     }
                 } catch (e: com.mezze.language.typechecker.TypeCheckError) {
                     // Error recovery: collect the original error (preserves metadata), continue
-                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata) else e)
+                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata, code = e.code, hints = e.hints) else e)
                     if (item.isSimpleBinding) {
                         currentContext = currentContext.extendMono(item.variableName, MezzeType.VarType(TypeVar.fresh()))
                     }
@@ -596,7 +598,7 @@ class ConstraintGenerator(
                     // Here in Phase 2, we type-check the implementation bodies
                     validateEffectImplementation(item, currentContext)
                 } catch (e: com.mezze.language.typechecker.TypeCheckError) {
-                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata) else e)
+                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata, code = e.code, hints = e.hints) else e)
                 }
                 is ParsedImplAbilityDecl -> try {
                     // CRITICAL: Validate ability implementation bodies
@@ -684,13 +686,15 @@ class ConstraintGenerator(
                                 constraints.add(Constraint.Equality(
                                     left = registeredMethodType.returnType,
                                     right = bodyResult.type,
-                                    context = "Inherent impl return type for ${op.name}"
+                                    context = "Inherent impl return type for ${op.name}",
+                                    loc = op.loc,
                                 ))
                                 val paramRecordType = MezzeType.RecordType(fields = paramTypes, rowVar = null)
                                 constraints.add(Constraint.Equality(
                                     left = registeredMethodType.paramType,
                                     right = paramRecordType,
-                                    context = "Inherent impl param type for ${op.name}"
+                                    context = "Inherent impl param type for ${op.name}",
+                                    loc = op.loc,
                                 ))
                             }
 
@@ -720,7 +724,7 @@ class ConstraintGenerator(
                         }
                     }
                 } catch (e: com.mezze.language.typechecker.TypeCheckError) {
-                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata) else e)
+                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata, code = e.code, hints = e.hints) else e)
                 }
                 is ParsedTopLevelExpr -> {
                     // Top-level expressions (for REPL)
@@ -890,7 +894,8 @@ class ConstraintGenerator(
                                 abilityName = constraint.abilityName,
                                 abilityHash = abilityDeclarations[constraint.abilityName]?.contentHash,
                                 typeArgs = constraint.typeArgs,
-                                context = "Type annotation on ${getBindingName(binding)}"
+                                context = "Type annotation on ${getBindingName(binding)}",
+                                loc = binding.loc,
                             )
                         } else {
                             null
@@ -933,9 +938,29 @@ class ConstraintGenerator(
             Pair(allConstraints, exprResult.abilityConstraints)
         }
 
+        // expectedTypeAt: record what the user-typed body must produce, so the
+        // LSP ranker can prioritize completion candidates whose return/declared
+        // type unifies with this expected type. For `let f: A -> B = lambda`,
+        // the body slot is the lambda's body; the expected type there is `B`.
+        // For non-function annotations or non-lambda bodies, the expected type
+        // is the annotated type itself.
+        val expectedHints: Map<com.mezze.language.parsedast.Loc, MezzeType> =
+            if (typeAnnotationValue != null && expectedType != null) {
+                val fnAnnotation = expectedType as? MezzeType.FunctionType
+                val lambdaBody = (binding.value as? com.mezze.language.parsedast.ParsedLambda)?.body
+                if (fnAnnotation != null && lambdaBody != null) {
+                    // Map the lambda BODY's loc to the function's return type.
+                    // Cursor in the body lands here when LSP looks up enclosing loc.
+                    mapOf(lambdaBody.loc to fnAnnotation.returnType)
+                } else {
+                    mapOf(binding.value.loc to expectedType)
+                }
+            } else emptyMap()
+
         return exprResult.copy(
             constraints = finalConstraints,
-            abilityConstraints = abilityConstraints
+            abilityConstraints = abilityConstraints,
+            expectedTypeAt = exprResult.expectedTypeAt + expectedHints,
         )
     }
 
@@ -1310,7 +1335,8 @@ class ConstraintGenerator(
             ?: throw com.mezze.language.typechecker.TypeCheckError(
                 "Ability '$qualifiedAbilityName' is not defined or not imported. " +
                 "Did you forget to import it with 'use'?",
-                impl.loc
+                impl.loc,
+                code = ErrorCode.V0401_ABILITY_NOT_DEFINED,
             )
 
         // Build allTypeArgs: concrete abilityTypeArgs (excluding type vars) + targetTypes
@@ -1388,7 +1414,8 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: " +
                         "Undefined variable '${undefinedVar.name}'",
-                        undefinedVar.loc
+                        undefinedVar.loc,
+                        code = ErrorCode.V0702_UNDEFINED_VARIABLE,
                     )
                 }
 
@@ -1408,7 +1435,8 @@ class ConstraintGenerator(
                         if (!allFieldAccessErrors) {
                             throw com.mezze.language.typechecker.TypeCheckError(
                                 "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}",
-                                implOp.loc
+                                implOp.loc,
+                                code = ErrorCode.T0201_TYPE_MISMATCH,
                             )
                         }
                     }
@@ -1419,7 +1447,7 @@ class ConstraintGenerator(
                         // Check that actual body type matches expected return type
                         val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
                         val unificationResult = unificationSolver.solve(
-                            listOf(Constraint.Equality(actualBodyType, expectedReturnType, "Ability body validation"))
+                            listOf(Constraint.Equality(actualBodyType, expectedReturnType, "Ability body validation", loc = implOp.loc))
                         )
 
                         if (unificationResult is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure) {
@@ -1428,7 +1456,9 @@ class ConstraintGenerator(
                             throw com.mezze.language.typechecker.TypeCheckError(
                                 "Method '${implOp.name}' in impl ${abilityName} returns wrong type: " +
                                 "expected $expectedTypeStr, but body returns $actualTypeStr.",
-                                implOp.loc
+                                implOp.loc,
+                                code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                                hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                             )
                         }
                     }
@@ -1468,7 +1498,11 @@ class ConstraintGenerator(
             ?: throw com.mezze.language.typechecker.TypeCheckError(
                 "Effect '${effectLookupKey}' is not defined or not imported. " +
                 "Did you forget to import it with 'use'?",
-                impl.loc
+                impl.loc,
+                code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0505_EFFECT_NOT_DEFINED,
+                hints = listOf(
+                    "declare `effect ${effectRef.localName} { ... }` or import it with `use module::${effectRef.localName}`"
+                ),
             )
 
         // Build substitution map: 'state -> Int, etc. (associated type bindings)
@@ -1511,14 +1545,18 @@ class ConstraintGenerator(
             throw com.mezze.language.typechecker.TypeCheckError(
                 "initialize_scope requires finalize_scope for resource safety. " +
                 "Add 'finalize_scope = {} -> {}' to clean up resources when the perform block exits.",
-                initializeScope!!.loc
+                initializeScope!!.loc,
+                code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0506_SCOPED_EFFECT_INIT_FINALIZE_REQUIRED,
+                hints = listOf("scoped effects need both `initialize_scope` and `finalize_scope` operations"),
             )
         }
         if (hasFinalizer && !isScopedEffect) {
             throw com.mezze.language.typechecker.TypeCheckError(
                 "finalize_scope requires initialize_scope. " +
                 "Add initialize_scope to create the scope that finalize_scope cleans up.",
-                finalizeScope!!.loc
+                finalizeScope!!.loc,
+                code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0506_SCOPED_EFFECT_INIT_FINALIZE_REQUIRED,
+                hints = listOf("scoped effects need both `initialize_scope` and `finalize_scope` operations"),
             )
         }
 
@@ -1530,7 +1568,8 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "initialize_scope must return a record type like { field1 = value1, ... }. " +
                         "The returned record becomes the 'scope' variable available in operations.",
-                        initializeScope.loc
+                        initializeScope.loc,
+                        code = ErrorCode.T0201_TYPE_MISMATCH,
                     )
                 }
             }
@@ -1540,7 +1579,8 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "finalize_scope must return {} (unit). " +
                         "It's for cleanup side effects only, not for returning values.",
-                        finalizeScope.loc
+                        finalizeScope.loc,
+                        code = ErrorCode.T0201_TYPE_MISMATCH,
                     )
                 }
             }
@@ -1581,7 +1621,8 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "The 'scope' variable is not available in initialize_scope. " +
                         "The scope is being created here and will only be available in operations and finalize_scope.",
-                        scopeUndefined.loc
+                        scopeUndefined.loc,
+                        code = ErrorCode.V0702_UNDEFINED_VARIABLE,
                     )
                 }
 
@@ -1699,7 +1740,7 @@ class ConstraintGenerator(
                 // Use full unification which checks both field names and types
                 val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(baseContext, typeDeclarations, abilityDeclarations)
                 val unificationResult = unificationSolver.solve(
-                    listOf(Constraint.Equality(implParamType, expectedParamType, "Effect param type validation"))
+                    listOf(Constraint.Equality(implParamType, expectedParamType, "Effect param type validation", loc = implOp.loc))
                 )
                 if (unificationResult is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure) {
                     val implTypeStr = com.mezze.language.ast.prettyPrintType(implParamType)
@@ -1709,7 +1750,8 @@ class ConstraintGenerator(
                         "expected $expectedTypeStr (from effect '${effectRef.localName}'), " +
                         "but impl declares $implTypeStr. " +
                         "Parameter names and types must match exactly.",
-                        implOp.implementation.loc
+                        implOp.implementation.loc,
+                        code = ErrorCode.T0201_TYPE_MISMATCH,
                     )
                 }
             }
@@ -1724,7 +1766,7 @@ class ConstraintGenerator(
                 // (impl can remove effects or transform them - this is handled elsewhere)
                 val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(baseContext, typeDeclarations, abilityDeclarations)
                 val unificationResult = unificationSolver.solve(
-                    listOf(Constraint.Equality(implReturnType, expectedReturnType, "Effect return type validation"))
+                    listOf(Constraint.Equality(implReturnType, expectedReturnType, "Effect return type validation", loc = implOp.loc))
                 )
                 if (unificationResult is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure) {
                     val implTypeStr = com.mezze.language.ast.prettyPrintType(implReturnType)
@@ -1733,7 +1775,9 @@ class ConstraintGenerator(
                         "Effect impl '${impl.performerName}' operation '${implOp.name}' has wrong return type: " +
                         "expected $expectedTypeStr (from effect '${effectRef.localName}'), " +
                         "but impl declares $implTypeStr.",
-                        implOp.implementation.loc
+                        implOp.implementation.loc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                     )
                 }
             }
@@ -1750,7 +1794,8 @@ class ConstraintGenerator(
                     "the same effect '${effectRef.localName}' it is implementing. " +
                     "The impl should handle the effect, not propagate it. " +
                     "Either remove '${effectRef.localName}' from the effect annotation or transform it to a different effect.",
-                    implOp.implementation.loc
+                    implOp.implementation.loc,
+                    code = ErrorCode.V0504_HERMETIC_EFFECT_CONFLICT,
                 )
             }
 
@@ -1844,7 +1889,8 @@ class ConstraintGenerator(
                         }
                         throw com.mezze.language.typechecker.TypeCheckError(
                             errorMessage,
-                            scopeUndefined.loc
+                            scopeUndefined.loc,
+                            code = ErrorCode.V0702_UNDEFINED_VARIABLE,
                         )
                     }
                     // Skip validation for other undefined variables - let the normal type-checking catch errors later
@@ -1878,7 +1924,8 @@ class ConstraintGenerator(
                                         "Cannot call non-function type as function in impl '${impl.performerName}' " +
                                         "operation '${implOp.name}': type '${com.mezze.language.ast.prettyPrintType(nonFunctionType)}' " +
                                         "is not a function",
-                                        firstError.constraint.loc ?: implOp.implementation.loc
+                                        firstError.constraint.loc ?: implOp.implementation.loc,
+                                        code = ErrorCode.T0302_CANNOT_APPLY_NON_FUNCTION,
                                     )
                                 }
                             }
@@ -1899,7 +1946,8 @@ class ConstraintGenerator(
                             if (isClearTypeMismatch) {
                                 throw com.mezze.language.typechecker.TypeCheckError(
                                     "Type error in impl '${impl.performerName}' operation '${implOp.name}': ${firstError.message}",
-                                    firstError.constraint.loc ?: implOp.implementation.loc
+                                    firstError.constraint.loc ?: implOp.implementation.loc,
+                                    code = ErrorCode.T0201_TYPE_MISMATCH,
                                 )
                             }
                         }
@@ -1913,7 +1961,7 @@ class ConstraintGenerator(
                         // This is more permissive than string comparison - it allows [] to unify with List String
                         val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
                         val unificationResult = unificationSolver.solve(
-                            listOf(Constraint.Equality(actualBodyType, expectedReturnType, "Effect body validation"))
+                            listOf(Constraint.Equality(actualBodyType, expectedReturnType, "Effect body validation", loc = implOp.loc))
                         )
 
                         when (unificationResult) {
@@ -1923,7 +1971,9 @@ class ConstraintGenerator(
                                 throw com.mezze.language.typechecker.TypeCheckError(
                                     "Operation '${implOp.name}' in impl ${effectRef.localName} returns wrong type: " +
                                     "expected $expectedTypeStr, but body returns $actualTypeStr.",
-                                    implOp.loc
+                                    implOp.loc,
+                                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                                 )
                             }
                             is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
@@ -2071,7 +2121,8 @@ class ConstraintGenerator(
                         throw com.mezze.language.typechecker.TypeCheckError(
                             "Type annotation mismatch: record has extra field(s) ${extraFields.sorted().joinToString(", ")} " +
                             "not present in closed record type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }",
-                            expression.loc
+                            expression.loc,
+                            code = ErrorCode.T0203_RECORD_EXTRA_FIELDS,
                         )
                     }
                 }
@@ -2082,7 +2133,8 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Type annotation mismatch: record is missing field(s) ${missingFields.sorted().joinToString(", ")} " +
                         "required by ${if (isOpen) "open" else "closed"} record type { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }}${if (isOpen) ", ..." else ""} }",
-                        expression.loc
+                        expression.loc,
+                        code = ErrorCode.T0202_RECORD_MISSING_FIELDS,
                     )
                 }
             }
@@ -2110,7 +2162,9 @@ class ConstraintGenerator(
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Type annotation mismatch: function expects $expectedParamCount parameter(s) " +
                     "but lambda has $actualParamCount parameter(s)",
-                    expression.loc
+                    expression.loc,
+                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                 )
             }
         }
@@ -2162,7 +2216,9 @@ class ConstraintGenerator(
                         "Type annotation mismatch for '$varName': Annotation declares type variable '${typeVar.name}' " +
                         "but implementation forces it to concrete type '${com.mezze.language.ast.prettyPrintType(substituted)}'. " +
                         "The implementation must work for all types, not just specific ones.",
-                        sourceLoc
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                     )
                 }
             }
@@ -2293,7 +2349,9 @@ class ConstraintGenerator(
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Type annotation mismatch for '$varName': Implementation uses effects ${extraEffects.joinToString(", ")} " +
                     "which are not declared in the annotation.",
-                    expression.loc
+                    expression.loc,
+                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                 )
             }
 
@@ -2303,7 +2361,9 @@ class ConstraintGenerator(
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Type annotation mismatch for '$varName': Annotation declares effects ${missingEffects.joinToString(", ")} " +
                     "which are not used in the implementation.",
-                    expression.loc
+                    expression.loc,
+                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                 )
             }
         }
@@ -2338,7 +2398,9 @@ class ConstraintGenerator(
                 throw com.mezze.language.typechecker.TypeCheckError(
                     "Type annotation mismatch for '$varName': Annotation declares effects ${overpromisedEffects.joinToString(", ")} " +
                     "which are not used in the implementation.",
-                    sourceLoc
+                    sourceLoc,
+                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                 )
             }
         }
@@ -2422,7 +2484,9 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
                         "Annotation declares constraint on ${declaredVars.joinToString()} but implementation uses it on '${usage.typeVar.name}'.",
-                        sourceLoc
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                     )
                 }
             } else {
@@ -2435,7 +2499,9 @@ class ConstraintGenerator(
                     throw com.mezze.language.typechecker.TypeCheckError(
                         "Type annotation mismatch for '$varName': Implementation requires '${usage.abilityName}' on type variable '${usage.typeVar.name}', " +
                         "but the annotation does not declare this constraint.",
-                        sourceLoc
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                     )
                 }
             }
@@ -2488,7 +2554,9 @@ class ConstraintGenerator(
                                 throw com.mezze.language.typechecker.TypeCheckError(
                                     "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
                                     "Annotation declares '${annotatedTypeArg.variable.name}' but implementation uses '${usage.typeVar.name}'.",
-                                    expression.loc
+                                    expression.loc,
+                                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                                 )
                             }
                         }
@@ -2512,7 +2580,9 @@ class ConstraintGenerator(
                         throw com.mezze.language.typechecker.TypeCheckError(
                             "Type annotation mismatch for '$varName': Annotation declares ability '${annotated.abilityName}' " +
                             "which is not used in the implementation.",
-                            expression.loc
+                            expression.loc,
+                            code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                            hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                         )
                     }
                 }

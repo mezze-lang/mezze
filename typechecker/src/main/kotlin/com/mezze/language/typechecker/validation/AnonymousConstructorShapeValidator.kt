@@ -5,6 +5,7 @@ import com.mezze.language.parsedast.Loc
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.solving.UnificationResult
 import com.mezze.language.typechecker.solving.unify
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typedast.*
 
 /**
@@ -76,7 +77,8 @@ object AnonymousConstructorShapeValidator {
                                 "this use has ${describe(shape)}. " +
                                 "An anonymous constructor must use the same payload shape across all uses, " +
                                 "or declare a `type` to fix the shape.",
-                            expr.loc
+                            expr.loc,
+                            code = ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY,
                         )
                     }
                 }

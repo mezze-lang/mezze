@@ -14,6 +14,7 @@ import com.mezze.language.typechecker.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.typechecker.util.StringDistance
 import com.mezze.language.ast.Keywords
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 
 
 /**
@@ -130,7 +131,9 @@ class ExpressionConstraintGenerator {
     private fun generateBinaryOp(expr: ParsedBinaryOp, context: ConstraintContext): ConstraintResult {
         val op = com.mezze.language.parser.OperatorMapping.getBinaryOp(expr.op)
             ?: throw com.mezze.language.typechecker.TypeCheckError(
-                "Unknown operator: ${expr.op}", expr.loc
+                "Unknown operator: ${expr.op}", expr.loc,
+                code = com.mezze.language.parsedast.diagnostics.ErrorCode.T0401_UNKNOWN_OPERATOR,
+                hints = listOf("binary operators desugar to method calls; check that `${expr.op}` is a known operator"),
             )
 
         // Desugar to method call: x + y → x.add {r = y}
@@ -153,7 +156,9 @@ class ExpressionConstraintGenerator {
     private fun generateUnaryOp(expr: ParsedUnaryOp, context: ConstraintContext): ConstraintResult {
         val op = com.mezze.language.parser.OperatorMapping.getUnaryOp(expr.op)
             ?: throw com.mezze.language.typechecker.TypeCheckError(
-                "Unknown operator: ${expr.op}", expr.loc
+                "Unknown operator: ${expr.op}", expr.loc,
+                code = com.mezze.language.parsedast.diagnostics.ErrorCode.T0401_UNKNOWN_OPERATOR,
+                hints = listOf("unary operators desugar to method calls; check that `${expr.op}` is a known operator"),
             )
 
         // Desugar to method call: -x → x.neg {}
@@ -254,7 +259,7 @@ class ExpressionConstraintGenerator {
                             left = exprResult.type,
                             right = MezzeType.StringType,
                             context = "String interpolation requires String type",
-                            loc = part.expr.loc,
+                            loc = expr.loc,
                             errorContext = ErrorContext.StringInterpolation(interpolationIndex)
                         )
                     )
@@ -478,7 +483,8 @@ class ExpressionConstraintGenerator {
                             variantType = resultType,
                             constructorName = expr.localName,
                             payloadType = null,
-                            context = "Variant constructor ${expr.localName}"
+                            context = "Variant constructor ${expr.localName}",
+                            loc = expr.loc,
                         )
                     )
                     ConstraintResult(
@@ -513,7 +519,9 @@ class ExpressionConstraintGenerator {
             "'@' can only be used inside a pipe expression (|>).\n\n" +
             "  hint: Use '@' to refer to the piped value:\n" +
             "        value |> func { arg = @ }",
-            expr.loc
+            expr.loc,
+            code = com.mezze.language.parsedast.diagnostics.ErrorCode.T0402_PIPE_PLACEHOLDER_MISUSE,
+            hints = listOf("`@` is only valid in pipe rhs: `x |> f { arg = @ }`"),
         )
     }
 
@@ -523,7 +531,8 @@ class ExpressionConstraintGenerator {
         throw com.mezze.language.typechecker.TypeCheckError(
             "Internal error: PipeExpression was not desugared before type checking. " +
             "This is a compiler bug.",
-            expr.loc
+            expr.loc,
+            code = ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE,
         )
     }
 
@@ -709,7 +718,8 @@ class ExpressionConstraintGenerator {
                         metadata = mapOf(
                             "missingFields" to missingFields.toList(),
                             "allFieldNames" to allFieldNames.toList()
-                        )
+                        ),
+                        code = ErrorCode.T0202_RECORD_MISSING_FIELDS,
                     )
                 }
 
@@ -727,7 +737,8 @@ class ExpressionConstraintGenerator {
                             metadata = mapOf(
                                 "extraFields" to extraFields.toList(),
                                 "expectedFields" to resolvedType.fields.keys.toList()
-                            )
+                            ),
+                            code = ErrorCode.T0203_RECORD_EXTRA_FIELDS,
                         )
                     }
                 }
@@ -807,7 +818,8 @@ class ExpressionConstraintGenerator {
                     throw TypeCheckError(
                         message = "Method '${expr.member}' not found in ability '$receiverName'.$didYouMean Available methods: ${availableMethods.joinToString(", ")}",
                         loc = expr.loc,
-                        errorType = ErrorType.MISSING_FIELD
+                        errorType = ErrorType.MISSING_FIELD,
+                        code = ErrorCode.T0206_METHOD_NOT_FOUND,
                     )
                 }
             }
@@ -819,7 +831,8 @@ class ExpressionConstraintGenerator {
                     message = "Direct ability access '${receiverName}.${expr.member}' is not allowed. " +
                         "Use 'value.${expr.member} { args }' or '${receiverName}.${expr.member} { it = value, ... }' instead.",
                     loc = expr.loc,
-                    errorType = ErrorType.MISSING_FIELD
+                    errorType = ErrorType.MISSING_FIELD,
+                    code = ErrorCode.T0209_ABILITY_AS_VALUE,
                 )
             }
 
@@ -874,7 +887,8 @@ class ExpressionConstraintGenerator {
                     throw TypeCheckError(
                         message = "'$receiverName' is not defined. Cannot access method '${expr.member}' on undefined ability or effect.$suggestion",
                         loc = expr.loc,
-                        errorType = ErrorType.UNDEFINED_VARIABLE
+                        errorType = ErrorType.UNDEFINED_VARIABLE,
+                        code = ErrorCode.V0702_UNDEFINED_VARIABLE,
                     )
                 }
             }
@@ -934,7 +948,8 @@ class ExpressionConstraintGenerator {
                         metadata = mapOf(
                             "field" to expr.member,
                             "availableFields" to fieldNames.toList()
-                        )
+                        ),
+                        code = ErrorCode.T0205_FIELD_NOT_FOUND,
                     )
                 } else {
                     // Open record with explicit literal - still fail
@@ -946,7 +961,8 @@ class ExpressionConstraintGenerator {
                         metadata = mapOf(
                             "field" to expr.member,
                             "availableFields" to fieldNames.toList()
-                        )
+                        ),
+                        code = ErrorCode.T0303_OPEN_RECORD_FIELD_MISSING,
                     )
                 }
             }
@@ -969,7 +985,8 @@ class ExpressionConstraintGenerator {
                 fieldName = expr.member,
                 fieldType = fieldType,
                 context = "Field access ${expr.member}",
-                strictFieldCheck = isStrictFieldCheck
+                loc = expr.loc,
+                strictFieldCheck = isStrictFieldCheck,
             )
         )
 
@@ -1762,7 +1779,8 @@ class ExpressionConstraintGenerator {
             throw TypeCheckError(
                 message = "Operation '$operationName' not found in effect '$effectName'.$didYouMean Available operations: ${availableOps.joinToString(", ")}",
                 loc = expr.loc,
-                errorType = ErrorType.MISSING_FIELD
+                errorType = ErrorType.MISSING_FIELD,
+                code = ErrorCode.T0206_METHOD_NOT_FOUND,
             )
         }
 
@@ -2573,7 +2591,11 @@ class ExpressionConstraintGenerator {
                     message = "Cannot construct newtype '${expr.constructor}' — its constructor is private to the defining module. " +
                         "Use a public constructor function from the module instead.",
                     loc = expr.loc,
-                    errorType = ErrorType.MISSING_FIELD
+                    errorType = ErrorType.MISSING_FIELD,
+                    code = ErrorCode.M0803_NOT_EXPORTED,
+                    hints = listOf(
+                        "newtype constructors are not exported; look for a `pub` factory function in the defining module"
+                    ),
                 )
             }
         }
@@ -2610,7 +2632,8 @@ class ExpressionConstraintGenerator {
                     variantType = resultType,
                     constructorName = expr.constructor,
                     payloadType = null,
-                    context = "Variant construction ${expr.constructor}"
+                    context = "Variant construction ${expr.constructor}",
+                    loc = expr.loc,
                 )
             )
 
@@ -2648,7 +2671,9 @@ class ExpressionConstraintGenerator {
                                         message = "Variant constructor ${expr.constructor} expects exact fields ${expectedFields.sorted().joinToString(", ")} " +
                                                 "but got extra field(s): ${extraFields.sorted().joinToString(", ")}",
                                         loc = expr.loc,
-                                        errorType = ErrorType.TYPE_MISMATCH
+                                        errorType = ErrorType.TYPE_MISMATCH,
+                                        code = ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY,
+                                        hints = listOf("remove: ${extraFields.sorted().joinToString(", ")}"),
                                     )
                                 }
 
@@ -2659,7 +2684,9 @@ class ExpressionConstraintGenerator {
                                         message = "Variant constructor ${expr.constructor} expects fields ${expectedFields.sorted().joinToString(", ")} " +
                                                 "but missing field(s): ${missingFields.sorted().joinToString(", ")}",
                                         loc = expr.loc,
-                                        errorType = ErrorType.MISSING_FIELD
+                                        errorType = ErrorType.MISSING_FIELD,
+                                        code = ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY,
+                                        hints = listOf("add: ${missingFields.sorted().joinToString(", ")}"),
                                     )
                                 }
                             }
@@ -2675,7 +2702,8 @@ class ExpressionConstraintGenerator {
                     variantType = resultType,
                     constructorName = expr.constructor,
                     payloadType = payloadResult.type,
-                    context = "Variant construction ${expr.constructor}"
+                    context = "Variant construction ${expr.constructor}",
+                    loc = expr.loc,
                 )
             )
 
@@ -2819,7 +2847,8 @@ class ExpressionConstraintGenerator {
                                 Constraint.Equality(
                                     left = annotationType,
                                     right = bodyType,
-                                    context = "Effect associated type '$assocName' in ${annotationInstance.name}"
+                                    context = "Effect associated type '$assocName' in ${annotationInstance.name}",
+                                    loc = expr.loc,
                                 )
                             )
                         }
@@ -2883,7 +2912,8 @@ class ExpressionConstraintGenerator {
                                 Constraint.Equality(
                                     left = annotationType,
                                     right = MezzeType.VarType(bodyTypeVar),
-                                    context = "Ability associated type '$assocName' in ${annotationConstraint.abilityName}"
+                                    context = "Ability associated type '$assocName' in ${annotationConstraint.abilityName}",
+                                    loc = expr.loc,
                                 )
                             )
                         }
@@ -3096,7 +3126,9 @@ class ExpressionConstraintGenerator {
                     metadata = mapOf(
                         "functionName" to functionName,
                         "spreadVariable" to spreadVarName
-                    )
+                    ),
+                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0708_SPREAD_ONLY_RECORD_FORBIDDEN,
+                    hints = listOf("write each field explicitly: `{ x = $spreadVarName.x, y = $spreadVarName.y }`"),
                 )
             }
         }
@@ -3248,7 +3280,8 @@ class ExpressionConstraintGenerator {
                         message = "Extra field(s) '${extraFields.joinToString(", ")}' in call to '$functionName'. " +
                                 "Function expects fields: ${expectedFields.sorted().joinToString(", ")}",
                         loc = expr.loc,
-                        errorType = ErrorType.TYPE_MISMATCH
+                        errorType = ErrorType.TYPE_MISMATCH,
+                        code = ErrorCode.T0203_RECORD_EXTRA_FIELDS,
                     )
                 }
 
@@ -3598,7 +3631,8 @@ class ExpressionConstraintGenerator {
                 Constraint.MustBeOpen(
                     type = scrutineeResult.type,
                     bindingName = context.currentBindingName,
-                    context = "Match has wildcard pattern - scrutinee may have additional constructors"
+                    context = "Match has wildcard pattern - scrutinee may have additional constructors",
+                    loc = expr.loc,
                 )
             )
         }
@@ -3639,7 +3673,9 @@ class ExpressionConstraintGenerator {
                     }
                     throw TypeCheckError(
                         "Or-pattern alternatives must bind the same variables. ${errorParts.joinToString("; ")}",
-                        expr.loc
+                        expr.loc,
+                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0605_OR_PATTERN_BINDS_DIFFERENT_VARS,
+                        hints = listOf("all alternatives in an or-pattern must bind the same variables"),
                     )
                 }
 
@@ -3650,7 +3686,8 @@ class ExpressionConstraintGenerator {
                         Constraint.Equality(
                             left = varType,
                             right = firstType,
-                            context = "Or-pattern binding '$varName' must have same type in all alternatives"
+                            context = "Or-pattern binding '$varName' must have same type in all alternatives",
+                            loc = expr.loc,
                         )
                     )
                 }
@@ -3687,7 +3724,8 @@ class ExpressionConstraintGenerator {
                             constructors = mapOf(com.mezze.language.ast.BuiltinTypes.TRUE to null, com.mezze.language.ast.BuiltinTypes.FALSE to null),
                             rowVar = null
                         ),
-                        context = "Match guard must be Bool"
+                        context = "Match guard must be Bool",
+                        loc = guard.loc,
                     )
                 )
             }
@@ -3775,7 +3813,8 @@ class ExpressionConstraintGenerator {
                     left = caseType,
                     right = resultType,
                     context = "Match case must have same type as other cases",
-                    isMatchCaseContext = true  // OPTIMIZATION: Use flag instead of string parsing
+                    isMatchCaseContext = true,  // OPTIMIZATION: Use flag instead of string parsing
+                    loc = expr.loc,
                 )
             )
         }
@@ -4127,7 +4166,12 @@ class ExpressionConstraintGenerator {
                     throw TypeCheckError(
                         message = "Unknown performer '${handlerName}'. Performer has not been defined with 'impl Effect for ${handlerName}'.",
                         loc = expr.loc,
-                        errorType = ErrorType.UNDEFINED_VARIABLE
+                        errorType = ErrorType.UNDEFINED_VARIABLE,
+                        code = ErrorCode.V0702_UNDEFINED_VARIABLE,
+                        hints = listOf(
+                            "declare a performer: `impl SomeEffect for $handlerName { ... }`",
+                            "or import it from the module that defines it",
+                        ),
                     )
                 }
             }
@@ -4142,7 +4186,9 @@ class ExpressionConstraintGenerator {
                 throw TypeCheckError(
                     message = "Multiple handlers for the same effect '$effect': $handlerNames. Each effect can only be handled by one performer.",
                     loc = expr.loc,
-                    errorType = ErrorType.CONSTRAINT_VIOLATION
+                    errorType = ErrorType.CONSTRAINT_VIOLATION,
+                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0507_HANDLER_DUPLICATE,
+                    hints = listOf("keep only one handler for `$effect` in this `perform` block"),
                 )
             }
         }
@@ -4192,7 +4238,9 @@ class ExpressionConstraintGenerator {
                     message = "Expression is pure (has no effects), but handlers were provided: $handlerNames. " +
                         "Remove the perform block or use an expression that actually uses effects.",
                     loc = expr.loc,
-                    errorType = ErrorType.CONSTRAINT_VIOLATION
+                    errorType = ErrorType.CONSTRAINT_VIOLATION,
+                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0508_HANDLER_ON_PURE_EXPR,
+                    hints = listOf("drop the `perform` wrapper — there are no effects to handle"),
                 )
             }
 
@@ -4210,7 +4258,12 @@ class ExpressionConstraintGenerator {
                             "Expression uses: ${allEffects.joinToString(", ")}. " +
                             "Handlers provided: $handlersList",
                         loc = expr.loc,
-                        errorType = ErrorType.CONSTRAINT_VIOLATION
+                        errorType = ErrorType.CONSTRAINT_VIOLATION,
+                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0509_HANDLER_EFFECT_MISMATCH,
+                        hints = listOf(
+                            "add a handler for one of: ${allEffects.joinToString(", ")}",
+                            "or remove handlers that don't match",
+                        ),
                     )
                 }
 
@@ -4229,7 +4282,9 @@ class ExpressionConstraintGenerator {
                                 "Expression uses: ${allEffects.joinToString(", ")}. " +
                                 "Remove the unnecessary handler.",
                             loc = expr.loc,
-                            errorType = ErrorType.CONSTRAINT_VIOLATION
+                            errorType = ErrorType.CONSTRAINT_VIOLATION,
+                            code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0510_HANDLER_UNNECESSARY,
+                            hints = listOf("remove the handler — no matching effect is performed"),
                         )
                     }
                 }
@@ -4607,7 +4662,8 @@ class ExpressionConstraintGenerator {
             throw TypeCheckError(
                 message = "Operation '$operationName' not found in effect '$effectName'.$didYouMean Available operations: ${availableOps.joinToString(", ")}",
                 loc = expr.loc,
-                errorType = ErrorType.MISSING_FIELD
+                errorType = ErrorType.MISSING_FIELD,
+                code = ErrorCode.T0206_METHOD_NOT_FOUND,
             )
         }
 

@@ -681,7 +681,8 @@ class TypeValidator(
                 ValidationError.MissingAbilityImplementation(
                     abilityName = abilityName,
                     typeName = typeDisplay,
-                    context = constraint.context ?: bindingContext
+                    context = constraint.context ?: bindingContext,
+                    loc = constraint.loc,
                 )
             )
         }
@@ -955,7 +956,7 @@ class TypeValidator(
                     bindingName = bindingName,
                     annotatedType = annotatedType,
                     inferredType = finalType,
-                    loc = null
+                    loc = decl.loc,
                 )
             )
         }

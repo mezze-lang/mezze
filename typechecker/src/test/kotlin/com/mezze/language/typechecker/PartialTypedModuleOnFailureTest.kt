@@ -55,4 +55,39 @@ class PartialTypedModuleOnFailureTest {
         assertTrue("also_good" in names, "expected `also_good` in partial typedModule, got: $names")
     }
 
+    @Test
+    fun `Failure carries partial typedModule when global unification fails (annotation vs body mismatch)`() {
+        // `broken` has an explicit annotation that disagrees with its body —
+        // this drives the GLOBAL constraint solver to a Failure (the
+        // per-binding pass alone can't resolve the conflict between the
+        // annotated function type and the inferred body type). Previously
+        // this path returned `typedModule = null` (TypeChecker.kt:537),
+        // wiping out type info for siblings. After #149 it must emit a
+        // partial typedModule so editors still hover the surviving decls.
+        //
+        // Uses checkParsedModule directly (sealed result) instead of
+        // typeCheck (which throws on first error and never reaches the
+        // partial-typedModule path).
+        val src = """
+            let good = { x: Int } -> x
+            let also_good = {} -> 42
+            let broken: { x: Int } -> Str = { x } -> x
+        """.trimIndent()
+        val parsed = parser.parseParsedModule(src, "test.mz")
+        val r = typeChecker.checkParsedModule(parsed, Paths.get("."), enablePrelude = false)
+
+        assertTrue(
+            r is TypeChecker.TypeCheckResult.Failure,
+            "expected Failure due to broken's annotation mismatch, got: $r"
+        )
+        val failure = r as TypeChecker.TypeCheckResult.Failure
+        val typedModule = failure.typedModule
+        assertNotNull(typedModule, "global-solve Failure should still emit a partial typedModule")
+
+        val letDecls = typedModule!!.decls.filterIsInstance<TypedLetDecl>()
+        val names = letDecls.map { it.name }.toSet()
+        assertTrue("good" in names, "expected `good` in partial typedModule, got: $names")
+        assertTrue("also_good" in names, "expected `also_good` in partial typedModule, got: $names")
+    }
+
 }

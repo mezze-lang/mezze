@@ -38,16 +38,35 @@ class MezzeParser {
             val lexer = Lexer(source)
             val tokens = lexer.tokenize()
 
-            // In strict mode, fail on lexer errors
+            // In strict mode, fail on lexer errors. The error token's text
+            // is the real lexer message (e.g. "Unterminated string"); for
+            // single-character ERROR tokens the text is that character, so
+            // we prefix with "Unexpected character" only in that case.
             val firstError = tokens.find { it.type == com.mezze.language.parser.internal.TokenType.ERROR }
             if (firstError != null) {
+                val isUnterminatedString = firstError.text.startsWith("Unterminated string")
+                val msg = if (firstError.text.length == 1) {
+                    "Unexpected character '${firstError.text}'"
+                } else {
+                    firstError.text
+                }
+                val lexCode = if (isUnterminatedString)
+                    com.mezze.language.parsedast.diagnostics.ErrorCode.P0001_UNTERMINATED_STRING
+                else
+                    com.mezze.language.parsedast.diagnostics.ErrorCode.P0002_UNEXPECTED_CHARACTER
+                val lexHints = if (isUnterminatedString)
+                    listOf("add a closing `\"` to terminate the string literal")
+                else
+                    emptyList()
                 throw ParseException(
-                    "Unexpected character '${firstError.text}'",
+                    msg,
                     firstError.position,
                     firstError.line,
                     firstError.column,
                     source,
-                    file
+                    file,
+                    code = lexCode,
+                    hints = lexHints
                 )
             }
 
@@ -63,7 +82,9 @@ class MezzeParser {
                     result.line,
                     result.column,
                     source,
-                    file
+                    file,
+                    code = result.code,
+                    hints = result.hints
                 )
             }
         } finally {
@@ -101,6 +122,36 @@ class MezzeParser {
         try {
             val lexer = Lexer(source)
             val tokens = lexer.tokenize()
+
+            // Lexer-level errors (unterminated strings, unknown characters)
+            // are reported up front with the real lexer message rather than
+            // being silently skipped downstream and surfacing as a generic
+            // "Do block must end with a result expression". Each error keeps
+            // its position so editors can underline the offending span.
+            for (tok in tokens) {
+                if (tok.type == TokenType.ERROR) {
+                    val isUnterminatedString = tok.text.startsWith("Unterminated string")
+                    val lexCode = if (isUnterminatedString)
+                        com.mezze.language.parsedast.diagnostics.ErrorCode.P0001_UNTERMINATED_STRING
+                    else
+                        com.mezze.language.parsedast.diagnostics.ErrorCode.P0002_UNEXPECTED_CHARACTER
+                    val lexHints = if (isUnterminatedString)
+                        listOf("add a closing `\"` to terminate the string literal")
+                    else
+                        emptyList()
+                    errors.add(ParseException(
+                        tok.text,  // e.g. "Unterminated string"
+                        tok.position,
+                        tok.line,
+                        tok.column,
+                        source,
+                        file,
+                        code = lexCode,
+                        hints = lexHints
+                    ))
+                }
+            }
+
             var stream = TokenStream(tokens)
 
             // Skip leading newlines and collect annotations
@@ -142,7 +193,9 @@ class MezzeParser {
                             result.line,
                             result.column,
                             source,
-                            file
+                            file,
+                            code = result.code,
+                            hints = result.hints
                         ))
 
                         // Synchronize: skip to next top-level declaration
@@ -271,7 +324,10 @@ class MezzeParser {
                         result.message,
                         result.position,
                         result.line,
-                        result.column
+                        result.column,
+                        isFatal = result.isFatal,
+                        code = result.code,
+                        hints = result.hints
                     )
                 }
             }
@@ -862,7 +918,10 @@ class ParseException(
     val column: Int = 0,
     val sourceCode: String? = null,
     val file: String? = null,
-    val length: Int = 1
+    val length: Int = 1,
+    val code: com.mezze.language.parsedast.diagnostics.ErrorCode =
+        com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED,
+    val hints: List<String> = emptyList()
 ) : Exception(formatParseError(errorMessage, position, line, column, sourceCode, file, length)) {
 
     companion object {

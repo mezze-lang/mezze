@@ -1,0 +1,12 @@
+error[T0201]: Type mismatch for argument 'r' in call to 'take': expected {r: {x: Int}} -> Int but got {r: {x: Int, y: Int}} -> 'o297 — unexpected 'y'
+  --> t0201-record-extra-field.mz:2:16
+   |
+ 1 | let take = { r: { x: Int } } -> r.x
+ 2 | let go = {} -> take { r = { x = 1, y = 2 } }
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 3 | 
+   |
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `mez --explain T0201`.

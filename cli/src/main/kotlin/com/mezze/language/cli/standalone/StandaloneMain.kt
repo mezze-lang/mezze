@@ -26,14 +26,28 @@ object StandaloneMain {
             return
         }
 
+        // Register store opener (see CLI Main.kt for rationale; #168).
+        com.mezze.language.store.MezzeStoreOpener.register { file ->
+            com.mezze.language.codebase.SQLiteMezzeStore.readOnly(file)
+        }
+
+        val timing = System.getenv("MEZZE_TIMING") != null
+        val t0 = System.nanoTime()
+        fun mark(label: String) {
+            if (timing) System.err.println("[${(System.nanoTime() - t0) / 1_000_000}ms] $label")
+        }
+        mark("main() entered")
+
         try {
             val stream = StandaloneMain::class.java.getResourceAsStream("/com/mezze/standalone/blobs.sqlite")
                 ?: throw RuntimeException("blobs.sqlite not found in JAR")
 
             val bytes = stream.readBytes()
             stream.close()
+            mark("blobs.sqlite resource read (${bytes.size / 1024}KB)")
 
-            StandaloneHelper.executeFromBlobsSqlite(bytes, args.toList())
+            StandaloneHelper.executeFromBlobsSqlite(bytes, args.toList(), timing, t0)
+            mark("execute returned")
         } catch (e: Exception) {
             System.err.println("Error: ${e.message}")
             if (args.contains("--debug")) e.printStackTrace()

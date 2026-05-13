@@ -1,0 +1,12 @@
+error[T0202]: Type annotation mismatch: record is missing field(s) age required by closed record type { age: ..., name: ... }
+  --> t0202-record-missing-field.mz:2:21
+   |
+ 1 | type Person = { name: Str, age: Int }
+ 2 | let alice: Person = { name = "Alice" }
+                         ^^^^^^^^^^^^^^^^^^
+ 3 | 
+   |
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `mez --explain T0202`.

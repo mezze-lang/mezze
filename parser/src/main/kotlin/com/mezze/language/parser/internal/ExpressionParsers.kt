@@ -896,6 +896,13 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                 var finalResult: Pair<ParsedExpr, TokenStream>? = null
                 var lastStatementWasLet = false
                 var lastLetName: String? = null
+                // Position of the `let` keyword of the last statement, so the
+                // "Do block must end with a result expression" error can point
+                // at the actual offending `let`, not the (much later) position
+                // where the parser noticed the missing trailing expression.
+                // Only valid when lastStatementWasLet is true.
+                var lastLetLine = 0
+                var lastLetCol = 0
 
                 // Capture the deepest fatal failure encountered while trying to
                 // parse a statement body. Fatal failures (`isFatal = true`)
@@ -982,6 +989,8 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                                                     is ParsedVariablePattern -> pattern.name
                                                     else -> null
                                                 }
+                                                lastLetLine = letToken.value.line
+                                                lastLetCol = letToken.value.column
                                             }
                                             is ParseResult.Failure -> { keepIfFatal(expr); break }
                                         }
@@ -1046,41 +1055,46 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                     // instead of the generic do-block-shape message.
                     fatalFailure!!
                 } else {
-                    val errorMsg = if (lastStatementWasLet && lastLetName != null) {
-                        """Do block must end with a result expression, not a 'let' statement.
-The last statement is 'let $lastLetName = ...', but 'do' blocks need a final expression that produces the result.
-
-Fix: Add an expression after the let statement, for example:
-  do
-    let $lastLetName = ...
-    $lastLetName  # <-- Return the value
-
-Or if you meant to use 'let rec' for a recursive function:
-  let rec $lastLetName = { ... } -> ...  # Define at module level instead"""
+                    val (errorMsg, errorCode, errorHints) = if (lastStatementWasLet && lastLetName != null) {
+                        Triple(
+                            "Do block must end with a result expression, not the 'let $lastLetName = ...' statement",
+                            com.mezze.language.parsedast.diagnostics.ErrorCode.P0112_DO_BLOCK_LAST_STATEMENT_IS_LET,
+                            listOf("add a final expression after the let; e.g. `return-value`")
+                        )
                     } else if (lastStatementWasLet) {
-                        """Do block must end with a result expression, not a 'let' statement.
-
-Fix: Add an expression after your let statements:
-  do
-    let x = 1
-    let y = 2
-    x + y  # <-- Final expression returns the result"""
+                        Triple(
+                            "Do block must end with a result expression, not a 'let' statement",
+                            com.mezze.language.parsedast.diagnostics.ErrorCode.P0113_DO_BLOCK_LAST_STATEMENT_NEEDS_EXPR,
+                            listOf("add a final expression after the let; e.g. `return-value`")
+                        )
                     } else if (statements.isEmpty()) {
-                        """Do block is empty. A 'do' block needs at least one expression.
-
-Example:
-  do
-    let x = 1
-    x + 1"""
+                        Triple(
+                            "Do block is empty; needs at least one expression",
+                            com.mezze.language.parsedast.diagnostics.ErrorCode.P0114_DO_BLOCK_EMPTY,
+                            listOf("add at least one expression inside the do block")
+                        )
                     } else {
-                        """Do block must end with a result expression.
-
-Example:
-  do
-    let x = 1
-    x + 1  # <-- Final expression"""
+                        Triple(
+                            "Do block must end with a result expression",
+                            com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED,
+                            emptyList<String>()
+                        )
                     }
-                    currentStream.failure(errorMsg)
+                    // For "ends with a let" errors, point at the offending
+                    // `let` keyword rather than the post-statement position
+                    // where the parser noticed the missing trailing expr.
+                    if (lastStatementWasLet) {
+                        ParseResult.Failure(
+                            errorMsg,
+                            currentStream.getSourcePosition(),
+                            lastLetLine,
+                            lastLetCol,
+                            code = errorCode,
+                            hints = errorHints
+                        )
+                    } else {
+                        currentStream.failure(errorMsg, code = errorCode, hints = errorHints)
+                    }
                 }
             }
             is ParseResult.Failure -> {
@@ -1693,38 +1707,23 @@ internal val MezzeParser.pipeExpression: Parser<ParsedExpr>
                             placeholderCount == 0 -> {
                                 val rightLoc = right.value.loc
                                 ParseResult.Failure(
-                                    """Pipe expression is missing '@' placeholder.
-                                    |
-                                    |The pipe operator (|>) passes a value to the right-hand side, but there's no '@' to receive it.
-                                    |
-                                    |  hint: Add '@' where you want the piped value to appear:
-                                    |        value |> func { arg = @ }
-                                    """.trimMargin(),
+                                    "Pipe expression is missing '@' placeholder on the right-hand side",
                                     right.remaining.getSourcePosition(),
                                     rightLoc.startLine,
-                                    rightLoc.startCol
+                                    rightLoc.startCol,
+                                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0115_PIPE_MISSING_PLACEHOLDER,
+                                    hints = listOf("add `@` where the piped value should go: `x |> f { arg = @ }`")
                                 )
                             }
                             placeholderCount > 1 -> {
                                 val locations = findPipePlaceholderLocations(right.value)
-                                val locDesc = locations.mapIndexed { i, loc ->
-                                    "  ${i + 1}. line ${loc.startLine}, column ${loc.startCol}"
-                                }.joinToString("\n")
                                 ParseResult.Failure(
-                                    """Pipe expression has multiple '@' placeholders (only one allowed).
-                                    |
-                                    |Found $placeholderCount '@' placeholders at:
-                                    |$locDesc
-                                    |
-                                    |Each pipe (|>) should have exactly one '@' to indicate where the value goes.
-                                    |
-                                    |  hint: If you need the value in multiple places, bind it first:
-                                    |        let x = value
-                                    |        func { a = x, b = x }
-                                    """.trimMargin(),
+                                    "Pipe expression has $placeholderCount '@' placeholders (exactly one allowed)",
                                     right.remaining.getSourcePosition(),
                                     locations.firstOrNull()?.startLine ?: op.line,
-                                    locations.firstOrNull()?.startCol ?: op.column
+                                    locations.firstOrNull()?.startCol ?: op.column,
+                                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0116_PIPE_MULTIPLE_PLACEHOLDERS,
+                                    hints = listOf("each pipe should have exactly one `@`; bind the value first if you need it in multiple places")
                                 )
                             }
                             else -> {
@@ -2468,7 +2467,8 @@ internal fun MezzeParser.parseParsedInterpolatedString(
             if (exprText.isBlank()) {
                 return remaining.failure(
                     "Empty interpolation \$(): nothing between the parens. " +
-                    "Did you mean to put an expression there, or write \\\$() to escape the dollar sign?"
+                    "Did you mean to put an expression there, or write \\\$() to escape the dollar sign?",
+                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0110_EMPTY_INTERPOLATION
                 )
             }
             // Parse the expression inside $(...)

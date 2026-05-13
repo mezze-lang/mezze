@@ -1,0 +1,13 @@
+error[T0201]: Field `x` expects Int but got Str in call to `greet`
+  --> t0201-arg-field-mismatch.mz:3:18
+   |
+ 1 | let greet: { x: Int } -> Str = { x } -> "hi"
+ 2 | 
+ 3 | let main = {} -> greet { x = "dasd" }
+                      ^^^^^^^^^^^^^^^^^^^^
+ 4 | 
+   |
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `mez --explain T0201`.

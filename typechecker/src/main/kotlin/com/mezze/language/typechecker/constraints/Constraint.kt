@@ -273,7 +273,17 @@ data class ConstraintResult(
     // reference (`{xs:[a], p: a->Bool} -> [a]`) and the call's `.type` falls
     // back to the surrounding contextType (`unknown`) — which then breaks LSP
     // per-segment chain inlay hints in pipe / dot-chain expressions.
-    val callReturnTypes: Map<Loc, MezzeType> = emptyMap()
+    val callReturnTypes: Map<Loc, MezzeType> = emptyMap(),
+    // Per-source-position "expected type" hint, populated wherever a
+    // constraint with a Loc fires its `expected` side. Used by the LSP
+    // ranker to surface completion candidates whose return/declared type
+    // unifies with what the typechecker thinks belongs there. Resolved
+    // after constraint solving by applying the final substitution.
+    //
+    // Independent of error production: even if every constraint solves
+    // cleanly, this map is still populated so completion ranking works
+    // in the happy path, not just when something already went wrong.
+    val expectedTypeAt: Map<Loc, MezzeType> = emptyMap(),
 ) {
     /**
      * Information about a resolved method call (ability method or inherent method).
@@ -356,7 +366,8 @@ data class ConstraintResult(
                 patternWarnings = results.flatMap { it.patternWarnings },
                 referencedBindings = results.flatMap { it.referencedBindings }.toSet(),
                 methodCallResolutions = results.fold(emptyMap()) { acc, r -> acc + r.methodCallResolutions },
-                callReturnTypes = results.fold(emptyMap()) { acc, r -> acc + r.callReturnTypes }
+                callReturnTypes = results.fold(emptyMap()) { acc, r -> acc + r.callReturnTypes },
+                expectedTypeAt = results.fold(emptyMap()) { acc, r -> acc + r.expectedTypeAt },
             )
         }
 

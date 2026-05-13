@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.printing
 
+import com.mezze.language.parsedast.diagnostics.display
 import com.mezze.language.typechecker.*
 import com.mezze.language.typechecker.module.ModuleError
 import com.mezze.language.typechecker.module.ModuleTypeCheckResult
@@ -39,27 +40,31 @@ object ErrorFormatter {
         colorize: Boolean = false
     ): String {
         return buildString {
-            // Header — show the specific phase only if it's informative.
-            // The TypeChecker.TypeCheckError variant always has a phase.
-            appendLine("❌ Type Error: ${error.phase}")
-            appendLine("━".repeat(50))
+            // Prefer the stable ErrorCode when set (migrated site).
+            // Otherwise fall back to the phase string (legacy path).
+            val migratedCode = error.code.takeIf {
+                it != com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED
+            }
+            val bracket = if (migratedCode != null) {
+                "[${migratedCode.display()}]"
+            } else {
+                "[${error.phase}]"
+            }
+            appendLine("error$bracket: ${error.message}")
 
-            // Location
             if (error.loc != null) {
                 val fileInfo = error.loc.file.ifEmpty { "<input>" }
-                appendLine("   --> $fileInfo:${error.loc.startLine}:${error.loc.startCol}")
+                appendLine("  --> $fileInfo:${error.loc.startLine}:${error.loc.startCol}")
             }
 
-            // Source code context
             if (sourceCode != null && error.loc != null) {
                 append(SourceContext.formatCodeSnippet(sourceCode, error.loc))
             }
 
-            // Error message
-            appendLine()
-            appendLine("Error: ${error.message}")
-
-            // Phase-specific formatting can be added here if needed
+            // Hint lines under the snippet, matching the exception-class overload.
+            for (hint in error.hints) {
+                appendLine("  = hint: $hint")
+            }
         }.trim()
     }
 
@@ -72,40 +77,97 @@ object ErrorFormatter {
     fun format(
         error: TypeCheckError,
         sourceCode: String? = null,
-        colorize: Boolean = false
+        colorize: Boolean = false,
     ): String {
         return buildString {
-            // Header — only show the category subtitle when it's
-            // informative. GENERAL means "we didn't bother classifying
-            // this," so it adds noise; drop the bracket entirely for that.
-            val header = if (error.errorType == ErrorType.GENERAL) {
-                "❌ Type Error"
-            } else {
-                // TYPE_MISMATCH -> "Type Mismatch"
-                val human = error.errorType.name.split('_').joinToString(" ") {
-                    it.lowercase().replaceFirstChar { c -> c.uppercase() }
-                }
-                "❌ Type Error: $human"
+            // Rust-style header: `error[CODE]: message`.
+            // If the new ErrorCode is set (migrated site), render the
+            // stable code like `T0210`. Otherwise fall back to the
+            // legacy ErrorType name. UNCATEGORIZED + GENERAL skip the
+            // bracket entirely.
+            val migratedCode = error.code.takeIf {
+                it != com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED
             }
-            appendLine(header)
-            appendLine("━".repeat(50))
+            val codeSlot = when {
+                migratedCode != null -> "[${migratedCode.display()}]"
+                error.errorType == ErrorType.GENERAL -> ""
+                else -> {
+                    // TYPE_MISMATCH -> "Type Mismatch"
+                    val human = error.errorType.name.split('_').joinToString(" ") {
+                        it.lowercase().replaceFirstChar { c -> c.uppercase() }
+                    }
+                    "[$human]"
+                }
+            }
+            appendLine("error$codeSlot: ${error.message}")
 
             val location = error.loc
             if (location != null) {
                 val fileInfo = location.file.ifEmpty { "<input>" }
-                appendLine("   --> $fileInfo:${location.startLine}:${location.startCol}")
+                appendLine("  --> $fileInfo:${location.startLine}:${location.startCol}")
             }
 
-            // Source code context
+            // Source code context — the caret snippet stays; it's the
+            // most useful single piece of info per error.
             if (sourceCode != null && location != null) {
                 append(SourceContext.formatCodeSnippet(sourceCode, location))
             }
 
-            // Error message
-            appendLine()
-            appendLine("Error: ${error.message}")
+            // Rust-style hint lines under the snippet.
+            for (hint in error.hints) {
+                appendLine("  = hint: $hint")
+            }
         }.trim()
     }
+
+    /**
+     * Format a [MezzeDiagnostic] — the canonical Rust-style rendering for
+     * every error in the compiler. Output shape:
+     *
+     *     error[T0201]: <message>
+     *       --> file:line:col
+     *        |
+     *      4 | <source line>
+     *        |       ^^^^^
+     *        |
+     *        = hint: <hint 1>
+     *        = hint: <hint 2>
+     *        = note: <note message>  --> file:line:col
+     *
+     * `sourceCode` is the full file body; needed for the caret snippet.
+     * Pass null in tests / when the source isn't available.
+     */
+    fun formatDiagnostic(
+        diag: com.mezze.language.parsedast.diagnostics.MezzeDiagnostic,
+        sourceCode: String? = null,
+    ): String = buildString {
+        val codeStr = diag.code.display()
+        appendLine("error[$codeStr]: ${diag.message}")
+
+        val loc = diag.loc
+        val fileInfo = loc.file.ifEmpty { "<input>" }
+        appendLine("  --> $fileInfo:${loc.startLine}:${loc.startCol}")
+
+        if (sourceCode != null) {
+            append(SourceContext.formatCodeSnippet(sourceCode, loc))
+        }
+
+        if (diag.hints.isNotEmpty() || diag.notes.isNotEmpty()) {
+            // Hint and note lines (Rust uses `= note:` / `= help:`).
+            for (hint in diag.hints) {
+                appendLine("  = hint: $hint")
+            }
+            for (note in diag.notes) {
+                val sameFile = note.loc.file == loc.file
+                val locStr = if (sameFile) {
+                    ":${note.loc.startLine}:${note.loc.startCol}"
+                } else {
+                    "${note.loc.file}:${note.loc.startLine}:${note.loc.startCol}"
+                }
+                appendLine("  = note: ${note.message} ($locStr)")
+            }
+        }
+    }.trimEnd()
 
     /**
      * Format validation error.
@@ -119,7 +181,7 @@ object ErrorFormatter {
         error: ValidationError,
         sourceCode: String? = null
     ): String {
-        return when (error) {
+        val body = when (error) {
             is ValidationError.AbilityNotSatisfied -> formatAbilityError(error, sourceCode)
             is ValidationError.EffectNotHandled -> formatEffectError(error, sourceCode)
             is ValidationError.NonExhaustiveMatch -> formatExhaustivenessError(error, sourceCode)
@@ -143,6 +205,20 @@ object ErrorFormatter {
             is ValidationError.TopLevelExpressionPerformedEffects -> formatTopLevelExpressionPerformedEffectsError(error, sourceCode)
             is ValidationError.MissingContentHash -> formatMissingContentHashError(error, sourceCode)
         }
+
+        // Rust-style `error[Vxxxx]: <message>` header prepended to the
+        // existing rendered body. Hints (if any) appended at the end as
+        // `  = hint: <text>` lines. Body output from per-subtype renderers
+        // is preserved unchanged for backwards compatibility with snapshots
+        // that depend on the type-diff / suggestion sections.
+        return buildString {
+            appendLine("error[${error.code.display()}]: ${error.message()}")
+            append(body)
+            for (hint in error.hints) {
+                appendLine()
+                append("  = hint: $hint")
+            }
+        }.trimEnd()
     }
 
     /**
@@ -664,176 +740,65 @@ private fun formatMissingContentHashError(
     // MODULE ERROR FORMATTERS
     // ========================================================================
 
-    private fun formatModuleNotFoundError(error: ModuleError.ModuleNotFound): String {
-        return buildString {
-            appendLine("❌ Module Error [Module Not Found]")
-            appendLine("━".repeat(50))
-            appendLine()
-            appendLine("Error: ${error.message}")
-            appendLine()
-            appendLine("Searched in:")
-            error.searchPaths.forEach { path ->
-                appendLine("   - $path")
-            }
-            appendLine()
-            appendLine("💡 Suggestions:")
-            appendLine("   - Check the module path spelling")
-            appendLine("   - Ensure the module file exists")
-            appendLine("   - Verify the module is in the search path")
-        }.trim()
-    }
+    /**
+     * Common Rust-style header for module errors:
+     *
+     *     error[<code>]: <message>
+     *       --> file:line:col
+     *      <snippet>
+     *       = hint: ...
+     *
+     * `loc` is optional — when absent we omit the file pointer / snippet.
+     */
+    private fun renderModuleError(
+        error: ModuleError,
+        loc: com.mezze.language.parsedast.Loc? = null,
+    ): String = buildString {
+        appendLine("error[${error.code.display()}]: ${error.message}")
 
-    private fun formatModuleCircularDependencyError(error: ModuleError.CircularDependency): String {
-        return buildString {
-            appendLine("❌ Module Error [Circular Dependency]")
-            appendLine("━".repeat(50))
-            appendLine()
-            appendLine("Error: ${error.message}")
-            appendLine()
-            appendLine("💡 Suggestions:")
-            appendLine("   - Break the circular dependency by extracting shared types to a new module")
-            appendLine("   - Consider using forward declarations if supported")
-        }.trim()
-    }
+        if (loc != null) {
+            val fileInfo = loc.file.ifEmpty { "<input>" }
+            appendLine("  --> $fileInfo:${loc.startLine}:${loc.startCol}")
 
-    private fun formatModuleParseError(error: ModuleError.ParseError): String {
-        return buildString {
-            appendLine("❌ Module Error [Parse Error]")
-            appendLine("━".repeat(50))
-            appendLine()
-            appendLine("Error: ${error.message}")
-            appendLine()
-            appendLine("💡 Suggestions:")
-            appendLine("   - Check the module syntax")
-            appendLine("   - Ensure all declarations are well-formed")
-        }.trim()
-    }
-
-    private fun formatModuleImportError(error: ModuleError.ImportError): String {
-        return buildString {
-            appendLine("❌ Module Error [Import Error]")
-            appendLine("━".repeat(50))
-            appendLine()
-            appendLine("Error: ${error.message}")
-            appendLine()
-            appendLine("💡 Suggestions:")
-            appendLine("   - Verify the import path is correct")
-            appendLine("   - Check that the module exports the requested item")
-            appendLine("   - Ensure the imported item is public (exported)")
-        }.trim()
-    }
-
-    private fun formatModuleExportNotFoundError(error: ModuleError.ExportNotFound): String {
-        return buildString {
-            appendLine("❌ Module Error [Export Not Found]")
-            appendLine("━".repeat(50))
-
-            // Show source location if available
-            error.loc?.let { loc ->
-                val fileInfo = loc.file.ifEmpty { "<input>" }
-                appendLine("   --> $fileInfo:${loc.startLine}:${loc.startCol}")
-
-                // Try to show source code snippet if we can
-                if (loc.file.isNotEmpty()) {
-                    try {
-                        val file = java.io.File(loc.file)
-                        if (file.exists()) {
-                            val lines = file.readLines()
-                            if (loc.startLine > 0 && loc.startLine <= lines.size) {
-                                val line = lines[loc.startLine - 1]
-                                appendLine("    |")
-                                appendLine("${loc.startLine.toString().padStart(3)} | $line")
-                                val underlineLen = if (loc.startLine == loc.endLine && loc.endCol > loc.startCol) loc.endCol - loc.startCol else 1
-                                appendLine("    | ${" ".repeat(loc.startCol - 1)}${"^".repeat(maxOf(1, underlineLen))}")
-                            }
-                        }
-                    } catch (_: Exception) {
-                        // Ignore file read errors
+            // Show a snippet from disk if the file path is real. Module
+            // errors are reported before the source string is threaded
+            // through, so we read from disk here (best-effort).
+            if (loc.file.isNotEmpty()) {
+                try {
+                    val file = java.io.File(loc.file)
+                    if (file.exists()) {
+                        val src = file.readText()
+                        append(SourceContext.formatCodeSnippet(src, loc))
                     }
+                } catch (_: Exception) {
+                    // Ignore file read errors — fall back to header only.
                 }
-                appendLine()
             }
+        }
 
-            appendLine("Error: Export '${error.exportName}' not found in module '${error.modulePath}'")
-            appendLine()
-            appendLine("💡 Suggestions:")
-            appendLine("   - Check the export name spelling")
-            appendLine("   - Verify the module exports this item with 'pub'")
-            appendLine("   - Use 'use ${error.modulePath}' to see available exports")
-        }.trim()
-    }
+        for (hint in error.hints) {
+            appendLine("  = hint: $hint")
+        }
+    }.trimEnd()
 
-    private fun formatModulePrivateExportError(error: ModuleError.PrivateExport): String {
-        return buildString {
-            appendLine("❌ Module Error [Private Item]")
-            appendLine("━".repeat(50))
+    private fun formatModuleNotFoundError(error: ModuleError.ModuleNotFound): String =
+        renderModuleError(error)
 
-            // Show source location if available
-            error.loc?.let { loc ->
-                val fileInfo = loc.file.ifEmpty { "<input>" }
-                appendLine("   --> $fileInfo:${loc.startLine}:${loc.startCol}")
+    private fun formatModuleCircularDependencyError(error: ModuleError.CircularDependency): String =
+        renderModuleError(error)
 
-                // Try to show source code snippet if we can
-                if (loc.file.isNotEmpty()) {
-                    try {
-                        val file = java.io.File(loc.file)
-                        if (file.exists()) {
-                            val lines = file.readLines()
-                            if (loc.startLine > 0 && loc.startLine <= lines.size) {
-                                val line = lines[loc.startLine - 1]
-                                appendLine("    |")
-                                appendLine("${loc.startLine.toString().padStart(3)} | $line")
-                                val underlineLen = if (loc.startLine == loc.endLine && loc.endCol > loc.startCol) loc.endCol - loc.startCol else 1
-                                appendLine("    | ${" ".repeat(loc.startCol - 1)}${"^".repeat(maxOf(1, underlineLen))}")
-                            }
-                        }
-                    } catch (_: Exception) {
-                        // Ignore file read errors
-                    }
-                }
-                appendLine()
-            }
+    private fun formatModuleParseError(error: ModuleError.ParseError): String =
+        renderModuleError(error)
 
-            appendLine("Error: '${error.exportName}' exists in '${error.modulePath}' but is not public")
-            appendLine()
-            appendLine("💡 To fix this, add 'pub' to the definition in ${error.modulePath}:")
-            appendLine()
-            appendLine("   pub let ${error.exportName} = ...")
-        }.trim()
-    }
+    private fun formatModuleImportError(error: ModuleError.ImportError): String =
+        renderModuleError(error)
 
-    private fun formatModuleInternalModuleAccessError(error: ModuleError.InternalModuleAccess): String {
-        return buildString {
-            appendLine("❌ Module Error [Internal Module Access]")
-            appendLine("━".repeat(50))
+    private fun formatModuleExportNotFoundError(error: ModuleError.ExportNotFound): String =
+        renderModuleError(error, error.loc)
 
-            // Show source location if available
-            error.loc?.let { loc ->
-                appendLine()
-                val fileInfo = if (loc.file.isNotEmpty()) " --> ${loc.file}" else ""
-                appendLine("$fileInfo:${loc.startLine}:${loc.startCol}")
-            }
+    private fun formatModulePrivateExportError(error: ModuleError.PrivateExport): String =
+        renderModuleError(error, error.loc)
 
-            appendLine()
-            appendLine("Error: ${error.message}")
-            appendLine()
-
-            // Extract the internal folder name for better suggestions
-            val internalFolder = when {
-                error.toModule.contains("::internal::") -> "internal/"
-                error.toModule.contains("::private::") -> "private/"
-                error.toModule.startsWith("internal::") -> "internal/"
-                error.toModule.startsWith("private::") -> "private/"
-                else -> "internal/"
-            }
-
-            appendLine("💡 The '$internalFolder' folder convention means this module is")
-            appendLine("   only accessible from within its parent package.")
-            appendLine()
-            appendLine("Suggestions:")
-            appendLine("   - Move the code that needs this module into the parent package")
-            appendLine("   - Move the module out of the '$internalFolder' folder to make it public")
-            appendLine("   - Create a public API that wraps the internal functionality")
-        }.trim()
-    }
+    private fun formatModuleInternalModuleAccessError(error: ModuleError.InternalModuleAccess): String =
+        renderModuleError(error, error.loc)
 }

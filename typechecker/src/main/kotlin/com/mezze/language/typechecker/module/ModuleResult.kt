@@ -91,34 +91,75 @@ enum class ExportedItemType {
 
 /**
  * Module loading errors.
+ *
+ * Every subtype IS the discriminator — no string parsing needed to recover
+ * the [ErrorCode]. Subtypes override [code] (and [hints] where applicable).
  */
 sealed class ModuleError(override val message: String) : Exception(message) {
+    /** Stable error code; UNCATEGORIZED until migrated. */
+    open val code: com.mezze.language.parsedast.diagnostics.ErrorCode =
+        com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED
+
+    /** Rust-style `= hint:` lines rendered under the snippet. */
+    open val hints: List<String> = emptyList()
+
     data class ModuleNotFound(
         val modulePath: String,
         val searchPaths: List<String>
-    ) : ModuleError("Module not found: $modulePath. Searched in: ${searchPaths.joinToString(", ")}")
+    ) : ModuleError("Module not found: $modulePath. Searched in: ${searchPaths.joinToString(", ")}") {
+        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0801_MODULE_NOT_FOUND
+        override val hints: List<String> = listOf(
+            "check the module path spelling and ensure the file exists"
+        )
+    }
 
     data class CircularDependency(
         val cycle: List<String>
-    ) : ModuleError("Circular dependency detected: ${cycle.joinToString(" -> ")}")
+    ) : ModuleError("Circular dependency detected: ${cycle.joinToString(" -> ")}") {
+        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0802_CIRCULAR_DEPENDENCY
+        override val hints: List<String> = listOf(
+            "break the cycle by removing one of the imports or extracting shared code to a third module"
+        )
+    }
 
     data class ParseError(
         val modulePath: String,
         val error: String
-    ) : ModuleError("Failed to parse module $modulePath: $error")
+    ) : ModuleError("Failed to parse module $modulePath: $error") {
+        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0804_MODULE_HAS_ERRORS
+        override val hints: List<String> = listOf(
+            "fix the parse errors in $modulePath first"
+        )
+    }
 
     data class ImportError(
         val modulePath: String,
         val itemName: String,
         val reason: String
-    ) : ModuleError("Cannot import '$itemName' from '$modulePath': $reason")
+    ) : ModuleError("Cannot import '$itemName' from '$modulePath': $reason") {
+        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0804_MODULE_HAS_ERRORS
+        override val hints: List<String> = listOf(
+            "fix the underlying error in $modulePath, then re-import"
+        )
+    }
 
     data class ExportNotFound(
         val modulePath: String,
         val exportName: String,
         val loc: com.mezze.language.parsedast.Loc? = null,
         val availableExports: List<String> = emptyList()
-    ) : ModuleError("Export '$exportName' not found in module '$modulePath'")
+    ) : ModuleError("Export '$exportName' not found in module '$modulePath'") {
+        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0803_NOT_EXPORTED
+        override val hints: List<String>
+            get() = buildList {
+                val closest = com.mezze.language.parsedast.diagnostics.LevenshteinSuggest
+                    .closest(exportName, availableExports)
+                if (closest != null) {
+                    add("did you mean `$closest`?")
+                }
+                add("check that the symbol is declared `pub` in $modulePath")
+            }
+    }
 
     /**
      * Thrown when trying to import an item that exists but is not public.
@@ -127,8 +168,15 @@ sealed class ModuleError(override val message: String) : Exception(message) {
         val modulePath: String,
         val exportName: String,
         val loc: com.mezze.language.parsedast.Loc? = null
-    ) : ModuleError("'$exportName' exists in module '$modulePath' but is not public. Add 'pub' to export it.")
+    ) : ModuleError("'$exportName' exists in module '$modulePath' but is not public. Add 'pub' to export it.") {
+        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0803_NOT_EXPORTED
+        override val hints: List<String> = listOf(
+            "add `pub` before the declaration in the source module"
+        )
+    }
 
+    // TODO: no dedicated M code for internal module access yet — leaving UNCATEGORIZED
+    // until an M0805 (or similar) is allocated in ErrorCode.kt.
     data class InternalModuleAccess(
         val fromModule: String,
         val toModule: String,
@@ -138,7 +186,11 @@ sealed class ModuleError(override val message: String) : Exception(message) {
             "Cannot access internal module '$toModule' from outside its package"
         else
             "Module '$fromModule' cannot access internal module '$toModule'"
-    )
+    ) {
+        override val hints: List<String> = listOf(
+            "internal modules can only be used by sibling modules inside the same package"
+        )
+    }
 }
 
 // ============================================================================

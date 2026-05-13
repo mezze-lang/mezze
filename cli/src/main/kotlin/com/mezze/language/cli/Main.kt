@@ -84,6 +84,17 @@ private fun detectProjectRoot(): File? {
 }
 
 fun main(args: Array<String>) {
+    // Register the SQLite-backed store opener so PrecompiledStdlib can
+    // hydrate from `stdlib.sqlite` without reflection. Must happen before
+    // any code touches PrecompiledStdlib (its init block calls
+    // openStdlibResourceAsStore → MezzeStoreOpener.current()). #168 — the
+    // reflective workaround for the `:typechecker` → `:store-sqlite` dep
+    // cycle silently failed under native-image and forced compile-from-
+    // source on every startup.
+    com.mezze.language.store.MezzeStoreOpener.register { file ->
+        com.mezze.language.codebase.SQLiteMezzeStore.readOnly(file)
+    }
+
     // Auto-detect and set mezze.project.root if not already set
     // This is mainly for development mode - stdlib is embedded in production native binary
     if (System.getProperty("mezze.project.root") == null) {
@@ -109,6 +120,11 @@ fun main(args: Array<String>) {
 
     if (command == "--version" || command == "-v") {
         showVersion()
+        return
+    }
+
+    if (command == "--explain") {
+        com.mezze.language.cli.commands.ExplainCommand().execute(remainingArgs)
         return
     }
 
@@ -178,8 +194,9 @@ private fun showHelp() {
     println("  lsp       Start Language Server Protocol server")
     println()
     println("GLOBAL OPTIONS:")
-    println("  -h, --help     Show this help message")
-    println("  -v, --version  Show version information")
+    println("  -h, --help        Show this help message")
+    println("  -v, --version     Show version information")
+    println("  --explain <CODE>  Show long-form docs for an error code (e.g. T0201)")
     println()
     println("EXAMPLES:")
     println("  mez init my_app --app           # Create an app package")

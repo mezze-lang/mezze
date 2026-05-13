@@ -1,0 +1,8 @@
+error[V0701]: Duplicate variable declaration: 'x' is already defined in this scope
+  --> v0701-duplicate-decl.mz:2:9
+   |
+ 1 | let x = 1
+ 2 | let x = 2
+             ^
+ 3 | 
+   |

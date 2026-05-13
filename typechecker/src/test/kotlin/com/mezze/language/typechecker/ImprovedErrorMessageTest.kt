@@ -88,9 +88,10 @@ class ImprovedErrorMessageTest {
 
         val error = getErrorMessage(source)
         assertNotNull(error, "Expected type error")
-        // Should mention type mismatch
+        // Field-level mismatch produces "Field `x` expects ..."; arg-level
+        // produces "Type mismatch for argument ...".
         assertTrue(
-            error!!.contains("mismatch") || error.contains("expected"),
+            error!!.contains("mismatch") || error.contains("expected") || error.contains("expects"),
             "Error should mention type mismatch: $error"
         )
     }
@@ -105,9 +106,8 @@ class ImprovedErrorMessageTest {
 
         val error = getErrorMessage(source)
         assertNotNull(error, "Expected type error")
-        // Should mention type mismatch
         assertTrue(
-            error!!.contains("mismatch") || error.contains("expected"),
+            error!!.contains("mismatch") || error.contains("expected") || error.contains("expects"),
             "Error should mention type mismatch: $error"
         )
     }

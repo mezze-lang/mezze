@@ -35,6 +35,15 @@ interface MezzeStore : AutoCloseable {
     /** Get IR bytes only (avoids deserializing typed). For executor hot path. */
     fun getIR(hash: Hash): ByteArray?
 
+    /**
+     * Enumerate every blob hash in the store. Used by bulk-load paths
+     * (e.g. PrecompiledStdlib startup) that need to materialise the entire
+     * IR set up front instead of chasing decl-by-decl. Default
+     * implementation returns empty — implementations that can iterate
+     * efficiently (SQL, etc.) should override.
+     */
+    fun getAllBlobHashes(): List<Hash> = emptyList()
+
     // ====================================================================
     // NAMES — human-readable labels pointing to hashes
     // ====================================================================

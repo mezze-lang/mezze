@@ -1,0 +1,16 @@
+error[P0001]: Unterminated string
+  --> unterminated-string.mz:4:19
+  |
+4 |   println { msg = "bye }
+  |                   ^
+  |
+  = hint: add a closing `"` to terminate the string literal
+
+error: Do block must end with a result expression
+  --> unterminated-string.mz:4:11
+  |
+4 |   println { msg = "bye }
+  |           ^
+  |
+
+error: aborting due to 2 previous parse errors
