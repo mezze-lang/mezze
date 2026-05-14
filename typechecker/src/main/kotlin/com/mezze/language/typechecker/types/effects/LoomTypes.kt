@@ -147,6 +147,14 @@ object LoomTypes {
             MezzeType.RecordType(emptyMap())
         )
 
+        // __native_loom_park_until: {predicate: {} -> Bool <...>} -> {}
+        context["__native_loom_park_until"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf(
+                "predicate" to effectPolymorphicThunk(MezzeType.BoolType)
+            )),
+            MezzeType.RecordType(emptyMap())
+        )
+
         // __native_promise_is_complete: {p: Promise} -> Bool
         context["__native_promise_is_complete"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(

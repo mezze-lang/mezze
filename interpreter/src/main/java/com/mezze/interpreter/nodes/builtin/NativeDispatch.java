@@ -2510,6 +2510,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_loom_is_done", (r, c) -> AsyncNatives.loomIsDone(r));
         HANDLERS.put("__native_loom_is_cancelled", (r, c) -> AsyncNatives.loomIsCancelled(r));
         HANDLERS.put("__native_loom_check", (r, c) -> AsyncNatives.loomCheck(r));
+        HANDLERS.put("__native_loom_park_until", (r, c) -> AsyncNatives.loomParkUntil(r, c));
         HANDLERS.put("__native_loom_any", (r, c) -> AsyncNatives.loomAny(r));
         HANDLERS.put("__native_loom_settle", (r, c) -> AsyncNatives.loomSettle(r));
         HANDLERS.put("__native_loom_scope_cancel_all", (r, c) -> AsyncNatives.loomScopeCancelAll(r));

@@ -962,6 +962,30 @@ public final class AsyncNatives {
         return MezzeUnit.INSTANCE;
     }
 
+    /**
+     * Park the current task until {@code predicate} returns True.
+     * Spin-park with exponential backoff up to a small cap; LockSupport
+     * .parkNanos lets the scheduler hibernate the virtual thread. An
+     * explicit waker would be cheaper for predicates that change
+     * rarely; can land later if profile demands.
+     */
+    @TruffleBoundary
+    public static MezzeUnit loomParkUntil(MezzeRecord args, IndirectCallNode callNode) {
+        MezzeFunction predicate = getFunction(args, "predicate");
+        long backoffNanos = 1_000L; // 1µs to start
+        final long maxBackoffNanos = 1_000_000L; // 1ms cap
+        while (true) {
+            Object result = callThunkFunction(predicate, callNode);
+            if (result instanceof Boolean b && b) return MezzeUnit.INSTANCE;
+            LockSupport.parkNanos(backoffNanos);
+            if (Thread.interrupted()) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Park interrupted");
+            }
+            backoffNanos = Math.min(backoffNanos * 2, maxBackoffNanos);
+        }
+    }
+
     @TruffleBoundary
     public static MezzeRecord loomJoin(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeFunction left = getFunction(args, "l");

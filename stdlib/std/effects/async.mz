@@ -68,7 +68,10 @@ effect Async where {
   ## Await all promises, returning Results (never throws).
   settle: { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async>,
   ## Run f within a structured concurrency scope.
-  scoped: { f: { sc: Scope 'a } -> 'a <...> } -> 'a <Async, ...>
+  scoped: { f: { sc: Scope 'a } -> 'a <...> } -> 'a <Async, ...>,
+  ## Suspend until {@code predicate} returns True. How "suspend" is
+  ## realized depends on the handler.
+  park: { predicate: {} -> Bool <...> } -> {} <Async, ...>
 }
 
 ## Default handler using Project Loom virtual threads.
@@ -93,6 +96,7 @@ impl Async for LoomAsync where {
   any = { ps } -> __native_loom_any { ps = ps },
   settle = { ps } -> __native_loom_settle { ps = ps },
   scoped = { f } -> __native_loom_scoped { f = f },
+  park = { predicate } -> __native_loom_park_until { predicate = predicate },
 }
 
 ## LoomAsync with configurable concurrency limit (0 = unbounded).
@@ -122,6 +126,7 @@ impl Async for LoomAsyncWith { max_concurrent: Int } where {
   any = { ps } -> __native_loom_any { ps = ps },
   settle = { ps } -> __native_loom_settle { ps = ps },
   scoped = { f } -> __native_loom_scoped { f = f },
+  park = { predicate } -> __native_loom_park_until { predicate = predicate },
 }
 
 ## OS platform thread implementation for true parallelism on CPU-bound work.
@@ -146,6 +151,7 @@ impl Async for OSThreadAsync where {
   any = { ps } -> __native_os_any { ps = ps },
   settle = { ps } -> __native_os_settle { ps = ps },
   scoped = { f } -> __native_os_scoped { f = f },
+  park = { predicate } -> __native_loom_park_until { predicate = predicate },
 }
 
 ## OSThreadAsync with configurable thread pool size (0 = unbounded).
@@ -170,6 +176,7 @@ impl Async for OSThreadAsyncWith { pool_size: Int } where {
   any = { ps } -> __native_os_any { ps = ps },
   settle = { ps } -> __native_os_settle { ps = ps },
   scoped = { f } -> __native_os_scoped { f = f },
+  park = { predicate } -> __native_loom_park_until { predicate = predicate },
 }
 
 ## Cooperative single-threaded scheduler using continuations.
@@ -246,6 +253,8 @@ impl Async for CoopAsync where {
       }
  },
   scoped = { f } -> f { sc = Scope { val = {} } },
+  ## Stub: spin-poll. Real coop park lands with #106.
+  park = { predicate } -> __native_loom_park_until { predicate = predicate },
 }
 
 ## Spawn and immediately await (synchronous helper).
