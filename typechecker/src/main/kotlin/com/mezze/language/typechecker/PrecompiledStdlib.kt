@@ -38,6 +38,15 @@ object PrecompiledStdlib {
         this.store = store
     }
 
+    /**
+     * Optional store handle exposed for error-message hint logic that
+     * wants to peek into the repo-wide decl index (e.g. "you referenced
+     * effect X but never imported it — it lives in module Y"). Returns
+     * null when no store has been wired (some test paths).
+     */
+    @JvmStatic
+    fun getStore(): com.mezze.language.store.MezzeStore? = store
+
     @OptIn(ExperimentalSerializationApi::class)
     private val cbor = Cbor {
         ignoreUnknownKeys = true
@@ -174,7 +183,7 @@ object PrecompiledStdlib {
         // proper v7 rows into the seed file (slice C).
         val forceRecompile = System.getProperty("mezze.stdlib.force-recompile") == "1"
         val fullCache = if (forceRecompile) null
-            else tryLoadFullFromStore() ?: tryLoadFullFromSqlite()
+            else tryLoadFromSnapshot() ?: tryLoadFullFromStore() ?: tryLoadFullFromSqlite()
 
         if (fullCache != null) {
             // Fast path: all data loaded from sqlite
@@ -376,6 +385,42 @@ object PrecompiledStdlib {
             if (refs.isNotEmpty()) graph[hash] = refs
         }
         return graph
+    }
+
+    /**
+     * Try to load the stdlib snapshot via the build-time-initialized
+     * [StdlibSnapshotData] holder. On a native binary built with
+     * `--initialize-at-build-time=...StdlibSnapshotData`, the CBOR decode
+     * happened at build time and the resulting object graph lives in the
+     * image heap — this method is just field reads (zero runtime cost).
+     *
+     * On the JVM, [StdlibSnapshotData]'s `init {}` runs lazily on first
+     * access here; the cost is the same one-time CBOR decode as before,
+     * just relocated to the holder so we share one decode across paths.
+     *
+     * Returns null when the resource is absent (older builds), the
+     * version mismatched, or decoding failed. Callers fall through to
+     * the SQLite paths.
+     */
+    private fun tryLoadFromSnapshot(): FullCacheData? {
+        if (!StdlibSnapshotData.present) return null
+        val ic = StdlibSnapshotData.importContext ?: return null
+        if (System.getenv("MEZZE_DEBUG") != null) {
+            System.err.println(
+                "[PrecompiledStdlib] Loaded from StdlibSnapshotData (image heap): " +
+                "${StdlibSnapshotData.functions.size} functions, " +
+                "${StdlibSnapshotData.abilityImpls.size} impls"
+            )
+        }
+        return FullCacheData(
+            importContext = ic,
+            functions = StdlibSnapshotData.functions,
+            performers = StdlibSnapshotData.performers,
+            dependencyGraph = StdlibSnapshotData.dependencyGraph,
+            abilityImpls = StdlibSnapshotData.abilityImpls,
+            declHashes = StdlibSnapshotData.declHashes,
+            moduleHashes = StdlibSnapshotData.moduleHashes,
+        )
     }
 
     @OptIn(ExperimentalSerializationApi::class)

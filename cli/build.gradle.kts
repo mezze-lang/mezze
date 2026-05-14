@@ -183,10 +183,28 @@ val compileStdlib by tasks.registering(JavaExec::class) {
     mainClass.set("com.mezze.language.cli.StdlibPrecompilerKt")
 
     val outputFile = layout.buildDirectory.file("generated/resources/stdlib.sqlite")
+    // StdlibPrecompiler writes stdlib-snapshot.cbor next to stdlib.sqlite —
+    // this is the SQLite-free bootstrap path used by the native binary
+    // (sqlite-jdbc is stripped from the native classpath; the snapshot
+    // CBOR carries the same FunctionIRs + prelude + dependency graph).
+    val snapshotFile = layout.buildDirectory.file("generated/resources/META-INF/mezze/stdlib-snapshot.cbor")
     val stdlibDir = rootProject.projectDir
 
-    args = listOf(outputFile.get().asFile.absolutePath, stdlibDir.absolutePath)
+    // The snapshot lands under META-INF/mezze/ — create the dir before
+    // StdlibPrecompiler tries to write into it.
+    doFirst {
+        snapshotFile.get().asFile.parentFile.mkdirs()
+    }
+    args = listOf(
+        outputFile.get().asFile.absolutePath,
+        stdlibDir.absolutePath,
+        // Third arg = absolute path for the CBOR snapshot. Older
+        // StdlibPrecompiler invocations (without this arg) still work —
+        // it derives the path from outputFile's parent.
+        snapshotFile.get().asFile.absolutePath,
+    )
     outputs.file(outputFile)
+    outputs.file(snapshotFile)
     inputs.dir(rootProject.projectDir.resolve("stdlib/std"))
 
     // Needs access to stdlib source files for parsing
@@ -204,9 +222,46 @@ sourceSets.main {
     resources.srcDir(layout.buildDirectory.dir("generated/resources"))
 }
 
+// Bundle the per-library runtime jars into a single zip resource at
+// META-INF/mezze/native-classpath.zip. `mez build --native` extracts this
+// at user-app build time and passes the unpacked jars to native-image
+// individually — keeping each jar's `module-info.class` intact so
+// native-image's Truffle language registration works. Without this,
+// native-image gets the merged shadowJar (no module-info) and fails at
+// runtime with "No language and polyglot implementation was found".
+//
+// Pure resource bundling — no extra files on disk for the user.
+val bundleNativeClasspath by tasks.registering(Zip::class) {
+    group = "build"
+    description = "Zip per-library runtime jars for embedding inside `mez`"
+    archiveFileName.set("native-classpath.zip")
+    // Land the zip where the resources srcDir above will pick it up,
+    // under a META-INF prefix so it doesn't collide with other top-level
+    // resources.
+    destinationDirectory.set(layout.buildDirectory.dir("generated/resources/META-INF/mezze"))
+    // Use Gradle's resolved runtimeClasspath rather than the shadowJar
+    // output. shadowJar already merged everything into one fat-jar; we
+    // need the originals.
+    from(configurations.runtimeClasspath)
+    // Drop directory entries — we only need the jar files themselves.
+    includeEmptyDirs = false
+}
+
+// processResources picks up `generated/resources/` via the srcDir above,
+// so it implicitly consumes bundleNativeClasspath's output. Make the dep
+// explicit so Gradle 8.x's validation doesn't error.
+tasks.named("processResources") {
+    dependsOn(bundleNativeClasspath)
+}
+
 // shadowJar depends on compileStdlib so stdlib.db is always fresh in the JAR
 tasks.shadowJar {
     dependsOn("compileStdlib")
+    // bundleNativeClasspath embeds the per-library jars as a resource so
+    // `mez build --native` can hand original (un-merged) jars to
+    // native-image — required for Truffle's language registration to find
+    // MezzeLanguageProvider.
+    dependsOn(bundleNativeClasspath)
     archiveFileName.set("mezze-lang.jar")
     mergeServiceFiles()
     // Truffle API is a multi-release JAR — JDK 21+ version of JDKAccessor
@@ -322,43 +377,26 @@ graalvmNative {
                 println("Building with PGO profile: ${pgoProfile.absolutePath}")
             }
 
-            args.addAll(listOf(
-                // Essential Polyglot support
-                "-H:IncludeResources=META-INF/truffle-languages/.*",
-                "-H:IncludeResources=META-INF/services/.*",
+            // Shared native-image flags live in a sectioned text file so
+            // the CLI's own build and the user-app build path
+            // (NativeBuildPath.kt) stay in sync. See the file's header
+            // for format; both consumers parse it identically.
+            val sharedFlags = parseNativeImageFlags(
+                file("src/main/resources/META-INF/mezze/native-image-flags.txt")
+            )
 
-                // Include stdlib as resources (embedded in native binary)
-                "-H:IncludeResources=stdlib/.*\\.mz",
-                "-H:IncludeResources=stdlib/MANIFEST.txt",
-                // stdlib.sqlite is the pre-compiled stdlib (FunctionIRs +
-                // TypedModule blobs). PrecompiledStdlib reads it via
-                // `getResourceAsStream("stdlib.sqlite")`. The previous
-                // glob `stdlib\.db` was a typo — no such resource exists,
-                // so the native binary shipped without stdlib and any
-                // file using `use std::...` failed to typecheck silently.
-                "-H:IncludeResources=stdlib\\.sqlite",
+            // Common (resource includes, charsets, Truffle inlining).
+            args.addAll(sharedFlags["common"].orEmpty())
 
-                // Include all charsets for language support
-                "-H:+AddAllCharsets",
+            // Init-at-build-time packages: shared list + the CLI binary
+            // has no extra entries today.
+            for (pkg in sharedFlags["init-at-build-time"].orEmpty()) {
+                args.add("--initialize-at-build-time=$pkg")
+            }
 
-                // Initialize V2 interpreter classes at build time
-                "--initialize-at-build-time=com.mezze.interpreter",
-
-                // Initialize datastructures classes at build time (MezzeSeq, MezzeList, etc.)
-                "--initialize-at-build-time=com.mezze.datastructures",
-
-                // Initialize kotlin and kotlinx classes at build time
-                // Required for AST serialization and related static initializers
-                "--initialize-at-build-time=kotlin",
-                "--initialize-at-build-time=kotlinx",
-
-                // Parser and AST classes
-                "--initialize-at-build-time=com.mezze.language.parser",
-                "--initialize-at-build-time=com.mezze.language.ast",
-
-                // Truffle runtime optimizations
-                "-H:+TruffleHostInlining"
-            ))
+            // Resources only the CLI binary embeds (e.g. native-classpath.zip,
+            // consumed by `mez build --native` at user-build time).
+            args.addAll(sharedFlags["cli-only-resources"].orEmpty())
 
             // G1GC only supported on Linux
             val os = System.getProperty("os.name").lowercase()
@@ -478,4 +516,26 @@ tasks.register<Delete>("cleanInstall") {
         mezzeHome.map { File(it, "cache") },
         mezzeHome.map { File(it, "bin/mez") }
     )
+}
+
+/**
+ * Parse the shared native-image flags file used by both this build
+ * and the user-app build path. Format matches
+ * `NativeImageFlags.parse` exactly (sections in `[brackets]`, `#`
+ * comments, blank lines ignored).
+ */
+fun parseNativeImageFlags(file: File): Map<String, List<String>> {
+    val sections = LinkedHashMap<String, MutableList<String>>()
+    var current: MutableList<String>? = null
+    for (rawLine in file.readLines()) {
+        val line = rawLine.trim()
+        if (line.isEmpty() || line.startsWith("#")) continue
+        if (line.startsWith("[") && line.endsWith("]")) {
+            val name = line.substring(1, line.length - 1)
+            current = sections.getOrPut(name) { mutableListOf() }
+            continue
+        }
+        current?.add(line)
+    }
+    return sections
 }

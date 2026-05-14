@@ -128,6 +128,31 @@ object StandaloneHelper {
     }
 
     /**
+     * Execute from a fully AOT-embedded app — [com.mezze.language.cli.standalone.embedded.EmbeddedApp]'s
+     * static fields are already populated (build-time initializer ran in
+     * the native-image build JVM, snapshot in `.data`). No SQLite, no
+     * JDBC, no resource decode.
+     *
+     * The cold-start critical path: read a few static fields, build the
+     * Truffle engine + context, eval. Aim for <100ms total.
+     */
+    @JvmStatic
+    fun executeFromEmbedded(args: List<String>, timing: Boolean, t0: Long) {
+        fun mark(label: String) {
+            if (timing) System.err.println("[${(System.nanoTime() - t0) / 1_000_000}ms] $label")
+        }
+
+        val embedded = com.mezze.language.cli.standalone.embedded.EmbeddedApp
+        check(embedded.present) { "executeFromEmbedded called but EmbeddedApp.present is false" }
+
+        val functions = embedded.functions
+        val performers = embedded.performerRecords
+        mark("embedded functions in hand (${functions.size})")
+
+        executeWithTruffle(functions, performers, embedded.entryName, args, timing, t0)
+    }
+
+    /**
      * Resolve where profile / coverage / allocation output goes. Defaults
      * to the current directory; override with MEZZE_OUTPUT_DIR env var.
      */

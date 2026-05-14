@@ -32,6 +32,12 @@ import java.io.File
 fun main(args: Array<String>) {
     val outputPath = args[0]
     val projectRoot = args.getOrElse(1) { "." }
+    // Optional 3rd arg: where to write the SQLite-free CBOR snapshot.
+    // Defaults to `stdlib-snapshot.cbor` next to the sqlite output for
+    // backwards-compat with older invocations.
+    val snapshotPath = args.getOrElse(2) {
+        File(outputPath).resolveSibling("stdlib-snapshot.cbor").absolutePath
+    }
 
     System.setProperty("mezze.project.root", projectRoot)
     // Force slow path so PrecompiledStdlib retains stdlibTypedModules /
@@ -49,6 +55,51 @@ fun main(args: Array<String>) {
 
     val initTime = (System.nanoTime() - startTime) / 1_000_000
     println("Stdlib compiled: ${functions.size} functions, ${performers.size} performers (${initTime}ms)")
+
+    // Eagerly typecheck every stdlib `.mz` file so its decls — especially
+    // `effect` and `performer` declarations — show up in stdlib.sqlite's
+    // `decls` table. Without this, the V0505 "did you mean to import this
+    // effect?" code action can't surface stdlib effects (Log, FileSystem,
+    // etc.) because they were never typechecked during prelude init.
+    // The cost is small (~5-10s); the alternative is lazy typecheck at
+    // import time, which means stdlib effects are invisible to the
+    // import-hints query until someone happens to use them.
+    //
+    // We go through `ModuleLoader.loadModuleWithDependencies` and feed each
+    // result into `ModuleTypeChecker.typeCheckModule()` — the same call the
+    // typechecker uses when user code imports a module. That populates
+    // ModuleTypeChecker.globalCache, which the StorePopulator loop below
+    // reads from to write the `decls` rows.
+    val stdlibEagerStart = System.nanoTime()
+    val resolver = ModuleResolver.create()
+    val stdlibRoot = File(projectRoot, "stdlib/std")
+    if (stdlibRoot.isDirectory) {
+        val loader = com.mezze.language.typechecker.module.ModuleLoader(resolver)
+        val typeChecker = com.mezze.language.typechecker.module.ModuleTypeChecker(
+            moduleResolver = resolver
+        )
+        var eagerCount = 0
+        stdlibRoot.walkTopDown().filter { it.isFile && it.extension == "mz" }.forEach { mzFile ->
+            // Convert filesystem path "stdlib/std/effects/log.mz" → module path
+            // "std::effects::log".
+            val rel = mzFile.toRelativeString(stdlibRoot.parentFile)
+            val modPath = rel.removeSuffix(".mz").replace(File.separatorChar, ':').replace(":", "::")
+                .replace("::::", "::")
+            try {
+                val loadResult = loader.loadModuleWithDependencies(modPath)
+                if (loadResult is com.mezze.language.typechecker.module.ModuleLoadResult.Success) {
+                    typeChecker.typeCheckModule(loadResult.module)
+                    eagerCount++
+                }
+            } catch (_: Throwable) {
+                // Best-effort. Some stdlib modules may legitimately fail
+                // (work-in-progress files); we still want the others
+                // indexed.
+            }
+        }
+        println("Eagerly typechecked $eagerCount stdlib modules " +
+            "in ${(System.nanoTime() - stdlibEagerStart) / 1_000_000}ms")
+    }
 
     // Write to SQLite
     val outputFile = File(outputPath)
@@ -167,6 +218,23 @@ fun main(args: Array<String>) {
     } finally {
         store.close()
     }
+
+    // Also write an SQLite-free CBOR snapshot of the same data — used by
+    // the native binary (and any other host that doesn't have sqlite-jdbc
+    // available). One file, one CBOR decode at boot, no JDBC anywhere.
+    val snapshotFile = File(snapshotPath)
+    snapshotFile.parentFile?.mkdirs()
+    val snapshot = com.mezze.language.typechecker.StdlibSnapshot(
+        importContext = precompiled.preludeImportContext,
+        functions = functions,
+        performers = performers.map { it.toList() },
+        dependencyGraph = precompiled.stdlibDependencyGraph,
+        abilityImpls = precompiled.stdlibAbilityImpls,
+        declHashes = precompiled.stdlibDeclHashes,
+        moduleHashes = precompiled.stdlibModuleHashes,
+    )
+    snapshotFile.writeBytes(com.mezze.language.typechecker.StdlibSnapshot.encode(snapshot))
+    println("Wrote ${snapshotFile.name} (${snapshotFile.length() / 1024}KB) — SQLite-free snapshot")
 }
 
 /**

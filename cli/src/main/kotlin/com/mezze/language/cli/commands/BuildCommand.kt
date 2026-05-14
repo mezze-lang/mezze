@@ -48,15 +48,27 @@ class BuildCommand {
         }
 
         val appName = args.find { it.startsWith("--app=") }?.substringAfter("=")
-            ?: args.getOrNull(args.indexOf("--app") + 1)?.takeIf { !it.startsWith("--") }
+            ?: args.indexOf("--app").takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
+                ?.takeIf { !it.startsWith("-") }
+
+        // `--native` / `-n` produces an AOT-compiled standalone executable
+        // next to the JAR. Build is slow (~30s quick / ~2min optimized);
+        // runtime is fast (no JVM boot, no SQLite, FunctionIRs frozen in
+        // the image heap via --initialize-at-build-time).
+        val nativeBuild = args.contains("--native") || args.contains("-n")
+
+        // `--optimized` / `-o` switches native-image from quick-build
+        // (-Ob, ~30-50s) to optimized (-O2, ~2m) and strips debug symbols.
+        // Default is quick-build with `-g` for fast iteration.
+        val optimizedBuild = args.contains("--optimized") || args.contains("-o")
 
         // Output directory precedence (highest first):
-        //   1. CLI flag:    --out=<path> or -o <path>
+        //   1. CLI flag:    --out=<path> or --out <path>
         //   2. Mezze.toml:  [build] out = "..."
         //   3. Default:     BuildConfig.DEFAULT_OUT (".build")
         val cliOut = args.find { it.startsWith("--out=") }?.substringAfter("=")
-            ?: args.getOrNull(args.indexOf("--out") + 1)?.takeIf { !it.startsWith("--") }
-            ?: args.getOrNull(args.indexOf("-o") + 1)?.takeIf { !it.startsWith("--") && !it.startsWith("-o") }
+            ?: args.indexOf("--out").takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
+                ?.takeIf { !it.startsWith("-") }
         val outDirName = cliOut ?: manifest.build.out
 
         val appConfig = if (appName != null) {
@@ -72,6 +84,15 @@ class BuildCommand {
         if (!appFile.exists()) {
             println("Error: App file not found: ${appFile.absolutePath}")
             return
+        }
+
+        // Fail fast if `--native` was requested but the toolchain is
+        // missing — building the JVM jar first and crashing 20 seconds
+        // in is a bad UX. The actual native-image invocation is later in
+        // the pipeline; this is just the early prereq check.
+        if (nativeBuild && NativeImageRunner.locate() == null) {
+            println(NativeImageRunner.missingMessage())
+            kotlin.system.exitProcess(2)
         }
 
         val store = SQLiteMezzeStore.openProject(currentDir)
@@ -160,7 +181,6 @@ class BuildCommand {
                 val present = store.blobsExist(candidates)
                 val missing = stdlibFunctions.filter { (hash, _) -> hash !in present }
                 if (missing.isNotEmpty()) {
-                    println("Loading ${missing.size} stdlib functions into store (${present.size} already cached)...")
                     store.transaction {
                         for ((hash, fnIR) in missing) {
                             val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
@@ -201,7 +221,7 @@ class BuildCommand {
             }
 
             val reachable = store.getTransitiveClosure(entryHash)
-            println("Compiled: ${reachable.size} definitions reachable from entry point")
+            if (timing) System.err.println("[${ms()}ms] closure (${reachable.size} defs)")
 
             // 5. Resolve output directory + create it.
             //    Layout:
@@ -348,21 +368,45 @@ class BuildCommand {
             writeWindowsLauncher(winLauncher, jarFile.name)
             if (timing) System.err.println("[${ms()}ms] launchers written")
 
+            // 8. Optional: AOT-compile to a native executable.
+            //    Runs native-image on the JAR we just built. Long build
+            //    (~2 min) for very fast cold start (<100ms). The native
+            //    binary lands next to the .jar as `<app>-native`.
+            var nativeBinary: File? = null
+            if (nativeBuild) {
+                println()
+                if (optimizedBuild) {
+                    println("Compiling native binary (optimized, ~2 min)...")
+                } else {
+                    println("Compiling native binary (quick mode, ~30-50s — pass -o for optimized)...")
+                }
+                nativeBinary = NativeBuildPath.build(
+                    jarFile = jarFile,
+                    outputDir = targetDir,
+                    outputName = "$outputJarName-native",
+                    appName = appConfig.name,
+                    entryName = appConfig.entry,
+                    loweredFunctions = typeCheckResult.loweredFunctions,
+                    performerRecords = typeCheckResult.performerRecords,
+                    optimized = optimizedBuild,
+                    timing = timing,
+                    relativeTime = { (System.nanoTime() - startTime) / 1_000_000 },
+                )
+            }
+
             val buildTime = (System.nanoTime() - startTime) / 1_000_000
 
-            // Show paths relative to the project root so the user sees
-            // exactly what to type. targetDir is either <out> (single
-            // app) or <out>/<app-name> (multi).
+            // Paths relative to project root — what the user types to run.
             val relTarget = currentDir.toPath().relativize(targetDir.toPath()).toString()
-            val launcherRel = "$relTarget/${unixLauncher.name}"
-            val jarRel = "$relTarget/${jarFile.name}"
 
             println()
-            println("Build complete: ${jarFile.name} (${jarFile.length() / 1024}KB)")
-            println("Output: $relTarget/")
-            println("Run: ./$launcherRel     (Unix — preconfigured)")
-            println("     java -jar $jarRel  (any JVM, default settings)")
-            println("Time: ${buildTime}ms")
+            println("Built ${appConfig.name} in ${formatDuration(buildTime)}")
+            println()
+            println("  Run:")
+            println("    ./$relTarget/${unixLauncher.name}")
+            if (nativeBinary != null) {
+                println("    ./$relTarget/${nativeBinary.name}    (native, no JVM)")
+            }
 
         } catch (e: Exception) {
             println("Error: ${e.message}")
@@ -433,7 +477,6 @@ class BuildCommand {
             }
 
             conn.commit()
-            println("Created blobs.sqlite with $blobCount blobs")
 
         } catch (e: Exception) {
             conn.rollback()
@@ -516,8 +559,6 @@ class BuildCommand {
      * Uses the installed mez CLI's lib JARs as the runtime base.
      */
     private fun createStandaloneJar(blobsFile: File, outputJar: File) {
-        println("Creating standalone JAR...")
-
         // Find the runtime JAR(s) by asking the running CLI where its own
         // classes were loaded from. That location IS the source of truth
         // for the bytecode that should be embedded in the user JAR. We
@@ -584,8 +625,6 @@ class BuildCommand {
             out.write(manifest.toByteArray())
             out.closeArchiveEntry()
         }
-
-        println("Created ${outputJar.name} (${outputJar.length() / 1024}KB)")
     }
 
     /**
@@ -724,6 +763,12 @@ class BuildCommand {
     private fun sha256(content: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
         return digest.digest(content.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+
+    /** Format a duration as either "Xs" or "Xm Ys" depending on magnitude. */
+    private fun formatDuration(millis: Long): String {
+        val secs = millis / 1000
+        return if (secs < 60) "${secs}s" else "${secs / 60}m ${secs % 60}s"
     }
 
 }

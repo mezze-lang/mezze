@@ -24,6 +24,9 @@ object CodebaseSerialization {
     fun deserializeFunctionIR(bytes: ByteArray) = delegate.deserializeFunctionIR(bytes)
     fun serializeFunctionIRList(fns: List<com.mezze.language.truffleir.FunctionIR>) = delegate.serializeFunctionIRList(fns)
     fun deserializeFunctionIRList(bytes: ByteArray) = delegate.deserializeFunctionIRList(bytes)
+    fun serializeEmbeddedAppMeta(meta: com.mezze.language.store.StoreSerialization.EmbeddedAppMeta) =
+        delegate.serializeEmbeddedAppMeta(meta)
+    fun deserializeEmbeddedAppMeta(bytes: ByteArray) = delegate.deserializeEmbeddedAppMeta(bytes)
     fun serializeTypedLetDecl(decl: com.mezze.language.typedast.TypedLetDecl) = delegate.serializeTypedLetDecl(decl)
     fun deserializeTypedLetDecl(bytes: ByteArray) = delegate.deserializeTypedLetDecl(bytes)
     fun serializeTypedTypeDecl(decl: com.mezze.language.typedast.TypedTypeDecl) = delegate.serializeTypedTypeDecl(decl)

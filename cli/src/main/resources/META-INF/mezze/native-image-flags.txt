@@ -1,0 +1,104 @@
+# Single source of truth for native-image flags shared between:
+#   - the `mez` CLI's own native build (cli/build.gradle.kts, graalvmNative.binaries)
+#   - the user-app native build path  (cli/.../NativeBuildPath.kt)
+#
+# Format:
+#   - blank lines and lines starting with '#' are ignored
+#   - a line beginning with '[section]' starts a new section
+#   - every other line is one native-image argument, verbatim
+#
+# Both consumers parse this file identically (see NativeImageFlags.kt and
+# the `readNativeImageFlags()` helper in cli/build.gradle.kts). Keep new
+# flags here, not in the consumer code.
+
+[common]
+# Common across both CLI and user-app builds.
+
+-H:+UnlockExperimentalVMOptions
+--no-fallback
+-H:+ReportExceptionStackTraces
+-H:+AddAllCharsets
+-H:+TruffleHostInlining
+
+# Truffle / polyglot language discovery resources.
+-H:IncludeResources=META-INF/truffle-languages/.*
+-H:IncludeResources=META-INF/services/.*
+
+# Stdlib fallback sources — used only if the CBOR snapshot is missing
+# (older builds, debug). Production reads the snapshot.
+-H:IncludeResources=stdlib/.*\.mz
+-H:IncludeResources=stdlib/MANIFEST.txt
+
+# SQLite-free stdlib snapshot. PrecompiledStdlib.tryLoadFromSnapshot
+# reads this on boot — replaces sqlite-jdbc in the runtime.
+-H:IncludeResources=META-INF/mezze/stdlib-snapshot\.cbor
+
+# This file itself must ship inside the `mez` native binary — the
+# user-app build path (NativeBuildPath) loads it off the classpath
+# at user-build time to assemble the native-image command. Without
+# this include, `mez build --native` errors with "broken `mez` install".
+-H:IncludeResources=META-INF/mezze/native-image-flags\.txt
+
+# Defer init of Netty's BouncyCastle ALPN bridge. Netty's static
+# initializer does Class.forName("org.bouncycastle.jsse.BCSSLEngine")
+# at class-init time to detect whether BC is on the classpath. We
+# don't ship BouncyCastle (no use of Netty's TLS via BC), so the
+# probe throws ClassNotFoundException during native-image build —
+# 50+ lines of stack trace polluting the log. Defer the clinit to
+# runtime where the class is genuinely absent and the probe is a
+# harmless no-op (Netty falls back to JDK TLS).
+--initialize-at-run-time=io.netty.handler.ssl.BouncyCastleAlpnSslUtils
+
+[init-at-build-time]
+# Packages whose static state is safe to freeze into the image heap.
+# Order doesn't matter; native-image handles dependency closure itself.
+#
+# Anything reachable from StdlibSnapshotData's decoded graph must be
+# listed here — otherwise the image heap scanner rejects the snapshot
+# objects with "found in heap, marked for runtime init".
+
+# Mezze runtime
+com.mezze.interpreter
+com.mezze.datastructures
+com.mezze.language.parser
+com.mezze.language.ast
+com.mezze.language.truffleir
+com.mezze.language.typedast
+com.mezze.language.parsedast
+
+# Stdlib snapshot — runs StdlibSnapshotData.<init> in the build JVM, the
+# decoded ModuleImportContext / FunctionIR graph lands in image heap.
+com.mezze.language.typechecker.StdlibSnapshotData
+com.mezze.language.typechecker.module
+
+# Kotlin runtime + serialization (needed for the snapshot decode).
+kotlin
+kotlinx
+
+# SLF4J + Logback get pulled in transitively; freeze Logger instances
+# so they don't trip the heap scanner.
+org.slf4j
+ch.qos.logback
+
+[cli-only-init-at-build-time]
+# Packages only the CLI binary itself needs to freeze.
+# The user-app native build doesn't ship these.
+
+[user-only-init-at-build-time]
+# Packages only the user-app build needs.
+
+# These are needed when EmbeddedAppLoader's init deserializes the user's
+# CBOR closure during the user-app native-image build. The CLI's own
+# build doesn't deserialize embedded-app.cbor, so these aren't required
+# there — but it's also harmless to include if we ever unify.
+com.mezze.language.cli.standalone.embedded.EmbeddedAppLoader
+com.mezze.language.cli.standalone.embedded.EmbeddedApp
+com.mezze.language.codebase
+com.mezze.language.store
+
+[cli-only-resources]
+# Resources only the CLI binary embeds.
+
+# native-classpath.zip is the bundle of per-library jars the CLI hands
+# to native-image when building a user app. Not needed in user binaries.
+-H:IncludeResources=META-INF/mezze/native-classpath\.zip

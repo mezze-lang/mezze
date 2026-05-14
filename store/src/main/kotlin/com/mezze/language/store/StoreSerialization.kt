@@ -68,6 +68,46 @@ object StoreSerialization {
         return cbor.decodeFromByteArray(bytes)
     }
 
+    /**
+     * App metadata that travels alongside the FunctionIR list when an
+     * app is AOT-embedded into a native binary. Captures the entry-point
+     * + performer-record info that the SQLite path normally reads from
+     * the `metadata` / `app_performers` tables.
+     */
+    @kotlinx.serialization.Serializable
+    data class EmbeddedAppMeta(
+        val appName: String,
+        val entryName: String?,
+        // List<List<String>> instead of List<Array<String>> because kotlinx
+        // serializes arrays awkwardly; the standalone code converts back
+        // to Array<String> after deserialization.
+        val performerRecords: List<List<String>>
+    )
+
+    fun serializeEmbeddedAppMeta(meta: EmbeddedAppMeta): ByteArray =
+        cbor.encodeToByteArray(EmbeddedAppMeta.serializer(), meta)
+
+    /**
+     * Convenience wrapper used by EmbeddedAppLoader's build-time init —
+     * returns a small shape with already-rehydrated `Array<String>`
+     * performer records to match what `MezzeLanguage.setFunctionsForDirectExecution`
+     * expects.
+     */
+    fun deserializeEmbeddedAppMeta(bytes: ByteArray): DeserializedEmbeddedAppMeta {
+        val raw = cbor.decodeFromByteArray(EmbeddedAppMeta.serializer(), bytes)
+        return DeserializedEmbeddedAppMeta(
+            appName = raw.appName,
+            entryName = raw.entryName,
+            performerRecords = raw.performerRecords.map { it.toTypedArray() }
+        )
+    }
+
+    data class DeserializedEmbeddedAppMeta(
+        val appName: String,
+        val entryName: String?,
+        val performerRecords: List<Array<String>>
+    )
+
     fun serializeTypedLetDecl(decl: com.mezze.language.typedast.TypedLetDecl): ByteArray {
         return cbor.encodeToByteArray(decl)
     }
