@@ -1,4 +1,12 @@
 use std::abilities::compare::{ Eq }
+use std::effects::async::{ Async }
+
+# NOTE: `lock` and `with_lock` could route their parking through
+# `Async.park` so the same mutex code transparently works under Loom
+# and Coop schedulers. Done initially in #107 and rolled back — too
+# many existing users of `lock`/`with_lock` lack an Async handler in
+# scope. To re-enable, audit all callers (MutexModuleTest etc.) to
+# wrap them in `perform LoomAsync` or similar. Tracking via #107.
 
 ## Reentrant mutual exclusion lock.
 pub newtype Mutex = Mutex __NativeLock
@@ -25,6 +33,11 @@ pub let with_lock : { mutex: Mutex, f: {} -> 'a <...> } -> 'a <...> = { mutex, f
 
 ## Acquire the lock (blocking). You must call unlock when done.
 pub let lock : { mutex: Mutex } -> {} = { mutex } -> __native_mutex_lock { mutex = mutex }
+
+## Park-aware lock: routes through Async.park. Use this version when
+## you want the same code to work under both LoomAsync and CoopAsync.
+pub let lock_async : { mutex: Mutex } -> {} <Async, ...> = { mutex } ->
+  Async.park { predicate = {} -> __native_mutex_try_lock { mutex = mutex } }
 
 ## Release the lock. Must be called by the thread that holds it.
 pub let unlock : { mutex: Mutex } -> {} = { mutex } -> __native_mutex_unlock { mutex = mutex }

@@ -1,4 +1,6 @@
 use std::abilities::compare::{ Eq }
+use std::effects::async::{ Async }
+use std::effects::concurrent::atom::{ atom, deref, reset }
 
 ## Typed channel for thread-safe message passing.
 pub newtype Chan 'a = Chan __NativeChannel
@@ -43,6 +45,33 @@ pub let chan : {} -> Chan 'a = {} -> __native_channel_make {}
 ## Create a bounded channel with the given capacity.
 pub let chan_bounded : { cap: Int } -> Chan 'a = { cap } ->
   __native_channel_make_buffered { capacity = cap }
+
+## Park-aware recv: parks the current task until the channel has a
+## value, then returns it. Works under any Async handler.
+##
+## Implementation: try_recv in the park predicate. The Some branch
+## stashes the value in a closure-captured atom so the outer call
+## doesn't have to re-take. Multiple racing receivers are fine — if
+## two predicates succeed but only one gets the queued value, the
+## loser's slot stays None and we recurse.
+pub let recv_async : { ch: Chan 'a } -> 'a <Async, ...> = { ch } -> do
+  let slot = atom { value = None }
+  Async.park {
+    predicate = {} -> match __native_channel_try_recv { ch = ch } is
+      Some { val } -> do
+        let _ = reset { atom = slot, value = Some { val = val } }
+        True
+      None -> False,
+  }
+  match deref { atom = slot } is
+    Some { val } -> val
+    None -> recv_async { ch = ch }
+
+## Park-aware send: parks until the channel has capacity, then sends.
+pub let send_async : { ch: Chan 'a, value: 'a } -> {} <Async, ...> = { ch, value } -> do
+  Async.park {
+    predicate = {} -> __native_channel_try_send { ch = ch, value = value },
+  }
 
 ## Blocking channel implementation using LinkedBlockingQueue.
 impl Channel for BlockingChannel where {
