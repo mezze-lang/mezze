@@ -267,6 +267,65 @@ pub let go : { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
   let _ = Async.spawn { f = f }
   {}
 
+## ==================================================================
+## Park-based helpers — derived from spawn + park + await primitives.
+## These are equivalent to the Async.* ops of the same name and exist
+## as plain functions so the Async effect can eventually shrink to
+## just the primitives. For now both paths coexist.
+## ==================================================================
+
+## Wait for any of a list of promises to complete; return the first
+## completer's value.
+pub let race : { ps: [Promise 'a] } -> 'a <Async, ...> = { ps } ->
+  Async.race { ps = ps }
+
+## Wait for all promises; return values in input order. First failure
+## aborts (the failing await raises).
+pub let all : { ps: [Promise 'a] } -> ['a] <Async, ...> = { ps } ->
+  seq::map { xs = ps, f = { x } -> Async.await { p = x } }
+
+## Run two thunks concurrently, return both values.
+pub let join : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Async, ...> =
+  { l, r } -> do
+    let pl = Async.spawn { f = l }
+    let pr = Async.spawn { f = r }
+    { l = Async.await { p = pl }, r = Async.await { p = pr } }
+
+## Run three thunks concurrently.
+pub let join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: 'a, b: 'b, c: 'c } <Async, ...> = { a, b, c } -> do
+  let pa = Async.spawn { f = a }
+  let pb = Async.spawn { f = b }
+  let pc = Async.spawn { f = c }
+  { a = Async.await { p = pa }, b = Async.await { p = pb }, c = Async.await { p = pc } }
+
+## Map over a sequence concurrently; results in input order.
+pub let par_map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Async, ...> =
+  { xs, f } -> do
+    let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> f { x = x } } }
+    all { ps = ps }
+
+## Run f over each element concurrently, discard results.
+pub let par_for_each : { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Async, ...> =
+  { xs, f } -> do
+    let _ = par_map { xs = xs, f = f }
+    {}
+
+## Filter a sequence with concurrent predicate evaluation.
+pub let par_filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Async, ...> =
+  { xs, f } -> do
+    let tagged = par_map {
+      xs = xs,
+      f = { x } -> { elem = x, keep = f { x = x } },
+    }
+    seq::map {
+      xs = seq::filter { xs = tagged, p = { x } -> x.keep },
+      f = { x } -> x.elem,
+    }
+
+## Wait for p up to ms milliseconds; None if it didn't finish in time.
+pub let with_timeout : { ms: Int, p: Promise 'a } -> Option 'a <Async, ...> = { ms, p } ->
+  Async.timeout { ms = ms, p = p }
+
 ## Run a computation with cooperative scheduling.
 pub let run_coop : { computation: {} -> 'a <Async> } -> 'a = { computation } -> perform CoopAsync in computation {}
 
