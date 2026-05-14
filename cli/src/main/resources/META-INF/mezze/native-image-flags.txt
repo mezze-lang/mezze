@@ -20,6 +20,19 @@
 -H:+AddAllCharsets
 -H:+TruffleHostInlining
 
+# Truffle-on-Native-Image macro. Links truffle-runtime-svm.jar
+# (Graal's native-image-safe partial evaluation runtime) onto the
+# native-image *builder* module path — NOT the user classpath.
+# This is the official path for getting Truffle JIT inside a native
+# binary. The macro guards itself with `IgnoreIfBuilderOnClasspath`,
+# which is why we must keep truffle-runtime.jar OUT of the user
+# classpath (see NativeBuildPath.extractRuntimeClasspath drop list).
+#
+# Without this macro, the binary boots with DefaultTruffleRuntime,
+# pure interpreter, no partial evaluation, ~10-50× slower than the
+# JVM build on CPU-bound workloads.
+--macro:truffle-svm
+
 # Truffle / polyglot language discovery resources.
 -H:IncludeResources=META-INF/truffle-languages/.*
 -H:IncludeResources=META-INF/services/.*
