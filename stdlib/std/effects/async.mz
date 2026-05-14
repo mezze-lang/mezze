@@ -253,8 +253,8 @@ impl Async for CoopAsync where {
       }
  },
   scoped = { f } -> f { sc = Scope { val = {} } },
-  ## Stub: spin-poll. Real coop park lands with #106.
-  park = { predicate } -> __native_loom_park_until { predicate = predicate },
+  ## Park: run ready tasks until predicate returns True.
+  park = { predicate } -> __native_scheduler_park_until { sched = scope, predicate = predicate },
 }
 
 ## Spawn and immediately await (synchronous helper).

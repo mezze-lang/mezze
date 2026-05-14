@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.types.effects
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.RowVar
 import com.mezze.language.ast.TypeVar
 
 /**
@@ -91,6 +92,19 @@ object SchedulerTypes {
             MezzeType.RecordType(mapOf(
                 "sched" to schedulerType,
                 "ms" to MezzeType.IntType
+            )),
+            MezzeType.RecordType(emptyMap())
+        )
+
+        // __native_scheduler_park_until: {sched, predicate: {} -> Bool <...>} -> {}
+        context["__native_scheduler_park_until"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf(
+                "sched" to schedulerType,
+                "predicate" to MezzeType.FunctionType(
+                    MezzeType.RecordType(emptyMap()),
+                    MezzeType.BoolType,
+                    effects = MezzeType.EffectRow.simple(emptySet<String>(), RowVar.fresh(), performed = false)
+                )
             )),
             MezzeType.RecordType(emptyMap())
         )

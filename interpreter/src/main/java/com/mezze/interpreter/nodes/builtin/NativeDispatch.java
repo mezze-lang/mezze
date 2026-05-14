@@ -2553,6 +2553,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_scheduler_race", (r, c) -> SchedulerNatives.schedulerRace(r, c));
         HANDLERS.put("__native_scheduler_all", (r, c) -> SchedulerNatives.schedulerAll(r, c));
         HANDLERS.put("__native_scheduler_sleep", (r, c) -> SchedulerNatives.schedulerSleep(r, c));
+        HANDLERS.put("__native_scheduler_park_until", (r, c) -> SchedulerNatives.schedulerParkUntil(r, c));
         HANDLERS.put("__native_scheduler_serialize", (r, c) -> SchedulerNatives.schedulerSerialize(r));
         HANDLERS.put("__native_scheduler_deserialize", (r, c) -> SchedulerNatives.schedulerDeserialize(r));
 

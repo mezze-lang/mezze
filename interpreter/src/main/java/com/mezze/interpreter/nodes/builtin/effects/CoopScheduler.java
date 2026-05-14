@@ -160,6 +160,34 @@ public final class CoopScheduler {
     }
 
     /**
+     * Park: run ready tasks until {@code predicate} returns True. The
+     * predicate is a Mezze closure of type {@code {} -> Bool}; it's
+     * called between task runs. Deadlocks (throws) if the ready queue
+     * empties and the predicate is still False — no way to make
+     * progress.
+     */
+    @TruffleBoundary
+    public void parkUntil(MezzeFunction predicate, IndirectCallNode callNode) {
+        while (true) {
+            if (callPredicate(predicate, callNode)) return;
+            if (readyQueue.isEmpty()) {
+                throw new RuntimeException(
+                    "CoopAsync deadlock: parked on a predicate that never became True");
+            }
+            runOneTask(callNode);
+        }
+    }
+
+    private boolean callPredicate(MezzeFunction predicate, IndirectCallNode callNode) {
+        Object[] closure = predicate.getClosureValues();
+        Object[] args = new Object[closure.length + 1];
+        System.arraycopy(closure, 0, args, 0, closure.length);
+        args[closure.length] = MezzeRecord.empty();
+        Object result = callNode.call(predicate.getCallTarget(), args);
+        return result instanceof Boolean b && b;
+    }
+
+    /**
      * Run one task from the ready queue.
      */
     private void runOneTask(IndirectCallNode callNode) {

@@ -102,6 +102,18 @@ public final class SchedulerNatives {
     }
 
     /**
+     * Park: run ready tasks until predicate returns True. Deadlocks if
+     * the ready queue empties before the predicate flips.
+     */
+    @TruffleBoundary
+    public static MezzeUnit schedulerParkUntil(MezzeRecord args, IndirectCallNode callNode) {
+        CoopScheduler scheduler = getScheduler(args, "sched");
+        MezzeFunction predicate = getFunction(args, "predicate");
+        scheduler.parkUntil(predicate, callNode);
+        return MezzeUnit.INSTANCE;
+    }
+
+    /**
      * Serialize scheduler state.
      */
     @TruffleBoundary
