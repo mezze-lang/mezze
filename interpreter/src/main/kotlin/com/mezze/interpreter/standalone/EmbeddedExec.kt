@@ -11,7 +11,7 @@ import java.io.PrintStream
 /**
  * Execute an AOT-embedded Mezze app — the FunctionIR closure and
  * performer records are already live in the image heap via
- * [embedded.EmbeddedApp].
+ * [EmbeddedApp].
  *
  * Cold-start path: read static fields → build Truffle engine →
  * register functions with [MezzeLanguage] → eval. No SQLite, no
@@ -25,7 +25,7 @@ object EmbeddedExec {
             if (timing) System.err.println("[${(System.nanoTime() - t0) / 1_000_000}ms] $label")
         }
 
-        val embedded = com.mezze.interpreter.standalone.embedded.EmbeddedApp
+        val embedded = com.mezze.interpreter.standalone.EmbeddedApp
         check(embedded.present) { "EmbeddedExec.run called but EmbeddedApp.present is false" }
 
         executeWithTruffle(

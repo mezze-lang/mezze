@@ -1,6 +1,5 @@
 package com.mezze.language.cli.commands
 
-import com.mezze.language.codebase.CodebaseSerialization
 import com.mezze.language.store.StoreSerialization
 import com.mezze.language.truffleir.FunctionIR
 import java.io.File
@@ -24,12 +23,12 @@ import java.util.jar.Manifest
  *  5. Invoke native-image with the shared flag set
  *     ([NativeImageFlags]) plus a few user-build-specific flags.
  *
- * Runtime path: NativeMain (in :interpreter, com.mezze.interpreter.standalone)
+ * Runtime path: MezzeAppMain (in :interpreter, com.mezze.interpreter.standalone)
  * reads `EmbeddedApp` static fields populated at image-build time and
  * dispatches into the runtime. No SQLite, no fallback. Stdlib is loaded
  * the same way via `StdlibSnapshotData`.
  *
- * NativeMain lives in :interpreter so the native binary's reachability
+ * MezzeAppMain lives in :interpreter so the native binary's reachability
  * surface doesn't include :cli / :lsp / store-sqlite / Ktor / lsp4j /
  * logback / formatter — those come in via :cli's transitive deps but
  * aren't needed at runtime. Keeping the user-app classpath narrow is
@@ -121,14 +120,7 @@ object NativeBuildPath {
         val closure = computeReachableClosure(loweredFunctions)
         if (timing) System.err.println("[${relativeTime()}ms] native: closure computed (${closure.size} fns)")
 
-        val fnBytes = CodebaseSerialization.serializeFunctionIRList(closure)
-        val metaBytes = CodebaseSerialization.serializeEmbeddedAppMeta(
-            StoreSerialization.EmbeddedAppMeta(
-                appName = appName,
-                entryName = entryName,
-                performerRecords = performerRecords.map { it.toList() },
-            )
-        )
+        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryName, performerRecords)
 
         val embeddedJar = File(stagingDir, "embedded-app.jar")
         writeJar(embeddedJar, mapOf(
@@ -137,6 +129,32 @@ object NativeBuildPath {
         ))
         if (timing) System.err.println("[${relativeTime()}ms] native: embedded-app.jar (${embeddedJar.length() / 1024}KB)")
         return embeddedJar
+    }
+
+    /**
+     * Serialize an already-computed closure + metadata to the two byte
+     * blobs that EmbeddedAppLoader reads at startup:
+     *   - functions: List<FunctionIR>  → embedded-app.cbor
+     *   - app metadata               → embedded-app.meta
+     *
+     * Shared by `mez build` (JVM jar packing) and `mez build --native`
+     * (passes the bytes through a tiny staging jar to native-image).
+     */
+    fun packEmbeddedAppCbor(
+        closure: List<FunctionIR>,
+        appName: String,
+        entryName: String,
+        performerRecords: List<Array<String>>,
+    ): Pair<ByteArray, ByteArray> {
+        val fnBytes = StoreSerialization.serializeFunctionIRList(closure)
+        val metaBytes = StoreSerialization.serializeEmbeddedAppMeta(
+            StoreSerialization.EmbeddedAppMeta(
+                appName = appName,
+                entryName = entryName,
+                performerRecords = performerRecords.map { it.toList() },
+            )
+        )
+        return fnBytes to metaBytes
     }
 
     /** User code + every stdlib FunctionIR reachable from it. */
@@ -267,8 +285,8 @@ object NativeBuildPath {
         // Use the :interpreter-resident main class for native binaries.
         // :cli's StandaloneMain is dual-mode (embedded path + SQLite/JVM-
         // jar fallback) and drags in lsp4j/ktor/store-sqlite via shadowJar.
-        // NativeMain knows only the embedded path — no SQLite, no CLI deps.
-        cmd.add("com.mezze.interpreter.standalone.NativeMain")
+        // MezzeAppMain knows only the embedded path — no SQLite, no CLI deps.
+        cmd.add("com.mezze.interpreter.standalone.MezzeAppMain")
         cmd.add("-o")
         cmd.add(outBinary.absolutePath)
 

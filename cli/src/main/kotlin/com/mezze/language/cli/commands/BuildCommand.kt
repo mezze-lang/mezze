@@ -386,7 +386,7 @@ class BuildCommand {
      * Approach: take a copy of `mezze-runtime.jar` (the slim runtime
      * shadowJar produced by :interpreter), append two CBOR resources
      * the runtime's EmbeddedAppLoader reads at startup, and write a
-     * fresh MANIFEST.MF pointing at NativeMain.
+     * fresh MANIFEST.MF pointing at MezzeAppMain.
      *
      * Result: a self-contained JAR that runs on JVM via
      *   `java -jar app.jar`
@@ -409,14 +409,12 @@ class BuildCommand {
 
         // CBOR-serialize the FunctionIR closure + a small metadata blob.
         // EmbeddedAppLoader (in :interpreter) reads these two resources
-        // from the classpath at boot.
-        val fnBytes = com.mezze.language.store.StoreSerialization.serializeFunctionIRList(closure)
-        val metaBytes = com.mezze.language.store.StoreSerialization.serializeEmbeddedAppMeta(
-            com.mezze.language.store.StoreSerialization.EmbeddedAppMeta(
-                appName = appName,
-                entryName = entryName,
-                performerRecords = performerRecords.map { it.toList() },
-            )
+        // from the classpath at boot. Shared helper with NativeBuildPath.
+        val (fnBytes, metaBytes) = NativeBuildPath.packEmbeddedAppCbor(
+            closure = closure,
+            appName = appName,
+            entryName = entryName,
+            performerRecords = performerRecords,
         )
 
         val seen = HashSet<String>()
@@ -451,63 +449,36 @@ class BuildCommand {
             put("META-INF/mezze/embedded-app.cbor", fnBytes)
             put("META-INF/mezze/embedded-app.meta", metaBytes)
 
-            // Fresh MANIFEST.MF — points at NativeMain in :interpreter.
+            // Fresh MANIFEST.MF — points at MezzeAppMain in :interpreter.
             val manifest = "Manifest-Version: 1.0\n" +
-                "Main-Class: com.mezze.interpreter.standalone.NativeMain\n\n"
+                "Main-Class: com.mezze.interpreter.standalone.MezzeAppMain\n\n"
             put("META-INF/MANIFEST.MF", manifest.toByteArray())
         }
     }
 
     /**
-     * Locate `mezze-runtime.jar`.
+     * Locate `mezze-runtime.jar` — the slim runtime jar user-app builds
+     * clone into their output. Two sources:
      *
-     * Three sources, in order:
-     *   1. `~/.mezze/lib/mezze-runtime.jar` — the installed CLI lays
-     *      this down via `installRuntime`. Native binaries (where
-     *      `protectionDomain.codeSource.location` is null) always
-     *      take this path.
-     *   2. A JAR sibling: when running from `mezze-lang.jar`, look for
-     *      `mezze-runtime.jar` in the same dir.
-     *   3. Dev fallback: `interpreter/build/libs/mezze-runtime.jar`
-     *      under `mezze.project.root` system property, or by walking
-     *      up from the running class location.
+     *   1. Production: `~/.mezze/lib/mezze-runtime.jar`, laid down by
+     *      `:cli:installRuntime`. Used by both native `mez` (where
+     *      `protectionDomain.codeSource.location` is null) and the
+     *      installed JVM jar.
+     *   2. Dev: `<mezze.project.root>/interpreter/build/libs/mezze-runtime.jar`,
+     *      for gradle / IDE runs.
      *
-     * Returns null if nothing matched — the caller surfaces a clear
-     * error pointing at `./gradlew :cli:installNative`.
+     * Returns null if neither exists — caller surfaces a clear error.
      */
     private fun findRuntimeJar(): File? {
-        // Source 1: ~/.mezze/lib/mezze-runtime.jar (the installed path).
-        // Works for both native binaries (where codeSource is null) and
-        // installed JVM jars.
-        val home = System.getProperty("user.home")
-        if (home != null) {
+        // Production install.
+        System.getProperty("user.home")?.let { home ->
             val installed = File("$home/.mezze/lib/mezze-runtime.jar")
             if (installed.isFile) return installed
         }
-
-        // Source 2: JAR sibling — running from `mezze-lang.jar` outside
-        // the standard install location (custom deploy).
-        val cliLocation = javaClass.protectionDomain.codeSource?.location
-        val cliJarOrClassDir = if (cliLocation != null) File(cliLocation.toURI()) else null
-        if (cliJarOrClassDir?.isFile == true && cliJarOrClassDir.extension == "jar") {
-            val sibling = File(cliJarOrClassDir.parentFile, "mezze-runtime.jar")
-            if (sibling.isFile) return sibling
-        }
-
-        // Source 3a: dev fallback via system property.
-        val projectRoot = System.getProperty("mezze.project.root")
-        if (projectRoot != null) {
-            val devRuntime = File(projectRoot, "interpreter/build/libs/mezze-runtime.jar")
-            if (devRuntime.isFile) return devRuntime
-        }
-
-        // Source 3b: walk up from running class dir to find the build
-        // output. Only matters when running from gradle / IDE.
-        var current: File? = cliJarOrClassDir
-        repeat(8) {
-            current = current?.parentFile ?: return@repeat
-            val candidate = File(current, "interpreter/build/libs/mezze-runtime.jar")
-            if (candidate.isFile) return candidate
+        // Dev / IDE.
+        System.getProperty("mezze.project.root")?.let { root ->
+            val dev = File(root, "interpreter/build/libs/mezze-runtime.jar")
+            if (dev.isFile) return dev
         }
         return null
     }

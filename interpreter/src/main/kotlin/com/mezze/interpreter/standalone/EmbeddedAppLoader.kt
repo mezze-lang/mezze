@@ -1,4 +1,4 @@
-package com.mezze.interpreter.standalone.embedded
+package com.mezze.interpreter.standalone
 
 import com.mezze.language.store.StoreSerialization
 
@@ -64,7 +64,7 @@ object EmbeddedAppLoader {
      * Public no-op entry to force class loading. Native-image's reachability
      * analysis needs SOMETHING to reference this class for `init {}` to
      * run; otherwise the class would be considered dead code and stripped.
-     * [NativeMain] calls [touch] from its `main` so the linkage holds.
+     * [MezzeAppMain] calls [touch] from its `main` so the linkage holds.
      */
     @JvmStatic
     fun touch() { /* init has already run by the time we get here */ }

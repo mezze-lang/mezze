@@ -100,8 +100,8 @@ ch.qos.logback
 # CBOR closure during the user-app native-image build. The CLI's own
 # build doesn't deserialize embedded-app.cbor, so these aren't required
 # there — but it's also harmless to include if we ever unify.
-com.mezze.interpreter.standalone.embedded.EmbeddedAppLoader
-com.mezze.interpreter.standalone.embedded.EmbeddedApp
+com.mezze.interpreter.standalone.EmbeddedAppLoader
+com.mezze.interpreter.standalone.EmbeddedApp
 com.mezze.language.codebase
 com.mezze.language.store
 

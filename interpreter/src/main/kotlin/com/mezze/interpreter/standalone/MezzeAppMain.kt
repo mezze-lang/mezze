@@ -1,7 +1,7 @@
 package com.mezze.interpreter.standalone
 
 /**
- * Entry point for native-image-compiled Mezze apps.
+ * Entry point for Mezze apps built by `mez build` and `mez build --native`.
  *
  * `mez build --native` produces a binary whose main class is this
  * object. The binary contains:
@@ -38,7 +38,7 @@ package com.mezze.interpreter.standalone
  *   MEZZE_TRACE_COMPILATION=1    print Truffle compilation events
  *   MEZZE_OUTPUT_DIR=<dir>       redirect profile/coverage outputs
  */
-object NativeMain {
+object MezzeAppMain {
     @JvmStatic
     fun main(args: Array<String>) {
         if (args.contains("--help") || args.contains("-h")) {
@@ -59,10 +59,10 @@ object NativeMain {
         // image heap; this call is a no-op at runtime but keeps the
         // reachability analysis honest (without it, the class could
         // be dead-stripped).
-        com.mezze.interpreter.standalone.embedded.EmbeddedAppLoader.touch()
+        com.mezze.interpreter.standalone.EmbeddedAppLoader.touch()
 
         try {
-            if (!com.mezze.interpreter.standalone.embedded.EmbeddedApp.present) {
+            if (!com.mezze.interpreter.standalone.EmbeddedApp.present) {
                 System.err.println(
                     "Error: this native binary has no embedded Mezze app. " +
                     "It was built without `mez build --native`, or the AOT " +
@@ -72,7 +72,7 @@ object NativeMain {
             }
             mark(
                 "embedded app detected (" +
-                "${com.mezze.interpreter.standalone.embedded.EmbeddedApp.functions.size} fns)"
+                "${com.mezze.interpreter.standalone.EmbeddedApp.functions.size} fns)"
             )
             EmbeddedExec.run(args.toList(), timing, t0)
             mark("execute returned")
