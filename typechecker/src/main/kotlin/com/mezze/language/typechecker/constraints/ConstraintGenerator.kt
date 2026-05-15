@@ -581,7 +581,7 @@ class ConstraintGenerator(
                     }
                 } catch (e: com.mezze.language.typechecker.TypeCheckError) {
                     // Error recovery: collect the original error (preserves metadata), continue
-                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata, code = e.code, hints = e.hints) else e)
+                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata, code = e.code, hints = e.hints, fixHints = e.fixHints) else e)
                     if (item.isSimpleBinding) {
                         currentContext = currentContext.extendMono(item.variableName, MezzeType.VarType(TypeVar.fresh()))
                     }
@@ -598,7 +598,7 @@ class ConstraintGenerator(
                     // Here in Phase 2, we type-check the implementation bodies
                     validateEffectImplementation(item, currentContext)
                 } catch (e: com.mezze.language.typechecker.TypeCheckError) {
-                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata, code = e.code, hints = e.hints) else e)
+                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata, code = e.code, hints = e.hints, fixHints = e.fixHints) else e)
                 }
                 is ParsedImplAbilityDecl -> try {
                     // CRITICAL: Validate ability implementation bodies
@@ -724,7 +724,7 @@ class ConstraintGenerator(
                         }
                     }
                 } catch (e: com.mezze.language.typechecker.TypeCheckError) {
-                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata, code = e.code, hints = e.hints) else e)
+                    collectedTypeCheckErrors.add(if (e.loc == null) com.mezze.language.typechecker.TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata, code = e.code, hints = e.hints, fixHints = e.fixHints) else e)
                 }
                 is ParsedTopLevelExpr -> {
                     // Top-level expressions (for REPL)
@@ -1235,6 +1235,69 @@ class ConstraintGenerator(
                         // Validate hermetic effects (e.g., Mutation cannot coexist with other effects)
                         // Use allEffectNames to include both simple effects and effect annotations
                         ContextBuilder.validateHermeticEffects(effectRow.allEffectNames)
+
+                        // Every named effect in the annotation must resolve.
+                        // Without this, an annotation like `Str <FileSystem>`
+                        // when FileSystem isn't imported silently strips the
+                        // effect, then downstream the body's real effects
+                        // surface as a confusing "effect Log doesn't match
+                        // FileSystem" error pointing at unrelated code.
+                        val unknownEffects = (effectRow.effects + effectRow.effectAnnotations.map { it.name })
+                            .filter { it !in effectDeclarations }
+                        if (unknownEffects.isNotEmpty()) {
+                            val name = unknownEffects.first()
+
+                            // First: did-you-mean within already-in-scope effects.
+                            val known = effectDeclarations.keys
+                            val suggestion = com.mezze.language.parsedast.diagnostics
+                                .LevenshteinSuggest.closest(name, known)
+                            val didYouMean = suggestion?.let { ". Did you mean `$it`?" } ?: ""
+
+                            // Second: repo-wide search via the store — an effect
+                            // with this exact name might exist somewhere the user
+                            // hasn't imported from. If so, point them at the
+                            // `use` line they need.
+                            // Repo-wide store search for effects with this name.
+                            val candidateModules: List<String> = try {
+                                val store = com.mezze.language.typechecker.PrecompiledStdlib.getStore()
+                                store?.getDeclsByKind(com.mezze.language.store.DeclKind.EFFECT)
+                                    ?.filter { it.declName == name }
+                                    ?.map { it.modulePath }
+                                    ?.distinct()
+                                    ?: emptyList()
+                            } catch (_: Exception) { emptyList() }  // best-effort
+
+                            // Text hints — kept for `mez check` CLI output.
+                            val hints = if (candidateModules.isNotEmpty()) {
+                                candidateModules.take(3).map { "import it: `use ${it}::{$name}`" }
+                            } else listOf(
+                                "declare `effect $name { ... }` in this module, or",
+                                "import it: `use some_module::$name`",
+                            )
+
+                            // Structured fix-hints — consumed by LSP code actions.
+                            // Each non-string handle: a Rename suggestion (if a
+                            // close in-scope effect exists) and one Import hint
+                            // (carrying every module the effect lives in).
+                            val fixHints = buildList {
+                                if (suggestion != null) {
+                                    add(com.mezze.language.parsedast.diagnostics
+                                        .FixHint.Rename(effectRow.loc, listOf(suggestion)))
+                                }
+                                if (candidateModules.isNotEmpty()) {
+                                    add(com.mezze.language.parsedast.diagnostics
+                                        .FixHint.Import(effectRow.loc, name, candidateModules))
+                                }
+                            }
+
+                            throw com.mezze.language.typechecker.TypeCheckError(
+                                "Effect `$name` is not defined or not imported$didYouMean",
+                                effectRow.loc,
+                                code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0505_EFFECT_NOT_DEFINED,
+                                hints = hints,
+                                fixHints = fixHints,
+                            )
+                        }
 
                         // If the effect row is polymorphic (<...> or <Effect, ...>), reuse
                         // the per-annotation shared row var so multiple `<...>` in one

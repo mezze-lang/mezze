@@ -1085,6 +1085,58 @@ class ConstraintSolver(
      * Uses ErrorContext when available, falls back to string-based context parsing
      * for backwards compatibility.
      */
+    /**
+     * If [actual] and [expected] are both function types and differ ONLY
+     * in their effect rows (same param, same return, no other ability
+     * differences), describe the effect diff in actionable English.
+     * Returns null when the difference is structural elsewhere.
+     *
+     * Typical hit: annotation says `{x} -> Str <*>` but body has type
+     * `{x} -> Str <Log>` — we want to tell the user "effect `Log` is
+     * performed but not declared (or not handled)" instead of dumping
+     * both full function types and making them squint at the row.
+     */
+    private fun describeEffectRowDifference(actual: MezzeType, expected: MezzeType): String? {
+        if (actual !is MezzeType.FunctionType || expected !is MezzeType.FunctionType) return null
+
+        // Param + return types must be structurally identical for this
+        // to be a pure effect-row mismatch.
+        if (actual.paramType != expected.paramType) return null
+        if (actual.returnType != expected.returnType) return null
+        if (actual.abilityConstraints != expected.abilityConstraints) return null
+
+        val actualEffects = actual.effects?.effects ?: emptySet()
+        val expectedEffects = expected.effects?.effects ?: emptySet()
+        if (actualEffects == expectedEffects) return null  // identical rows; some other field differs
+
+        val extra = (actualEffects - expectedEffects).sorted()    // body performs, annotation missed
+        val missing = (expectedEffects - actualEffects).sorted()  // annotation promises, body doesn't deliver
+
+        return when {
+            extra.isNotEmpty() && missing.isEmpty() -> {
+                val names = extra.joinToString(", ") { "<$it>" }
+                if (extra.size == 1) {
+                    "the body performs effect $names but the annotation doesn't allow it. " +
+                    "Either add $names to the return type (e.g. `... -> Str $names`), " +
+                    "or wrap the call in a `perform <handler> in do ... end` block."
+                } else {
+                    "the body performs effects $names but the annotation doesn't allow them. " +
+                    "Either declare them on the return type, or install handlers."
+                }
+            }
+            missing.isNotEmpty() && extra.isEmpty() -> {
+                val names = missing.joinToString(", ") { "<$it>" }
+                "the annotation promises effects $names but the body never performs them. " +
+                "Drop the unused effects from the annotation."
+            }
+            else -> {
+                val extraTxt = if (extra.isNotEmpty()) "body performs ${extra.joinToString(", ") { "<$it>" }}" else null
+                val missingTxt = if (missing.isNotEmpty()) "annotation expects ${missing.joinToString(", ") { "<$it>" }}" else null
+                "effect rows don't match — ${listOfNotNull(missingTxt, extraTxt).joinToString("; ")}."
+            }
+        }
+    }
+
     private fun generateBetterErrorMessage(
         constraint: Constraint.Equality,
         failure: UnificationResult.Failure
@@ -1137,6 +1189,17 @@ class ConstraintSolver(
             }
             is ErrorContext.TypeAnnotation -> {
                 val bindingName = errorContext.bindingName
+
+                // If the only difference is the effect row, give a much
+                // more focused message — users hit this constantly when
+                // a function body performs an effect they forgot to
+                // declare on the annotation. Dumping both full function
+                // types side-by-side just makes them squint to spot
+                // the `<Log>` vs `<*>` difference.
+                describeEffectRowDifference(type1, type2)?.let { reason ->
+                    return "Type annotation mismatch for '$bindingName': $reason"
+                }
+
                 val expected = TypeDiffPrinter.formatType(type2)
                 val actual = TypeDiffPrinter.formatType(type1)
 

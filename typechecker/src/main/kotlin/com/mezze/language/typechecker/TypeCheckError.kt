@@ -20,6 +20,13 @@ class TypeCheckError(
         com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED,
     /** Zero or more "what to do next" hints. */
     val hints: List<String> = emptyList(),
+    /**
+     * Structured, machine-actionable suggestions for fixing this error.
+     * Consumed by the LSP code-action handler to offer one-click fixes
+     * without parsing the user-facing message text. Empty list = no
+     * automated fix available.
+     */
+    val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint> = emptyList(),
 ) : Exception(message) {
 
     override fun toString(): String {

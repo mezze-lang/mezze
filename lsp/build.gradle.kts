@@ -36,6 +36,15 @@ application {
 
 tasks.test {
     useJUnitPlatform()
+    // Known issue: this suite hangs after all tests pass. lsp4j's launcher
+    // and the typechecker/store transitive deps leave non-daemon threads
+    // alive. Tried both `LauncherSessionListener` and `AfterAllCallback`
+    // via ServiceLoader — gradle's test integration didn't pick either up.
+    //   - CI workaround: wrap `./gradlew :lsp:test` in `timeout 300`
+    //   - Dev workaround: Ctrl-C once all tests print PASSED
+    // forkEvery=1 isolates each class JVM so a hang in one doesn't poison
+    // siblings.
+    forkEvery = 1
 }
 
 // Create a fat JAR for the LSP server

@@ -191,6 +191,12 @@ class TypeChecker(
          * lines under the source snippet.
          */
         val hints: List<String> = emptyList(),
+        /**
+         * Structured fix suggestions consumed by the LSP code-action
+         * handler. Empty list = no automated fix offered. See
+         * [com.mezze.language.parsedast.diagnostics.FixHint].
+         */
+        val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint> = emptyList(),
     )
 
     /**
@@ -410,6 +416,7 @@ class TypeChecker(
                     metadata = e.metadata,
                     code = e.code,
                     hints = e.hints,
+                    fixHints = e.fixHints,
                 )
             })
             // Don't return early — keep flowing so we can emit a partial
@@ -435,7 +442,19 @@ class TypeChecker(
                 buildResult.implDeclarations
             )
             val allVariables = context.getAllBindings()
+            // `context` is the pre-program TypingContext — it doesn't yet
+            // contain the peer top-level lets that the constraint generator
+            // added on its way through. Without folding those names in,
+            // "Did you mean…?" for a typo'd reference to a peer binding
+            // would silently return nothing (the candidate pool was the
+            // prelude only). Include the program's binding names so the
+            // suggestion + structured FixHint.Rename for V0702 can offer
+            // peer bindings as candidates.
+            val peerBindingNames = constraintResults.keys.filterNot { it.startsWith("_") }
             val errors = undefinedVars.map { undefinedVar ->
+                // Track PrivateItemResult across message building so the AddPub
+                // FixHint at the bottom of the lambda can reference it.
+                var privateItemForFix: PrivateItemResult? = null
                 val isBuiltInAbility = com.mezze.language.typechecker.abilities.BuiltInAbilities.isBuiltInAbility(undefinedVar.name)
                 val isUserDefinedAbility = allAbilityDeclarations.containsKey(undefinedVar.name)
                 val isEffect = allEffectDeclarations.containsKey(undefinedVar.name)
@@ -463,12 +482,12 @@ class TypeChecker(
                     "Undefined variable: ${undefinedVar.name}. " +
                     "Did you mean to call an effect operation? Use: $effectName.${undefinedVar.name}"
                 } else {
-                    val privateItemMessage = checkIfPrivateQualifiedItem(undefinedVar, loadedModules, importContext)
+                    privateItemForFix = checkIfPrivateQualifiedItem(undefinedVar, loadedModules, importContext)
 
-                    if (privateItemMessage != null) {
-                        privateItemMessage
+                    if (privateItemForFix != null) {
+                        privateItemForFix!!.message
                     } else {
-                        val candidateNames = allVariables.keys.map { key -> key.toKeyString() }
+                        val candidateNames = allVariables.keys.map { key -> key.toKeyString() } + peerBindingNames
                         val similarNames = validator.findSimilarNames(undefinedVar.name, candidateNames)
                         // Prelude-stripped name hint: the prelude deliberately drops
                         // free-function bindings (option::fold vs seq::fold name
@@ -491,11 +510,35 @@ class TypeChecker(
                         }
                     }
                 }
+                // Emit structured FixHints so the LSP can offer one-click QuickFix:
+                //  - AddPub when the user named a real-but-private decl in another module
+                //  - Rename when the unqualified name is a typo of an in-scope binding
+                val undefFixHints: List<com.mezze.language.parsedast.diagnostics.FixHint> = buildList {
+                    if (undefinedVar.loc != null && privateItemForFix != null) {
+                        add(com.mezze.language.parsedast.diagnostics.FixHint.AddPub(
+                            undefinedVar.loc!!,
+                            privateItemForFix!!.declModulePath,
+                            privateItemForFix!!.declName,
+                        ))
+                    }
+                    if (undefinedVar.loc != null && privateItemForFix == null &&
+                        !isBuiltInAbility && !isUserDefinedAbility && !isEffect &&
+                        matchingAbilityOp == null && matchingEffectOp == null) {
+                        val candidateNames = allVariables.keys.map { key -> key.toKeyString() } + peerBindingNames
+                        val similarNames = validator.findSimilarNames(undefinedVar.name, candidateNames)
+                        if (similarNames.isNotEmpty()) {
+                            add(com.mezze.language.parsedast.diagnostics.FixHint.Rename(
+                                undefinedVar.loc!!, similarNames.take(3)
+                            ))
+                        }
+                    }
+                }
                 TypeCheckError(
                     phase = "Validation",
                     message = message,
                     loc = undefinedVar.loc,
                     code = ErrorCode.V0702_UNDEFINED_VARIABLE,
+                    fixHints = undefFixHints,
                 )
             }
             collectedErrors.addAll(errors)
@@ -652,6 +695,7 @@ class TypeChecker(
                                 loc = error.location(),
                                 code = error.code,
                                 hints = error.hints,
+                                fixHints = error.fixHints,
                             )
                         })
                     }
@@ -897,6 +941,7 @@ class TypeChecker(
                             loc = error.location(),
                             code = error.code,
                             hints = error.hints,
+                            fixHints = error.fixHints,
                         )
                     })
                 }
@@ -1035,13 +1080,51 @@ class TypeChecker(
             }
         }
 
+        // When the failure is a pure effect-row mismatch on a TypeAnnotation /
+        // ReturnType constraint, mine the constraint's actual/expected effect
+        // rows to emit structured `AddEffectToAnnotation` fixes. The LSP can
+        // then offer "Add `<Log>` to return type" one-click.
+        val solverFixHints: List<com.mezze.language.parsedast.diagnostics.FixHint> =
+            if (ctx is com.mezze.language.typechecker.constraints.ErrorContext.TypeAnnotation ||
+                ctx is com.mezze.language.typechecker.constraints.ErrorContext.ReturnType) {
+                effectRowExtraEffects(constraint).let { extras ->
+                    if (extras.isNotEmpty() && error.constraint.loc != null) {
+                        extras.map { effect ->
+                            com.mezze.language.parsedast.diagnostics.FixHint
+                                .AddEffectToAnnotation(error.constraint.loc!!, effect)
+                        }
+                    } else emptyList()
+                }
+            } else emptyList()
+
         return TypeCheckError(
             phase = "Constraint Solving",
             message = error.message,
             loc = error.constraint.loc,
             code = code,
             hints = hints,
+            fixHints = solverFixHints,
         )
+    }
+
+    /**
+     * Returns the effects that exist in the constraint's actual (left) side
+     * but not in the expected (right) side, when both are function types that
+     * only differ in their effect rows. Empty when the constraint is some
+     * other shape — caller falls back to other fix kinds.
+     */
+    private fun effectRowExtraEffects(
+        constraint: com.mezze.language.typechecker.constraints.Constraint
+    ): List<String> {
+        val eq = constraint as? com.mezze.language.typechecker.constraints.Constraint.Equality
+            ?: return emptyList()
+        val actual = eq.left as? MezzeType.FunctionType ?: return emptyList()
+        val expected = eq.right as? MezzeType.FunctionType ?: return emptyList()
+        if (actual.paramType != expected.paramType) return emptyList()
+        if (actual.returnType != expected.returnType) return emptyList()
+        val actualEffects = actual.effects?.effects ?: emptySet()
+        val expectedEffects = expected.effects?.effects ?: emptySet()
+        return (actualEffects - expectedEffects).sorted()
     }
 
     private fun buildPartialTypedModule(
@@ -1204,17 +1287,20 @@ class TypeChecker(
         return carriers
     }
 
+    /** Result of a private-qualified-item check: message + the (modulePath, declName) needed for an AddPub fix. */
+    private data class PrivateItemResult(val message: String, val declModulePath: String, val declName: String)
+
     /**
      * Check if a qualified name (like "module::function") refers to an item
      * that exists in the module but isn't public.
      *
-     * @return An error message if the item exists but isn't public, null otherwise.
+     * @return A [PrivateItemResult] if the item exists but isn't public, null otherwise.
      */
     private fun checkIfPrivateQualifiedItem(
         undefinedVar: ConstraintResult.UndefinedVariable,
         loadedModules: Map<com.mezze.language.ast.ModulePath, TypedModule>,
         importContext: ModuleImportContext?
-    ): String? {
+    ): PrivateItemResult? {
         // Only check qualified names - now using structured qualifier from AST
         if (!undefinedVar.isQualified) return null
 
@@ -1237,7 +1323,11 @@ class TypeChecker(
             // Check if the item exists in the module's program but isn't exported
             val existsButNotExported = checkIfItemExistsInModule(moduleByPath, itemName)
             if (existsButNotExported) {
-                return "'$itemName' exists in module '${qualifierPath.fullPath}' but is not public. Add 'pub' to export it."
+                return PrivateItemResult(
+                    "'$itemName' exists in module '${qualifierPath.fullPath}' but is not public. Add 'pub' to export it.",
+                    moduleByPath.modulePath,
+                    itemName,
+                )
             }
         }
 
@@ -1254,7 +1344,11 @@ class TypeChecker(
             if (module != null) {
                 val existsButNotExported = checkIfItemExistsInModule(module, itemName)
                 if (existsButNotExported) {
-                    return "'$itemName' exists in module '${qualifierPath.fullPath}' but is not public. Add 'pub' to export it."
+                    return PrivateItemResult(
+                        "'$itemName' exists in module '${qualifierPath.fullPath}' but is not public. Add 'pub' to export it.",
+                        module.modulePath,
+                        itemName,
+                    )
                 }
             }
         }

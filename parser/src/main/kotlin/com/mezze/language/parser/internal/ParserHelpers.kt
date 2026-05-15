@@ -71,7 +71,10 @@ internal fun createParseException(
     message: String,
     stream: TokenStream,
     source: String?,
-    file: String?
+    file: String?,
+    code: com.mezze.language.parsedast.diagnostics.ErrorCode =
+        com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED,
+    hints: List<String> = emptyList(),
 ): ParseException {
     return ParseException(
         message,
@@ -79,7 +82,9 @@ internal fun createParseException(
         stream.getSourceLine(),
         stream.getSourceColumn(),
         source,
-        file
+        file,
+        code = code,
+        hints = hints,
     )
 }
 

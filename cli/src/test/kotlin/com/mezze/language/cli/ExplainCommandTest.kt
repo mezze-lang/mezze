@@ -37,9 +37,13 @@ class ExplainCommandTest {
 
     @Test
     fun `each shipped doc renders`() {
-        val codes = listOf("T0201", "T0202", "T0203", "T0205", "T0210",
-                           "V0501", "V0601", "V0701", "V0702",
-                           "M0801", "M0803", "P0001")
+        val codes = listOf(
+            "T0201", "T0202", "T0203", "T0204", "T0205", "T0206", "T0207", "T0210",
+            "V0401", "V0402", "V0408", "V0501", "V0601", "V0603", "V0604",
+            "V0701", "V0702", "V0707",
+            "M0801", "M0803",
+            "P0001", "P0101", "P0109",
+        )
         for (code in codes) {
             val out = captureStdout { ExplainCommand().execute(listOf(code)) }
             assertFalse(out.isBlank(), "explain $code produced no output")

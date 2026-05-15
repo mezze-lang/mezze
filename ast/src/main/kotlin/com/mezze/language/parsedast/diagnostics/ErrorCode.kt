@@ -50,6 +50,7 @@ enum class ErrorCode {
     P0115_PIPE_MISSING_PLACEHOLDER,
     P0116_PIPE_MULTIPLE_PLACEHOLDERS,
     P0117_RECORD_FIELD_MISSING_TYPE,
+    P0118_NAMED_ARGS_REQUIRED,    // function / constructor called with positional args or ()
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,

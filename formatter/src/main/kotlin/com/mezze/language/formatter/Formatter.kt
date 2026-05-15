@@ -63,6 +63,28 @@ class Formatter {
     }
 
     /**
+     * Format a small Mezze snippet (one or a handful of top-level decls)
+     * the same way the full-file formatter would. Used by LSP code actions
+     * that need to insert generated code (auto-import lines, etc.) so the
+     * inserted text matches the project style instead of whatever the
+     * action builder typed inline.
+     *
+     * Falls back to the input unchanged if the snippet doesn't parse as a
+     * valid set of top-level decls — callers shouldn't crash a quick-fix
+     * just because we can't pretty-print it.
+     */
+    fun formatSnippet(snippet: String, file: String? = null): String {
+        return try {
+            // Strip a single trailing newline so we don't double-up — the
+            // pretty printer always ends with one.
+            val formatted = format(snippet, file)
+            formatted
+        } catch (_: FormatException) {
+            snippet
+        }
+    }
+
+    /**
      * Format and verify idempotency (for testing/debugging).
      *
      * @param source The source code to format

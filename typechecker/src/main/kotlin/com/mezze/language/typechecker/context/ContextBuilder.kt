@@ -1167,9 +1167,51 @@ class ContextBuilder {
                     returnType = convertParsedTypeAnnotationInternal(annotation.returnType),
                     effects = annotation.effects?.let { effectRow ->
                         validateHermeticEffects(effectRow.allEffectNames)
+                        // Every effect named in the annotation must be in scope —
+                        // a declared `effect Foo { ... }` in this module or an
+                        // imported one. Silently dropping unknown names produced
+                        // baffling "annotation declares effects ... not used"
+                        // errors downstream.
+                        val unknown = effectRow.effects.filter { it !in currentEffectDecls }
+                        if (unknown.isNotEmpty()) {
+                            val name = unknown.first()
+                            val suggestion = com.mezze.language.parsedast.diagnostics
+                                .LevenshteinSuggest.closest(name, currentEffectDecls.keys)
+                            val didYouMean = suggestion?.let { ". Did you mean `$it`?" } ?: ""
+                            val candidateModules: List<String> = try {
+                                val store = com.mezze.language.typechecker.PrecompiledStdlib.getStore()
+                                store?.getDeclsByKind(com.mezze.language.store.DeclKind.EFFECT)
+                                    ?.filter { it.declName == name }
+                                    ?.map { it.modulePath }
+                                    ?.distinct()
+                                    ?: emptyList()
+                            } catch (_: Exception) { emptyList() }
+                            val hints = if (candidateModules.isNotEmpty()) {
+                                candidateModules.take(3).map { "import it: `use ${it}::{$name}`" }
+                            } else listOf(
+                                "declare `effect $name { ... }` in this module, or",
+                                "import it: `use some_module::$name`",
+                            )
+                            val fixHints = buildList {
+                                if (suggestion != null) {
+                                    add(com.mezze.language.parsedast.diagnostics
+                                        .FixHint.Rename(effectRow.loc, listOf(suggestion)))
+                                }
+                                if (candidateModules.isNotEmpty()) {
+                                    add(com.mezze.language.parsedast.diagnostics
+                                        .FixHint.Import(effectRow.loc, name, candidateModules))
+                                }
+                            }
+                            throw TypeCheckError(
+                                "Effect `$name` is not defined or not imported$didYouMean",
+                                effectRow.loc,
+                                code = ErrorCode.V0505_EFFECT_NOT_DEFINED,
+                                hints = hints,
+                                fixHints = fixHints,
+                            )
+                        }
                         val hashes = effectRow.effects.mapNotNull { name ->
-                            val hash = currentEffectDecls[name]?.contentHash ?: return@mapNotNull null
-                            name to hash
+                            currentEffectDecls[name]?.contentHash?.let { name to it }
                         }.toMap()
                         val rowVar = if (effectRow.isPolymorphic) {
                             // All `<...>` markers within one signature share the same

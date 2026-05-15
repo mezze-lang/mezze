@@ -50,6 +50,14 @@ class LspFeaturesTest {
         executor.submit {
             try { startServer(sIn, sOut, "features-test") } catch (_: Throwable) {}
         }
+        // We previously passed our own daemon executor to Launcher.Builder
+        // here, hoping to let the gradle worker JVM exit. That broke
+        // request/response: lsp4j's single-thread executor handles BOTH
+        // reading from the pipe and dispatching incoming notifications,
+        // and we were deadlocking when a long-running test produced
+        // publishDiagnostics that backed up against a busy synchronous
+        // request. Use the stock launcher — JVM exit is handled by
+        // ForceExitListener (resources/META-INF/services/...).
         val launcher: Launcher<LanguageServer> =
             LSPLauncher.createClientLauncher(client, cIn, cOut)
         server = launcher.remoteProxy
@@ -350,6 +358,76 @@ class LspFeaturesTest {
         val code = typeDiag.code?.left
         assertNotNull(code, "type-error diagnostic should carry a non-null code")
         assertNotEquals("GENERAL", code, "expected specific errorType code (e.g. UNDEFINED_VARIABLE / TYPE_MISMATCH), not GENERAL — got: ${typeDiag.message}")
+    }
+
+    // ===== Code actions ================================================
+
+    @Test
+    fun `field typo produces a Replace-with rename code action`() {
+        // Regression for #178: V0703 FieldNotFound now emits structured
+        // FixHint.Rename payloads alongside the diagnostic. The LSP code
+        // action handler should decode those and surface a one-click
+        // "Replace with `y`" QuickFix in VS Code's lightbulb.
+        val (uri, _) = openSingleFile("""
+            let r = {x = 1, y = 2}
+            let bad = r.z
+        """.trimIndent())
+
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags, "expected publishDiagnostics for type-error file")
+        // Field-not-found surfaces as T0205 from ExpressionConstraints
+        // (closed record field check) — V0703 is the ValidationError path,
+        // hit by different syntactic shapes. Both wire fixHints now.
+        val fieldDiag = diags!!.diagnostics.firstOrNull {
+            val c = it.code?.left
+            c == "T0205" || c == "V0703" || c == "T0303"
+        } ?: fail("expected a field-not-found diagnostic among ${diags.diagnostics.map { it.code?.left to it.message }}")
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = fieldDiag.range
+            context = CodeActionContext(listOf(fieldDiag))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val titles = actions.mapNotNull { e -> if (e.isRight) e.right.title else null }
+        assertTrue(
+            titles.any { it.contains("Replace with") && (it.contains("`x`") || it.contains("`y`")) },
+            "expected a 'Replace with `x`' or 'Replace with `y`' code action, got: $titles"
+        )
+    }
+
+    @Test
+    fun `undefined variable typo produces a Replace-with rename code action`() {
+        // Regression for #178: V0702 VariableNotInScope must emit a
+        // structured FixHint.Rename when there's a Levenshtein-close
+        // peer binding in scope. This caught a real bug — at one point
+        // the typechecker built the undefined-var candidate list before
+        // peer top-level lets were registered, so `greeting` was missing
+        // from the suggestion pool for `greetin`. Keeping the test as a
+        // regression guard ensures the candidate pool covers peer lets.
+        val (uri, _) = openSingleFile("""
+            let greeting = {} -> 1
+            let bad = greetin
+        """.trimIndent())
+
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags, "expected publishDiagnostics for undefined-var file")
+        val varDiag = diags!!.diagnostics.firstOrNull { it.code?.left == "V0702" }
+            ?: fail("expected a V0702 diagnostic among ${diags.diagnostics.map { it.code?.left to it.message }}")
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = varDiag.range
+            context = CodeActionContext(listOf(varDiag))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val titles = actions.mapNotNull { e -> if (e.isRight) e.right.title else null }
+        assertTrue(
+            titles.any { it.contains("Replace with") && it.contains("`greeting`") },
+            "expected a 'Replace with `greeting`' code action, got titles=$titles; " +
+            "diag.code=${varDiag.code?.left} diag.data=${varDiag.data} " +
+            "diag.message=${varDiag.message}"
+        )
     }
 
     // ===== Cross-module go-to-definition (in-memory fallback) =========

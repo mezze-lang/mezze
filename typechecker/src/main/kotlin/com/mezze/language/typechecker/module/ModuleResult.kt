@@ -103,6 +103,9 @@ sealed class ModuleError(override val message: String) : Exception(message) {
     /** Rust-style `= hint:` lines rendered under the snippet. */
     open val hints: List<String> = emptyList()
 
+    /** Structured one-click fixes — LSP code actions read this; CLI ignores. */
+    open val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint> = emptyList()
+
     data class ModuleNotFound(
         val modulePath: String,
         val searchPaths: List<String>
@@ -159,6 +162,15 @@ sealed class ModuleError(override val message: String) : Exception(message) {
                 }
                 add("check that the symbol is declared `pub` in $modulePath")
             }
+        override val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint>
+            get() {
+                if (loc == null || availableExports.isEmpty()) return emptyList()
+                val close = com.mezze.language.parsedast.diagnostics
+                    .LevenshteinSuggest.closestN(exportName, availableExports, 3)
+                return if (close.isNotEmpty())
+                    listOf(com.mezze.language.parsedast.diagnostics.FixHint.Rename(loc, close))
+                else emptyList()
+            }
     }
 
     /**
@@ -173,6 +185,10 @@ sealed class ModuleError(override val message: String) : Exception(message) {
         override val hints: List<String> = listOf(
             "add `pub` before the declaration in the source module"
         )
+        override val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint>
+            get() = if (loc != null)
+                listOf(com.mezze.language.parsedast.diagnostics.FixHint.AddPub(loc, modulePath, exportName))
+            else emptyList()
     }
 
     // TODO: no dedicated M code for internal module access yet — leaving UNCATEGORIZED

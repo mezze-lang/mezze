@@ -118,7 +118,11 @@ object TypeDiffPrinter {
         val params = formatType(type.paramType, indent)
         val result = formatType(type.returnType, indent)
 
-        // Format effect row if present (including performed marker)
+        // Format effect row if present (including performed marker).
+        // Mezze surface syntax: `{p} -> Ret <Effect1, Effect2>`. The
+        // effect row sits AFTER the return type, not between `->` and
+        // the return — using the wrong order in error messages confuses
+        // users into thinking the type doesn't match what they wrote.
         val effectRow = type.effects
         val effects = if (effectRow != null && (effectRow.effects.isNotEmpty() || effectRow.rowVar != null || effectRow.performed)) {
             " ${formatEffectRow(effectRow)}"
@@ -132,7 +136,7 @@ object TypeDiffPrinter {
         // If the param is a record, its own formatter already emitted braces;
         // don't double-wrap (`{{x: Int}}` → `{x: Int}`).
         val paramFmt = if (type.paramType is MezzeType.RecordType) params else "{$params}"
-        return "$paramFmt ->$effects$abilities $result"
+        return "$paramFmt -> $result$effects$abilities"
     }
 
     private fun formatRecordType(type: MezzeType.RecordType, indent: Int): String {

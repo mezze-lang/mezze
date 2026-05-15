@@ -570,7 +570,8 @@ private fun validateSeqSpreadPosition(elements: List<ParsedSeqElement>, loc: Loc
                         line = loc.startLine,
                         column = loc.startCol,
                         sourceCode = source,
-                        file = file
+                        file = file,
+                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0104_SPREAD_NOT_AT_START,
                     )
                 }
             }
@@ -2114,7 +2115,8 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                         "Instead of '$funcName(...)', use '$funcName { <field> = <value> }' with named arguments.",
                         currentStream,
                         currentSource,
-                        currentFile
+                        currentFile,
+                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0118_NAMED_ARGS_REQUIRED,
                     )
                 }
                 TokenType.IDENTIFIER -> {
@@ -2133,7 +2135,8 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                             "use '$funcName { ... }' with named arguments.",
                             currentStream,
                             currentSource,
-                            currentFile
+                            currentFile,
+                            code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0118_NAMED_ARGS_REQUIRED,
                         )
                     } else if (funcExpr is ParsedVariantConstruct) {
                         // BUG FIX: Reject variant constructor with bare argument like "Left 42"
@@ -2144,7 +2147,8 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                             "use '$constructorName { <field> = $argName }' with named arguments.",
                             currentStream,
                             currentSource,
-                            currentFile
+                            currentFile,
+                            code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0118_NAMED_ARGS_REQUIRED,
                         )
                     }
                     // For non-identifier expressions, treat following identifier as separate statement
@@ -2190,7 +2194,8 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                             errorMessage,
                             currentStream,
                             currentSource,
-                            currentFile
+                            currentFile,
+                            code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0118_NAMED_ARGS_REQUIRED,
                         )
                     }
                     break

@@ -202,15 +202,31 @@ data class ModuleDependency(
  * Module-related errors
  */
 sealed class ModuleError(message: String) : Exception(message) {
-    data class ModuleNotFound(val modulePath: String, val searchPaths: List<String>) : 
-        ModuleError("Module not found: $modulePath. Searched in: ${searchPaths.joinToString(", ")}")
-    
-    data class CircularDependency(val cycle: List<String>) : 
-        ModuleError("Circular dependency detected: ${cycle.joinToString(" -> ")}")
-    
-    data class ParseError(val modulePath: String, val error: String) : 
-        ModuleError("Failed to parse module $modulePath: $error")
-    
+    /** Stable error code; UNCATEGORIZED until each subtype assigns one below. */
+    open val code: com.mezze.language.parsedast.diagnostics.ErrorCode =
+        com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED
+
+    /** Cursor position the diagnostic should point at, when known. */
+    open val errorLoc: com.mezze.language.parsedast.Loc? = null
+
+    /** Structured one-click fixes — LSP code actions read this; CLI ignores. */
+    open val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint> = emptyList()
+
+    data class ModuleNotFound(val modulePath: String, val searchPaths: List<String>) :
+        ModuleError("Module not found: $modulePath. Searched in: ${searchPaths.joinToString(", ")}") {
+        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0801_MODULE_NOT_FOUND
+    }
+
+    data class CircularDependency(val cycle: List<String>) :
+        ModuleError("Circular dependency detected: ${cycle.joinToString(" -> ")}") {
+        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0802_CIRCULAR_DEPENDENCY
+    }
+
+    data class ParseError(val modulePath: String, val error: String) :
+        ModuleError("Failed to parse module $modulePath: $error") {
+        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0804_MODULE_HAS_ERRORS
+    }
+
     data class InternalModuleAccess(
         val fromModule: String,
         val toModule: String,
@@ -220,8 +236,10 @@ sealed class ModuleError(message: String) : Exception(message) {
             "Cannot access internal module '$toModule' from outside its package"
         else
             "Module '$fromModule' cannot access internal module '$toModule'"
-    )
-    
+    ) {
+        override val errorLoc get() = loc
+    }
+
     data class ExportNotFound(
         val modulePath: String,
         val exportName: String,
@@ -233,7 +251,21 @@ sealed class ModuleError(message: String) : Exception(message) {
             append(". ")
             append(StringDistance.suggestOrList(exportName, availableExports, "exports"))
         }
-    })
+    }) {
+        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0803_NOT_EXPORTED
+        override val errorLoc get() = loc
+        // Did-you-mean: emit a Rename FixHint when an export close to
+        // `exportName` exists — turns the typo into a one-click fix.
+        override val fixHints
+            get(): List<com.mezze.language.parsedast.diagnostics.FixHint> {
+                if (loc == null || availableExports.isEmpty()) return emptyList()
+                val close = com.mezze.language.parsedast.diagnostics
+                    .LevenshteinSuggest.closestN(exportName, availableExports, 3)
+                return if (close.isNotEmpty())
+                    listOf(com.mezze.language.parsedast.diagnostics.FixHint.Rename(loc, close))
+                else emptyList()
+            }
+    }
 
     /**
      * Thrown when trying to import an item that exists but is not public.
@@ -242,7 +274,17 @@ sealed class ModuleError(message: String) : Exception(message) {
         val modulePath: String,
         val exportName: String,
         val loc: com.mezze.language.parsedast.Loc? = null
-    ) : ModuleError("'$exportName' exists in module '$modulePath' but is not public. Add 'pub' to export it.")
+    ) : ModuleError("'$exportName' exists in module '$modulePath' but is not public. Add 'pub' to export it.") {
+        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0803_NOT_EXPORTED
+        override val errorLoc get() = loc
+        // Surface an AddPub fix so the lightbulb can offer one-click cross-
+        // module visibility change once we have a real cross-file edit.
+        override val fixHints
+            get(): List<com.mezze.language.parsedast.diagnostics.FixHint> =
+                if (loc != null)
+                    listOf(com.mezze.language.parsedast.diagnostics.FixHint.AddPub(loc, modulePath, exportName))
+                else emptyList()
+    }
 
     data class DeprecatedCoreModule(val modulePath: String, val suggestion: String) :
         ModuleError("Deprecated core module: $modulePath. $suggestion")

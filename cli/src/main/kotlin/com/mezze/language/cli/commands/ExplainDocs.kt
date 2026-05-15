@@ -292,5 +292,262 @@ object ExplainDocs {
             - Watch out for stray `"` characters in the middle of the string —
               escape them as `\"`.
         """.trimIndent(),
+
+        "T0204" to """
+            # T0204: Variant constructor field mismatch
+
+            A variant constructor was called with the wrong set of fields.
+            Variant constructors take a record payload whose fields must match
+            the declared shape exactly.
+
+            ## Example
+
+            ```mezze
+            type Shape = | Circle { r: Int } | Square { s: Int } |
+            let c = Circle { radius = 5 }  // ❌ expected `r`, got `radius`
+            ```
+
+            ## How to fix
+
+            - Use the declared field names from the type definition.
+            - If you wanted to add fields, edit the type declaration first.
+        """.trimIndent(),
+
+        "T0206" to """
+            # T0206: Method not found
+
+            A `.method` call resolves through ability/impl tables. If no matching
+            method exists for the receiver's type, you get T0206.
+
+            ## Example
+
+            ```mezze
+            let n = 5
+            let s = n.greet {}
+            //        ^^^^^ no method `greet` on `Int`
+            ```
+
+            ## How to fix
+
+            - Check the spelling — the error usually suggests close matches.
+            - Make sure the relevant `impl` is in scope (imported via `use`).
+            - If the method should exist, add an `impl Ability for Type` block.
+        """.trimIndent(),
+
+        "T0207" to """
+            # T0207: Infinite type
+
+            The type-checker tried to unify a type variable with a type that
+            contains itself. Mezze's type system doesn't allow recursive types
+            via inference — only via named `type` declarations.
+
+            ## Example
+
+            ```mezze
+            let f = { x } -> x.f {}
+            //               ^^^ f's type would need to contain itself
+            ```
+
+            ## How to fix
+
+            - Use a named recursive type declaration: `type Tree = ...`.
+            - Or break the recursion by introducing a wrapper variant.
+        """.trimIndent(),
+
+        "V0401" to """
+            # V0401: Ability not defined
+
+            An `impl SomeAbility for ...` block referred to an ability name
+            that isn't declared or imported.
+
+            ## How to fix
+
+            - Declare the ability with `ability SomeAbility { ... }`.
+            - Or import it: `use other_module::SomeAbility`.
+            - Check spelling — error message suggests close matches.
+        """.trimIndent(),
+
+        "V0402" to """
+            # V0402: Ability constraint not satisfied
+
+            A generic function requires an ability the caller hasn't proven for
+            the type at the call site.
+
+            ## Example
+
+            ```mezze
+            let sort = { xs: [a], a: Ord } -> ...
+            let bad = sort { xs = [MyType {}] }  // ❌ MyType has no Ord impl
+            ```
+
+            ## How to fix
+
+            - Provide an `impl Ord for MyType` block, or
+            - Restrict the call to types that already have the impl, or
+            - Relax the generic signature if the ability isn't actually needed.
+        """.trimIndent(),
+
+        "V0408" to """
+            # V0408: No implementation found
+
+            A method dispatch resolved to no concrete impl. This usually means
+            the receiver's type has no `impl SomeAbility for ThatType` in scope.
+
+            ## How to fix
+
+            - Add the missing `impl` block.
+            - Import an existing impl: `use other_module::{impl SomeAbility for ThatType}`.
+            - Check that the receiver's type matches what the impl expects
+              (sometimes a value is inferred as a different type than you expect).
+        """.trimIndent(),
+
+        "V0501" to """
+            # V0501: Effect not handled
+
+            An effect operation was performed but no handler is installed for
+            that effect at the call site. Mezze tracks effects in the type
+            system — every effectful operation must eventually be enclosed by
+            a `perform`/`handle` block that resolves it.
+
+            ## Example
+
+            ```mezze
+            effect Log { log: { msg: Str } -> {} }
+            let main = do
+                Log.log { msg = "hi" }
+            //  ^^^^^^^ effect `Log` is performed but not handled
+            end
+            ```
+
+            ## How to fix
+
+            - Wrap the expression in `perform Logger in do ... end`, where
+              `Logger` is a performer for the `Log` effect.
+            - Or, if the effect should propagate to the caller, annotate the
+              enclosing function's return type so the effect is visible.
+        """.trimIndent(),
+
+        "V0603" to """
+            # V0603: Unreachable pattern
+
+            A match case can never run because an earlier case already covers
+            every value it would match.
+
+            ## Example
+
+            ```mezze
+            match x is
+                _ -> "anything"   // catches everything
+                Some n -> n       // ❌ unreachable
+            end
+            ```
+
+            ## How to fix
+
+            - Reorder cases so specific patterns come before catch-alls.
+            - Or remove the redundant case.
+        """.trimIndent(),
+
+        "V0604" to """
+            # V0604: Constructor has no payload
+
+            A variant constructor was called with arguments, but its declaration
+            has no payload — it's a nullary tag.
+
+            ## Example
+
+            ```mezze
+            type Color = | Red | Green | Blue |
+            let c = Red { intensity = 5 }
+            //          ^^^^^^^^^^^^^^^^^ Red has no payload fields
+            ```
+
+            ## How to fix
+
+            - Use the constructor without args: `let c = Red`.
+            - Or, if Red should carry data, declare it with a payload:
+              `| Red { intensity: Int } |`.
+        """.trimIndent(),
+
+        "V0707" to """
+            # V0707: Constructor must start with uppercase
+
+            Variant constructor names must be uppercase to distinguish them
+            from variable bindings in patterns.
+
+            ## Example
+
+            ```mezze
+            type Maybe = | none | some Int |
+            //            ^^^^   ^^^^ must be `None`, `Some`
+            ```
+
+            ## How to fix
+
+            - Rename to start with an uppercase letter.
+        """.trimIndent(),
+
+        "P0101" to """
+            # P0101: Expected token
+
+            The parser expected a particular token (like `=`, `}`, `->`) but
+            saw something else.
+
+            ## Example
+
+            ```mezze
+            let x: Int 5    // ❌ expected `=` between annotation and value
+            ```
+
+            ## How to fix
+
+            - Read the error's "expected" hint and insert the missing token.
+            - Common slips: missing `=` in `let`, missing `->` in lambdas,
+              missing `}` in records.
+        """.trimIndent(),
+
+        "P0109" to """
+            # P0109: Refutable pattern in `let`
+
+            `let` bindings require an irrefutable pattern — one that always
+            matches. Variant constructors (like `Some x`) might fail to match,
+            so they're not allowed in `let`.
+
+            ## Example
+
+            ```mezze
+            let Some n = lookup k m   // ❌ refutable
+            ```
+
+            ## How to fix
+
+            - Use `match` instead:
+              `match lookup k m is | Some n -> ... | None -> ... end`.
+            - Or, for partial bindings, use a record pattern: `let {x, y} = p`.
+        """.trimIndent(),
+
+        "P0118" to """
+            # P0118: Function or constructor needs named arguments
+
+            Mezze functions are called with named arguments wrapped in
+            braces: `f { x = 1, y = 2 }`. Positional `()` calls and bare-
+            argument calls (`f x`) are intentional syntax errors — every
+            argument has a name to keep call sites self-documenting.
+
+            ## Example
+
+            ```mezze
+            greet("world")    // ❌ uses `()`
+            greet "world"     // ❌ bare argument
+            Some 42           // ❌ constructor without `{}`
+            ```
+
+            ## How to fix
+
+            - Use the named form: `greet { msg = "world" }`.
+            - For one-field constructors: `Some { value = 42 }`.
+            - The field names come from the function or constructor's
+              record-typed parameter; hover the callee to see them.
+        """.trimIndent(),
     )
 }

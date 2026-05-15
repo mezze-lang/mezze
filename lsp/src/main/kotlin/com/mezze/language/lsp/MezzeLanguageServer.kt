@@ -116,7 +116,17 @@ class MezzeLanguageServer(
             workspaceSymbolProvider = Either.forLeft(true)
 
             // Code actions (quick fixes)
-            codeActionProvider = Either.forLeft(true)
+            // Advertise the specific code-action kinds we emit so editors
+            // can surface them under "Refactor…" submenus and respect the
+            // `Only` filter from the client. QuickFix is wired by the
+            // FixHint pipeline; the Refactor.* kinds come from the new
+            // refactoring code actions (Extract to let, Inline, etc.).
+            codeActionProvider = Either.forRight(CodeActionOptions(listOf(
+                CodeActionKind.QuickFix,
+                CodeActionKind.RefactorExtract,
+                CodeActionKind.RefactorInline,
+                CodeActionKind.RefactorRewrite,
+            )))
 
             // Signature help
             signatureHelpProvider = SignatureHelpOptions().apply {
@@ -132,8 +142,34 @@ class MezzeLanguageServer(
             // Inlay hints (types on pipes, chains, let bindings)
             inlayHintProvider = Either.forLeft(true)
 
-            // Rename support
-            renameProvider = Either.forLeft(true)
+            // Rename support — RenameOptions(prepareProvider = true) tells the
+            // client to first call textDocument/prepareRename to validate /
+            // gate the rename UI per cursor position. We answer it with the
+            // identifier range, or null on a keyword.
+            renameProvider = Either.forRight(RenameOptions().apply { prepareProvider = true })
+
+            // Go to Type Definition + Go to Implementation. The former jumps
+            // to the *type* a value has; the latter jumps to the impl(s) of
+            // an ability method. Both reuse the typed AST and parsed module
+            // we already keep per-document.
+            typeDefinitionProvider = Either.forLeft(true)
+            implementationProvider = Either.forLeft(true)
+
+            // Document links — makes `use foo::bar` import paths clickable.
+            documentLinkProvider = DocumentLinkOptions(false)
+
+            // Range formatting — same engine as full-file formatting, just
+            // restricted to the selected text. Mezze's formatter works at the
+            // module level so we widen to whole-file in practice; clients
+            // tolerate that.
+            documentRangeFormattingProvider = Either.forLeft(true)
+
+            // On-type formatting — fires when the user types `}`. Re-runs
+            // the formatter on the whole file. Required by lsp4j: first-char
+            // must be set; we leave `moreTriggerCharacter` empty so only `}`
+            // triggers (Enter / newline would format every line and feel
+            // jumpy).
+            documentOnTypeFormattingProvider = DocumentOnTypeFormattingOptions("}", emptyList())
 
             // Semantic tokens (syntax highlighting)
             // Token types and modifiers are defined by the LSP spec:

@@ -50,6 +50,8 @@ class GotoDefinitionTest {
         executor.submit {
             try { startServer(sIn, sOut, "goto-def-test") } catch (_: Throwable) {}
         }
+        // Stock launcher — ForceExitListener handles JVM shutdown so we don't
+        // need a custom executor here.
         val launcher: Launcher<LanguageServer> =
             LSPLauncher.createClientLauncher(CaptureClient(), cIn, cOut)
         server = launcher.remoteProxy

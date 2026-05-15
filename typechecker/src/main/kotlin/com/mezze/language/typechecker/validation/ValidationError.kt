@@ -54,6 +54,15 @@ sealed interface ValidationError {
         get() = emptyList()
 
     /**
+     * Optional structured fix suggestions. Empty by default; override on
+     * subtypes that can produce mechanical fixes (rename, import, etc.).
+     * Consumed by the LSP code-action handler — see
+     * [com.mezze.language.parsedast.diagnostics.FixHint].
+     */
+    val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint>
+        get() = emptyList()
+
+    /**
      * Ability constraint not satisfied.
      *
      * Example: Trying to use + on String (doesn't have NumAdd ability)
@@ -81,6 +90,16 @@ sealed interface ValidationError {
         }
 
         override fun location() = loc
+
+        override val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint>
+            get() {
+                if (loc == null || availableAbilities.isEmpty()) return emptyList()
+                val close = com.mezze.language.parsedast.diagnostics
+                    .LevenshteinSuggest.closestN(abilityName, availableAbilities, 3)
+                return if (close.isNotEmpty())
+                    listOf(com.mezze.language.parsedast.diagnostics.FixHint.Rename(loc, close))
+                else emptyList()
+            }
 
         private fun friendlyAbilityName(name: String): String = when (name) {
             "NumAdd" -> "addition (+)"
@@ -133,6 +152,28 @@ sealed interface ValidationError {
         }
 
         override fun location() = loc
+
+        override val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint>
+            get() {
+                if (loc == null) return emptyList()
+                // Close-match handler → likely typo on the effect name.
+                if (availableHandlers.isNotEmpty()) {
+                    val close = com.mezze.language.parsedast.diagnostics
+                        .LevenshteinSuggest.closestN(effectName, availableHandlers, 3)
+                    if (close.isNotEmpty()) {
+                        return listOf(com.mezze.language.parsedast.diagnostics.FixHint.Rename(loc, close))
+                    }
+                }
+                // No close match → user genuinely forgot to handle / propagate.
+                return listOf(
+                    com.mezze.language.parsedast.diagnostics.FixHint.WrapInPerform(
+                        loc, effectName, availableHandlers
+                    ),
+                    com.mezze.language.parsedast.diagnostics.FixHint.AddEffectToAnnotation(
+                        loc, effectName
+                    ),
+                )
+            }
     }
 
     /**
@@ -282,6 +323,16 @@ sealed interface ValidationError {
         }
 
         override fun location() = loc
+
+        override val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint>
+            get() {
+                if (loc == null || availableFields.isEmpty()) return emptyList()
+                val close = com.mezze.language.parsedast.diagnostics
+                    .LevenshteinSuggest.closestN(fieldName, availableFields, 3)
+                return if (close.isNotEmpty())
+                    listOf(com.mezze.language.parsedast.diagnostics.FixHint.Rename(loc, close))
+                else emptyList()
+            }
     }
 
     /**
@@ -306,6 +357,16 @@ sealed interface ValidationError {
         }
 
         override fun location() = loc
+
+        override val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint>
+            get() {
+                if (loc == null || availableConstructors.isEmpty()) return emptyList()
+                val close = com.mezze.language.parsedast.diagnostics
+                    .LevenshteinSuggest.closestN(constructorName, availableConstructors, 3)
+                return if (close.isNotEmpty())
+                    listOf(com.mezze.language.parsedast.diagnostics.FixHint.Rename(loc, close))
+                else emptyList()
+            }
     }
 
     /**
@@ -331,6 +392,14 @@ sealed interface ValidationError {
         }
 
         override fun location() = loc
+
+        override val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint>
+            get() {
+                if (loc == null || similarNames.isEmpty()) return emptyList()
+                return listOf(
+                    com.mezze.language.parsedast.diagnostics.FixHint.Rename(loc, similarNames.take(3))
+                )
+            }
     }
 
     /**
