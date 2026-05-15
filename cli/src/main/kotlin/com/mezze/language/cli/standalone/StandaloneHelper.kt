@@ -186,10 +186,19 @@ object StandaloneHelper {
         val jitDisabled = System.getenv("MEZZE_JIT")?.let {
             it == "0" || it.equals("false", ignoreCase = true)
         } ?: false
+        // MEZZE_TRACE_COMPILATION=1 surfaces Truffle's "function X
+        // compiled" log lines — the cleanest yes/no for whether JIT
+        // is actually running in this binary. On JVM and native-with-
+        // truffle-runtime this prints `[engine] opt done ...` for each
+        // compiled CallTarget. On interpreter-only builds it's silent.
+        val traceCompilation = System.getenv("MEZZE_TRACE_COMPILATION")?.let {
+            it == "1" || it.equals("true", ignoreCase = true)
+        } ?: false
         val engineBuilder = Engine.newBuilder()
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
             .apply { if (jitDisabled) option("engine.Compilation", "false") }
+            .apply { if (traceCompilation) option("engine.TraceCompilation", "true") }
 
         val profile = args.contains("--profile")
         val coverage = args.contains("--coverage")
