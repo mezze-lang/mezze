@@ -113,34 +113,6 @@ public final class SchedulerNatives {
         return MezzeUnit.INSTANCE;
     }
 
-    /**
-     * Serialize scheduler state.
-     */
-    @TruffleBoundary
-    public static MezzeSeq schedulerSerialize(MezzeRecord args) {
-        CoopScheduler scheduler = getScheduler(args, "sched");
-        byte[] data = scheduler.serialize();
-        // Convert to Mezze Int array
-        Object[] result = new Object[data.length];
-        for (int i = 0; i < data.length; i++) {
-            result[i] = (long) (data[i] & 0xFF);
-        }
-        return MezzeSeq.fromArray(result);
-    }
-
-    /**
-     * Deserialize scheduler state.
-     */
-    @TruffleBoundary
-    public static CoopScheduler schedulerDeserialize(MezzeRecord args) {
-        Object[] data = getArray(args, "data");
-        byte[] bytes = new byte[data.length];
-        for (int i = 0; i < data.length; i++) {
-            bytes[i] = ((Number) data[i]).byteValue();
-        }
-        return CoopScheduler.deserialize(bytes);
-    }
-
     // ========================================================================
     // Helper Methods
     // ========================================================================

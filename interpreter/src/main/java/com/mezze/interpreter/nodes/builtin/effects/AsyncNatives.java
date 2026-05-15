@@ -1643,50 +1643,14 @@ public final class AsyncNatives {
     // OS versions reuse the same await/race/all/etc. implementations
     // since they all work with MezzePromise
 
-    @TruffleBoundary
-    public static Object osAwait(MezzeRecord args) {
-        return loomAwait(args);
-    }
-
-    @TruffleBoundary
-    public static Object osRace(MezzeRecord args) {
-        return loomRace(args);
-    }
-
-    @TruffleBoundary
-    public static MezzeSeq osAll(MezzeRecord args) {
-        return loomAll(args);
-    }
-
-    @TruffleBoundary
-    public static MezzeVariant osTimeout(MezzeRecord args) {
-        return loomTimeout(args);
-    }
-
-    @TruffleBoundary
-    public static MezzeUnit osCancel(MezzeRecord args) {
-        return loomCancel(args);
-    }
-
-    @TruffleBoundary
-    public static MezzeUnit osSleep(MezzeRecord args) {
-        return loomSleep(args);
-    }
-
-    // OPTIMIZATION 5: No @TruffleBoundary - delegates to loom version
-    public static boolean osIsDone(MezzeRecord args) {
-        return loomIsDone(args);
-    }
-
-    // OPTIMIZATION 5: No @TruffleBoundary
-    public static boolean osIsCancelled(MezzeRecord args) {
-        return loomIsCancelled(args);
-    }
-
-    // OPTIMIZATION 5: No @TruffleBoundary
-    public static MezzeUnit osCheck(MezzeRecord args) {
-        return loomCheck(args);
-    }
+    // osAwait / osRace / osAll / osTimeout / osCancel / osSleep / osIsDone /
+    // osIsCancelled / osCheck / osAny / osSettle were all pure passthroughs
+    // to their loom counterparts (they operated on MezzePromise values which
+    // carry their own thread reference). The stdlib OS impls now call
+    // __native_loom_* directly. The remaining os* natives below (join, join3,
+    // map, for_each, filter, scoped, spawn, init/finalize_scope) keep their
+    // own implementations because they genuinely create platform threads
+    // with .virtual(false).
 
     @TruffleBoundary
     public static MezzeRecord osJoin(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
@@ -1970,21 +1934,6 @@ public final class AsyncNatives {
         }
 
         return MezzeSeq.fromArray(results.toArray());
-    }
-
-    @TruffleBoundary
-    public static Object osAny(MezzeRecord args) {
-        return loomAny(args);
-    }
-
-    @TruffleBoundary
-    public static MezzeSeq osSettle(MezzeRecord args) {
-        return loomSettle(args);
-    }
-
-    @TruffleBoundary
-    public static Object osScoped(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
-        return loomScoped(args, callNode, node);
     }
 
     // ==================== AsyncError Variant Helpers ====================

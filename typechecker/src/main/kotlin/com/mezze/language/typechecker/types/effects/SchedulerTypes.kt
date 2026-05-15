@@ -109,20 +109,5 @@ object SchedulerTypes {
             MezzeType.RecordType(emptyMap())
         )
 
-        // __native_scheduler_serialize: {sched: __NativeScheduler} -> [Int]
-        context["__native_scheduler_serialize"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "sched" to schedulerType
-            )),
-            MezzeType.SeqType(MezzeType.IntType)
-        )
-
-        // __native_scheduler_deserialize: {data: [Int]} -> __NativeScheduler
-        context["__native_scheduler_deserialize"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "data" to MezzeType.SeqType(MezzeType.IntType)
-            )),
-            schedulerType
-        )
     }
 }

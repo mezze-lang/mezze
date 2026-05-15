@@ -2518,6 +2518,10 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_loom_scope_get_token", (r, c) -> AsyncNatives.loomScopeGetToken(r));
 
         // === OS Threads - true parallelism, limited scale ===
+        // Only ops that genuinely create platform threads keep their own
+        // natives. Stateless ops (await/race/all/etc.) operate on
+        // MezzePromise values that carry their own thread reference; the
+        // OS impls route those to __native_loom_* (see async.mz).
         HANDLERS_WITH_NODE.put("__native_os_spawn_cfg", (r, c, n) -> AsyncNatives.osSpawnCfg(r, c, n));
         HANDLERS_WITH_NODE.put("__native_os_spawn_tracked", (r, c, n) -> AsyncNatives.osSpawnTracked(r, c, n));
         HANDLERS_WITH_NODE.put("__native_os_join", (r, c, n) -> AsyncNatives.osJoin(r, c, n));
@@ -2525,23 +2529,10 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS_WITH_NODE.put("__native_os_map", (r, c, n) -> AsyncNatives.osMap(r, c, n));
         HANDLERS_WITH_NODE.put("__native_os_for_each", (r, c, n) -> AsyncNatives.osForEach(r, c, n));
         HANDLERS_WITH_NODE.put("__native_os_filter", (r, c, n) -> AsyncNatives.osFilter(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_os_scoped", (r, c, n) -> AsyncNatives.osScoped(r, c, n));
 
         // OS thread scope lifecycle (scoped effects)
         HANDLERS.put("__native_os_init_scope", (r, c) -> AsyncNatives.osInitScope(r));
         HANDLERS.put("__native_os_finalize_scope", (r, c) -> AsyncNatives.osFinalizeScope(r));
-
-        HANDLERS.put("__native_os_await", (r, c) -> AsyncNatives.osAwait(r));
-        HANDLERS.put("__native_os_race", (r, c) -> AsyncNatives.osRace(r));
-        HANDLERS.put("__native_os_all", (r, c) -> AsyncNatives.osAll(r));
-        HANDLERS.put("__native_os_timeout", (r, c) -> AsyncNatives.osTimeout(r));
-        HANDLERS.put("__native_os_cancel", (r, c) -> AsyncNatives.osCancel(r));
-        HANDLERS.put("__native_os_sleep", (r, c) -> AsyncNatives.osSleep(r));
-        HANDLERS.put("__native_os_is_done", (r, c) -> AsyncNatives.osIsDone(r));
-        HANDLERS.put("__native_os_is_cancelled", (r, c) -> AsyncNatives.osIsCancelled(r));
-        HANDLERS.put("__native_os_check", (r, c) -> AsyncNatives.osCheck(r));
-        HANDLERS.put("__native_os_any", (r, c) -> AsyncNatives.osAny(r));
-        HANDLERS.put("__native_os_settle", (r, c) -> AsyncNatives.osSettle(r));
 
         // === Cooperative Scheduler - real continuation-based coop async ===
         HANDLERS.put("__native_scheduler_new", (r, c) -> SchedulerNatives.schedulerNew());
@@ -2554,8 +2545,6 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_scheduler_all", (r, c) -> SchedulerNatives.schedulerAll(r, c));
         HANDLERS.put("__native_scheduler_sleep", (r, c) -> SchedulerNatives.schedulerSleep(r, c));
         HANDLERS.put("__native_scheduler_park_until", (r, c) -> SchedulerNatives.schedulerParkUntil(r, c));
-        HANDLERS.put("__native_scheduler_serialize", (r, c) -> SchedulerNatives.schedulerSerialize(r));
-        HANDLERS.put("__native_scheduler_deserialize", (r, c) -> SchedulerNatives.schedulerDeserialize(r));
 
     }
 

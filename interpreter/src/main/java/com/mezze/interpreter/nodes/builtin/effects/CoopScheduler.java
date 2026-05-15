@@ -12,19 +12,19 @@ import java.util.*;
 /**
  * Cooperative scheduler for single-threaded async execution.
  *
- * This is a SIMPLE cooperative scheduler that:
- * - Queues tasks instead of executing immediately
- * - Runs tasks when await is called on incomplete promises
- * - Provides deterministic, interleaved execution
+ * Today's design: tasks run to completion on the Java stack;
+ * interleaving happens only at spawn boundaries. {@link #parkUntil}
+ * runs ready tasks while polling a predicate, which enables simple
+ * park-based primitives (Mutex, Latch) to work under Coop without
+ * contention.
  *
- * Key design: No continuation capture within scheduler.
- * Tasks run to completion or until they call await.
- * When await is called, scheduler runs other tasks until the awaited promise completes.
- *
- * This is simpler than full continuation-based scheduling but provides:
- * - Task interleaving at await points
- * - Deterministic execution order
- * - Foundation for workflow serialization (tasks are explicit)
+ * <p>Limitation: nested {@code parkUntil} (a parked task whose body
+ * itself parks) deadlocks because the inner parker doesn't capture
+ * its continuation. The proper fix is fiber-based suspension via
+ * EffectFiber (tracked in #113). Until that lands, CoopAsync is a
+ * good drop-in for spawn/await tests and uncontended primitives, but
+ * not for producer/consumer-style nested-park scenarios — those
+ * tests are {@code @Disabled}.
  */
 public final class CoopScheduler {
 
@@ -306,19 +306,4 @@ public final class CoopScheduler {
         return result;
     }
 
-    // ========================================================================
-    // Serialization (stub - full implementation in Task #6)
-    // ========================================================================
-
-    @TruffleBoundary
-    public byte[] serialize() {
-        // TODO: Implement full serialization
-        return new byte[0];
-    }
-
-    @TruffleBoundary
-    public static CoopScheduler deserialize(byte[] data) {
-        // TODO: Implement full deserialization
-        return new CoopScheduler();
-    }
 }
