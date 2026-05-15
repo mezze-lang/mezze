@@ -250,6 +250,15 @@ object StandaloneHelper {
 
         val engine = engineBuilder.build()
         mark("Engine built (JIT ${if (jitDisabled) "OFF" else "ON"})")
+        // Truffle.getRuntime() returns the active Truffle runtime — the
+        // ground truth for "does this binary JIT?". HotSpotTruffleRuntime
+        // = JIT via Graal partial evaluation. DefaultTruffleRuntime =
+        // pure interpreter, no compilation. Surfaced under MEZZE_DIAG=1
+        // because the answer is a frequent debugging question.
+        if (System.getenv("MEZZE_DIAG") == "1") {
+            val runtime = com.oracle.truffle.api.Truffle.getRuntime()
+            System.err.println("[mezze] Truffle runtime: ${runtime.javaClass.name} (${runtime.name})")
+        }
 
         // Truffle's polyglot engine registers its OWN shutdown hook that
         // disposes instruments and flushes their output. Adding our own
