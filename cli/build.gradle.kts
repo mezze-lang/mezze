@@ -398,6 +398,10 @@ graalvmNative {
             // consumed by `mez build --native` at user-build time).
             args.addAll(sharedFlags["cli-only-resources"].orEmpty())
 
+            // Raw native-image flags only the CLI binary uses
+            // (--macro:truffle-svm for JIT — see flags file).
+            args.addAll(sharedFlags["cli-only-flags"].orEmpty())
+
             // G1GC only supported on Linux
             val os = System.getProperty("os.name").lowercase()
             if (os.contains("linux")) {
@@ -429,14 +433,28 @@ tasks.named("nativeCompile") {
 val mezzeHome = providers.systemProperty("user.home").map { File(it, ".mezze") }
 
 /**
- * Install the freshly-built shadow jar to ~/.mezze/lib/mezze-lang.jar.
- * Depends on shadowJar so the artifact is up-to-date.
+ * Install the freshly-built shadow jars to ~/.mezze/lib/.
+ *
+ * Two artifacts:
+ *   - mezze-lang.jar     — the CLI fat-jar (everything: parser, typechecker,
+ *                          LSP, formatter, CLI commands, runtime, …).
+ *                          Used by `mez dev` (shells out to a JVM with this
+ *                          classpath) and by anything else that needs the
+ *                          full toolchain.
+ *   - mezze-runtime.jar  — the slim runtime fat-jar (just :interpreter +
+ *                          its runtime deps). What user-app JVM jars bundle.
+ *                          `BuildCommand.createStandaloneJar` clones this
+ *                          file, appends the user's embedded-app CBOR,
+ *                          and writes a fresh MANIFEST.MF pointing at
+ *                          com.mezze.interpreter.standalone.NativeMain.
+ *                          ~3× smaller than mezze-lang.jar.
  */
 tasks.register<Copy>("installRuntime") {
     group = "install"
-    description = "Install mezze-lang.jar into ~/.mezze/lib/"
-    dependsOn("shadowJar")
+    description = "Install mezze-lang.jar + mezze-runtime.jar into ~/.mezze/lib/"
+    dependsOn("shadowJar", ":interpreter:runtimeShadowJar")
     from(layout.buildDirectory.file("libs/mezze-lang.jar"))
+    from(project(":interpreter").layout.buildDirectory.file("libs/mezze-runtime.jar"))
     into(mezzeHome.map { File(it, "lib") })
 }
 

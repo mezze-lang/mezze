@@ -20,18 +20,14 @@
 -H:+AddAllCharsets
 -H:+TruffleHostInlining
 
-# Truffle-on-Native-Image macro. Links truffle-runtime-svm.jar
-# (Graal's native-image-safe partial evaluation runtime) onto the
-# native-image *builder* module path — NOT the user classpath.
-# This is the official path for getting Truffle JIT inside a native
-# binary. The macro guards itself with `IgnoreIfBuilderOnClasspath`,
-# which is why we must keep truffle-runtime.jar OUT of the user
-# classpath (see NativeBuildPath.extractRuntimeClasspath drop list).
-#
-# Without this macro, the binary boots with DefaultTruffleRuntime,
-# pure interpreter, no partial evaluation, ~10-50× slower than the
-# JVM build on CPU-bound workloads.
---macro:truffle-svm
+# NOTE: --macro:truffle-svm (Truffle JIT) is intentionally OFF for
+# user-app native builds today. The macro requires truffle-runtime.jar
+# on the classpath, which then makes compiled Mezze code transitively
+# reach JDK methods on native-image's blocklist (ConcurrentHashMap.size
+# via Object.equals/toString fallout, etc). Until #184 lands tighter
+# interpreter dispatch, user-app native binaries run interpreter-only.
+# The CLI's own native build (mez binary) uses the macro via gradle's
+# graalvmNative plugin and works there because its classpath is cleaner.
 
 # Truffle / polyglot language discovery resources.
 -H:IncludeResources=META-INF/truffle-languages/.*
@@ -104,8 +100,8 @@ ch.qos.logback
 # CBOR closure during the user-app native-image build. The CLI's own
 # build doesn't deserialize embedded-app.cbor, so these aren't required
 # there — but it's also harmless to include if we ever unify.
-com.mezze.language.cli.standalone.embedded.EmbeddedAppLoader
-com.mezze.language.cli.standalone.embedded.EmbeddedApp
+com.mezze.interpreter.standalone.embedded.EmbeddedAppLoader
+com.mezze.interpreter.standalone.embedded.EmbeddedApp
 com.mezze.language.codebase
 com.mezze.language.store
 
@@ -115,3 +111,16 @@ com.mezze.language.store
 # native-classpath.zip is the bundle of per-library jars the CLI hands
 # to native-image when building a user app. Not needed in user binaries.
 -H:IncludeResources=META-INF/mezze/native-classpath\.zip
+
+[cli-only-flags]
+# Raw native-image flags that apply ONLY to the CLI binary's own build
+# (not the user-app build path NativeBuildPath uses).
+
+# Truffle-on-Native-Image macro: links truffle-runtime-svm.jar into the
+# native-image builder, enabling Truffle partial evaluation (JIT) in
+# the CLI binary. This works for the CLI because its compiled-code
+# reachability surface is narrow. For user-app builds, the same macro
+# trips JDK blocklisted methods via Direct*Node.execute fallbacks —
+# tracked in #184. Until that's fixed, user-app native binaries run
+# interpreter-only and skip this flag.
+--macro:truffle-svm

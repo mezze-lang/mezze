@@ -1,6 +1,11 @@
 plugins {
     java
     kotlin("jvm")
+    // shadowJar: produces the slim "mezze-runtime.jar" that user apps
+    // bundle. Contains :interpreter + its runtime deps only — no parser,
+    // typechecker, CLI, LSP, formatter, etc. See the runtimeShadowJar
+    // task below.
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
 // Pure Java module for Truffle DSL nodes
@@ -12,7 +17,22 @@ java {
 }
 
 dependencies {
-    // Core project dependencies
+    // Core project dependencies.
+    //
+    // :interpreter is the runtime. The :parser and :typechecker deps
+    // exist for two reasons today:
+    //   1. MezzeContext (a Truffle context) holds lazy per-context
+    //      parser/typechecker fields. The host can re-parse/recheck
+    //      sources at runtime — but `mez build --native` user binaries
+    //      never do (they execute pre-compiled FunctionIR only).
+    //   2. PipelineRunner references PrecompiledStdlib (which lives in
+    //      :typechecker even though it's pure runtime data —
+    //      pre-compiled stdlib FunctionIRs + dep graph).
+    //
+    // Both could be lifted: (1) by moving the lazy parser/typechecker
+    // out of MezzeContext (host concern, not language concern), (2) by
+    // moving PrecompiledStdlib into :store or :stdlib. Tracked under
+    // #187. Until then the deps stick.
     implementation(project(":ast"))
     implementation(project(":parser"))
     implementation(project(":store"))
@@ -120,6 +140,72 @@ tasks.test {
     // Default `test` excludes benches so `./gradlew :interpreter:test`
     // stays a fast feedback loop. Benches live in :interpreter:bench.
     benchClassPatterns.forEach { exclude(it) }
+}
+
+// ─── Runtime shadowJar ──────────────────────────────────────────────────
+//
+// Produces `mezze-runtime.jar` — the slim runtime that user-app JVM
+// jars bundle (and that `mez build --native` feeds to native-image).
+//
+// Contains: :interpreter + its runtime transitive deps (truffle, polyglot,
+// vertx, kotlin-stdlib, kotlinx-serialization-cbor). Crucially NOT:
+// :parser, :typechecker, :formatter, :lsp, :store-sqlite, :cli, lsp4j,
+// logback, ktor, sqlite-jdbc.
+//
+// User-app build path (BuildCommand.createStandaloneJar): clones this
+// jar, appends META-INF/mezze/embedded-app.cbor + .meta, sets Main-Class
+// to com.mezze.interpreter.standalone.NativeMain. Same artifact works on
+// JVM (`java -jar app.jar`) and as the staging input to native-image.
+val runtimeShadowJar = tasks.register<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("runtimeShadowJar") {
+    group = "build"
+    description = "Slim runtime fat-jar that user apps bundle (no CLI/LSP/parser/typechecker)."
+
+    // The CLI's compileStdlib task produces stdlib.sqlite +
+    // META-INF/mezze/stdlib-snapshot.cbor under cli/build/generated/resources/.
+    // Pull those into the runtime jar so PrecompiledStdlib's
+    // tryLoadFromSnapshot finds the CBOR (no sources fallback) and the
+    // SQLite path still works on JVM-jar boots that prefer it.
+    dependsOn(":cli:compileStdlib")
+
+    archiveBaseName.set("mezze-runtime")
+    archiveClassifier.set("")
+    archiveVersion.set("")
+
+    from(sourceSets.main.get().output)
+    from(project(":cli").layout.buildDirectory.dir("generated/resources")) {
+        // Skip the per-library zip — that's CLI-only (for `mez build --native`).
+        exclude("META-INF/mezze/native-classpath.zip")
+    }
+    // Stdlib .mz sources for go-to-definition + the prelude bootstrap
+    // fallback (when the CBOR snapshot is somehow missing).
+    from(rootProject.projectDir.resolve("stdlib")) {
+        include("**/*.mz")
+        into("stdlib")
+    }
+    configurations = listOf(project.configurations.runtimeClasspath.get())
+
+    // Drop tools that exist only for dev (mez dev, mez run --profile etc).
+    // These live in :interpreter's runtime classpath because we want them
+    // available when the CLI shells out to a JVM with this same classpath,
+    // but a deployed user binary doesn't need them.
+    dependencies {
+        exclude(dependency("org.graalvm.tools:profiler-tool"))
+        exclude(dependency("org.graalvm.tools:chromeinspector-tool"))
+        exclude(dependency("org.graalvm.tools:dap-tool"))
+        exclude(dependency("org.graalvm.tools:coverage-tool"))
+        exclude(dependency("org.graalvm.tools:insight-tool"))
+    }
+
+    // Don't merge service files; just include them — each contributor's
+    // META-INF/services entries should land verbatim.
+    mergeServiceFiles()
+
+    // Exclude module-info.class so the merged fat-jar doesn't claim to be
+    // a module (would conflict on the classpath).
+    exclude("module-info.class")
+    exclude("META-INF/*.SF")
+    exclude("META-INF/*.DSA")
+    exclude("META-INF/*.RSA")
 }
 
 tasks.register<Test>("bench") {

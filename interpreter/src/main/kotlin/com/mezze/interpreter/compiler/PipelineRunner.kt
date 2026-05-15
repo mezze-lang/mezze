@@ -5,10 +5,8 @@ import com.mezze.interpreter.nodes.MezzeNode
 import com.mezze.interpreter.nodes.MezzeRootNode
 import com.mezze.interpreter.nodes.literal.UnitLiteralNode
 import com.mezze.interpreter.runtime.MezzeLanguage
-import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parsedast.*
 import com.mezze.language.typedast.*
-import com.mezze.language.typechecker.TypeChecker
 import com.oracle.truffle.api.CallTarget
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.FrameSlotKind

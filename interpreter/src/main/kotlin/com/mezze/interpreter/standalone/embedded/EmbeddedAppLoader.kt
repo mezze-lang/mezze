@@ -1,6 +1,6 @@
-package com.mezze.language.cli.standalone.embedded
+package com.mezze.interpreter.standalone.embedded
 
-import com.mezze.language.codebase.CodebaseSerialization
+import com.mezze.language.store.StoreSerialization
 
 /**
  * Build-time-only loader: native-image's `--initialize-at-build-time`
@@ -15,8 +15,8 @@ import com.mezze.language.codebase.CodebaseSerialization
  * `-H:IncludeResources` for it, so it's discarded after build init.
  *
  * For the JVM jar build (no embedded resource present), the init is a
- * no-op and [EmbeddedApp.present] stays false — [StandaloneMain] falls
- * through to the SQLite path.
+ * no-op and [EmbeddedApp.present] stays false — the CLI's StandaloneMain
+ * falls through to the SQLite path.
  */
 object EmbeddedAppLoader {
     init {
@@ -36,14 +36,14 @@ object EmbeddedAppLoader {
             val descBytes = descStream.readBytes()
             descStream.close()
 
-            EmbeddedApp.functions = CodebaseSerialization.deserializeFunctionIRList(fnBytes)
+            EmbeddedApp.functions = StoreSerialization.deserializeFunctionIRList(fnBytes)
 
             // Descriptor format (CBOR map): {
             //   "appName": String,
             //   "entryName": String?,
             //   "performers": List<List<String>>
             // }
-            val desc = CodebaseSerialization.deserializeEmbeddedAppMeta(descBytes)
+            val desc = StoreSerialization.deserializeEmbeddedAppMeta(descBytes)
             EmbeddedApp.appName = desc.appName
             EmbeddedApp.entryName = desc.entryName
             EmbeddedApp.performerRecords = desc.performerRecords
@@ -64,7 +64,7 @@ object EmbeddedAppLoader {
      * Public no-op entry to force class loading. Native-image's reachability
      * analysis needs SOMETHING to reference this class for `init {}` to
      * run; otherwise the class would be considered dead code and stripped.
-     * [StandaloneMain] calls [touch] from its `main` so the linkage holds.
+     * [NativeMain] calls [touch] from its `main` so the linkage holds.
      */
     @JvmStatic
     fun touch() { /* init has already run by the time we get here */ }

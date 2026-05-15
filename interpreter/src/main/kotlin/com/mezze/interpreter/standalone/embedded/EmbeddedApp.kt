@@ -1,4 +1,4 @@
-package com.mezze.language.cli.standalone.embedded
+package com.mezze.interpreter.standalone.embedded
 
 import com.mezze.language.truffleir.FunctionIR
 

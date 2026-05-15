@@ -24,10 +24,17 @@ import java.util.jar.Manifest
  *  5. Invoke native-image with the shared flag set
  *     ([NativeImageFlags]) plus a few user-build-specific flags.
  *
- * Runtime path: StandaloneMain detects `EmbeddedApp.present == true`
- * (the CBOR was decoded at image-build time via
- * `--initialize-at-build-time`) and skips SQLite entirely. Stdlib is
- * loaded the same way via `StdlibSnapshotData`.
+ * Runtime path: NativeMain (in :interpreter, com.mezze.interpreter.standalone)
+ * reads `EmbeddedApp` static fields populated at image-build time and
+ * dispatches into the runtime. No SQLite, no fallback. Stdlib is loaded
+ * the same way via `StdlibSnapshotData`.
+ *
+ * NativeMain lives in :interpreter so the native binary's reachability
+ * surface doesn't include :cli / :lsp / store-sqlite / Ktor / lsp4j /
+ * logback / formatter — those come in via :cli's transitive deps but
+ * aren't needed at runtime. Keeping the user-app classpath narrow is
+ * what lets Truffle JIT activate (broad classpaths trip native-image's
+ * blocklist for runtime compilation).
  */
 object NativeBuildPath {
 
@@ -133,7 +140,7 @@ object NativeBuildPath {
     }
 
     /** User code + every stdlib FunctionIR reachable from it. */
-    private fun computeReachableClosure(loweredFunctions: List<FunctionIR>): List<FunctionIR> {
+    fun computeReachableClosure(loweredFunctions: List<FunctionIR>): List<FunctionIR> {
         val needed = com.mezze.interpreter.compiler.PipelineRunner
             .collectReferencedHashes(loweredFunctions)
         val stdlibFns = com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions
@@ -156,17 +163,26 @@ object NativeBuildPath {
      * discover MezzeLanguageProvider. The originals were captured by the
      * `bundleNativeClasspath` gradle task; we just unzip them.
      *
-     * Drops jars from the runtime classpath:
-     *   - truffle-runtime: keeping it activates Truffle partial evaluation
-     *     (JIT) via --macro:truffle-svm — but in user-app builds today,
-     *     compiled Mezze code transitively reaches Logback/Netty methods
-     *     that native-image's blocklist forbids in compiled code. The CLI's
-     *     own binary doesn't hit this because it doesn't drag in :cli/:lsp
-     *     code reachable from MezzeRootNode. Slim the user-app classpath
-     *     (see #187) and we can flip this back on; until then, dropping
-     *     truffle-runtime keeps the build working at the cost of JIT.
-     *   - sqlite-jdbc: the binary uses CBOR snapshots instead of SQLite
-     *     (~10MB savings + simpler reachability story).
+     * Drops jars from the runtime classpath. Each one's reason:
+     *
+     *   - truffle-runtime-*: keeping it activates Truffle JIT via
+     *     --macro:truffle-svm — but compiled Mezze code transitively
+     *     reaches JDK blocklisted methods (ConcurrentHashMap.size,
+     *     WeakHashMap.containsKey, ServiceLoader.parse, ...) through
+     *     Direct*Node.execute fallback paths. Until interpreter-level
+     *     work tightens dispatch, drop truffle-runtime → native binary
+     *     uses DefaultTruffleRuntime (interpreter-only, no JIT). See
+     *     #184.
+     *   - sqlite-jdbc: native binary loads stdlib + user IR from CBOR
+     *     snapshots, never opens SQLite at runtime.
+     *   - chromeinspector-tool, dap-tool, profiler-tool, coverage-tool,
+     *     insight-tool: Truffle debugging instruments. Useful for
+     *     `mez dev`, dead weight in a production native binary.
+     *
+     * Note: the runtime jar we build (mezze-runtime.jar) already
+     * excludes most of these via its shadowJar filter — the list here
+     * is belt-and-suspenders for any extras the per-library extract
+     * might still surface.
      */
     private fun extractRuntimeClasspath(
         stagingDir: File,
@@ -179,9 +195,16 @@ object NativeBuildPath {
             "Native classpath resource not found inside mez. " +
             "Did you build this `mez` with `./gradlew :cli:installNative`?"
         )
-        val kept = all.filterNot { jar ->
-            jar.name.startsWith("truffle-runtime-") || jar.name.startsWith("sqlite-jdbc-")
-        }
+        val drop = listOf(
+            "truffle-runtime-",
+            "sqlite-jdbc-",
+            "chromeinspector-tool-",
+            "dap-tool-",
+            "profiler-tool-",
+            "coverage-tool-",
+            "insight-tool-",
+        )
+        val kept = all.filterNot { jar -> drop.any { jar.name.startsWith(it) } }
         if (timing) System.err.println(
             "[${relativeTime()}ms] native: classpath (${kept.size} jars, dropped ${all.size - kept.size})"
         )
@@ -241,7 +264,11 @@ object NativeBuildPath {
 
         cmd.add("-cp")
         cmd.add(cp)
-        cmd.add("com.mezze.language.cli.standalone.StandaloneMain")
+        // Use the :interpreter-resident main class for native binaries.
+        // :cli's StandaloneMain is dual-mode (embedded path + SQLite/JVM-
+        // jar fallback) and drags in lsp4j/ktor/store-sqlite via shadowJar.
+        // NativeMain knows only the embedded path — no SQLite, no CLI deps.
+        cmd.add("com.mezze.interpreter.standalone.NativeMain")
         cmd.add("-o")
         cmd.add(outBinary.absolutePath)
 
