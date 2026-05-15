@@ -156,11 +156,15 @@ object NativeBuildPath {
      * discover MezzeLanguageProvider. The originals were captured by the
      * `bundleNativeClasspath` gradle task; we just unzip them.
      *
-     * Drops two jars from the runtime classpath:
-     *   - truffle-runtime: activates HotSpot runtime compilation, which
-     *     hits 300+ native-image blocklist violations. We use the
-     *     DefaultTruffleRuntime (pure interpreter) instead — fine for
-     *     cold-start CLIs.
+     * Drops jars from the runtime classpath:
+     *   - truffle-runtime: keeping it activates Truffle partial evaluation
+     *     (JIT) via --macro:truffle-svm — but in user-app builds today,
+     *     compiled Mezze code transitively reaches Logback/Netty methods
+     *     that native-image's blocklist forbids in compiled code. The CLI's
+     *     own binary doesn't hit this because it doesn't drag in :cli/:lsp
+     *     code reachable from MezzeRootNode. Slim the user-app classpath
+     *     (see #187) and we can flip this back on; until then, dropping
+     *     truffle-runtime keeps the build working at the cost of JIT.
      *   - sqlite-jdbc: the binary uses CBOR snapshots instead of SQLite
      *     (~10MB savings + simpler reachability story).
      */
