@@ -159,7 +159,7 @@ object NativeBuildPath {
 
     /** User code + every stdlib FunctionIR reachable from it. */
     fun computeReachableClosure(loweredFunctions: List<FunctionIR>): List<FunctionIR> {
-        val needed = com.mezze.interpreter.compiler.PipelineRunner
+        val needed = com.mezze.language.typechecker.FunctionIRReachability
             .collectReferencedHashes(loweredFunctions)
         val stdlibFns = com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions
         val closureMap = LinkedHashMap<com.mezze.language.typedast.Hash, FunctionIR>()
