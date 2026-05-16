@@ -1988,16 +1988,24 @@ public final class AsyncNatives {
      * promise.
      */
     private static void runPromiseTask(MezzeRecord[] chain, MezzePromise promise, TaskBody body) {
+        // Inlined EffectFiber.runWithHandlerChain so we don't allocate a
+        // second lambda per spawn. The chain.length == 0 fast path matches
+        // the common case (top-level Async.spawn outside any perform).
+        boolean installed = false;
         try {
-            EffectFiber.runWithHandlerChain(chain, () -> {
-                Object result = body.run();
-                promise.complete(result);
-            });
+            if (chain.length > 0) {
+                EffectFiber.installHandlerChain(chain);
+                installed = true;
+            }
+            Object result = body.run();
+            promise.complete(result);
         } catch (TaskUnhandledOpException tue) {
             promise.setUnhandledOpCall(tue.opCall);
             promise.complete(null);
         } catch (Throwable e) {
             promise.fail(e);
+        } finally {
+            if (installed) EffectFiber.clearHandlerChain();
         }
     }
 
