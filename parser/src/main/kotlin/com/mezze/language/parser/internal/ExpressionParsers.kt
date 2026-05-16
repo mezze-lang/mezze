@@ -500,7 +500,11 @@ internal val MezzeParser.arrayLiteral: Parser<ParsedExpr>
         // NOT allowed: [a, ...xs] or [a, ...xs, b]
         val file = currentFile ?: "<unknown>"
         val lbracketToken = stream.current()
-        val seqLoc = lbracketToken?.let { tokenLoc(it, file) } ?: Loc(file, 1, 1, 1, 1)
+        // Fall back to the token-aware streamLoc helper (which picks up the
+        // last token's position when the stream is exhausted) instead of a
+        // hardcoded (1,1) — under EOF that gave misleading "error at start
+        // of file" diagnostics for `[` at end of input. Audit #211.
+        val seqLoc = lbracketToken?.let { tokenLoc(it, file) } ?: streamLoc(stream, file)
         val lbracket = tok(TokenType.LBRACKET)(stream)
         when (lbracket) {
             is ParseResult.Success -> {
@@ -2491,21 +2495,43 @@ internal fun MezzeParser.parseParsedInterpolatedString(
             // its source-position is (contentLine, contentCol + 2).
             val exprStartLine = contentLine
             val exprStartCol = contentCol + 2
-            // Parse the expression inside $(...)
-            val exprResult = try {
+            // Parse the expression inside $(...). Narrowly catch only the
+            // exceptions the inner Lexer/parser can actually raise; broader
+            // catches mask real bugs (NPE etc.) as parser errors (#209).
+            val exprResult: ParseResult<ParsedExpr> = try {
                 val lexer = Lexer(exprText, startLine = exprStartLine, startColumn = exprStartCol)
                 val tokens = lexer.tokenize()
                 val exprStream = TokenStream(tokens)
                 expression(exprStream)
-            } catch (e: Exception) {
-                return remaining.failure("Failed to parse interpolated expression \$($exprText): ${e.message ?: "internal parser error"}")
+            } catch (e: com.mezze.language.parser.internal.LexerException) {
+                // Lexer error inside the slice — surface the real reason and
+                // point at the start of the interpolation in the file.
+                ParseResult.Failure(
+                    message = "in string interpolation: ${e.message ?: "lexer error"}",
+                    position = remaining.getSourcePosition(),
+                    line = exprStartLine,
+                    column = exprStartCol,
+                )
             }
             when (exprResult) {
                 is ParseResult.Success -> {
                     parts.add(ParsedStringPart.Interpolation(exprResult.value))
                 }
                 is ParseResult.Failure -> {
-                    return remaining.failure("Failed to parse interpolated expression \$($exprText): ${exprResult.message}")
+                    // Forward the nested failure verbatim — its line/column
+                    // already carry file coordinates (we passed startLine /
+                    // startColumn to the inner Lexer), and its code/hints
+                    // describe the real problem. Just annotate that it
+                    // happened inside an interpolation. Fixes #209.
+                    return ParseResult.Failure(
+                        message = "in string interpolation: ${exprResult.message}",
+                        position = exprResult.position,
+                        line = exprResult.line,
+                        column = exprResult.column,
+                        isFatal = exprResult.isFatal,
+                        code = exprResult.code,
+                        hints = exprResult.hints,
+                    )
                 }
             }
             // Advance contentLine/contentCol past `$(...)` (i..j-1 inclusive).

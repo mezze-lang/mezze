@@ -2844,7 +2844,7 @@ class ExpressionConstraintGenerator {
         //   - Branch 2: Exception with 'error = FakeError
         // These need to be MERGED by unifying their associated types, producing:
         //   - Exception with 'error = | MathError, FakeError |
-        val (mergedEffectInstances, effectMergeConstraints) = mergeEffectInstances(bodyResult.effectInstances)
+        val (mergedEffectInstances, effectMergeConstraints) = mergeEffectInstances(bodyResult.effectInstances, expr.body.loc)
 
         val effectRow = if (bodyResult.effects.isNotEmpty() || mergedEffectInstances.isNotEmpty() || bodyResult.performed) {
             MezzeType.EffectRow(
@@ -3001,7 +3001,10 @@ class ExpressionConstraintGenerator {
      * For variant types, we directly merge constructors from all branches.
      * For non-variant types, we generate equality constraints.
      */
-    private fun mergeEffectInstances(instances: Set<MezzeType.EffectInstance>): Pair<Set<MezzeType.EffectInstance>, List<Constraint>> {
+    private fun mergeEffectInstances(
+        instances: Set<MezzeType.EffectInstance>,
+        loc: Loc? = null,
+    ): Pair<Set<MezzeType.EffectInstance>, List<Constraint>> {
         if (instances.isEmpty()) {
             return Pair(emptySet(), emptyList())
         }
@@ -3034,7 +3037,7 @@ class ExpressionConstraintGenerator {
                         mergedAssocTypes[key] = typesForKey.first()
                     } else {
                         // Multiple instances have this key - try to merge them directly
-                        val mergedType = mergeAssociatedTypes(typesForKey, constraints)
+                        val mergedType = mergeAssociatedTypes(typesForKey, constraints, loc)
                         mergedAssocTypes[key] = mergedType
                     }
                 }
@@ -3052,7 +3055,11 @@ class ExpressionConstraintGenerator {
      * For variant types, this directly merges constructors from all types.
      * For other types, this creates a fresh type variable and generates equality constraints.
      */
-    private fun mergeAssociatedTypes(types: List<MezzeType>, constraints: MutableList<Constraint>): MezzeType {
+    private fun mergeAssociatedTypes(
+        types: List<MezzeType>,
+        constraints: MutableList<Constraint>,
+        loc: Loc? = null,
+    ): MezzeType {
         // Check if all types are variant types - if so, we can merge them directly
         val variantTypes = types.filterIsInstance<MezzeType.VariantType>()
 
@@ -3074,14 +3081,16 @@ class ExpressionConstraintGenerator {
                             Constraint.Equality(
                                 left = existingPayload,
                                 right = mergedPayloadVar,
-                                context = "Merging variant constructor '$constructorName' payload"
+                                context = "Merging variant constructor '$constructorName' payload",
+                                loc = loc,
                             )
                         )
                         constraints.add(
                             Constraint.Equality(
                                 left = payloadType,
                                 right = mergedPayloadVar,
-                                context = "Merging variant constructor '$constructorName' payload"
+                                context = "Merging variant constructor '$constructorName' payload",
+                                loc = loc,
                             )
                         )
                         mergedConstructors[constructorName] = mergedPayloadVar
@@ -3113,7 +3122,8 @@ class ExpressionConstraintGenerator {
                     left = typeForKey,
                     right = mergedTypeVar,
                     context = "Merging effect associated types from branches",
-                    isMatchCaseContext = true  // Enable variant merging
+                    isMatchCaseContext = true,  // Enable variant merging
+                    loc = loc,
                 )
             )
         }

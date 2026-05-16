@@ -255,6 +255,10 @@ class ConstraintSolver(
         // Group HasConstructor constraints by their variant type
         // Also collect payload types for creating anonymous variants
         val constructorsByType = mutableMapOf<MezzeType, MutableMap<String, MezzeType?>>()
+        // Track the loc of the first contributing HasConstructor per typevar so
+        // the synthesized Equality below carries a user-meaningful source
+        // position (otherwise solver errors land at null loc → file:1:1).
+        val firstLocByType = mutableMapOf<MezzeType, com.mezze.language.parsedast.Loc?>()
 
         for (constraint in constraints) {
             if (constraint is Constraint.HasConstructor) {
@@ -263,6 +267,7 @@ class ConstraintSolver(
                 if (variantType is MezzeType.VarType) {
                     constructorsByType
                         .getOrPut(variantType) { mutableMapOf() }[constraint.constructorName] = constraint.payloadType
+                    if (variantType !in firstLocByType) firstLocByType[variantType] = constraint.loc
                 }
             }
         }
@@ -274,7 +279,11 @@ class ConstraintSolver(
         for ((typeVar, constructorsWithPayloads) in constructorsByType) {
             val constructorNames = constructorsWithPayloads.keys
             // Find variant type declaration that has ALL these constructors
-            val result = findVariantWithConstructors(constructorNames, constructorsWithPayloads)
+            val result = findVariantWithConstructors(
+                constructorNames,
+                constructorsWithPayloads,
+                loc = firstLocByType[typeVar],
+            )
 
             when {
                 result is VariantInferenceResult.Success -> {
@@ -283,7 +292,8 @@ class ConstraintSolver(
                         Constraint.Equality(
                             left = typeVar,
                             right = result.variantType,
-                            context = "Inferred from constructors: ${constructorNames.joinToString()}"
+                            context = "Inferred from constructors: ${constructorNames.joinToString()}",
+                            loc = firstLocByType[typeVar],
                         )
                     )
                     // Add payload type constraints to specialize type parameters
@@ -336,7 +346,8 @@ class ConstraintSolver(
      */
     private fun findVariantWithConstructors(
         constructors: Set<String>,
-        constructorPayloads: Map<String, MezzeType?> = emptyMap()
+        constructorPayloads: Map<String, MezzeType?> = emptyMap(),
+        loc: com.mezze.language.parsedast.Loc? = null,
     ): VariantInferenceResult? {
         // OPTIMIZATION: Use constructor index for O(1) lookup of candidate variants
         // Collect all variant declarations that have at least one of the constructors
@@ -382,7 +393,8 @@ class ConstraintSolver(
                         Constraint.Equality(
                             left = actualPayload,
                             right = declaredPayload,
-                            context = "Constructor '${constructorDef.name}' payload type"
+                            context = "Constructor '${constructorDef.name}' payload type",
+                            loc = loc,
                         )
                     )
                 }
@@ -2155,7 +2167,7 @@ class ConstraintSolver(
 
         // If we have the original operator from the AST, use it directly
         if (operator != null) {
-            return "Cannot use '$operator' with $typeNames. To enable this, implement: impl $abilityName for $primaryType where { ... }"
+            return "Cannot use '$operator' with $typeNames. To enable this, implement: impl $abilityName for $primaryType where { ... }${formatAbilityCandidates(abilityName)}"
         }
 
         // Generic ability error — no hardcoded ability→operator mappings.
@@ -2168,7 +2180,7 @@ class ConstraintSolver(
                     """Cannot infer decode target type. Add a type annotation:
   let result: MyType = decode {val = data, fmt = fmt}"""
                 } else {
-                    "$typeNames does not implement '$abilityName'. Ensure the data type is serializable."
+                    "$typeNames does not implement '$abilityName'. Ensure the data type is serializable.${formatAbilityCandidates(abilityName)}"
                 }
             }
             "Encode", "EncodeRepr" -> {
@@ -2176,11 +2188,74 @@ class ConstraintSolver(
                 if (dataType is MezzeType.VarType) {
                     "Cannot infer encode source type. Add a type annotation to the value being encoded."
                 } else {
-                    "$typeNames does not implement '$abilityName'. Ensure the data type is serializable."
+                    "$typeNames does not implement '$abilityName'. Ensure the data type is serializable.${formatAbilityCandidates(abilityName)}"
                 }
             }
-            else -> "$typeNames does not implement '$abilityName'. To enable this, implement: impl $abilityName for $primaryType where { ... }"
+            else -> "$typeNames does not implement '$abilityName'. To enable this, implement: impl $abilityName for $primaryType where { ... }${formatAbilityCandidates(abilityName)}"
         }
+    }
+
+    /**
+     * Surface the existing impls of [abilityName] so the user can tell whether
+     * (a) they're missing an impl for their type, or (b) they chose the wrong
+     * ability. Returns a leading-newline-prefixed block, or "" when no impls
+     * are in scope. Caps at 5 entries with an ellipsis to avoid wall-of-text.
+     *
+     * Audit task #208.
+     */
+    private fun formatAbilityCandidates(abilityName: String): String {
+        val impls = context.getAbilityImpls(abilityName)
+        if (impls.isEmpty()) return ""
+        // Render each impl's target-type annotation as the user would have
+        // written it. Annotations are the source-of-truth; targetTypes is a
+        // stringly-typed fallback.
+        val rendered = impls.mapNotNull { info ->
+            val targets = info.targetTypeAnnotations
+            when {
+                targets != null && targets.isNotEmpty() ->
+                    targets.joinToString(", ") { renderAnnotation(it) }
+                info.targetTypes.isNotEmpty() ->
+                    info.targetTypes.joinToString(", ")
+                else -> null
+            }
+        }.distinct()
+        if (rendered.isEmpty()) return ""
+        val shown = rendered.take(5)
+        val suffix = if (rendered.size > shown.size) ", … (${rendered.size - shown.size} more)" else ""
+        return "\n  Available impls: " + shown.joinToString("; ") { "impl $abilityName for $it" } + suffix
+    }
+
+    /**
+     * Render a [ParsedTypeAnnotation] back to user-facing surface syntax.
+     * Used by [formatAbilityCandidates] so the "Available impls" hint reads
+     * like the user would have written it ("Result Str Err"), not like a
+     * data-class dump ("ParsedNamedType(name=Result, loc=…)"). Loc info is
+     * intentionally elided.
+     */
+    private fun renderAnnotation(a: com.mezze.language.parsedast.ParsedTypeAnnotation): String = when (a) {
+        is com.mezze.language.parsedast.ParsedNamedType -> a.name
+        is com.mezze.language.parsedast.ParsedQualifiedType -> {
+            val prefix = a.modulePath.joinToString("::")
+            val head = if (prefix.isEmpty()) a.typeName else "$prefix::${a.typeName}"
+            if (a.args.isEmpty()) head else "$head ${a.args.joinToString(" ") { renderAnnotation(it) }}"
+        }
+        is com.mezze.language.parsedast.ParsedTypeApp ->
+            if (a.args.isEmpty()) a.constructor else "${a.constructor} ${a.args.joinToString(" ") { renderAnnotation(it) }}"
+        is com.mezze.language.parsedast.ParsedRecordType -> {
+            val fields = a.entries.joinToString(", ") { "${it.name}: ${renderAnnotation(it.type)}" }
+            if (a.isOpen) "{ $fields, ... }" else "{ $fields }"
+        }
+        is com.mezze.language.parsedast.ParsedVariantType -> {
+            val ctors = a.constructors.joinToString(", ") { c ->
+                val dt = c.dataType
+                if (dt == null) c.name else "${c.name} ${renderAnnotation(dt)}"
+            }
+            "| $ctors |"
+        }
+        is com.mezze.language.parsedast.ParsedFunctionType ->
+            "${renderAnnotation(a.paramType)} -> ${renderAnnotation(a.returnType)}"
+        is com.mezze.language.parsedast.ParsedSeqType -> "[${renderAnnotation(a.elementType)}]"
+        else -> a::class.simpleName?.removePrefix("Parsed")?.removeSuffix("Type") ?: "?"
     }
 
     /** Matches partial Bool variants (e.g., just {True} or just {False}) during constraint solving. */
