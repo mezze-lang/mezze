@@ -63,7 +63,14 @@ data class TypingContext(
         data class Monomorphic(
             val type: MezzeType,
             val sourceModule: String? = null,
-            val contentHash: Hash? = null
+            val contentHash: Hash? = null,
+            // #194: For `let x = <expr>` inside a do-block, holds the RHS expression.
+            // Lets method-call dispatch peel let-aliases when the binding's inferred
+            // type is still a VarType at constraint-generation time — e.g.
+            // `let r = double {n=21}; r.to_str {}` falls back to the syntactic
+            // shape of `double {n=21}` to recover the receiver's type name.
+            // Null for params, captures, top-level decls, and destructuring binds.
+            val aliasOf: com.mezze.language.parsedast.ParsedExpr? = null
         ) : Binding()
 
         /**

@@ -1651,7 +1651,41 @@ class ExpressionConstraintGenerator {
      * method dispatch when constraint solving hasn't yet pinned the receiver
      * type.
      */
-    private fun lookupConstructorTypeName(receiver: ParsedExpr, context: ConstraintContext): String? {
+    private fun lookupConstructorTypeName(receiver: ParsedExpr, context: ConstraintContext): String? =
+        lookupConstructorTypeName(receiver, context, depth = 0)
+
+    /**
+     * Bounded variant. `depth` guards against `let a = b; let b = c; …` chains;
+     * we walk at most a handful of hops, which is enough to cover the realistic
+     * "alias one call result" pattern (#194) without quadratic blowups on
+     * pathological inputs.
+     */
+    private fun lookupConstructorTypeName(
+        receiver: ParsedExpr,
+        context: ConstraintContext,
+        depth: Int,
+    ): String? {
+        if (depth > 4) return null
+
+        // #194 let-alias peel: `let r = double {n=21}; r.to_str {}` — at
+        // constraint-gen time `r`'s inferred type is still a fresh VarType
+        // (the call's return type is not yet resolved). The binding records
+        // the RHS expression as `aliasOf`; recurse on it so we recover the
+        // syntactic shape (a function call) the inline form would have seen.
+        if (receiver is ParsedIdentifier && receiver.qualifier == null) {
+            val lookup = context.typingContext.lookup(receiver.localName)
+            if (lookup is TypingContext.LookupResult.Found) {
+                val binding = lookup.binding
+                if (binding is TypingContext.Binding.Monomorphic &&
+                    binding.aliasOf != null &&
+                    binding.type is MezzeType.VarType
+                ) {
+                    val aliased = lookupConstructorTypeName(binding.aliasOf, context, depth + 1)
+                    if (aliased != null) return aliased
+                }
+            }
+        }
+
         // Variant constructor receiver: `Some {val=42}`, `Ok {val=42}`.
         val ctorName = when (receiver) {
             is ParsedVariantConstruct -> receiver.constructor
@@ -1679,7 +1713,7 @@ class ExpressionConstraintGenerator {
         // name, then look up the inherent method's return type.
         if (receiver is ParsedFunctionCall && receiver.function is ParsedMemberAccess) {
             val memberAccess = receiver.function as ParsedMemberAccess
-            val innerTypeName = lookupConstructorTypeName(memberAccess.receiver, context) ?: return null
+            val innerTypeName = lookupConstructorTypeName(memberAccess.receiver, context, depth + 1) ?: return null
             val candidates = context.typingContext.findAnonymousMethodsByName(memberAccess.member)
                 .filter { it.targetTypeName == innerTypeName }
             val method = candidates.singleOrNull() ?: return null
@@ -4033,9 +4067,18 @@ class ExpressionConstraintGenerator {
                             BindingKey.unqualified(name) to TypingContext.Binding.Polymorphic(scheme)
                         }.toMap()
                     } else {
-                        // Regular monomorphic binding
+                        // Regular monomorphic binding. For a simple `let x = <expr>`
+                        // (single-variable pattern, no destructuring), thread the RHS
+                        // expression onto the binding so method-call dispatch can peel
+                        // the alias when `x.method {}` is called and `x`'s inferred
+                        // type is still a VarType — see #194.
+                        val singleVarAliasRhs: com.mezze.language.parsedast.ParsedExpr? =
+                            if (stmt.pattern is ParsedVariablePattern) stmt.value else null
                         patternResult.bindings.map { (name, type) ->
-                            BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type)
+                            BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(
+                                type = type,
+                                aliasOf = singleVarAliasRhs,
+                            )
                         }.toMap()
                     }
 
