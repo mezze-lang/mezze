@@ -28,7 +28,8 @@ import org.junit.jupiter.api.Assertions.*
  */
 class EffectHandlerPerfTest {
 
-    private fun eval(source: String): Any = MezzeTestHelper.run(source)
+    // Bench uses runJit() so measurements reflect production (JIT-on) perf.
+    private fun eval(source: String): Any = MezzeTestHelper.runJit(source)
 
     private fun bench(label: String, iters: Int = 1, body: () -> Unit) {
         BenchRecorder.bench(

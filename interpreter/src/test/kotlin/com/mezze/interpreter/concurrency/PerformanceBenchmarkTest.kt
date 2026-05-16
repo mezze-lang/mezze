@@ -43,7 +43,8 @@ class PerformanceBenchmarkTest {
         warmupJVM(500)
     }
 
-    private fun eval(source: String): Any = MezzeTestHelper.run(source)
+    // Bench uses runJit() so measurements reflect production (JIT-on) perf.
+    private fun eval(source: String): Any = MezzeTestHelper.runJit(source)
 
     private fun warmupJVM(iterations: Int) {
         repeat(iterations) {

@@ -17,7 +17,8 @@ import org.junit.jupiter.api.Assertions.*
  */
 class AsyncMicroBench {
 
-    private fun eval(source: String): Any = MezzeTestHelper.run(source)
+    // Bench uses runJit() so measurements reflect production (JIT-on) perf.
+    private fun eval(source: String): Any = MezzeTestHelper.runJit(source)
 
     private fun bench(category: String, label: String, iters: Int, body: () -> Unit) {
         BenchRecorder.bench(category, label, iters = iters, body = body)
