@@ -138,6 +138,7 @@ fun main(args: Array<String>) {
         when (command) {
             "check" -> handleCheckCommand(remainingArgs)
             "dev" -> handleDevCommand(remainingArgs)
+            "exec" -> handleExecCommand(remainingArgs)
             "build" -> handleBuildCommand(remainingArgs)
             "init" -> handleInitCommand(remainingArgs)
             "index" -> handleIndexCommand(remainingArgs)
@@ -230,7 +231,7 @@ private fun showUsage() {
     println("  mez <command> [options]")
     println()
     println("COMMANDS:")
-    println("  Project:  init, dev, build, check")
+    println("  Project:  init, dev, exec, build, check")
     println("  Tools:    fmt, lsp, index")
     println()
     println("For command-specific help: mez <command> --help")
@@ -313,6 +314,27 @@ private fun showCommandHelp(command: String) {
             println("  mez dev --insight=trace.js           # Run with a JS probe")
             println("  mez dev --app server                 # Run a specific app")
             println()
+        }
+
+        "exec" -> {
+            println("USAGE: mez exec [app_name]")
+            println()
+            println("Run the project's app once with the JIT-on Truffle engine, then exit.")
+            println()
+            println("Same fast execution path as 'mez dev' (load → typecheck → lower → run),")
+            println("but without the file watcher and without writing any artifacts to disk.")
+            println()
+            println("APP SELECTION:")
+            println("  mez exec               Run the first [[app]] in Mezze.toml")
+            println("  mez exec <name>        Run the [[app]] with that name")
+            println("  mez exec --app=<name>  Same, explicit flag form")
+            println()
+            println("OTHER:")
+            println("  -h, --help             Show this help message")
+            println()
+            println("EXAMPLES:")
+            println("  mez exec               # Run the default app")
+            println("  mez exec server        # Run the 'server' app")
         }
 
         "build" -> {
@@ -596,6 +618,10 @@ private fun printTypedModuleSuccess(module: com.mezze.language.typedast.TypedMod
 
 private fun handleDevCommand(args: List<String>) {
     com.mezze.language.cli.commands.DevCommand().execute(args)
+}
+
+private fun handleExecCommand(args: List<String>) {
+    com.mezze.language.cli.commands.ExecCommand().execute(args)
 }
 
 private fun handleBuildCommand(args: List<String>) {

@@ -15,6 +15,11 @@ object JvmLauncher {
         "--add-opens=java.base/java.lang=ALL-UNNAMED",
         "--add-opens=java.base/java.nio=ALL-UNNAMED",
         "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+        // Required by EffectFiber which wraps jdk.internal.vm.Continuation
+        // for Loom-backed effect handlers (mirrors the same flag we set on
+        // standalone JVM-jar launchers in commit 28b3ea5f). Without this,
+        // any `perform` lands at "Loom continuations not available".
+        "--add-opens=java.base/jdk.internal.vm=ALL-UNNAMED",
         // JDK 24+: Truffle uses Unsafe::objectFieldOffset internally; silence the
         // deprecation warning rather than letting it flood `mez dev` startup.
         "--sun-misc-unsafe-memory-access=allow",
