@@ -51,17 +51,19 @@ public final class InvokeScalarNNode extends MezzeNode {
     /** Kind of the callee param at each callee position (LONG/DOUBLE/OBJECT). */
     @CompilationFinal(dimensions = 1) private byte[] calleeParamKinds;
 
-    /** Typed-payload path activation flags + reusable buffers. At most one
-     *  of these is true at a time; null buffers are unused. */
+    /** Typed-payload path activation flags. At most one is true at a time.
+     *  Buffers (long[]/double[]/Object[]) are allocated per execute() call
+     *  so the node is concurrency-safe under Loom virtual threads sharing
+     *  CallTargets. */
     @CompilationFinal private boolean useTypedLong;
     @CompilationFinal private boolean useTypedDouble;
     @CompilationFinal private boolean useTypedMixed;
 
-    @CompilationFinal(dimensions = 1) private long[] reusableLongArgs;
-    @CompilationFinal(dimensions = 1) private double[] reusableDoubleArgs;
-    @CompilationFinal(dimensions = 1) private Object[] reusableObjArgs;
-    /** [closure..., MARKER, (paramKinds), buckets...]. Wired at cache time. */
-    @CompilationFinal(dimensions = 1) private Object[] reusableTypedWrapper;
+    /** Mixed-kind bucket sizes — structural metadata, safe to share. */
+    @CompilationFinal private int mixedLongCount;
+    @CompilationFinal private int mixedDoubleCount;
+    @CompilationFinal private int mixedObjCount;
+
     /** Per-arg bucket-slot index for mixed payload: bucketIdxByCallerArg[i] is
      *  the index into the appropriate bucket (long/double/obj) for caller arg i,
      *  determined by the kind of the callee param this arg maps to. */
@@ -89,8 +91,10 @@ public final class InvokeScalarNNode extends MezzeNode {
         }
 
         // FAST PATH: all-LONG callee. Permute args into long[] bucket then call.
+        // Buffers allocated per call to keep the node concurrency-safe under
+        // virtual threads sharing CallTargets.
         if (useTypedLong) {
-            long[] longArgs = reusableLongArgs;
+            long[] longArgs = new long[argumentCount];
             try {
                 for (int i = 0; i < argumentCount; i++) {
                     longArgs[callerToCalleeIdx[i]] = argumentNodes[i].executeLong(frame);
@@ -100,12 +104,16 @@ public final class InvokeScalarNNode extends MezzeNode {
                 useTypedLong = false;
                 return fallbackRecordCall(frame, fn);
             }
-            return cachedCallNode.call(reusableTypedWrapper);
+            Object[] wrapper = new Object[cachedClosureLength + 2];
+            for (int i = 0; i < cachedClosureLength; i++) wrapper[i] = cachedClosureValues[i];
+            wrapper[cachedClosureLength] = ScalarLongPayloadMarker.INSTANCE;
+            wrapper[cachedClosureLength + 1] = longArgs;
+            return cachedCallNode.call(wrapper);
         }
 
         // FAST PATH: all-DOUBLE callee.
         if (useTypedDouble) {
-            double[] doubleArgs = reusableDoubleArgs;
+            double[] doubleArgs = new double[argumentCount];
             try {
                 for (int i = 0; i < argumentCount; i++) {
                     doubleArgs[callerToCalleeIdx[i]] = argumentNodes[i].executeDouble(frame);
@@ -115,20 +123,34 @@ public final class InvokeScalarNNode extends MezzeNode {
                 useTypedDouble = false;
                 return fallbackRecordCall(frame, fn);
             }
-            return cachedCallNode.call(reusableTypedWrapper);
+            Object[] wrapper = new Object[cachedClosureLength + 2];
+            for (int i = 0; i < cachedClosureLength; i++) wrapper[i] = cachedClosureValues[i];
+            wrapper[cachedClosureLength] = ScalarDoublePayloadMarker.INSTANCE;
+            wrapper[cachedClosureLength + 1] = doubleArgs;
+            return cachedCallNode.call(wrapper);
         }
 
         // FAST PATH: mixed-kind callee. Each caller arg is read with the kind
         // of the callee param it maps to and stored in the right bucket.
         if (useTypedMixed) {
+            long[] longArgs = mixedLongCount > 0 ? new long[mixedLongCount] : null;
+            double[] doubleArgs = mixedDoubleCount > 0 ? new double[mixedDoubleCount] : null;
+            Object[] objArgs = mixedObjCount > 0 ? new Object[mixedObjCount] : null;
             try {
-                fillMixedBuckets(frame);
+                fillMixedBuckets(frame, longArgs, doubleArgs, objArgs);
             } catch (UnexpectedResultException ure) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 useTypedMixed = false;
                 return fallbackRecordCall(frame, fn);
             }
-            return cachedCallNode.call(reusableTypedWrapper);
+            Object[] wrapper = new Object[cachedClosureLength + 5];
+            for (int i = 0; i < cachedClosureLength; i++) wrapper[i] = cachedClosureValues[i];
+            wrapper[cachedClosureLength] = ScalarMixedPayloadMarker.INSTANCE;
+            wrapper[cachedClosureLength + 1] = calleeParamKinds;
+            wrapper[cachedClosureLength + 2] = longArgs;
+            wrapper[cachedClosureLength + 3] = doubleArgs;
+            wrapper[cachedClosureLength + 4] = objArgs;
+            return cachedCallNode.call(wrapper);
         }
 
         // Fallback: build a MezzeRecord with caller's field names + values and
@@ -138,17 +160,17 @@ public final class InvokeScalarNNode extends MezzeNode {
     }
 
     @ExplodeLoop
-    private void fillMixedBuckets(VirtualFrame frame) throws UnexpectedResultException {
+    private void fillMixedBuckets(VirtualFrame frame, long[] longArgs, double[] doubleArgs, Object[] objArgs) throws UnexpectedResultException {
         for (int i = 0; i < argumentCount; i++) {
             int calleeIdx = callerToCalleeIdx[i];
             byte kind = calleeParamKinds[calleeIdx];
             int bucketIdx = bucketIdxByCallerArg[i];
             if (kind == 0 /* LONG */) {
-                reusableLongArgs[bucketIdx] = argumentNodes[i].executeLong(frame);
+                longArgs[bucketIdx] = argumentNodes[i].executeLong(frame);
             } else if (kind == 1 /* DOUBLE */) {
-                reusableDoubleArgs[bucketIdx] = argumentNodes[i].executeDouble(frame);
+                doubleArgs[bucketIdx] = argumentNodes[i].executeDouble(frame);
             } else {
-                reusableObjArgs[bucketIdx] = argumentNodes[i].execute(frame);
+                objArgs[bucketIdx] = argumentNodes[i].execute(frame);
             }
         }
     }
@@ -202,10 +224,9 @@ public final class InvokeScalarNNode extends MezzeNode {
         useTypedLong = false;
         useTypedDouble = false;
         useTypedMixed = false;
-        reusableLongArgs = null;
-        reusableDoubleArgs = null;
-        reusableObjArgs = null;
-        reusableTypedWrapper = null;
+        mixedLongCount = 0;
+        mixedDoubleCount = 0;
+        mixedObjCount = 0;
         callerToCalleeIdx = null;
         calleeParamKinds = null;
         bucketIdxByCallerArg = null;
@@ -243,33 +264,24 @@ public final class InvokeScalarNNode extends MezzeNode {
 
         if (allLong) {
             useTypedLong = true;
-            reusableLongArgs = new long[argumentCount];
-            reusableTypedWrapper = new Object[cachedClosureLength + 2];
-            for (int i = 0; i < cachedClosureLength; i++) reusableTypedWrapper[i] = cachedClosureValues[i];
-            reusableTypedWrapper[cachedClosureLength] = ScalarLongPayloadMarker.INSTANCE;
-            reusableTypedWrapper[cachedClosureLength + 1] = reusableLongArgs;
             return;
         }
         if (allDouble) {
             useTypedDouble = true;
-            reusableDoubleArgs = new double[argumentCount];
-            reusableTypedWrapper = new Object[cachedClosureLength + 2];
-            for (int i = 0; i < cachedClosureLength; i++) reusableTypedWrapper[i] = cachedClosureValues[i];
-            reusableTypedWrapper[cachedClosureLength] = ScalarDoublePayloadMarker.INSTANCE;
-            reusableTypedWrapper[cachedClosureLength + 1] = reusableDoubleArgs;
             return;
         }
         if (!anyBool && anyPrimitive) {
-            // Mixed-kind path. Build per-kind buckets sized by kind counts in callee order.
+            // Mixed-kind path: cache structural metadata; buckets are allocated
+            // per execute() call (see fast-path branch).
             int longCount = 0, doubleCount = 0, objCount = 0;
             for (int i = 0; i < kinds.length; i++) {
                 if (kinds[i] == 0) longCount++;
                 else if (kinds[i] == 1) doubleCount++;
                 else objCount++;
             }
-            reusableLongArgs = longCount > 0 ? new long[longCount] : null;
-            reusableDoubleArgs = doubleCount > 0 ? new double[doubleCount] : null;
-            reusableObjArgs = objCount > 0 ? new Object[objCount] : null;
+            mixedLongCount = longCount;
+            mixedDoubleCount = doubleCount;
+            mixedObjCount = objCount;
 
             calleeParamKinds = new byte[kinds.length];
             // calleeBucketIdx[k] = position of callee param k in its kind's bucket.
@@ -287,14 +299,6 @@ public final class InvokeScalarNNode extends MezzeNode {
             for (int i = 0; i < argumentCount; i++) {
                 bucketIdxByCallerArg[i] = calleeBucketIdx[perm[i]];
             }
-
-            reusableTypedWrapper = new Object[cachedClosureLength + 5];
-            for (int i = 0; i < cachedClosureLength; i++) reusableTypedWrapper[i] = cachedClosureValues[i];
-            reusableTypedWrapper[cachedClosureLength] = ScalarMixedPayloadMarker.INSTANCE;
-            reusableTypedWrapper[cachedClosureLength + 1] = calleeParamKinds;
-            reusableTypedWrapper[cachedClosureLength + 2] = reusableLongArgs;
-            reusableTypedWrapper[cachedClosureLength + 3] = reusableDoubleArgs;
-            reusableTypedWrapper[cachedClosureLength + 4] = reusableObjArgs;
             useTypedMixed = true;
         }
     }
