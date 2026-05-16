@@ -72,27 +72,16 @@ class TypeValidator(
         val warnings = mutableListOf<String>()
         val parserBridge = com.mezze.language.parser.MezzeParser
 
-        // Validate each binding from constraint results
+        // Validate each binding from constraint results.
+        //
+        // Undefined-variable reporting (V0702) lives in TypeChecker.kt's
+        // pre-validation pass (~line 454), which classifies the name
+        // (ability / effect / prelude method / private item) and builds the
+        // richer "Did you mean" / "available as a method on Int" hints.
+        // We deliberately do NOT re-emit `VariableNotInScope` here — doing
+        // so was the source of the duplicate V0702 messages with different
+        // suggestion sets seen on undefined-identifier reproductions.
         for ((bindingName, result) in constraintResults) {
-            // Check for undefined variables
-            if (result.undefinedVariables.isNotEmpty()) {
-                for (undefinedVar in result.undefinedVariables) {
-                    val allVariables = context.getAllBindings()
-                    val candidateNames = allVariables.keys.map { key ->
-                        if (key.qualifier != null) "${key.qualifier}.${key.localName}" else key.localName
-                    }
-                    val similarNames = findSimilarNames(undefinedVar.name, candidateNames)
-
-                    errors.add(
-                        ValidationError.VariableNotInScope(
-                            variableName = undefinedVar.name,
-                            similarNames = similarNames,
-                            loc = undefinedVar.loc
-                        )
-                    )
-                }
-            }
-
             val finalType = substitution.apply(result.type)
 
             val abilityValueErrors = validateBuiltInAbilityUsage(finalType, bindingName)

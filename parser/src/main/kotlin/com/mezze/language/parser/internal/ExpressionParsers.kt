@@ -2449,6 +2449,17 @@ internal fun MezzeParser.parseParsedInterpolatedString(
     var i = 0
     val sb = StringBuilder()
 
+    // Track the source coordinates of content[i] as we walk. `loc` points at
+    // the opening `"` of the string literal in the file; content[0] is one
+    // character after the opening quote, so contentLine/Col start at
+    // (loc.startLine, loc.startCol + 1). When we cross a literal newline in
+    // `content` we increment the line and reset the column. This lets us
+    // hand interpolated sub-expressions the right (line, column) so their
+    // tokens (and downstream errors) report file-coordinates instead of
+    // `1:1` relative to the slice. Fixes the "wrong location" half of #206.
+    var contentLine = loc.startLine
+    var contentCol = loc.startCol + 1
+
     while (i < content.length) {
         if (i + 1 < content.length && content[i] == '$' && content[i + 1] == '(') {
             // Flush literal text
@@ -2476,9 +2487,13 @@ internal fun MezzeParser.parseParsedInterpolatedString(
                     code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0110_EMPTY_INTERPOLATION
                 )
             }
+            // The expression text starts at content[i + 2] (after `$(`), so
+            // its source-position is (contentLine, contentCol + 2).
+            val exprStartLine = contentLine
+            val exprStartCol = contentCol + 2
             // Parse the expression inside $(...)
             val exprResult = try {
-                val lexer = Lexer(exprText)
+                val lexer = Lexer(exprText, startLine = exprStartLine, startColumn = exprStartCol)
                 val tokens = lexer.tokenize()
                 val exprStream = TokenStream(tokens)
                 expression(exprStream)
@@ -2493,12 +2508,19 @@ internal fun MezzeParser.parseParsedInterpolatedString(
                     return remaining.failure("Failed to parse interpolated expression \$($exprText): ${exprResult.message}")
                 }
             }
+            // Advance contentLine/contentCol past `$(...)` (i..j-1 inclusive).
+            for (k in i until j) {
+                if (content[k] == '\n') { contentLine++; contentCol = 1 } else contentCol++
+            }
             i = j
         } else if (content[i] == '\\' && i + 1 < content.length && content[i + 1] == '$') {
             sb.append('$')
+            contentCol += 2
             i += 2
         } else {
-            sb.append(content[i])
+            val ch = content[i]
+            sb.append(ch)
+            if (ch == '\n') { contentLine++; contentCol = 1 } else contentCol++
             i++
         }
     }

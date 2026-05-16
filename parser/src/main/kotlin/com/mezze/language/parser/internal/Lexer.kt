@@ -129,10 +129,25 @@ private object InternedTokens {
     val commonIdentifiers = setOf(TRUE, FALSE, SOME, NONE, OK, ERR)
 }
 
-class Lexer(private val source: String) {
+/**
+ * @param startLine 1-based line of the first character of [source] in its
+ *   containing file. Used when the lexer is re-invoked on a sub-slice (e.g.
+ *   the contents of a `$(...)` interpolation) so token locs come out with
+ *   the original file coordinates instead of `1:1`. Defaults to 1 for the
+ *   normal top-level file path.
+ * @param startColumn 1-based column of the first character of [source].
+ *   Same rationale as [startLine]. Note: the column offset only applies to
+ *   the first line of the slice — after the first newline, subsequent
+ *   columns reset to 1 (the slice is now in its own line space).
+ */
+class Lexer(
+    private val source: String,
+    startLine: Int = 1,
+    startColumn: Int = 1,
+) {
     private var position = 0
-    private var line = 1
-    private var column = 1
+    private var line = startLine
+    private var column = startColumn
 
     companion object {
         // Static keywords map shared across all Lexer instances
