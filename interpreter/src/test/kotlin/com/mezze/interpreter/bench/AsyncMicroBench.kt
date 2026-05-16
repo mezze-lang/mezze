@@ -76,6 +76,39 @@ class AsyncMicroBench {
     // ─── Async concurrency ───────────────────────────────────────────────
 
     @Test
+    fun `spawn N detached no await`() {
+        // Profile-friendly: only the spawn cost, no await coord. Spawned
+        // tasks return immediately; we don't observe their results. Each
+        // spawn allocates: Object[] (closure+arg), MezzeRecord[0] chain
+        // snapshot, MezzePromise×2, two lambdas, Thread, ConcurrentLinkedQueue
+        // entry. After this we measure the join-via-Async.all so the
+        // process doesn't exit before tasks complete.
+        val n = 2000
+        val source = """
+            use std::effects::async::{ Async, LoomAsync }
+            use std::collections::seq
+
+            perform LoomAsync in do
+                let ps = seq::map {
+                    xs = seq::range { start = 0, end = $n },
+                    f = { x } -> Async.spawn { f = {} -> x },
+                }
+                Async.all { ps = ps }
+                $n
+        """.trimIndent()
+        BenchRecorder.bench(
+            category = "Async core (Loom)",
+            label = "spawn $n detached, await-all at end",
+            iters = n,
+            warmup = 0,
+            runs = 1,
+        ) {
+            val r = eval(source)
+            assertEquals(n.toLong(), r)
+        }
+    }
+
+    @Test
     fun `spawn many lightweight tasks`() {
         // Ceiling probe for how cheap Mezze's Async.spawn is — how many
         // tasks can we spin up and join before things break? Each task

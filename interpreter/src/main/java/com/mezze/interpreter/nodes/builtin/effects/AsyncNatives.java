@@ -108,8 +108,19 @@ public final class AsyncNatives {
         @SuppressWarnings("unused")
         private long q0, q1, q2, q3, q4, q5, q6; // Padding after hot fields
 
-        final Thread executingThread; // For cancellation
+        // Set in the constructor or via setExecutingThread() once the
+        // spawned virtual thread has been created. Single writer (the
+        // spawn-site code), single reader (cancel()) which only fires
+        // after the spawn site has returned and the body has had a chance
+        // to run, so plain field access is safe.
+        Thread executingThread; // For cancellation
         final Semaphore semaphore; // For concurrency limiting (may be null)
+
+        /** Set once, after the Thread is created (spawn sites first build
+         *  the promise, then the thread, then store it here). */
+        public void setExecutingThread(Thread t) {
+            this.executingThread = t;
+        }
 
         // Set by Async.spawn when the spawned task body terminated because
         // an op-call propagated past all inherited handlers. Read by
@@ -466,6 +477,11 @@ public final class AsyncNatives {
         // the same handlers that were in scope at the spawn site.
         MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
+        // Single promise: body completes it, parent awaits it. Thread
+        // reference is patched in after construction (single writer:
+        // the spawn site; reader: cancel() which only fires post-spawn).
+        // Saves one MezzePromise allocation per spawn vs the old
+        // inner+delegating-outer pattern.
         MezzePromise promise = new MezzePromise(null, semaphore);
 
         Thread vThread = env.newTruffleThreadBuilder(() -> runPromiseTask(handlerChain, promise, () -> {
@@ -481,16 +497,15 @@ public final class AsyncNatives {
             }
         })).virtual(true).build();
 
+        promise.setExecutingThread(vThread);
         vThread.start();
-
-        MezzePromise tracked = new MezzePromise(vThread, semaphore, promise);
 
         // Track for cleanup
         if (trackerObj instanceof PromiseTracker tracker) {
-            tracker.track(tracked);
+            tracker.track(promise);
         }
 
-        return tracked;
+        return promise;
     }
 
     // ==================== OS Thread Scope Lifecycle ====================
@@ -542,15 +557,14 @@ public final class AsyncNatives {
                 () -> callNode.call(callTarget, fullArgs))
         ).build();
 
+        promise.setExecutingThread(thread);
         thread.start();
 
-        MezzePromise tracked = new MezzePromise(thread, null, promise);
-
         if (trackerObj instanceof PromiseTracker tracker) {
-            tracker.track(tracked);
+            tracker.track(promise);
         }
 
-        return tracked;
+        return promise;
     }
 
     // Semaphore cache for concurrency limiting
@@ -641,6 +655,9 @@ public final class AsyncNatives {
         // were in scope here. Snapshot copy is safe to ship across threads.
         MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
+        // Single promise: body completes it, parent awaits it. Thread
+        // reference is patched in after construction (single writer:
+        // the spawn site; reader: cancel() which only fires post-spawn).
         MezzePromise promise = new MezzePromise(null, null);
 
         Thread vThread = env.newTruffleThreadBuilder(
@@ -648,8 +665,9 @@ public final class AsyncNatives {
                 () -> callNode.call(f.getCallTarget(), fullArgs))
         ).virtual(true).build();
 
+        promise.setExecutingThread(vThread);
         vThread.start();
-        return new MezzePromise(vThread, null, promise);
+        return promise;
     }
 
     /**
@@ -694,8 +712,9 @@ public final class AsyncNatives {
                     () -> callNode.call(callTarget, fullArgs))
             ).virtual(true).build();
 
+            promise.setExecutingThread(vThread);
             vThread.start();
-            promises[idx] = new MezzePromise(vThread, null, promise);
+            promises[idx] = promise;
         }
 
         // Await all promises and collect results into an array
@@ -754,10 +773,9 @@ public final class AsyncNatives {
             })
         ).virtual(true).build();
 
+        promise.setExecutingThread(vThread);
         vThread.start();
-
-        // Return promise with thread reference for cancellation
-        return new MezzePromise(vThread, semaphore, promise);
+        return promise;
     }
 
     @TruffleBoundary
@@ -1580,6 +1598,7 @@ public final class AsyncNatives {
             }
         }).virtual(true).build();
 
+        promise.setExecutingThread(vThread);
         vThread.start();
 
         return promise;
@@ -1635,6 +1654,7 @@ public final class AsyncNatives {
                 () -> callNode.call(callTarget, fullArgs))
         ).build();  // Platform thread (not virtual)
 
+        promise.setExecutingThread(thread);
         thread.start();
 
         return promise;

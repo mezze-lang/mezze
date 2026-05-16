@@ -208,6 +208,12 @@ public final class EffectFiber {
         while (chain.size() > depth) chain.pop();
     }
 
+    /** Singleton empty array — handed back instead of allocating per call.
+     *  Most spawn sites snapshot a chain with no handlers above them
+     *  (top-level Async.spawn outside any perform installs zero handlers
+     *  on this thread), so this is the overwhelmingly common case. */
+    private static final MezzeRecord[] EMPTY_CHAIN = new MezzeRecord[0];
+
     /**
      * Snapshot of the handler chain on this thread, innermost-first
      * (matching the iteration order callers want for "innermost matches
@@ -216,7 +222,9 @@ public final class EffectFiber {
      */
     public static MezzeRecord[] snapshotHandlerChain() {
         ArrayDeque<MezzeRecord> chain = HANDLER_CHAIN.get();
-        return chain.toArray(new MezzeRecord[0]);
+        int size = chain.size();
+        if (size == 0) return EMPTY_CHAIN;
+        return chain.toArray(new MezzeRecord[size]);
     }
 
     /**
