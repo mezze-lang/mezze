@@ -349,7 +349,11 @@ class BuildCommand {
             fi
 
             JAVA="${'$'}{MEZZE_JAVA:-java}"
-            DEFAULT_OPTS="-XX:+UseZGC -Xmx4g --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
+            # --add-opens=java.base/jdk.internal.vm=ALL-UNNAMED: required for
+            # EffectFiber, which wraps jdk.internal.vm.Continuation for the
+            # Loom-backed effect handler runtime. Without it the JVM refuses
+            # to load the wrapping class.
+            DEFAULT_OPTS="-XX:+UseZGC -Xmx4g --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-opens=java.base/jdk.internal.vm=ALL-UNNAMED"
             OPTS="${'$'}{MEZZE_JAVA_OPTS:-${'$'}DEFAULT_OPTS}"
 
             exec "${'$'}JAVA" ${'$'}OPTS -jar "${'$'}JAR" "${'$'}@"
@@ -374,7 +378,7 @@ class BuildCommand {
                 exit /b 1
             )
             if "%MEZZE_JAVA%"=="" set "MEZZE_JAVA=java"
-            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-XX:+UseZGC -Xmx4g --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow"
+            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-XX:+UseZGC -Xmx4g --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-opens=java.base/jdk.internal.vm=ALL-UNNAMED"
             "%MEZZE_JAVA%" %MEZZE_JAVA_OPTS% -jar "%JAR%" %*
         """.trimIndent() + "\r\n"
         launcher.writeText(script)
