@@ -94,8 +94,8 @@ data class TypedCall(
 /** How a polymorphic function is instantiated at a call site */
 @Serializable
 data class TypeInstantiation(
-    val typeArgs: List<MezzeType>,
-    val abilityImpls: List<AbilityImplRef>
+    val typeArgs: List<MezzeType> = emptyList(),
+    val abilityImpls: List<AbilityImplRef> = emptyList()
 )
 
 /** Reference to a specific ability impl — by hash, NOT by name */
