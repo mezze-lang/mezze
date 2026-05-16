@@ -22,7 +22,6 @@ class AbilityParserTest {
         val ability = module.decls[0] as ParsedAbilityDecl
         assertEquals("Encoder", ability.name)
         assertEquals(listOf("'a"), ability.typeParams)
-        assertEquals(0, ability.dependencies.size)
         assertEquals(1, ability.operations.size)
 
         val operation = ability.operations[0]

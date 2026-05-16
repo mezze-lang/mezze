@@ -40,6 +40,12 @@ class AbilityDependencyTypeCheckerTest {
     // TESTS: Ability-level constraints are rejected
     // ========================================================================
 
+    // Ability-level constraints used to be caught by the typechecker
+    // (V0410). They're now rejected by the parser (P0119) before the
+    // typechecker ever sees the module — see audit task #212. These
+    // tests still pin the rejection behavior, but assert against the
+    // parser exception thrown at parse time.
+
     @Test
     fun `ability-level constraint is rejected with helpful error`() {
         val source = """
@@ -52,14 +58,14 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-
-        val error = assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
+        val ex = org.junit.jupiter.api.Assertions.assertThrows(Throwable::class.java) {
+            parser.parseParsedModule(source, "test.mz")
         }
-
-        assertContains(error.message!!, "ability-level constraints")
-        assertContains(error.message!!, "method-level constraints")
+        val msg = ex.message ?: ""
+        assertContains(msg, "ability-level 'with' constraint")
+        // Per-method form is surfaced via hint lines in the rendered block.
+        assertTrue(msg.contains("operation") || msg.contains("with"),
+            "Expected per-operation suggestion in error, got: $msg")
     }
 
     @Test
@@ -78,17 +84,17 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-
-        val error = assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
+        val ex = org.junit.jupiter.api.Assertions.assertThrows(Throwable::class.java) {
+            parser.parseParsedModule(source, "test.mz")
         }
-
-        assertContains(error.message!!, "ability-level constraints")
+        assertContains(ex.message ?: "", "ability-level 'with' constraint")
     }
 
     @Test
     fun `circular ability-level constraints are rejected`() {
+        // The legacy `ability A for 'a with B 'a` form is rejected by
+        // the parser, so the "circular" case never reaches the
+        // typechecker — the first ability decl fails to parse.
         val source = """
             ability A for 'a with B 'a where {
                 opA : {val: 'a} -> Str
@@ -99,11 +105,8 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-
-        // Both abilities have ability-level constraints, so the first one should fail
-        assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
+        org.junit.jupiter.api.Assertions.assertThrows(Throwable::class.java) {
+            parser.parseParsedModule(source, "test.mz")
         }
     }
 
@@ -115,10 +118,8 @@ class AbilityDependencyTypeCheckerTest {
             }
         """.trimIndent()
 
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-
-        assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
+        org.junit.jupiter.api.Assertions.assertThrows(Throwable::class.java) {
+            parser.parseParsedModule(source, "test.mz")
         }
     }
 
@@ -147,10 +148,8 @@ class AbilityDependencyTypeCheckerTest {
 
         val ord = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>().find { it.name == "Ord" }
         assertNotNull(ord)
-        // No ability-level dependencies
-        assertEquals(0, ord!!.dependencies.size)
-        // But method has constraint
-        assertEquals(1, ord.operations[0].abilityConstraints.size)
+        // Constraint lives on the method, not on the ability (#212).
+        assertEquals(1, ord!!.operations[0].abilityConstraints.size)
         assertEquals("Eq", ord.operations[0].abilityConstraints[0].abilityName)
 
         // Verify type checking succeeds for both via TypedModule
@@ -181,8 +180,8 @@ class AbilityDependencyTypeCheckerTest {
 
         val serializable = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>().find { it.name == "Serializable" }
         assertNotNull(serializable)
-        assertEquals(0, serializable!!.dependencies.size)
-        assertEquals(2, serializable.operations[0].abilityConstraints.size)
+        // Constraints live on operations only (#212).
+        assertEquals(2, serializable!!.operations[0].abilityConstraints.size)
 
         // Verify type checking succeeds
         val serializableDecl = typedProgram.typedModule?.abilityDecls?.find { it.name == "Serializable" }
@@ -202,8 +201,7 @@ class AbilityDependencyTypeCheckerTest {
 
         val show = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>().find { it.name == "Show" }
         assertNotNull(show)
-        assertEquals(0, show!!.dependencies.size)
-        assertEquals(0, show.operations[0].abilityConstraints.size)
+        assertEquals(0, show!!.operations[0].abilityConstraints.size)
 
         // Verify type checking succeeds
         val showDecl = typedProgram.typedModule?.abilityDecls?.find { it.name == "Show" }

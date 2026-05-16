@@ -32,29 +32,11 @@ object AbilityValidator {
      */
     fun validateAbilityDeclaration(ability: com.mezze.language.parsedast.ParsedAbilityDecl) {
         val sourceLocation = ability.loc
-        if (ability.constraints.isNotEmpty() || ability.dependencies.isNotEmpty()) {
-            val constraintsList = (ability.constraints.map { "${it.abilityName} ${it.typeParam}" } +
-                                   ability.dependencies.map { dep ->
-                                       "${dep.abilityName} ${dep.typeArgs.joinToString(" ")}"
-                                   })
-                .joinToString(", ")
-
-            val suggestion = buildString {
-                append("Move constraints to method signatures. For example:\n\n")
-                append("  ability ${ability.name} ${ability.typeParams.joinToString(" ")} where {\n")
-                for (op in ability.operations) {
-                    append("      ${op.name}: ... with $constraintsList -> ...\n")
-                }
-                append("  }")
-            }
-
-            throw TypeCheckError(
-                "Ability '${ability.name}' uses ability-level constraints ('with $constraintsList'), " +
-                "but only method-level constraints are allowed.\n\n$suggestion",
-                sourceLocation,
-                code = ErrorCode.V0410_ABILITY_LEVEL_CONSTRAINT_FORBIDDEN,
-            )
-        }
+        // Ability-level constraints (`with B 'a` or `where 'a: B`) are now
+        // caught at parse time as P0119_ABILITY_LEVEL_CONSTRAINT — see
+        // DeclarationParsers.kt's parseAbilityDeclaration. The validator
+        // used to re-check here against ParsedAbilityDecl.constraints /
+        // .dependencies, but those fields were removed in #212.
 
         for (operation in ability.operations) {
             val effects = operation.effects ?: continue
@@ -560,83 +542,12 @@ object AbilityValidator {
         }
     }
 
-    /**
-     * Validate ability dependencies to detect circular dependencies.
-     *
-     * Checks:
-     * 1. No self-dependencies (ability cannot depend on itself)
-     * 2. No circular dependencies (A -> B -> A)
-     *
-     * @param abilityDeclaration The ability declaration to validate
-     * @param abilityDeclarations Map of ability name to declaration for dependency lookup
-     * @throws TypeCheckError if circular dependency detected
-     */
-    fun validateAbilityDependencies(
-        abilityDeclaration: com.mezze.language.parsedast.ParsedAbilityDecl,
-        abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>
-    ) {
-        // Get dependencies from ability declaration
-        val dependencies = abilityDeclaration.dependencies
-
-        // Check for self-dependency
-        if (dependencies.any { it.abilityName == abilityDeclaration.name }) {
-            throw TypeCheckError(
-                "Ability '${abilityDeclaration.name}' cannot depend on itself. " +
-                "Remove the self-dependency from the 'requires' clause.",
-                loc = abilityDeclaration.loc,
-                code = ErrorCode.M0802_CIRCULAR_DEPENDENCY,
-                hints = listOf("break the cycle by removing one of the imports"),
-            )
-        }
-
-        // Check for circular dependencies using DFS
-        val visited = mutableSetOf<String>()
-        val recursionStack = mutableSetOf<String>()
-
-        fun detectCycle(abilityName: String): Boolean {
-            if (recursionStack.contains(abilityName)) {
-                // Found a cycle
-                return true
-            }
-
-            if (visited.contains(abilityName)) {
-                // Already explored this path, no cycle
-                return false
-            }
-
-            visited.add(abilityName)
-            recursionStack.add(abilityName)
-
-            // Check dependencies
-            val currentAbility = abilityDeclarations[abilityName]
-            if (currentAbility != null) {
-                for (dep in currentAbility.dependencies) {
-                    if (detectCycle(dep.abilityName)) {
-                        return true
-                    }
-                }
-            }
-
-            recursionStack.remove(abilityName)
-            return false
-        }
-
-        // Start cycle detection from each dependency
-        for (dep in dependencies) {
-            recursionStack.clear()
-            recursionStack.add(abilityDeclaration.name) // Start from current ability
-
-            if (detectCycle(dep.abilityName)) {
-                throw TypeCheckError(
-                    "Circular dependency detected in ability '${abilityDeclaration.name}'. " +
-                    "Ability '${dep.abilityName}' (directly or indirectly) depends on '${abilityDeclaration.name}'.",
-                    loc = dep.loc,
-                    code = ErrorCode.M0802_CIRCULAR_DEPENDENCY,
-                    hints = listOf("break the cycle by removing one of the imports"),
-                )
-            }
-        }
-    }
+    // `validateAbilityDependencies` used to walk
+    // ParsedAbilityDecl.dependencies (populated from the legacy
+    // `ability A for 'a with B 'a` syntax) and detect cycles. Since
+    // #212 removed that field — the parser now rejects ability-level
+    // `with` clauses with P0119_ABILITY_LEVEL_CONSTRAINT — the
+    // dependency cycle check is no longer reachable. Removed.
 
     /**
      * Validate name collisions between abilities, types, and effects.

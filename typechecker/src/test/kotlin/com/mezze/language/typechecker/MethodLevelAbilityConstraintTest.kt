@@ -271,6 +271,10 @@ class MethodLevelAbilityConstraintTest {
     // SECTION 5: Ability-Level Constraints are REJECTED
     // ========================================================================
 
+    // Ability-level `with` constraints are now rejected at parse time
+    // (P0119) rather than at typecheck (V0410). See audit task #212.
+    // `typeCheck(code)` rethrows the parser's exception unchanged.
+
     @Test
     fun `ability-level constraint is rejected`() {
         val code = """
@@ -281,9 +285,8 @@ class MethodLevelAbilityConstraintTest {
             }
         """.trimIndent()
 
-        val error = assertThrows<TypeCheckError> { typeCheck(code) }
-        assertContains(error.message!!, "ability-level constraints")
-        assertContains(error.message!!, "method-level")
+        val error = assertThrows<Throwable> { typeCheck(code) }
+        assertContains(error.message!!, "ability-level 'with' constraint")
     }
 
     @Test
@@ -297,8 +300,8 @@ class MethodLevelAbilityConstraintTest {
             }
         """.trimIndent()
 
-        val error = assertThrows<TypeCheckError> { typeCheck(code) }
-        assertContains(error.message!!, "ability-level constraints")
+        val error = assertThrows<Throwable> { typeCheck(code) }
+        assertContains(error.message!!, "ability-level 'with' constraint")
     }
 
     @Test
@@ -311,8 +314,10 @@ class MethodLevelAbilityConstraintTest {
             }
         """.trimIndent()
 
-        val error = assertThrows<TypeCheckError> { typeCheck(code) }
-        assertContains(error.message!!, "method")
+        val error = assertThrows<Throwable> { typeCheck(code) }
+        // The parser hints reference operations and `with` — the canonical
+        // per-method form.
+        assertTrue((error.message ?: "").let { it.contains("operation") || it.contains("with") })
     }
 
     // ========================================================================
@@ -337,7 +342,7 @@ class MethodLevelAbilityConstraintTest {
             .find { it.name == "Container" }!!
 
         assertEquals(listOf("'item"), container.associatedTypes)
-        assertEquals(0, container.dependencies.size)
+        // Ability-level dependencies were removed in #212.
         assertEquals(1, container.operations[2].abilityConstraints.size)
     }
 

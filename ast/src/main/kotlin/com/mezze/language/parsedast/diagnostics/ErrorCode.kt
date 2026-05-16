@@ -51,6 +51,7 @@ enum class ErrorCode {
     P0116_PIPE_MULTIPLE_PLACEHOLDERS,
     P0117_RECORD_FIELD_MISSING_TYPE,
     P0118_NAMED_ARGS_REQUIRED,    // function / constructor called with positional args or ()
+    P0119_ABILITY_LEVEL_CONSTRAINT, // `ability A for 'a with B 'a` or `where 'a: B` — put it on a method instead
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,

@@ -1098,69 +1098,68 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
                             is ParseResult.Failure -> currentStream
                         }
 
-                        // Parse optional 'with' clause for dependencies
-                        val dependencies = mutableListOf<ParsedAbilityDep>()
+                        // Ability-level constraints aren't supported. The two surface
+                        // forms users can mistakenly write here are:
+                        //
+                        //   1. `ability A for 'a with B 'a where { ... }`  — old "deps" form
+                        //   2. `ability A for 'a where 'a: B where { ... }` — Rust/Haskell style
+                        //
+                        // Both used to parse and then get rejected later by the
+                        // typechecker (V0410). Catch them at parse time so the error
+                        // surfaces with a precise loc and a worked example of the
+                        // canonical per-method `with` form. Audit task #212.
                         val stream3 = skipNewlines(streamAfterHaving)
-                        val withToken = tok(TokenType.WITH)(stream3)
-                        val streamAfterWith = when (withToken) {
-                            is ParseResult.Success -> {
-                                // Parse dependencies separated by commas
-                                val stream4 = skipNewlines(withToken.remaining)
-                                var depStream = stream4
-                                var parseFailed = false
-
-                                while (!parseFailed) {
-                                    // Parse: AbilityName TypeArg1 TypeArg2 ...
-                                    val abilityName = identifierParser(depStream)
-                                    when (abilityName) {
-                                        is ParseResult.Success -> {
-                                            val typeArgs = mutableListOf<ParsedTypeAnnotation>()
-                                            var typeStream = skipNewlines(abilityName.remaining)
-
-                                            // Parse type arguments until we hit comma or 'where'
-                                            while (true) {
-                                                val next = typeStream.current()
-                                                if (next?.type == TokenType.COMMA || next?.type == TokenType.WHERE) {
-                                                    break
-                                                }
-
-                                                val typeArg = primaryTypeAnnotation(typeStream)
-                                                when (typeArg) {
-                                                    is ParseResult.Success -> {
-                                                        typeArgs.add(typeArg.value)
-                                                        typeStream = skipNewlines(typeArg.remaining)
-                                                    }
-                                                    is ParseResult.Failure -> break
-                                                }
-                                            }
-
-                                            val file = currentFile ?: "<unknown>"
-                                            val depLoc = spanLocTo(abilityName.value, typeStream, file)
-                                            dependencies.add(ParsedAbilityDep(abilityName.value.text, typeArgs, depLoc))
-
-                                            // Check for comma (more dependencies) or 'where'
-                                            val commaToken = tok(TokenType.COMMA)(typeStream)
-                                            depStream = when (commaToken) {
-                                                is ParseResult.Success -> skipNewlines(commaToken.remaining)
-                                                is ParseResult.Failure -> {
-                                                    parseFailed = true
-                                                    typeStream
-                                                }
-                                            }
-                                        }
-                                        is ParseResult.Failure -> {
-                                            parseFailed = true
-                                            depStream
-                                        }
-                                    }
-                                }
-                                depStream
-                            }
-                            is ParseResult.Failure -> stream3
+                        val withToken = stream3.current()
+                        if (withToken?.type == TokenType.WITH) {
+                            return ParseResult.Failure(
+                                message = "Ability '${name.value.text}' has an ability-level 'with' constraint, " +
+                                    "but constraints belong on individual operations, not on the ability.",
+                                position = withToken.position,
+                                line = withToken.line,
+                                column = withToken.column,
+                                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0119_ABILITY_LEVEL_CONSTRAINT,
+                                isFatal = true,
+                                hints = listOf(
+                                    "move the constraint onto the operation(s) that need it, e.g.:",
+                                    "    ability ${name.value.text} for $receiverTypeParam where {",
+                                    "        operation_name: { it: $receiverTypeParam, ... } with <Ability> $receiverTypeParam -> ...",
+                                    "    }",
+                                ),
+                            )
                         }
 
-                        val streamBeforeWhere = skipNewlines(streamAfterWith)
+                        val streamBeforeWhere = stream3
                         val whereToken = tok(TokenType.WHERE)(streamBeforeWhere)
+
+                        // Rust/Haskell-style bound: `ability A for 'a where 'a: B`.
+                        // After 'where', if the next token is a type variable
+                        // followed by ':', it's the wrong-syntax form (the
+                        // canonical 'where' immediately precedes a '{' opening
+                        // the operations block).
+                        if (whereToken is ParseResult.Success) {
+                            val afterWhere = skipNewlines(whereToken.remaining)
+                            val maybeTypeVar = afterWhere.current()
+                            if (maybeTypeVar?.type == TokenType.IDENTIFIER && maybeTypeVar.text.startsWith("'")) {
+                                val afterTypeVar = skipNewlines(afterWhere.advance())
+                                if (afterTypeVar.current()?.type == TokenType.COLON) {
+                                    return ParseResult.Failure(
+                                        message = "Ability '${name.value.text}' uses a `where ${maybeTypeVar.text}: …` bound, " +
+                                            "but Mezze places constraints on individual operations via `with`, not at the ability level.",
+                                        position = maybeTypeVar.position,
+                                        line = maybeTypeVar.line,
+                                        column = maybeTypeVar.column,
+                                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0119_ABILITY_LEVEL_CONSTRAINT,
+                                        isFatal = true,
+                                        hints = listOf(
+                                            "move the constraint onto the operation(s) that need it, e.g.:",
+                                            "    ability ${name.value.text} for $receiverTypeParam where {",
+                                            "        operation_name: { it: $receiverTypeParam, ... } with <Ability> $receiverTypeParam -> ...",
+                                            "    }",
+                                        ),
+                                    )
+                                }
+                            }
+                        }
 
                         when (whereToken) {
                             is ParseResult.Success -> {
@@ -1192,9 +1191,8 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
                                                         name = name.value.text,
                                                         typeParams = typeParams,
                                                         receiverTypeParam = receiverTypeParam,
-                                                        associatedTypes = associatedTypes,  // list of associated types from 'having' clause
-                                                        constraints = emptyList(),  // constraints (for function ability constraints)
-                                                        dependencies = dependencies,  // dependencies from 'with' clause
+                                                        // Associated types from `having` clause.
+                                                        associatedTypes = associatedTypes,
                                                         operations = operations,
                                                         loc = loc
                                                     ),

@@ -105,8 +105,8 @@ class AbilityAssociatedTypesTest {
 
         val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
         assertEquals("'item", ability.associatedTypes.firstOrNull())
-        // No ability-level dependencies
-        assertEquals(0, ability.dependencies.size)
+        // (Ability-level constraints/dependencies were removed in #212 —
+        // they're now a parse error.)
         // Method-level constraint on 'contains'
         val containsOp = ability.operations.find { it.name == "contains" }
         assertNotNull(containsOp)
@@ -269,8 +269,8 @@ class AbilityAssociatedTypesTest {
 
         val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
         assertEquals("'elem", ability.associatedTypes.firstOrNull())
-        // No ability-level dependencies
-        assertEquals(0, ability.dependencies.size)
+        // (Ability-level constraints/dependencies were removed in #212 —
+        // they're now a parse error.)
         // Method-level constraints
         val insertOp = ability.operations.find { it.name == "insert" }
         assertNotNull(insertOp)
@@ -561,8 +561,8 @@ class AbilityAssociatedTypesTest {
 
         val ability = parsedModule.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
         assertEquals(2, ability.associatedTypes.size)
-        // No ability-level dependencies
-        assertEquals(0, ability.dependencies.size)
+        // (Ability-level constraints/dependencies were removed in #212 —
+        // they're now a parse error.)
         // Method-level constraints
         assertEquals(1, ability.operations[0].abilityConstraints.size)
         assertEquals(1, ability.operations[1].abilityConstraints.size)

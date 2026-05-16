@@ -242,17 +242,8 @@ class PrettyPrinter {
             append(decl.associatedTypes.joinToString(", "))
         }
 
-        if (decl.dependencies.isNotEmpty()) {
-            append(" with ")
-            decl.dependencies.forEachIndexed { i, dep ->
-                if (i > 0) append(", ")
-                append(dep.abilityName)
-                if (dep.typeArgs.isNotEmpty()) {
-                    append(" ")
-                    dep.typeArgs.forEach { arg -> printTypeAnnotation(arg) }
-                }
-            }
-        }
+        // Ability-level dependencies were removed in #212; the parser
+        // rejects ability-level `with` clauses with P0119.
 
         append(" where {")
         newLine()
@@ -280,11 +271,11 @@ class PrettyPrinter {
 
     private fun printImplAbilityDecl(decl: ParsedImplAbilityDecl) {
         append("impl ")
-        if (decl.forallVars.isNotEmpty()) {
-            append("forall ")
-            append(decl.forallVars.joinToString(" ") { "'$it" })
-            append(". ")
-        }
+        // No `forall …` prefix: Mezze surface syntax has no explicit
+        // quantifier keyword, and `forallVars` on ParsedImplAbilityDecl is
+        // derived by the parser from the type variables that appear in
+        // `abilityTypeArgs` / `targetTypes`. Round-tripping through the
+        // formatter is sound — the next parse re-derives the same list.
         when (val target = decl.target) {
             is ParsedImplTarget.Named -> {
                 if (target.ability.qualifier != null) {

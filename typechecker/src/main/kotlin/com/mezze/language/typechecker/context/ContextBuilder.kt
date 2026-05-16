@@ -298,10 +298,6 @@ class ContextBuilder {
         )
 
         for (abilityDecl in abilityDecls.values) {
-            AbilityValidator.validateAbilityDependencies(abilityDecl, allParsedAbilityDecls)
-        }
-
-        for (abilityDecl in abilityDecls.values) {
             AbilityValidator.validateAbilityDeclaration(abilityDecl)
         }
 

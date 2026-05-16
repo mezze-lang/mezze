@@ -76,16 +76,20 @@ class DebugTest {
     }
 
     @Test
-    fun `format ability with dependencies`() {
+    fun `legacy ability-level with-clause is rejected by formatter (parser surfaces P0119)`() {
+        // Used to assert pretty-printing of `ability Ord for 'a with Eq 'a`.
+        // That surface form is forbidden — constraints must live on each
+        // operation. The formatter forwards the parse error verbatim.
+        // See audit task #212.
         val input = """ability Ord for 'a with Eq 'a where {
     compare: { left: 'a, right: 'a } -> Int
 }"""
-        val output = formatter.format(input)
-        val expected = """ability Ord for 'a with Eq 'a where {
-  compare: { left: 'a, right: 'a } -> Int
-}
-"""
-        assertEquals(expected, output)
+        val ex = assertThrows(Throwable::class.java) { formatter.format(input) }
+        val msg = ex.message ?: ""
+        assertTrue(
+            msg.contains("ability-level 'with' constraint") || msg.contains("P0119"),
+            "Expected P0119 parser rejection, got: $msg",
+        )
     }
 
     @Test

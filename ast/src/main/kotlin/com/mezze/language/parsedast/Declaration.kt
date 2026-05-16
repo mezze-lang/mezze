@@ -142,10 +142,15 @@ data class ParsedNewtypeDef(
 /**
  * Ability declaration: `ability Eq for 'a where { ... }`
  *
+ * Constraints in Mezze are per-method only — they live on individual
+ * operations via `with`, not on the ability itself. The parser rejects
+ * ability-level `with` clauses or `where 'a: …` bounds with
+ * P0119_ABILITY_LEVEL_CONSTRAINT; see DeclarationParsers.kt's
+ * `parseAbilityDeclaration` for the error sites.
+ *
  * Examples:
  * - `ability Eq for 'a where { eq: {it: 'a, r: 'a} -> Bool }`
  * - `ability Into 'b for 'a where { into: {it: 'a} -> 'b }`
- * - `ability Ord for 'a where { ... }` with dependency on Eq
  */
 @Serializable
 data class ParsedAbilityDecl(
@@ -153,8 +158,6 @@ data class ParsedAbilityDecl(
     val typeParams: List<String>,
     val receiverTypeParam: String? = null,
     val associatedTypes: List<String> = emptyList(),
-    val constraints: List<ParsedAbilityConstraint> = emptyList(),
-    val dependencies: List<ParsedAbilityDep> = emptyList(),
     val operations: List<ParsedAbilityOp>,
     override val visibility: Visibility = Visibility.PUBLIC,
     override val leadingComments: List<ParsedComment> = emptyList(),

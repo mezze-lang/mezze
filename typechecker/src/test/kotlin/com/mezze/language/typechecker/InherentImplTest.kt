@@ -895,16 +895,17 @@ class InherentImplTest {
 
     @Test
     fun `ability with ability-level constraints is rejected`() {
+        // Now rejected by the parser (P0119) rather than the typechecker
+        // (V0410). See audit task #212.
         val source = """
             ability Container for 'a with NumAdd 'a where {
                 first: {} -> 'a
             }
         """.trimIndent()
 
-        val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
+        val ex = assertThrows<Throwable> {
+            parser.parseParsedModule(source, "test.mz")
         }
-        assertTrue(error.message!!.contains("ability-level constraints") || error.message!!.contains("method-level"))
+        assertTrue((ex.message ?: "").contains("ability-level 'with' constraint"))
     }
 }

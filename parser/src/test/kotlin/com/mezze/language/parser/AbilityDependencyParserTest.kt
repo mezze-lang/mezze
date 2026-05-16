@@ -1,199 +1,128 @@
 package com.mezze.language.parser
 
-import com.mezze.language.parsedast.*
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
+/**
+ * Originally tested the legacy ability-decl `with` dependency form
+ * (`ability Ord for 'a with Eq 'a where { ... }`). That form is no
+ * longer accepted — in Mezze all ability constraints live on
+ * individual operations via the per-method `with` clause. The parser
+ * now rejects ability-level constraints with
+ * [ErrorCode.P0119_ABILITY_LEVEL_CONSTRAINT].
+ *
+ * These tests pin that behavior down (audit task #212).
+ */
 class AbilityDependencyParserTest {
 
     private val parser = MezzeParser()
 
+    /**
+     * Try to parse `source`, returning the first parse error.
+     * `parseParsedModule` either succeeds or surfaces the failure as a
+     * Kotlin exception with a message that begins with the diagnostic.
+     * For consistent assertions we re-parse via the low-level path and
+     * walk the resulting diagnostic.
+     */
+    private fun parseExpectingFailure(source: String): Throwable {
+        return assertThrows(Throwable::class.java) {
+            parser.parseParsedModule(source, "ability_test.mz")
+        }
+    }
+
     @Test
-    fun testAbilityWithSingleDependency() {
+    fun `ability-level with-constraint is rejected with P0119`() {
         val source = """
             ability Ord for 'a with Eq 'a where {
-                compare : {left: 'a, right: 'a} -> String
+                compare : {it: 'a, r: 'a} -> Bool
             }
         """.trimIndent()
 
-        val module = parser.parseParsedModule(source)
-        assertEquals(1, module.decls.size)
-
-        val ability = module.decls[0] as ParsedAbilityDecl
-        assertEquals("Ord", ability.name)
-        assertEquals(listOf("'a"), ability.typeParams)
-        assertEquals(1, ability.dependencies.size)
-
-        val dependency = ability.dependencies[0]
-        assertEquals("Eq", dependency.abilityName)
-        assertEquals(1, dependency.typeArgs.size)
-        assertTrue(dependency.typeArgs[0] is ParsedNamedType)
-        assertEquals("'a", (dependency.typeArgs[0] as ParsedNamedType).name)
-
-        assertEquals(1, ability.operations.size)
-        assertEquals("compare", ability.operations[0].name)
+        val ex = parseExpectingFailure(source)
+        val msg = ex.message ?: ""
+        assertTrue(
+            msg.contains("ability-level 'with' constraint") || msg.contains("P0119"),
+            "Expected P0119 ability-level constraint error, got: $msg",
+        )
+        // Hints render inline in the formatted error block.
+        assertTrue(
+            msg.contains("operation") || msg.contains("with"),
+            "Error should reference the per-operation fix, got: $msg",
+        )
     }
 
     @Test
-    fun testAbilityWithMultipleDependencies() {
+    fun `ability-level multi-dependency form is rejected`() {
         val source = """
-            ability Serializable for 'a with Show 'a, Eq 'a where {
-                serialize : {val: 'a} -> String,
-                deserialize : {str: String} -> 'a,
+            ability OrdShow for 'a with Eq 'a, Show 'a where {
+                method : {it: 'a} -> Bool
             }
         """.trimIndent()
 
-        val module = parser.parseParsedModule(source)
-        assertEquals(1, module.decls.size)
-
-        val ability = module.decls[0] as ParsedAbilityDecl
-        assertEquals("Serializable", ability.name)
-        assertEquals(listOf("'a"), ability.typeParams)
-        assertEquals(2, ability.dependencies.size)
-
-        val showDep = ability.dependencies[0]
-        assertEquals("Show", showDep.abilityName)
-        assertEquals(1, showDep.typeArgs.size)
-        assertEquals("'a", (showDep.typeArgs[0] as ParsedNamedType).name)
-
-        val eqDep = ability.dependencies[1]
-        assertEquals("Eq", eqDep.abilityName)
-        assertEquals(1, eqDep.typeArgs.size)
-        assertEquals("'a", (eqDep.typeArgs[0] as ParsedNamedType).name)
-
-        assertEquals(2, ability.operations.size)
+        val ex = parseExpectingFailure(source)
+        assertTrue(
+            (ex.message ?: "").contains("ability-level 'with'"),
+            "Expected P0119; got: ${ex.message}",
+        )
     }
 
     @Test
-    fun testAbilityWithMultiParameterDependency() {
+    fun `where-bound on ability declaration is rejected with P0119`() {
+        // Rust/Haskell-style `where 'a: Eq` — Mezze does not support this.
+        // The `where` keyword in an ability decl only opens the body block;
+        // a type-var followed by `:` is the typo'd-from-other-language case.
         val source = """
-            ability ComplexStore 'b for 'a with KVStore 'a 'b, Show 'a where {
-                complexStore : {key: 'a, value: 'b, metadata: String} -> {}
+            ability Ord for 'a where 'a: Eq where {
+                compare : {it: 'a, r: 'a} -> Bool
             }
         """.trimIndent()
 
-        val module = parser.parseParsedModule(source)
-        assertEquals(1, module.decls.size)
-
-        val ability = module.decls[0] as ParsedAbilityDecl
-        assertEquals("ComplexStore", ability.name)
-        assertEquals(listOf("'b", "'a"), ability.typeParams)
-        assertEquals(2, ability.dependencies.size)
-
-        val kvStoreDep = ability.dependencies[0]
-        assertEquals("KVStore", kvStoreDep.abilityName)
-        assertEquals(2, kvStoreDep.typeArgs.size)
-        assertEquals("'a", (kvStoreDep.typeArgs[0] as ParsedNamedType).name)
-        assertEquals("'b", (kvStoreDep.typeArgs[1] as ParsedNamedType).name)
-
-        val showDep = ability.dependencies[1]
-        assertEquals("Show", showDep.abilityName)
-        assertEquals(1, showDep.typeArgs.size)
-        assertEquals("'a", (showDep.typeArgs[0] as ParsedNamedType).name)
+        val ex = parseExpectingFailure(source)
+        val msg = ex.message ?: ""
+        assertTrue(
+            msg.contains("'a: …") || msg.contains("'a:") || msg.contains("P0119"),
+            "Expected P0119 where-bound error, got: $msg",
+        )
+        assertTrue(
+            msg.contains("constraints on individual operations") || msg.contains("with"),
+            "Error should mention the canonical per-method `with`, got: $msg",
+        )
     }
 
     @Test
-    fun testAbilityWithConcreteDependency() {
-        val source = """
-            ability Logger for 'a with Show String where {
-                log : {val: 'a, message: String} -> {}
-            }
-        """.trimIndent()
-
-        val module = parser.parseParsedModule(source)
-        assertEquals(1, module.decls.size)
-
-        val ability = module.decls[0] as ParsedAbilityDecl
-        assertEquals("Logger", ability.name)
-        assertEquals(listOf("'a"), ability.typeParams)
-        assertEquals(1, ability.dependencies.size)
-
-        val dependency = ability.dependencies[0]
-        assertEquals("Show", dependency.abilityName)
-        assertEquals(1, dependency.typeArgs.size)
-        assertTrue(dependency.typeArgs[0] is ParsedNamedType)
-        assertEquals("String", (dependency.typeArgs[0] as ParsedNamedType).name)
-    }
-
-    @Test
-    fun testAbilityWithoutDependencies() {
-        val source = """
-            ability Show for 'a where {
-                show : {val: 'a} -> String
-            }
-        """.trimIndent()
-
-        val module = parser.parseParsedModule(source)
-        assertEquals(1, module.decls.size)
-
-        val ability = module.decls[0] as ParsedAbilityDecl
-        assertEquals("Show", ability.name)
-        assertEquals(listOf("'a"), ability.typeParams)
-        assertEquals(0, ability.dependencies.size)
-        assertEquals(1, ability.operations.size)
-    }
-
-    // @org.junit.jupiter.api.Disabled("Type application in dependencies - needs parser optimization")
-    @Test
-    fun testAbilityWithTypeApplicationDependency() {
-        val source = """
-            ability Container for 'a with Show (Maybe 'a) where {
-                wrap : {val: 'a} -> (Maybe 'a)
-            }
-        """.trimIndent()
-
-        val module = parser.parseParsedModule(source)
-        assertEquals(1, module.decls.size)
-
-        val ability = module.decls[0] as ParsedAbilityDecl
-        assertEquals("Container", ability.name)
-        assertEquals(listOf("'a"), ability.typeParams)
-        assertEquals(1, ability.dependencies.size)
-
-        val dependency = ability.dependencies[0]
-        assertEquals("Show", dependency.abilityName)
-        assertEquals(1, dependency.typeArgs.size)
-
-        // The type argument should be a type application (Maybe 'a)
-        assertTrue(dependency.typeArgs[0] is ParsedTypeApp)
-        val typeApp = dependency.typeArgs[0] as ParsedTypeApp
-        assertEquals("Maybe", typeApp.constructor)
-        assertEquals(1, typeApp.args.size)
-        assertEquals("'a", (typeApp.args[0] as ParsedNamedType).name)
-    }
-
-    @Test
-    fun testMultipleAbilitiesWithDependencies() {
+    fun `ability without any ability-level constraint parses cleanly`() {
         val source = """
             ability Eq for 'a where {
-                equals : {left: 'a, right: 'a} -> Boolean,
-            }
-
-            ability Ord for 'a with Eq 'a where {
-                compare : {left: 'a, right: 'a} -> String,
-            }
-
-            ability Bounded for 'a with Ord 'a where {
-                minBound : {} -> 'a,
-                maxBound : {} -> 'a,
+                eq : {it: 'a, r: 'a} -> Bool
             }
         """.trimIndent()
 
-        val module = parser.parseParsedModule(source)
-        assertEquals(3, module.decls.size)
+        val module = parser.parseParsedModule(source, "ok.mz")
+        assertEquals(1, module.decls.size)
+        val ability = module.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
+        assertEquals("Eq", ability.name)
+        assertEquals(listOf("'a"), ability.typeParams)
+        assertEquals(1, ability.operations.size)
+        assertEquals("eq", ability.operations[0].name)
+    }
 
-        val eq = module.decls[0] as ParsedAbilityDecl
-        assertEquals("Eq", eq.name)
-        assertEquals(0, eq.dependencies.size)
+    @Test
+    fun `per-method with-constraint inside ability body is fine`() {
+        // The canonical form — `with` lives on the operation signature.
+        val source = """
+            ability Container for 'c where {
+                insert : { it: 'c, item: 'a } with Ord 'a -> 'c
+            }
+        """.trimIndent()
 
-        val ord = module.decls[1] as ParsedAbilityDecl
-        assertEquals("Ord", ord.name)
-        assertEquals(1, ord.dependencies.size)
-        assertEquals("Eq", ord.dependencies[0].abilityName)
-
-        val bounded = module.decls[2] as ParsedAbilityDecl
-        assertEquals("Bounded", bounded.name)
-        assertEquals(1, bounded.dependencies.size)
-        assertEquals("Ord", bounded.dependencies[0].abilityName)
+        val module = parser.parseParsedModule(source, "ok.mz")
+        assertEquals(1, module.decls.size)
+        val ability = module.decls[0] as com.mezze.language.parsedast.ParsedAbilityDecl
+        assertEquals("Container", ability.name)
+        assertEquals(1, ability.operations.size)
+        val insertOp = ability.operations[0]
+        assertEquals(1, insertOp.abilityConstraints.size)
+        assertEquals("Ord", insertOp.abilityConstraints[0].abilityName)
     }
 }

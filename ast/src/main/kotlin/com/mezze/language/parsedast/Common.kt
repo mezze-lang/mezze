@@ -190,30 +190,13 @@ data class ParsedFnAbilityConstraint(
     val loc: Loc
 )
 
-/**
- * Ability dependency declared on an ability.
- *
- * Example: `ability Ord for 'a` depends on `Eq 'a`
- */
-@Serializable
-data class ParsedAbilityDep(
-    val abilityName: String,
-    val typeArgs: List<ParsedTypeAnnotation> = emptyList(),
-    val loc: Loc
-)
-
-/**
- * Ability constraint on the ability declaration itself.
- *
- * Example: in `ability Ord for 'a where 'a: Eq`, the constraint is Eq on 'a.
- */
-@Serializable
-data class ParsedAbilityConstraint(
-    val abilityName: String,
-    val typeParam: String,
-    val typeArgs: List<ParsedTypeAnnotation> = emptyList(),
-    val loc: Loc
-)
+// `ParsedAbilityDep` and `ParsedAbilityConstraint` used to model
+// ability-level constraints (`ability A for 'a with B 'a` and
+// `ability A for 'a where 'a: B`). Both are forbidden in Mezze —
+// constraints belong on individual operations via the per-method
+// `with` clause inside the ability body. The parser now rejects
+// these surface forms with P0119_ABILITY_LEVEL_CONSTRAINT and the
+// AST nodes were removed in audit task #212.
 
 /**
  * Performer parameter.

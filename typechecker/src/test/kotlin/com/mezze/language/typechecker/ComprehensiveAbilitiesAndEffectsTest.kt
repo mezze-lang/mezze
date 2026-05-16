@@ -91,7 +91,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             it is com.mezze.language.parsedast.ParsedAbilityDecl && it.name == "MyOrd"
         } as com.mezze.language.parsedast.ParsedAbilityDecl?
         assertNotNull(ordDecl)
-        assertTrue(ordDecl.dependencies.isEmpty())
+        // Constraint lives on the method only (#212).
         assertEquals(1, ordDecl.operations.first().abilityConstraints.size)
         assertEquals("MyEq", ordDecl.operations.first().abilityConstraints.first().abilityName)
     }
