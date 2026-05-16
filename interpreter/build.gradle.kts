@@ -133,6 +133,7 @@ fun org.gradle.api.tasks.testing.Test.applyCommonTestConfig() {
 val benchClassPatterns = listOf(
     "**/*Benchmark*",
     "**/*Bench*",
+    "**/*PerfTest*",
     "**/*ProfileTest*",
     "**/StdlibHofSoSurveyTest*",
     "**/MicroBenchmarkTest*",
