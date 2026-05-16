@@ -214,7 +214,7 @@ class MezzeExecutor(
             // Leaves / effect-hash / read-global — not validated, no recursion.
             is com.mezze.language.truffleir.ReadGlobalByHashIR -> {}
             is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> {}
-            is com.mezze.language.truffleir.ReadScopeIR -> {}
+            is com.mezze.language.truffleir.EffectBindingIR -> {}
             is com.mezze.language.truffleir.ReadLocalIR -> {}
             is com.mezze.language.truffleir.ReadCaptureIR -> {}
             is com.mezze.language.truffleir.ReadArgIR -> {}

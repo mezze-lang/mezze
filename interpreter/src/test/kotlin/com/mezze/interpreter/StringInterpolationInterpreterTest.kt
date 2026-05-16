@@ -94,7 +94,7 @@ Line 2: $(b)"
             eval(code)
         }
         assertTrue(exception.message?.contains("TypeCheckError") == true)
-        assertTrue(exception.message?.contains("expected Str") == true)
+        assertTrue(exception.message?.contains("String interpolation requires String type") == true)
     }
 
     @Test
@@ -201,7 +201,7 @@ Line 2: $(b)"
             eval(code)
         }
         assertTrue(exception.message?.contains("TypeCheckError") == true)
-        assertTrue(exception.message?.contains("expected Str") == true)
+        assertTrue(exception.message?.contains("String interpolation requires String type") == true)
     }
 
     @Test
@@ -215,7 +215,7 @@ Line 2: $(b)"
             eval(code)
         }
         assertTrue(exception.message?.contains("TypeCheckError") == true)
-        assertTrue(exception.message?.contains("expected Str") == true)
+        assertTrue(exception.message?.contains("String interpolation requires String type") == true)
     }
 
     @Test
