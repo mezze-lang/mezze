@@ -145,6 +145,36 @@ class AsyncMicroBench {
     }
 
     @Test
+    fun `non-tail recursion ceiling probe`() {
+        // Direct recursion that is NOT in tail position — classic fib
+        // shape but counting (so we can pick large N). Tests whether the
+        // interpreter's per-frame Java overhead lets users do
+        // O(N) recursive descent for moderate N.
+        for (n in intArrayOf(100, 1_000, 10_000, 50_000)) {
+            val source = """
+                let count : { n: Int } -> Int = { n } ->
+                    if n <= 0 then 0 else 1 + count { n = n - 1 }
+                count { n = $n }
+            """.trimIndent()
+            try {
+                BenchRecorder.bench(
+                    category = "Recursion ceiling",
+                    label = "non-tail count(n=$n)",
+                    iters = n,
+                    warmup = 0,
+                    runs = 1,
+                ) {
+                    val r = eval(source)
+                    assertEquals(n.toLong(), r)
+                }
+            } catch (e: Throwable) {
+                System.err.println("[bench] non-tail count $n FAILED: ${e.message?.take(120)}")
+                break
+            }
+        }
+    }
+
+    @Test
     fun `mutual recursion ceiling probe`() {
         // Cross-function tail recursion: even/odd ping-pong. SHOULD work
         // to any depth if cross-function tail calls are properly

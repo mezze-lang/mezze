@@ -212,10 +212,21 @@ public final class SeqNatives {
     @TruffleBoundary
     public static MezzeSeq map(MezzeSeq seq, MezzeFunction mapper,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        Object[] result = new Object[seq.size()];
-        for (int i = 0; i < seq.size(); i++) {
-            result[i] = callNode.call(mapper.getCallTarget(),
-                prepareArgs(mapper, seq.get(i)));
+        // Hoist invariants outside the loop: mapper's closure/CallTarget
+        // doesn't change across elements. Saves one MezzeFunction-method
+        // call + one array-bounds check per element on the hot path.
+        Object[] closureValues = mapper.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = mapper.getCallTarget();
+        int size = seq.size();
+        Object[] result = new Object[size];
+        for (int i = 0; i < size; i++) {
+            // Each call allocates fresh args because callNode.call may
+            // retain the array (TailCallException paths, etc.).
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            args[closureLen] = MezzeRecord.wrapX(seq.get(i));
+            result[i] = callNode.call(target, args);
         }
         return MezzeSeq.fromArray(result);
     }
@@ -226,13 +237,20 @@ public final class SeqNatives {
         int size = seq.size();
         if (size == 0) return MezzeSeq.empty();
 
+        // Hoist closure + CallTarget outside the loop (same pattern as map).
+        Object[] closureValues = predicate.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+
         // Two-pass: first count matches, then collect
         boolean[] keep = new boolean[size];
         int count = 0;
         for (int i = 0; i < size; i++) {
             Object element = seq.get(i);
-            Object result = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, element));
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            args[closureLen] = MezzeRecord.wrapX(element);
+            Object result = callNode.call(target, args);
             if (result instanceof Boolean && (Boolean) result) {
                 keep[i] = true;
                 count++;
@@ -269,10 +287,18 @@ public final class SeqNatives {
     @TruffleBoundary
     public static Object fold(MezzeSeq seq, Object init, MezzeFunction folder,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // Hoist closure + CallTarget outside the loop. fold runs N
+        // iterations with the same folder — no point re-reading per element.
+        Object[] closureValues = folder.getClosureValues();
+        int closureLen = closureValues.length;
+        com.oracle.truffle.api.CallTarget target = folder.getCallTarget();
+        int size = seq.size();
         Object acc = init;
-        for (int i = 0; i < seq.size(); i++) {
-            acc = callNode.call(folder.getCallTarget(),
-                prepareArgsTwo(folder, acc, seq.get(i)));
+        for (int i = 0; i < size; i++) {
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            args[closureLen] = MezzeRecord.wrapAccX(acc, seq.get(i));
+            acc = callNode.call(target, args);
         }
         return acc;
     }
