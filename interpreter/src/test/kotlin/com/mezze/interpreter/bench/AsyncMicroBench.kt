@@ -145,6 +145,75 @@ class AsyncMicroBench {
     }
 
     @Test
+    fun `bare seq map ceiling probe`() {
+        // No Async, no spawn — just seq::map with a trivial closure, to
+        // isolate whether seq::map itself blows the stack at large N
+        // (it shouldn't — it's a native Java for-loop).
+        for (n in intArrayOf(1_000, 10_000, 50_000, 200_000, 1_000_000)) {
+            val source = """
+                use std::collections::seq
+                let xs = seq::range { start = 1, end = $n + 1 }
+                let ys = seq::map { xs = xs, f = { x } -> x + 1 }
+                seq::fold { xs = ys, init = 0, f = { acc, x } -> acc + x }
+            """.trimIndent()
+            // sum 2..n+1 = (n*(n+3))/2... easier: sum 1..n + n = n(n+1)/2 + n
+            val expected = (n.toLong() * (n + 1)) / 2 + n
+            try {
+                BenchRecorder.bench(
+                    category = "Seq baseline (no Async)",
+                    label = "seq::map + fold ($n elems)",
+                    iters = n,
+                    warmup = 1,
+                    runs = 1,
+                ) {
+                    val r = eval(source)
+                    assertEquals(expected, r)
+                }
+            } catch (e: Throwable) {
+                System.err.println("[bench] bare seq::map $n FAILED: ${e.message?.take(120)}")
+                break
+            }
+        }
+    }
+
+    @Test
+    fun `bare spawn no await ceiling probe`() {
+        // Spawn N tasks via seq::map (the native iterative one), discard
+        // results immediately. No Async.all — so we isolate spawn from
+        // the await-many path. If this scales but the with-await one
+        // doesn't, the stack growth is on the await side.
+        for (n in intArrayOf(1_000, 5_000, 10_000, 50_000)) {
+            val source = """
+                use std::effects::async::{ Async, LoomAsync }
+                use std::collections::seq
+
+                let drive = {} -> do
+                    let _ = seq::map {
+                        xs = seq::range { start = 1, end = $n + 1 },
+                        f = { x } -> Async.spawn { f = {} -> x },
+                    }
+                    $n
+                perform LoomAsync in drive {}
+            """.trimIndent()
+            try {
+                BenchRecorder.bench(
+                    category = "Async core (Loom)",
+                    label = "spawn $n no-await",
+                    iters = n,
+                    warmup = 0,
+                    runs = 1,
+                ) {
+                    val r = eval(source)
+                    assertEquals(n.toLong(), r)
+                }
+            } catch (e: Throwable) {
+                System.err.println("[bench] bare spawn $n FAILED: ${e.message?.take(120)}")
+                break
+            }
+        }
+    }
+
+    @Test
     fun `spawn ceiling probe`() {
         // Find where Mezze's Async.spawn ceiling actually is today.
         // Ladder: 1K → 5K → 10K. Stops at the first scale that fails.
@@ -165,7 +234,7 @@ class AsyncMicroBench {
         // closure-applying intermediaries even though seq::map itself
         // is native). The numbers we DO get show the per-spawn cost
         // dropping as JIT compiles the hot path.
-        for (n in intArrayOf(1_000, 5_000, 10_000)) {
+        for (n in intArrayOf(1_000, 10_000, 50_000, 200_000, 1_000_000)) {
             val source = """
                 use std::effects::async::{ Async, LoomAsync }
                 use std::collections::seq
@@ -184,7 +253,7 @@ class AsyncMicroBench {
                     category = "Async core (Loom)",
                     label = "spawn $n + await-all (JIT)",
                     iters = n,
-                    warmup = 1,
+                    warmup = 0,
                     runs = 1,
                 ) {
                     val r = eval(source)
@@ -192,6 +261,7 @@ class AsyncMicroBench {
                 }
             } catch (e: Throwable) {
                 System.err.println("[bench] spawn $n FAILED: ${e.message?.take(120)}")
+                break
             }
         }
     }

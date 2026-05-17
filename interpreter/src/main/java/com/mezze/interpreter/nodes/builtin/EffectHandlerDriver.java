@@ -419,69 +419,77 @@ public final class EffectHandlerDriver {
             EffectFiber outerFiber,
             Object resumeWith,
             IndirectCallNode callNode) {
-        if (resumeWith != null) {
-            fiber.setResumeValue(resumeWith);
-        }
-        fiber.run();
-
-        Object suspended = fiber.takeSuspendedValue();
-        if (suspended instanceof BodyResult br) {
-            return br.value();
-        }
-        if (!(suspended instanceof OpCall opCall)) {
-            throw new RuntimeException(
-                "EffectHandlerDriver: unexpected suspend payload: "
-                + (suspended == null ? "null" : suspended.getClass().getName()));
-        }
-
-        // Look up the handler operation by name.
-        Object opHandlerObj = handler.getField(opCall.opName());
-        if (!(opHandlerObj instanceof MezzeFunction opHandler)) {
-            // Op isn't handled here — propagate to the outer fiber so a
-            // surrounding HandleNode's driver can try to dispatch it.
-            // If there's no outer fiber AND we're inside a spawned task
-            // (TASK_BOUNDARY thread-local set by runFunctionThroughChain),
-            // throw a TaskUnhandledOpException so Async.spawn can store
-            // the op on the promise for re-raise at await time.
-            if (outerFiber == null) {
-                if (TASK_BOUNDARY.get()) {
-                    throw new TaskUnhandledOpException(opCall);
-                }
-                // Partial-handling: this perform handled some effects but
-                // not this op. Bubble out as MezzeSuspended carrying the
-                // unhandled effect; an outer perform can wrap this result
-                // and force it, or top-level code can hold a deferred
-                // computation. The driver short-circuits — body's fiber
-                // never resumes from here.
-                return makeUnhandledSuspended(opCall);
+        // Originally written recursively (every op-call dispatch tail-called
+        // drive() with the next resume value). Java doesn't TCO so a body
+        // with N op-calls in one perform grew the Java stack N deep — N=10K
+        // blew the stack with default 512KB. Now an explicit while loop:
+        // unbounded op-calls per perform without stack growth. #128.
+        while (true) {
+            if (resumeWith != null) {
+                fiber.setResumeValue(resumeWith);
             }
-            Object resumedWith = outerFiber.suspend(opCall);
-            // Outer handler eventually resumed us with a value. Continue
-            // driving this fiber forward with that value as the local
-            // op-call's return.
-            return drive(handler, fiber, outerFiber, resumedWith, callNode);
-        }
+            fiber.run();
 
-        // Dispatch the op. resume/abort handles flow through the fiber's
-        // handle stack — not the op handler's argument record — and the
-        // op handler body reads them via EffectBindingNode.
-        OpDispatchResult result = dispatchOp(
-            opHandler, opCall, fiber,
-            makeResumeFunction(handler, fiber, outerFiber, callNode),
-            makeAbortFunction(),
-            callNode);
+            Object suspended = fiber.takeSuspendedValue();
+            if (suspended instanceof BodyResult br) {
+                return br.value();
+            }
+            if (!(suspended instanceof OpCall opCall)) {
+                throw new RuntimeException(
+                    "EffectHandlerDriver: unexpected suspend payload: "
+                    + (suspended == null ? "null" : suspended.getClass().getName()));
+            }
 
-        // Fall-through vs explicit-resume:
-        //   - If the op handler explicitly called resume during its body,
-        //     it already drove the fiber forward; the value it produced
-        //     becomes this perform's result.
-        //   - Otherwise the handler "fell through" — implicitly equivalent
-        //     to `resume {val = opResult}`. Drive the fiber forward with
-        //     opResult as the suspend's return value.
-        if (result.resumed()) {
-            return result.opResult();
+            // Look up the handler operation by name.
+            Object opHandlerObj = handler.getField(opCall.opName());
+            if (!(opHandlerObj instanceof MezzeFunction opHandler)) {
+                // Op isn't handled here — propagate to the outer fiber so a
+                // surrounding HandleNode's driver can try to dispatch it.
+                // If there's no outer fiber AND we're inside a spawned task
+                // (TASK_BOUNDARY thread-local set by runFunctionThroughChain),
+                // throw a TaskUnhandledOpException so Async.spawn can store
+                // the op on the promise for re-raise at await time.
+                if (outerFiber == null) {
+                    if (TASK_BOUNDARY.get()) {
+                        throw new TaskUnhandledOpException(opCall);
+                    }
+                    // Partial-handling: this perform handled some effects but
+                    // not this op. Bubble out as MezzeSuspended carrying the
+                    // unhandled effect; an outer perform can wrap this result
+                    // and force it, or top-level code can hold a deferred
+                    // computation. The driver short-circuits — body's fiber
+                    // never resumes from here.
+                    return makeUnhandledSuspended(opCall);
+                }
+                // Outer handler eventually resumes us with a value. Continue
+                // driving this fiber forward with that value as the local
+                // op-call's return.
+                resumeWith = outerFiber.suspend(opCall);
+                continue;
+            }
+
+            // Dispatch the op. resume/abort handles flow through the fiber's
+            // handle stack — not the op handler's argument record — and the
+            // op handler body reads them via EffectBindingNode.
+            OpDispatchResult result = dispatchOp(
+                opHandler, opCall, fiber,
+                makeResumeFunction(handler, fiber, outerFiber, callNode),
+                makeAbortFunction(),
+                callNode);
+
+            // Fall-through vs explicit-resume:
+            //   - If the op handler explicitly called resume during its body,
+            //     it already drove the fiber forward; the value it produced
+            //     becomes this perform's result.
+            //   - Otherwise the handler "fell through" — implicitly equivalent
+            //     to `resume {val = opResult}`. Drive the fiber forward with
+            //     opResult as the suspend's return value.
+            if (result.resumed()) {
+                return result.opResult();
+            }
+            resumeWith = result.opResult();
+            // loop
         }
-        return drive(handler, fiber, outerFiber, result.opResult(), callNode);
     }
 
     // ----------------------------------------------------------------
