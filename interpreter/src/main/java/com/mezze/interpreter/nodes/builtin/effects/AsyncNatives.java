@@ -175,6 +175,38 @@ public final class AsyncNatives {
             return false;
         }
 
+        // Outcome codes for cancelOutcome() — mapped 1:1 to the Mezze
+        // CancelOutcome ADT constructors. See AsyncNatives.promiseCancel.
+        public static final int CANCEL_DID_CANCEL        = 0;
+        public static final int CANCEL_ALREADY_COMPLETED = 1;
+        public static final int CANCEL_ALREADY_FAILED    = 2;
+        public static final int CANCEL_NOT_CANCELLABLE   = 3;
+
+        /** Like cancel() but reports what actually happened. Returns one
+         *  of the CANCEL_* codes. */
+        public int cancelOutcome() {
+            if (STATE.compareAndSet(this, PENDING, CANCELLED)) {
+                if (executingThread != null) {
+                    executingThread.interrupt();
+                }
+                unparkWaiter();
+                return CANCEL_DID_CANCEL;
+            }
+            return switch (state) {
+                case COMPLETED -> CANCEL_ALREADY_COMPLETED;
+                case FAILED    -> CANCEL_ALREADY_FAILED;
+                case CANCELLED -> CANCEL_DID_CANCEL;  // racing cancel saw us
+                default        -> CANCEL_NOT_CANCELLABLE;
+            };
+        }
+
+        /** Snapshot the state for inspection. Returns one of the
+         *  state constants. Result field is read separately by caller
+         *  AFTER seeing a non-PENDING state (volatile state acts as
+         *  release fence). */
+        public int snapshotState() { return state; }
+        public Object snapshotResult() { return result; }
+
         // OPTIMIZATION: Use VarHandle for proper memory ordering on waiter access
         private void unparkWaiter() {
             // Use acquire semantics to ensure we see the waiter if it was set
