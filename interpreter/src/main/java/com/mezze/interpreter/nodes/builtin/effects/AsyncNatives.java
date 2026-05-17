@@ -154,7 +154,15 @@ public final class AsyncNatives {
             return false;
         }
 
-        public boolean fail(Throwable error) {
+        /** Mark Promise as Failed. `error` can be:
+         *    - a Throwable (regular task-body-crashed path); receivers
+         *      convert it to AsyncFailed { msg = e.getMessage() } when
+         *      they need an AsyncError variant for the user.
+         *    - a Mezze AsyncError variant (constructed via promiseFail);
+         *      receivers pass it through unchanged.
+         *  The Promise's result field is Object, so either flavor fits
+         *  natively. */
+        public boolean fail(Object error) {
             // Set result BEFORE state to ensure visibility
             RESULT.setVolatile(this, error);
             if (STATE.compareAndSet(this, PENDING, FAILED)) {
@@ -1972,7 +1980,7 @@ public final class AsyncNatives {
         return MezzeSeq.fromArray(results.toArray());
     }
 
-    // ==================== AsyncError Variant Helpers ====================
+    // ==================== AsyncError / PromiseState / CancelOutcome Helpers ====================
 
     private static MezzeVariant createAsyncCancelled() {
         int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("AsyncCancelled");
@@ -1986,6 +1994,183 @@ public final class AsyncNatives {
             new Object[]{msg != null ? msg : "Unknown error"}
         );
         return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, errRec);
+    }
+
+    private static MezzeVariant createAsyncTimedOut(long ms) {
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("AsyncTimedOut");
+        MezzeRecord errRec = MezzeRecord.fromFields(
+            new String[]{"ms"}, new Object[]{ms});
+        return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, errRec);
+    }
+
+    // PromiseState constructors. Pending is allocation-free via singleton.
+    private static volatile MezzeVariant PENDING_SINGLETON = null;
+    private static MezzeVariant promiseStatePending() {
+        MezzeVariant v = PENDING_SINGLETON;
+        if (v != null) return v;
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Pending");
+        v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+        PENDING_SINGLETON = v;
+        return v;
+    }
+    private static MezzeVariant promiseStateCompleted(Object val) {
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Completed");
+        MezzeRecord rec = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{val});
+        return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, rec);
+    }
+    private static MezzeVariant promiseStateFailed(Object errVariant) {
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Failed");
+        MezzeRecord rec = MezzeRecord.fromFields(new String[]{"err"}, new Object[]{errVariant});
+        return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, rec);
+    }
+
+    // CancelOutcome constructors. All cached singletons (no payload).
+    private static volatile MezzeVariant CANCEL_DID_CANCEL_V       = null;
+    private static volatile MezzeVariant CANCEL_ALREADY_COMPLETED_V = null;
+    private static volatile MezzeVariant CANCEL_ALREADY_FAILED_V    = null;
+    private static volatile MezzeVariant CANCEL_NOT_CANCELLABLE_V   = null;
+    private static MezzeVariant cancelOutcomeFor(int outcome) {
+        return switch (outcome) {
+            case MezzePromise.CANCEL_DID_CANCEL -> {
+                MezzeVariant v = CANCEL_DID_CANCEL_V;
+                if (v == null) {
+                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Cancelled");
+                    v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+                    CANCEL_DID_CANCEL_V = v;
+                }
+                yield v;
+            }
+            case MezzePromise.CANCEL_ALREADY_COMPLETED -> {
+                MezzeVariant v = CANCEL_ALREADY_COMPLETED_V;
+                if (v == null) {
+                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("AlreadyCompleted");
+                    v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+                    CANCEL_ALREADY_COMPLETED_V = v;
+                }
+                yield v;
+            }
+            case MezzePromise.CANCEL_ALREADY_FAILED -> {
+                MezzeVariant v = CANCEL_ALREADY_FAILED_V;
+                if (v == null) {
+                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("AlreadyFailed");
+                    v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+                    CANCEL_ALREADY_FAILED_V = v;
+                }
+                yield v;
+            }
+            default -> {
+                MezzeVariant v = CANCEL_NOT_CANCELLABLE_V;
+                if (v == null) {
+                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("NotCancellable");
+                    v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+                    CANCEL_NOT_CANCELLABLE_V = v;
+                }
+                yield v;
+            }
+        };
+    }
+
+    // ==================== Promise Natives (new API #117/#118/#123) ====================
+
+    /** Non-blocking snapshot of a Promise's state, returns the
+     *  PromiseState 'a ADT value. Used by `Promise.inspect`. */
+    @TruffleBoundary
+    public static MezzeVariant promiseInspect(MezzeRecord args) {
+        MezzePromise p = getPromise(args, "p");
+        int state = p.snapshotState();
+        return switch (state) {
+            case MezzePromise.PENDING   -> promiseStatePending();
+            case MezzePromise.COMPLETED -> promiseStateCompleted(p.snapshotResult());
+            case MezzePromise.FAILED    -> promiseStateFailed(asyncErrorFromResult(p.snapshotResult()));
+            case MezzePromise.CANCELLED -> promiseStateFailed(createAsyncCancelled());
+            default -> throw new RuntimeException("MezzePromise: unknown state " + state);
+        };
+    }
+
+    /** Cancel the Promise and return a CancelOutcome variant. */
+    @TruffleBoundary
+    public static MezzeVariant promiseCancel(MezzeRecord args) {
+        MezzePromise p = getPromise(args, "p");
+        int outcome = p.cancelOutcome();
+        return cancelOutcomeFor(outcome);
+    }
+
+    /** Construct an already-Completed Promise. */
+    @TruffleBoundary
+    public static MezzePromise promiseSucceed(MezzeRecord args) {
+        Object val = getFieldValue(args, "val");
+        MezzePromise p = new MezzePromise(null, null);
+        p.complete(val);
+        return p;
+    }
+
+    /** Construct an already-Failed Promise. err must be an AsyncError variant. */
+    @TruffleBoundary
+    public static MezzePromise promiseFail(MezzeRecord args) {
+        Object err = getFieldValue(args, "err");
+        MezzePromise p = new MezzePromise(null, null);
+        p.fail(err);
+        return p;
+    }
+
+    /** Block until the promise resolves; return a `Result 'a AsyncError`
+     *  variant. Replaces the throw-on-failure behavior of loomAwait. */
+    @TruffleBoundary
+    public static Object promiseAwaitResult(MezzeRecord args) {
+        MezzePromise p = getPromise(args, "p");
+        Object value;
+        try {
+            value = p.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return MezzeVariant.err(createAsyncCancelled());
+        }
+        // Same propagation logic as loomAwaitPromise — MezzeSuspended forcing
+        // and unhandled-op re-raise still happen, those are NOT failure modes
+        // but the body's effect propagation.
+        if (value instanceof MezzeSuspended suspended) {
+            Object forced = suspended.force(IndirectCallNode.getUncached());
+            return MezzeVariant.ok(forced);
+        }
+        OpCall pending = p.getUnhandledOpCall();
+        if (pending != null) {
+            EffectFiber parentFiber = EffectFiber.current();
+            if (parentFiber != null) {
+                Object forced = parentFiber.suspend(pending);
+                return MezzeVariant.ok(forced);
+            }
+            if (EffectFiber.handlerChainDepth() > 0) {
+                throw new EffectHandlerDriver.TaskUnhandledOpException(pending);
+            }
+            // No handler — surface as AsyncFailed so caller sees Result Err.
+            return MezzeVariant.err(createAsyncFailed(
+                "Spawned task raised effect operation '" + pending.opName()
+                + "' with no handler available at await site."));
+        }
+        // Classify by final state.
+        int state = p.snapshotState();
+        return switch (state) {
+            case MezzePromise.COMPLETED -> MezzeVariant.ok(value);
+            case MezzePromise.FAILED    -> MezzeVariant.err(asyncErrorFromResult(value));
+            case MezzePromise.CANCELLED -> MezzeVariant.err(createAsyncCancelled());
+            default -> MezzeVariant.err(createAsyncFailed(
+                "promise.await returned with unexpected state " + state));
+        };
+    }
+
+    /** Convert a MezzePromise's stored result-on-failure into an AsyncError
+     *  variant for the user-side Mezze API.
+     *
+     *  Two shapes the result field can take:
+     *    - MezzeVariant (user constructed via promiseFail OR settle paths
+     *      already stored a Mezze AsyncError there): pass through.
+     *    - Throwable (regular spawned-body-crash path): wrap as
+     *      AsyncFailed { msg = e.getMessage() }.
+     *  Anything else falls through to a generic AsyncFailed for safety. */
+    private static Object asyncErrorFromResult(Object r) {
+        if (r instanceof MezzeVariant v) return v;
+        if (r instanceof Throwable t)    return createAsyncFailed(t.getMessage());
+        return createAsyncFailed(r == null ? "Unknown error" : r.toString());
     }
 
     // ==================== Helper Methods ====================
