@@ -286,11 +286,44 @@ public final class EffectFiber {
      * {@link #currentResume}, {@link #currentAbort}) so chain-dispatch on
      * spawned threads can give op handlers a valid dispatch context for
      * reading {@code resume}/{@code abort} via {@code EffectBindingNode}.
+     *
+     * <p>Acquires from a thread-local 1-slot pool when available — every
+     * chain-dispatch entry allocates and discards one dispatch fiber,
+     * so reusing a single per-thread slot saves an allocation per
+     * op-call on the chain-dispatch path. The fiber is in clean state
+     * when reused (popEffectHandles already clears its slots).
+     *
+     * <p>Callers MUST pair this with {@link #releaseDispatchOnly(EffectFiber)}
+     * after use. The pool is best-effort: nested dispatch fibers allocate
+     * fresh (no recursive pool).
      */
-    @TruffleBoundary
-    public static EffectFiber createDispatchOnly() {
+    public static EffectFiber acquireDispatchOnly() {
+        EffectFiber cached = DISPATCH_POOL.get();
+        if (cached != null) {
+            DISPATCH_POOL.set(null);
+            return cached;
+        }
         return new EffectFiber(/* scope */ null, /* continuation */ null);
     }
+
+    /** Return a dispatch fiber to the per-thread cache (best-effort). */
+    public static void releaseDispatchOnly(EffectFiber fiber) {
+        if (fiber.effectHandleDepth != 0) {
+            // Caller didn't pop their pushes — don't pool a dirty fiber.
+            return;
+        }
+        // Most recent goes in cache; older one (if any) is dropped.
+        DISPATCH_POOL.set(fiber);
+    }
+
+    /** Back-compat wrapper. New callers should use acquire/release. */
+    @TruffleBoundary
+    public static EffectFiber createDispatchOnly() {
+        return acquireDispatchOnly();
+    }
+
+    private static final ThreadLocal<EffectFiber> DISPATCH_POOL =
+        ThreadLocal.withInitial(() -> null);
 
     /**
      * Run/resume the body. Returns when body either suspends or completes.

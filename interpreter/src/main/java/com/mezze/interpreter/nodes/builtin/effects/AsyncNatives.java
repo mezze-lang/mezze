@@ -211,9 +211,10 @@ public final class AsyncNatives {
          * OPTIMIZATION: VarHandle for proper waiter memory ordering.
          */
         public Object await() throws InterruptedException {
-            // OPTIMIZATION: Only measure time on sampled calls
-            long startNanos = ((completionCount.get() & (SAMPLE_RATE - 1)) == 0)
-                ? System.nanoTime() : 0;
+            // OPTIMIZATION: Only measure time on sampled calls. Sampling
+            // uses a per-thread counter (no atomic) — single read +
+            // increment, no coherence traffic across awaiting threads.
+            long startNanos = shouldSampleThisCall() ? System.nanoTime() : 0;
 
             // Fast path: already done
             if (state != PENDING) {
@@ -564,33 +565,54 @@ public final class AsyncNatives {
     }
 
     // ==================== OPTIMIZATION: Sampled Completion Time Tracking ====================
+    //
+    // Adaptive spin tracks avg completion time so getAdaptiveSpinCount can
+    // pick a sensible spin budget. Sampling is per-thread (no contention
+    // on the hot path); the EMA itself is a plain volatile-via-VarHandle
+    // (lossy under contention, fine for a perf heuristic).
 
-    // Track average completion time in nanoseconds for adaptive spinning
-    // OPTIMIZATION: Only sample 1 in 64 completions to reduce nanoTime() overhead
-    private static final AtomicLong avgCompletionNanos = new AtomicLong(1000);
-    private static final AtomicLong completionCount = new AtomicLong(0);
-    private static final int SAMPLE_RATE = 64; // Only measure every 64th completion
+    private static final int SAMPLE_RATE = 64;
+    // Per-thread monotonic counter. Read on every await() to decide
+    // whether to nanoTime() — replaces the previous AtomicLong.get()
+    // which was a coherence-traffic hotspot under 1M+ parallel awaits.
+    private static final ThreadLocal<long[]> SAMPLE_COUNTER =
+        ThreadLocal.withInitial(() -> new long[1]);
 
-    // Update completion time tracking with sampling
-    private static void recordCompletionTime(long nanos) {
-        long count = completionCount.incrementAndGet();
-        // OPTIMIZATION: Only update EMA on sampled completions
-        if ((count & (SAMPLE_RATE - 1)) == 0) {
-            if (count < 100 * SAMPLE_RATE) {
-                avgCompletionNanos.updateAndGet(old -> (old + nanos) / 2);
-            } else {
-                // Exponential moving average with alpha = 0.1
-                avgCompletionNanos.updateAndGet(old -> (long)(old * 0.9 + nanos * 0.1));
-            }
-        }
+    /** Returns true iff this thread should sample timing on this await. */
+    private static boolean shouldSampleThisCall() {
+        long[] counter = SAMPLE_COUNTER.get();
+        long next = counter[0]++;
+        return (next & (SAMPLE_RATE - 1)) == 0;
     }
 
-    // Calculate adaptive spin count based on historical completion times
+    // Average completion time in nanoseconds. Plain long with relaxed
+    // semantics — perf heuristic, lossy updates are acceptable.
+    private static volatile long avgCompletionNanos = 1000L;
+    // Count of total sampled completions across all threads — only used
+    // to switch from initialization-EMA to long-run-EMA. Atomic so the
+    // count progresses sanely; not on the hot path.
+    private static final AtomicLong sampledCompletions = new AtomicLong(0);
+
+    // Update completion time tracking — called only when shouldSampleThisCall
+    // returned true (so already sampled, no need to gate again).
+    private static void recordCompletionTime(long nanos) {
+        long count = sampledCompletions.incrementAndGet();
+        long oldAvg = avgCompletionNanos;
+        long newAvg;
+        if (count < 100) {
+            newAvg = (oldAvg + nanos) / 2;
+        } else {
+            // Exponential moving average with alpha = 0.1.
+            newAvg = (long)(oldAvg * 0.9 + nanos * 0.1);
+        }
+        avgCompletionNanos = newAvg;
+    }
+
+    // Calculate adaptive spin count based on historical completion times.
+    // Bounded between 16 and 1024 iterations regardless of avgNanos.
     private static int getAdaptiveSpinCount() {
-        long avgNanos = avgCompletionNanos.get();
-        // Spin for approximately 1/10th of average completion time
-        // Bounded between 16 and 1024 iterations
-        return (int) Math.min(1024, Math.max(16, avgNanos / 100));
+        long avgNanos = avgCompletionNanos;
+        return (int) Math.min(1024L, Math.max(16L, avgNanos / 100));
     }
 
     // ==================== Loom Async Operations ====================

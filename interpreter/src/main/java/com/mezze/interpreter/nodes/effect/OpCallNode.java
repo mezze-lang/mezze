@@ -123,8 +123,10 @@ public final class OpCallNode extends MezzeNode {
                 }
 
                 // Set up dispatch context so the handler body can read
-                // resume/abort via EffectBindingNode.
-                EffectFiber dispatchFiber = EffectFiber.createDispatchOnly();
+                // resume/abort via EffectBindingNode. Acquire from a
+                // per-thread 1-slot pool to avoid allocating a fresh
+                // dispatch fiber per op-call.
+                EffectFiber dispatchFiber = EffectFiber.acquireDispatchOnly();
                 MezzeFunction resumeFn = makeChainResumeFunction();
                 MezzeFunction abortFn = EffectHandlerDriver.makeAbortFunction();
                 dispatchFiber.pushEffectHandles(resumeFn, abortFn);
@@ -147,6 +149,7 @@ public final class OpCallNode extends MezzeNode {
                 } finally {
                     EffectFiber.exitDispatch(prev);
                     dispatchFiber.popEffectHandles();
+                    EffectFiber.releaseDispatchOnly(dispatchFiber);
                 }
             }
         }
