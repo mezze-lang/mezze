@@ -145,6 +145,39 @@ class AsyncMicroBench {
     }
 
     @Test
+    fun `mutual recursion ceiling probe`() {
+        // Cross-function tail recursion: even/odd ping-pong. SHOULD work
+        // to any depth if cross-function tail calls are properly
+        // trampolined; will SO if they recurse through Java frames.
+        // Ladder identifies the actual ceiling.
+        for (n in intArrayOf(1_000, 10_000, 100_000, 1_000_000)) {
+            val source = """
+                let even : { n: Int } -> Bool = { n } ->
+                    if n == 0 then True else odd { n = n - 1 }
+                let odd : { n: Int } -> Bool = { n } ->
+                    if n == 0 then False else even { n = n - 1 }
+                even { n = $n }
+            """.trimIndent()
+            val expected = (n % 2) == 0
+            try {
+                BenchRecorder.bench(
+                    category = "Tail-call ceiling",
+                    label = "mutual rec (even/odd) n=$n",
+                    iters = n,
+                    warmup = 0,
+                    runs = 1,
+                ) {
+                    val r = eval(source)
+                    assertEquals(expected, r)
+                }
+            } catch (e: Throwable) {
+                System.err.println("[bench] mutual rec $n FAILED: ${e.message?.take(120)}")
+                break
+            }
+        }
+    }
+
+    @Test
     fun `bare seq map ceiling probe`() {
         // No Async, no spawn — just seq::map with a trivial closure, to
         // isolate whether seq::map itself blows the stack at large N
