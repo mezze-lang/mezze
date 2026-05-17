@@ -138,25 +138,8 @@ public final class AsyncNatives {
         }
 
         public OpCall getUnhandledOpCall() {
-            // Walk through delegates (await() follows them) to find the
-            // originating promise's stored op-call.
-            MezzePromise d = delegate;
-            if (d != null) return d.getUnhandledOpCall();
             return unhandledOpCall;
         }
-
-        /**
-         * Constructor that delegates to another promise's future state.
-         * Used for returning a promise with thread reference after spawn.
-         */
-        public MezzePromise(Thread executingThread, Semaphore semaphore, MezzePromise delegate) {
-            this.executingThread = executingThread;
-            this.semaphore = semaphore;
-            // Link to delegate - we'll poll its state
-            this.delegate = delegate;
-        }
-
-        private volatile MezzePromise delegate;
 
         public boolean complete(Object value) {
             // Set result BEFORE state to ensure visibility
@@ -202,32 +185,22 @@ public final class AsyncNatives {
         }
 
         public boolean isDone() {
-            MezzePromise d = delegate;
-            if (d != null) return d.isDone();
             return state != PENDING;
         }
 
         public boolean isCompleted() {
-            MezzePromise d = delegate;
-            if (d != null) return d.isCompleted();
             return state == COMPLETED;
         }
 
         public boolean isFailed() {
-            MezzePromise d = delegate;
-            if (d != null) return d.isFailed();
             return state == FAILED;
         }
 
         public boolean isCancelled() {
-            MezzePromise d = delegate;
-            if (d != null) return d.isCancelled();
             return state == CANCELLED;
         }
 
         public Object getResult() {
-            MezzePromise d = delegate;
-            if (d != null) return d.getResult();
             return result;
         }
 
@@ -241,12 +214,6 @@ public final class AsyncNatives {
             // OPTIMIZATION: Only measure time on sampled calls
             long startNanos = ((completionCount.get() & (SAMPLE_RATE - 1)) == 0)
                 ? System.nanoTime() : 0;
-
-            // If delegating, wait on the delegate
-            MezzePromise d = delegate;
-            if (d != null) {
-                return d.await();
-            }
 
             // Fast path: already done
             if (state != PENDING) {
@@ -285,11 +252,6 @@ public final class AsyncNatives {
          * Timed await.
          */
         public Object await(long timeoutMs) throws InterruptedException, TimeoutException {
-            MezzePromise d = delegate;
-            if (d != null) {
-                return d.await(timeoutMs);
-            }
-
             if (state != PENDING) {
                 return getResultOrThrow();
             }

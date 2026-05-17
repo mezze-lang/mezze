@@ -219,6 +219,9 @@ tasks.register<Test>("bench") {
     // Bench tests need longer per-test timeout — they're allowed to run
     // for tens of seconds. Override the strict 120s default applied above.
     systemProperty("junit.jupiter.execution.timeout.default", "600s")
+    // Bench needs more heap than the 2g test default — the 1M-spawn
+    // probe alone needs ~5GB for virtual-thread stacks.
+    maxHeapSize = "10g"
     benchClassPatterns.forEach { include(it) }
     // Always re-run; bench output is informational, never up-to-date.
     outputs.upToDateWhen { false }

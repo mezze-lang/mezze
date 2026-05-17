@@ -145,6 +145,58 @@ class AsyncMicroBench {
     }
 
     @Test
+    fun `spawn ceiling probe`() {
+        // Find where Mezze's Async.spawn ceiling actually is today.
+        // Ladder: 1K → 5K → 10K. Stops at the first scale that fails.
+        // Aspiration is 1M but stack-depth limits (#128) cap us much
+        // sooner today.
+        //
+        // Heap: bench task uses 10GB so headroom isn't the constraint;
+        // the limit is Truffle interpreter call stack from chained
+        // closures, not memory.
+        // Climb the ladder: stop wherever it breaks. The benchmark runs
+        // each scale and records, then attempts the next. If one fails
+        // (stack overflow or OOM), the earlier numbers still tell us
+        // where the ceiling is today.
+        //
+        // Uses seq::range + seq::map + Async.all + seq::fold. This is
+        // realistic user code shape but bound by stack-depth ceilings
+        // around 10K today (#128: Mezze recursion isn't TCO'd through
+        // closure-applying intermediaries even though seq::map itself
+        // is native). The numbers we DO get show the per-spawn cost
+        // dropping as JIT compiles the hot path.
+        for (n in intArrayOf(1_000, 5_000, 10_000)) {
+            val source = """
+                use std::effects::async::{ Async, LoomAsync }
+                use std::collections::seq
+
+                perform LoomAsync in do
+                    let ps = seq::map {
+                        xs = seq::range { start = 1, end = $n + 1 },
+                        f = { x } -> Async.spawn { f = {} -> x },
+                    }
+                    let results = Async.all { ps = ps }
+                    seq::fold { xs = results, init = 0, f = { acc, x } -> acc + x }
+            """.trimIndent()
+            val expected = (n.toLong() * (n + 1)) / 2
+            try {
+                BenchRecorder.bench(
+                    category = "Async core (Loom)",
+                    label = "spawn $n + await-all (JIT)",
+                    iters = n,
+                    warmup = 1,
+                    runs = 1,
+                ) {
+                    val r = eval(source)
+                    assertEquals(expected, r)
+                }
+            } catch (e: Throwable) {
+                System.err.println("[bench] spawn $n FAILED: ${e.message?.take(120)}")
+            }
+        }
+    }
+
+    @Test
     fun `concurrent recursive fib three threads`() {
         // The same shape that surfaced the shared-buffer race (now fixed).
         // Three concurrent recursive fib calls — measures both spawn-spawn-
