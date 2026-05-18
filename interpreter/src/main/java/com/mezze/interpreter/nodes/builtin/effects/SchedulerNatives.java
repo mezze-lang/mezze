@@ -28,7 +28,7 @@ public final class SchedulerNatives {
      * Spawn a task on the scheduler.
      */
     @TruffleBoundary
-    public static CoopScheduler.CoopPromise schedulerSpawn(MezzeRecord args, IndirectCallNode callNode) {
+    public static AsyncNatives.MezzePromise schedulerSpawn(MezzeRecord args, IndirectCallNode callNode) {
         CoopScheduler scheduler = getScheduler(args, "sched");
         MezzeFunction f = getFunction(args, "f");
         return scheduler.spawn(f);
@@ -40,7 +40,7 @@ public final class SchedulerNatives {
     @TruffleBoundary
     public static Object schedulerAwait(MezzeRecord args, IndirectCallNode callNode) {
         CoopScheduler scheduler = getScheduler(args, "sched");
-        CoopScheduler.CoopPromise promise = getPromise(args, "p");
+        AsyncNatives.MezzePromise promise = getPromise(args, "p");
         return scheduler.await(promise, callNode);
     }
 
@@ -58,8 +58,8 @@ public final class SchedulerNatives {
      * Check if promise is done.
      */
     public static boolean schedulerIsDone(MezzeRecord args) {
-        CoopScheduler.CoopPromise promise = getPromise(args, "p");
-        return promise.isCompleted();
+        AsyncNatives.MezzePromise promise = getPromise(args, "p");
+        return promise.isDone();
     }
 
     /**
@@ -126,12 +126,12 @@ public final class SchedulerNatives {
             (val == null ? "null" : val.getClass().getName()));
     }
 
-    private static CoopScheduler.CoopPromise getPromise(MezzeRecord args, String field) {
+    private static AsyncNatives.MezzePromise getPromise(MezzeRecord args, String field) {
         Object val = args.getField(field);
-        if (val instanceof CoopScheduler.CoopPromise p) {
+        if (val instanceof AsyncNatives.MezzePromise p) {
             return p;
         }
-        throw new RuntimeException("Expected CoopPromise for field '" + field + "', got: " +
+        throw new RuntimeException("Expected MezzePromise for field '" + field + "', got: " +
             (val == null ? "null" : val.getClass().getName()) + ". Args: " + args);
     }
 

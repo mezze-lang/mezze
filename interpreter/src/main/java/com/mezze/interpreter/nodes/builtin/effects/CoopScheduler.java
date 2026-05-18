@@ -18,6 +18,10 @@ import java.util.*;
  * park-based primitives (Mutex, Latch) to work under Coop without
  * contention.
  *
+ * <p>Scheduler tasks complete a shared {@link AsyncNatives.MezzePromise}
+ * — the same promise type Loom uses. That makes Promise value ops
+ * (inspect, is_*, cancel) scheduler-agnostic at the user-facing layer.
+ *
  * <p>Limitation: nested {@code parkUntil} (a parked task whose body
  * itself parks) deadlocks because the inner parker doesn't capture
  * its continuation. The proper fix is fiber-based suspension via
@@ -31,65 +35,20 @@ public final class CoopScheduler {
     // Ready queue - tasks waiting to execute
     private final Deque<CoopTask> readyQueue = new ArrayDeque<>();
 
-    // All promises by ID
-    private final Map<Long, CoopPromise> promises = new HashMap<>();
-
-    // Promise ID counter
-    private long nextPromiseId = 0;
-
     // Scheduler ID for serialization
     private final UUID id = UUID.randomUUID();
 
-    // Track if we're currently running a task (to detect re-entry)
-    private boolean isRunning = false;
-
     /**
-     * A task in the scheduler - wraps function + promise.
+     * A task in the scheduler - wraps function + the MezzePromise it
+     * completes. Run order is determined by the ready queue.
      */
-    public static final class CoopTask {
-        final long promiseId;
+    static final class CoopTask {
         final MezzeFunction function;
-        final CoopPromise promise;
+        final AsyncNatives.MezzePromise promise;
 
-        CoopTask(long promiseId, MezzeFunction function, CoopPromise promise) {
-            this.promiseId = promiseId;
+        CoopTask(MezzeFunction function, AsyncNatives.MezzePromise promise) {
             this.function = function;
             this.promise = promise;
-        }
-    }
-
-    /**
-     * A promise in the scheduler - tracks completion.
-     */
-    public static final class CoopPromise {
-        final long id;
-        Object result;
-        boolean completed = false;
-        Throwable error;
-
-        CoopPromise(long id) {
-            this.id = id;
-        }
-
-        public boolean isCompleted() {
-            return completed;
-        }
-
-        public Object getResult() {
-            if (error != null) {
-                throw new RuntimeException("Task failed: " + error.getMessage(), error);
-            }
-            return result;
-        }
-
-        void complete(Object value) {
-            this.result = value;
-            this.completed = true;
-        }
-
-        void fail(Throwable t) {
-            this.error = t;
-            this.completed = true;
         }
     }
 
@@ -102,14 +61,9 @@ public final class CoopScheduler {
      * Task is NOT executed yet.
      */
     @TruffleBoundary
-    public CoopPromise spawn(MezzeFunction f) {
-        long promiseId = nextPromiseId++;
-        CoopPromise promise = new CoopPromise(promiseId);
-        CoopTask task = new CoopTask(promiseId, f, promise);
-
-        promises.put(promiseId, promise);
-        readyQueue.addLast(task);
-
+    public AsyncNatives.MezzePromise spawn(MezzeFunction f) {
+        AsyncNatives.MezzePromise promise = new AsyncNatives.MezzePromise(null, null);
+        readyQueue.addLast(new CoopTask(f, promise));
         return promise;
     }
 
@@ -121,22 +75,22 @@ public final class CoopScheduler {
      * @return The promise result
      */
     @TruffleBoundary
-    public Object await(CoopPromise promise, IndirectCallNode callNode) {
+    public Object await(AsyncNatives.MezzePromise promise, IndirectCallNode callNode) {
         // Fast path: already complete
-        if (promise.isCompleted()) {
-            return promise.getResult();
+        if (promise.isDone()) {
+            return resultOrThrow(promise);
         }
 
         // Run scheduler until this promise completes
         runUntil(promise, callNode);
 
         // Now should be complete
-        if (!promise.isCompleted()) {
-            throw new RuntimeException("Deadlock: promise " + promise.id +
-                " never completed (ready queue empty: " + readyQueue.isEmpty() + ")");
+        if (!promise.isDone()) {
+            throw new RuntimeException("Deadlock: scheduler promise never completed "
+                + "(ready queue empty: " + readyQueue.isEmpty() + ")");
         }
 
-        return promise.getResult();
+        return resultOrThrow(promise);
     }
 
     /**
@@ -153,8 +107,8 @@ public final class CoopScheduler {
      * Run tasks until a specific promise completes.
      */
     @TruffleBoundary
-    public void runUntil(CoopPromise target, IndirectCallNode callNode) {
-        while (!target.isCompleted() && !readyQueue.isEmpty()) {
+    public void runUntil(AsyncNatives.MezzePromise target, IndirectCallNode callNode) {
+        while (!target.isDone() && !readyQueue.isEmpty()) {
             runOneTask(callNode);
         }
     }
@@ -234,9 +188,9 @@ public final class CoopScheduler {
 
         // Check if any already complete
         for (Object p : promiseArray) {
-            CoopPromise promise = (CoopPromise) p;
-            if (promise.isCompleted()) {
-                return promise.getResult();
+            AsyncNatives.MezzePromise promise = (AsyncNatives.MezzePromise) p;
+            if (promise.isDone()) {
+                return resultOrThrow(promise);
             }
         }
 
@@ -244,9 +198,9 @@ public final class CoopScheduler {
         while (true) {
             // Check if any complete now
             for (Object p : promiseArray) {
-                CoopPromise promise = (CoopPromise) p;
-                if (promise.isCompleted()) {
-                    return promise.getResult();
+                AsyncNatives.MezzePromise promise = (AsyncNatives.MezzePromise) p;
+                if (promise.isDone()) {
+                    return resultOrThrow(promise);
                 }
             }
 
@@ -266,7 +220,7 @@ public final class CoopScheduler {
         Object[] results = new Object[promiseArray.length];
 
         for (int i = 0; i < promiseArray.length; i++) {
-            CoopPromise promise = (CoopPromise) promiseArray[i];
+            AsyncNatives.MezzePromise promise = (AsyncNatives.MezzePromise) promiseArray[i];
             results[i] = await(promise, callNode);
         }
 
@@ -291,12 +245,34 @@ public final class CoopScheduler {
     // Utility Methods
     // ========================================================================
 
-    public boolean isDone(CoopPromise promise) {
-        return promise.isCompleted();
+    public boolean isDone(AsyncNatives.MezzePromise promise) {
+        return promise.isDone();
     }
 
     public int pendingCount() {
         return readyQueue.size();
+    }
+
+    /**
+     * Read the final value of a settled promise. On FAILED, re-throw so
+     * the await caller observes the same behavior as before the
+     * CoopPromise → MezzePromise switch.
+     */
+    private static Object resultOrThrow(AsyncNatives.MezzePromise promise) {
+        if (promise.isCompleted()) {
+            return promise.snapshotResult();
+        }
+        if (promise.isFailed()) {
+            Object stored = promise.snapshotResult();
+            if (stored instanceof Throwable t) {
+                throw new RuntimeException("Task failed: " + t.getMessage(), t);
+            }
+            throw new RuntimeException("Task failed: " + stored);
+        }
+        if (promise.isCancelled()) {
+            throw new RuntimeException("Task cancelled");
+        }
+        throw new RuntimeException("Promise not settled");
     }
 
     private static Object[] appendArg(Object[] closure, Object arg) {
