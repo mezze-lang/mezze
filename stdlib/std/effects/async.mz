@@ -19,9 +19,35 @@ impl Eq 'a for Scope 'a where {
 }
 
 impl Promise 'a where {
+  ## Block until the Promise resolves. Returns the success value, or
+  ## raises if the Promise failed. For non-raising handling use
+  ## `await_result` (returns Result), or `inspect` (non-blocking).
   await = { it } -> Async.await { p = it },
-  is_done = { it } -> Async.is_done { p = it },
-  cancel = { it } -> Async.cancel { p = it },
+
+  ## Block until the Promise resolves. Returns Result so callers can
+  ## pattern-match success vs failure modes.
+  await_result = { it } -> __native_promise_await_result { p = it },
+
+  ## Non-blocking snapshot of the Promise's state. Never raises.
+  inspect = { it } -> __native_promise_inspect { p = it },
+
+  ## Convenience predicates derived from inspect. None block, none raise.
+  is_done      = { it } -> match __native_promise_inspect { p = it } is
+    Pending -> False
+    _ -> True,
+  is_pending   = { it } -> match __native_promise_inspect { p = it } is
+    Pending -> True
+    _ -> False,
+  is_failed    = { it } -> match __native_promise_inspect { p = it } is
+    Failed { err = _ } -> True
+    _ -> False,
+  is_cancelled = { it } -> match __native_promise_inspect { p = it } is
+    Failed { err = AsyncCancelled } -> True
+    _ -> False,
+
+  ## Request cancellation; returns the actual outcome (Cancelled /
+  ## AlreadyCompleted / AlreadyFailed / NotCancellable).
+  cancel = { it } -> __native_promise_cancel { p = it },
 }
 
 ## Error type for async operations.
@@ -29,6 +55,24 @@ pub type AsyncError = |
   AsyncFailed { msg: Str },
   AsyncCancelled,
   AsyncTimedOut { ms: Int },
+|
+
+## Snapshot of a Promise's state at one moment in time.
+## Returned by `Promise.inspect {}` — never blocks, never raises.
+pub type PromiseState 'a = |
+  Pending,
+  Completed { val: 'a },
+  Failed { err: AsyncError },
+|
+
+## What happened when you tried to cancel a Promise.
+## Returned by `Promise.cancel {}` — never loses information about
+## whether the cancellation actually took effect.
+pub type CancelOutcome = |
+  Cancelled,
+  AlreadyCompleted,
+  AlreadyFailed,
+  NotCancellable,
 |
 
 ## Unified async effect for spawning, awaiting, and structured concurrency.

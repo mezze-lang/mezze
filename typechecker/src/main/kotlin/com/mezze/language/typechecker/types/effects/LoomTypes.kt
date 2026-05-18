@@ -267,6 +267,44 @@ object LoomTypes {
             MezzeType.SeqType(resultType)
         )
 
+        // === Promise-value natives (#117/#118/#123) ===
+        // PromiseState 'a — variant: Pending | Completed{val: 'a} | Failed{err: AsyncError}
+        val promiseStateType = MezzeType.VarType(com.mezze.language.ast.TypeVar("PromiseState"))
+        // CancelOutcome — Cancelled | AlreadyCompleted | AlreadyFailed | NotCancellable
+        val cancelOutcomeType = MezzeType.VarType(com.mezze.language.ast.TypeVar("CancelOutcome"))
+
+        // __native_promise_inspect: { p: Promise 'a } -> PromiseState 'a
+        context["__native_promise_inspect"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("p" to promiseType)),
+            promiseStateType
+        )
+
+        // __native_promise_cancel: { p: Promise 'a } -> CancelOutcome
+        context["__native_promise_cancel"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("p" to promiseType)),
+            cancelOutcomeType
+        )
+
+        // __native_promise_succeed: { val: 'a } -> Promise 'a
+        context["__native_promise_succeed"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf(
+                "val" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            )),
+            promiseType
+        )
+
+        // __native_promise_fail: { err: AsyncError } -> Promise 'a
+        context["__native_promise_fail"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("err" to asyncErrorType)),
+            promiseType
+        )
+
+        // __native_promise_await_result: { p: Promise 'a } -> Result 'a AsyncError
+        context["__native_promise_await_result"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("p" to promiseType)),
+            resultType
+        )
+
         // === Structured Concurrency Scopes ===
 
         // Scope type - opaque wrapper for structured concurrency scopes
