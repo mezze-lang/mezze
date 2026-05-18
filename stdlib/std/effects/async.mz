@@ -46,8 +46,10 @@ impl Promise 'a where {
     _ -> False,
 
   ## Request cancellation; returns the actual outcome (Cancelled /
-  ## AlreadyCompleted / AlreadyFailed / NotCancellable).
-  cancel = { it } -> __native_promise_cancel { p = it },
+  ## AlreadyCompleted / AlreadyFailed / NotCancellable). The
+  ## interpretation is handler-specific — Loom interrupts the carrier
+  ## thread; Coop marks the task so the scheduler drops it.
+  cancel = { it } -> Async.cancel { p = it },
 }
 
 ## Error type for async operations.
@@ -87,8 +89,11 @@ effect Async where {
   all: { ps: [Promise 'a] } -> ['a] <Async>,
   ## Await with timeout, returning None if it expires.
   timeout: { ms: Int, p: Promise 'a } -> Option 'a <Async>,
-  ## Request cancellation of a Promise.
-  cancel: { p: Promise 'a } -> {} <Async>,
+  ## Request cancellation of a Promise; returns CancelOutcome describing
+  ## what actually happened (Cancelled, AlreadyCompleted, AlreadyFailed,
+  ## NotCancellable). Cancellation is effectful: it can interrupt
+  ## in-flight I/O in the spawned task.
+  cancel: { p: Promise 'a } -> CancelOutcome <Async>,
   ## Sleep for the given milliseconds.
   sleep: { ms: Int } -> {} <Async>,
   ## Check if a Promise is complete (non-blocking).
@@ -127,7 +132,7 @@ impl Async for LoomAsync where {
   race = { ps } -> __native_loom_race { ps = ps },
   all = { ps } -> __native_loom_all { ps = ps },
   timeout = { ms, p } -> __native_loom_timeout { ms = ms, p = p },
-  cancel = { p } -> __native_loom_cancel { p = p },
+  cancel = { p } -> __native_promise_cancel { p = p },
   sleep = { ms } -> __native_loom_sleep { ms = ms },
   is_done = { p } -> __native_loom_is_done { p = p },
   is_cancelled = {} -> __native_loom_is_cancelled {},
@@ -157,7 +162,7 @@ impl Async for LoomAsyncWith { max_concurrent: Int } where {
   race = { ps } -> __native_loom_race { ps = ps },
   all = { ps } -> __native_loom_all { ps = ps },
   timeout = { ms, p } -> __native_loom_timeout { ms = ms, p = p },
-  cancel = { p } -> __native_loom_cancel { p = p },
+  cancel = { p } -> __native_promise_cancel { p = p },
   sleep = { ms } -> __native_loom_sleep { ms = ms },
   is_done = { p } -> __native_loom_is_done { p = p },
   is_cancelled = {} -> __native_loom_is_cancelled {},
@@ -184,7 +189,7 @@ impl Async for OSThreadAsync where {
   race = { ps } -> __native_loom_race { ps = ps },
   all = { ps } -> __native_loom_all { ps = ps },
   timeout = { ms, p } -> __native_loom_timeout { ms = ms, p = p },
-  cancel = { p } -> __native_loom_cancel { p = p },
+  cancel = { p } -> __native_promise_cancel { p = p },
   sleep = { ms } -> __native_loom_sleep { ms = ms },
   is_done = { p } -> __native_loom_is_done { p = p },
   is_cancelled = {} -> __native_loom_is_cancelled {},
@@ -211,7 +216,7 @@ impl Async for OSThreadAsyncWith { pool_size: Int } where {
   race = { ps } -> __native_loom_race { ps = ps },
   all = { ps } -> __native_loom_all { ps = ps },
   timeout = { ms, p } -> __native_loom_timeout { ms = ms, p = p },
-  cancel = { p } -> __native_loom_cancel { p = p },
+  cancel = { p } -> __native_promise_cancel { p = p },
   sleep = { ms } -> __native_loom_sleep { ms = ms },
   is_done = { p } -> __native_loom_is_done { p = p },
   is_cancelled = {} -> __native_loom_is_cancelled {},
@@ -251,7 +256,7 @@ impl Async for CoopAsync where {
     Promise { val = native_p } -> Some {
       val = __native_scheduler_await { sched = scope, p = native_p },
     },
-  cancel = { p } -> {},
+  cancel = { p } -> __native_promise_cancel { p = p },
   sleep = { ms } -> __native_scheduler_sleep { sched = scope, ms = ms },
   is_done = { p } -> match p is
     Promise { val = native_p } -> __native_scheduler_is_done { p = native_p },
