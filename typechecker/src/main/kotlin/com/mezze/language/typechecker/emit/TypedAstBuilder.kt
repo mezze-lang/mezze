@@ -57,7 +57,12 @@ class TypedAstBuilder(
     // Without this, qualified-import calls (`seq::filter { ... }`) only know
     // their generic scheme, and the call's `.type` falls back to `unknown`,
     // breaking LSP per-segment chain inlay hints.
-    private val callReturnTypes: Map<Loc, MezzeType> = emptyMap()
+    private val callReturnTypes: Map<Loc, MezzeType> = emptyMap(),
+    // Locations of `ParsedPerform` nodes synthesized by the do-bind desugar
+    // (set in `TypeChecker.syntheticPerformLocs`). When emitting a TypedPerform,
+    // these get `synthetic = true` so the typechecker suppresses `<*>` on the
+    // enclosing function's signature.
+    private val syntheticPerformLocs: Set<Loc> = emptySet()
 ) {
 
     /**
@@ -992,6 +997,14 @@ class TypedAstBuilder(
                             val exprTyped = buildExpr(stmt.expr, file)
                             stmts.add(TypedStatement.Expr(exprTyped, stmt.loc))
                         }
+                        is ParsedStatement.Bind -> {
+                            // Will be handled by the do-bind desugar (Task #9). For now,
+                            // any Bind reaching here is a wiring error.
+                            throw IllegalStateException(
+                                "ParsedStatement.Bind reached TypedAstBuilder at ${stmt.loc} — " +
+                                "the do-bind desugar isn't wired up yet."
+                            )
+                        }
                     }
                 }
                 val result = buildExpr(expr.result, file, contextType)
@@ -1084,7 +1097,10 @@ class TypedAstBuilder(
                     buildHandlerRef(h, file, loc)
                 }
                 val body = buildExpr(expr.body, file, contextType)
-                TypedPerform(handlers, body, body.type, loc)
+                // If this loc was registered by the do-bind desugar, mark as
+                // synthetic so consumers (LSP, formatter, runtime) can tell.
+                val isSynthetic = expr.loc in syntheticPerformLocs
+                TypedPerform(handlers, body, body.type, loc, synthetic = isSynthetic)
             }
 
             // ------------------------------------------------------------------

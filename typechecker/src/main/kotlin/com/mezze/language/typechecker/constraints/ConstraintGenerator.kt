@@ -2711,9 +2711,12 @@ class ConstraintGenerator(
             abilityNames: Set<String> = emptySet(),
             effectNames: Set<String> = emptySet(),
             abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap(),
-            effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap()
+            effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),
+            // Set of perform loc's that were synthesized by the do-bind desugar.
+            // Used to suppress <*> on the enclosing function signature.
+            syntheticPerformLocs: Set<com.mezze.language.parsedast.Loc> = emptySet()
         ): ConstraintGenerator {
-            val expressionGen = ExpressionConstraintGenerator()
+            val expressionGen = ExpressionConstraintGenerator(syntheticPerformLocs)
             val patternGen = PatternConstraintGenerator()
             val abilityGen = AbilityConstraintGenerator()
             val effectGen = EffectConstraintGenerator()

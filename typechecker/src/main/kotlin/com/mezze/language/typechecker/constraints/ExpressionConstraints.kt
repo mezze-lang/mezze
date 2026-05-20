@@ -37,7 +37,15 @@ import com.mezze.language.parsedast.diagnostics.ErrorCode
  * - Lazy effectInstance creation (only when in perform context with associated types)
  * - Short-circuit checks to avoid unnecessary work
  */
-class ExpressionConstraintGenerator {
+class ExpressionConstraintGenerator(
+    /**
+     * Locations of `ParsedPerform` nodes synthesized by the do-bind desugar.
+     * When a perform's loc is in this set, `removeEffectsFromType` is called
+     * with `synthetic = true` so `<*>` doesn't leak onto the enclosing function.
+     * See `TypeChecker.syntheticPerformLocs` and the do-bind design doc.
+     */
+    private val syntheticPerformLocs: Set<com.mezze.language.parsedast.Loc> = emptySet(),
+) {
 
     // ========================================================================
     // CACHES FOR PERFORMANCE
@@ -1410,6 +1418,24 @@ class ExpressionConstraintGenerator {
             loc = expr.loc
         ))
 
+        // If the ability method declared effects in its arrow type (e.g. `try: {it: 'm} -> 'inner <Exception>`),
+        // propagate them: wrap the call result in SuspendedType and add to the effect set. This mirrors the
+        // behavior of regular function calls (see generateFunctionCall around line 3486) so that callers
+        // can see effects declared by the method.
+        val methodEffectRow = strippedMethodType.effects
+        val methodHasUnhandledEffects = methodEffectRow != null &&
+            (methodEffectRow.effects.isNotEmpty() ||
+             methodEffectRow.effectInstances.isNotEmpty() ||
+             methodEffectRow.rowVar != null)
+        val methodHasPerformedEffects = methodEffectRow != null && methodEffectRow.performed
+        val callType: MezzeType = if (methodEffectRow != null && (methodHasUnhandledEffects || methodHasPerformedEffects)) {
+            MezzeType.SuspendedType(valueType = resultType, effects = methodEffectRow)
+        } else {
+            resultType
+        }
+        val methodDeclaredEffects = methodEffectRow?.effects ?: emptySet()
+        val methodDeclaredEffectInstances = methodEffectRow?.effectInstances ?: emptySet()
+
         // Store method call resolution for the TypedAstBuilder
         val methodCallInfo = ConstraintResult.MethodCallInfo(
             abilityName = resolvedAbilityName,
@@ -1420,16 +1446,16 @@ class ExpressionConstraintGenerator {
         )
 
         return ConstraintResult(
-            type = resultType,
+            type = callType,
             constraints = constraints,
-            effects = receiverResult.effects + argumentResult.effects + extraEffects,
-            effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances,
+            effects = receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects,
+            effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances + methodDeclaredEffectInstances,
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
             usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
             methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf((expr.loc to methodCallInfo.methodName) to methodCallInfo),
-            callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to resultType)
+            callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType)
         )
     }
 
@@ -1617,17 +1643,33 @@ class ExpressionConstraintGenerator {
             )
         } else null
 
+        // If the inherent method declared effects in its arrow type, propagate them by wrapping
+        // the result in SuspendedType and adding to the effect set. Mirrors generateFunctionCall.
+        val methodEffectRow = (freshMethodType as? MezzeType.FunctionType)?.effects
+        val methodHasUnhandledEffects = methodEffectRow != null &&
+            (methodEffectRow.effects.isNotEmpty() ||
+             methodEffectRow.effectInstances.isNotEmpty() ||
+             methodEffectRow.rowVar != null)
+        val methodHasPerformedEffects = methodEffectRow != null && methodEffectRow.performed
+        val callType: MezzeType = if (methodEffectRow != null && (methodHasUnhandledEffects || methodHasPerformedEffects)) {
+            MezzeType.SuspendedType(valueType = resultType, effects = methodEffectRow)
+        } else {
+            resultType
+        }
+        val methodDeclaredEffects = methodEffectRow?.effects ?: emptySet()
+        val methodDeclaredEffectInstances = methodEffectRow?.effectInstances ?: emptySet()
+
         return ConstraintResult(
-            type = resultType,
+            type = callType,
             constraints = constraints,
-            effects = receiverResult.effects + argumentResult.effects + extraEffects,
-            effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances,
+            effects = receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects,
+            effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances + methodDeclaredEffectInstances,
             abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints,
             associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
             usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
             methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf((expr.loc to inherentMethodCallInfo.methodName) to inherentMethodCallInfo) else emptyMap()),
-            callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to resultType)
+            callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType)
         )
     }
 
@@ -4117,6 +4159,15 @@ class ExpressionConstraintGenerator {
                     methodCallResolutions.putAll(exprResult.methodCallResolutions)
                     callReturnTypes.putAll(exprResult.callReturnTypes)
                 }
+                is ParsedStatement.Bind -> {
+                    // Bind statements must be rewritten to Let by the desugar pass before
+                    // constraint generation. If we see one here, the desugar wasn't wired up.
+                    throw IllegalStateException(
+                        "ParsedStatement.Bind reached constraint generation at ${stmt.loc} — " +
+                        "the do-bind desugar in TypedAstBuilder must rewrite Bind statements " +
+                        "to Let before constraint generation."
+                    )
+                }
             }
         }
 
@@ -4498,7 +4549,10 @@ class ExpressionConstraintGenerator {
         } else {
             exprResult.type
         }
-        val resultType = removeEffectsFromType(baseType, handledEffects)
+        // Synthetic performs (from the do-bind desugar) suppress the <*> marker
+        // so the enclosing function's signature stays clean. See do-bind design doc.
+        val isSynthetic = expr.loc in syntheticPerformLocs
+        val resultType = removeEffectsFromType(baseType, handledEffects, synthetic = isSynthetic)
 
         // CRITICAL: Also remove handled effects from ConstraintResult.effects
         // This is where effects are tracked during constraint generation
@@ -4639,46 +4693,51 @@ class ExpressionConstraintGenerator {
      * For FunctionType with effects: Remove effects from effect row
      * For SuspendedType with effects: Remove effects from effect row, returning pure value if all removed
      */
-    private fun removeEffectsFromType(type: MezzeType, effectsToRemove: Set<String>): MezzeType {
+    /**
+     * Remove handled effects from a type and mark it as performed.
+     *
+     * @param type the type to strip effects from
+     * @param effectsToRemove names of effects the surrounding perform handles
+     * @param synthetic when true (compiler-synthesized perform from do-bind desugar),
+     *        DO NOT set `performed = true` on the result. This keeps `<*>` out of
+     *        the enclosing function's signature so users don't see internal compiler
+     *        machinery leak through. Default false preserves existing behavior for
+     *        all user-written `perform` expressions. See `docs/design/do-bind-proposal.md` §5.
+     */
+    internal fun removeEffectsFromType(
+        type: MezzeType,
+        effectsToRemove: Set<String>,
+        synthetic: Boolean = false
+    ): MezzeType {
+        val markPerformed = !synthetic
         return when (type) {
             is MezzeType.FunctionType -> {
                 val effects = type.effects
                 if (effects == null) {
-                    // No effects to remove, but mark as performed since we're in a perform block
                     MezzeType.FunctionType(
                         paramType = type.paramType,
                         returnType = type.returnType,
-                        effects = MezzeType.EffectRow.simple(emptySet(), null, true),  // Mark as performed
+                        effects = MezzeType.EffectRow.simple(emptySet(), null, markPerformed),
                         abilityConstraints = type.abilityConstraints
                     )
                 } else {
-                    // Remove the handled effects, mark as performed
                     val remainingEffects = effects.effects - effectsToRemove
-
-                    // Always set performed = true since we're handling effects
                     MezzeType.FunctionType(
                         paramType = type.paramType,
                         returnType = type.returnType,
-                        effects = MezzeType.EffectRow.simple(remainingEffects, effects.rowVar, true),
+                        effects = MezzeType.EffectRow.simple(remainingEffects, effects.rowVar, markPerformed),
                         abilityConstraints = type.abilityConstraints
                     )
                 }
             }
             is MezzeType.SuspendedType -> {
-                // Remove effects from suspended type, mark as performed
                 val remainingEffects = type.effects.effects - effectsToRemove
-
-                // Keep SuspendedType with performed=true even when all effects are handled
-                // This allows top-level validation to reject values with <*> marker
                 MezzeType.SuspendedType(
                     valueType = type.valueType,
-                    effects = MezzeType.EffectRow.simple(remainingEffects, type.effects.rowVar, true)
+                    effects = MezzeType.EffectRow.simple(remainingEffects, type.effects.rowVar, markPerformed)
                 )
             }
-            else -> {
-                // Other types don't have effects
-                type
-            }
+            else -> type
         }
     }
 

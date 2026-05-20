@@ -36,6 +36,7 @@ enum class TokenType {
     EQ, NEQ, LT, GT, LTE, GTE,
     AND, OR, NOT,
     PIPE, PIPE_OP, DOUBLE_COLON,  // PIPE is |, PIPE_OP is |>
+    BIND,  // <- for do-block bind statements (Tryable.try desugar)
 
     // Delimiters
     LPAREN, RPAREN,
@@ -85,6 +86,7 @@ private object InternedTokens {
 
     // Multi-character operators
     const val ARROW = "->"
+    const val BIND = "<-"
     const val DOUBLE_COLON = "::"
     const val EQ = "=="
     const val NEQ = "!="
@@ -251,6 +253,11 @@ class Lexer(
         if (char == '<' && peek() == '=') {
             advance(2)
             return Token(TokenType.LTE, InternedTokens.LTE, start, startLine, startColumn)
+        }
+
+        if (char == '<' && peek() == '-') {
+            advance(2)
+            return Token(TokenType.BIND, InternedTokens.BIND, start, startLine, startColumn)
         }
 
         if (char == '>' && peek() == '=') {

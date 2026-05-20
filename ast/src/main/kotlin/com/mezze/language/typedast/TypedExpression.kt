@@ -238,7 +238,21 @@ data class TypedPerform(
     val handlers: List<TypedHandlerRef>,
     val body: TypedExpr,
     override val type: MezzeType,
-    override val loc: Loc
+    override val loc: Loc,
+    /**
+     * True when this perform was synthesized by the compiler (e.g. by the
+     * do-bind desugar wrapping a do-with-`<-` block in `perform ExceptionToResult`).
+     *
+     * Synthetic performs suppress the `<*>` performed marker on the result
+     * type when inside a function body, so user-written do-bind blocks don't
+     * leak `<*>` into function signatures. See:
+     *   - docs/design/do-bind-proposal.md §5
+     *   - ExpressionConstraints.kt `removeEffectsFromType`
+     *
+     * Default `false` — user-written `perform` keeps the existing behavior
+     * (sets `performed = true`, which top-level validation enforces).
+     */
+    val synthetic: Boolean = false
 ) : TypedExpr
 
 @Serializable

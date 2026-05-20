@@ -4,6 +4,59 @@ effect Exception having 'error where {
   throw: { error: 'error } -> 'a <Exception>
 }
 
+## Ability for types that participate in `do`-block `<-` syntax.
+##
+## Implementing `Tryable` lets a type be unwrapped via `<-` inside a `do`
+## block. The `try` method extracts the success value or throws via
+## `Exception.throw` on failure. The `<-` desugar wraps the surrounding
+## block in an implicit `perform ExceptionToResult` so the throw becomes
+## an `Err` in the resulting `Result`.
+##
+## Standard impls for `Result` and `Option` are defined below. Custom
+## failure types can implement `Tryable` to participate in `<-`.
+##
+## See `docs/design/do-bind-proposal.md` for the full design.
+ability Tryable for 'm having 'inner where {
+  ## Extract the success value, throwing on failure.
+  ##
+  ## On success (`Ok {val}`, `Some {val}`, etc.), return the inner value.
+  ## On failure, call `Exception.throw` with whatever value the surrounding
+  ## `ExceptionToResult` handler should turn into `Err`.
+  ##
+  ## Direct calls are unusual — `try` is primarily a desugar target for
+  ## `<-`. The receiver's evaluation can have any effect; those effects
+  ## flow into the surrounding expression's effect row independently of
+  ## `try`'s `<Exception>`. The associated type `'inner` is the unwrapped
+  ## success type, bound per impl (e.g., for `Result 'a 'e`, `'inner = 'a`).
+  try: { it: 'm } -> 'inner <Exception>
+}
+
+## Tryable for Result — extract Ok, throw the raw error on Err.
+##
+## When this throw is caught by an enclosing `ExceptionToResult`, the
+## `Err` is reconstructed exactly as it was. Two `<-` lines on `Result`s
+## with different error types contribute their error types to `<Exception>`'s
+## `'error` row; standard `Exception` unification handles the union (variants
+## row-union, primitives must match).
+impl Tryable for Result 'a 'e having 'inner = 'a where {
+  try = { it } -> match it is
+    Ok { val } -> val
+    Err { error } -> Exception.throw { error = error }
+}
+
+## Tryable for Option — extract Some, throw `NoneOpt` on None.
+##
+## `Option` carries no error information, so the throw is a synthetic
+## variant `NoneOpt` that downstream code can match on. In a do-block
+## that mixes `Option` and `Result` `<-` lines, the `<Exception>` row's
+## `'error` parameter unifies to include both the `Result`s error types
+## and `NoneOpt` for the `Option`s.
+impl Tryable for Option 'a having 'inner = 'a where {
+  try = { it } -> match it is
+    Some { val } -> val
+    None -> Exception.throw { error = NoneOpt }
+}
+
 ## Converts exceptions to Result values (Ok on success, Err on throw).
 impl Exception for ExceptionToResult having 'error = 'e where {
   throw = { error } -> abort { val = Err { error } },

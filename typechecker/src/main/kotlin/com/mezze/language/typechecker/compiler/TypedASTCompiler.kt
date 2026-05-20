@@ -2066,24 +2066,31 @@ class TypedASTCompiler(
     }
 
     private fun tryResolveAbilityOp(methodName: String, receiverType: MezzeType): Hash? {
+        // Unwrap SuspendedType — when a receiver is the result of an effectful call
+        // (e.g. `let x = effectful {}` where effectful : ... -> T <SomeEffect>), its
+        // type at the dispatch point is SuspendedType<T, effects>. The effects are
+        // orthogonal to method dispatch; resolve against the underlying value type.
+        val effectiveType = if (receiverType is SuspendedType) receiverType.valueType else receiverType
         val candidates = abilityOpIndex[methodName] ?: return null
         val match = candidates.firstOrNull { op ->
-            op.targetTypes.any { typeMatchesTarget(receiverType, it) }
+            op.targetTypes.any { typeMatchesTarget(effectiveType, it) }
         }
         if (match != null) return match.opHash
         // Fallback: if there's exactly one candidate and the receiver is a variant/type-application,
         // use it. This handles user-defined type aliases where the variant type's constructors
         // don't match the known aliases in typeMatchesTarget.
-        if (candidates.size == 1 && (receiverType is VariantType || receiverType is TypeApplication)) {
+        if (candidates.size == 1 && (effectiveType is VariantType || effectiveType is TypeApplication)) {
             return candidates.first().opHash
         }
         return null
     }
 
     private fun findAbilityOpBody(methodName: String, receiverType: MezzeType): TypedExpr? {
+        // See tryResolveAbilityOp — unwrap SuspendedType for dispatch.
+        val effectiveType = if (receiverType is SuspendedType) receiverType.valueType else receiverType
         for (impl in abilityImpls) {
             if (impl.operations.containsKey(methodName) &&
-                impl.targetTypes.any { typeMatchesTarget(receiverType, it) }) {
+                impl.targetTypes.any { typeMatchesTarget(effectiveType, it) }) {
                 return impl.operations[methodName]
             }
         }

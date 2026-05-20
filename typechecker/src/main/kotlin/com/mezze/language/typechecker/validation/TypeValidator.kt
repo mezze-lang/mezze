@@ -309,6 +309,7 @@ class TypeValidator(
                     when (stmt) {
                         is com.mezze.language.parsedast.ParsedStatement.Let -> walkParsedExpr(stmt.value, visitor)
                         is com.mezze.language.parsedast.ParsedStatement.Expr -> walkParsedExpr(stmt.expr, visitor)
+                        is com.mezze.language.parsedast.ParsedStatement.Bind -> walkParsedExpr(stmt.expr, visitor)
                     }
                 }
                 walkParsedExpr(expr.result, visitor)
@@ -1600,6 +1601,10 @@ class TypeValidator(
                             val nestedErrors = validatePatternsInExpression(stmt.expr, substitution)
                             errors.addAll(nestedErrors)
                         }
+                        is com.mezze.language.parsedast.ParsedStatement.Bind -> {
+                            val nestedErrors = validatePatternsInExpression(stmt.expr, substitution)
+                            errors.addAll(nestedErrors)
+                        }
                     }
                 }
 
@@ -1786,6 +1791,9 @@ class TypeValidator(
                             errors.addAll(validatePerformExpressionsInExpression(stmt.value, implDeclarations, effectDeclarations, functionDefinitions))
                         }
                         is com.mezze.language.parsedast.ParsedStatement.Expr -> {
+                            errors.addAll(validatePerformExpressionsInExpression(stmt.expr, implDeclarations, effectDeclarations, functionDefinitions))
+                        }
+                        is com.mezze.language.parsedast.ParsedStatement.Bind -> {
                             errors.addAll(validatePerformExpressionsInExpression(stmt.expr, implDeclarations, effectDeclarations, functionDefinitions))
                         }
                     }
@@ -2039,6 +2047,7 @@ class TypeValidator(
                         when (stmt) {
                             is com.mezze.language.parsedast.ParsedStatement.Let -> traverse(stmt.value)
                             is com.mezze.language.parsedast.ParsedStatement.Expr -> traverse(stmt.expr)
+                            is com.mezze.language.parsedast.ParsedStatement.Bind -> traverse(stmt.expr)
                         }
                     }
                     traverse(e.result)
