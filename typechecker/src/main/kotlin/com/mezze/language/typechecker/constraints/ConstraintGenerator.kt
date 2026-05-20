@@ -1343,7 +1343,8 @@ class ConstraintGenerator(
                     rowVar = if (annotation.isOpen) RowVar.userOpen() else null,
                     // Use synthetic typeName for closed inline annotations to enable validation.
                     // This makes `let x: | Red, Blue | = Green` fail because Green is not in the annotation.
-                    typeName = if (!annotation.isOpen) "<inline>" else null
+                    typeName = if (!annotation.isOpen) "<inline>" else null,
+                    nominalWall = !annotation.isOpen // #148: closed inline annotations are always walls
                 )
             }
             is ParsedTypeApp -> {

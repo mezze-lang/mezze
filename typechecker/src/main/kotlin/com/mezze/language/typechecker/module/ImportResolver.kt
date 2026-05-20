@@ -359,6 +359,11 @@ class ImportResolver(
     ): ModuleImportContext {
         val bindings = mutableMapOf<String, ImportedBinding>()
         val types = mutableMapOf<String, com.mezze.language.parsedast.ParsedTypeDecl>()
+        // Subset of `types` keys that the USER explicitly listed in a `use` clause
+        // (vs. auto-imported because some imported binding referenced them).
+        // Used by the structural-alias check (#148) to decide whether a type name
+        // acts as a nominal wall.
+        val explicitTypeNames = mutableSetOf<String>()
         val abilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
         val effects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
         val impls = mutableMapOf<String, com.mezze.language.parsedast.ParsedPerformerDecl>()
@@ -400,6 +405,8 @@ class ImportResolver(
                         // TypeApplication.constructor contains the unqualified type name (e.g., "Continuation")
                         // so the lookup in expandTypeApplicationToRecord must find it by that name.
                         types[export.originalName] = typeDecl
+                        // This is an explicit `use foo::{TypeName}` — record it for #148.
+                        explicitTypeNames.add(export.originalName)
                     }
 
                     // Also add as a binding for name resolution
@@ -428,6 +435,9 @@ class ImportResolver(
                     val typeDecl = module?.index?.typeDeclarations?.get(export.originalName)
                     if (typeDecl != null) {
                         types[export.originalName] = typeDecl
+                        // newtype-style constructors share the type name; importing the
+                        // constructor brings the type name into scope as well (#148).
+                        explicitTypeNames.add(export.originalName)
                     }
                 }
                 ExportedItemType.ABILITY -> {
@@ -521,6 +531,7 @@ class ImportResolver(
         return ModuleImportContext(
             importedBindings = bindings,
             importedTypes = types,
+            explicitlyImportedTypeNames = explicitTypeNames,
             importedAbilities = abilities,
             importedEffects = effects,
             importedImpls = impls,
@@ -542,6 +553,11 @@ class ImportResolver(
     ): ModuleImportContext {
         val bindings = mutableMapOf<String, ImportedBinding>()
         val types = mutableMapOf<String, com.mezze.language.parsedast.ParsedTypeDecl>()
+        // Subset of `types` keys that the USER explicitly listed in a `use` clause
+        // (vs. auto-imported because some imported binding referenced them).
+        // Used by the structural-alias check (#148) to decide whether a type name
+        // acts as a nominal wall.
+        val explicitTypeNames = mutableSetOf<String>()
         val abilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
         val effects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
         val impls = mutableMapOf<String, com.mezze.language.parsedast.ParsedPerformerDecl>()
@@ -578,6 +594,8 @@ class ImportResolver(
                         val typeDecl = module?.index?.typeDeclarations?.get(item.name)
                         if (typeDecl != null) {
                             types[localName] = typeDecl
+                            // newtype-style constructor brings type name into scope (#148)
+                            explicitTypeNames.add(localName)
                         }
                     }
                 }
@@ -586,6 +604,8 @@ class ImportResolver(
                     val typeDecl = module?.index?.typeDeclarations?.get(item.name)
                     if (typeDecl != null) {
                         types[localName] = typeDecl
+                        // Explicit `use foo::{TypeName}` (#148)
+                        explicitTypeNames.add(localName)
                     }
                     // Note: Types are NOT added to bindings because they don't have runtime values.
                     // Type imports are compile-time only (used by typechecker, not interpreter).
@@ -696,6 +716,7 @@ class ImportResolver(
         return ModuleImportContext(
             importedBindings = bindings,
             importedTypes = types,
+            explicitlyImportedTypeNames = explicitTypeNames,
             importedAbilities = abilities,
             importedEffects = effects,
             importedImpls = impls,

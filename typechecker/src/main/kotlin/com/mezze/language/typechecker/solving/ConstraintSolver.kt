@@ -351,12 +351,26 @@ class ConstraintSolver(
     ): VariantInferenceResult? {
         // OPTIMIZATION: Use constructor index for O(1) lookup of candidate variants
         // Collect all variant declarations that have at least one of the constructors
-        val candidateVariants = mutableSetOf<Pair<com.mezze.language.parsedast.ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>()
+        val rawCandidates = mutableSetOf<Pair<com.mezze.language.parsedast.ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>()
         for (constructorName in constructors) {
             constructorIndex[constructorName]?.let { variants ->
-                candidateVariants.addAll(variants)
+                rawCandidates.addAll(variants)
             }
         }
+
+        // #148: filter to aliases whose name is in scope at the use site.
+        // The constructorIndex covers EVERY known type declaration (local + all
+        // imports including auto-imports for expansion). But an alias only acts
+        // as a nominal wall when its name is in scope (locally declared or
+        // explicitly imported). If no in-scope alias matches, fall through to
+        // the anonymous/structural variant path — letting downstream row closure
+        // (closePatternBasedVariants) pin the variant if it's a match scrutinee.
+        val inScope = com.mezze.language.typechecker.solving.inScopeAliasNamesForSolverOrNull()
+        val candidateVariants = if (inScope != null) {
+            rawCandidates.filterTo(mutableSetOf()) { (typeDecl, _) ->
+                typeDecl.name in inScope
+            }
+        } else rawCandidates
 
         // If no candidates found, it's an anonymous/structural variant
         if (candidateVariants.isEmpty()) {
@@ -3338,7 +3352,44 @@ class ConstraintSolver(
                     // No type variable found - return success
                     return ConstraintResult.Success(Substitution.empty)
                 } else {
-                    // Variant is closed - constructor must exist
+                    // #148: a closed variant whose name is NOT in scope and which
+                    // is NOT a nominalWall (inline/inferred ascription) should
+                    // behave structurally — we add the new constructor as we would
+                    // for an open variant. Alias names from other modules act as
+                    // labels, not walls, unless the user imported them by name.
+                    val inScope = com.mezze.language.typechecker.solving.inScopeAliasNamesForSolverOrNull()
+                    val name = variantType.typeName
+                    val nameInScope = variantType.nominalWall ||
+                        (name != null && (inScope == null || name in inScope))
+                    if (!nameInScope) {
+                        val newConstructors = variantType.constructors + (constructorName to expectedPayloadType)
+                        val extendedVariant = MezzeType.VariantType(
+                            constructors = newConstructors,
+                            rowVar = null,  // stay closed
+                            typeName = null,  // drop nominal label
+                            typeHash = null
+                        )
+                        // Find the type variable that maps to this variant and update it.
+                        var directTypeVar: TypeVar? = null
+                        var chainedTypeVar: TypeVar? = null
+                        for ((typeVar, mappedType) in currentSubst.mappings) {
+                            if (mappedType == variantType) {
+                                directTypeVar = typeVar
+                                break
+                            }
+                            val resolvedMappedType = currentSubst.apply(mappedType)
+                            if (resolvedMappedType == variantType && chainedTypeVar == null) {
+                                chainedTypeVar = typeVar
+                            }
+                        }
+                        val targetTypeVar = directTypeVar ?: chainedTypeVar
+                        if (targetTypeVar != null) {
+                            return ConstraintResult.Success(Substitution.single(targetTypeVar, extendedVariant))
+                        }
+                        return ConstraintResult.Success(Substitution.empty)
+                    }
+
+                    // Variant is closed AND in scope - constructor must exist
                     val availableConstructors = variantType.constructors.keys.toList()
                     val suggestion = com.mezze.language.typechecker.util.StringDistance.suggestOrList(
                         constructorName,
@@ -3485,6 +3536,7 @@ class ConstraintSolver(
         return when (type) {
             is MezzeType.VariantType -> {
                 val shouldClose = type.rowVar != null && rowVarsToClose.contains(type.rowVar)
+                val pinningInferred = shouldClose && type.typeName == null
                 MezzeType.VariantType(
                     constructors = type.constructors.mapValues { (_, payloadType) ->
                         payloadType?.let { closeRowVarsInType(it, rowVarsToClose) }
@@ -3495,7 +3547,8 @@ class ConstraintSolver(
                     // from merging with other variants during later unification.
                     // Example: `let f = {c} -> match c is Red -> 1 | Blue -> 2`
                     // creates `| Red, Blue |` which should reject `f { c = Green }`.
-                    typeName = if (shouldClose && type.typeName == null) "<inferred>" else type.typeName
+                    typeName = if (pinningInferred) "<inferred>" else type.typeName,
+                    nominalWall = type.nominalWall || pinningInferred // #148
                 )
             }
             is MezzeType.RecordType -> {

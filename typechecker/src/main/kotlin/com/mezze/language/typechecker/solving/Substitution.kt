@@ -184,7 +184,8 @@ data class Substitution(
                     constructors = appliedConstructors,
                     rowVar = type.rowVar, // Row variables handled separately
                     typeName = type.typeName, // Preserve type name for validation
-                    typeHash = type.typeHash // Preserve content hash for rename-safe identity
+                    typeHash = type.typeHash, // Preserve content hash for rename-safe identity
+                    nominalWall = type.nominalWall // #148: preserve nominal-wall flag
                 )
             }
 
@@ -416,7 +417,8 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
             },
             rowVar = closedRowVar,
             typeName = type.typeName,
-            typeHash = type.typeHash
+            typeHash = type.typeHash,
+            nominalWall = type.nominalWall // #148: preserve nominal-wall flag
         )
     }
     is MezzeType.FunctionType -> MezzeType.FunctionType(

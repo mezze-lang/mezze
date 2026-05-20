@@ -4934,7 +4934,8 @@ class ExpressionConstraintGenerator {
             is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(
                 constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertParsedFieldType(dt) } },
                 rowVar = if (annotation.isOpen) RowVar.userOpen() else null,
-                typeName = if (!annotation.isOpen) "<inline>" else null
+                typeName = if (!annotation.isOpen) "<inline>" else null,
+                nominalWall = !annotation.isOpen // #148: closed inline annotations are always walls
             )
             is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(convertParsedFieldType(annotation.elementType))
             is com.mezze.language.parsedast.ParsedQualifiedType -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
@@ -5092,7 +5093,8 @@ class ExpressionConstraintGenerator {
                         ctor.name to ctor.dataType?.let { convertParsedTypeAnnotation(it) }
                     },
                     rowVar = if (annotation.isOpen) RowVar.userOpen() else null,
-                    typeName = if (!annotation.isOpen) "<inline>" else null
+                    typeName = if (!annotation.isOpen) "<inline>" else null,
+                    nominalWall = !annotation.isOpen // #148
                 )
             }
             is ParsedFunctionType -> {

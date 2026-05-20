@@ -303,7 +303,14 @@ sealed class ImportResolutionResult {
 @kotlinx.serialization.Serializable
 data class ModuleImportContext(
     val importedBindings: Map<String, ImportedBinding>,      // Imported functions/values (keyed by name)
-    val importedTypes: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,         // Imported type declarations (keyed by name)
+    val importedTypes: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,         // Imported type declarations (keyed by name) — includes auto-imports for expansion
+    // Names the user EXPLICITLY listed in `use foo::{TypeName}` clauses.
+    // Strict subset of `importedTypes.keys` — excludes auto-imported types pulled
+    // in transitively for expansion purposes. Used by the structural alias check
+    // (#148): an alias acts as a nominal wall only if its name is in this set or
+    // is locally declared. Auto-imported declarations remain useful for type
+    // expansion but don't gate unification.
+    val explicitlyImportedTypeNames: Set<String> = emptySet(),
     val importedAbilities: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,  // Imported abilities (keyed by name)
     val importedEffects: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,     // Imported effects (keyed by name)
     val importedImpls: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,         // Imported effect implementations (keyed by performer name)
@@ -350,6 +357,7 @@ data class ModuleImportContext(
         return ModuleImportContext(
             importedBindings = importedBindings + other.importedBindings,
             importedTypes = importedTypes + other.importedTypes,
+            explicitlyImportedTypeNames = explicitlyImportedTypeNames + other.explicitlyImportedTypeNames,
             importedAbilities = importedAbilities + other.importedAbilities,
             importedEffects = importedEffects + other.importedEffects,
             importedImpls = importedImpls + other.importedImpls,

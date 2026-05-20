@@ -111,7 +111,18 @@ sealed interface MezzeType {
         val constructors: Map<String, MezzeType?>, // null = no data, MezzeType = constructor data
         val rowVar: RowVar? = null, // null = closed, non-null = open
         val typeName: String? = null, // Original type alias name (e.g., "Person" for `type Person = | ... |`)
-        val typeHash: com.mezze.language.typedast.Hash? = null  // Content hash of the type declaration (for rename-safe identity)
+        val typeHash: com.mezze.language.typedast.Hash? = null,  // Content hash of the type declaration (for rename-safe identity)
+        // #148: marks the variant as a nominal wall that ALWAYS rejects foreign
+        // constructors, regardless of whether `typeName` is in scope at the use
+        // site. Set true for:
+        //   - Inline ascriptions   (`let x: | A, B | = ...`)
+        //   - Inferred match-scrutinee closure (the typechecker pinned the
+        //     scrutinee to the union of its match arms).
+        // Variant aliases declared with `type Foo = | ... |` use typeName +
+        // in-scope membership instead, NOT this flag. That's how a `pub type`
+        // alias becomes structural across module boundaries while ascriptions
+        // stay nominal everywhere.
+        val nominalWall: Boolean = false
     ) : MezzeType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
