@@ -104,13 +104,10 @@ object AliasStripper {
         val strippedArgs = type.args.map { stripImpl(it, inScope, typeDecls, recursionGuard) }
 
         // If the alias name is in scope, retain the nominal application.
+        // Built-ins (Option/Result/Seq/etc.) are always in scope by virtue of
+        // the prelude — callers add `BuiltinTypes.allBuiltinTypeNames` to
+        // the in-scope set before invoking the stripper.
         if (type.constructor in inScope) {
-            return type.copy(args = strippedArgs)
-        }
-
-        // Built-ins and unknown names: leave as-is. (Built-ins like Option/Result
-        // are nominal by convention; unknown names happen during partial typing.)
-        if (isBuiltinTypeName(type.constructor)) {
             return type.copy(args = strippedArgs)
         }
 
@@ -157,10 +154,10 @@ object AliasStripper {
         val name = type.typeName
         // Walls always keep their label and structure — these are intentional
         // ascription/inferred barriers, not user-visible aliases.
+        // Built-ins are kept too — they're added to `inScope` by the caller.
         val keepName = type.nominalWall ||
             name == null ||
             name in inScope ||
-            isBuiltinTypeName(name) ||
             // Records / newtypes can also share a name with a VariantType representation;
             // only strip when the actual decl is a variant alias.
             (typeDecls[name]?.definition !is ParsedVariantDef &&
@@ -184,18 +181,4 @@ object AliasStripper {
         }
         return type.copy(fields = newFields)
     }
-
-    /**
-     * Type names that are always considered in scope. Mirrors the prelude/built-in
-     * surface: these aliases live at the language root and don't need explicit imports.
-     */
-    private val BUILTIN_TYPE_NAMES = setOf(
-        "Bool", "Int", "Nat", "Float", "Str", "Char", "Bytes",
-        "Option", "Result", "Ordering",
-        "Seq", "Map", "SortedMap", "SortedSet",
-        // Unit / empty record placeholders sometimes show up as TypeApplications.
-        "Unit"
-    )
-
-    private fun isBuiltinTypeName(name: String): Boolean = name in BUILTIN_TYPE_NAMES
 }

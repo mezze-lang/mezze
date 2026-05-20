@@ -920,11 +920,24 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         val var1NameInScope = isVariantNameInScope(var1, typeDeclarations)
         val var2NameInScope = isVariantNameInScope(var2, typeDeclarations)
         if (var1NameInScope || var2NameInScope) {
-            return UnificationResult.Failure(
-                message = "Cannot unify different variant types '${var1.typeName}' and '${var2.typeName}'",
-                type1 = var1,
-                type2 = var2
-            )
+            // #149: when both walls happen to constrain to the SAME arm set,
+            // unify successfully (their nominal identities are interchangeable
+            // for value-typing purposes). Concretely this covers the pattern
+            //
+            //   pub let f : {} -> | Red, Green, Blue | = {} -> color_returning_fn {}
+            //
+            // where the inline-annotation wall's arms equal the alias-typed
+            // body's arms. Different names, same set of legal values.
+            val sameArms = var1.constructors.keys == var2.constructors.keys
+            if (!sameArms) {
+                return UnificationResult.Failure(
+                    message = "Cannot unify different variant types '${var1.typeName}' and '${var2.typeName}'",
+                    type1 = var1,
+                    type2 = var2
+                )
+            }
+            // Arms agree — fall through to the merge loop below, which will
+            // unify per-constructor payloads.
         }
         // Neither name is in scope — fall through to structural merge below.
     }

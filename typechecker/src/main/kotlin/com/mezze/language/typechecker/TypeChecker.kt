@@ -300,13 +300,14 @@ class TypeChecker(
                     importContext = importResult.importContext
                     loadedModules = importResult.loadedModules
 
-                    // #148: compute the in-scope alias name set from the module's
-                    // local type declarations plus explicit `use foo::{TypeName}` imports.
-                    // This drives the alias-stripping inside mergeImportContext.
+                    // #148/#149: compute the in-scope alias name set for the alias-stripper.
+                    // Local declarations + explicit `use foo::{TypeName}` imports +
+                    // built-ins (always-in-scope via the prelude).
                     val localTypeNames = module.decls
                         .filterIsInstance<com.mezze.language.parsedast.ParsedTypeDecl>()
                         .map { it.name }
                         .toSet()
+                    val builtinNames = com.mezze.language.ast.BuiltinTypes.allBuiltinTypeNames
                     if (shouldInjectPrelude) {
                         val preludeContext = loadPreludeModules(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
@@ -314,7 +315,7 @@ class TypeChecker(
                     if (moduleUsesBind) {
                         importContext = injectExceptionToResultForBind(importContext!!, importResolver)
                     }
-                    val inScopeNames = localTypeNames + importContext!!.explicitlyImportedTypeNames
+                    val inScopeNames = localTypeNames + importContext!!.explicitlyImportedTypeNames + builtinNames
                     mergeImportContext(parentContext, importContext!!, inScopeNames)
                 }
                 is ImportResolutionResult.Failure -> {
@@ -412,8 +413,14 @@ class TypeChecker(
         // AND solving. Per-binding solving runs inside generateProgram, so the
         // override has to be in effect for that entire call. We restore at the
         // bottom of this function.
+        //
+        // The set:
+        //  - locally declared types (includes Bool/Option/Result via addBuiltInParsedTypes)
+        //  - explicitly imported type names (`use foo::{Alias}`)
+        //  - all built-ins (Seq/Map/List/etc. — always-in-scope via prelude)
         val inScopeAliasNames = buildResult.typeDeclarations.keys +
-            (importContext?.explicitlyImportedTypeNames ?: emptySet())
+            (importContext?.explicitlyImportedTypeNames ?: emptySet()) +
+            com.mezze.language.ast.BuiltinTypes.allBuiltinTypeNames
         val programConstraintResult = com.mezze.language.typechecker.solving.withInScopeAliasNames(inScopeAliasNames) {
             constraintGenerator.generateProgram(parsedModule, context)
         }
