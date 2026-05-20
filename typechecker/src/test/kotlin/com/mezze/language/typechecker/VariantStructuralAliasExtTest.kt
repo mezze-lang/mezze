@@ -505,9 +505,14 @@ class VariantStructuralAliasExtTest {
     // The "correct" behavior under #148: the inferred wall should defer to
     // the structural-demotion of the call's return type. Tracking as a
     // follow-up; marked @Disabled for now.
-    @org.junit.jupiter.api.Disabled("#148 follow-up: inferred wall vs out-of-scope alias inside nested carrier")
+    // A match arm whose constructor is NOT in the scrutinee's value type
+    // is dead code and should fail typecheck — even when the scrutinee's
+    // type came from an out-of-scope alias that demoted structurally.
+    //
+    // The alias still has a bounded arm set. The match arm extending that
+    // set beyond what the value can produce is a user bug we want to catch.
     @Test
-    fun `LIMITATION — inferred wall blocks extras inside nested carrier with unimported alias`() {
+    fun `dead pattern arm beyond value's arm set is rejected`() {
         writeModule("opt_err", """
             pub type OptErr = | NoneFound, MalformedInput |
             pub let lookup : { id: Int } -> Option OptErr = { id } ->
@@ -524,8 +529,8 @@ class VariantStructuralAliasExtTest {
             describe { id = 1 }
         """
         val r = checkMain(main)
-        assertTrue(r.isSuccess) {
-            "Expected structural extension to allow extra arm; got: ${r.exceptionOrNull()?.message}"
+        assertTrue(r.isFailure) {
+            "Expected dead arm 'BackendDown' to be rejected; got success"
         }
     }
 
