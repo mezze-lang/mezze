@@ -112,6 +112,18 @@ object BasicTypes {
             MezzeType.BoolType
         )
 
+        // Polymorphic reference equality for opaque types (newtypes wrapping
+        // native objects). Both operands must be the same type 'a.
+        val refEqA = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+        context["__native_ref_eq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to refEqA, "r" to refEqA)),
+            MezzeType.BoolType
+        )
+        context["__native_ref_neq"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to refEqA, "r" to refEqA)),
+            MezzeType.BoolType
+        )
+
         context["__native_int_to_frac"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.IntType)),
             MezzeType.FracType

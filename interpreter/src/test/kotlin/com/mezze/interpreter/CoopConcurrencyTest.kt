@@ -42,7 +42,10 @@ class CoopConcurrencyTest {
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 5 + 10}
-                Async.await {p = p}
+                let result = match Async.await {p = p} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                result
         """
         val result = eval(code)
         assertEquals(15L, result)
@@ -55,7 +58,10 @@ class CoopConcurrencyTest {
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                Async.await {p = p}
+                let result = match Async.await {p = p} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                result
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -72,7 +78,10 @@ class CoopConcurrencyTest {
                     let x = 42
                     x
                 }
-                Async.await {p = p}
+                let result = match Async.await {p = p} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                result
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -88,9 +97,15 @@ class CoopConcurrencyTest {
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
 
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
-                let r3 = Async.await {p = p3}
+                let r1 = match Async.await {p = p1} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                let r2 = match Async.await {p = p2} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                let r3 = match Async.await {p = p3} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
 
                 r1 + r2 + r3
         """
@@ -107,7 +122,10 @@ class CoopConcurrencyTest {
                 perform CoopAsync in do
                     let x = 100
                     let p = Async.spawn {f = {} -> x * 2}
-                    Async.await {p = p}
+                    let result = match Async.await {p = p} is
+                        Ok { val } -> val
+                        Err { error = _ } -> -1
+                    result
 
             test {}
         """
@@ -127,7 +145,10 @@ class CoopConcurrencyTest {
                     let c = a * b
                     c + 10
                 }
-                Async.await {p = p}
+                let result = match Async.await {p = p} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                result
         """
         val result = eval(code)
         assertEquals(45L, result)
@@ -142,9 +163,15 @@ class CoopConcurrencyTest {
                 let outer = Async.spawn {f = {} ->
                     perform CoopAsync in do
                         let inner = Async.spawn {f = {} -> 42}
-                        Async.await {p = inner}
+                        let inner_result = match Async.await {p = inner} is
+                            Ok { val } -> val
+                            Err { error = _ } -> -1
+                        inner_result
                 }
-                Async.await {p = outer}
+                let outer_result = match Async.await {p = outer} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                outer_result
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -160,9 +187,15 @@ class CoopConcurrencyTest {
                 let p2 = Async.spawn {f = {} -> 10 + 3}
                 let p3 = Async.spawn {f = {} -> 7 * 3}
 
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
-                let r3 = Async.await {p = p3}
+                let r1 = match Async.await {p = p1} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                let r2 = match Async.await {p = p2} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                let r3 = match Async.await {p = p3} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
 
                 r1 + r2 + r3
         """
@@ -181,13 +214,20 @@ class CoopConcurrencyTest {
 
             perform CoopAsync in do
                 let stage1 = Async.spawn {f = {} -> 10}
-                let result1 = Async.await {p = stage1}
+                let result1 = match Async.await {p = stage1} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
 
                 let stage2 = Async.spawn {f = {} -> result1 * 2}
-                let result2 = Async.await {p = stage2}
+                let result2 = match Async.await {p = stage2} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
 
                 let stage3 = Async.spawn {f = {} -> result2 + 5}
-                Async.await {p = stage3}
+                let result3 = match Async.await {p = stage3} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                result3
         """
         val result = eval(code)
         assertEquals(25L, result)
@@ -203,7 +243,9 @@ class CoopConcurrencyTest {
                 then acc
                 else perform CoopAsync in do
                     let p = Async.spawn {f = {} -> remaining * 2}
-                    let result = Async.await {p = p}
+                    let result = match Async.await {p = p} is
+                        Ok { val } -> val
+                        Err { error = _ } -> -1
                     spawn_workers {remaining = remaining - 1, acc = acc + result}
 
             spawn_workers {remaining = 5, acc = 0}
@@ -226,7 +268,9 @@ class CoopConcurrencyTest {
                 then 0
                 else perform CoopAsync in do
                     let p = Async.spawn {f = {} -> recursive_spawn {n = n - 1}}
-                    let result = Async.await {p = p}
+                    let result = match Async.await {p = p} is
+                        Ok { val } -> val
+                        Err { error = _ } -> -1
                     n + result
 
             recursive_spawn {n = 5}
@@ -245,7 +289,9 @@ class CoopConcurrencyTest {
                 then acc
                 else perform CoopAsync in do
                     let p = Async.spawn {f = {} -> n}
-                    let result = Async.await {p = p}
+                    let result = match Async.await {p = p} is
+                        Ok { val } -> val
+                        Err { error = _ } -> -1
                     parallel_sum {n = n - 1, acc = acc + result}
 
             parallel_sum {n = 10, acc = 0}
@@ -271,8 +317,12 @@ class CoopConcurrencyTest {
                     let p1 = Async.spawn {f = {} -> a * 2}
                     let p2 = Async.spawn {f = {} -> b * 3}
 
-                    let r1 = Async.await {p = p1}
-                    let r2 = Async.await {p = p2}
+                    let r1 = match Async.await {p = p1} is
+                        Ok { val } -> val
+                        Err { error = _ } -> -1
+                    let r2 = match Async.await {p = p2} is
+                        Ok { val } -> val
+                        Err { error = _ } -> -1
 
                     r1 + r2
 
@@ -296,8 +346,12 @@ class CoopConcurrencyTest {
                     let p1 = Async.spawn {f = {} -> add10 {y = 5}}
                     let p2 = Async.spawn {f = {} -> add10 {y = 15}}
 
-                    let r1 = Async.await {p = p1}
-                    let r2 = Async.await {p = p2}
+                    let r1 = match Async.await {p = p1} is
+                        Ok { val } -> val
+                        Err { error = _ } -> -1
+                    let r2 = match Async.await {p = p2} is
+                        Ok { val } -> val
+                        Err { error = _ } -> -1
 
                     r1 + r2
 
@@ -316,7 +370,10 @@ class CoopConcurrencyTest {
                 if use_async
                 then perform CoopAsync in do
                     let p = Async.spawn {f = {} -> 100}
-                    Async.await {p = p}
+                    let result = match Async.await {p = p} is
+                        Ok { val } -> val
+                        Err { error = _ } -> -1
+                    result
                 else 50
 
             let r1 = conditional {use_async = True}
@@ -341,9 +398,15 @@ class CoopConcurrencyTest {
                 let p2 = Async.spawn {f = {} -> 2}
                 let p3 = Async.spawn {f = {} -> 3}
 
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
-                let r3 = Async.await {p = p3}
+                let r1 = match Async.await {p = p1} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                let r2 = match Async.await {p = p2} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                let r3 = match Async.await {p = p3} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
 
                 r1 * 100 + r2 * 10 + r3
         """
@@ -361,9 +424,15 @@ class CoopConcurrencyTest {
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
 
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
-                let r3 = Async.await {p = p3}
+                let r1 = match Async.await {p = p1} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                let r2 = match Async.await {p = p2} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                let r3 = match Async.await {p = p3} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
 
                 r1 + r2 + r3
         """
@@ -432,7 +501,9 @@ class CoopConcurrencyTest {
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                let _ = Async.await {p = p}
+                let _ = match Async.await {p = p} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
                 Async.is_done {p = p}
         """
         val result = eval(code)

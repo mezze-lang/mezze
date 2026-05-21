@@ -39,7 +39,10 @@ class ScopedConcurrencyTest {
             perform LoomAsync in do
                 Async.scoped {f = {sc} -> do
                     let p = scope_spawn {sc = sc, f = {} -> 42}
-                    Async.await {p = p}
+                    let r = match Async.await {p = p} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
+                    r
                 }
         """
         val result = eval(code)
@@ -57,9 +60,15 @@ class ScopedConcurrencyTest {
                     let p2 = scope_spawn {sc = sc, f = {} -> 20}
                     let p3 = scope_spawn {sc = sc, f = {} -> 30}
 
-                    let r1 = Async.await {p = p1}
-                    let r2 = Async.await {p = p2}
-                    let r3 = Async.await {p = p3}
+                    let r1 = match Async.await {p = p1} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
+                    let r2 = match Async.await {p = p2} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
+                    let r3 = match Async.await {p = p3} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
 
                     r1 + r2 + r3
                 }
@@ -76,7 +85,9 @@ class ScopedConcurrencyTest {
             perform LoomAsync in do
                 Async.scoped {f = {sc} -> do
                     let p = scope_spawn {sc = sc, f = {} -> 100}
-                    let _ = Async.await {p = p}
+                    let _ = match Async.await {p = p} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
                     "done"
                 }
         """
@@ -107,10 +118,15 @@ class ScopedConcurrencyTest {
 
                     let inner_result = Async.scoped {f = {sc} -> do
                         let p2 = scope_spawn {sc = sc, f = {} -> 20}
-                        Async.await {p = p2}
+                        let r2 = match Async.await {p = p2} is
+                            Ok {val} -> val
+                            Err {error = _} -> -1
+                        r2
                     }
 
-                    let r1 = Async.await {p = p1}
+                    let r1 = match Async.await {p = p1} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
                     r1 + inner_result
                 }
         """
@@ -135,8 +151,12 @@ class ScopedConcurrencyTest {
                         r = {} -> 15
                     }
 
-                    let r1 = Async.await {p = p1}
-                    let r2 = Async.await {p = p2}
+                    let r1 = match Async.await {p = p1} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
+                    let r2 = match Async.await {p = p2} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
 
                     r1 + r2 + joined.l + joined.r
                 }
@@ -153,17 +173,26 @@ class ScopedConcurrencyTest {
             perform LoomAsync in do
                 let r1 = Async.scoped {f = {sc} -> do
                     let p = scope_spawn {sc = sc, f = {} -> 10}
-                    Async.await {p = p}
+                    let r = match Async.await {p = p} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
+                    r
                 }
 
                 let r2 = Async.scoped {f = {sc} -> do
                     let p = scope_spawn {sc = sc, f = {} -> 20}
-                    Async.await {p = p}
+                    let r = match Async.await {p = p} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
+                    r
                 }
 
                 let r3 = Async.scoped {f = {sc} -> do
                     let p = scope_spawn {sc = sc, f = {} -> 30}
-                    Async.await {p = p}
+                    let r = match Async.await {p = p} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
+                    r
                 }
 
                 r1 + r2 + r3
@@ -190,7 +219,10 @@ class ScopedConcurrencyTest {
                         sum
                     }
 
-                    Async.await {p = p}
+                    let r = match Async.await {p = p} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
+                    r
                 }
         """
         val result = eval(code)
@@ -207,8 +239,12 @@ class ScopedConcurrencyTest {
                     let p1 = scope_spawn {sc = sc, f = {} -> {a = 10, b = 20}}
                     let p2 = scope_spawn {sc = sc, f = {} -> {a = 30, b = 40}}
 
-                    let r1 = Async.await {p = p1}
-                    let r2 = Async.await {p = p2}
+                    let r1 = match Async.await {p = p1} is
+                        Ok {val} -> val
+                        Err {error = _} -> {a = 0, b = 0}
+                    let r2 = match Async.await {p = p2} is
+                        Ok {val} -> val
+                        Err {error = _} -> {a = 0, b = 0}
 
                     r1.a + r1.b + r2.a + r2.b
                 }
@@ -226,7 +262,10 @@ class ScopedConcurrencyTest {
                 let multiplier = 10
                 Async.scoped {f = {sc} -> do
                     let p = scope_spawn {sc = sc, f = {} -> 5 * multiplier}
-                    Async.await {p = p}
+                    let r = match Async.await {p = p} is
+                        Ok {val} -> val
+                        Err {error = _} -> -1
+                    r
                 }
         """
         val result = eval(code)
@@ -245,9 +284,15 @@ class ScopedConcurrencyTest {
                         let p2 = scope_spawn {sc = sc, f = {} -> 2}
                         Async.scoped {f = {sc} -> do
                             let p3 = scope_spawn {sc = sc, f = {} -> 3}
-                            let r3 = Async.await {p = p3}
-                            let r2 = Async.await {p = p2}
-                            let r1 = Async.await {p = p1}
+                            let r3 = match Async.await {p = p3} is
+                                Ok {val} -> val
+                                Err {error = _} -> -1
+                            let r2 = match Async.await {p = p2} is
+                                Ok {val} -> val
+                                Err {error = _} -> -1
+                            let r1 = match Async.await {p = p1} is
+                                Ok {val} -> val
+                                Err {error = _} -> -1
                             r1 + r2 + r3
                         }
                     }

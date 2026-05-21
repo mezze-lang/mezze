@@ -28,9 +28,15 @@ class MinimalTypeVarTest {
                 let p1 = Async.spawn {f = {} -> 1 * 2}
                 let p2 = Async.spawn {f = {} -> 2 * 2}
                 let p3 = Async.spawn {f = {} -> 3 * 2}
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
-                let r3 = Async.await {p = p3}
+                let r1 = match Async.await {p = p1} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                let r2 = match Async.await {p = p2} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                let r3 = match Async.await {p = p3} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
                 [r1, r2, r3]
         """
         val result = eval(code)
@@ -81,9 +87,15 @@ class MinimalTypeVarTest {
                 let p1 = Async.spawn {f = {} -> 1 * 2}
                 let p2 = Async.spawn {f = {} -> 2 * 2}
                 let p3 = Async.spawn {f = {} -> 3 * 2}
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
-                let r3 = Async.await {p = p3}
+                let r1 = match Async.await {p = p1} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                let r2 = match Async.await {p = p2} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
+                let r3 = match Async.await {p = p3} is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
                 [r1, r2, r3]
         """
         val result = eval(code)

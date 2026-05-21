@@ -8,48 +8,68 @@ pub newtype Promise 'a = Promise __NativePromise
 ## Opaque scope for structured concurrency.
 pub newtype Scope 'a = Scope __NativeScope
 
+pub let promise_eq : { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
+  __native_ref_eq { l = l, r = r }
+
+pub let promise_neq : { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
+  __native_ref_neq { l = l, r = r }
+
 impl Eq 'a for Promise 'a where {
-  eq = { it, r } -> __native_ref_eq { l = it, r = r },
-  neq = { it, r } -> __native_ref_neq { l = it, r = r },
+  eq  = { it, r } -> promise_eq  { l = it, r = r },
+  neq = { it, r } -> promise_neq { l = it, r = r },
 }
+
+pub let scope_eq : { l: Scope 'a, r: Scope 'a } -> Bool = { l, r } ->
+  __native_ref_eq { l = l, r = r }
+
+pub let scope_neq : { l: Scope 'a, r: Scope 'a } -> Bool = { l, r } ->
+  __native_ref_neq { l = l, r = r }
 
 impl Eq 'a for Scope 'a where {
-  eq = { it, r } -> __native_ref_eq { l = it, r = r },
-  neq = { it, r } -> __native_ref_neq { l = it, r = r },
+  eq  = { it, r } -> scope_eq  { l = it, r = r },
+  neq = { it, r } -> scope_neq { l = it, r = r },
 }
 
-impl Promise 'a where {
-  ## Block until the Promise resolves. Returns the success value, or
-  ## raises if the Promise failed. For non-raising handling use
-  ## `await_result` (returns Result), or `inspect` (non-blocking).
-  await = { it } -> Async.await { p = it },
+## Block until the Promise resolves, returning success or AsyncError.
+pub let await : { p: Promise 'a } -> Result 'a AsyncError <Async> = { p } ->
+  Async.await { p = p }
 
-  ## Block until the Promise resolves. Returns Result so callers can
-  ## pattern-match success vs failure modes.
-  await_result = { it } -> __native_promise_await_result { p = it },
+## Non-blocking snapshot of the Promise's state.
+pub let inspect : { p: Promise 'a } -> PromiseState 'a = { p } ->
+  __native_promise_inspect { p = p }
 
-  ## Non-blocking snapshot of the Promise's state. Never raises.
-  inspect = { it } -> __native_promise_inspect { p = it },
-
-  ## Convenience predicates derived from inspect. None block, none raise.
-  is_done      = { it } -> match __native_promise_inspect { p = it } is
+pub let is_done : { p: Promise 'a } -> Bool = { p } ->
+  match __native_promise_inspect { p = p } is
     Pending -> False
-    _ -> True,
-  is_pending   = { it } -> match __native_promise_inspect { p = it } is
-    Pending -> True
-    _ -> False,
-  is_failed    = { it } -> match __native_promise_inspect { p = it } is
-    Failed { err = _ } -> True
-    _ -> False,
-  is_cancelled = { it } -> match __native_promise_inspect { p = it } is
-    Failed { err = AsyncCancelled } -> True
-    _ -> False,
+    _ -> True
 
-  ## Request cancellation; returns the actual outcome (Cancelled /
-  ## AlreadyCompleted / AlreadyFailed / NotCancellable). The
-  ## interpretation is handler-specific — Loom interrupts the carrier
-  ## thread; Coop marks the task so the scheduler drops it.
-  cancel = { it } -> Async.cancel { p = it },
+pub let is_pending : { p: Promise 'a } -> Bool = { p } ->
+  match __native_promise_inspect { p = p } is
+    Pending -> True
+    _ -> False
+
+pub let is_failed : { p: Promise 'a } -> Bool = { p } ->
+  match __native_promise_inspect { p = p } is
+    Failed { err = _ } -> True
+    _ -> False
+
+pub let is_cancelled : { p: Promise 'a } -> Bool = { p } ->
+  match __native_promise_inspect { p = p } is
+    Failed { err = AsyncCancelled } -> True
+    _ -> False
+
+## Request cancellation; returns the actual outcome.
+pub let cancel : { p: Promise 'a } -> CancelOutcome <Async> = { p } ->
+  Async.cancel { p = p }
+
+impl Promise 'a where {
+  await        = { it } -> await        { p = it },
+  inspect      = { it } -> inspect      { p = it },
+  is_done      = { it } -> is_done      { p = it },
+  is_pending   = { it } -> is_pending   { p = it },
+  is_failed    = { it } -> is_failed    { p = it },
+  is_cancelled = { it } -> is_cancelled { p = it },
+  cancel       = { it } -> cancel       { p = it },
 }
 
 ## Error type for async operations.
@@ -81,8 +101,15 @@ pub type CancelOutcome = |
 effect Async where {
   ## Spawn a computation, returning a Promise immediately.
   spawn: { f: {} -> 'a <...> } -> Promise 'a <Async, ...>,
-  ## Await a Promise to completion.
-  await: { p: Promise 'a } -> 'a <Async>,
+  ## Await a Promise. Returns `Result 'a AsyncError`:
+  ##   Ok { val }                  — the spawned task produced a value.
+  ##   Err { error = AsyncCancelled }      — the promise was cancelled.
+  ##   Err { error = AsyncTimedOut { ms }} — only if the await itself
+  ##                                         was bounded; not used by
+  ##                                         the bare effect op.
+  ##   Err { error = AsyncFailed { msg } } — the spawned task crashed.
+  ## Never raises; non-raising failure surfaces are part of the contract.
+  await: { p: Promise 'a } -> Result 'a AsyncError <Async>,
   ## Wait for the first Promise to complete.
   race: { ps: [Promise 'a] } -> 'a <Async>,
   ## Wait for all Promises to complete.
@@ -128,7 +155,7 @@ impl Async for LoomAsync where {
   initialize_scope = {} -> __native_loom_init_scope {},
   finalize_scope = {} -> __native_loom_finalize_scope { tracker = scope },
   spawn = { f } -> __native_loom_spawn_tracked { f = f, max_concurrent = 0, tracker = scope },
-  await = { p } -> __native_loom_await { p = p },
+  await = { p } -> __native_promise_await_result { p = p },
   race = { ps } -> __native_loom_race { ps = ps },
   all = { ps } -> __native_loom_all { ps = ps },
   timeout = { ms, p } -> __native_loom_timeout { ms = ms, p = p },
@@ -158,7 +185,7 @@ impl Async for LoomAsyncWith { max_concurrent: Int } where {
       max_concurrent = max_concurrent,
       tracker = scope,
     },
-  await = { p } -> __native_loom_await { p = p },
+  await = { p } -> __native_promise_await_result { p = p },
   race = { ps } -> __native_loom_race { ps = ps },
   all = { ps } -> __native_loom_all { ps = ps },
   timeout = { ms, p } -> __native_loom_timeout { ms = ms, p = p },
@@ -185,7 +212,7 @@ impl Async for OSThreadAsync where {
   spawn = { f } -> __native_os_spawn_tracked { f = f, pool_size = 0, tracker = scope },
   # Stateless ops operate on MezzePromise values (which carry their own
   # thread reference). They share implementation with LoomAsync.
-  await = { p } -> __native_loom_await { p = p },
+  await = { p } -> __native_promise_await_result { p = p },
   race = { ps } -> __native_loom_race { ps = ps },
   all = { ps } -> __native_loom_all { ps = ps },
   timeout = { ms, p } -> __native_loom_timeout { ms = ms, p = p },
@@ -212,7 +239,7 @@ impl Async for OSThreadAsyncWith { pool_size: Int } where {
   finalize_scope = {} -> __native_os_finalize_scope { tracker = scope },
   spawn = { f } -> __native_os_spawn_tracked { f = f, pool_size = pool_size, tracker = scope },
   # Same sharing as OSThreadAsync above — stateless ops route to Loom natives.
-  await = { p } -> __native_loom_await { p = p },
+  await = { p } -> __native_promise_await_result { p = p },
   race = { ps } -> __native_loom_race { ps = ps },
   all = { ps } -> __native_loom_all { ps = ps },
   timeout = { ms, p } -> __native_loom_timeout { ms = ms, p = p },
@@ -240,8 +267,15 @@ impl Async for CoopAsync where {
   spawn = { f } -> Promise {
     val = __native_scheduler_spawn { sched = scope, f = f },
   },
+  ## CoopAsync's await blocks the cooperative scheduler — running other
+  ## ready tasks until the target promise completes. The scheduler's await
+  ## native still throws on task failure today (technical debt — same as
+  ## pre-#143). Wrap in Ok for the common case; failure propagation
+  ## through Coop is a separate follow-up.
   await = { p } -> match p is
-    Promise { val = native_p } -> __native_scheduler_await { sched = scope, p = native_p },
+    Promise { val = native_p } -> Ok {
+      val = __native_scheduler_await { sched = scope, p = native_p },
+    },
   race = { ps } -> do
     let native_ps = seq::map { xs = ps, f = { x } -> match x is
       Promise { val = p } -> p
@@ -311,7 +345,8 @@ impl Async for CoopAsync where {
 }
 
 ## Spawn and immediately await (synchronous helper).
-pub let run : { f: {} -> 'a <...> } -> 'a <Async, ...> = { f } -> do
+## Returns the Result from `Async.await` — callers decide how to handle failure.
+pub let run : { f: {} -> 'a <...> } -> Result 'a AsyncError <Async, ...> = { f } -> do
   let p = Async.spawn { f = f }
   Async.await { p = p }
 
@@ -332,20 +367,20 @@ pub let go : { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
 pub let race : { ps: [Promise 'a] } -> 'a <Async, ...> = { ps } ->
   Async.race { ps = ps }
 
-## Wait for all promises; return values in input order. First failure
-## aborts (the failing await raises).
-pub let all : { ps: [Promise 'a] } -> ['a] <Async, ...> = { ps } ->
+## Wait for all promises; return each one's Result in input order. Never
+## raises; the per-promise Result carries success/failure information.
+pub let all : { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async, ...> = { ps } ->
   seq::map { xs = ps, f = { x } -> Async.await { p = x } }
 
-## Run two thunks concurrently, return both values.
-pub let join : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Async, ...> =
+## Run two thunks concurrently, return both Results.
+pub let join : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: Result 'a AsyncError, r: Result 'b AsyncError } <Async, ...> =
   { l, r } -> do
     let pl = Async.spawn { f = l }
     let pr = Async.spawn { f = r }
     { l = Async.await { p = pl }, r = Async.await { p = pr } }
 
-## Run three thunks concurrently.
-pub let join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: 'a, b: 'b, c: 'c } <Async, ...> = { a, b, c } -> do
+## Run three thunks concurrently, return all Results.
+pub let join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: Result 'a AsyncError, b: Result 'b AsyncError, c: Result 'c AsyncError } <Async, ...> = { a, b, c } -> do
   let pa = Async.spawn { f = a }
   let pb = Async.spawn { f = b }
   let pc = Async.spawn { f = c }

@@ -472,8 +472,9 @@ class AsyncExtendedTest {
                 # Each element spawns a task that doubles it
                 let results = Async.map {xs = xs, f = {x} -> do
                     let p = Async.spawn {f = {} -> x * 2}
-                    let r = Async.await {p = p}
-                    r
+                    match Async.await {p = p} is
+                        Ok { val } -> val
+                        Err { error = _ } -> -1
                 }
                 match results is
                     [a, b, c] -> a + b + c

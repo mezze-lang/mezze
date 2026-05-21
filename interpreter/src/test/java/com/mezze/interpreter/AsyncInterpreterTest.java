@@ -20,10 +20,11 @@ public class AsyncInterpreterTest {
     void testCoopSpawnAndAwait() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, CoopAsync}
+            use std::result
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                Async.await {p = p}
+                result::get_or_else { result = Async.await {p = p}, def = -1 }
         """);
         assertEquals(42L, result);
     }
@@ -32,12 +33,13 @@ public class AsyncInterpreterTest {
     void testCoopSpawnMultipleTasks() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, CoopAsync}
+            use std::result
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
+                let r1 = result::get_or_else { result = Async.await {p = p1}, def = -1 }
+                let r2 = result::get_or_else { result = Async.await {p = p2}, def = -1 }
                 r1 + r2
         """);
         assertEquals(30L, result);
@@ -90,10 +92,11 @@ public class AsyncInterpreterTest {
     void testCoopIsDone() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, CoopAsync}
+            use std::result
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                let _ = Async.await {p = p}
+                let _ = result::get_or_else { result = Async.await {p = p}, def = -1 }
                 Async.is_done {p = p}
         """);
         assertEquals(true, result);
@@ -106,10 +109,11 @@ public class AsyncInterpreterTest {
     void testLoomSpawnAndAwait() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, LoomAsync}
+            use std::result
 
             perform LoomAsync {} in do
                 let p = Async.spawn {f = {} -> 42}
-                Async.await {p = p}
+                result::get_or_else { result = Async.await {p = p}, def = -1 }
         """);
         assertEquals(42L, result);
     }
@@ -148,10 +152,11 @@ public class AsyncInterpreterTest {
     void testOsSpawnAndAwait() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, OSThreadAsync}
+            use std::result
 
             perform OSThreadAsync {} in do
                 let p = Async.spawn {f = {} -> 42}
-                Async.await {p = p}
+                result::get_or_else { result = Async.await {p = p}, def = -1 }
         """);
         assertEquals(42L, result);
     }

@@ -29,7 +29,9 @@ class CoopAsyncTest {
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                Async.await {p = p}
+                match Async.await {p = p} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
         """.trimIndent()
 
         val result = eval(source)
@@ -45,9 +47,15 @@ class CoopAsyncTest {
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
-                let r3 = Async.await {p = p3}
+                let r1 = match Async.await {p = p1} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
+                let r2 = match Async.await {p = p2} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
+                let r3 = match Async.await {p = p3} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
                 r1 + r2 + r3
         """.trimIndent()
 
@@ -64,7 +72,9 @@ class CoopAsyncTest {
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> compute {x = 5}}
-                Async.await {p = p}
+                match Async.await {p = p} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
         """.trimIndent()
 
         val result = eval(source)
@@ -85,8 +95,12 @@ class CoopAsyncTest {
                 let p1 = Async.spawn {f = {} -> "first"}
                 let p2 = Async.spawn {f = {} -> "second"}
                 # Await in opposite order - should still work
-                let r2 = Async.await {p = p2}
-                let r1 = Async.await {p = p1}
+                let r2 = match Async.await {p = p2} is
+                    Ok {val} -> val
+                    Err {error = _} -> "err"
+                let r1 = match Async.await {p = p1} is
+                    Ok {val} -> val
+                    Err {error = _} -> "err"
                 r1
         """.trimIndent()
 
@@ -171,7 +185,9 @@ class CoopAsyncTest {
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                let _ = Async.await {p = p}
+                let _ = match Async.await {p = p} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
                 Async.is_done {p = p}
         """.trimIndent()
 
@@ -190,7 +206,9 @@ class CoopAsyncTest {
 
             let async_compute = {x} -> do
                 let p = Async.spawn {f = {} -> x + 10}
-                Async.await {p = p}
+                match Async.await {p = p} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
 
             perform CoopAsync in do
                 let r1 = async_compute {x = 5}
@@ -235,7 +253,9 @@ class CoopAsyncTest {
                 let before1 = Async.is_done {p = p1}
                 let before2 = Async.is_done {p = p2}
                 # Await p1 - scheduler runs and completes p1
-                let r1 = Async.await {p = p1}
+                let r1 = match Async.await {p = p1} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
                 let after1 = Async.is_done {p = p1}
                 { before1 = before1, before2 = before2, after1 = after1, r1 = r1 }
         """.trimIndent()
@@ -395,11 +415,17 @@ class CoopAsyncTest {
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
-                let r1 = Async.await {p = p1}
+                let r1 = match Async.await {p = p1} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
                 let p2 = Async.spawn {f = {} -> r1 * 2}
-                let r2 = Async.await {p = p2}
+                let r2 = match Async.await {p = p2} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
                 let p3 = Async.spawn {f = {} -> r2 + 5}
-                Async.await {p = p3}
+                match Async.await {p = p3} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
         """.trimIndent()
 
         val result = eval(source)
@@ -487,7 +513,9 @@ class CoopAsyncTest {
             use std::effects::async::{Async, CoopAsync, run}
 
             perform CoopAsync in do
-                run {f = {} -> 42}
+                match run {f = {} -> 42} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
         """.trimIndent()
 
         val result = eval(source)
@@ -510,9 +538,15 @@ class CoopAsyncTest {
                 let p2 = Async.spawn {f = {} -> 2}
                 let p3 = Async.spawn {f = {} -> 3}
                 # Await in different order
-                let r3 = Async.await {p = p3}
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
+                let r3 = match Async.await {p = p3} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
+                let r1 = match Async.await {p = p1} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
+                let r2 = match Async.await {p = p2} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
                 # Results should still match their original values
                 [r1, r2, r3]
         """.trimIndent()

@@ -32,7 +32,9 @@ class AsyncConfigTest {
 
             perform LoomAsyncWith {max_concurrent = 4} in do
                 let p = Async.spawn {f = {} -> 42}
-                Async.await {p = p}
+                match Async.await {p = p} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -48,9 +50,15 @@ class AsyncConfigTest {
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
 
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
-                let r3 = Async.await {p = p3}
+                let r1 = match Async.await {p = p1} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
+                let r2 = match Async.await {p = p2} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
+                let r3 = match Async.await {p = p3} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
 
                 r1 + r2 + r3
         """
@@ -69,9 +77,15 @@ class AsyncConfigTest {
                 let p2 = Async.spawn {f = {} -> 2}
                 let p3 = Async.spawn {f = {} -> 3}
 
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
-                let r3 = Async.await {p = p3}
+                let r1 = match Async.await {p = p1} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
+                let r2 = match Async.await {p = p2} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
+                let r3 = match Async.await {p = p3} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
                 r1 + r2 + r3
         """
         val result = eval(code)
@@ -90,7 +104,9 @@ class AsyncConfigTest {
 
             perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                Async.await {p = p}
+                match Async.await {p = p} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -106,9 +122,15 @@ class AsyncConfigTest {
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
 
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
-                let r3 = Async.await {p = p3}
+                let r1 = match Async.await {p = p1} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
+                let r2 = match Async.await {p = p2} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
+                let r3 = match Async.await {p = p3} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
 
                 r1 + r2 + r3
         """
@@ -126,7 +148,13 @@ class AsyncConfigTest {
                 let p1 = Async.spawn {f = {} -> 1}
                 let p2 = Async.spawn {f = {} -> 2}
 
-                Async.await {p = p1} + Async.await {p = p2}
+                let r1 = match Async.await {p = p1} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
+                let r2 = match Async.await {p = p2} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
+                r1 + r2
         """
         val result = eval(code)
         assertEquals(3L, result)
@@ -143,7 +171,9 @@ class AsyncConfigTest {
 
             perform LoomAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                Async.await {p = p}
+                match Async.await {p = p} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -156,7 +186,9 @@ class AsyncConfigTest {
 
             perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                Async.await {p = p}
+                match Async.await {p = p} is
+                    Ok {val} -> val
+                    Err {error = _} -> -1
         """
         val result = eval(code)
         assertEquals(42L, result)

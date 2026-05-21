@@ -170,7 +170,9 @@ class EffectHandlerPerfTest {
                 else do
                     let v = perform LoomAsync in do
                         let t = Async.spawn { f = {} -> 1 }
-                        Async.await { p = t }
+                        match Async.await { p = t } is
+                            Ok { val } -> val
+                            Err _ -> -1
                     outer { n = n - 1, acc = acc + v }
 
             outer { n = 100, acc = 0 }

@@ -33,7 +33,9 @@ class AsyncExceptionCompositionTest {
 
             perform ExceptionToResult in perform LoomAsync in do
               let t = Async.spawn { f = {} -> Exception.throw { error = "boom" } }
-              let v = Async.await { p = t }
+              let v = match Async.await { p = t } is
+                Ok { val } -> val
+                Err { error = _ } -> -1
               Ok { val = v }
         """.trimIndent()
 
@@ -48,7 +50,7 @@ class AsyncExceptionCompositionTest {
     fun `task that conditionally raises wraps via outer ExceptionToResult`() {
         // Body uses Exception (so typechecker keeps the ExceptionToResult
         // handler). The actual code path skips the raise — task returns
-        // 42 directly; await returns 42; perform returns Ok {val = 42}.
+        // 42 directly; await returns Ok {val = 42}; perform returns Ok {val = 42}.
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
             use std::effects::async::{Async, LoomAsync}
@@ -57,7 +59,9 @@ class AsyncExceptionCompositionTest {
               let t = Async.spawn { f = {} ->
                 if False then Exception.throw { error = "never" } else 42
               }
-              let v = Async.await { p = t }
+              let v = match Async.await { p = t } is
+                Ok { val } -> val
+                Err { error = _ } -> -1
               Ok { val = v }
         """.trimIndent()
 
@@ -126,7 +130,9 @@ class AsyncExceptionCompositionTest {
               let good = Async.spawn { f = {} -> 100 }
               let bad = Async.spawn { f = {} -> Exception.throw { error = "bad" } }
               let _ = Async.await { p = good }
-              let v = Async.await { p = bad }
+              let v = match Async.await { p = bad } is
+                Ok { val } -> val
+                Err { error = _ } -> -1
               Ok { val = v }
         """.trimIndent()
 
@@ -150,9 +156,13 @@ class AsyncExceptionCompositionTest {
             perform ExceptionToResult in perform LoomAsync in do
               let outer = Async.spawn { f = {} -> do
                 let inner = Async.spawn { f = {} -> Exception.throw { error = "inner-bad" } }
-                Async.await { p = inner }
+                match Async.await { p = inner } is
+                    Ok { val } -> val
+                    Err { error = _ } -> -1
               }
-              let v = Async.await { p = outer }
+              let v = match Async.await { p = outer } is
+                Ok { val } -> val
+                Err { error = _ } -> -1
               Ok { val = v }
         """.trimIndent()
 

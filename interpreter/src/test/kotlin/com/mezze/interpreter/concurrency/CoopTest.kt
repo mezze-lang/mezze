@@ -27,6 +27,7 @@ class CoopTest {
     // Setup code for Coop operations using stdlib
     private val coopSetup = """
         use std::effects::async::{Async, CoopAsync}
+        use std::result
     """.trimIndent()
 
     // =============================================================================
@@ -55,7 +56,7 @@ class CoopTest {
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                Async.await {p = p}
+                result::get_or_else { result = Async.await {p = p}, def = -1 }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -68,7 +69,7 @@ class CoopTest {
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 10 + 20 + 12}
-                Async.await {p = p}
+                result::get_or_else { result = Async.await {p = p}, def = -1 }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -130,9 +131,9 @@ class CoopTest {
                 let p2 = Async.spawn {f = {} -> 2}
                 let p3 = Async.spawn {f = {} -> 3}
 
-                let r1 = Async.await {p = p1}
-                let r2 = Async.await {p = p2}
-                let r3 = Async.await {p = p3}
+                let r1 = result::get_or_else { result = Async.await {p = p1}, def = -1 }
+                let r2 = result::get_or_else { result = Async.await {p = p2}, def = -1 }
+                let r3 = result::get_or_else { result = Async.await {p = p3}, def = -1 }
 
                 r1 + r2 + r3
         """
@@ -148,11 +149,11 @@ class CoopTest {
             perform CoopAsync in do
                 let outer = Async.spawn {f = {} -> do
                     let inner = Async.spawn {f = {} -> 21}
-                    let x = Async.await {p = inner}
+                    let x = result::get_or_else { result = Async.await {p = inner}, def = -1 }
                     x * 2
                 }
 
-                Async.await {p = outer}
+                result::get_or_else { result = Async.await {p = outer}, def = -1 }
         """
         val result = eval(code)
         assertEquals(42L, result)
