@@ -15,9 +15,7 @@ import com.mezze.language.parsedast.ParsedMemberAccess
 import com.mezze.language.parsedast.ParsedModule
 import com.mezze.language.parsedast.ParsedParens
 import com.mezze.language.parsedast.ParsedPerform
-import com.mezze.language.parsedast.ParsedPerformHandler
 import com.mezze.language.parsedast.ParsedPipe
-import com.mezze.language.parsedast.ParsedQualifiedRef
 import com.mezze.language.parsedast.ParsedRecordEntry
 import com.mezze.language.parsedast.ParsedRecordLit
 import com.mezze.language.parsedast.ParsedSeqElement
@@ -28,7 +26,6 @@ import com.mezze.language.parsedast.ParsedStringPart
 import com.mezze.language.parsedast.ParsedTopLevelExpr
 import com.mezze.language.parsedast.ParsedUnaryOp
 import com.mezze.language.parsedast.ParsedVariantConstruct
-import com.mezze.language.typechecker.module.ModuleImportContext
 
 /**
  * Do-bind desugar (`<-` syntax) for parsed modules.
@@ -36,29 +33,27 @@ import com.mezze.language.typechecker.module.ModuleImportContext
  * For every `ParsedDo` containing one or more `ParsedStatement.Bind` statements:
  *   - rewrite each `pat <- expr` to `let pat = expr.try {}`
  *   - wrap the do-block's result expression in `Ok {val = result}`
- *   - wrap the entire ParsedDo in a synthetic `perform ExceptionToResult`
- *   - record the synthetic perform's loc in the returned `syntheticLocs` set
+ *   - record the do-block's loc in `syntheticBindBlockLocs`
  *
- * The synthetic perform's loc must be recognized later by the constraint
- * generator (via the syntheticPerformLocs threaded through) so it can pass
- * `synthetic = true` to `removeEffectsFromType`, suppressing the `<*>`
- * marker on the enclosing function's signature.
- *
- * `ExceptionToResult` (the performer) and `Exception` (the effect) are NOT
- * carried by the prelude — keeping them out of users' modules. Instead,
- * `injectSyntheticPerformerCtx` adds them to the per-module import context
- * ONLY when the module contains `<-`. Users who want `ExceptionToResult` in
- * their own scope must explicitly `use std::effects::exception::{ExceptionToResult}`.
+ * The do-block's loc is recognized later by the constraint generator and
+ * TypedAstBuilder. The constraint generator subtracts `<Exception>` from
+ * the do-block's effect row (the synthetic `ExceptionToResult` "discharges"
+ * it). TypedAstBuilder wraps the built TypedBlock in a TypedPerform whose
+ * handler references the well-known `ExceptionToResult` performer + `Exception`
+ * effect hashes — no `ParsedPerform` is ever emitted into the parsed AST,
+ * so the user's namespace never has `ExceptionToResult` or `Exception`
+ * resolvable (true scoping: the performer is invoked only by the synthetic
+ * desugar machinery).
  *
  * See `docs/design/do-bind-proposal.md` for the full design.
  *
  * Recurses into all nested expressions: each `ParsedDo` is desugared
  * independently. Nested do-blocks with `<-` each get their own synthetic
- * perform; do-blocks without `<-` are left alone.
+ * wrap; do-blocks without `<-` are left alone.
  *
  * Pure value-shape rewrite — no type information used. `<-` always emits
- * `Tryable.try {}` (via dot-method syntax). If the RHS doesn't impl
- * Tryable (e.g., it's already a value with `<Exception>` in its row), the
+ * `expr.try {}` (via dot-method syntax). If the RHS doesn't impl Tryable
+ * (e.g., it's already a value with `<Exception>` in its row), the
  * typechecker produces a clean "type X does not implement Tryable" error.
  * Users use plain `let` for `<Exception>`-throwing calls.
  */
@@ -67,75 +62,32 @@ object DoBindDesugar {
     /**
      * Result of running the do-bind desugar on a module.
      *
-     * @param module the rewritten module (Bind statements rewritten to Let calls
-     *   to `Tryable.try`, wrapped in synthetic perform).
-     * @param syntheticLocs the locs of every synthetic perform inserted. Threaded
-     *   to the constraint generator so it can suppress `<*>` for those.
-     * @param hasBinds true if any `<-` was found in the module. When true, the
-     *   typechecker needs to inject `Exception` effect + `ExceptionToResult`
-     *   performer into the module's import context.
+     * @param module the rewritten module (Bind → Let; result wrapped in `Ok`).
+     * @param syntheticBindBlockLocs locs of every do-block whose Binds were
+     *   rewritten. The constraint generator subtracts `<Exception>` from these
+     *   blocks; the TypedAstBuilder wraps them in a synthetic TypedPerform.
      */
     data class Result(
         val module: ParsedModule,
-        val syntheticLocs: Set<Loc>,
-        val hasBinds: Boolean,
-    )
+        val syntheticBindBlockLocs: Set<Loc>,
+    ) {
+        val hasBinds: Boolean get() = syntheticBindBlockLocs.isNotEmpty()
+    }
 
     fun desugar(module: ParsedModule): Result {
-        val syntheticLocs = mutableSetOf<Loc>()
+        val locs = mutableSetOf<Loc>()
         val rewritten = module.copy(decls = module.decls.map { decl ->
             when (decl) {
-                is ParsedLetDecl -> decl.copy(value = desugarBindsInExpr(decl.value, syntheticLocs))
+                is ParsedLetDecl -> decl.copy(value = desugarBindsInExpr(decl.value, locs))
                 is ParsedImplAbilityDecl -> decl.copy(operations = decl.operations.map { op ->
-                    op.copy(implementation = desugarBindsInExpr(op.implementation, syntheticLocs))
+                    op.copy(implementation = desugarBindsInExpr(op.implementation, locs))
                 })
-                is ParsedTopLevelExpr -> decl.copy(expression = desugarBindsInExpr(decl.expression, syntheticLocs))
+                is ParsedTopLevelExpr -> decl.copy(expression = desugarBindsInExpr(decl.expression, locs))
                 else -> decl
             }
         })
-        return Result(
-            module = rewritten,
-            syntheticLocs = syntheticLocs,
-            hasBinds = syntheticLocs.isNotEmpty(),
-        )
+        return Result(module = rewritten, syntheticBindBlockLocs = locs)
     }
-
-    /**
-     * Inject `Exception` effect + `ExceptionToResult` performer into a
-     * `ModuleImportContext` ONLY when the module contains `<-`.
-     *
-     * Pulls these from the precompiled stdlib's prelude context (which has
-     * loaded `effects::exception` transitively via `abilities::tryable`).
-     * Only `Exception` and `ExceptionToResult` are copied — other performers
-     * (ExceptionToOption, etc.) and helpers (`throw`, `unwrap`) are NOT,
-     * keeping them out of user scope unless explicitly imported.
-     *
-     * @param baseCtx the module's current import context (after prelude merge)
-     * @param preludeCtx the full prelude context (before stripping); we look
-     *   up Exception + ExceptionToResult here
-     * @return a new ModuleImportContext with the synthetic-perform machinery
-     *   injected if not already present
-     */
-    fun injectSyntheticPerformerCtx(
-        baseCtx: ModuleImportContext,
-        preludeCtx: ModuleImportContext,
-    ): ModuleImportContext {
-        val exceptionEffect = preludeCtx.importedEffects[EXCEPTION_EFFECT_NAME]
-        val exceptionToResult = preludeCtx.importedImpls[EXCEPTION_TO_RESULT_NAME]
-        if (exceptionEffect == null || exceptionToResult == null) {
-            // Shouldn't happen — these come from the stdlib that the prelude
-            // always loads. If it does happen, return base unchanged and let
-            // the later "Unknown performer" error surface clearly.
-            return baseCtx
-        }
-        return baseCtx.copy(
-            importedEffects = baseCtx.importedEffects + (EXCEPTION_EFFECT_NAME to exceptionEffect),
-            importedImpls = baseCtx.importedImpls + (EXCEPTION_TO_RESULT_NAME to exceptionToResult),
-        )
-    }
-
-    private const val EXCEPTION_EFFECT_NAME = "Exception"
-    private const val EXCEPTION_TO_RESULT_NAME = "ExceptionToResult"
 
     // ------------------------------------------------------------------
     // Implementation
@@ -220,20 +172,20 @@ object DoBindDesugar {
      *     pat3 <- expr3
      *     result
      *
-     * Output:
-     *   perform ExceptionToResult in do
+     * Output (still a ParsedDo — NO ParsedPerform):
+     *   do
      *     let pat1 = expr1.try {}
      *     stmt2
      *     let pat3 = expr3.try {}
      *     Ok {val = result}
      *
-     * The synthetic perform's loc is added to `syntheticLocs` so the
-     * constraint generator can pass `synthetic = true` to
-     * `removeEffectsFromType` later.
+     * The do-block's loc is registered in `syntheticBindBlockLocs`. Downstream:
+     *   - ConstraintGenerator subtracts `<Exception>` from this do-block's
+     *     effect row.
+     *   - TypedAstBuilder wraps the built TypedBlock in a synthetic TypedPerform
+     *     using well-known Exception + ExceptionToResult hashes.
      */
-    private fun rewriteDoWithBinds(doExpr: ParsedDo, syntheticLocs: MutableSet<Loc>): ParsedPerform {
-        val loc = doExpr.loc
-
+    private fun rewriteDoWithBinds(doExpr: ParsedDo, locs: MutableSet<Loc>): ParsedDo {
         // 1. Rewrite each Bind statement to a `let pat = expr.try {}`.
         val rewrittenStatements = doExpr.statements.map { stmt ->
             when (stmt) {
@@ -260,28 +212,8 @@ object DoBindDesugar {
             loc = resultLoc,
         )
 
-        // 3. Build the rewritten inner do-block.
-        val rewrittenDo = doExpr.copy(statements = rewrittenStatements, result = wrappedResult)
-
-        // 4. Wrap in `perform ExceptionToResult in <rewrittenDo>`.
-        val performHandler = ParsedPerformHandler(
-            performer = ParsedQualifiedRef(
-                localName = EXCEPTION_TO_RESULT_NAME,
-                qualifier = null,
-                loc = loc,
-            ),
-            params = null,
-        )
-        val syntheticPerform = ParsedPerform(
-            handlers = listOf(performHandler),
-            body = rewrittenDo,
-            loc = loc,
-        )
-
-        // 5. Mark this perform as synthetic so the typechecker suppresses <*>.
-        syntheticLocs.add(loc)
-
-        return syntheticPerform
+        locs.add(doExpr.loc)
+        return doExpr.copy(statements = rewrittenStatements, result = wrappedResult)
     }
 
     /**

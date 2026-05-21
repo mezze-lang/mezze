@@ -1011,7 +1011,30 @@ class TypedAstBuilder(
                 if (pushedBlockScope) {
                     lambdaParamScopes.removeLast()
                 }
-                TypedBlock(stmts, result, result.type, loc)
+                val builtBlock = TypedBlock(stmts, result, result.type, loc)
+                // DO-BIND DESUGAR: if this do-block was rewritten by `<-`,
+                // wrap it in a synthetic `perform ExceptionToResult` using
+                // the well-known Exception + ExceptionToResult hashes.
+                // `ExceptionToResult` is never resolvable by name from user
+                // code — it reaches the runtime only via this wrapping.
+                if (expr.loc in syntheticPerformLocs) {
+                    val handler = TypedHandlerRef(
+                        performerHash = com.mezze.language.typechecker.WellKnownHashConstants.PERFORMER_EXCEPTIONTORESULT,
+                        effectHash = com.mezze.language.typechecker.WellKnownHashConstants.EFFECT_EXCEPTION,
+                        performerName = com.mezze.language.typechecker.WellKnownHashConstants.PERFORMER_EXCEPTIONTORESULT_NAME,
+                        params = null,
+                        loc = loc,
+                    )
+                    TypedPerform(
+                        handlers = listOf(handler),
+                        body = builtBlock,
+                        type = builtBlock.type,
+                        loc = loc,
+                        synthetic = true,
+                    )
+                } else {
+                    builtBlock
+                }
             }
 
             // ------------------------------------------------------------------

@@ -238,16 +238,17 @@ class TypeChecker(
 
         // Desugar do-block <- statements (do-bind feature). See DoBindDesugar.kt.
         // The desugar rewrites each `pat <- expr` to `let pat = expr.try {}`,
-        // wraps the body in `Ok {val = ...}`, and wraps the whole do-block in
-        // a synthetic `perform ExceptionToResult`. `moduleNeedsBindCtx` tracks
-        // whether the module uses `<-` so we can later inject the Exception
-        // effect + ExceptionToResult performer into the per-module import
-        // context (surgical — they stay out of users' namespaces otherwise).
+        // and wraps the do-block's result in `Ok {val = ...}`. Crucially, NO
+        // synthetic `perform` is emitted into the parsed AST — the do-block's
+        // loc is registered in `syntheticPerformLocs`, and:
+        //   - ConstraintGenerator subtracts `<Exception>` from that do-block.
+        //   - TypedAstBuilder wraps the built TypedBlock in a TypedPerform
+        //     using the well-known Exception + ExceptionToResult hashes.
+        // This keeps `ExceptionToResult` invisible to user namespace entirely.
         syntheticPerformLocs.clear()
         val bindDesugarResult = com.mezze.language.typechecker.desugar.DoBindDesugar.desugar(module)
         module = bindDesugarResult.module
-        syntheticPerformLocs.addAll(bindDesugarResult.syntheticLocs)
-        val moduleNeedsBindCtx = bindDesugarResult.hasBinds
+        syntheticPerformLocs.addAll(bindDesugarResult.syntheticBindBlockLocs)
 
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
@@ -271,12 +272,6 @@ class TypeChecker(
             importContext = precompiled.preludeImportContext
             if (cachedPreludeLoadedModules == null) {
                 cachedPreludeLoadedModules = precompiled.loadedModules
-            }
-            // Surgical injection for do-bind: ExceptionToResult / Exception
-            // are NOT in the stripped prelude. Inject only when this module
-            // uses `<-`. See DoBindDesugar.injectSyntheticPerformerCtx.
-            if (moduleNeedsBindCtx) {
-                importContext = injectSyntheticPerformerCtxLazy(importContext!!)
             }
             precompiled.compiledPrelude.mergeInto(parentContext)
         } else if (hasUserImports || shouldInjectPrelude) {
@@ -307,12 +302,6 @@ class TypeChecker(
                     if (shouldInjectPrelude) {
                         val preludeContext = loadPreludeModules(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
-                    }
-                    // Surgical injection for do-bind: when a module uses `<-`,
-                    // load Exception + ExceptionToResult into the import context
-                    // (only). See DoBindDesugar.injectSyntheticPerformerCtx.
-                    if (moduleNeedsBindCtx) {
-                        importContext = injectSyntheticPerformerCtxLazy(importContext!!, importResolver)
                     }
                     mergeImportContext(parentContext, importContext!!)
                 }
@@ -1218,42 +1207,6 @@ class TypeChecker(
      * Load prelude modules and return a combined ModuleImportContext.
      * Cached globally — computed once per JVM process since stdlib doesn't change.
      */
-    /**
-     * Inject the Exception effect + ExceptionToResult performer into a
-     * module's import context. Only called when the module contains `<-`.
-     *
-     * Loads `std::effects::exception` directly via [importResolver] and
-     * grabs the two needed declarations. The rest of the module is
-     * discarded — `Exception` and `ExceptionToResult` reach the synthetic
-     * `perform` via the import context without polluting user namespace.
-     */
-    private fun injectSyntheticPerformerCtxLazy(
-        baseCtx: ModuleImportContext,
-        importResolver: ImportResolver? = null,
-    ): ModuleImportContext {
-        val resolver = importResolver ?: run {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "."))
-            val moduleLoader = ModuleLoader.fromPath(projectRoot.toString())
-            val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
-                parentContext,
-                moduleLoader.getResolver()
-            )
-            ImportResolver(moduleLoader, moduleTypeChecker)
-        }
-        val exceptionCtx = cachedExceptionCtx ?: run {
-            // Parse a tiny synthetic module that just imports the exception
-            // module, then run import resolution to materialize its decls.
-            val syntheticSrc = "use std::effects::exception::{ Exception, ExceptionToResult }"
-            val syntheticModule = MezzeParser().parseParsedModule(syntheticSrc, file = "<dobind-synthetic>")
-            when (val r = resolver.resolveImports(syntheticModule)) {
-                is ImportResolutionResult.Success -> r.importContext.also { cachedExceptionCtx = it }
-                is ImportResolutionResult.Failure -> return baseCtx
-            }
-        }
-        return com.mezze.language.typechecker.desugar.DoBindDesugar
-            .injectSyntheticPerformerCtx(baseCtx, exceptionCtx)
-    }
-
     private fun loadPreludeModules(
         importResolver: ImportResolver,
         userImportContext: ModuleImportContext
@@ -1833,15 +1786,6 @@ class TypeChecker(
         @Volatile
         private var cachedPreludeContext: ModuleImportContext? = null
 
-        /**
-         * Cached import context produced by resolving
-         * `use std::effects::exception::{ Exception, ExceptionToResult }`.
-         * Used by the do-bind desugar to surgically inject the synthetic
-         * perform machinery only into modules that contain `<-`. NOT
-         * exposed to user code or merged into prelude.
-         */
-        @Volatile
-        private var cachedExceptionCtx: ModuleImportContext? = null
 
         /** Cached prelude loaded modules — shared across all TypeChecker instances */
         @Volatile
@@ -1878,7 +1822,6 @@ class TypeChecker(
         /** Clears prelude cache. Used when stdlib files change. */
         fun clearPreludeCache() {
             cachedPreludeContext = null
-            cachedExceptionCtx = null
             cachedPreludeLoadedModules = null
             cachedPreludeEnhancedContext = null
         }

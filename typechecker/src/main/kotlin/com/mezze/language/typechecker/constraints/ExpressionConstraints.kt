@@ -4194,6 +4194,15 @@ class ExpressionConstraintGenerator(
         methodCallResolutions.putAll(resultResult.methodCallResolutions)
         callReturnTypes.putAll(resultResult.callReturnTypes)
 
+        // DO-BIND DESUGAR: if this do-block was rewritten by `<-` (its loc is
+        // registered in `syntheticPerformLocs`), the synthetic `ExceptionToResult`
+        // wrap inserted by TypedAstBuilder discharges `<Exception>`. Subtract
+        // it from the effect row so the surrounding function doesn't see
+        // `<Exception>` in its signature.
+        if (expr.loc in syntheticPerformLocs) {
+            effects.remove(com.mezze.language.typechecker.WellKnownHashConstants.EFFECT_EXCEPTION_NAME)
+        }
+
         // CRITICAL: If do block has effects or performed effects, wrap the result in SuspendedType
         // This allows perform expressions to properly detect and handle effects
         // BUT: Don't double-wrap if the result is already a SuspendedType!
