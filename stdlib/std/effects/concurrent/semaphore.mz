@@ -1,4 +1,5 @@
 use std::abilities::compare::{ Eq }
+use std::effects::async::{ Async }
 
 ## Counting semaphore for limiting concurrent access.
 pub newtype Semaphore = Semaphore __NativeSemaphore
@@ -29,6 +30,17 @@ pub let acquire : { sem: Semaphore } -> {} = { sem } -> __native_semaphore_acqui
 ## Acquire n permits (blocks until all available).
 pub let acquire_n : { sem: Semaphore, permits: Int } -> {} = { sem, permits } ->
   __native_semaphore_acquire_n { sem = sem, permits = permits }
+
+## Park-aware acquire: routes through Async.park so the same code works
+## under LoomAsync and CoopAsync.
+pub let acquire_async : { sem: Semaphore } -> {} <Async, ...> = { sem } ->
+  Async.park { predicate = {} -> __native_semaphore_try_acquire { sem = sem } }
+
+## Park-aware acquire_n: routes through Async.park.
+pub let acquire_n_async : { sem: Semaphore, permits: Int } -> {} <Async, ...> = { sem, permits } ->
+  Async.park {
+    predicate = {} -> __native_semaphore_try_acquire_n { sem = sem, permits = permits },
+  }
 
 ## Release one permit.
 pub let release : { sem: Semaphore } -> {} = { sem } -> __native_semaphore_release { sem = sem }
