@@ -34,7 +34,7 @@ class TryableErrorMessagesTest {
     @Test
     fun `try on Int has clear error mentioning Tryable`() {
         val msg = expectError("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
 
             let run = {} -> do
                 let r = perform ExceptionToResult in do

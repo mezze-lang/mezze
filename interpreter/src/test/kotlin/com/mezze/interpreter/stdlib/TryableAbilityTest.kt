@@ -35,7 +35,7 @@ class TryableAbilityTest {
     @Test
     fun `Result_try returns inner value on Ok`() {
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
 
             let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
 
@@ -55,7 +55,7 @@ class TryableAbilityTest {
     @Test
     fun `Result_try throws on Err and ExceptionToResult catches it`() {
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
 
             let make_err : {} -> Result Int Str = {} -> Err {error = "boom"}
 
@@ -75,7 +75,7 @@ class TryableAbilityTest {
     @Test
     fun `Result_try preserves variant error type`() {
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
 
             type DbError = | ConnectionLost, QueryFailed {sql: Str} |
 
@@ -104,7 +104,7 @@ class TryableAbilityTest {
     @Test
     fun `Option_try returns inner value on Some`() {
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
 
             let make_some : {} -> Option Int = {} -> Some {val = 99}
 
@@ -124,7 +124,7 @@ class TryableAbilityTest {
     @Test
     fun `Option_try throws NoneOpt on None`() {
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
 
             let make_none : {} -> Option Int = {} -> None
 
@@ -153,7 +153,7 @@ class TryableAbilityTest {
         // before `.try {}` is dispatched. Calling .try on a SuspendedType directly
         // isn't currently supported (typechecker resolves as field access).
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
             use std::effects::log::{Log, QuietConsole, info}
 
             let make_some : {x: Int} -> Option Int <Log> = {x} -> do
@@ -177,7 +177,7 @@ class TryableAbilityTest {
     @Test
     fun `try works on Result from a Log-using function`() {
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
             use std::effects::log::{Log, QuietConsole, info}
 
             let lookup : {key: Str} -> Result Int Str <Log> = {key} -> do
@@ -202,7 +202,7 @@ class TryableAbilityTest {
     @Test
     fun `try propagates failure from a Log-using function`() {
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
             use std::effects::log::{Log, QuietConsole, info}
 
             let lookup : {key: Str} -> Result Int Str <Log> = {key} -> do
@@ -231,7 +231,7 @@ class TryableAbilityTest {
     @Test
     fun `multiple Result_try with same primitive error type`() {
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
 
             let one : {} -> Result Int Str = {} -> Ok {val = 1}
             let two : {} -> Result Int Str = {} -> Ok {val = 2}
@@ -255,7 +255,7 @@ class TryableAbilityTest {
     @Test
     fun `multiple Result_try short-circuits on first Err`() {
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
 
             let one : {} -> Result Int Str = {} -> Ok {val = 1}
             let bad : {} -> Result Int Str = {} -> Err {error = "second failed"}
@@ -283,7 +283,7 @@ class TryableAbilityTest {
     @Test
     fun `Option and Result try together — all succeed`() {
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
 
             type HttpError = | NotFound, Unauthorized |
 
@@ -309,7 +309,7 @@ class TryableAbilityTest {
         // Note: HttpError is declared open (...) so the row-union with NoneOpt works.
         // Closed variants don't compose with throws from a different source.
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
 
             type HttpError = | NotFound, Unauthorized, ... |
 
@@ -337,7 +337,7 @@ class TryableAbilityTest {
     @Test
     fun `Option and Result try together — Result Err short-circuits`() {
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
 
             type HttpError = | NotFound, Unauthorized, ... |
 
@@ -369,7 +369,8 @@ class TryableAbilityTest {
     @Test
     fun `custom Tryable impl participates with ExceptionToResult`() {
         val result = eval("""
-            use std::effects::exception::{Exception, Tryable, ExceptionToResult}
+            use std::abilities::tryable::{Tryable}
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             type Validated 'a = | Valid {val: 'a}, Invalid {reason: Str} |
 
@@ -397,7 +398,8 @@ class TryableAbilityTest {
     @Test
     fun `custom Tryable impl throws and is caught`() {
         val result = eval("""
-            use std::effects::exception::{Exception, Tryable, ExceptionToResult}
+            use std::abilities::tryable::{Tryable}
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             type Validated 'a = | Valid {val: 'a}, Invalid {reason: Str} |
 

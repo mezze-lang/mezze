@@ -190,7 +190,7 @@ class AbilityMethodEffectsRegressionTest {
         // be an effectful call. The whole thing is wrapped in implicit
         // `perform ExceptionToResult`. This is the canonical regression case.
         val error = typeCheck("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
+            use std::effects::exception::{ExceptionToResult}
             use std::effects::log::{Log, QuietConsole, info}
 
             let lookup : {id: Int} -> Result Int Str <Log> = {id} -> do

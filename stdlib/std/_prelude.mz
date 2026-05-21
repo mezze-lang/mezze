@@ -6,6 +6,11 @@ use std::abilities::logic
 use std::abilities::convert
 use std::abilities::default
 use std::abilities::inspect
+## Tryable ability for `<-` do-bind syntax. The `ExceptionToResult`
+## performer used by the synthetic perform is NOT in the prelude — it's
+## injected surgically by the typechecker when desugaring `<-`, so users
+## don't have it in their namespace.
+use std::abilities::tryable
 use std::int
 use std::float
 use std::nat

@@ -236,14 +236,18 @@ class TypeChecker(
         @Suppress("NAME_SHADOWING")
         var module = desugarPipesInParsedModule(module)
 
-        // Desugar do-block <- statements (do-bind feature).
-        // Rewrites each `pat <- expr` to `let pat = Tryable.try {it = expr}`,
-        // wraps the body's result in `Ok {val = ...}`, and wraps the whole
-        // do-block in a synthetic `perform ExceptionToResult` whose location
-        // gets recorded in `syntheticPerformLocs` for the typechecker to
-        // suppress `<*>` later. See docs/design/do-bind-proposal.md.
+        // Desugar do-block <- statements (do-bind feature). See DoBindDesugar.kt.
+        // The desugar rewrites each `pat <- expr` to `let pat = expr.try {}`,
+        // wraps the body in `Ok {val = ...}`, and wraps the whole do-block in
+        // a synthetic `perform ExceptionToResult`. `moduleNeedsBindCtx` tracks
+        // whether the module uses `<-` so we can later inject the Exception
+        // effect + ExceptionToResult performer into the per-module import
+        // context (surgical — they stay out of users' namespaces otherwise).
         syntheticPerformLocs.clear()
-        module = desugarBindsInParsedModule(module)
+        val bindDesugarResult = com.mezze.language.typechecker.desugar.DoBindDesugar.desugar(module)
+        module = bindDesugarResult.module
+        syntheticPerformLocs.addAll(bindDesugarResult.syntheticLocs)
+        val moduleNeedsBindCtx = bindDesugarResult.hasBinds
 
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
@@ -267,6 +271,12 @@ class TypeChecker(
             importContext = precompiled.preludeImportContext
             if (cachedPreludeLoadedModules == null) {
                 cachedPreludeLoadedModules = precompiled.loadedModules
+            }
+            // Surgical injection for do-bind: ExceptionToResult / Exception
+            // are NOT in the stripped prelude. Inject only when this module
+            // uses `<-`. See DoBindDesugar.injectSyntheticPerformerCtx.
+            if (moduleNeedsBindCtx) {
+                importContext = injectSyntheticPerformerCtxLazy(importContext!!)
             }
             precompiled.compiledPrelude.mergeInto(parentContext)
         } else if (hasUserImports || shouldInjectPrelude) {
@@ -294,14 +304,17 @@ class TypeChecker(
                     importContext = importResult.importContext
                     loadedModules = importResult.loadedModules
 
-                    val ctx = if (shouldInjectPrelude) {
+                    if (shouldInjectPrelude) {
                         val preludeContext = loadPreludeModules(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
-                        mergeImportContext(parentContext, importContext!!)
-                    } else {
-                        mergeImportContext(parentContext, importContext!!)
                     }
-                    ctx
+                    // Surgical injection for do-bind: when a module uses `<-`,
+                    // load Exception + ExceptionToResult into the import context
+                    // (only). See DoBindDesugar.injectSyntheticPerformerCtx.
+                    if (moduleNeedsBindCtx) {
+                        importContext = injectSyntheticPerformerCtxLazy(importContext!!, importResolver)
+                    }
+                    mergeImportContext(parentContext, importContext!!)
                 }
                 is ImportResolutionResult.Failure -> {
                     throw importResult.errors.firstOrNull()
@@ -1205,6 +1218,42 @@ class TypeChecker(
      * Load prelude modules and return a combined ModuleImportContext.
      * Cached globally — computed once per JVM process since stdlib doesn't change.
      */
+    /**
+     * Inject the Exception effect + ExceptionToResult performer into a
+     * module's import context. Only called when the module contains `<-`.
+     *
+     * Loads `std::effects::exception` directly via [importResolver] and
+     * grabs the two needed declarations. The rest of the module is
+     * discarded — `Exception` and `ExceptionToResult` reach the synthetic
+     * `perform` via the import context without polluting user namespace.
+     */
+    private fun injectSyntheticPerformerCtxLazy(
+        baseCtx: ModuleImportContext,
+        importResolver: ImportResolver? = null,
+    ): ModuleImportContext {
+        val resolver = importResolver ?: run {
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "."))
+            val moduleLoader = ModuleLoader.fromPath(projectRoot.toString())
+            val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
+                parentContext,
+                moduleLoader.getResolver()
+            )
+            ImportResolver(moduleLoader, moduleTypeChecker)
+        }
+        val exceptionCtx = cachedExceptionCtx ?: run {
+            // Parse a tiny synthetic module that just imports the exception
+            // module, then run import resolution to materialize its decls.
+            val syntheticSrc = "use std::effects::exception::{ Exception, ExceptionToResult }"
+            val syntheticModule = MezzeParser().parseParsedModule(syntheticSrc, file = "<dobind-synthetic>")
+            when (val r = resolver.resolveImports(syntheticModule)) {
+                is ImportResolutionResult.Success -> r.importContext.also { cachedExceptionCtx = it }
+                is ImportResolutionResult.Failure -> return baseCtx
+            }
+        }
+        return com.mezze.language.typechecker.desugar.DoBindDesugar
+            .injectSyntheticPerformerCtx(baseCtx, exceptionCtx)
+    }
+
     private fun loadPreludeModules(
         importResolver: ImportResolver,
         userImportContext: ModuleImportContext
@@ -1236,6 +1285,11 @@ class TypeChecker(
                 // Abilities ARE carried so that `with X 'a` constraints in user
                 // code can refer to prelude abilities (Sized, Show, etc.) and
                 // method-call resolution sees their operation types (#304).
+                //
+                // Effects and effect impls are stripped. The Exception effect /
+                // ExceptionToResult performer needed by the do-bind desugar are
+                // injected per-module by `DoBindDesugar.injectSyntheticPerformerCtx`
+                // ONLY when the module contains a `<-`. See do-bind-proposal.md.
                 val ctx = result.importContext
                 // Cache loaded modules for inclusion in Monomorphizer's allModules
                 cachedPreludeLoadedModules = result.loadedModules
@@ -1779,6 +1833,16 @@ class TypeChecker(
         @Volatile
         private var cachedPreludeContext: ModuleImportContext? = null
 
+        /**
+         * Cached import context produced by resolving
+         * `use std::effects::exception::{ Exception, ExceptionToResult }`.
+         * Used by the do-bind desugar to surgically inject the synthetic
+         * perform machinery only into modules that contain `<-`. NOT
+         * exposed to user code or merged into prelude.
+         */
+        @Volatile
+        private var cachedExceptionCtx: ModuleImportContext? = null
+
         /** Cached prelude loaded modules — shared across all TypeChecker instances */
         @Volatile
         @JvmStatic
@@ -1814,6 +1878,7 @@ class TypeChecker(
         /** Clears prelude cache. Used when stdlib files change. */
         fun clearPreludeCache() {
             cachedPreludeContext = null
+            cachedExceptionCtx = null
             cachedPreludeLoadedModules = null
             cachedPreludeEnhancedContext = null
         }
@@ -2112,264 +2177,7 @@ class TypeChecker(
     }
 
     // V1 pipe desugarer deleted — v2 ParsedModule desugars pipes in desugarPipesInParsedModule()
-
-    /**
-     * Desugar do-block `<-` statements (do-bind feature).
-     *
-     * For every `ParsedDo` containing one or more `ParsedStatement.Bind` statements:
-     *   - rewrite each `pat <- expr` to `let pat = Tryable.try {it = expr}`
-     *   - wrap the do-block's result expression in `Ok {val = result}`
-     *   - wrap the entire ParsedDo in a `perform ExceptionToResult in do { ... }`
-     *   - register the synthetic perform's loc in `syntheticPerformLocs` so
-     *     the typechecker knows to suppress `<*>` on the enclosing function.
-     *
-     * Recurses into all nested expressions: each `ParsedDo` is desugared
-     * independently. Nested do-blocks with `<-` each get their own synthetic
-     * perform; do-blocks without `<-` are left alone.
-     *
-     * Pure value-shape rewrite — no type information used. `<-` always emits
-     * `Tryable.try {it = ...}`. If the RHS doesn't impl Tryable (e.g. it's a
-     * value of type `Int <Exception>`), the typechecker will produce a clean
-     * "Int does not implement Tryable" error. Users use plain `let` for
-     * `<Exception>`-throwing calls.
-     *
-     * See `docs/design/do-bind-proposal.md` for the full design.
-     */
-    private fun desugarBindsInParsedModule(
-        module: com.mezze.language.parsedast.ParsedModule
-    ): com.mezze.language.parsedast.ParsedModule {
-        return module.copy(decls = module.decls.map { decl ->
-            when (decl) {
-                is com.mezze.language.parsedast.ParsedLetDecl ->
-                    decl.copy(value = desugarBindsInExpr(decl.value))
-                is com.mezze.language.parsedast.ParsedImplAbilityDecl ->
-                    decl.copy(operations = decl.operations.map { op ->
-                        op.copy(implementation = desugarBindsInExpr(op.implementation))
-                    })
-                is com.mezze.language.parsedast.ParsedTopLevelExpr ->
-                    decl.copy(expression = desugarBindsInExpr(decl.expression))
-                else -> decl
-            }
-        })
-    }
-
-    /**
-     * Recursively desugar `<-` statements in an expression.
-     *
-     * Walks down the AST. When it finds a ParsedDo with any Bind statements,
-     * rewrites the whole block. Recurses into nested expressions first so
-     * inner do-blocks are desugared before their containing block.
-     */
-    private fun desugarBindsInExpr(
-        expr: com.mezze.language.parsedast.ParsedExpr
-    ): com.mezze.language.parsedast.ParsedExpr = when (expr) {
-        is com.mezze.language.parsedast.ParsedDo -> {
-            // Recurse into all sub-expressions first.
-            val newStatements = expr.statements.map { stmt ->
-                when (stmt) {
-                    is com.mezze.language.parsedast.ParsedStatement.Let ->
-                        stmt.copy(value = desugarBindsInExpr(stmt.value))
-                    is com.mezze.language.parsedast.ParsedStatement.Expr ->
-                        stmt.copy(expr = desugarBindsInExpr(stmt.expr))
-                    is com.mezze.language.parsedast.ParsedStatement.Bind ->
-                        stmt.copy(expr = desugarBindsInExpr(stmt.expr))
-                }
-            }
-            val newResult = desugarBindsInExpr(expr.result)
-            val processedDo = expr.copy(statements = newStatements, result = newResult)
-
-            // If this do-block has any Bind statements, perform the rewrite.
-            if (processedDo.statements.any { it is com.mezze.language.parsedast.ParsedStatement.Bind }) {
-                rewriteDoWithBinds(processedDo)
-            } else {
-                processedDo
-            }
-        }
-        is com.mezze.language.parsedast.ParsedFunctionCall ->
-            expr.copy(function = desugarBindsInExpr(expr.function), arguments = desugarBindsInExpr(expr.arguments))
-        is com.mezze.language.parsedast.ParsedLambda ->
-            expr.copy(body = desugarBindsInExpr(expr.body))
-        is com.mezze.language.parsedast.ParsedRecordLit ->
-            expr.copy(entries = expr.entries.map { e ->
-                when (e) {
-                    is com.mezze.language.parsedast.ParsedRecordEntry.Field ->
-                        e.copy(value = e.value?.let { desugarBindsInExpr(it) })
-                    is com.mezze.language.parsedast.ParsedRecordEntry.Spread ->
-                        e.copy(expr = desugarBindsInExpr(e.expr))
-                }
-            })
-        is com.mezze.language.parsedast.ParsedIf ->
-            expr.copy(
-                condition = desugarBindsInExpr(expr.condition),
-                thenBranch = desugarBindsInExpr(expr.thenBranch),
-                elseBranch = desugarBindsInExpr(expr.elseBranch),
-            )
-        is com.mezze.language.parsedast.ParsedMatch ->
-            expr.copy(
-                scrutinee = desugarBindsInExpr(expr.scrutinee),
-                cases = expr.cases.map { it.copy(body = desugarBindsInExpr(it.body)) }
-            )
-        is com.mezze.language.parsedast.ParsedPerform ->
-            expr.copy(body = desugarBindsInExpr(expr.body))
-        is com.mezze.language.parsedast.ParsedMemberAccess ->
-            expr.copy(receiver = desugarBindsInExpr(expr.receiver))
-        is com.mezze.language.parsedast.ParsedParens ->
-            expr.copy(expr = desugarBindsInExpr(expr.expr))
-        is com.mezze.language.parsedast.ParsedVariantConstruct ->
-            expr.copy(value = expr.value?.let { desugarBindsInExpr(it) })
-        is com.mezze.language.parsedast.ParsedSeqLit ->
-            expr.copy(elements = expr.elements.map { elem ->
-                when (elem) {
-                    is com.mezze.language.parsedast.ParsedSeqElement.Regular ->
-                        elem.copy(expr = desugarBindsInExpr(elem.expr))
-                    is com.mezze.language.parsedast.ParsedSeqElement.Spread ->
-                        elem.copy(expr = desugarBindsInExpr(elem.expr))
-                }
-            })
-        is com.mezze.language.parsedast.ParsedEffectCall ->
-            expr.copy(arguments = desugarBindsInExpr(expr.arguments))
-        is com.mezze.language.parsedast.ParsedStringLit ->
-            expr.copy(parts = expr.parts.map { part ->
-                when (part) {
-                    is com.mezze.language.parsedast.ParsedStringPart.Interpolation ->
-                        part.copy(expr = desugarBindsInExpr(part.expr))
-                    else -> part
-                }
-            })
-        is com.mezze.language.parsedast.ParsedBinaryOp ->
-            expr.copy(left = desugarBindsInExpr(expr.left), right = desugarBindsInExpr(expr.right))
-        is com.mezze.language.parsedast.ParsedUnaryOp ->
-            expr.copy(operand = desugarBindsInExpr(expr.operand))
-        is com.mezze.language.parsedast.ParsedPipe ->
-            expr.copy(left = desugarBindsInExpr(expr.left), right = desugarBindsInExpr(expr.right))
-        else -> expr
-    }
-
-    /**
-     * Rewrite a ParsedDo containing Bind statements into the desugared form.
-     *
-     * Input:
-     *   do
-     *     pat1 <- expr1
-     *     stmt2
-     *     pat3 <- expr3
-     *     result
-     *
-     * Output:
-     *   perform ExceptionToResult in do
-     *     let pat1 = Tryable.try {it = expr1}
-     *     stmt2
-     *     let pat3 = Tryable.try {it = expr3}
-     *     Ok {val = result}
-     *
-     * The synthetic perform's loc is registered in `syntheticPerformLocs`
-     * so the constraint generator can later pass `synthetic = true` to
-     * `removeEffectsFromType`, suppressing `<*>` on the enclosing function.
-     */
-    private fun rewriteDoWithBinds(
-        doExpr: com.mezze.language.parsedast.ParsedDo
-    ): com.mezze.language.parsedast.ParsedPerform {
-        val loc = doExpr.loc
-
-        // 1. Rewrite each Bind statement to a Let with Tryable.try {it = expr}.
-        val rewrittenStatements = doExpr.statements.map { stmt ->
-            when (stmt) {
-                is com.mezze.language.parsedast.ParsedStatement.Bind -> {
-                    val tryCall = buildTryableTryCall(stmt.expr, stmt.loc)
-                    com.mezze.language.parsedast.ParsedStatement.Let(
-                        pattern = stmt.pattern,
-                        typeAnnotation = null,
-                        value = tryCall,
-                        loc = stmt.loc,
-                    )
-                }
-                else -> stmt
-            }
-        }
-
-        // 2. Wrap the result in Ok {val = result}.
-        val resultLoc = doExpr.result.loc
-        val wrappedResult = com.mezze.language.parsedast.ParsedVariantConstruct(
-            constructor = "Ok",
-            value = com.mezze.language.parsedast.ParsedRecordLit(
-                entries = listOf(
-                    com.mezze.language.parsedast.ParsedRecordEntry.Field(
-                        name = "val",
-                        value = doExpr.result,
-                        loc = resultLoc,
-                    )
-                ),
-                loc = resultLoc,
-            ),
-            loc = resultLoc,
-        )
-
-        // 3. Build the rewritten inner do-block.
-        val rewrittenDo = doExpr.copy(
-            statements = rewrittenStatements,
-            result = wrappedResult,
-        )
-
-        // 4. Wrap in `perform ExceptionToResult in <rewrittenDo>`.
-        val performHandler = com.mezze.language.parsedast.ParsedPerformHandler(
-            performer = com.mezze.language.parsedast.ParsedQualifiedRef(
-                localName = "ExceptionToResult",
-                qualifier = null,
-                loc = loc,
-            ),
-            params = null,
-        )
-        val syntheticPerform = com.mezze.language.parsedast.ParsedPerform(
-            handlers = listOf(performHandler),
-            body = rewrittenDo,
-            loc = loc,
-        )
-
-        // 5. Mark this perform as synthetic so the typechecker suppresses <*>.
-        syntheticPerformLocs.add(loc)
-
-        return syntheticPerform
-    }
-
-    /**
-     * Build a `Tryable.try {it = expr}` call expression.
-     */
-    private fun buildTryableTryCall(
-        expr: com.mezze.language.parsedast.ParsedExpr,
-        loc: com.mezze.language.parsedast.Loc,
-    ): com.mezze.language.parsedast.ParsedFunctionCall {
-        // Build the function reference: `Tryable.try` as a member access on
-        // the ability name. The typechecker resolves Tryable.try to the
-        // appropriate ability method.
-        val abilityRef = com.mezze.language.parsedast.ParsedIdentifier(
-            localName = "Tryable",
-            qualifier = null,
-            loc = loc,
-        )
-        val tryAccess = com.mezze.language.parsedast.ParsedMemberAccess(
-            receiver = abilityRef,
-            member = "try",
-            loc = loc,
-        )
-
-        // Build the argument record: `{it = expr}`.
-        val argRecord = com.mezze.language.parsedast.ParsedRecordLit(
-            entries = listOf(
-                com.mezze.language.parsedast.ParsedRecordEntry.Field(
-                    name = "it",
-                    value = expr,
-                    loc = loc,
-                )
-            ),
-            loc = loc,
-        )
-
-        return com.mezze.language.parsedast.ParsedFunctionCall(
-            function = tryAccess,
-            arguments = argRecord,
-            loc = loc,
-        )
-    }
+    // do-bind desugar (`<-`) lives in DoBindDesugar.kt
 
 }
 

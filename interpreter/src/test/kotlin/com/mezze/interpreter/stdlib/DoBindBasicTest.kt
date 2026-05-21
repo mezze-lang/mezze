@@ -31,9 +31,8 @@ class DoBindBasicTest {
 
     @Test
     fun `single bind on Result Ok unwraps and returns Ok of value`() {
+        // No explicit import — Tryable and ExceptionToResult come from the prelude.
         val result = eval("""
-            use std::effects::exception::{Tryable, ExceptionToResult}
-
             let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
 
             let run = {} -> do

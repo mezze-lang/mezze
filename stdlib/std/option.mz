@@ -1,5 +1,20 @@
 use std::abilities::compare::{ Eq, Ord }
 use std::abilities::default::{ Default }
+use std::abilities::tryable::{ Tryable }
+use std::effects::exception::{ Exception }
+
+## Tryable for Option — extract Some, throw `NoneOpt` on None.
+##
+## `Option` carries no error information, so the throw is a synthetic
+## variant `NoneOpt` that downstream code can match on. In a do-block
+## that mixes `Option` and `Result` `<-` lines, the `<Exception>` row's
+## `'error` parameter unifies to include both the `Result`s error types
+## and `NoneOpt` for the `Option`s.
+impl Tryable for Option 'a having 'inner = 'a where {
+  try = { it } -> match it is
+    Some { val } -> val
+    None -> Exception.throw { error = NoneOpt }
+}
 
 impl Eq 'a for Option 'a where {
   eq = { it, r } -> match it is
