@@ -1,0 +1,21 @@
+# Design doc 3a: All-Result chain. Both binds throw their respective error
+# types into the synthetic Exception row; the row unifies and the do-block
+# produces a single Result whose error type is the union.
+
+type User = { id: Int, name: Str }
+type Bio = { text: Str }
+type HttpError = | NotFound, Unauthorized |
+type ParseError = | InvalidJson, MissingField |
+
+let find_user : { id: Int } -> Result User HttpError = { id } ->
+  if id > 0 then Ok { val = { id = id, name = "alice" } }
+  else Err { error = NotFound }
+
+let parse_bio : { raw: Str } -> Result Bio ParseError = { raw } ->
+  if raw.size {} > 0 then Ok { val = { text = raw } }
+  else Err { error = MissingField }
+
+let fetch = { id } -> do
+  user <- find_user { id = id }
+  bio  <- parse_bio { raw = user.name }
+  { user = user, bio = bio }

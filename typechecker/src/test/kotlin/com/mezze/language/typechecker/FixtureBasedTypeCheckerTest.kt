@@ -324,6 +324,17 @@ class FixtureBasedTypeCheckerTest {
     @Test fun `valid - variants_pattern_matching`() = testValidFixture("variants_pattern_matching.mz")
     @Test fun `valid - wildcard_in_closed_variant`() = testValidFixture("wildcard_in_closed_variant.mz")
 
+    // Do-bind (`<-`) — design-doc §3 valid examples.
+    // Permissive: we only assert the modules typecheck; exact pretty-printed
+    // types are pinned by the interpreter-level DoBindBasicTest end-to-end.
+    @Test fun `valid - do_bind_all_result`() = testValidFixture("do_bind_all_result.mz", permissive = true)
+    @Test fun `valid - do_bind_all_option`() = testValidFixture("do_bind_all_option.mz", permissive = true)
+    @Test fun `valid - do_bind_mixed`() = testValidFixture("do_bind_mixed.mz", permissive = true)
+    @Test fun `valid - do_bind_in_if`() = testValidFixture("do_bind_in_if.mz", permissive = true)
+    @Test fun `valid - do_bind_in_match`() = testValidFixture("do_bind_in_match.mz", permissive = true)
+    @Test fun `valid - do_bind_nested`() = testValidFixture("do_bind_nested.mz", permissive = true)
+    @Test fun `valid - do_bind_with_log`() = testValidFixture("do_bind_with_log.mz", permissive = true)
+
     // Inference fixture tests
     @Test fun `inference - basic_inference`() = testInferenceFixture("basic_inference.mz")
     @Test fun `inference - function_parameter_inference`() = testInferenceFixture("function_parameter_inference.mz", permissive = true)
@@ -355,4 +366,11 @@ class FixtureBasedTypeCheckerTest {
     @Test fun `invalid - variant_constructor_mismatch`() = testInvalidFixture("variant_constructor_mismatch.mz")
     @Test fun `invalid - wildcard_in_closed_variant`() = testInvalidFixture("wildcard_in_closed_variant.mz")
     @Test fun `invalid - inspect_ability_errors`() = testInvalidFixture("inspect_ability_errors.mz")
+
+    // Do-bind (`<-`) — design-doc §3 invalid examples + edge cases.
+    @Test fun `invalid - do_bind_non_tryable`() = testInvalidFixture("do_bind_non_tryable.mz")
+    @Test fun `invalid - do_bind_body_type_error`() = testInvalidFixture("do_bind_body_type_error.mz")
+    @Test fun `invalid - do_bind_top_level`() = testInvalidFixture("do_bind_top_level.mz")
+    @Test fun `invalid - do_bind_outside_do`() = testInvalidFixture("do_bind_outside_do.mz")
+    @Test fun `invalid - do_bind_incompatible_throws`() = testInvalidFixture("do_bind_incompatible_throws.mz")
 }

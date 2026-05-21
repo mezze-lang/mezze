@@ -1,0 +1,13 @@
+# Design doc Section 6: `<-` mixed with another effect (Log). The
+# synthetic ExceptionToResult discharges `<Exception>`; `<Log>` is left
+# in the surrounding function's row.
+
+use std::effects::log::{ Log, info }
+
+let read : { id: Int } -> Result Int Str <Log> = { id } -> do
+  info { msg = "reading" }
+  if id > 0 then Ok { val = id } else Err { error = "bad" }
+
+let process = { id } -> do
+  v <- read { id = id }
+  v + 1
