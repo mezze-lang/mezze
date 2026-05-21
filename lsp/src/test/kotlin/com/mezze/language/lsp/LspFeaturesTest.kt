@@ -201,6 +201,45 @@ class LspFeaturesTest {
         )
     }
 
+    // ===== Do-bind (`<-`) ==============================================
+    //
+    // Hover and goto-def on `<-`-bound names go through the same TypedAST
+    // walk as regular `let` bindings — the desugar rewrites `pat <- expr`
+    // into a typed `let pat = expr.try {}` before LSP sees the typed AST.
+    // The synthetic Let inherits the bind statement's loc so position
+    // lookups land on user-written source.
+    //
+    // Known limitation (tracked separately): hovering directly on the `a`
+    // pattern of `a <- make_ok {}` currently lands on the synthetic
+    // `.try` field access and renders the ability method's generic type
+    // (`Tryable.try : { it: 'm } -> 'inner`) instead of the bound name's
+    // inferred type. Workaround: hover on the receiver (`make_ok`) or
+    // on uses of `a` in the body.
+
+    @Test
+    fun `hover on receiver function inside bind shows function type`() {
+        // `a <- make_ok {}` — hovering on `make_ok` should show its
+        // declared function type, demonstrating that the desugar doesn't
+        // disrupt normal hover on user-written sub-expressions of `<-`.
+        val (uri, _) = openSingleFile("""
+            let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
+
+            let foo = {} -> do
+                a <- make_ok {}
+                a
+        """.trimIndent())
+
+        // Cursor on the `make_ok` call inside the bind. The line is
+        // `    a <- make_ok {}` (3-space indent in trimIndent).
+        // a at col 3 (0-indexed); space; <-; space; make_ok starts at col 8.
+        // Actually the trim is 4 spaces. Verify by hovering and finding `make_ok`.
+        val hover = hoverAt(uri, line = 3, character = 9)
+        assertNotNull(hover, "expected hover on `make_ok` inside the bind")
+        val content = hoverText(hover!!)
+        assertTrue(content.contains("Result") || content.contains("Ok"),
+            "expected hover to surface the function's return type, got:\n$content")
+    }
+
     // ===== Inlay hints =================================================
 
     @Test
