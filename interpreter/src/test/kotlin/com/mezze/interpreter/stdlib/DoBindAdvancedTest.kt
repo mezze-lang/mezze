@@ -1,7 +1,6 @@
 package com.mezze.interpreter.stdlib
 
 import com.mezze.interpreter.MezzeTestHelper
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -92,12 +91,6 @@ class DoBindAdvancedTest {
         assertEquals("result-err", result)
     }
 
-    @Disabled("Nested inline do-with-bind not yet supported — workaround: hoist " +
-        "inner do to a typed `let name : Result _ _ = ... -> do { b <- ... }` helper. " +
-        "The inline form fails because the inner do's `Ok {val=...}` infers as an " +
-        "open-variant `| Ok {val: 'a} |` that doesn't match the Result Tryable impl " +
-        "before the outer `.try {}` IR is generated. A constraint-solver tweak to " +
-        "delay receiver-type-driven method resolution would fix this.")
     @Test
     fun `nested do-with-bind - inner Err propagates through outer`() {
         val result = eval("""
@@ -122,7 +115,6 @@ class DoBindAdvancedTest {
         assertEquals("inner failed", result)
     }
 
-    @Disabled("Same as the Err-propagation case — inline nested do-with-bind not supported.")
     @Test
     fun `nested do-with-bind - both layers succeed`() {
         val result = eval("""

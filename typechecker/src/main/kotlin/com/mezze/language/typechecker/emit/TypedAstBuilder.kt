@@ -1007,7 +1007,19 @@ class TypedAstBuilder(
                         }
                     }
                 }
-                val result = buildExpr(expr.result, file, contextType)
+                // For synthetic do-bind blocks, the desugar wraps the result in
+                // `Ok {val = ...}` and the constraint generator pins the do-block's
+                // result type to `Result 'a 'e`. Pass that shape as the result's
+                // contextType so the variant literal infers as `Result _ _` instead
+                // of an open `| Ok {val: 'a} |`. Without this, a nested
+                // `outer <- (inner_do)` fails to find the Result Tryable impl.
+                val resultContext = if (expr.loc in syntheticPerformLocs) {
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.result(
+                        ok = MezzeType.VarType(TypeVar("dobind_ok")),
+                        err = MezzeType.VarType(TypeVar("dobind_err")),
+                    )
+                } else contextType
+                val result = buildExpr(expr.result, file, resultContext)
                 if (pushedBlockScope) {
                     lambdaParamScopes.removeLast()
                 }

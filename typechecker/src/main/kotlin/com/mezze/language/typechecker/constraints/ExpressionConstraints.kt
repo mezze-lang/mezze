@@ -4199,8 +4199,27 @@ class ExpressionConstraintGenerator(
         // wrap inserted by TypedAstBuilder discharges `<Exception>`. Subtract
         // it from the effect row so the surrounding function doesn't see
         // `<Exception>` in its signature.
+        //
+        // We also constrain the result type to `Result 'a 'e`. The desugar wraps
+        // the do-block's tail in `Ok {val = result}` which would otherwise infer
+        // as the bare open variant `| Ok {val: 'a} |`. Without this constraint,
+        // a nested `outer <- (inner_do)` fails: the outer's `.try {}` dispatch
+        // looks for Tryable on the open variant rather than on Result, mis-resolves,
+        // and produces a runtime dict-slot crash. The constraint forces the
+        // expected `Result` shape so dispatch finds the right impl.
         if (expr.loc in syntheticPerformLocs) {
             effects.remove(com.mezze.language.typechecker.WellKnownHashConstants.EFFECT_EXCEPTION_NAME)
+            val pinnedResultType = com.mezze.language.typechecker.util.WellKnownTypeApp.result(
+                ok = MezzeType.VarType(TypeVar.fresh()),
+                err = MezzeType.VarType(TypeVar.fresh()),
+            )
+            constraints.add(
+                Constraint.Equality(
+                    left = resultResult.type,
+                    right = pinnedResultType,
+                    loc = expr.loc,
+                )
+            )
         }
 
         // CRITICAL: If do block has effects or performed effects, wrap the result in SuspendedType
