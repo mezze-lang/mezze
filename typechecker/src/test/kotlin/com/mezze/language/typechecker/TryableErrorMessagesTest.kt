@@ -59,7 +59,8 @@ class TryableErrorMessagesTest {
         // When the user has impl'd Tryable for their own type, but calls .try on
         // an unrelated type, the available-impls list should include theirs.
         val msg = expectError("""
-            use std::effects::exception::{Exception, Tryable, ExceptionToResult}
+            use std::abilities::tryable::{Tryable}
+            use std::effects::exception::{Exception, ExceptionToResult}
 
             type Box 'a = | Boxed {val: 'a} |
 
@@ -77,5 +78,21 @@ class TryableErrorMessagesTest {
             run {}
         """)
         assertTrue(msg.contains("Tryable"), "Expected mention of Tryable: $msg")
+    }
+
+    @Test
+    fun `bind on Int has friendly do-bind error`() {
+        // The Phase 5 improvement: error should be framed around `<-` (not
+        // the underlying ability), and suggest `let x = ...` as a workaround.
+        val msg = expectError("""
+            let foo = {} -> do
+                x <- 42
+                x
+            foo {}
+        """)
+        assertTrue(msg.contains("`<-`"), "Expected '`<-`' in error, got: $msg")
+        assertTrue(msg.contains("let") && msg.contains("="),
+            "Expected `let x = ...` hint, got: $msg")
+        assertTrue(msg.contains("Int"), "Expected mention of Int, got: $msg")
     }
 }

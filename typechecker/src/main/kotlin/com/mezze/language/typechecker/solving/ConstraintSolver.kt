@@ -2191,6 +2191,15 @@ class ConstraintSolver(
                     "$typeNames does not implement '$abilityName'. Ensure the data type is serializable.${formatAbilityCandidates(abilityName)}"
                 }
             }
+            "Tryable" -> {
+                // Tryable is almost always reached via `<-` desugar. Frame the
+                // error around the user-facing syntax rather than the ability
+                // name, but keep the underlying ability mentioned so the user
+                // can implement it on a custom failure type if they really want.
+                "Cannot use `<-` on $typeNames — no `Tryable` impl. `<-` works " +
+                    "on `Option`, `Result`, or any type implementing `Tryable`. " +
+                    "If you meant a plain binding, use `let x = ...` instead."
+            }
             else -> "$typeNames does not implement '$abilityName'. To enable this, implement: impl $abilityName for $primaryType where { ... }${formatAbilityCandidates(abilityName)}"
         }
     }
