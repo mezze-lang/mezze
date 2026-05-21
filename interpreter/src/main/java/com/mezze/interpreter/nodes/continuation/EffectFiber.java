@@ -246,6 +246,21 @@ public final class EffectFiber {
     }
 
     /**
+     * Pop {@code count} handlers from the top of this thread's chain.
+     * Companion to {@link #installHandlerChain} when the caller must
+     * preserve any handlers underneath the chunk it installed (e.g. the
+     * coop scheduler runs spawned bodies on its driver thread, which
+     * itself sits inside an outer perform).
+     */
+    public static void popHandlerChain(int count) {
+        if (count <= 0) return;
+        ArrayDeque<MezzeRecord> stack = HANDLER_CHAIN.get();
+        for (int i = 0; i < count && !stack.isEmpty(); i++) {
+            stack.pop();
+        }
+    }
+
+    /**
      * Install {@code chain} on the current thread, run {@code body}, then
      * clear. Use this in spawned-task bodies that need to inherit the
      * parent's handler chain. Empty chain is a no-op fast path.
@@ -342,6 +357,50 @@ public final class EffectFiber {
         } finally {
             CURRENT.set(previous);
         }
+    }
+
+    /**
+     * Run the body without setting {@link #CURRENT}. Used by the coop
+     * scheduler: the body should dispatch effect ops via the snapshot
+     * handler chain (chain-dispatch path in {@code OpCallNode}), not by
+     * suspending the fiber for every op-call. The fiber is still
+     * suspendable — call {@link #suspendUnscoped(Object)} from inside
+     * the body when you do want to yield (e.g. for park).
+     */
+    @TruffleBoundary
+    public void runUnscoped() {
+        if (closed) {
+            throw new IllegalStateException(
+                "EffectFiber@" + id + " is closed; cannot run");
+        }
+        EffectFiber previous = CURRENT.get();
+        CURRENT.set(null);
+        try {
+            LoomSupport.run(continuation);
+        } finally {
+            CURRENT.set(previous);
+        }
+    }
+
+    /**
+     * Suspend this fiber regardless of whether it is the current fiber.
+     * Companion to {@link #runUnscoped()} for the coop scheduler.
+     */
+    @TruffleBoundary
+    public Object suspendUnscoped(Object value) {
+        if (closed) {
+            throw new IllegalStateException(
+                "EffectFiber@" + id + " is closed; cannot suspend");
+        }
+        this.suspendedValue = value;
+        boolean ok = LoomSupport.yield(scope);
+        if (!ok) {
+            throw new IllegalStateException(
+                "EffectFiber yield failed (likely native frames pinning)");
+        }
+        Object resumed = this.resumeValue;
+        this.resumeValue = null;
+        return resumed;
     }
 
     public boolean isDone() {

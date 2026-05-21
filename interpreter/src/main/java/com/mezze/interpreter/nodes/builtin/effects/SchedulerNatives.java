@@ -31,7 +31,7 @@ public final class SchedulerNatives {
     public static AsyncNatives.MezzePromise schedulerSpawn(MezzeRecord args, IndirectCallNode callNode) {
         CoopScheduler scheduler = getScheduler(args, "sched");
         MezzeFunction f = getFunction(args, "f");
-        return scheduler.spawn(f);
+        return scheduler.spawn(f, callNode);
     }
 
     /**
