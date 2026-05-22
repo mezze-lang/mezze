@@ -72,6 +72,15 @@ class SQLiteMezzeStore private constructor(
             template.replace("<DB>", it)
         }
 
+    /**
+     * Escape LIKE-special characters (`%`, `_`, `\`) in user input. The
+     * matching SQL must use `LIKE ... ESCAPE '\\'`. Without this, a user
+     * query containing `_` in an identifier matches any char in that
+     * position, returning extra rows.
+     */
+    private fun escapeLikePattern(raw: String): String =
+        raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
     companion object {
         /**
          * Schema version. We've reset to baseline alongside the three-file
@@ -80,7 +89,7 @@ class SQLiteMezzeStore private constructor(
          * and regenerated from source. See
          * `docs/architecture/17-three-file-cache.md`.
          */
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
         const val PROJECT_DIR = ".mz"
         const val CACHE_FILE = "cache.sqlite"
         const val STDLIB_FILE = "stdlib.sqlite"
@@ -455,7 +464,7 @@ class SQLiteMezzeStore private constructor(
                     local_name TEXT NOT NULL,
                     target_module TEXT NOT NULL,
                     target_name TEXT NOT NULL,
-                    target_hash TEXT NOT NULL,
+                    target_hash TEXT,
                     start_line INTEGER NOT NULL,
                     start_col INTEGER NOT NULL,
                     end_line INTEGER NOT NULL,
@@ -704,14 +713,14 @@ class SQLiteMezzeStore private constructor(
 
             s.executeUpdate("""
                 -- imports: every `use` declaration across the project.
-                -- target_hash is NOT a FK; the imported decl may live in
-                -- another file/module not yet scattered.
+                -- target_hash is NOT a FK (imported decl may live in another
+                -- file not yet scattered) and is NULL when unresolved.
                 CREATE TABLE imports (
                     module_path   TEXT NOT NULL REFERENCES modules(path) ON DELETE CASCADE,
                     local_name    TEXT NOT NULL,
                     target_module TEXT NOT NULL,
                     target_name   TEXT NOT NULL,
-                    target_hash   TEXT NOT NULL,
+                    target_hash   TEXT,
                     start_line    INTEGER NOT NULL,
                     start_col     INTEGER NOT NULL,
                     end_line      INTEGER NOT NULL,
@@ -905,7 +914,14 @@ class SQLiteMezzeStore private constructor(
     }
 
     private val getIRStmt: PreparedStatement by lazy {
-        conn.prepareStatement(unionAll("SELECT ir FROM <DB>.blobs WHERE hash = ?") + " LIMIT 1")
+        // Filter `ir IS NOT NULL` PER-TIER (inside each branch of UNION ALL)
+        // rather than wrapping the union. Otherwise `LIMIT 1` picks `main`'s
+        // null-ir row over a later tier's real bytes, and we miss the IR.
+        // Scope-disjoint invariant means at most one tier has a real row;
+        // this just defends against an IR-less placeholder shadowing it.
+        conn.prepareStatement(
+            unionAll("SELECT ir FROM <DB>.blobs WHERE hash = ? AND ir IS NOT NULL") + " LIMIT 1"
+        )
     }
 
     @Synchronized
@@ -1002,13 +1018,14 @@ class SQLiteMezzeStore private constructor(
         conn.prepareStatement(unionAll("""
             SELECT n.module, n.name, n.hash FROM <DB>.names n
             JOIN <DB>.blobs b ON n.hash = b.hash
-            WHERE n.name LIKE ? AND b.visibility = 'PUBLIC'
+            WHERE n.name LIKE ? ESCAPE '\' AND b.visibility = 'PUBLIC'
         """.trimIndent()) + " LIMIT 50")
     }
 
     @Synchronized
     override fun searchExportsByName(query: String): List<NameRow> {
-        for (i in 0..2) searchExportsStmt.setString(i + 1, "$query%")
+        val pattern = "${escapeLikePattern(query)}%"
+        for (i in 0..2) searchExportsStmt.setString(i + 1, pattern)
         return searchExportsStmt.executeQuery().use { rs -> rs.collectNameRows() }
     }
 
@@ -1348,8 +1365,7 @@ class SQLiteMezzeStore private constructor(
 
     @Synchronized
     override fun getMetadataByPrefix(prefix: String): Map<String, String> {
-        val escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        getMetadataByPrefixStmt.setString(1, "$escaped%")
+        getMetadataByPrefixStmt.setString(1, "${escapeLikePattern(prefix)}%")
         return getMetadataByPrefixStmt.executeQuery().use { rs ->
             buildMap {
                 while (rs.next()) put(rs.getString(1), rs.getString(2))
@@ -1495,9 +1511,10 @@ class SQLiteMezzeStore private constructor(
             setString(2, localName)
             setString(3, targetModule)
             setString(4, targetName)
-            // Schema says NOT NULL but the column isn't FK'd; use empty string
-            // when the target hasn't been scattered yet.
-            setString(5, targetHash?.hex ?: "")
+            // target_hash is nullable; pass NULL (not "") when unresolved so
+            // direct SQL queries see a real NULL.
+            if (targetHash != null) setString(5, targetHash.hex)
+            else setNull(5, java.sql.Types.VARCHAR)
             setInt(6, startLine)
             setInt(7, startCol)
             setInt(8, endLine)
@@ -1653,13 +1670,14 @@ class SQLiteMezzeStore private constructor(
             SELECT module_path, decl_name, decl_kind, source_hash, hash,
                    start_line, start_col, end_line, end_col, doc, metadata
             FROM <DB>.decls
-            WHERE decl_name LIKE ? || '%'
+            WHERE decl_name LIKE ? ESCAPE '\'
         """.trimIndent()) + " ORDER BY decl_name LIMIT 200")
     }
 
     @Synchronized
     override fun searchDeclsByName(query: String): List<DeclRow> {
-        for (i in 0..2) searchDeclsByNameStmt.setString(i + 1, query)
+        val pattern = "${escapeLikePattern(query)}%"
+        for (i in 0..2) searchDeclsByNameStmt.setString(i + 1, pattern)
         return searchDeclsByNameStmt.executeQuery().use { rs ->
             buildList { while (rs.next()) add(rs.toDeclRow()) }
         }
@@ -1874,12 +1892,29 @@ class SQLiteMezzeStore private constructor(
     override fun <T> transaction(block: () -> T): T {
         val wasAutoCommit = conn.autoCommit
         conn.autoCommit = false
+        // Snapshot the L1 maps so we can restore them on rollback. Without
+        // this, a failed transaction leaves L1 holding writes that SQLite
+        // never committed — subsequent reads see ghost data. Cheap because
+        // L1 only holds hot entries (~hundreds, not all of cache).
+        val savedBlobs = HashMap(l1Blobs)
+        val savedIR = HashMap(l1IR)
+        val savedNames = HashMap(l1Names)
+        val savedModules = HashMap(l1Modules)
+        val savedParsedModules = HashMap(l1ParsedModules)
+        val savedTypedModules = HashMap(l1TypedModules)
         return try {
             val result = block()
             conn.commit()
             result
         } catch (e: Exception) {
             conn.rollback()
+            // Restore L1 to its pre-transaction state.
+            l1Blobs.clear(); l1Blobs.putAll(savedBlobs)
+            l1IR.clear(); l1IR.putAll(savedIR)
+            l1Names.clear(); l1Names.putAll(savedNames)
+            l1Modules.clear(); l1Modules.putAll(savedModules)
+            l1ParsedModules.clear(); l1ParsedModules.putAll(savedParsedModules)
+            l1TypedModules.clear(); l1TypedModules.putAll(savedTypedModules)
             throw e
         } finally {
             conn.autoCommit = wasAutoCommit
