@@ -1,5 +1,7 @@
 package com.mezze.language.codebase
 
+import com.mezze.language.store.*
+
 import com.mezze.language.typedast.Hash
 import java.io.File
 import java.sql.Connection

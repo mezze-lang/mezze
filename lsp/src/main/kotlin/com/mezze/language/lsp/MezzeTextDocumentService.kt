@@ -7,11 +7,11 @@ import com.mezze.language.typechecker.ResolvedImport
 import com.mezze.language.typechecker.ImportKind
 import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.diagnostics.display
-import com.mezze.language.codebase.MezzeStore
+import com.mezze.language.store.MezzeStore
 import com.mezze.language.codebase.SQLiteMezzeStore
 import com.mezze.language.codebase.StorePopulator
 import com.mezze.language.codebase.StoreHydration
-import com.mezze.language.codebase.CodebaseSerialization
+import com.mezze.language.store.StoreSerialization
 import com.mezze.language.formatter.Formatter
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parser.ParseException
@@ -1426,11 +1426,11 @@ class MezzeTextDocumentService(
             val store = projectStore
             if (store != null) {
                 try {
-                    for (declRow in store.getDeclsByKind(com.mezze.language.codebase.DeclKind.ABILITY)) {
+                    for (declRow in store.getDeclsByKind(com.mezze.language.store.DeclKind.ABILITY)) {
                         val blob = store.getBlob(declRow.hash) ?: continue
                         val bytes = blob.typed ?: continue
                         val typedAbility = try {
-                            com.mezze.language.codebase.CodebaseSerialization.deserializeTypedAbilityDecl(bytes)
+                            com.mezze.language.store.StoreSerialization.deserializeTypedAbilityDecl(bytes)
                         } catch (_: Throwable) { continue }
                         val typedOp = typedAbility.operations.firstOrNull { it.name == methodName }
                             ?: continue
@@ -2243,7 +2243,7 @@ class MezzeTextDocumentService(
         val items = mutableListOf<CompletionItem>()
         val seen = mutableSetOf<String>()
         try {
-            for (declRow in store.getDeclsByKind(com.mezze.language.codebase.DeclKind.LET)) {
+            for (declRow in store.getDeclsByKind(com.mezze.language.store.DeclKind.LET)) {
                 val name = declRow.declName
                 if (name in visibleNames) continue
                 if (!name.startsWith(prefix, ignoreCase = false) && !name.contains(prefix, ignoreCase = true)) continue
@@ -2947,18 +2947,18 @@ class MezzeTextDocumentService(
                 val importedAbilityNames = result.importedAbilities.keys + localAbilities.map { it.name }.toSet()
 
                 // Index abilities + impls once per dot-completion request.
-                val abilityDecls = store.getDeclsByKind(com.mezze.language.codebase.DeclKind.ABILITY)
+                val abilityDecls = store.getDeclsByKind(com.mezze.language.store.DeclKind.ABILITY)
                 val abilityModuleByHash = abilityDecls.associate { it.hash to it.modulePath }
                 val abilityNameByHash = abilityDecls.associate { it.hash to it.declName }
 
-                val implDecls = store.getDeclsByKind(com.mezze.language.codebase.DeclKind.IMPL)
+                val implDecls = store.getDeclsByKind(com.mezze.language.store.DeclKind.IMPL)
                 var step4Added = 0
                 for (implRow in implDecls) {
                     val implBlob = store.getBlob(implRow.hash) ?: continue
-                    if (implBlob.kind != com.mezze.language.codebase.BlobKind.ABILITY_IMPL) continue
+                    if (implBlob.kind != com.mezze.language.store.BlobKind.ABILITY_IMPL) continue
                     val implTyped = try {
                         val bytes = implBlob.typed ?: continue
-                        com.mezze.language.codebase.CodebaseSerialization.deserializeTypedAbilityImpl(bytes)
+                        com.mezze.language.store.StoreSerialization.deserializeTypedAbilityImpl(bytes)
                     } catch (_: Exception) { continue }
 
                     val abilityName = abilityNameByHash[implTyped.abilityHash] ?: continue
@@ -2976,7 +2976,7 @@ class MezzeTextDocumentService(
                     val abilityBlob = store.getBlob(abilityHashRow.hash) ?: continue
                     val abilityDecl = try {
                         val bytes = abilityBlob.typed ?: continue
-                        com.mezze.language.codebase.CodebaseSerialization.deserializeTypedAbilityDecl(bytes)
+                        com.mezze.language.store.StoreSerialization.deserializeTypedAbilityDecl(bytes)
                     } catch (_: Exception) { continue }
 
                     for (op in abilityDecl.operations) {
@@ -4094,7 +4094,7 @@ class MezzeTextDocumentService(
 
             val out = mutableListOf<CallHierarchyIncomingCall>()
             for (edge in store.getEdgesTo(targetHash)) {
-                if (edge.kind != com.mezze.language.codebase.EdgeKind.CALLS) continue
+                if (edge.kind != com.mezze.language.store.EdgeKind.CALLS) continue
                 val callerItem = makeCallHierarchyItem(edge.fromHash) ?: continue
                 // `fromRanges` is the list of call-site ranges inside the
                 // caller's body. We resolve them via the usages table —
@@ -4131,7 +4131,7 @@ class MezzeTextDocumentService(
 
             val out = mutableListOf<CallHierarchyOutgoingCall>()
             for (edge in store.getEdgesFrom(callerHash)) {
-                if (edge.kind != com.mezze.language.codebase.EdgeKind.CALLS) continue
+                if (edge.kind != com.mezze.language.store.EdgeKind.CALLS) continue
                 val calleeItem = makeCallHierarchyItem(edge.toHash) ?: continue
                 val ranges = store.getUsages(edge.toHash)
                     .filter { it.filePath == callerFilePath }
@@ -4175,14 +4175,14 @@ class MezzeTextDocumentService(
         return item
     }
 
-    private fun declKindToSymbolKindForCallHierarchy(kind: com.mezze.language.codebase.DeclKind): SymbolKind =
+    private fun declKindToSymbolKindForCallHierarchy(kind: com.mezze.language.store.DeclKind): SymbolKind =
         when (kind) {
-            com.mezze.language.codebase.DeclKind.LET -> SymbolKind.Function
-            com.mezze.language.codebase.DeclKind.TYPE -> SymbolKind.Class
-            com.mezze.language.codebase.DeclKind.ABILITY -> SymbolKind.Interface
-            com.mezze.language.codebase.DeclKind.EFFECT -> SymbolKind.Event
-            com.mezze.language.codebase.DeclKind.PERFORMER -> SymbolKind.Operator
-            com.mezze.language.codebase.DeclKind.IMPL -> SymbolKind.Method
+            com.mezze.language.store.DeclKind.LET -> SymbolKind.Function
+            com.mezze.language.store.DeclKind.TYPE -> SymbolKind.Class
+            com.mezze.language.store.DeclKind.ABILITY -> SymbolKind.Interface
+            com.mezze.language.store.DeclKind.EFFECT -> SymbolKind.Event
+            com.mezze.language.store.DeclKind.PERFORMER -> SymbolKind.Operator
+            com.mezze.language.store.DeclKind.IMPL -> SymbolKind.Method
         }
 
     // ========== Type Hierarchy ==========
@@ -4249,7 +4249,7 @@ class MezzeTextDocumentService(
             // Walk the IMPLEMENTS edges from this hash — each target is a
             // supertype (ability or effect).
             for (edge in store.getEdgesFrom(hash)) {
-                if (edge.kind != com.mezze.language.codebase.EdgeKind.IMPLEMENTS) continue
+                if (edge.kind != com.mezze.language.store.EdgeKind.IMPLEMENTS) continue
                 makeTypeHierarchyItem(edge.toHash)?.let { out.add(it) }
             }
             out
@@ -4274,7 +4274,7 @@ class MezzeTextDocumentService(
             // Generic: every IMPLEMENTS edge pointing at this hash.
             // (Captures effect → performer relationships.)
             for (edge in store.getEdgesTo(hash)) {
-                if (edge.kind != com.mezze.language.codebase.EdgeKind.IMPLEMENTS) continue
+                if (edge.kind != com.mezze.language.store.EdgeKind.IMPLEMENTS) continue
                 makeTypeHierarchyItem(edge.fromHash)?.let { out.add(it) }
             }
             out.distinctBy { it.data as String }

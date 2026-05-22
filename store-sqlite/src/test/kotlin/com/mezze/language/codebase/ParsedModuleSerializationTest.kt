@@ -1,5 +1,7 @@
 package com.mezze.language.codebase
 
+import com.mezze.language.store.*
+
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
@@ -12,8 +14,8 @@ class ParsedModuleSerializationTest {
             pub let main = {} -> "hi"
         """.trimIndent()
         val parsed = MezzeParser().parseParsedModule(source, "x.mz")
-        val blob = CodebaseSerialization.serializeParsedModule(parsed)
-        val back = CodebaseSerialization.deserializeParsedModule(blob)
+        val blob = StoreSerialization.serializeParsedModule(parsed)
+        val back = StoreSerialization.deserializeParsedModule(blob)
         assertEquals(parsed.decls.size, back.decls.size)
     }
 
@@ -29,8 +31,8 @@ class ParsedModuleSerializationTest {
               println { msg = greet { who = "stage1f" } }
         """.trimIndent()
         val parsed = MezzeParser().parseParsedModule(source, "x.mz")
-        val blob = CodebaseSerialization.serializeParsedModule(parsed)
-        val back = CodebaseSerialization.deserializeParsedModule(blob)
+        val blob = StoreSerialization.serializeParsedModule(parsed)
+        val back = StoreSerialization.deserializeParsedModule(blob)
         assertEquals(parsed.decls.size, back.decls.size)
     }
 }

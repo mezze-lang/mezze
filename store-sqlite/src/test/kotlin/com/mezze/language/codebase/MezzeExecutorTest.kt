@@ -1,5 +1,7 @@
 package com.mezze.language.codebase
 
+import com.mezze.language.store.*
+
 import com.mezze.language.truffleir.*
 import com.mezze.language.typedast.Hash
 import org.junit.jupiter.api.*
@@ -24,7 +26,7 @@ class MezzeExecutorTest {
     private fun makeHash(c: Char) = Hash(c.toString().repeat(64))
 
     private fun storeFunctionIR(hash: Hash, ir: FunctionIR) {
-        val irBytes = CodebaseSerialization.serializeFunctionIR(ir)
+        val irBytes = StoreSerialization.serializeFunctionIR(ir)
         store.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, null, irBytes)
     }
 
@@ -74,7 +76,7 @@ class MezzeExecutorTest {
         val ir = simpleFunctionIR(hash, "in_store2", LongLitIR(99, src))
 
         // Only in store2
-        val irBytes = CodebaseSerialization.serializeFunctionIR(ir)
+        val irBytes = StoreSerialization.serializeFunctionIR(ir)
         store2.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, null, irBytes)
 
         val loaded = multiExecutor.loadIR(hash)

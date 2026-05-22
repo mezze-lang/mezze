@@ -1,10 +1,10 @@
 package com.mezze.language.cli
 
-import com.mezze.language.codebase.CodebaseSerialization
+import com.mezze.language.store.StoreSerialization
 import com.mezze.language.codebase.SQLiteMezzeStore
-import com.mezze.language.codebase.BlobKind
+import com.mezze.language.store.BlobKind
 import com.mezze.language.codebase.StorePopulator
-import com.mezze.language.codebase.Visibility
+import com.mezze.language.store.Visibility
 import com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX
 import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.PrecompiledStdlib
@@ -148,7 +148,7 @@ fun main(args: Array<String>) {
             // matching the user-code merge path in scatterFunctionIRs.
             for ((hash, fn) in functions) {
                 val existing = store.getBlob(hash)
-                val irBytes = CodebaseSerialization.serializeFunctionIR(fn)
+                val irBytes = StoreSerialization.serializeFunctionIR(fn)
                 store.putBlob(
                     hash,
                     existing?.kind ?: BlobKind.FUNCTION,

@@ -1,6 +1,6 @@
 package com.mezze.language.lsp
 
-import com.mezze.language.codebase.DeclKind
+import com.mezze.language.store.DeclKind
 import com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX
 import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.messages.Either
