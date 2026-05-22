@@ -1249,4 +1249,78 @@ class FormatterTest {
         val second = formatter.format(first)
         assertEquals(first, second, "do-bind formatting should be idempotent")
     }
+
+    // =========================================================================
+    // Ability constraints with associated-type bindings — round-trip coverage
+    // =========================================================================
+    //
+    // The pre-arrow `with` clause supports a `having 'tv = T, 'tv2 = T2` suffix
+    // per ability for associated-type bindings (e.g. `Container 'c having
+    // 'item = Int`). Make sure the formatter (a) emits the `having` clause at
+    // all, (b) preserves multi-binding order, and (c) round-trips idempotently
+    // across the trickier shapes.
+
+    @Test
+    fun `format ability constraint with associated type binding`() {
+        val input = "pub let f: {c: 'c} with Container 'c having 'item = Int -> Int = {c} -> 0"
+        val output = formatter.format(input)
+        assertTrue(
+            output.contains("with Container 'c having 'item = Int"),
+            "Missing `having 'item = Int`. Output:\n$output",
+        )
+    }
+
+    @Test
+    fun `format ability constraint with multiple associated type bindings`() {
+        val input = "pub let f: {i: 'i} with Iterator 'i having 'item = Int, 'state = Bool -> Int = {i} -> 0"
+        val output = formatter.format(input)
+        assertTrue(
+            output.contains("with Iterator 'i having 'item = Int, 'state = Bool"),
+            "Missing multi-binding `having` clause. Output:\n$output",
+        )
+    }
+
+    @Test
+    fun `format multiple constraints each with their own associated type bindings`() {
+        val input = "pub let f: {a: 'a, b: 'b} with Container 'a having 'item = Int, Iterator 'b having 'elem = Str -> {} = {a, b} -> {}"
+        val output = formatter.format(input)
+        // Each constraint keeps its own `having` clause; commas inside one
+        // clause must not split out into the next constraint.
+        assertTrue(
+            output.contains("with Container 'a having 'item = Int, Iterator 'b having 'elem = Str"),
+            "Constraint/having grouping broken. Output:\n$output",
+        )
+    }
+
+    @Test
+    fun `format mixed constraints — bare and with having clauses`() {
+        val input = "pub let f: {a: 'a, b: 'b} with Eq 'a, Container 'b having 'item = Int -> {} = {a, b} -> {}"
+        val output = formatter.format(input)
+        assertTrue(
+            output.contains("with Eq 'a, Container 'b having 'item = Int"),
+            "Bare + having-bearing mix broken. Output:\n$output",
+        )
+    }
+
+    @Test
+    fun `format ability constraint with complex associated type`() {
+        // Compound type as the binding RHS: Result (Option Int)
+        val input = "pub let f: {c: 'c} with Container 'c having 'item = (Option Int) -> Int = {c} -> 0"
+        val output = formatter.format(input)
+        assertTrue(
+            output.contains("'item = (Option Int)") ||
+                output.contains("'item = Option Int"),
+            "Compound-type associated binding lost. Output:\n$output",
+        )
+    }
+
+    @Test
+    fun `format ability constraint round-trip is idempotent`() {
+        // Idempotence guard: formatting twice yields the same string. Catches
+        // subtle shape drift (e.g. spaces around `=`, comma placement).
+        val input = "pub let f: {a: 'a, b: 'b} with Container 'a having 'item = Int, Eq 'b -> Bool = {a, b} -> true"
+        val first = formatter.format(input)
+        val second = formatter.format(first)
+        assertEquals(first, second, "with-clause formatting should be idempotent")
+    }
 }

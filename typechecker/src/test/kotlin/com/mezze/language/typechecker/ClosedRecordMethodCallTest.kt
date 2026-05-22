@@ -18,7 +18,7 @@ import java.nio.file.Paths
  * Behaviours:
  *
  * 1. `let f = { xs } -> xs.size {}` infers
- *    `f : { xs: 'a } -> Int with Sized 'a`. Polymorphic in 'a, constrained
+ *    `f : { xs: 'a } with Sized 'a -> Int`. Polymorphic in 'a, constrained
  *    to types that implement Sized.
  *
  * 2. Calling `f` with a value whose type implements Sized (Seq, Str, …) works.

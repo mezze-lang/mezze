@@ -104,7 +104,7 @@ class AbilityConstraintInferenceTest {
                 mysize = {it} -> 42,
             }
 
-            let probe : {m: 'a} -> Int with MySized 'a = {m} -> m.mysize {}
+            let probe : {m: 'a} with MySized 'a -> Int = {m} -> m.mysize {}
         """.trimIndent()
 
         val result = typeCheck(code)
@@ -127,7 +127,7 @@ class AbilityConstraintInferenceTest {
                 mysize = {it} -> 42,
             }
 
-            let probe : {m: 'a} -> Int with MySized 'a = {m} -> m.mysize {}
+            let probe : {m: 'a} with MySized 'a -> Int = {m} -> m.mysize {}
 
             let n = probe { m = 7 }
         """.trimIndent()
@@ -147,7 +147,7 @@ class AbilityConstraintInferenceTest {
         // TotallyMadeUpAbility doesn't exist anywhere. Should error, not silently
         // accept the constraint as if it were a real ability.
         val code = """
-            let x : {m: 'a} -> Int with TotallyMadeUpAbility 'a = {m} -> 0
+            let x : {m: 'a} with TotallyMadeUpAbility 'a -> Int = {m} -> 0
         """.trimIndent()
 
         val ex = assertThrows<TypeCheckError> { typeCheck(code) }
@@ -182,7 +182,7 @@ class AbilityConstraintInferenceTest {
                 mysize = {it} -> 42,
             }
 
-            let x : {m: 'a} -> Int with MySized 'a = {m} -> m.wrong_name_size {}
+            let x : {m: 'a} with MySized 'a -> Int = {m} -> m.wrong_name_size {}
         """.trimIndent()
 
         // Today: silently passes with structural type (BUG).
@@ -312,7 +312,7 @@ class AbilityConstraintInferenceTest {
         // Sized comes from prelude. The annotation should be honored just like
         // any same-module ability — currently a known bug (#304).
         val code = """
-            let x : {m: 'a} -> Int with Sized 'a = {m} -> m.size {}
+            let x : {m: 'a} with Sized 'a -> Int = {m} -> m.size {}
         """.trimIndent()
 
         // Test that the inferred type carries the constraint, not that it

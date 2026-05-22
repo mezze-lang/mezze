@@ -347,7 +347,7 @@ public class UserDefinedAbilityTest {
                 encode = {} -> "string_encoded"
             }
 
-            let encode_value: {x: 'a} -> Str with Encoder 'a =
+            let encode_value: {x: 'a} with Encoder 'a -> Str =
                 {x} -> x.encode {}
 
             encode_value {x = 42}
@@ -367,7 +367,7 @@ public class UserDefinedAbilityTest {
                 encode = {} -> "int"
             }
 
-            let encode_value: {x: 'a} -> Str with Encoder 'a =
+            let encode_value: {x: 'a} with Encoder 'a -> Str =
                 {x} -> x.encode {}
 
             encode_value {x = 42}
@@ -384,7 +384,7 @@ public class UserDefinedAbilityTest {
                 encode = {} -> "string"
             }
 
-            let encode_value: {x: 'a} -> Str with Encoder 'a =
+            let encode_value: {x: 'a} with Encoder 'a -> Str =
                 {x} -> x.encode {}
 
             encode_value {x = "hello"}
@@ -413,7 +413,7 @@ public class UserDefinedAbilityTest {
                 compare = {it, r} -> it == r
             }
 
-            let encode_if_equal: {x: 'a, y: 'a} -> Str with Encoder 'a, Comparer 'a =
+            let encode_if_equal: {x: 'a, y: 'a} with Encoder 'a, Comparer 'a -> Str =
                 {x, y} -> if x.compare {r = y}
                     then x.encode {}
                     else "not equal"
@@ -436,10 +436,10 @@ public class UserDefinedAbilityTest {
                 encode = {} -> "int_value"
             }
 
-            let inner_encode: {x: 'a} -> Str with Encoder 'a =
+            let inner_encode: {x: 'a} with Encoder 'a -> Str =
                 {x} -> x.encode {}
 
-            let outer_encode: {x: 'a} -> Str with Encoder 'a =
+            let outer_encode: {x: 'a} with Encoder 'a -> Str =
                 {x} -> inner_encode {x = x}
 
             outer_encode {x = 42}
@@ -459,7 +459,7 @@ public class UserDefinedAbilityTest {
                 encode = {} -> "encoded_int"
             }
 
-            let encode_value: {x: 'a} -> Str with Encoder 'a =
+            let encode_value: {x: 'a} with Encoder 'a -> Str =
                 {x} -> x.encode {}
 
             let apply_encoder = {f, val} -> f {x = val}
@@ -481,7 +481,7 @@ public class UserDefinedAbilityTest {
                 encode = {} -> "int"
             }
 
-            let encode_value: {x: 'a} -> Str with Encoder 'a =
+            let encode_value: {x: 'a} with Encoder 'a -> Str =
                 {x} -> x.encode {}
 
             encode_value {x = 42}
@@ -501,7 +501,7 @@ public class UserDefinedAbilityTest {
                 encode = {} -> "int"
             }
 
-            let encode_value: {x: 'a} -> Str with Encoder 'a =
+            let encode_value: {x: 'a} with Encoder 'a -> Str =
                 {x} -> x.encode {}
 
             do
@@ -523,7 +523,7 @@ public class UserDefinedAbilityTest {
                 encode = {} -> "int"
             }
 
-            let encode_value: {x: 'a} -> Str with Encoder 'a =
+            let encode_value: {x: 'a} with Encoder 'a -> Str =
                 {x} -> x.encode {}
 
             do
@@ -551,7 +551,7 @@ public class UserDefinedAbilityTest {
                 encode = {} -> "string"
             }
 
-            let encode_value: {x: 'a} -> Str with Encoder 'a =
+            let encode_value: {x: 'a} with Encoder 'a -> Str =
                 {x} -> x.encode {}
 
             do
@@ -579,7 +579,7 @@ public class UserDefinedAbilityTest {
                 encode = {} -> "string"
             }
 
-            let encode_value: {x: 'a} -> Str with Encoder 'a =
+            let encode_value: {x: 'a} with Encoder 'a -> Str =
                 {x} -> x.encode {}
 
             do
@@ -607,7 +607,7 @@ public class UserDefinedAbilityTest {
                 encode = {} -> "string"
             }
 
-            let encode_value: {x: 'a} -> Str with Encoder 'a =
+            let encode_value: {x: 'a} with Encoder 'a -> Str =
                 {x} -> x.encode {}
 
             do

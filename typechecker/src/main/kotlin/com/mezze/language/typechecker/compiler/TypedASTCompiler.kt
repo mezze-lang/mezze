@@ -1354,7 +1354,7 @@ class TypedASTCompiler(
      * Compile a call argument, wrapping any dict-needing function references in
      * wrapper lambdas that capture the resolved dict functions.
      *
-     * When a polymorphic function like `encode_value: {x: 'a} -> Str with Encoder 'a`
+     * When a polymorphic function like `encode_value: {x: 'a} with Encoder 'a -> Str`
      * is passed as a value (e.g., `apply_encoder {f = encode_value, val = 42}`),
      * the dict params aren't populated. This method detects such references and
      * wraps them in closures that inject the resolved dict at call time.

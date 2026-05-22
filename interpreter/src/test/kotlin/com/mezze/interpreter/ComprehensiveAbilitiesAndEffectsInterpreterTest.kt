@@ -69,7 +69,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
               show = {it} -> it
             }
 
-            let displayValue: {val: 'a} -> Str with Show 'a = {val} ->
+            let displayValue: {val: 'a} with Show 'a -> Str = {val} ->
               val.show {}
 
             displayValue {val = 42}

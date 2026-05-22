@@ -434,7 +434,7 @@ class ConstraintGenerator(
                                 // We only prevent generalization for user-defined abilities that need explicit implementations.
                                 // EXCEPTION: If the user explicitly declared ability constraints in their type annotation,
                                 // we MUST allow generalization. The user is explicitly telling us "this is polymorphic with these constraints".
-                                // Example: let encode_value: {x: 'a} -> String with Encoder 'a = ...
+                                // Example: let encode_value: {x: 'a} with Encoder 'a -> String = ...
                                 // The user explicitly wants this to be polymorphic over 'a with Encoder 'a constraint.
                                 val hasExplicitAbilityConstraints = when (val annotation = item.typeAnnotation) {
                                     is ParsedFunctionType -> annotation.abilityConstraints.isNotEmpty()

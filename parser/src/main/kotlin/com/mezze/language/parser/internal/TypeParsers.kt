@@ -32,6 +32,63 @@ private fun typeVarJuxtaposedMessage(fieldName: String): String =
     "If you want to parameterize over a wrapper type, declare the relationship in the impl head: " +
     "`impl Foo for Result 'a 'e where { ... }` not `{it: 'm 'a}`."
 
+/**
+ * Build a fix-it hint for `{p} -> Ret <Eff> with C` rewriting the user's
+ * own signature to the canonical `{p} with C -> Ret <Eff>` form. Returns a
+ * list of hint lines suitable for `ParseResult.Failure.hints`.
+ *
+ * Slices the source between the relevant tokens; falls back to a generic
+ * example if the source isn't available (e.g. tests that construct
+ * TokenStreams directly).
+ */
+private fun buildWithAfterArrowFix(
+    source: String?,
+    paramStart: Token,
+    arrowToken: Token,
+    withToken: Token,
+    tokensAfterWith: TokenStream,
+): List<String> {
+    // Generic fallback when we can't slice the original source.
+    val generic = listOf(
+        "move the 'with' clause to before the '->', e.g.:",
+        "    { x: 'a, y: 'a } with NumAdd 'a -> 'a <Log>",
+        "not:",
+        "    { x: 'a, y: 'a } -> 'a <Log> with NumAdd 'a",
+    )
+    if (source == null) return generic
+
+    // Slurp tokens for the with-clause: from `with` until we hit a terminator
+    // (`=` for let-assignment, EOF, `,` at top level, `}`/`)` for nested
+    // contexts). End offset = the start of the terminator token, or end of
+    // source if no terminator found.
+    var idx = tokensAfterWith.position
+    val tokens = tokensAfterWith.tokens
+    var endOffset = source.length
+    while (idx < tokens.size) {
+        val t = tokens[idx]
+        when (t.type) {
+            TokenType.ASSIGN, TokenType.RBRACE, TokenType.RPAREN, TokenType.COMMA -> {
+                endOffset = t.position
+                break
+            }
+            else -> idx++
+        }
+    }
+
+    // Slice the original source. Bail to generic if any offsets are odd.
+    return try {
+        val paramSlice = source.substring(paramStart.position, arrowToken.position).trimEnd()
+        val returnSlice = source.substring(arrowToken.position + 2, withToken.position).trim() // +2 to skip "->"
+        val withSlice = source.substring(withToken.position, endOffset).trim()
+        listOf(
+            "rewrite as:",
+            "    $paramSlice $withSlice -> $returnSlice",
+        )
+    } catch (_: StringIndexOutOfBoundsException) {
+        generic
+    }
+}
+
 // Record type entry parser (helper for record type annotations)
 internal val MezzeParser.recordTypeEntryParser: Parser<ParsedRecordTypeEntry>
     get() = { stream ->
@@ -288,97 +345,52 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                             EffectRowParseResult(emptyList(), emptyList(), false, false, returnType.remaining)
                         }
 
-                        // Also check for 'with' keyword AFTER the return type
-                        var streamAfterWith = effectRowResult.stream
+                        // `with` after the return type is rejected — constraints must
+                        // come BEFORE the arrow. Catching this here gives a precise
+                        // loc pointing at the misplaced `with` and a fix-it that
+                        // rewrites the user's actual signature. Pre-arrow form is the
+                        // canonical position; see #35.
+                        val streamAfterWith = effectRowResult.stream
                         val streamBeforeWithAfter = skipNewlines(effectRowResult.stream)
-                        if (streamBeforeWithAfter.current()?.type == TokenType.WITH) {
-                            var abilityStreamAfter = skipNewlines(streamBeforeWithAfter.advance())
+                        val postArrowWithToken =
+                            if (streamBeforeWithAfter.current()?.type == TokenType.WITH) {
+                                streamBeforeWithAfter.current()
+                            } else null
 
-                            while (true) {
-                                val abilityNameResult = parseQualifiedName(abilityStreamAfter)
-                                if (abilityNameResult !is ParseResult.Success) break
-                                val abilityName = abilityNameResult.value
-                                val constraintStart = abilityStreamAfter.current()
-                                abilityStreamAfter = skipNewlines(abilityNameResult.remaining)
-
-                                val typeArgs = mutableListOf<ParsedTypeAnnotation>()
-                                while (true) {
-                                    val typeResult = atomicTypeAnnotation(abilityStreamAfter)
-                                    when (typeResult) {
-                                        is ParseResult.Success -> {
-                                            typeArgs.add(typeResult.value)
-                                            abilityStreamAfter = skipNewlines(typeResult.remaining)
-                                            val nextToken = abilityStreamAfter.current()
-                                            if (nextToken?.type == TokenType.ASSIGN ||
-                                                nextToken?.type == TokenType.COMMA ||
-                                                nextToken?.type == TokenType.WITH ||
-                                                nextToken?.type == TokenType.HAVING ||
-                                                nextToken == null) {
-                                                break
-                                            }
-                                        }
-                                        is ParseResult.Failure -> break
-                                    }
-                                }
-
-                                val associatedTypeBindingsAfter = mutableMapOf<String, ParsedTypeAnnotation>()
-                                if (abilityStreamAfter.current()?.type == TokenType.HAVING) {
-                                    abilityStreamAfter = skipNewlines(abilityStreamAfter.advance())
-                                    while (true) {
-                                        val typeVarResult = identifierParser(abilityStreamAfter)
-                                        if (typeVarResult !is ParseResult.Success) break
-                                        val typeVarName = typeVarResult.value.text
-                                        if (!typeVarName.startsWith("'")) break
-                                        abilityStreamAfter = skipNewlines(typeVarResult.remaining)
-                                        if (abilityStreamAfter.current()?.type != TokenType.ASSIGN) break
-                                        abilityStreamAfter = skipNewlines(abilityStreamAfter.advance())
-                                        val typeResult = atomicTypeAnnotation(abilityStreamAfter)
-                                        if (typeResult !is ParseResult.Success) break
-                                        associatedTypeBindingsAfter[typeVarName] = typeResult.value
-                                        abilityStreamAfter = skipNewlines(typeResult.remaining)
-                                        if (abilityStreamAfter.current()?.type == TokenType.COMMA) {
-                                            val afterComma = skipNewlines(abilityStreamAfter.advance())
-                                            val nextToken = afterComma.current()
-                                            if (nextToken?.type == TokenType.IDENTIFIER && nextToken.text.startsWith("'")) {
-                                                abilityStreamAfter = afterComma
-                                                continue
-                                            } else {
-                                                break
-                                            }
-                                        } else {
-                                            break
-                                        }
-                                    }
-                                }
-
-                                val cLoc = if (constraintStart != null) spanLocTo(constraintStart, abilityStreamAfter, file) else streamLoc(abilityStreamAfter, file)
-                                abilityConstraints.add(ParsedFnAbilityConstraint(abilityName, typeArgs, associatedTypeBindingsAfter, cLoc))
-
-                                if (abilityStreamAfter.current()?.type == TokenType.COMMA) {
-                                    abilityStreamAfter = skipNewlines(abilityStreamAfter.advance())
-                                } else {
-                                    break
-                                }
-                            }
-
-                            streamAfterWith = abilityStreamAfter
-                        }
-
-                        val effectRow = if (effectRowResult.effects.isNotEmpty() || effectRowResult.effectAnnotations.isNotEmpty() || effectRowResult.isPolymorphic || effectRowResult.isPerformed) {
-                            ParsedEffectRow(
-                                effects = effectRowResult.effects,
-                                effectAnnotations = effectRowResult.effectAnnotations,
-                                isPolymorphic = effectRowResult.isPolymorphic,
-                                isPerformed = effectRowResult.isPerformed,
-                                loc = spanLocTo(startToken, streamAfterWith, file)
+                        if (postArrowWithToken != null) {
+                            val hint = buildWithAfterArrowFix(
+                                source = currentSource,
+                                paramStart = startToken,
+                                arrowToken = arrow,
+                                withToken = postArrowWithToken,
+                                tokensAfterWith = streamBeforeWithAfter,
                             )
-                        } else null
+                            ParseResult.Failure(
+                                message = "'with' clause must come BEFORE the arrow, not after the return type.",
+                                position = postArrowWithToken.position,
+                                line = postArrowWithToken.line,
+                                column = postArrowWithToken.column,
+                                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0120_WITH_AFTER_ARROW,
+                                isFatal = true,
+                                hints = hint,
+                            )
+                        } else {
+                            val effectRow = if (effectRowResult.effects.isNotEmpty() || effectRowResult.effectAnnotations.isNotEmpty() || effectRowResult.isPolymorphic || effectRowResult.isPerformed) {
+                                ParsedEffectRow(
+                                    effects = effectRowResult.effects,
+                                    effectAnnotations = effectRowResult.effectAnnotations,
+                                    isPolymorphic = effectRowResult.isPolymorphic,
+                                    isPerformed = effectRowResult.isPerformed,
+                                    loc = spanLocTo(startToken, streamAfterWith, file)
+                                )
+                            } else null
 
-                        val fnLoc = spanLocTo(startToken, streamAfterWith, file)
-                        ParseResult.Success(
-                            ParsedFunctionType(result.value, returnType.value, effectRow, abilityConstraints, fnLoc),
-                            streamAfterWith
-                        )
+                            val fnLoc = spanLocTo(startToken, streamAfterWith, file)
+                            ParseResult.Success(
+                                ParsedFunctionType(result.value, returnType.value, effectRow, abilityConstraints, fnLoc),
+                                streamAfterWith
+                            )
+                        }
                     }
                     is ParseResult.Failure -> break
                 }

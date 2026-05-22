@@ -42,7 +42,7 @@ class AbilityConstraintTest {
             use std::codec::core::{EncodeRepr, CodecConfig, default_config}
             use std::codec::json::{Json, JsonFmt, json_fmt, to_str}
 
-            let encode_to_json: { body: 'a } -> Str with EncodeRepr 'a = { body } -> do
+            let encode_to_json: { body: 'a } with EncodeRepr 'a -> Str = { body } -> do
                 let result = body.encode_repr { fmt = json_fmt, config = default_config }
                 match result is
                     Ok { val } -> to_str { json = val }

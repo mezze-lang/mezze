@@ -105,7 +105,13 @@ data class ParsedVariantTypeCtor(
  * Examples:
  * - `{ x: Int } -> Str` → paramType={x:Int}, returnType=Str, effects=null
  * - `{ x: Int } -> Str <FileSystem>` → effects=<FileSystem>
- * - `{ x: 'a } -> Bool with Eq 'a` → abilityConstraints=[Eq 'a]
+ * - `{ x: 'a } with Eq 'a -> Bool` → abilityConstraints=[Eq 'a]
+ *
+ * Syntax order: `{ params } with Constraints -> Return <Effects>`. The
+ * `with` clause MUST precede the arrow — post-arrow `with` is rejected
+ * by the parser (P0120). This keeps the return slot focused on the value
+ * type and its effect row, with constraints living adjacent to where
+ * type variables are introduced (the param block).
  */
 @Serializable
 data class ParsedFunctionType(

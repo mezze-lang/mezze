@@ -245,7 +245,7 @@ class AbilityValidationTest {
     @Test
     fun `test type variable not specialized should fail`() {
         // With method-call syntax, the ability constraint is inferred on the wrapper.
-        // display gets type {value: 'a} -> Str with Show 'a
+        // display gets type {value: 'a} with Show 'a -> Str
         // Calling display {value = 42} resolves Show Int — should succeed.
         // Test instead that calling with a type that has no impl FAILS.
         val source = """
@@ -403,7 +403,7 @@ class AbilityValidationTest {
               show = {it} -> "number"
             }
 
-            let display: {val: 'a} -> Str with Show 'a = {val} ->
+            let display: {val: 'a} with Show 'a -> Str = {val} ->
               val.show {}
 
             display {val = 3.14}
@@ -433,7 +433,7 @@ class AbilityValidationTest {
               show = {it} -> "float"
             }
 
-            let display: {val: 'a} -> Str with Show 'a = {val} ->
+            let display: {val: 'a} with Show 'a -> Str = {val} ->
               val.show {}
 
             display {val = 3.14}
@@ -488,7 +488,7 @@ class AbilityValidationTest {
               eq: {it: Int, r: Int} -> Bool = {it, r} -> it == r
             }
 
-            let compare: {x: 'a, y: 'a} -> Str with Show 'a, Eq 'a = {x, y} ->
+            let compare: {x: 'a, y: 'a} with Show 'a, Eq 'a -> Str = {x, y} ->
               if x.eq {r = y} then
                 "Equal: $(x.show {})"
               else
@@ -520,7 +520,7 @@ class AbilityValidationTest {
 
             # Missing Eq String implementation
 
-            let compare: {x: Str, y: Str} -> Str with Show Str, Eq String = {x, y} ->
+            let compare: {x: Str, y: Str} with Show Str, Eq String -> Str = {x, y} ->
               if x.eq {r = y} then
                 "Equal: $(x.show {})"
               else
@@ -549,10 +549,10 @@ class AbilityValidationTest {
               show = {it} -> int::to_str {n = it}
             }
 
-            let display: {val: 'a} -> Str with Show 'a = {val} ->
+            let display: {val: 'a} with Show 'a -> Str = {val} ->
               val.show {}
 
-            let format: {x: 'a} -> Str with Show 'a = {x} ->
+            let format: {x: 'a} with Show 'a -> Str = {x} ->
               "[$(display {val = x})]"
 
             format {x = 42}
@@ -577,7 +577,7 @@ class AbilityValidationTest {
               convert = {it} -> 0
             }
 
-            let transform: {val: Float} -> Int with Convert Int Float = {val} ->
+            let transform: {val: Float} with Convert Int Float -> Int = {val} ->
               val.convert {}
 
             # This should fail - no Convert Int Float implementation
@@ -604,7 +604,7 @@ class AbilityValidationTest {
               show = {it} -> int::to_str {n = it}
             }
 
-            let display: {val: 'a} -> Str with Show 'a = {val} ->
+            let display: {val: 'a} with Show 'a -> Str = {val} ->
               val.show {}
 
             # This should pass - Int has Show implementation
@@ -638,7 +638,7 @@ class AbilityValidationTest {
             }
 
             # Single-parameter constraint: Show 'a
-            let format: {x: 'a} -> Str with Show 'a = {x} ->
+            let format: {x: 'a} with Show 'a -> Str = {x} ->
               "Value: $(x.show {})"
 
             # Should find impl Show for Int, not look for impl Show for Int Int
@@ -665,7 +665,7 @@ class AbilityValidationTest {
             }
 
             # Multi-parameter constraint: Convert 'b 'a with 'to='b, 'from='a
-            let parse: {s: 'a} -> 'b with Convert 'b 'a = {s} ->
+            let parse: {s: 'a} with Convert 'b 'a -> 'b = {s} ->
               s.convert {}
 
             # Should find impl Convert for Int Str
@@ -696,10 +696,10 @@ class AbilityValidationTest {
               show = {it} -> it
             }
 
-            let wrap: {x: 'a} -> Str with Show 'a = {x} ->
+            let wrap: {x: 'a} with Show 'a -> Str = {x} ->
               "[$(x.show {})]"
 
-            let doubleWrap: {x: 'a} -> Str with Show 'a = {x} ->
+            let doubleWrap: {x: 'a} with Show 'a -> Str = {x} ->
               "<<$(wrap {x = x})>>"
 
             # Should propagate Show constraint through both functions
@@ -729,7 +729,7 @@ class AbilityValidationTest {
             }
 
             # Constraint has concrete type (Json) and polymorphic type ('a)
-            let toJson: {data: 'a} -> Json with Encode Json 'a = {data} ->
+            let toJson: {data: 'a} with Encode Json 'a -> Json = {data} ->
               data.encode {}
 
             # Should find impl Encode for Json Int
@@ -765,7 +765,7 @@ class AbilityValidationTest {
             }
 
             # Multiple constraints on same type parameter
-            let showIfEqual: {a: 'x, b: 'x} -> Str with Show 'x, Eq 'x = {a, b} ->
+            let showIfEqual: {a: 'x, b: 'x} with Show 'x, Eq 'x -> Str = {a, b} ->
               if a.eq {r = b} then
                 a.show {}
               else
@@ -790,7 +790,7 @@ class AbilityValidationTest {
 
             # No impl Show for Float defined!
 
-            let format: {x: 'a} -> Str with Show 'a = {x} ->
+            let format: {x: 'a} with Show 'a -> Str = {x} ->
               x.show {}
 
             # Should fail - no impl Show for Float
@@ -819,7 +819,7 @@ class AbilityValidationTest {
             }
 
             # Higher-order: takes a function that requires Show constraint
-            let applyAndShow: {f: {x: 'a} -> 'a, val: 'a} -> Str with Show 'a = {f, val} -> do
+            let applyAndShow: {f: {x: 'a} -> 'a, val: 'a} with Show 'a -> Str = {f, val} -> do
               let result = f {x = val}
               result.show {}
 

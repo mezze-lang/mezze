@@ -199,7 +199,7 @@ class AbilityParserTest {
     @Test
     fun testAbilityConstraintWithSingleAssociatedType() {
         val source = """
-            let f: {c: 'c} -> 'item with Container 'c having 'item = Int = {c} -> 42
+            let f: {c: 'c} with Container 'c having 'item = Int -> 'item = {c} -> 42
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -221,7 +221,7 @@ class AbilityParserTest {
     @Test
     fun testAbilityConstraintWithMultipleAssociatedTypes() {
         val source = """
-            let f: {iter: 'i} -> {} with Iterator 'i having 'item = Int, 'state = Boolean = {iter} -> {}
+            let f: {iter: 'i} with Iterator 'i having 'item = Int, 'state = Boolean -> {} = {iter} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -243,7 +243,7 @@ class AbilityParserTest {
     @Test
     fun testMultipleAbilityConstraintsWithAssociatedTypes() {
         val source = """
-            let f: {a: 'a, b: 'b} -> {} with Container 'a having 'item = Int, Iterator 'b having 'elem = String = {a, b} -> {}
+            let f: {a: 'a, b: 'b} with Container 'a having 'item = Int, Iterator 'b having 'elem = String -> {} = {a, b} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -268,7 +268,7 @@ class AbilityParserTest {
     @Test
     fun testMixedAbilityConstraintsWithAndWithoutAssociatedTypes() {
         val source = """
-            let f: {a: 'a, b: 'b} -> {} with Eq 'a, Container 'b having 'item = Int = {a, b} -> {}
+            let f: {a: 'a, b: 'b} with Eq 'a, Container 'b having 'item = Int -> {} = {a, b} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -295,7 +295,7 @@ class AbilityParserTest {
     @Test
     fun testAbilityConstraintWithComplexAssociatedType() {
         val source = """
-            let f: {c: 'c} -> {} with Container 'c having 'item = (List String) = {c} -> {}
+            let f: {c: 'c} with Container 'c having 'item = (List String) -> {} = {c} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -314,7 +314,7 @@ class AbilityParserTest {
     @Test
     fun testAbilityConstraintWithRecordAssociatedType() {
         val source = """
-            let f: {c: 'c} -> {} with Container 'c having 'item = {x: Int, y: Int} = {c} -> {}
+            let f: {c: 'c} with Container 'c having 'item = {x: Int, y: Int} -> {} = {c} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -352,7 +352,7 @@ class AbilityParserTest {
     @Test
     fun testAbilityConstraintWithQualifiedAbilityName() {
         val source = """
-            let f: {a: 'a} -> {} with std::collections::Container 'a having 'item = Int = {a} -> {}
+            let f: {a: 'a} with std::collections::Container 'a having 'item = Int -> {} = {a} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -370,7 +370,7 @@ class AbilityParserTest {
     @Test
     fun testAbilityConstraintWithMultipleTypeArgs() {
         val source = """
-            let f: {a: 'a, b: 'b} -> {} with BiContainer 'a 'b having 'joined = String = {a, b} -> {}
+            let f: {a: 'a, b: 'b} with BiContainer 'a 'b having 'joined = String -> {} = {a, b} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -399,7 +399,7 @@ class AbilityParserTest {
         // - "Container 'c having 'item = Int, OtherAbility 'x" (two constraints)
         // - "Container 'c having 'item = Int, 'other = String" (one constraint with two associated types)
         val source = """
-            let f: {c: 'c, x: 'x} -> {} with Container 'c having 'item = Int, Show 'x = {c, x} -> {}
+            let f: {c: 'c, x: 'x} with Container 'c having 'item = Int, Show 'x -> {} = {c, x} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -425,7 +425,7 @@ class AbilityParserTest {
     fun testMultipleAssociatedTypesInSingleConstraint() {
         // This tests that multiple associated types are correctly parsed as part of one constraint
         val source = """
-            let f: {c: 'c} -> {} with Container 'c having 'item = Int, 'index = String = {c} -> {}
+            let f: {c: 'c} with Container 'c having 'item = Int, 'index = String -> {} = {c} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -447,7 +447,7 @@ class AbilityParserTest {
     fun testDisambiguateMultipleConstraintsWithMixedAnnotations() {
         // Complex test: Ability1 with 'a = X, Ability2 (no associated), Ability3 with 'b = Y
         val source = """
-            let f: {a: 'a, b: 'b, c: 'c} -> {} with Container 'a having 'item = Int, Eq 'b, Iterator 'c having 'elem = String = {a, b, c} -> {}
+            let f: {a: 'a, b: 'b, c: 'c} with Container 'a having 'item = Int, Eq 'b, Iterator 'c having 'elem = String -> {} = {a, b, c} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -476,7 +476,7 @@ class AbilityParserTest {
     @Test
     fun testNestedOptionArrayType() {
         val source = """
-            let f: {c: 'c} -> {} with Container 'c having 'item = (Option [Int]) = {c} -> {}
+            let f: {c: 'c} with Container 'c having 'item = (Option [Int]) -> {} = {c} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -497,7 +497,7 @@ class AbilityParserTest {
     @Test
     fun testDeeplyNestedGenericType() {
         val source = """
-            let f: {c: 'c} -> {} with Container 'c having 'item = (Result (Option String) Int) = {c} -> {}
+            let f: {c: 'c} with Container 'c having 'item = (Result (Option String) Int) -> {} = {c} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -519,7 +519,7 @@ class AbilityParserTest {
     @Test
     fun testFunctionTypeAsAssociatedType() {
         val source = """
-            let f: {c: 'c} -> {} with Container 'c having 'item = ({x: Int} -> String) = {c} -> {}
+            let f: {c: 'c} with Container 'c having 'item = ({x: Int} -> String) -> {} = {c} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -539,7 +539,7 @@ class AbilityParserTest {
     @Test
     fun testArrayOfRecordsAsAssociatedType() {
         val source = """
-            let f: {c: 'c} -> {} with Container 'c having 'item = [{id: Int, name: String}] = {c} -> {}
+            let f: {c: 'c} with Container 'c having 'item = [{id: Int, name: String}] -> {} = {c} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -559,7 +559,7 @@ class AbilityParserTest {
     @Test
     fun testMultipleComplexAssociatedTypes() {
         val source = """
-            let f: {iter: 'i} -> {} with Iterator 'i having 'item = (Option String), 'state = (Result Int String) = {iter} -> {}
+            let f: {iter: 'i} with Iterator 'i having 'item = (Option String), 'state = (Result Int String) -> {} = {iter} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -590,7 +590,7 @@ class AbilityParserTest {
     fun testAbilityConstraintWithoutHavingClause() {
         // Ability with associated types declared but used without `having` annotation
         val source = """
-            let f: {c: 'c} -> {} with Container 'c = {c} -> {}
+            let f: {c: 'c} with Container 'c -> {} = {c} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)
@@ -610,7 +610,7 @@ class AbilityParserTest {
     fun testPartialAnnotationInMiddle() {
         // Constraints: annotated, simple, annotated
         val source = """
-            let f: {a: 'a, b: 'b, c: 'c} -> {} with Container 'a having 'item = Int, Show 'b, Iterator 'c having 'elem = String = {a, b, c} -> {}
+            let f: {a: 'a, b: 'b, c: 'c} with Container 'a having 'item = Int, Show 'b, Iterator 'c having 'elem = String -> {} = {a, b, c} -> {}
         """.trimIndent()
 
         val module = parser.parseParsedModule(source)

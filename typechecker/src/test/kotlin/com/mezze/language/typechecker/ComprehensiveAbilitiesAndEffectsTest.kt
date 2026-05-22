@@ -38,7 +38,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
               show = {it} -> int::to_str {n = it}
             }
 
-            let displayValue: {val: 'a} -> Str with Show 'a = {val} -> val.show {}
+            let displayValue: {val: 'a} with Show 'a -> Str = {val} -> val.show {}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -109,7 +109,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
               show = {it} -> int::to_str {n = it}
             }
 
-            let displayValue: {val: 'a} -> Str with Show 'a = {val} -> val.show {}
+            let displayValue: {val: 'a} with Show 'a -> Str = {val} -> val.show {}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -132,7 +132,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
               show = {it} -> int::to_str {n = it}
             }
 
-            let displayValue: {val: 'a} -> Str with Show 'a = {val} ->
+            let displayValue: {val: 'a} with Show 'a -> Str = {val} ->
               val.show {}
 
             let result = displayValue {val = 42}
@@ -301,7 +301,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
               show = {it} -> if it then "True" else "False"
             }
 
-            let showValue: {val: 'a} -> Str with Show 'a = {val} ->
+            let showValue: {val: 'a} with Show 'a -> Str = {val} ->
               val.show {}
 
             let result = showValue {val = True}
@@ -335,7 +335,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
               log : {message: Str} -> Unit = {message} -> {}
             }
 
-            let loggedShow: {val: 'a} -> Str <Log> with Show 'a = {val} -> do
+            let loggedShow: {val: 'a} with Show 'a -> Str <Log> = {val} -> do
               let str = val.show {}
               Log.log {message = "Showing value: $(str)"}
               str
