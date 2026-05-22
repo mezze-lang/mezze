@@ -8,13 +8,15 @@ import org.junit.jupiter.api.Test
 
 /**
  * Tests that the `Tryable` ability — added to the prelude — is available
- * without an explicit `use std::effects::exception::{Tryable}` import in
+ * without an explicit `use std::abilities::tryable::{Tryable}` import in
  * the user's module.
  *
- * Note that `Exception` (effect) and `ExceptionToResult` (performer) are
- * NOT in the prelude. The synthetic perform inserted by `<-` desugar uses
- * a compiler-internal mechanism and doesn't require those to be visible
- * in the user's namespace.
+ * `Exception` (effect) and `ExceptionToResult` (performer) are NOT in the
+ * prelude. They reach a user module only when:
+ *   1. The user imports them explicitly via `use std::effects::exception`, or
+ *   2. The do-bind desugar runs (because the module contains `<-`), at which
+ *      point TypeChecker.injectExceptionToResultForBind adds them to the
+ *      module's import context so the synthesized perform resolves.
  */
 class PreludeTryableTest {
     private val parser = MezzeParser()
