@@ -270,7 +270,6 @@ object DevRunner {
         // First run — always execute (use cache if present, else compile).
         printHeader(appName, entryFile)
         compileStoreExecute(store, engine, sourceFile, projectRoot, entryName, modulePath, appName, inspect, inspectBrk, ReloadMode.COLD_START, sharedContext)
-        printWatching()
 
         // Watch only the dirs containing files this app depends on.
         // After every compile, we recompute the set from ModuleResolver and adjust.
@@ -279,9 +278,15 @@ object DevRunner {
         syncWatchedDirs(watcher, watchedDirs, sourceFile, projectRoot)
 
         // One queue feeds both file events and keyboard events into the main loop.
+        // Set up the keyboard handler BEFORE the first `watching` line so that
+        // line reflects the actual key bindings the user has — previously the
+        // cold-start banner said "press Ctrl+C to stop" even when keyboard
+        // raw-mode succeeded a moment later, then the next reload's banner
+        // switched to the full key list. Two different lines for the same state.
         val events = java.util.concurrent.LinkedBlockingQueue<DevEvent>()
         startFileWatcherThread(watcher, events)
         val keyboardActive = startKeyboardThread(events)
+        printWatching(keyboardActive)
 
         while (true) {
             when (val event = events.take()) {
@@ -327,15 +332,6 @@ object DevRunner {
                     printHeader(appName, entryFile)
                     printWatching(keyboardActive)
                 }
-                DevEvent.Help -> {
-                    System.err.println()
-                    System.err.println("${ANSI_BOLD}keys${ANSI_RESET}")
-                    System.err.println("  ${ANSI_BOLD}r${ANSI_RESET}  re-run (force, even with no changes)")
-                    System.err.println("  ${ANSI_BOLD}c${ANSI_RESET}  clear screen")
-                    System.err.println("  ${ANSI_BOLD}h${ANSI_RESET}  show this help")
-                    System.err.println("  ${ANSI_BOLD}q${ANSI_RESET}  quit")
-                    System.err.println()
-                }
                 DevEvent.Quit -> {
                     System.err.println()
                     System.err.println("${ANSI_GRAY}bye${ANSI_RESET}")
@@ -349,7 +345,6 @@ object DevRunner {
         data class FilesChanged(val files: Set<String>) : DevEvent()
         object Rerun : DevEvent()
         object Clear : DevEvent()
-        object Help : DevEvent()
         object Quit : DevEvent()
     }
 
@@ -412,7 +407,6 @@ object DevRunner {
                     when (ch.toChar().lowercaseChar()) {
                         'r' -> events.add(DevEvent.Rerun)
                         'c' -> events.add(DevEvent.Clear)
-                        'h', '?' -> events.add(DevEvent.Help)
                         'q' -> { events.add(DevEvent.Quit); return@Thread }
                         '' -> { events.add(DevEvent.Quit); return@Thread } // Ctrl+C as char (rare; signal usually)
                     }
@@ -930,7 +924,7 @@ object DevRunner {
     private fun printWatching(keyboardActive: Boolean = false) {
         System.err.println()
         if (keyboardActive) {
-            System.err.println("${ANSI_GRAY}watching · press ${ANSI_BOLD}r${ANSI_RESET}${ANSI_GRAY} to re-run, ${ANSI_BOLD}h${ANSI_RESET}${ANSI_GRAY} for help, ${ANSI_BOLD}q${ANSI_RESET}${ANSI_GRAY} to quit${ANSI_RESET}")
+            System.err.println("${ANSI_GRAY}watching · press ${ANSI_BOLD}r${ANSI_RESET}${ANSI_GRAY} to re-run, ${ANSI_BOLD}c${ANSI_RESET}${ANSI_GRAY} to clear, ${ANSI_BOLD}q${ANSI_RESET}${ANSI_GRAY} to quit${ANSI_RESET}")
         } else {
             System.err.println("${ANSI_GRAY}watching for changes — press Ctrl+C to stop${ANSI_RESET}")
         }
