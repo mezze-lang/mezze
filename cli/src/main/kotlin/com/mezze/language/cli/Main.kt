@@ -255,6 +255,7 @@ private fun showCommandHelp(command: String) {
             println("OPTIONS:")
             println("  -q, --quiet        Only show errors (no type info)")
             println("  --app <name>       Check specific app from Mezze.toml")
+            println("  --json             Emit machine-readable JSON instead of text")
             println("  -h, --help         Show this help message")
             println()
             println("EXAMPLES:")
@@ -262,6 +263,7 @@ private fun showCommandHelp(command: String) {
             println("  mezze check --quiet app.mz   # Quiet mode")
             println("  mezze check                    # Check package app")
             println("  mezze check --app server       # Check specific app")
+            println("  mezze check --json app.mz      # JSON output for CI/tooling")
         }
         
         "init" -> {
