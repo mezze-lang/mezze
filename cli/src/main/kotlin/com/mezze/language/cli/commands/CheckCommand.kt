@@ -27,6 +27,7 @@ class CheckCommand {
 
     fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
         val quietMode = args.contains("-q") || args.contains("--quiet")
+        val jsonMode = args.contains("--json")
         val appIndex = args.indexOf("--app")
         val appName = args.find { it.startsWith("--app=") }?.substringAfter("=")
             ?: if (appIndex >= 0 && appIndex + 1 < args.size) args[appIndex + 1] else null
@@ -37,21 +38,27 @@ class CheckCommand {
 
         if (fileArgs.size == 1) {
             // Single file mode
-            checkFile(File(fileArgs[0]), quietMode)
+            checkFile(File(fileArgs[0]), quietMode, jsonMode)
         } else {
             // Package mode
-            checkPackage(currentDir, appName, quietMode)
+            checkPackage(currentDir, appName, quietMode, jsonMode)
         }
     }
 
-    private fun checkFile(file: File, quiet: Boolean) {
+    private fun checkFile(file: File, quiet: Boolean, jsonMode: Boolean) {
         if (!file.exists()) {
+            if (jsonMode) {
+                jsonExitWith(file.path, null,
+                    DiagnosticJson(Severity.ERROR, message = "File not found: ${file.path}"),
+                    exitCode = 1)
+            }
             println("Error: File not found: ${file.path}")
             kotlin.system.exitProcess(1)
         }
 
         val source = file.readText()
         val projectRoot = file.toPath().toAbsolutePath().parent ?: file.toPath().toAbsolutePath()
+        val absPath = file.absolutePath
 
         try {
             val startTime = System.nanoTime()
@@ -60,12 +67,13 @@ class CheckCommand {
             // (the throwing parseParsedModule stopped at the first one). The
             // partial ParsedModule from a failed parse is still fed to the
             // typechecker so cross-decl errors in surviving code also surface.
-            val parseResult = parser.parseWithRecovery(source, file = file.absolutePath)
+            val parseResult = parser.parseWithRecovery(source, file = absPath)
             val parsedModule = parseResult.module
             val parseTime = (System.nanoTime() - startTime) / 1_000_000.0
 
-            // Print parse errors first, then continue to typecheck the partial.
-            if (parseResult.errors.isNotEmpty()) {
+            // Text mode: print parse errors first, then continue to typecheck the partial.
+            // JSON mode: collect everything into a single diagnostics list, output at end.
+            if (!jsonMode && parseResult.errors.isNotEmpty()) {
                 println(ParseErrorFormatter.formatAll(parseResult.errors))
             }
 
@@ -83,6 +91,15 @@ class CheckCommand {
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success -> {
                     val typedModule = result.typedModule
                         ?: throw TypeCheckError("V2 pipeline did not emit a TypedModule")
+                    if (jsonMode) {
+                        if (parseResult.errors.isNotEmpty()) {
+                            jsonExitWith(absPath, null,
+                                parseResult.errors.map { JsonDiagnosticFormatter.fromParseException(it) },
+                                exitCode = 3)
+                        }
+                        emitJson(JsonDiagnosticFormatter.ok(absPath, null, typedModule, emptyList()))
+                        return
+                    }
                     if (parseResult.errors.isNotEmpty()) {
                         // Surviving decls typechecked, but parse errors mean
                         // some code is missing. The "aborting due to N
@@ -100,6 +117,12 @@ class CheckCommand {
                     }
                 }
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> {
+                    if (jsonMode) {
+                        val diags = parseResult.errors.map { JsonDiagnosticFormatter.fromParseException(it) } +
+                                    result.errors.map { JsonDiagnosticFormatter.fromTypeCheckError(it) }
+                        jsonExitWith(absPath, null, diags,
+                            exitCode = if (parseResult.errors.isNotEmpty()) 3 else 4)
+                    }
                     if (parseResult.errors.isNotEmpty()) println()
                     for ((idx, err) in result.errors.withIndex()) {
                         if (idx > 0) println()
@@ -119,16 +142,25 @@ class CheckCommand {
                 }
             }
         } catch (e: TypeCheckError) {
+            if (jsonMode) {
+                jsonExitWith(absPath, null, JsonDiagnosticFormatter.fromTypeCheckError(e), exitCode = 4)
+            }
             println(ErrorFormatter.format(e, source))
             printExplainHint(listOf(e.code))
             kotlin.system.exitProcess(4)
         } catch (e: com.mezze.language.typechecker.module.ModuleError) {
+            if (jsonMode) {
+                jsonExitWith(absPath, null, JsonDiagnosticFormatter.fromModuleError(e), exitCode = 4)
+            }
             // Module errors carry their own ErrorCode + hints now; route
             // through the canonical formatter so users see `error[M0801]:`.
             println(ErrorFormatter.formatModuleError(e))
             printExplainHint(listOf(e.code))
             kotlin.system.exitProcess(4)
         } catch (e: com.mezze.language.parser.ParseException) {
+            if (jsonMode) {
+                jsonExitWith(absPath, null, JsonDiagnosticFormatter.fromParseException(e), exitCode = 3)
+            }
             // Should be rare now (parseWithRecovery doesn't throw), but
             // keep as a safety net for unrecoverable lex errors.
             println(ParseErrorFormatter.format(e))
@@ -136,38 +168,73 @@ class CheckCommand {
         }
     }
 
-    private fun checkPackage(currentDir: File, appName: String?, quiet: Boolean) {
+    private fun emitJson(result: CheckResultJson) {
+        println(JsonDiagnosticFormatter.render(result))
+    }
+
+    /**
+     * Emit a JSON error envelope for a single error source and exit with
+     * [exitCode]. `Nothing` return type tells the compiler this is terminal,
+     * eliminating dead-code in catch blocks.
+     */
+    private fun jsonExitWith(
+        file: String?,
+        app: String?,
+        diagnostic: DiagnosticJson,
+        exitCode: Int,
+    ): Nothing {
+        emitJson(JsonDiagnosticFormatter.errors(file, app, listOf(diagnostic)))
+        kotlin.system.exitProcess(exitCode)
+    }
+
+    /** Bulk variant — for combined parse + type error envelopes. */
+    private fun jsonExitWith(
+        file: String?,
+        app: String?,
+        diagnostics: List<DiagnosticJson>,
+        exitCode: Int,
+    ): Nothing {
+        emitJson(JsonDiagnosticFormatter.errors(file, app, diagnostics))
+        kotlin.system.exitProcess(exitCode)
+    }
+
+    private fun checkPackage(currentDir: File, appName: String?, quiet: Boolean, jsonMode: Boolean) {
+        // Local helper for the setup-phase early exits (before we have an app context).
+        fun bail(message: String, exitCode: Int): Nothing {
+            if (jsonMode) {
+                jsonExitWith(file = null, app = appName,
+                    diagnostic = DiagnosticJson(Severity.ERROR, message = message),
+                    exitCode = exitCode)
+            }
+            println("Error: $message")
+            kotlin.system.exitProcess(exitCode)
+        }
+
         val mezzeToml = File(currentDir, "Mezze.toml")
         if (!mezzeToml.exists()) {
-            println("Error: No Mezze.toml found. Use 'mez check <file>' for single-file mode.")
-            kotlin.system.exitProcess(1)
+            bail("No Mezze.toml found. Use 'mez check <file>' for single-file mode.", 1)
         }
 
         val manifest = try {
             Toml.decodeFromString(MezzeToml.serializer(), mezzeToml.readText())
         } catch (e: Exception) {
-            println("Error: Failed to parse Mezze.toml: ${e.message}")
-            kotlin.system.exitProcess(1)
+            bail("Failed to parse Mezze.toml: ${e.message}", 1)
         }
 
         if (manifest.app == null || manifest.app.isEmpty()) {
-            println("Error: No [[app]] entries in Mezze.toml")
-            kotlin.system.exitProcess(1)
+            bail("No [[app]] entries in Mezze.toml", 1)
         }
 
         val appConfig = if (appName != null) {
-            manifest.app.find { it.name == appName } ?: run {
-                println("Error: App '$appName' not found. Available: ${manifest.app.map { it.name }}")
-                kotlin.system.exitProcess(1)
-            }
+            manifest.app.find { it.name == appName }
+                ?: bail("App '$appName' not found. Available: ${manifest.app.map { it.name }}", 1)
         } else {
             manifest.app.first()
         }
 
         val appFile = File(currentDir, appConfig.path)
         if (!appFile.exists()) {
-            println("Error: App file not found: ${appFile.absolutePath}")
-            kotlin.system.exitProcess(1)
+            bail("App file not found: ${appFile.absolutePath}", 1)
         }
 
         val source = appFile.readText()
@@ -185,9 +252,8 @@ class CheckCommand {
             val parseResult = parser.parseWithRecovery(source, file = appFile.name)
             val ast = parseResult.module
 
-            // Print parse errors first; typecheck the partial regardless so
-            // independent errors in surviving decls also surface.
-            if (parseResult.errors.isNotEmpty()) {
+            // Text mode prints parse errors first then continues; JSON mode collects all.
+            if (!jsonMode && parseResult.errors.isNotEmpty()) {
                 println(ParseErrorFormatter.formatAll(parseResult.errors))
             }
 
@@ -200,6 +266,12 @@ class CheckCommand {
 
             when (rawResult) {
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> {
+                    if (jsonMode) {
+                        val diags = parseResult.errors.map { JsonDiagnosticFormatter.fromParseException(it) } +
+                                    rawResult.errors.map { JsonDiagnosticFormatter.fromTypeCheckError(it) }
+                        jsonExitWith(null, appConfig.name, diags,
+                            exitCode = if (parseResult.errors.isNotEmpty()) 3 else 4)
+                    }
                     if (parseResult.errors.isNotEmpty()) println()
                     println(TypeCheckRunner.formatErrors(rawResult, source))
                     if (parseResult.errors.isNotEmpty()) {
@@ -218,7 +290,16 @@ class CheckCommand {
                     kotlin.system.exitProcess(if (parseResult.errors.isNotEmpty()) 3 else 4)
                 }
                 is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success -> {
-                    if (parseResult.errors.isNotEmpty()) {
+                    if (jsonMode) {
+                        if (parseResult.errors.isNotEmpty()) {
+                            jsonExitWith(null, appConfig.name,
+                                parseResult.errors.map { JsonDiagnosticFormatter.fromParseException(it) },
+                                exitCode = 3)
+                        }
+                        // Successful — fall through; we still want to populate the
+                        // store + emit ok JSON below. Don't return here; the store
+                        // population happens in the shared tail.
+                    } else if (parseResult.errors.isNotEmpty()) {
                         // Parse errors but typecheck succeeded on the
                         // partial AST. The footer from
                         // ParseErrorFormatter.formatAll already says it;
@@ -245,7 +326,9 @@ class CheckCommand {
                 loadedParsedModules = depParsedModules
             )
 
-            if (quiet) {
+            if (jsonMode) {
+                emitJson(JsonDiagnosticFormatter.ok(null, appConfig.name, typeCheckResult.typedModule, emptyList()))
+            } else if (quiet) {
                 println("OK (${String.format("%.1f", totalTime)}ms)")
             } else {
                 val typedModule = typeCheckResult.typedModule
@@ -256,12 +339,21 @@ class CheckCommand {
                 println("Check passed: ${appConfig.name} (${String.format("%.1f", totalTime)}ms)")
             }
         } catch (e: TypeCheckError) {
+            if (jsonMode) {
+                jsonExitWith(null, appConfig.name, JsonDiagnosticFormatter.fromTypeCheckError(e), exitCode = 4)
+            }
             println(ErrorFormatter.format(e, source))
             kotlin.system.exitProcess(4)
         } catch (e: com.mezze.language.typechecker.module.ModuleError) {
+            if (jsonMode) {
+                jsonExitWith(null, appConfig.name, JsonDiagnosticFormatter.fromModuleError(e), exitCode = 4)
+            }
             println(ErrorFormatter.formatModuleError(e))
             kotlin.system.exitProcess(4)
         } catch (e: com.mezze.language.parser.ParseException) {
+            if (jsonMode) {
+                jsonExitWith(null, appConfig.name, JsonDiagnosticFormatter.fromParseException(e), exitCode = 3)
+            }
             println(ParseErrorFormatter.format(e))
             kotlin.system.exitProcess(3)
         } finally {
