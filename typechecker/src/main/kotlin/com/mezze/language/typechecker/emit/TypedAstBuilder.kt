@@ -58,6 +58,10 @@ class TypedAstBuilder(
     // their generic scheme, and the call's `.type` falls back to `unknown`,
     // breaking LSP per-segment chain inlay hints.
     private val callReturnTypes: Map<Loc, MezzeType> = emptyMap(),
+    // Locs of `ParsedStatement.Let` nodes synthesized by the do-bind desugar
+    // from a `pat <- expr` source. Used to set `TypedStatement.Let.isBind = true`
+    // — LSP consults it for hover position-lookup on the bind pattern name.
+    private val bindLetLocs: Set<Loc> = emptySet(),
 ) {
 
     /**
@@ -994,7 +998,8 @@ class TypedAstBuilder(
                                 // Use v1 content hash if available, otherwise compute
                                 val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
                                 val contentHash = v1LetHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(stmt.value)
-                                stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc, isRecursive))
+                                val isBind = stmt.loc in bindLetLocs
+                                stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc, isRecursive, isBind))
                             }
                         }
                         is ParsedStatement.Expr -> {

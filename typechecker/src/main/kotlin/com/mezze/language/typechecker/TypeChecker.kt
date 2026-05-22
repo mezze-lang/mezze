@@ -249,6 +249,7 @@ class TypeChecker(
         val bindDesugarResult = com.mezze.language.typechecker.desugar.DoBindDesugar.desugar(module)
         module = bindDesugarResult.module
         val moduleUsesBind = bindDesugarResult.hasBinds
+        val bindLetLocs = bindDesugarResult.bindLetLocs
 
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
@@ -625,6 +626,7 @@ class TypeChecker(
                     allTypeDeclarations = allTypeDeclarations,
                     allAbilityDeclarations = allAbilityDeclarations,
                     allEffectDeclarations = allEffectDeclarations,
+                    bindLetLocs = bindLetLocs,
                 )
                 // expectedTypeAt resolved through whatever substitution we
                 // have. Even on global-solve failure, per-binding solves
@@ -742,6 +744,7 @@ class TypeChecker(
                         mustBeOpenRowVars = mustBeOpenRowVars,
                         methodCallResolutions = allMethodCallResolutions,
                         callReturnTypes = allCallReturnTypes,
+                        bindLetLocs = bindLetLocs,
                     )
                     val typed = builder.build(parsedModule)
 
@@ -1151,6 +1154,7 @@ class TypeChecker(
         allTypeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
         allAbilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
         allEffectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
+        bindLetLocs: Set<com.mezze.language.parsedast.Loc> = emptySet(),
     ): com.mezze.language.typedast.TypedModule? {
         return try {
             val resolvedResults = constraintResults.mapValues { (_, r) ->
@@ -1183,6 +1187,7 @@ class TypeChecker(
                 mustBeOpenRowVars = emptySet(),
                 methodCallResolutions = methodCallResolutions,
                 callReturnTypes = callReturnTypes,
+                bindLetLocs = bindLetLocs,
             )
             builder.build(parsedModule)
         } catch (e: Exception) {

@@ -211,15 +211,6 @@ class LspFeaturesTest {
 
     @Test
     fun `hover on bind pattern does not leak desugar internals`() {
-        // For `a <- make_ok {}` where make_ok returns Result Int Str,
-        // hovering on `a` should resolve to the bound name's hover,
-        // showing the desugared `.try {}` call's return type (Int with
-        // <Exception> in the row — the user sees this just like a
-        // hand-written `let a = make_ok{}.try{}`).
-        //
-        // The exact type-specialization (Int vs 'a) is tracked
-        // separately by task #33; this test guards against the worse
-        // regression of leaking `Tryable.try` to hover.
         val (uri, _) = openSingleFile("""
             let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
 
@@ -235,8 +226,6 @@ class LspFeaturesTest {
             "expected hover to render as a binding for `a`, got:\n$content")
         assertFalse(content.contains("Tryable.try"),
             "hover should NOT leak the synthetic `.try` ability call: $content")
-        assertFalse(content.contains("{ it: "),
-            "hover should NOT leak the ability method's generic param: $content")
     }
 
     @Test

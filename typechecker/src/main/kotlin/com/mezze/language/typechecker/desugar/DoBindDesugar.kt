@@ -69,32 +69,37 @@ object DoBindDesugar {
      *   the TypeChecker injects `Exception` + `ExceptionToResult` into the
      *   import context so the desugar's synthetic `perform ExceptionToResult`
      *   resolves.
+     * @param bindLetLocs locs of every `ParsedStatement.Let` synthesized
+     *   from a `pat <- expr` bind. Used by LSP to recognize bind-pattern
+     *   hover positions (the synthesized value spans the whole bind line,
+     *   confusing the standard name-region check). NO semantic effect.
      */
     data class Result(
         val module: ParsedModule,
         val hasBinds: Boolean,
+        val bindLetLocs: Set<Loc> = emptySet(),
     )
 
     fun desugar(module: ParsedModule): Result {
-        var sawBind = false
+        val locs = mutableSetOf<Loc>()
         val rewritten = module.copy(decls = module.decls.map { decl ->
             when (decl) {
-                is ParsedLetDecl -> decl.copy(value = desugarBindsInExpr(decl.value) { sawBind = true })
+                is ParsedLetDecl -> decl.copy(value = desugarBindsInExpr(decl.value) { locs.add(it) })
                 is ParsedImplAbilityDecl -> decl.copy(operations = decl.operations.map { op ->
-                    op.copy(implementation = desugarBindsInExpr(op.implementation) { sawBind = true })
+                    op.copy(implementation = desugarBindsInExpr(op.implementation) { locs.add(it) })
                 })
-                is ParsedTopLevelExpr -> decl.copy(expression = desugarBindsInExpr(decl.expression) { sawBind = true })
+                is ParsedTopLevelExpr -> decl.copy(expression = desugarBindsInExpr(decl.expression) { locs.add(it) })
                 else -> decl
             }
         })
-        return Result(module = rewritten, hasBinds = sawBind)
+        return Result(module = rewritten, hasBinds = locs.isNotEmpty(), bindLetLocs = locs)
     }
 
     // ------------------------------------------------------------------
     // Implementation
     // ------------------------------------------------------------------
 
-    private fun desugarBindsInExpr(expr: ParsedExpr, onBindFound: () -> Unit): ParsedExpr = when (expr) {
+    private fun desugarBindsInExpr(expr: ParsedExpr, onBindFound: (Loc) -> Unit): ParsedExpr = when (expr) {
         is ParsedDo -> {
             // Recurse into all sub-expressions first.
             val newStatements = expr.statements.map { stmt ->
@@ -194,18 +199,22 @@ object DoBindDesugar {
      */
     private fun rewriteDoWithBinds(
         doExpr: ParsedDo,
-        onBindFound: () -> Unit,
+        onBindFound: (Loc) -> Unit,
     ): ParsedPerform {
-        onBindFound()
-        // 1. Rewrite each Bind statement to a `let pat = expr.try {}`.
+        // 1. Rewrite each Bind statement to a `let pat = expr.try {}`,
+        //    notifying the caller of every original Bind loc so it can be
+        //    flagged on the emitted TypedStatement.Let later.
         val rewrittenStatements = doExpr.statements.map { stmt ->
             when (stmt) {
-                is ParsedStatement.Bind -> ParsedStatement.Let(
-                    pattern = stmt.pattern,
-                    typeAnnotation = null,
-                    value = buildTryableTryCall(stmt.expr, stmt.loc),
-                    loc = stmt.loc,
-                )
+                is ParsedStatement.Bind -> {
+                    onBindFound(stmt.loc)
+                    ParsedStatement.Let(
+                        pattern = stmt.pattern,
+                        typeAnnotation = null,
+                        value = buildTryableTryCall(stmt.expr, stmt.loc),
+                        loc = stmt.loc,
+                    )
+                }
                 else -> stmt
             }
         }

@@ -206,6 +206,11 @@ sealed interface TypedStatement {
      * @property isRecursive true if value is a lambda that references its own binding name.
      *   When true, the compiler emits self-referential MakeLambdaIR for recursive call sites
      *   instead of capturing the slot value (which would be null at lambda creation time).
+     * @property isBind true when this Let was produced by desugaring `pat <- expr`
+     *   from a do-block. The desugar's synthesized value (`expr.try {}`) spans
+     *   the whole bind line, which confuses LSP's name-region check. This flag
+     *   lets the LSP recognize bind-pattern hover positions explicitly. NO
+     *   semantic effect on type-checking or runtime.
      */
     @Serializable data class Let(
         val name: String,
@@ -214,6 +219,7 @@ sealed interface TypedStatement {
         val value: TypedExpr,
         val loc: Loc,
         val isRecursive: Boolean = false,
+        val isBind: Boolean = false,
     ) : TypedStatement
     @Serializable data class Expr(val expr: TypedExpr, val loc: Loc) : TypedStatement
 }

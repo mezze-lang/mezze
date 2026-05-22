@@ -254,6 +254,19 @@ object TypedAstLookup {
                             if (inStmt && beforeValue) {
                                 return LookupResult.Binding(stmt.name, stmt.type, stmt.loc)
                             }
+                            // For do-bind-synthesized lets (`pat <- expr` rewritten
+                            // to `let pat = expr.try {}`), value.loc == stmt.loc so
+                            // beforeValue is false. Detect a hit directly on the
+                            // pattern name's text via `isBind` instead.
+                            if (inStmt && stmt.isBind) {
+                                val nameLen = stmt.name.length
+                                val nameStartCol = stmt.loc.startCol
+                                val onName = line == stmt.loc.startLine &&
+                                    col in nameStartCol until (nameStartCol + nameLen)
+                                if (onName) {
+                                    return LookupResult.Binding(stmt.name, stmt.type, stmt.loc)
+                                }
+                            }
                             findNestedLetAtName(stmt.value, line, col)?.let { return it }
                         }
                         is TypedStatement.Expr -> {
