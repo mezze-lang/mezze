@@ -394,11 +394,8 @@ class AsyncMicroBench {
         // JIT. We use with_lock so the benchmark is the lock-acquire +
         // protected-body + release cycle.
         //
-        // Single-shot (warmup=0, runs=1) until the shared-Engine
-        // repeated-eval bug is fixed (see task #130). The result is
-        // pessimistic — no JIT warmup applies on the first eval — but
-        // still gives a meaningful baseline since we just want a number
-        // to diff against future runs.
+        // Now safe to run with warmup since #129 is fixed; using the
+        // default cadence so the number reflects JIT-warm behavior.
         val source = """
             use std::effects::concurrent::mutex::{ mutex, with_lock }
 
@@ -415,8 +412,6 @@ class AsyncMicroBench {
             category = "Mutex (Loom)",
             label = "with_lock × 500 (uncontended)",
             iters = 500,
-            warmup = 0,
-            runs = 1,
         ) {
             val r = eval(source)
             assertEquals(500L, r)
