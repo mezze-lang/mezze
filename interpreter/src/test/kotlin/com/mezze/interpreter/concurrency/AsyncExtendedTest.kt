@@ -35,13 +35,14 @@ class AsyncExtendedTest {
     fun `test join runs two computations concurrently with LoomAsync`() {
         val code = """
             use std::effects::async::{Async, LoomAsync}
+            use std::result
 
             perform LoomAsync in do
-                let result = Async.join {
+                let r = Async.join {
                     l = {} -> 10,
                     r = {} -> 20
                 }
-                result.l + result.r
+                result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
         """
         val result = eval(code)
         assertEquals(30L, result)
@@ -51,13 +52,14 @@ class AsyncExtendedTest {
     fun `test join runs two computations concurrently with OSThreadAsync`() {
         val code = """
             use std::effects::async::{Async, OSThreadAsync}
+            use std::result
 
             perform OSThreadAsync in do
-                let result = Async.join {
+                let r = Async.join {
                     l = {} -> 100,
                     r = {} -> 200
                 }
-                result.l + result.r
+                result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
         """
         val result = eval(code)
         assertEquals(300L, result)
@@ -67,13 +69,14 @@ class AsyncExtendedTest {
     fun `test join with different return types`() {
         val code = """
             use std::effects::async::{Async, LoomAsync}
+            use std::result
 
             perform LoomAsync in do
-                let result = Async.join {
+                let r = Async.join {
                     l = {} -> "hello",
                     r = {} -> 42
                 }
-                result.r
+                result::get_or_else { result = r.r, def = 0 }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -87,14 +90,15 @@ class AsyncExtendedTest {
     fun `test join3 runs three computations concurrently`() {
         val code = """
             use std::effects::async::{Async, LoomAsync}
+            use std::result
 
             perform LoomAsync in do
-                let result = Async.join3 {
+                let r = Async.join3 {
                     a = {} -> 1,
                     b = {} -> 2,
                     c = {} -> 3
                 }
-                result.a + result.b + result.c
+                result::get_or_else { result = r.a, def = 0 } + result::get_or_else { result = r.b, def = 0 } + result::get_or_else { result = r.c, def = 0 }
         """
         val result = eval(code)
         assertEquals(6L, result)
@@ -105,14 +109,15 @@ class AsyncExtendedTest {
         // Use CoopAsync for deterministic behavior (avoids Truffle thread issues)
         val code = """
             use std::effects::async::{Async, CoopAsync}
+            use std::result
 
             perform CoopAsync in do
-                let result = Async.join3 {
+                let r = Async.join3 {
                     a = {} -> "first",
                     b = {} -> 2,
                     c = {} -> True
                 }
-                result.b
+                result::get_or_else { result = r.b, def = 0 }
         """
         val result = eval(code)
         assertEquals(2L, result)
@@ -393,13 +398,14 @@ class AsyncExtendedTest {
     fun `test CoopAsync join executes sequentially`() {
         val code = """
             use std::effects::async::{Async, CoopAsync}
+            use std::result
 
             perform CoopAsync in do
-                let result = Async.join {
+                let r = Async.join {
                     l = {} -> 5,
                     r = {} -> 10
                 }
-                result.l + result.r
+                result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
         """
         val result = eval(code)
         assertEquals(15L, result)
@@ -443,20 +449,26 @@ class AsyncExtendedTest {
 
     @Test
     fun `test combining join and map`() {
+        // join now returns {l: Result [Int] AsyncError, r: Result ...}.
+        // The spawned thunks themselves call Async.map.
         val code = """
             use std::effects::async::{Async, LoomAsync}
 
             perform LoomAsync in do
-                let result = Async.join {
+                let r = Async.join {
                     l = {} -> Async.map {xs = [1, 2], f = {x} -> x * 2},
                     r = {} -> Async.map {xs = [3, 4], f = {x} -> x * 3}
                 }
-                # result.l = [2, 4], result.r = [9, 12]
-                match result.l is
-                    [a, b] -> match result.r is
-                        [c, d] -> a + b + c + d
-                        _ -> 0
-                    _ -> 0
+                # r.l = Ok { val = [2, 4] }, r.r = Ok { val = [9, 12] }
+                match r.l is
+                    Ok { val = lxs } -> match r.r is
+                        Ok { val = rxs } -> match lxs is
+                            [a, b] -> match rxs is
+                                [c, d] -> a + b + c + d
+                                _ -> -2
+                            _ -> -3
+                        _ -> -4
+                    _ -> -5
         """
         val result = eval(code)
         assertEquals(27L, result) // 2 + 4 + 9 + 12 = 27

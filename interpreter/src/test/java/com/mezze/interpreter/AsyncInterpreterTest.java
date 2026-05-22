@@ -49,13 +49,14 @@ public class AsyncInterpreterTest {
     void testCoopJoinTwoComputations() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, CoopAsync}
+            use std::result
 
             perform CoopAsync in do
                 let r = Async.join {
                     l = {} -> 10,
                     r = {} -> 20
                 }
-                r.l + r.r
+                result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
         """);
         assertEquals(30L, result);
     }
@@ -64,6 +65,7 @@ public class AsyncInterpreterTest {
     void testCoopJoin3ThreeComputations() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, CoopAsync}
+            use std::result
 
             perform CoopAsync in do
                 let r = Async.join3 {
@@ -71,7 +73,7 @@ public class AsyncInterpreterTest {
                     b = {} -> 2,
                     c = {} -> 3
                 }
-                r.a + r.b + r.c
+                result::get_or_else { result = r.a, def = 0 } + result::get_or_else { result = r.b, def = 0 } + result::get_or_else { result = r.c, def = 0 }
         """);
         assertEquals(6L, result);
     }
@@ -122,13 +124,14 @@ public class AsyncInterpreterTest {
     void testLoomJoinTwoComputations() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, LoomAsync}
+            use std::result
 
             perform LoomAsync {} in do
                 let r = Async.join {
                     l = {} -> 10,
                     r = {} -> 20
                 }
-                r.l + r.r
+                result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
         """);
         assertEquals(30L, result);
     }
@@ -165,13 +168,14 @@ public class AsyncInterpreterTest {
     void testOsJoinTwoComputations() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, OSThreadAsync}
+            use std::result
 
             perform OSThreadAsync {} in do
                 let r = Async.join {
                     l = {} -> 10,
                     r = {} -> 20
                 }
-                r.l + r.r
+                result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
         """);
         assertEquals(30L, result);
     }

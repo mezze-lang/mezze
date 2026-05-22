@@ -116,13 +116,14 @@ class CoopAsyncTest {
     fun `test join two computations`() {
         val source = """
             use std::effects::async::{Async, CoopAsync}
+            use std::result
 
             perform CoopAsync in do
-                let result = Async.join {
+                let r = Async.join {
                     l = {} -> 100,
                     r = {} -> 200
                 }
-                result.l + result.r
+                result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
         """.trimIndent()
 
         val result = eval(source)
@@ -133,14 +134,15 @@ class CoopAsyncTest {
     fun `test join3 computations`() {
         val source = """
             use std::effects::async::{Async, CoopAsync}
+            use std::result
 
             perform CoopAsync in do
-                let result = Async.join3 {
+                let r = Async.join3 {
                     a = {} -> 1,
                     b = {} -> 2,
                     c = {} -> 3
                 }
-                result.a + result.b + result.c
+                result::get_or_else { result = r.a, def = 0 } + result::get_or_else { result = r.b, def = 0 } + result::get_or_else { result = r.c, def = 0 }
         """.trimIndent()
 
         val result = eval(source)
@@ -460,6 +462,7 @@ class CoopAsyncTest {
     fun `test nested joins`() {
         val source = """
             use std::effects::async::{Async, CoopAsync}
+            use std::result
 
             perform CoopAsync in do
                 let outer = Async.join {
@@ -468,16 +471,16 @@ class CoopAsyncTest {
                             l = {} -> 1,
                             r = {} -> 2
                         }
-                        inner.l + inner.r
+                        result::get_or_else { result = inner.l, def = 0 } + result::get_or_else { result = inner.r, def = 0 }
                     ,
                     r = {} -> do
                         let inner = Async.join {
                             l = {} -> 3,
                             r = {} -> 4
                         }
-                        inner.l + inner.r
+                        result::get_or_else { result = inner.l, def = 0 } + result::get_or_else { result = inner.r, def = 0 }
                 }
-                outer.l + outer.r
+                result::get_or_else { result = outer.l, def = 0 } + result::get_or_else { result = outer.r, def = 0 }
         """.trimIndent()
 
         val result = eval(source)

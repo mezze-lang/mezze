@@ -126,7 +126,7 @@ class AsyncModuleTest {
                 l = {} -> 10,
                 r = {} -> 20
             }
-            r.l + r.r
+            result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
         """))
         assertEquals(30L, result)
     }
@@ -141,7 +141,7 @@ class AsyncModuleTest {
                 b = {} -> 2,
                 c = {} -> 3
             }
-            r.a + r.b + r.c
+            result::get_or_else { result = r.a, def = 0 } + result::get_or_else { result = r.b, def = 0 } + result::get_or_else { result = r.c, def = 0 }
         """))
         assertEquals(6L, result)
     }

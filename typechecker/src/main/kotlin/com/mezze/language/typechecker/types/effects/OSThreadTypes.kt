@@ -96,7 +96,13 @@ object OSThreadTypes {
 
         // === Structured Concurrency ===
 
-        // __native_os_join: {l: {} -> 'a, r: {} -> 'b} -> {l: 'a, r: 'b}
+        // Result 'x AsyncError helper for join* return shapes.
+        val osJoinAsyncErrorType = MezzeType.VarType(TypeVar("AsyncError"))
+        fun osResultOf(elemType: MezzeType): MezzeType =
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(elemType, osJoinAsyncErrorType))
+
+        // __native_os_join: {l: {} -> 'a, r: {} -> 'b}
+        //   -> {l: Result 'a AsyncError, r: Result 'b AsyncError}
         context["__native_os_join"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "l" to MezzeType.FunctionType(
@@ -109,12 +115,13 @@ object OSThreadTypes {
                 )
             )),
             MezzeType.RecordType(mapOf(
-                "l" to MezzeType.VarType(TypeVar("a")),
-                "r" to MezzeType.VarType(TypeVar("b"))
+                "l" to osResultOf(MezzeType.VarType(TypeVar("a"))),
+                "r" to osResultOf(MezzeType.VarType(TypeVar("b")))
             ))
         )
 
-        // __native_os_join3: {a: {} -> 'a, b: {} -> 'b, c: {} -> 'c} -> {a: 'a, b: 'b, c: 'c}
+        // __native_os_join3: {a: {} -> 'a, b: {} -> 'b, c: {} -> 'c}
+        //   -> {a: Result 'a AsyncError, b: Result 'b AsyncError, c: Result 'c AsyncError}
         context["__native_os_join3"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "a" to MezzeType.FunctionType(
@@ -131,9 +138,9 @@ object OSThreadTypes {
                 )
             )),
             MezzeType.RecordType(mapOf(
-                "a" to MezzeType.VarType(TypeVar("a")),
-                "b" to MezzeType.VarType(TypeVar("b")),
-                "c" to MezzeType.VarType(TypeVar("c"))
+                "a" to osResultOf(MezzeType.VarType(TypeVar("a"))),
+                "b" to osResultOf(MezzeType.VarType(TypeVar("b"))),
+                "c" to osResultOf(MezzeType.VarType(TypeVar("c")))
             ))
         )
 

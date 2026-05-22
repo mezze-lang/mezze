@@ -22,6 +22,7 @@ import java.lang.invoke.VarHandle;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
+import java.util.function.Supplier;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -1062,6 +1063,59 @@ public final class AsyncNatives {
         }
     }
 
+    /**
+     * Spawn one side of a join. Wraps the body's outcome in
+     * {@code Result 'a AsyncError} and completes {@code resultFuture}.
+     *
+     * <p>Matches {@code futures::join!} semantics: each side runs
+     * independently to completion. No sibling auto-cancel on failure —
+     * a Mezze {@code try_join} (future #122f) will handle that.
+     *
+     * <p>{@code virtual} selects between Loom virtual threads
+     * (true, for {@code __native_loom_join*}) and OS platform threads
+     * (false, for {@code __native_os_join*}).
+     */
+    private static Thread spawnJoinSide(
+            Env env,
+            MezzeRecord[] chain,
+            CompletableFuture<MezzeVariant> resultFuture,
+            boolean virtual,
+            Supplier<Object> body) {
+        return env.newTruffleThreadBuilder(() -> {
+            MezzeVariant result;
+            boolean installed = false;
+            try {
+                if (chain.length > 0) {
+                    EffectFiber.installHandlerChain(chain);
+                    installed = true;
+                }
+                Object value = body.get();
+                // If the body returned a MezzeSuspended, an effect op
+                // (e.g. Exception.throw) propagated past the chain
+                // without a handler — surface as Err AsyncFailed.
+                if (value instanceof MezzeSuspended suspended) {
+                    result = createAsyncFailed(
+                        "join task raised unhandled effect: " + suspended);
+                } else {
+                    result = MezzeVariant.ok(value);
+                }
+            } catch (TaskUnhandledOpException tue) {
+                result = createAsyncFailed(
+                    "join task raised effect operation '" + tue.opCall.opName() + "'");
+            } catch (Throwable e) {
+                if (Thread.currentThread().isInterrupted()) {
+                    result = createAsyncCancelled();
+                } else {
+                    String msg = e.getMessage() == null ? e.toString() : e.getMessage();
+                    result = createAsyncFailed(msg);
+                }
+            } finally {
+                if (installed) EffectFiber.popHandlerChain(chain.length);
+            }
+            resultFuture.complete(result);
+        }).virtual(virtual).build();
+    }
+
     @TruffleBoundary
     public static MezzeRecord loomJoin(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeFunction left = getFunction(args, "l");
@@ -1072,8 +1126,6 @@ public final class AsyncNatives {
         var leftTarget = left.getCallTarget();
         var rightTarget = right.getCallTarget();
 
-        // Build argument arrays: closure values + empty record argument
-        // Thunk functions expect {} as argument
         Object[] leftArgs = new Object[leftClosure.length + 1];
         System.arraycopy(leftClosure, 0, leftArgs, 0, leftClosure.length);
         leftArgs[leftClosure.length] = MezzeRecord.empty();
@@ -1082,44 +1134,38 @@ public final class AsyncNatives {
         System.arraycopy(rightClosure, 0, rightArgs, 0, rightClosure.length);
         rightArgs[rightClosure.length] = MezzeRecord.empty();
 
-        MezzeContext context = MezzeContext.get(node);
-        Env env = context.getEnv();
-
+        Env env = MezzeContext.get(node).getEnv();
         MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
-        // Use CompletableFuture for result coordination
-        CompletableFuture<Object> leftFuture = new CompletableFuture<>();
-        CompletableFuture<Object> rightFuture = new CompletableFuture<>();
-
-        // Spawn Truffle-aware threads for both computations
-        Thread leftThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, leftFuture,
-                () -> callNode.call(leftTarget, leftArgs))
-        ).virtual(true).build();
-
-        Thread rightThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, rightFuture,
-                () -> callNode.call(rightTarget, rightArgs))
-        ).virtual(true).build();
+        CompletableFuture<MezzeVariant> leftFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> rightFuture = new CompletableFuture<>();
+        Thread leftThread = spawnJoinSide(env, handlerChain, leftFuture, true,
+            () -> callNode.call(leftTarget, leftArgs));
+        Thread rightThread = spawnJoinSide(env, handlerChain, rightFuture, true,
+            () -> callNode.call(rightTarget, rightArgs));
 
         leftThread.start();
         rightThread.start();
 
         try {
-            // Wait for both
-            Object leftResult = leftFuture.get();
-            Object rightResult = rightFuture.get();
-            // OPTIMIZATION: Use cached field name array
-            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{leftResult, rightResult});
+            MezzeVariant lr = leftFuture.get();
+            MezzeVariant rr = rightFuture.get();
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{lr, rr});
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             leftThread.interrupt();
             rightThread.interrupt();
-            throw new RuntimeException("Join interrupted", e);
+            // Surface as two Err AsyncCancelled — no host exception
+            // escapes; caller pattern-matches the Result.
+            MezzeVariant cancelled = createAsyncCancelled();
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{cancelled, cancelled});
         } catch (ExecutionException e) {
+            // Defensive: futures should always complete with a Result.
             leftThread.interrupt();
             rightThread.interrupt();
-            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "join");
+            MezzeVariant failed = createAsyncFailed(
+                "join: unexpected ExecutionException: " + e);
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{failed, failed});
         }
     }
 
@@ -1129,26 +1175,18 @@ public final class AsyncNatives {
         MezzeFunction b = getFunction(args, "b");
         MezzeFunction c = getFunction(args, "c");
 
-        MezzeContext context = MezzeContext.get(node);
-        Env env = context.getEnv();
-
+        Env env = MezzeContext.get(node).getEnv();
         MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
-        CompletableFuture<Object> aFuture = new CompletableFuture<>();
-        CompletableFuture<Object> bFuture = new CompletableFuture<>();
-        CompletableFuture<Object> cFuture = new CompletableFuture<>();
-
-        Thread aThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, aFuture, () -> callThunkFunction(a, callNode))
-        ).virtual(true).build();
-
-        Thread bThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, bFuture, () -> callThunkFunction(b, callNode))
-        ).virtual(true).build();
-
-        Thread cThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, cFuture, () -> callThunkFunction(c, callNode))
-        ).virtual(true).build();
+        CompletableFuture<MezzeVariant> aFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> bFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> cFuture = new CompletableFuture<>();
+        Thread aThread = spawnJoinSide(env, handlerChain, aFuture, true,
+            () -> callThunkFunction(a, callNode));
+        Thread bThread = spawnJoinSide(env, handlerChain, bFuture, true,
+            () -> callThunkFunction(b, callNode));
+        Thread cThread = spawnJoinSide(env, handlerChain, cFuture, true,
+            () -> callThunkFunction(c, callNode));
 
         aThread.start();
         bThread.start();
@@ -1164,12 +1202,18 @@ public final class AsyncNatives {
             aThread.interrupt();
             bThread.interrupt();
             cThread.interrupt();
-            throw new RuntimeException("Join3 interrupted", e);
+            MezzeVariant cancelled = createAsyncCancelled();
+            return MezzeRecord.fromFields(
+                ABC_FIELDS, new Object[]{cancelled, cancelled, cancelled});
         } catch (ExecutionException e) {
+            // Defensive — futures complete with Result, never exceptionally.
             aThread.interrupt();
             bThread.interrupt();
             cThread.interrupt();
-            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "join3");
+            MezzeVariant failed = createAsyncFailed(
+                "join3: unexpected ExecutionException: " + e);
+            return MezzeRecord.fromFields(
+                ABC_FIELDS, new Object[]{failed, failed, failed});
         }
     }
 
@@ -1735,39 +1779,36 @@ public final class AsyncNatives {
         MezzeFunction left = getFunction(args, "l");
         MezzeFunction right = getFunction(args, "r");
 
-        MezzeContext context = MezzeContext.get(node);
-        Env env = context.getEnv();
-
+        Env env = MezzeContext.get(node).getEnv();
         MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
-        CompletableFuture<Object> leftFuture = new CompletableFuture<>();
-        CompletableFuture<Object> rightFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> leftFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> rightFuture = new CompletableFuture<>();
 
-        Thread leftThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, leftFuture, () -> callThunkFunction(left, callNode))
-        ).build();
-
-        Thread rightThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, rightFuture, () -> callThunkFunction(right, callNode))
-        ).build();
+        Thread leftThread = spawnJoinSide(env, handlerChain, leftFuture, false,
+            () -> callThunkFunction(left, callNode));
+        Thread rightThread = spawnJoinSide(env, handlerChain, rightFuture, false,
+            () -> callThunkFunction(right, callNode));
 
         leftThread.start();
         rightThread.start();
 
         try {
-            return MezzeRecord.fromFields(
-                LEFT_RIGHT_FIELDS,
-                new Object[]{leftFuture.get(), rightFuture.get()}
-            );
+            MezzeVariant lr = leftFuture.get();
+            MezzeVariant rr = rightFuture.get();
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{lr, rr});
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             leftThread.interrupt();
             rightThread.interrupt();
-            throw new RuntimeException("Join interrupted", e);
+            MezzeVariant cancelled = createAsyncCancelled();
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{cancelled, cancelled});
         } catch (ExecutionException e) {
             leftThread.interrupt();
             rightThread.interrupt();
-            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "join");
+            MezzeVariant failed = createAsyncFailed(
+                "join: unexpected ExecutionException: " + e);
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{failed, failed});
         }
     }
 
@@ -1777,26 +1818,19 @@ public final class AsyncNatives {
         MezzeFunction b = getFunction(args, "b");
         MezzeFunction c = getFunction(args, "c");
 
-        MezzeContext context = MezzeContext.get(node);
-        Env env = context.getEnv();
-
+        Env env = MezzeContext.get(node).getEnv();
         MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
-        CompletableFuture<Object> aFuture = new CompletableFuture<>();
-        CompletableFuture<Object> bFuture = new CompletableFuture<>();
-        CompletableFuture<Object> cFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> aFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> bFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> cFuture = new CompletableFuture<>();
 
-        Thread aThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, aFuture, () -> callThunkFunction(a, callNode))
-        ).build();
-
-        Thread bThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, bFuture, () -> callThunkFunction(b, callNode))
-        ).build();
-
-        Thread cThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, cFuture, () -> callThunkFunction(c, callNode))
-        ).build();
+        Thread aThread = spawnJoinSide(env, handlerChain, aFuture, false,
+            () -> callThunkFunction(a, callNode));
+        Thread bThread = spawnJoinSide(env, handlerChain, bFuture, false,
+            () -> callThunkFunction(b, callNode));
+        Thread cThread = spawnJoinSide(env, handlerChain, cFuture, false,
+            () -> callThunkFunction(c, callNode));
 
         aThread.start();
         bThread.start();
@@ -1809,9 +1843,20 @@ public final class AsyncNatives {
             );
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Join3 interrupted", e);
+            aThread.interrupt();
+            bThread.interrupt();
+            cThread.interrupt();
+            MezzeVariant cancelled = createAsyncCancelled();
+            return MezzeRecord.fromFields(
+                ABC_FIELDS, new Object[]{cancelled, cancelled, cancelled});
         } catch (ExecutionException e) {
-            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "join3");
+            aThread.interrupt();
+            bThread.interrupt();
+            cThread.interrupt();
+            MezzeVariant failed = createAsyncFailed(
+                "join3: unexpected ExecutionException: " + e);
+            return MezzeRecord.fromFields(
+                ABC_FIELDS, new Object[]{failed, failed, failed});
         }
     }
 

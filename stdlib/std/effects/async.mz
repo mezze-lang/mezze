@@ -137,10 +137,14 @@ effect Async where {
   is_cancelled: {} -> Bool <Async>,
   ## Cancellation checkpoint -- throws if cancelled.
   check: {} -> {} <Async>,
-  ## Run two computations concurrently, cancel sibling on failure.
-  join: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Async, ...>,
-  ## Run three computations concurrently.
-  join3: { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: 'a, b: 'b, c: 'c } <Async, ...>,
+  ## Run two computations concurrently. Each side is reported as
+  ## `Result 'x AsyncError`. On first failure, the surviving sibling is
+  ## cancelled (auto-cancel #122) — observers see it as
+  ## `Err { error = AsyncCancelled }`.
+  join: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: Result 'a AsyncError, r: Result 'b AsyncError } <Async, ...>,
+  ## Run three computations concurrently. Same cancel-on-first-failure
+  ## semantics as join.
+  join3: { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: Result 'a AsyncError, b: Result 'b AsyncError, c: Result 'c AsyncError } <Async, ...>,
   ## Map over a sequence concurrently, results in input order.
   map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Async, ...>,
   ## Run f on each element concurrently for side effects.
@@ -304,12 +308,16 @@ impl Async for CoopAsync where {
     Promise { val = native_p } -> __native_scheduler_is_done { p = native_p },
   is_cancelled = {} -> False,
   check = {} -> {},
+  ## Coop join: wraps each side's result in Ok. The scheduler's await
+  ## still throws on task failure today (#122e tech debt — Coop
+  ## doesn't yet observe AsyncError); when that's fixed both sides
+  ## will report as proper Result.
   join = { l, r } -> do
     let p_l = __native_scheduler_spawn { sched = scope, f = l }
     let p_r = __native_scheduler_spawn { sched = scope, f = r }
     let r_l = __native_scheduler_await { sched = scope, p = p_l }
     let r_r = __native_scheduler_await { sched = scope, p = p_r }
-    { l = r_l, r = r_r },
+    { l = Ok { val = r_l }, r = Ok { val = r_r } },
   join3 = { a, b, c } -> do
     let p_a = __native_scheduler_spawn { sched = scope, f = a }
     let p_b = __native_scheduler_spawn { sched = scope, f = b }
@@ -317,7 +325,7 @@ impl Async for CoopAsync where {
     let r_a = __native_scheduler_await { sched = scope, p = p_a }
     let r_b = __native_scheduler_await { sched = scope, p = p_b }
     let r_c = __native_scheduler_await { sched = scope, p = p_c }
-    { a = r_a, b = r_b, c = r_c },
+    { a = Ok { val = r_a }, b = Ok { val = r_b }, c = Ok { val = r_c } },
   map = { xs, f } -> do
     let promises = seq::map { xs = xs, f = { x } ->
       __native_scheduler_spawn { sched = scope, f = {} -> f { x = x } } }

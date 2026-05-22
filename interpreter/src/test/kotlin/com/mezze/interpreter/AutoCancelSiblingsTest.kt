@@ -85,31 +85,25 @@ class AutoCancelSiblingsTest {
     // fiber must be cancelled before counter has time to mutate.
 
     @Test
-    @Disabled("blocked on #122e — Async.join failure shape under ExceptionToResult typechecks weirdly")
+    @Disabled("moves to Async.try_join (#122f / #169) — Async.join is now Rust-style: each side runs to completion, no auto-cancel. Re-enable against try_join once it lands.")
     fun `join cancels surviving sibling when one fails under LoomAsync`() {
-        // The failer task raises an unhandled throw — Async.join's
-        // current contract is to propagate the failure (re-raise on
-        // the parent). On failure, the surviving sibling is interrupted,
-        // so its sleep returns early and the counter never increments.
-        //
-        // Wrap with ExceptionToResult so the test program can read the
-        // counter after the join returns Err. Read the counter outside
-        // the inner perform so it's still accessible.
+        // failer uses crash {} (an unrecoverable host error) — the spawn
+        // boundary catches the throwable and records AsyncFailed on the
+        // l side of the join result. First-failure auto-cancel then
+        // interrupts slow before it can bump the counter (slow is in
+        // Thread.sleep, so the interrupt takes effect immediately).
         val source = """
             use std::effects::async::{ Async, LoomAsync }
             use std::effects::concurrent::atom::{ atom, deref, reset }
-            use std::effects::exception::{ Exception, ExceptionToResult, throw }
 
             perform LoomAsync in do
               let counter = atom { value = 0 }
-              let failer = {} -> throw { error = "boom" }
+              let failer = {} -> crash { msg = "boom" }
               let slow = {} -> do
                 Async.sleep { ms = 200 }
                 let _ = reset { atom = counter, value = 1 }
                 0
-              let result = perform ExceptionToResult in do
-                let _ = Async.join { l = failer, r = slow }
-                {}
+              let _ = Async.join { l = failer, r = slow }
               Async.sleep { ms = 400 }
               deref { atom = counter }
         """.trimIndent()
@@ -117,12 +111,12 @@ class AutoCancelSiblingsTest {
     }
 
     @Test
-    @Disabled("blocked on #122e — Async.join failure shape under ExceptionToResult typechecks weirdly")
+    @Disabled("moves to Async.try_join (#122f / #169) — Async.join no longer auto-cancels.")
     fun `join cancels surviving sibling when one fails under CoopAsync`() {
         val source = """
             use std::effects::async::{ Async, CoopAsync }
             use std::effects::concurrent::atom::{ atom, deref, reset }
-            use std::effects::exception::{ Exception, ExceptionToResult, throw }
+            use std::effects::exception::{ Exception, throw }
 
             perform CoopAsync in do
               let counter = atom { value = 0 }
@@ -131,22 +125,21 @@ class AutoCancelSiblingsTest {
                 Async.sleep { ms = 200 }
                 let _ = reset { atom = counter, value = 1 }
                 0
-              let _ = perform ExceptionToResult in
-                Async.join { l = failer, r = slow }
+              let _ = Async.join { l = failer, r = slow }
               Async.sleep { ms = 400 }
               deref { atom = counter }
         """.trimIndent()
         assertEquals(0L, eval(source))
     }
 
-    // ─── join with success — no cancellation expected ─────────────────────
+    // ─── join with success — both effects observable ────────────────────────
 
     @Test
     fun `join with all success does NOT cancel anyone under LoomAsync`() {
-        // Sanity check: only failure (or race-winner commit) triggers
-        // sibling cancel. When all join arms succeed, both effects
-        // are observable. Uses `swap` for an atomic increment to avoid
-        // a read-modify-write race on `counter` under real concurrency.
+        // Under the Rust-style join semantics (no auto-cancel; each side
+        // runs to completion), both bumps fire and the counter is 2.
+        // Uses `swap` for an atomic increment so the read-modify-write is
+        // safe under real concurrency.
         val source = """
             use std::effects::async::{ Async, LoomAsync }
             use std::effects::concurrent::atom::{ atom, deref, swap }
@@ -165,16 +158,15 @@ class AutoCancelSiblingsTest {
     // ─── join3 — first failure cancels the other two ──────────────────────
 
     @Test
-    @Disabled("blocked on #122e — Async.join3 failure shape under ExceptionToResult typechecks weirdly")
+    @Disabled("moves to Async.try_join3 (#122f / #169) — Async.join3 no longer auto-cancels.")
     fun `join3 cancels two surviving siblings when one fails under LoomAsync`() {
         val source = """
             use std::effects::async::{ Async, LoomAsync }
             use std::effects::concurrent::atom::{ atom, deref, swap }
-            use std::effects::exception::{ Exception, ExceptionToResult, throw }
 
             perform LoomAsync in do
               let counter = atom { value = 0 }
-              let failer = {} -> throw { error = "boom" }
+              let failer = {} -> crash { msg = "boom" }
               let slow1 = {} -> do
                 Async.sleep { ms = 200 }
                 let _ = swap { atom = counter, f = { current } -> current + 1 }
@@ -183,8 +175,7 @@ class AutoCancelSiblingsTest {
                 Async.sleep { ms = 200 }
                 let _ = swap { atom = counter, f = { current } -> current + 1 }
                 0
-              let _ = perform ExceptionToResult in
-                Async.join3 { a = failer, b = slow1, c = slow2 }
+              let _ = Async.join3 { a = failer, b = slow1, c = slow2 }
               Async.sleep { ms = 400 }
               deref { atom = counter }
         """.trimIndent()

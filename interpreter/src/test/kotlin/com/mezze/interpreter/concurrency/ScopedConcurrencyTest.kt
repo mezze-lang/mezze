@@ -138,6 +138,7 @@ class ScopedConcurrencyTest {
     fun `test scoped with mixed spawn and join`() {
         val code = """
             use std::effects::async::{Async, LoomAsync, scope_spawn}
+            use std::result
 
             perform LoomAsync in do
                 Async.scoped {f = {sc} -> do
@@ -158,7 +159,7 @@ class ScopedConcurrencyTest {
                         Ok {val} -> val
                         Err {error = _} -> -1
 
-                    r1 + r2 + joined.l + joined.r
+                    r1 + r2 + result::get_or_else { result = joined.l, def = 0 } + result::get_or_else { result = joined.r, def = 0 }
                 }
         """
         val result = eval(code)

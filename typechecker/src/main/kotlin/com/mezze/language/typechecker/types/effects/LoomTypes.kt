@@ -170,21 +170,26 @@ object LoomTypes {
 
         // === Structured Concurrency ===
 
-        // __native_loom_join: {l: {} -> 'a <...>, r: {} -> 'b <...>} -> {l: 'a, r: 'b}
-        // Callback parameters accept any effects (<...>)
+        // Result 'x AsyncError helper for join* return shapes.
+        val joinAsyncErrorType = MezzeType.VarType(com.mezze.language.ast.TypeVar("AsyncError"))
+        fun resultOf(elemType: MezzeType): MezzeType =
+            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(elemType, joinAsyncErrorType))
+
+        // __native_loom_join: {l: {} -> 'a <...>, r: {} -> 'b <...>}
+        //   -> {l: Result 'a AsyncError, r: Result 'b AsyncError}
         context["__native_loom_join"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "l" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
                 "r" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
             )),
             MezzeType.RecordType(mapOf(
-                "l" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
-                "r" to MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
+                "l" to resultOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
+                "r" to resultOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
             ))
         )
 
-        // __native_loom_join3: {a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...>} -> {a: 'a, b: 'b, c: 'c}
-        // Callback parameters accept any effects (<...>)
+        // __native_loom_join3: {a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...>}
+        //   -> {a: Result 'a AsyncError, b: Result 'b AsyncError, c: Result 'c AsyncError}
         context["__native_loom_join3"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "a" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
@@ -192,9 +197,9 @@ object LoomTypes {
                 "c" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("c")))
             )),
             MezzeType.RecordType(mapOf(
-                "a" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
-                "b" to MezzeType.VarType(com.mezze.language.ast.TypeVar("b")),
-                "c" to MezzeType.VarType(com.mezze.language.ast.TypeVar("c"))
+                "a" to resultOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
+                "b" to resultOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))),
+                "c" to resultOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("c")))
             ))
         )
 

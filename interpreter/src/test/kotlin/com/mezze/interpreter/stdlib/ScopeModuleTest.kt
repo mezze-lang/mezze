@@ -149,7 +149,7 @@ class ScopeModuleTest {
                     let r1 = result::get_or_else { result = Async.await { p = p1 }, def = -1 }
                     let r2 = result::get_or_else { result = Async.await { p = p2 }, def = -1 }
 
-                    r1 + r2 + joined.l + joined.r
+                    r1 + r2 + result::get_or_else { result = joined.l, def = 0 } + result::get_or_else { result = joined.r, def = 0 }
                 }
         """)
         assertEquals(50L, result)
