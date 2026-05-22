@@ -26,7 +26,7 @@ public final class MezzeTestHelper {
     private static final MezzeParser parser = new MezzeParser();
     private static final TypeChecker typeChecker = new TypeChecker();
 
-    // Shared engine for test execution performance.
+    // Shared engine for general test execution performance.
     // engine.Compilation=false disables Truffle PE/JIT — even though
     // truffle-runtime is on the classpath (HotSpotTruffleRuntime), tests
     // run interpreted to avoid per-test JIT warmup (~1-3s each).
@@ -35,6 +35,18 @@ public final class MezzeTestHelper {
         .allowExperimentalOptions(true)
         .option("engine.WarnInterpreterOnly", "false")
         .option("engine.Compilation", "false")
+        .build();
+
+    // Separate engine for benchmarks: JIT ON, with PE+compilation, so
+    // measurements reflect production perf (mez build / native image).
+    // Bench callers must warm up before timing — Truffle needs ~hundreds
+    // of executions before a CallTarget compiles. Use `runJit()` from
+    // the bench harness; correctness tests should keep using `run()`.
+    private static final Engine jitEngine = Engine.newBuilder()
+        .allowExperimentalOptions(true)
+        .option("engine.WarnInterpreterOnly", "false")
+        // engine.Compilation defaults to true; spell it out for clarity.
+        .option("engine.Compilation", "true")
         .build();
 
     private MezzeTestHelper() {}
@@ -51,6 +63,22 @@ public final class MezzeTestHelper {
      * Execute a Mezze program from source code with custom project root.
      */
     public static Object run(String sourceCode, Path projectRoot) {
+        return runWith(sourceCode, projectRoot, sharedEngine);
+    }
+
+    /**
+     * Execute a Mezze program with Truffle JIT enabled. Intended for
+     * benchmarks where JIT-compiled hot paths reflect production perf.
+     * Each call still creates a fresh Context so module caches don't
+     * leak across benches, but the engine is shared so CallTargets
+     * (and their compiled code) persist across calls — meaning the
+     * first call pays compile cost, subsequent calls are warm.
+     */
+    public static Object runJit(String sourceCode) {
+        return runWith(sourceCode, null, jitEngine);
+    }
+
+    private static Object runWith(String sourceCode, Path projectRoot, Engine engine) {
         Path root = projectRoot != null
             ? projectRoot
             : Paths.get(System.getProperty("mezze.project.root", "."));
@@ -65,7 +93,7 @@ public final class MezzeTestHelper {
         MezzeLanguage.clearLastResult();
 
         Context context = Context.newBuilder(MezzeLanguage.ID)
-                .engine(sharedEngine)
+                .engine(engine)
                 .allowAllAccess(true)
                 .allowCreateThread(true)
                 .build();

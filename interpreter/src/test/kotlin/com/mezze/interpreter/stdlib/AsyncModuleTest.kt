@@ -21,13 +21,13 @@ class AsyncModuleTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // Helper to wrap code in CoopAsync handler
-    private fun withCoopAsync(body: String): String = """
-        use std::effects::async::{Async, CoopAsync}
-        use std::collections::seq
-
-        perform CoopAsync in do
-            $body
-    """
+    private fun withCoopAsync(body: String): String =
+        "use std::effects::async::{Async, CoopAsync}\n" +
+        "use std::collections::seq\n" +
+        "use std::result\n" +
+        "\n" +
+        "perform CoopAsync in do\n" +
+        body.trimIndent().lines().joinToString("\n") { "    $it" }
 
     // === CoopAsync Handler Tests ===
 
@@ -35,7 +35,7 @@ class AsyncModuleTest {
     fun `test CoopAsync executes computation`() {
         val result = eval(withCoopAsync("""
             let p = Async.spawn {f = {} -> 42}
-            Async.await {p = p}
+            result::get_or_else { result = Async.await {p = p}, def = -1 }
         """))
         assertEquals(42L, result)
     }
@@ -46,7 +46,7 @@ class AsyncModuleTest {
     fun `test spawn and await returns result`() {
         val result = eval(withCoopAsync("""
             let p = Async.spawn {f = {} -> 42}
-            Async.await {p = p}
+            result::get_or_else { result = Async.await {p = p}, def = -1 }
         """))
         assertEquals(42L, result)
     }
@@ -56,8 +56,8 @@ class AsyncModuleTest {
         val result = eval(withCoopAsync("""
             let p1 = Async.spawn {f = {} -> 10}
             let p2 = Async.spawn {f = {} -> 20}
-            let r1 = Async.await {p = p1}
-            let r2 = Async.await {p = p2}
+            let r1 = result::get_or_else { result = Async.await {p = p1}, def = -1 }
+            let r2 = result::get_or_else { result = Async.await {p = p2}, def = -1 }
             r1 + r2
         """))
         assertEquals(30L, result)
@@ -69,7 +69,7 @@ class AsyncModuleTest {
     fun `test is_done on completed promise`() {
         val result = eval(withCoopAsync("""
             let p = Async.spawn {f = {} -> 42}
-            let _ = Async.await {p = p}
+            let _ = result::get_or_else { result = Async.await {p = p}, def = -1 }
             Async.is_done {p = p}
         """))
         assertEquals(true, result)
@@ -109,7 +109,9 @@ class AsyncModuleTest {
         val result = eval(withCoopAsync("""
             let p1 = Async.spawn {f = {} -> 1}
             let p2 = Async.spawn {f = {} -> 2}
-            Async.race {ps = [p1, p2]}
+            match Async.race {ps = [p1, p2]} is
+              Ok { val } -> val
+              Err { error = _ } -> -1
         """))
         // In coop scheduler, first one wins
         assertEquals(1L, result)
@@ -124,7 +126,7 @@ class AsyncModuleTest {
                 l = {} -> 10,
                 r = {} -> 20
             }
-            r.l + r.r
+            result::get_or_else { result = r.l, def = 0 } + result::get_or_else { result = r.r, def = 0 }
         """))
         assertEquals(30L, result)
     }
@@ -139,7 +141,7 @@ class AsyncModuleTest {
                 b = {} -> 2,
                 c = {} -> 3
             }
-            r.a + r.b + r.c
+            result::get_or_else { result = r.a, def = 0 } + result::get_or_else { result = r.b, def = 0 } + result::get_or_else { result = r.c, def = 0 }
         """))
         assertEquals(6L, result)
     }
@@ -207,9 +209,10 @@ class AsyncModuleTest {
     fun `test run helper spawns and awaits`() {
         val result = eval("""
             use std::effects::async::{Async, CoopAsync, run}
+            use std::result
 
             perform CoopAsync in do
-                run {f = {} -> 42}
+                result::get_or_else { result = run {f = {} -> 42}, def = -1 }
         """)
         assertEquals(42L, result)
     }
@@ -276,9 +279,9 @@ class AsyncModuleTest {
         val result = eval(withCoopAsync("""
             let outer = Async.spawn {f = {} -> do
                 let inner = Async.spawn {f = {} -> 42}
-                Async.await {p = inner}
+                result::get_or_else { result = Async.await {p = inner}, def = -1 }
             }
-            Async.await {p = outer}
+            result::get_or_else { result = Async.await {p = outer}, def = -1 }
         """))
         assertEquals(42L, result)
     }

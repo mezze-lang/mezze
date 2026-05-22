@@ -708,6 +708,81 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
 }
 
 /**
+ * Variant alias scope check (#148).
+ *
+ * An alias name is "in scope" at the current unification site if it appears in
+ * the caller's `typeDeclarations` map — which contains locally-declared types
+ * plus those explicitly imported by name (`use foo::{Alias}`).
+ *
+ * Anonymous variants (typeName = null OR placeholders like "<inline>" /
+ * "<inferred>") are never in scope as walls; they only carry an arm set.
+ *
+ * Used by the two nominal-wall checks in `unifyVariants`. When neither side's
+ * name is in scope, the typechecker treats the variants structurally so that
+ * values exported from different modules combine via their arm sets without
+ * requiring the caller to name the alias.
+ */
+/**
+ * Returns true iff the variant acts as a nominal wall at the current
+ * unification site (#148). True when either:
+ *   - The variant carries `nominalWall = true` (inline ascription or
+ *     match-pinned inferred variant). These are ALWAYS walls.
+ *   - The variant has a typeName that's in the caller's in-scope alias
+ *     name set (locally declared or explicitly imported by `use`).
+ *
+ * Anonymous variants (no typeName, no nominalWall) are never walls — they
+ * only carry an arm set and merge structurally.
+ *
+ * Uses the thread-local in-scope set established by the caller via
+ * [withInScopeAliasNames]. Falls back to a conservative "everything in
+ * typeDeclarations is in scope" if no override is active (preserves
+ * pre-#148 behavior at call sites that haven't been migrated).
+ */
+private fun isVariantNameInScope(
+    v: MezzeType.VariantType,
+    typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>
+): Boolean {
+    if (v.nominalWall) return true
+    val name = v.typeName ?: return false
+    val override = inScopeAliasNamesOverride.get()
+    return if (override != null) override.contains(name)
+           else typeDeclarations.containsKey(name)
+}
+
+/**
+ * Thread-local override for "which alias names act as nominal walls" (#148).
+ *
+ * When the top-level constraint solver knows the narrower in-scope set
+ * (local declarations + explicit `use` imports), it sets this before calling
+ * unify, restoring afterward. While set, [isVariantNameInScope] uses it
+ * instead of the full typeDeclarations map.
+ *
+ * Null means "no override; conservative fallback to typeDeclarations.keys."
+ */
+private val inScopeAliasNamesOverride: ThreadLocal<Set<String>?> = ThreadLocal.withInitial { null }
+
+/**
+ * Run [block] with the in-scope alias names set to [names].
+ * Used by the constraint solver / type-checker entry points.
+ */
+fun <T> withInScopeAliasNames(names: Set<String>, block: () -> T): T {
+    val prev = inScopeAliasNamesOverride.get()
+    inScopeAliasNamesOverride.set(names)
+    try {
+        return block()
+    } finally {
+        inScopeAliasNamesOverride.set(prev)
+    }
+}
+
+/**
+ * Get the currently-active in-scope alias names, if any. Returns null when no
+ * override is in effect. Used by ConstraintSolver to filter the constructor
+ * index to in-scope aliases only (#148).
+ */
+fun inScopeAliasNamesForSolverOrNull(): Set<String>? = inScopeAliasNamesOverride.get()
+
+/**
  * Unify two variant types.
  */
 internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
@@ -762,10 +837,12 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         val closedCtors = closedVar.constructors.keys
         val openCtors = openVar.constructors.keys
 
-        // CRITICAL: If closed variant has a typeName (is a declared type or inline annotation),
-        // check that ALL constructors in the open variant exist in the closed variant.
-        // This prevents `Yellow` from unifying with `Color = | Red, Green, Blue |`.
-        if (closedVar.typeHash != null || closedVar.typeName != null) {
+        // CRITICAL: If the closed variant acts as a nominal wall (in-scope alias OR
+        // inline/inferred placeholder via #148's nominalWall flag), check that ALL
+        // constructors in the open variant exist in the closed variant. This is what
+        // prevents `Yellow` from unifying with `Color = | Red, Green, Blue |` when
+        // Color is declared/imported here.
+        if (isVariantNameInScope(closedVar, typeDeclarations)) {
             val invalidConstructors = openCtors - closedCtors
             if (invalidConstructors.isNotEmpty()) {
                 val available = closedCtors.sorted().joinToString(", ")
@@ -784,6 +861,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
                 )
             }
         }
+        // Otherwise: an out-of-scope named alias acts purely as its arm set.
 
         // Unify payload types for constructors that exist in BOTH variants
         // (constructors only in the closed variant are implicitly accepted by the open variant)
@@ -824,10 +902,13 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
     // This allows match expressions to return different constructors that get unified into
     // a combined variant type: `match x is Red -> Blue | Green -> Yellow` produces `| Blue, Yellow |`
     //
-    // HOWEVER: If BOTH variants have a typeName (are declared types), they must be the SAME type.
-    // This prevents `Animal` from unifying with `Color` even if they happen to share a constructor.
-    // Hash-first comparison: if both have typeHash, compare by hash (rename-safe).
-    // Fall back to typeName comparison if hashes are not available.
+    // HOWEVER: If BOTH variants have a typeName (are declared types), they must be the SAME type
+    // — but only if at least one of those names is in scope at the use site (#148). An alias
+    // acts as a nominal wall only when its name is reachable by the caller (declared locally
+    // or imported by name). When a value crosses a module boundary with an alias-typed shape
+    // and the caller didn't import the alias, the name has no nominal force here.
+    //
+    // The "inline"/"inferred" placeholders are anonymous markers and never act as walls.
     val bothNamed = (var1.typeHash != null && var2.typeHash != null) ||
                     (var1.typeName != null && var2.typeName != null)
     val namesMatch = if (var1.typeHash != null && var2.typeHash != null) {
@@ -836,15 +917,34 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         var1.typeName == var2.typeName
     }
     if (bothNamed && !namesMatch) {
-        return UnificationResult.Failure(
-            message = "Cannot unify different variant types '${var1.typeName}' and '${var2.typeName}'",
-            type1 = var1,
-            type2 = var2
-        )
+        val var1NameInScope = isVariantNameInScope(var1, typeDeclarations)
+        val var2NameInScope = isVariantNameInScope(var2, typeDeclarations)
+        if (var1NameInScope || var2NameInScope) {
+            // #149: when both walls happen to constrain to the SAME arm set,
+            // unify successfully (their nominal identities are interchangeable
+            // for value-typing purposes). Concretely this covers the pattern
+            //
+            //   pub let f : {} -> | Red, Green, Blue | = {} -> color_returning_fn {}
+            //
+            // where the inline-annotation wall's arms equal the alias-typed
+            // body's arms. Different names, same set of legal values.
+            val sameArms = var1.constructors.keys == var2.constructors.keys
+            if (!sameArms) {
+                return UnificationResult.Failure(
+                    message = "Cannot unify different variant types '${var1.typeName}' and '${var2.typeName}'",
+                    type1 = var1,
+                    type2 = var2
+                )
+            }
+            // Arms agree — fall through to the merge loop below, which will
+            // unify per-constructor payloads.
+        }
+        // Neither name is in scope — fall through to structural merge below.
     }
 
     // If only one has a typeName/typeHash (is a declared type), check that ALL constructors from the
-    // anonymous variant exist in the declared type
+    // anonymous variant exist in the declared type — but only if the declared type's name is in
+    // scope (#148). Otherwise the "declared" side acts purely as a structural arm set.
     val isDeclared1 = var1.typeHash != null || var1.typeName != null
     val isDeclared2 = var2.typeHash != null || var2.typeName != null
     val (declaredVar, anonymousVar) = when {
@@ -855,7 +955,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
 
     if (declaredVar != null && anonymousVar != null) {
         val invalidConstructors = anonymousVar.constructors.keys - declaredVar.constructors.keys
-        if (invalidConstructors.isNotEmpty()) {
+        if (invalidConstructors.isNotEmpty() && isVariantNameInScope(declaredVar, typeDeclarations)) {
             val available = declaredVar.constructors.keys.sorted().joinToString(", ")
             val invalid = invalidConstructors.sorted().joinToString(", ")
             // Use friendly message for inline annotations and inferred variants
@@ -871,6 +971,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
                 type2 = var2
             )
         }
+        // Otherwise: extras flow through; merge structurally below.
     }
 
     val allConstructors = (constructors1 + constructors2).toSet()
@@ -923,16 +1024,42 @@ private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeTy
         (app1.typeHash != null && app2.typeHash != null && app1.typeHash == app2.typeHash)
 
     if (!constructorsMatch) {
-        // OPEN VARIANT HANDLING: If one type is an open variant, expand both and unify as variants
-        // This allows open variants to accept constructors from other types
+        // Try to expand both sides into their underlying variant shape. Expansion
+        // consults the in-scope typeDeclarations map first, then falls back to a
+        // global ModuleResolver lookup — so it succeeds for aliases that exist in
+        // some loaded module even if the user didn't `use` them by name.
         val expanded1 = expandTypeApplicationToVariant(app1, typeDeclarations)
         val expanded2 = expandTypeApplicationToVariant(app2, typeDeclarations)
 
         if (expanded1 != null && expanded2 != null) {
-            // At least one must be open for cross-type unification
+            // OPEN VARIANT HANDLING (existing): if either side carries a row var,
+            // structural unification proceeds — this is how anonymous variants
+            // merge during inference.
             if (expanded1.rowVar != null || expanded2.rowVar != null) {
                 return unifyVariants(expanded1, expanded2, typeDeclarations)
             }
+
+            // STRUCTURAL ALIAS HANDLING (#148): two distinct closed aliases. An
+            // alias name acts as a nominal barrier ONLY when it's in scope in
+            // the caller's module — declared locally or imported by name. When
+            // NEITHER side is in scope, both names are reachable-but-unqualified
+            // labels and the typechecker should treat the values structurally,
+            // unifying their arm sets.
+            //
+            // Rationale: a function exported from module A returning Alias is
+            // received in module B without knowing or caring about Alias's name;
+            // B sees only the arms. Combining such a value with a value from
+            // module C (also unimported) succeeds iff arm names compose.
+            val override = inScopeAliasNamesOverride.get()
+            val app1InScope = if (override != null) override.contains(app1.constructor)
+                              else typeDeclarations.containsKey(app1.constructor)
+            val app2InScope = if (override != null) override.contains(app2.constructor)
+                              else typeDeclarations.containsKey(app2.constructor)
+            if (!app1InScope && !app2InScope) {
+                return unifyVariants(expanded1, expanded2, typeDeclarations)
+            }
+            // Exactly one or both in scope — the in-scope alias's identity wins.
+            // Fall through to the existing failure path.
         }
 
         return UnificationResult.Failure(

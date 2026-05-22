@@ -69,13 +69,18 @@ object SchedulerTypes {
             MezzeType.IntType
         )
 
-        // __native_scheduler_race: {sched: __NativeScheduler, ps: [__NativePromise]} -> 'a
+        // __native_scheduler_race: {sched: __NativeScheduler, ps: [__NativePromise]} -> Result 'a AsyncError
+        val schedRaceAsyncErrorType = MezzeType.VarType(TypeVar("AsyncError"))
+        val schedRaceResultType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(
+            MezzeType.VarType(TypeVar("a")),
+            schedRaceAsyncErrorType
+        ))
         context["__native_scheduler_race"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "sched" to schedulerType,
                 "ps" to MezzeType.SeqType(nativePromiseType)
             )),
-            MezzeType.VarType(TypeVar("a"))
+            schedRaceResultType
         )
 
         // __native_scheduler_all: {sched: __NativeScheduler, ps: [__NativePromise]} -> ['a]

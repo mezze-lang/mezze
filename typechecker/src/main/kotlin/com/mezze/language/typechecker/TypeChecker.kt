@@ -300,6 +300,14 @@ class TypeChecker(
                     importContext = importResult.importContext
                     loadedModules = importResult.loadedModules
 
+                    // #148/#149: compute the in-scope alias name set for the alias-stripper.
+                    // Local declarations + explicit `use foo::{TypeName}` imports +
+                    // built-ins (always-in-scope via the prelude).
+                    val localTypeNames = module.decls
+                        .filterIsInstance<com.mezze.language.parsedast.ParsedTypeDecl>()
+                        .map { it.name }
+                        .toSet()
+                    val builtinNames = com.mezze.language.ast.BuiltinTypes.allBuiltinTypeNames
                     if (shouldInjectPrelude) {
                         val preludeContext = loadPreludeModules(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
@@ -307,7 +315,8 @@ class TypeChecker(
                     if (moduleUsesBind) {
                         importContext = injectExceptionToResultForBind(importContext!!, importResolver)
                     }
-                    mergeImportContext(parentContext, importContext!!)
+                    val inScopeNames = localTypeNames + importContext!!.explicitlyImportedTypeNames + builtinNames
+                    mergeImportContext(parentContext, importContext!!, inScopeNames)
                 }
                 is ImportResolutionResult.Failure -> {
                     throw importResult.errors.firstOrNull()
@@ -399,7 +408,22 @@ class TypeChecker(
             abilityDeclarations = allAbilityDeclarations,
             effectDeclarations = allEffectDeclarations,
         )
-        val programConstraintResult = constraintGenerator.generateProgram(parsedModule, context)
+
+        // #148: install the narrow in-scope alias name set for constraint generation
+        // AND solving. Per-binding solving runs inside generateProgram, so the
+        // override has to be in effect for that entire call. We restore at the
+        // bottom of this function.
+        //
+        // The set:
+        //  - locally declared types (includes Bool/Option/Result via addBuiltInParsedTypes)
+        //  - explicitly imported type names (`use foo::{Alias}`)
+        //  - all built-ins (Seq/Map/List/etc. — always-in-scope via prelude)
+        val inScopeAliasNames = buildResult.typeDeclarations.keys +
+            (importContext?.explicitlyImportedTypeNames ?: emptySet()) +
+            com.mezze.language.ast.BuiltinTypes.allBuiltinTypeNames
+        val programConstraintResult = com.mezze.language.typechecker.solving.withInScopeAliasNames(inScopeAliasNames) {
+            constraintGenerator.generateProgram(parsedModule, context)
+        }
         val constraintResults = programConstraintResult.constraintResults
         val perBindingMustBeOpenRowVars = programConstraintResult.perBindingMustBeOpenRowVars
         val perBindingSolveErrors = programConstraintResult.perBindingSolveErrors
@@ -595,7 +619,12 @@ class TypeChecker(
 
         // PHASE 3: Solve Constraints
         val solver = ConstraintSolver(context, allTypeDeclarations, allAbilityDeclarations)
-        val solveResult = solver.solve(allConstraints)
+        // #148: keep the same narrow in-scope alias set in effect during the
+        // global solve. inScopeAliasNames was computed above for constraint
+        // generation; reuse it here.
+        val solveResult = com.mezze.language.typechecker.solving.withInScopeAliasNames(inScopeAliasNames) {
+            solver.solve(allConstraints)
+        }
 
         when (solveResult) {
             is ConstraintSolver.SolveResult.Failure -> {
@@ -1451,9 +1480,19 @@ class TypeChecker(
      */
     private fun mergeImportContext(
         baseContext: TypingContext,
-        importContext: ModuleImportContext
+        importContext: ModuleImportContext,
+        inScopeAliasNames: Set<String> = emptySet()
     ): TypingContext {
         var context = baseContext
+
+        // #148: strip variant-alias labels from imported binding types when the
+        // alias name isn't in scope at this use site. The result is that values
+        // crossing the module boundary lose their nominal identity (becoming
+        // structural arm sets) for aliases the caller didn't `use foo::{Alias}`.
+        // Newtypes and records stay nominal (intentional barriers).
+        // typeDeclMap below merges importedTypes (which carries auto-imports for
+        // expansion) so the stripper can resolve any TypeApplication it sees.
+        val typeDeclMap = importContext.importedTypes
 
         // Add imported bindings
         // Types with free type variables are registered as polymorphic
@@ -1461,16 +1500,29 @@ class TypeChecker(
         for ((name, binding) in importContext.importedBindings) {
             // Parse the name to handle qualified names like "buffer::empty"
             val bindingKey = BindingKey.parse(name)
-            val freeVars = collectFreeTypeVars(binding.type)
+            // #148: strip alias labels not in scope before registering. If
+            // inScopeAliasNames is empty (callers that haven't migrated), this
+            // is a no-op — every TypeApplication looks "out of scope" but
+            // typeDeclMap may also be empty in that case, so the stripper
+            // simply doesn't find decls to strip and returns the type unchanged.
+            // We pass typeDeclMap (importedTypes) so the stripper can resolve
+            // names. Local-decl names aren't in scope here yet — they'll be
+            // captured by the constraint-generator-level override.
+            val bindingType = if (inScopeAliasNames.isNotEmpty()) {
+                com.mezze.language.typechecker.solving.AliasStripper.strip(
+                    binding.type, inScopeAliasNames, typeDeclMap
+                )
+            } else binding.type
+            val freeVars = collectFreeTypeVars(bindingType)
             if (freeVars.isEmpty()) {
                 // Monomorphic type - use directly
-                context = context.extendMono(bindingKey, binding.type, binding.modulePath, binding.contentHash)
+                context = context.extendMono(bindingKey, bindingType, binding.modulePath, binding.contentHash)
             } else {
                 // Polymorphic type - wrap in TypeScheme for fresh instantiation
                 val scheme = TypeScheme(
                     quantifiedVars = freeVars.toList(),
                     constraints = emptyList(),
-                    type = binding.type
+                    type = bindingType
                 )
                 context = context.extendPoly(bindingKey, scheme, binding.modulePath, binding.contentHash)
             }

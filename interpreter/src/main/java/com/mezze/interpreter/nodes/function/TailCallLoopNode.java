@@ -2,6 +2,7 @@ package com.mezze.interpreter.nodes.function;
 
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -75,17 +76,45 @@ public final class TailCallLoopNode extends MezzeNode {
             }
         }
 
+        // Trampoline for both self-recursive and cross-function tail
+        // calls. The key invariant: this method never grows the Java
+        // stack across iterations — when it catches a TailCallException,
+        // it either rebinds slots (self) or replaces the target/args
+        // and re-issues `target.call(args)` in the inner loop (cross).
+        //
+        // Cross-function works because the callee's TailCallLoopNode
+        // (a fresh Java frame for the duration of one call) catches
+        // its OWN body's exceptions: if it self-recurses it loops, if
+        // it cross-tail-calls a 3rd function it enters its OWN inner
+        // trampoline (one more frame), etc. The depth of Java frames
+        // is bounded by the number of distinct functions in the tail
+        // cycle, NOT by the recursion depth. For mutual recursion
+        // (even/odd ping-pong at depth N), Java stack stays at ~2
+        // frames regardless of N.
         while (loopProfile.profile(true)) {
             try {
                 return bodyNode.execute(frame);
             } catch (TailCallException e) {
-                // Check if this is a self-recursive tail call or a call to a different function
-                if (e.getCallTarget() == selfCallTarget) {
-                    // Self-recursive tail call: rebind arguments and continue loop
+                CallTarget target = e.getCallTarget();
+                if (target == selfCallTarget) {
                     rebindArguments(frame, e.getArguments());
-                } else {
-                    // Tail call to different function: actually call it and return the result
-                    return e.getCallTarget().call(e.getArguments());
+                    continue;
+                }
+                // Cross-function: trampoline. Inner loop avoids re-throwing
+                // the exception (which would unwind through bodyNode and
+                // re-enter the outer loop redundantly).
+                Object[] args = e.getArguments();
+                while (true) {
+                    try {
+                        return target.call(args);
+                    } catch (TailCallException e2) {
+                        if (e2.getCallTarget() == selfCallTarget) {
+                            rebindArguments(frame, e2.getArguments());
+                            break;
+                        }
+                        target = e2.getCallTarget();
+                        args = e2.getArguments();
+                    }
                 }
             }
         }

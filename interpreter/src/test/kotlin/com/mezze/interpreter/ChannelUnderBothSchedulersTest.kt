@@ -1,18 +1,14 @@
 package com.mezze.interpreter
 
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
 /**
  * Producer/consumer using park-aware send_async / recv_async.
  *
- * Loom works today. Coop variant is currently @Disabled — the
- * CoopScheduler is non-reentrant: when a parked task (producer)
- * itself calls park, the inner parkUntil deadlocks because the
- * outer parker (main) isn't in the ready queue. The proper fix is
- * the deferred #106 (Java scheduler on EffectFiber suspension);
- * without it, Coop only supports a single parked task at a time.
+ * After #113 (CoopScheduler on EffectFiber suspension), both producer
+ * and consumer can park concurrently — each runs on its own JDK
+ * delimited continuation, so nested park no longer deadlocks.
  */
 class ChannelUnderBothSchedulersTest {
 
@@ -42,7 +38,6 @@ class ChannelUnderBothSchedulersTest {
     }
 
     @Test
-    @Disabled("CoopScheduler is non-reentrant — see class docstring; needs #106.")
     fun `producer-consumer works under CoopAsync`() {
         assertEquals(60L, eval(program("CoopAsync")))
     }

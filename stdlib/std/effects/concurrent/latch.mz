@@ -1,4 +1,6 @@
 use std::abilities::compare::{ Eq }
+use std::effects::async::{ Async }
+use std::int
 
 ## One-shot countdown barrier that releases waiting threads when count reaches zero.
 pub newtype Latch = Latch __NativeLatch
@@ -24,6 +26,11 @@ pub let count_down : { latch: Latch } -> {} = { latch } ->
 
 ## Wait until the count reaches zero.
 pub let await_latch : { latch: Latch } -> {} = { latch } -> __native_latch_await { latch = latch }
+
+## Park-aware await: routes through Async.park so the same code works
+## under LoomAsync and CoopAsync.
+pub let await_latch_async : { latch: Latch } -> {} <Async, ...> = { latch } ->
+  Async.park { predicate = {} -> __native_latch_get_count { latch = latch } == 0 }
 
 ## Wait until count reaches zero or timeout expires. Returns True if released.
 pub let await_latch_timeout : { latch: Latch, ms: Int } -> Bool = { latch, ms } ->

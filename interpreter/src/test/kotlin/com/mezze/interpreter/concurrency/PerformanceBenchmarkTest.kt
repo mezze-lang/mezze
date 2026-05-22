@@ -1,10 +1,10 @@
 package com.mezze.interpreter.concurrency
 
 import com.mezze.interpreter.MezzeTestHelper
+import com.mezze.interpreter.bench.BenchRecorder
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
@@ -33,7 +33,6 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  *
  *   ./gradlew :interpreter:test --tests com.mezze.interpreter.concurrency.PerformanceBenchmarkTest
  */
-@Disabled("Performance benchmarks — flaky under CI, run manually")
 @Execution(ExecutionMode.SAME_THREAD)
 class PerformanceBenchmarkTest {
 
@@ -44,7 +43,8 @@ class PerformanceBenchmarkTest {
         warmupJVM(500)
     }
 
-    private fun eval(source: String): Any = MezzeTestHelper.run(source)
+    // Bench uses runJit() so measurements reflect production (JIT-on) perf.
+    private fun eval(source: String): Any = MezzeTestHelper.runJit(source)
 
     private fun warmupJVM(iterations: Int) {
         repeat(iterations) {
@@ -58,6 +58,15 @@ class PerformanceBenchmarkTest {
         val start = System.currentTimeMillis()
         block()
         return System.currentTimeMillis() - start
+    }
+
+    /** Time [block] in nanoseconds and record under [label] in the bench output. */
+    private fun benchOnce(label: String, iters: Int = 1, block: () -> Unit): Long {
+        val startNs = System.nanoTime()
+        block()
+        val elapsedNs = System.nanoTime() - startNs
+        BenchRecorder.record("Async macro (Loom)", label, elapsedNs, iters)
+        return elapsedNs
     }
 
     // Shared prelude used by every benchmark — pulls in the Async effect

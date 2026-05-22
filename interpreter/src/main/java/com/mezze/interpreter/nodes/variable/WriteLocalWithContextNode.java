@@ -50,11 +50,6 @@ public final class WriteLocalWithContextNode extends MezzeNode {
     @Child
     private MezzeNode valueNode;
 
-    // Track if we've already registered with the global context.
-    // This only needs to happen once - after that, just write to frame slot.
-    @CompilationFinal
-    private boolean globalRegistered = false;
-
     public WriteLocalWithContextNode(MezzeNode valueNode, int slot, String variableName) {
         this(valueNode, slot, KIND_OBJECT, variableName, null);
     }
@@ -119,11 +114,14 @@ public final class WriteLocalWithContextNode extends MezzeNode {
             }
         }
 
-        // Register with global context only once (for recursive/nested access)
-        // After JIT, this check becomes a constant false and is eliminated
-        if (!globalRegistered) {
-            defineGlobalOnce(value);
-        }
+        // Register with the *current* context's globals. The CallTarget
+        // holding this node is shared across MezzeContexts on a shared
+        // Engine; we must (re-)populate `globals` every time the
+        // top-level let runs so a new Context (e.g. a second
+        // MezzeTestHelper.run) sees the binding. defineGlobal is an
+        // idempotent HashMap.put — cheap, and top-level lets run once
+        // per program execution.
+        registerGlobal(value);
 
         // Return MezzeUnit for lazy suspended effects to prevent early return in BlockNode
         if (value instanceof MezzeSuspended) {
@@ -145,12 +143,8 @@ public final class WriteLocalWithContextNode extends MezzeNode {
     }
 
     @TruffleBoundary
-    private void defineGlobalOnce(Object value) {
-        // Double-check to handle concurrent first execution
-        if (globalRegistered) return;
-
+    private void registerGlobal(Object value) {
         MezzeContext context = MezzeContext.get(this);
-        // Register by content hash for precise runtime lookup.
         if (contentHash != null) {
             context.defineGlobal(contentHash, value);
         }
@@ -159,10 +153,6 @@ public final class WriteLocalWithContextNode extends MezzeNode {
         // by name) can find this value. Strictly separate from the Hash-keyed
         // globals map — name vs hash can never collide.
         context.recordTestInspectionVar(variableName, value);
-
-        // Mark as registered - after JIT, this makes the if-check a constant false
-        com.oracle.truffle.api.CompilerDirectives.transferToInterpreterAndInvalidate();
-        globalRegistered = true;
     }
 
     /**

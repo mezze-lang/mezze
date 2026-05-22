@@ -123,8 +123,10 @@ public final class OpCallNode extends MezzeNode {
                 }
 
                 // Set up dispatch context so the handler body can read
-                // resume/abort via EffectBindingNode.
-                EffectFiber dispatchFiber = EffectFiber.createDispatchOnly();
+                // resume/abort via EffectBindingNode. Acquire from a
+                // per-thread 1-slot pool to avoid allocating a fresh
+                // dispatch fiber per op-call.
+                EffectFiber dispatchFiber = EffectFiber.acquireDispatchOnly();
                 MezzeFunction resumeFn = makeChainResumeFunction();
                 MezzeFunction abortFn = EffectHandlerDriver.makeAbortFunction();
                 dispatchFiber.pushEffectHandles(resumeFn, abortFn);
@@ -147,6 +149,7 @@ public final class OpCallNode extends MezzeNode {
                 } finally {
                     EffectFiber.exitDispatch(prev);
                     dispatchFiber.popEffectHandles();
+                    EffectFiber.releaseDispatchOnly(dispatchFiber);
                 }
             }
         }
@@ -159,9 +162,24 @@ public final class OpCallNode extends MezzeNode {
      * X — the op-call's caller (the spawned task body) sees X. There's no
      * continuation to drive forward; the spawned body resumes naturally
      * via the normal Java return.
+     *
+     * <p>The body is stateless (reads val from arg record, returns it),
+     * so we cache the whole MezzeFunction as a singleton. Saves
+     * {@code FrameDescriptor + RootCallTarget + MezzeFunction + closure
+     * Object[]} allocations per op-call dispatch — meaningful at high
+     * op-call rates (1M op-calls = 4M fewer allocations).
      */
-    @TruffleBoundary
+    private static volatile MezzeFunction CACHED_CHAIN_RESUME_FN = null;
+
     private static MezzeFunction makeChainResumeFunction() {
+        MezzeFunction cached = CACHED_CHAIN_RESUME_FN;
+        if (cached != null) return cached;
+        return buildAndCacheChainResumeFunction();
+    }
+
+    @TruffleBoundary
+    private static synchronized MezzeFunction buildAndCacheChainResumeFunction() {
+        if (CACHED_CHAIN_RESUME_FN != null) return CACHED_CHAIN_RESUME_FN;
         FrameDescriptor fd = FrameDescriptor.newBuilder().build();
         MezzeNode resumeBody = new MezzeNode() {
             @Override
@@ -184,7 +202,9 @@ public final class OpCallNode extends MezzeNode {
             1,
             new int[0]
         ).getCallTarget();
-        return new MezzeFunction(target, ScopedEffectConstants.RESUME, new Object[0]);
+        CACHED_CHAIN_RESUME_FN = new MezzeFunction(
+            target, ScopedEffectConstants.RESUME, new Object[0]);
+        return CACHED_CHAIN_RESUME_FN;
     }
 
     @TruffleBoundary

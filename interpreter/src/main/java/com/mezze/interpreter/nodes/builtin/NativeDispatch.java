@@ -2517,6 +2517,15 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_loom_scope_is_cancelled", (r, c) -> AsyncNatives.loomScopeIsCancelled(r));
         HANDLERS.put("__native_loom_scope_get_token", (r, c) -> AsyncNatives.loomScopeGetToken(r));
 
+        // === Promise-value operations (#117/#118/#123) ===
+        // Promise is the user-facing newtype; these natives operate on the
+        // underlying MezzePromise regardless of which Async impl spawned it.
+        HANDLERS.put("__native_promise_inspect",      (r, c) -> AsyncNatives.promiseInspect(r));
+        HANDLERS.put("__native_promise_cancel",       (r, c) -> AsyncNatives.promiseCancel(r));
+        HANDLERS.put("__native_promise_succeed",      (r, c) -> AsyncNatives.promiseSucceed(r));
+        HANDLERS.put("__native_promise_fail",         (r, c) -> AsyncNatives.promiseFail(r));
+        HANDLERS.put("__native_promise_await_result", (r, c) -> AsyncNatives.promiseAwaitResult(r));
+
         // === OS Threads - true parallelism, limited scale ===
         // Only ops that genuinely create platform threads keep their own
         // natives. Stateless ops (await/race/all/etc.) operate on

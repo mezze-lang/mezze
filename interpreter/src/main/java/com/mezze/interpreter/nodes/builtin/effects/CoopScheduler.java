@@ -1,9 +1,9 @@
 package com.mezze.interpreter.nodes.builtin.effects;
 
+import com.mezze.interpreter.nodes.continuation.EffectFiber;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.datastructures.seq.MezzeSeq;
-import com.mezze.interpreter.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 
@@ -12,84 +12,46 @@ import java.util.*;
 /**
  * Cooperative scheduler for single-threaded async execution.
  *
- * Today's design: tasks run to completion on the Java stack;
- * interleaving happens only at spawn boundaries. {@link #parkUntil}
- * runs ready tasks while polling a predicate, which enables simple
- * park-based primitives (Mutex, Latch) to work under Coop without
- * contention.
+ * <p>Each spawn creates an {@link EffectFiber} (no virtual thread — just
+ * a JDK delimited continuation). {@link #parkUntil} suspends the
+ * current fiber via the same Continuation.yield primitive Loom uses;
+ * the driver loop wakes parked fibers when their predicate flips true.
  *
- * <p>Limitation: nested {@code parkUntil} (a parked task whose body
- * itself parks) deadlocks because the inner parker doesn't capture
- * its continuation. The proper fix is fiber-based suspension via
- * EffectFiber (tracked in #113). Until that lands, CoopAsync is a
- * good drop-in for spawn/await tests and uncontended primitives, but
- * not for producer/consumer-style nested-park scenarios — those
- * tests are {@code @Disabled}.
+ * <p>Because each fiber owns its own continuation/stack, nested park
+ * works: a fiber that parks while another fiber is also parked simply
+ * yields back to the driver, which schedules whatever's ready next.
+ *
+ * <p>Promise completion uses the shared {@link AsyncNatives.MezzePromise},
+ * so Promise value ops (inspect, is_*, cancel) work identically under
+ * Loom and Coop at the user-facing layer.
  */
 public final class CoopScheduler {
 
-    // Ready queue - tasks waiting to execute
-    private final Deque<CoopTask> readyQueue = new ArrayDeque<>();
-
-    // All promises by ID
-    private final Map<Long, CoopPromise> promises = new HashMap<>();
-
-    // Promise ID counter
-    private long nextPromiseId = 0;
-
-    // Scheduler ID for serialization
-    private final UUID id = UUID.randomUUID();
-
-    // Track if we're currently running a task (to detect re-entry)
-    private boolean isRunning = false;
-
-    /**
-     * A task in the scheduler - wraps function + promise.
-     */
-    public static final class CoopTask {
-        final long promiseId;
-        final MezzeFunction function;
-        final CoopPromise promise;
-
-        CoopTask(long promiseId, MezzeFunction function, CoopPromise promise) {
-            this.promiseId = promiseId;
-            this.function = function;
-            this.promise = promise;
-        }
+    /** Sentinel suspend-payload telling the driver "fiber is parked". */
+    private static final class ParkRequest {
+        final MezzeFunction predicate;
+        ParkRequest(MezzeFunction predicate) { this.predicate = predicate; }
     }
 
-    /**
-     * A promise in the scheduler - tracks completion.
-     */
-    public static final class CoopPromise {
-        final long id;
-        Object result;
-        boolean completed = false;
-        Throwable error;
+    /** Per-thread handle so a fiber body can find its scheduler when parking. */
+    private static final ThreadLocal<CoopScheduler> CURRENT = new ThreadLocal<>();
+    /** Per-thread handle for the coop fiber currently executing on this scheduler. */
+    private static final ThreadLocal<EffectFiber> CURRENT_FIBER = new ThreadLocal<>();
 
-        CoopPromise(long id) {
-            this.id = id;
-        }
+    private final Deque<CoopFiber> readyQueue = new ArrayDeque<>();
+    private final List<CoopFiber> parkedFibers = new ArrayList<>();
+    private final UUID id = UUID.randomUUID();
 
-        public boolean isCompleted() {
-            return completed;
-        }
+    /** A fiber tracked by this scheduler — pairs the JDK continuation with its result promise. */
+    static final class CoopFiber {
+        final EffectFiber fiber;
+        final AsyncNatives.MezzePromise promise;
+        /** Set while parked; null while ready or running. */
+        ParkRequest park;
 
-        public Object getResult() {
-            if (error != null) {
-                throw new RuntimeException("Task failed: " + error.getMessage(), error);
-            }
-            return result;
-        }
-
-        void complete(Object value) {
-            this.result = value;
-            this.completed = true;
-        }
-
-        void fail(Throwable t) {
-            this.error = t;
-            this.completed = true;
+        CoopFiber(EffectFiber fiber, AsyncNatives.MezzePromise promise) {
+            this.fiber = fiber;
+            this.promise = promise;
         }
     }
 
@@ -98,84 +60,186 @@ public final class CoopScheduler {
     // ========================================================================
 
     /**
-     * Spawn a new task - adds to ready queue, returns promise immediately.
-     * Task is NOT executed yet.
+     * Spawn a new task — wraps it in an EffectFiber and adds to the ready
+     * queue. Task is NOT executed yet.
+     *
+     * <p>The body captures the parent's handler chain (so dispatch from
+     * inside the spawned body resolves to the same handlers — including
+     * {@code CoopAsync} itself, which routes back into this scheduler).
      */
     @TruffleBoundary
-    public CoopPromise spawn(MezzeFunction f) {
-        long promiseId = nextPromiseId++;
-        CoopPromise promise = new CoopPromise(promiseId);
-        CoopTask task = new CoopTask(promiseId, f, promise);
+    public AsyncNatives.MezzePromise spawn(MezzeFunction f, IndirectCallNode callNode) {
+        AsyncNatives.MezzePromise promise = new AsyncNatives.MezzePromise(null, null);
+        MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
-        promises.put(promiseId, promise);
-        readyQueue.addLast(task);
+        Runnable body = () -> {
+            EffectFiber.installHandlerChain(handlerChain);
+            try {
+                Object result = callMezzeThunk(f, callNode);
+                promise.complete(result);
+            } catch (Throwable t) {
+                promise.fail(t);
+            } finally {
+                EffectFiber.popHandlerChain(handlerChain.length);
+            }
+        };
 
+        EffectFiber fiber = EffectFiber.create("coop-task-" + UUID.randomUUID(), body);
+        readyQueue.addLast(new CoopFiber(fiber, promise));
         return promise;
     }
 
     /**
-     * Await a promise - runs scheduler until the promise completes.
-     *
-     * @param promise The promise to await
-     * @param callNode For calling Mezze functions
-     * @return The promise result
+     * Await a promise — runs scheduler until the promise completes.
      */
     @TruffleBoundary
-    public Object await(CoopPromise promise, IndirectCallNode callNode) {
-        // Fast path: already complete
-        if (promise.isCompleted()) {
-            return promise.getResult();
+    public Object await(AsyncNatives.MezzePromise promise, IndirectCallNode callNode) {
+        if (promise.isDone()) {
+            return resultOrThrow(promise);
         }
-
-        // Run scheduler until this promise completes
         runUntil(promise, callNode);
-
-        // Now should be complete
-        if (!promise.isCompleted()) {
-            throw new RuntimeException("Deadlock: promise " + promise.id +
-                " never completed (ready queue empty: " + readyQueue.isEmpty() + ")");
+        if (!promise.isDone()) {
+            throw new RuntimeException("Deadlock: scheduler promise never completed "
+                + "(ready queue empty: " + readyQueue.isEmpty()
+                + ", parked: " + parkedFibers.size() + ")");
         }
-
-        return promise.getResult();
+        return resultOrThrow(promise);
     }
 
-    /**
-     * Drain scheduler - run all tasks until ready queue is empty.
-     */
+    /** Drain — run all tasks until both ready and parked are empty (or stuck). */
     @TruffleBoundary
     public void drain(IndirectCallNode callNode) {
-        while (!readyQueue.isEmpty()) {
-            runOneTask(callNode);
+        while (!readyQueue.isEmpty() || !parkedFibers.isEmpty()) {
+            if (!tick(callNode)) break;
         }
     }
 
-    /**
-     * Run tasks until a specific promise completes.
-     */
+    /** Run tasks until a specific promise completes. */
     @TruffleBoundary
-    public void runUntil(CoopPromise target, IndirectCallNode callNode) {
-        while (!target.isCompleted() && !readyQueue.isEmpty()) {
-            runOneTask(callNode);
+    public void runUntil(AsyncNatives.MezzePromise target, IndirectCallNode callNode) {
+        while (!target.isDone()) {
+            if (!tick(callNode)) break;
         }
     }
 
     /**
-     * Park: run ready tasks until {@code predicate} returns True. The
-     * predicate is a Mezze closure of type {@code {} -> Bool}; it's
-     * called between task runs. Deadlocks (throws) if the ready queue
-     * empties and the predicate is still False — no way to make
-     * progress.
+     * Park the *current* fiber until {@code predicate} returns True.
+     *
+     * <p>Called from inside a fiber body. Suspends via Continuation.yield,
+     * returning control to the driver loop. The driver re-polls the
+     * predicate on each tick; when it flips, the fiber is moved back to
+     * ready and resumed on the next tick.
      */
     @TruffleBoundary
     public void parkUntil(MezzeFunction predicate, IndirectCallNode callNode) {
-        while (true) {
-            if (callPredicate(predicate, callNode)) return;
-            if (readyQueue.isEmpty()) {
-                throw new RuntimeException(
-                    "CoopAsync deadlock: parked on a predicate that never became True");
+        // Fast path: already true.
+        if (callPredicate(predicate, callNode)) return;
+        EffectFiber self = CURRENT_FIBER.get();
+        if (self == null) {
+            // Called from outside any coop fiber (e.g. the main perform body
+            // before any spawn) — fall back to busy-poll on the ready queue.
+            while (true) {
+                if (callPredicate(predicate, callNode)) return;
+                if (readyQueue.isEmpty() && parkedFibers.isEmpty()) {
+                    throw new RuntimeException(
+                        "CoopAsync deadlock: parked on a predicate that never became True");
+                }
+                if (!tick(callNode)) {
+                    throw new RuntimeException(
+                        "CoopAsync deadlock: parked on a predicate that never became True");
+                }
             }
-            runOneTask(callNode);
         }
+        // Inside a coop fiber: yield to the driver with a park request.
+        self.suspendUnscoped(new ParkRequest(predicate));
+        // Re-entry: predicate became True; nothing more to do.
+    }
+
+    /**
+     * Run one ready fiber to its next suspend/completion, then re-poll
+     * parked predicates. Returns true if forward progress was made.
+     */
+    private boolean tick(IndirectCallNode callNode) {
+        if (readyQueue.isEmpty()) {
+            // Nothing ready — try to unpark first (handles cases where
+            // a predicate became true via external mutation between ticks).
+            if (!unparkReady(callNode)) {
+                return false;
+            }
+        }
+        CoopFiber task = readyQueue.pollFirst();
+        if (task == null) return false;
+
+        // Observe cancellation (#160): if the promise was cancelled while
+        // this fiber sat in the ready queue, skip the body entirely. The
+        // promise is already in CANCELLED state; just close the fiber so
+        // its continuation can be GC'd.
+        if (task.promise.isCancelled()) {
+            try { task.fiber.close(); } catch (Throwable ignored) {}
+            return true;
+        }
+
+        CoopScheduler prevSched = CURRENT.get();
+        EffectFiber prevFiber = CURRENT_FIBER.get();
+        CURRENT.set(this);
+        CURRENT_FIBER.set(task.fiber);
+        try {
+            task.fiber.runUnscoped();
+        } catch (Throwable t) {
+            task.promise.fail(t);
+            return true;
+        } finally {
+            CURRENT.set(prevSched);
+            CURRENT_FIBER.set(prevFiber);
+        }
+
+        if (task.fiber.isDone()) {
+            // Promise already completed by the body's invoke wrapper.
+            // Defensive: if it isn't, that's a runtime bug.
+            return true;
+        }
+
+        Object suspended = task.fiber.takeSuspendedValue();
+        if (suspended instanceof ParkRequest pr) {
+            task.park = pr;
+            parkedFibers.add(task);
+        } else {
+            task.promise.fail(new RuntimeException(
+                "CoopScheduler: fiber suspended with unexpected payload " + suspended));
+        }
+        unparkReady(callNode);
+        return true;
+    }
+
+    /**
+     * Re-poll every parked fiber's predicate. Any whose predicate flips
+     * True is moved to the ready queue. Returns true if at least one was
+     * unparked or the ready queue was non-empty.
+     */
+    private boolean unparkReady(IndirectCallNode callNode) {
+        if (parkedFibers.isEmpty()) return !readyQueue.isEmpty();
+        Iterator<CoopFiber> it = parkedFibers.iterator();
+        boolean unparked = false;
+        while (it.hasNext()) {
+            CoopFiber pf = it.next();
+            // Cancellation (#160): a parked fiber whose promise was
+            // cancelled never wakes — drop it from the parked set so
+            // the scheduler doesn't deadlock waiting on it.
+            if (pf.promise.isCancelled()) {
+                pf.park = null;
+                try { pf.fiber.close(); } catch (Throwable ignored) {}
+                it.remove();
+                unparked = true;  // forward progress: one fewer fiber to track
+                continue;
+            }
+            if (pf.park == null || callPredicate(pf.park.predicate, callNode)) {
+                pf.park = null;
+                it.remove();
+                readyQueue.addLast(pf);
+                unparked = true;
+            }
+        }
+        return unparked || !readyQueue.isEmpty();
     }
 
     private boolean callPredicate(MezzeFunction predicate, IndirectCallNode callNode) {
@@ -187,33 +251,7 @@ public final class CoopScheduler {
         return result instanceof Boolean b && b;
     }
 
-    /**
-     * Run one task from the ready queue.
-     */
-    private void runOneTask(IndirectCallNode callNode) {
-        if (readyQueue.isEmpty()) {
-            return;
-        }
-
-        CoopTask task = readyQueue.pollFirst();
-
-        try {
-            // Execute the task function
-            Object result = executeTaskFunction(task.function, callNode);
-
-            // Task completed successfully
-            task.promise.complete(result);
-
-        } catch (Throwable e) {
-            // Task failed
-            task.promise.fail(e);
-        }
-    }
-
-    /**
-     * Execute a task's function.
-     */
-    private Object executeTaskFunction(MezzeFunction f, IndirectCallNode callNode) {
+    private Object callMezzeThunk(MezzeFunction f, IndirectCallNode callNode) {
         Object[] closure = f.getClosureValues();
         Object[] args = appendArg(closure, MezzeRecord.empty());
         return callNode.call(f.getCallTarget(), args);
@@ -224,79 +262,96 @@ public final class CoopScheduler {
     // ========================================================================
 
     /**
-     * Race - wait for first promise to complete.
+     * Race — return the first promise to settle as {@code Result 'a AsyncError},
+     * auto-cancelling losing siblings (#122). Cancelled promises are
+     * skipped — race waits for a Completed or Failed outcome. If every
+     * promise is cancelled or progress is impossible, surfaces Err
+     * AsyncCancelled.
      */
     @TruffleBoundary
     public Object race(Object[] promiseArray, IndirectCallNode callNode) {
         if (promiseArray.length == 0) {
-            throw new RuntimeException("race requires at least one promise");
+            return AsyncNatives.asyncFailedResult("race requires at least one promise");
         }
-
-        // Check if any already complete
-        for (Object p : promiseArray) {
-            CoopPromise promise = (CoopPromise) p;
-            if (promise.isCompleted()) {
-                return promise.getResult();
-            }
-        }
-
-        // Run until any promise completes
         while (true) {
-            // Check if any complete now
-            for (Object p : promiseArray) {
-                CoopPromise promise = (CoopPromise) p;
-                if (promise.isCompleted()) {
-                    return promise.getResult();
-                }
+            Object winner = pollForWinner(promiseArray);
+            if (winner != null) return winner;
+            if (!tick(callNode)) {
+                // Driver stalled with no progress possible — treat as cancelled.
+                return AsyncNatives.asyncCancelledResult();
             }
-
-            // Run one task
-            if (readyQueue.isEmpty()) {
-                throw new RuntimeException("Deadlock: no promise completed and no tasks to run");
-            }
-            runOneTask(callNode);
         }
     }
 
     /**
-     * All - wait for all promises to complete.
+     * Same shape as AsyncNatives.pollForWinner — picks the first
+     * Completed/Failed promise and cancels its losers. Returns null
+     * when no settled non-cancelled promise exists yet.
      */
+    private static Object pollForWinner(Object[] promiseArray) {
+        boolean allCancelled = true;
+        for (Object p : promiseArray) {
+            AsyncNatives.MezzePromise promise = (AsyncNatives.MezzePromise) p;
+            if (!promise.isDone()) {
+                allCancelled = false;
+                continue;
+            }
+            if (promise.isCancelled()) continue;
+            AsyncNatives.cancelOtherCoopPromises(promiseArray, promise);
+            if (promise.isCompleted()) {
+                return AsyncNatives.asyncOkResult(promise.snapshotResult());
+            }
+            return AsyncNatives.asyncFailedResultFromPromise(promise);
+        }
+        if (allCancelled) return AsyncNatives.asyncCancelledResult();
+        return null;
+    }
+
+    /** All - wait for all promises to complete. */
     @TruffleBoundary
     public MezzeSeq all(Object[] promiseArray, IndirectCallNode callNode) {
         Object[] results = new Object[promiseArray.length];
-
         for (int i = 0; i < promiseArray.length; i++) {
-            CoopPromise promise = (CoopPromise) promiseArray[i];
-            results[i] = await(promise, callNode);
+            results[i] = await((AsyncNatives.MezzePromise) promiseArray[i], callNode);
         }
-
         return MezzeSeq.fromArray(results);
     }
 
-    /**
-     * Sleep - yield to other tasks.
-     * In coop mode, this just runs other ready tasks once then returns.
-     */
+    /** Sleep: cooperative yield — run one ready fiber if available. */
     @TruffleBoundary
     public void sleep(long ms, IndirectCallNode callNode) {
-        // In cooperative mode, sleep just yields to other ready tasks
-        // Run one task if available, then return
-        if (!readyQueue.isEmpty()) {
-            runOneTask(callNode);
+        if (!readyQueue.isEmpty() || !parkedFibers.isEmpty()) {
+            tick(callNode);
         }
-        // Real time-based sleeping would require integration with event loop
+    }
+
+    public boolean isDone(AsyncNatives.MezzePromise promise) {
+        return promise.isDone();
+    }
+
+    public int pendingCount() {
+        return readyQueue.size() + parkedFibers.size();
     }
 
     // ========================================================================
     // Utility Methods
     // ========================================================================
 
-    public boolean isDone(CoopPromise promise) {
-        return promise.isCompleted();
-    }
-
-    public int pendingCount() {
-        return readyQueue.size();
+    private static Object resultOrThrow(AsyncNatives.MezzePromise promise) {
+        if (promise.isCompleted()) {
+            return promise.snapshotResult();
+        }
+        if (promise.isFailed()) {
+            Object stored = promise.snapshotResult();
+            if (stored instanceof Throwable t) {
+                throw new RuntimeException("Task failed: " + t.getMessage(), t);
+            }
+            throw new RuntimeException("Task failed: " + stored);
+        }
+        if (promise.isCancelled()) {
+            throw new RuntimeException("Task cancelled");
+        }
+        throw new RuntimeException("Promise not settled");
     }
 
     private static Object[] appendArg(Object[] closure, Object arg) {
@@ -305,5 +360,4 @@ public final class CoopScheduler {
         result[closure.length] = arg;
         return result;
     }
-
 }

@@ -208,6 +208,12 @@ public final class EffectFiber {
         while (chain.size() > depth) chain.pop();
     }
 
+    /** Singleton empty array — handed back instead of allocating per call.
+     *  Most spawn sites snapshot a chain with no handlers above them
+     *  (top-level Async.spawn outside any perform installs zero handlers
+     *  on this thread), so this is the overwhelmingly common case. */
+    private static final MezzeRecord[] EMPTY_CHAIN = new MezzeRecord[0];
+
     /**
      * Snapshot of the handler chain on this thread, innermost-first
      * (matching the iteration order callers want for "innermost matches
@@ -216,7 +222,9 @@ public final class EffectFiber {
      */
     public static MezzeRecord[] snapshotHandlerChain() {
         ArrayDeque<MezzeRecord> chain = HANDLER_CHAIN.get();
-        return chain.toArray(new MezzeRecord[0]);
+        int size = chain.size();
+        if (size == 0) return EMPTY_CHAIN;
+        return chain.toArray(new MezzeRecord[size]);
     }
 
     /**
@@ -235,6 +243,21 @@ public final class EffectFiber {
 
     public static void clearHandlerChain() {
         HANDLER_CHAIN.get().clear();
+    }
+
+    /**
+     * Pop {@code count} handlers from the top of this thread's chain.
+     * Companion to {@link #installHandlerChain} when the caller must
+     * preserve any handlers underneath the chunk it installed (e.g. the
+     * coop scheduler runs spawned bodies on its driver thread, which
+     * itself sits inside an outer perform).
+     */
+    public static void popHandlerChain(int count) {
+        if (count <= 0) return;
+        ArrayDeque<MezzeRecord> stack = HANDLER_CHAIN.get();
+        for (int i = 0; i < count && !stack.isEmpty(); i++) {
+            stack.pop();
+        }
     }
 
     /**
@@ -278,11 +301,44 @@ public final class EffectFiber {
      * {@link #currentResume}, {@link #currentAbort}) so chain-dispatch on
      * spawned threads can give op handlers a valid dispatch context for
      * reading {@code resume}/{@code abort} via {@code EffectBindingNode}.
+     *
+     * <p>Acquires from a thread-local 1-slot pool when available — every
+     * chain-dispatch entry allocates and discards one dispatch fiber,
+     * so reusing a single per-thread slot saves an allocation per
+     * op-call on the chain-dispatch path. The fiber is in clean state
+     * when reused (popEffectHandles already clears its slots).
+     *
+     * <p>Callers MUST pair this with {@link #releaseDispatchOnly(EffectFiber)}
+     * after use. The pool is best-effort: nested dispatch fibers allocate
+     * fresh (no recursive pool).
      */
-    @TruffleBoundary
-    public static EffectFiber createDispatchOnly() {
+    public static EffectFiber acquireDispatchOnly() {
+        EffectFiber cached = DISPATCH_POOL.get();
+        if (cached != null) {
+            DISPATCH_POOL.set(null);
+            return cached;
+        }
         return new EffectFiber(/* scope */ null, /* continuation */ null);
     }
+
+    /** Return a dispatch fiber to the per-thread cache (best-effort). */
+    public static void releaseDispatchOnly(EffectFiber fiber) {
+        if (fiber.effectHandleDepth != 0) {
+            // Caller didn't pop their pushes — don't pool a dirty fiber.
+            return;
+        }
+        // Most recent goes in cache; older one (if any) is dropped.
+        DISPATCH_POOL.set(fiber);
+    }
+
+    /** Back-compat wrapper. New callers should use acquire/release. */
+    @TruffleBoundary
+    public static EffectFiber createDispatchOnly() {
+        return acquireDispatchOnly();
+    }
+
+    private static final ThreadLocal<EffectFiber> DISPATCH_POOL =
+        ThreadLocal.withInitial(() -> null);
 
     /**
      * Run/resume the body. Returns when body either suspends or completes.
@@ -301,6 +357,50 @@ public final class EffectFiber {
         } finally {
             CURRENT.set(previous);
         }
+    }
+
+    /**
+     * Run the body without setting {@link #CURRENT}. Used by the coop
+     * scheduler: the body should dispatch effect ops via the snapshot
+     * handler chain (chain-dispatch path in {@code OpCallNode}), not by
+     * suspending the fiber for every op-call. The fiber is still
+     * suspendable — call {@link #suspendUnscoped(Object)} from inside
+     * the body when you do want to yield (e.g. for park).
+     */
+    @TruffleBoundary
+    public void runUnscoped() {
+        if (closed) {
+            throw new IllegalStateException(
+                "EffectFiber@" + id + " is closed; cannot run");
+        }
+        EffectFiber previous = CURRENT.get();
+        CURRENT.set(null);
+        try {
+            LoomSupport.run(continuation);
+        } finally {
+            CURRENT.set(previous);
+        }
+    }
+
+    /**
+     * Suspend this fiber regardless of whether it is the current fiber.
+     * Companion to {@link #runUnscoped()} for the coop scheduler.
+     */
+    @TruffleBoundary
+    public Object suspendUnscoped(Object value) {
+        if (closed) {
+            throw new IllegalStateException(
+                "EffectFiber@" + id + " is closed; cannot suspend");
+        }
+        this.suspendedValue = value;
+        boolean ok = LoomSupport.yield(scope);
+        if (!ok) {
+            throw new IllegalStateException(
+                "EffectFiber yield failed (likely native frames pinning)");
+        }
+        Object resumed = this.resumeValue;
+        this.resumeValue = null;
+        return resumed;
     }
 
     public boolean isDone() {

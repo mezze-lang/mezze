@@ -1,4 +1,6 @@
 use std::abilities::compare::{ Eq }
+use std::effects::async::{ Async }
+use std::int
 
 ## Resettable counter for waiting on a group of tasks to complete.
 pub newtype WaitGroup = WaitGroup __NativeWaitGroup
@@ -28,6 +30,11 @@ pub let done : { wg: WaitGroup } -> {} = { wg } -> __native_waitgroup_done { wg 
 
 ## Wait until the counter reaches zero.
 pub let wait : { wg: WaitGroup } -> {} = { wg } -> __native_waitgroup_wait { wg = wg }
+
+## Park-aware wait: routes through Async.park so the same code works
+## under LoomAsync and CoopAsync.
+pub let wait_async : { wg: WaitGroup } -> {} <Async, ...> = { wg } ->
+  Async.park { predicate = {} -> __native_waitgroup_get_count { wg = wg } == 0 }
 
 ## Wait with timeout. Returns True if counter reached zero, False on timeout.
 pub let wait_timeout : { wg: WaitGroup, ms: Int } -> Bool = { wg, ms } ->

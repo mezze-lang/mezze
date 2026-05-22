@@ -22,6 +22,7 @@ import java.lang.invoke.VarHandle;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
+import java.util.function.Supplier;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -108,8 +109,19 @@ public final class AsyncNatives {
         @SuppressWarnings("unused")
         private long q0, q1, q2, q3, q4, q5, q6; // Padding after hot fields
 
-        final Thread executingThread; // For cancellation
+        // Set in the constructor or via setExecutingThread() once the
+        // spawned virtual thread has been created. Single writer (the
+        // spawn-site code), single reader (cancel()) which only fires
+        // after the spawn site has returned and the body has had a chance
+        // to run, so plain field access is safe.
+        Thread executingThread; // For cancellation
         final Semaphore semaphore; // For concurrency limiting (may be null)
+
+        /** Set once, after the Thread is created (spawn sites first build
+         *  the promise, then the thread, then store it here). */
+        public void setExecutingThread(Thread t) {
+            this.executingThread = t;
+        }
 
         // Set by Async.spawn when the spawned task body terminated because
         // an op-call propagated past all inherited handlers. Read by
@@ -127,25 +139,8 @@ public final class AsyncNatives {
         }
 
         public OpCall getUnhandledOpCall() {
-            // Walk through delegates (await() follows them) to find the
-            // originating promise's stored op-call.
-            MezzePromise d = delegate;
-            if (d != null) return d.getUnhandledOpCall();
             return unhandledOpCall;
         }
-
-        /**
-         * Constructor that delegates to another promise's future state.
-         * Used for returning a promise with thread reference after spawn.
-         */
-        public MezzePromise(Thread executingThread, Semaphore semaphore, MezzePromise delegate) {
-            this.executingThread = executingThread;
-            this.semaphore = semaphore;
-            // Link to delegate - we'll poll its state
-            this.delegate = delegate;
-        }
-
-        private volatile MezzePromise delegate;
 
         public boolean complete(Object value) {
             // Set result BEFORE state to ensure visibility
@@ -160,7 +155,15 @@ public final class AsyncNatives {
             return false;
         }
 
-        public boolean fail(Throwable error) {
+        /** Mark Promise as Failed. `error` can be:
+         *    - a Throwable (regular task-body-crashed path); receivers
+         *      convert it to AsyncFailed { msg = e.getMessage() } when
+         *      they need an AsyncError variant for the user.
+         *    - a Mezze AsyncError variant (constructed via promiseFail);
+         *      receivers pass it through unchanged.
+         *  The Promise's result field is Object, so either flavor fits
+         *  natively. */
+        public boolean fail(Object error) {
             // Set result BEFORE state to ensure visibility
             RESULT.setVolatile(this, error);
             if (STATE.compareAndSet(this, PENDING, FAILED)) {
@@ -181,6 +184,38 @@ public final class AsyncNatives {
             return false;
         }
 
+        // Outcome codes for cancelOutcome() — mapped 1:1 to the Mezze
+        // CancelOutcome ADT constructors. See AsyncNatives.promiseCancel.
+        public static final int CANCEL_DID_CANCEL        = 0;
+        public static final int CANCEL_ALREADY_COMPLETED = 1;
+        public static final int CANCEL_ALREADY_FAILED    = 2;
+        public static final int CANCEL_NOT_CANCELLABLE   = 3;
+
+        /** Like cancel() but reports what actually happened. Returns one
+         *  of the CANCEL_* codes. */
+        public int cancelOutcome() {
+            if (STATE.compareAndSet(this, PENDING, CANCELLED)) {
+                if (executingThread != null) {
+                    executingThread.interrupt();
+                }
+                unparkWaiter();
+                return CANCEL_DID_CANCEL;
+            }
+            return switch (state) {
+                case COMPLETED -> CANCEL_ALREADY_COMPLETED;
+                case FAILED    -> CANCEL_ALREADY_FAILED;
+                case CANCELLED -> CANCEL_DID_CANCEL;  // racing cancel saw us
+                default        -> CANCEL_NOT_CANCELLABLE;
+            };
+        }
+
+        /** Snapshot the state for inspection. Returns one of the
+         *  state constants. Result field is read separately by caller
+         *  AFTER seeing a non-PENDING state (volatile state acts as
+         *  release fence). */
+        public int snapshotState() { return state; }
+        public Object snapshotResult() { return result; }
+
         // OPTIMIZATION: Use VarHandle for proper memory ordering on waiter access
         private void unparkWaiter() {
             // Use acquire semantics to ensure we see the waiter if it was set
@@ -191,32 +226,22 @@ public final class AsyncNatives {
         }
 
         public boolean isDone() {
-            MezzePromise d = delegate;
-            if (d != null) return d.isDone();
             return state != PENDING;
         }
 
         public boolean isCompleted() {
-            MezzePromise d = delegate;
-            if (d != null) return d.isCompleted();
             return state == COMPLETED;
         }
 
         public boolean isFailed() {
-            MezzePromise d = delegate;
-            if (d != null) return d.isFailed();
             return state == FAILED;
         }
 
         public boolean isCancelled() {
-            MezzePromise d = delegate;
-            if (d != null) return d.isCancelled();
             return state == CANCELLED;
         }
 
         public Object getResult() {
-            MezzePromise d = delegate;
-            if (d != null) return d.getResult();
             return result;
         }
 
@@ -227,15 +252,10 @@ public final class AsyncNatives {
          * OPTIMIZATION: VarHandle for proper waiter memory ordering.
          */
         public Object await() throws InterruptedException {
-            // OPTIMIZATION: Only measure time on sampled calls
-            long startNanos = ((completionCount.get() & (SAMPLE_RATE - 1)) == 0)
-                ? System.nanoTime() : 0;
-
-            // If delegating, wait on the delegate
-            MezzePromise d = delegate;
-            if (d != null) {
-                return d.await();
-            }
+            // OPTIMIZATION: Only measure time on sampled calls. Sampling
+            // uses a per-thread counter (no atomic) — single read +
+            // increment, no coherence traffic across awaiting threads.
+            long startNanos = shouldSampleThisCall() ? System.nanoTime() : 0;
 
             // Fast path: already done
             if (state != PENDING) {
@@ -274,11 +294,6 @@ public final class AsyncNatives {
          * Timed await.
          */
         public Object await(long timeoutMs) throws InterruptedException, TimeoutException {
-            MezzePromise d = delegate;
-            if (d != null) {
-                return d.await(timeoutMs);
-            }
-
             if (state != PENDING) {
                 return getResultOrThrow();
             }
@@ -466,6 +481,11 @@ public final class AsyncNatives {
         // the same handlers that were in scope at the spawn site.
         MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
+        // Single promise: body completes it, parent awaits it. Thread
+        // reference is patched in after construction (single writer:
+        // the spawn site; reader: cancel() which only fires post-spawn).
+        // Saves one MezzePromise allocation per spawn vs the old
+        // inner+delegating-outer pattern.
         MezzePromise promise = new MezzePromise(null, semaphore);
 
         Thread vThread = env.newTruffleThreadBuilder(() -> runPromiseTask(handlerChain, promise, () -> {
@@ -481,16 +501,15 @@ public final class AsyncNatives {
             }
         })).virtual(true).build();
 
+        promise.setExecutingThread(vThread);
         vThread.start();
-
-        MezzePromise tracked = new MezzePromise(vThread, semaphore, promise);
 
         // Track for cleanup
         if (trackerObj instanceof PromiseTracker tracker) {
-            tracker.track(tracked);
+            tracker.track(promise);
         }
 
-        return tracked;
+        return promise;
     }
 
     // ==================== OS Thread Scope Lifecycle ====================
@@ -542,15 +561,14 @@ public final class AsyncNatives {
                 () -> callNode.call(callTarget, fullArgs))
         ).build();
 
+        promise.setExecutingThread(thread);
         thread.start();
 
-        MezzePromise tracked = new MezzePromise(thread, null, promise);
-
         if (trackerObj instanceof PromiseTracker tracker) {
-            tracker.track(tracked);
+            tracker.track(promise);
         }
 
-        return tracked;
+        return promise;
     }
 
     // Semaphore cache for concurrency limiting
@@ -588,33 +606,54 @@ public final class AsyncNatives {
     }
 
     // ==================== OPTIMIZATION: Sampled Completion Time Tracking ====================
+    //
+    // Adaptive spin tracks avg completion time so getAdaptiveSpinCount can
+    // pick a sensible spin budget. Sampling is per-thread (no contention
+    // on the hot path); the EMA itself is a plain volatile-via-VarHandle
+    // (lossy under contention, fine for a perf heuristic).
 
-    // Track average completion time in nanoseconds for adaptive spinning
-    // OPTIMIZATION: Only sample 1 in 64 completions to reduce nanoTime() overhead
-    private static final AtomicLong avgCompletionNanos = new AtomicLong(1000);
-    private static final AtomicLong completionCount = new AtomicLong(0);
-    private static final int SAMPLE_RATE = 64; // Only measure every 64th completion
+    private static final int SAMPLE_RATE = 64;
+    // Per-thread monotonic counter. Read on every await() to decide
+    // whether to nanoTime() — replaces the previous AtomicLong.get()
+    // which was a coherence-traffic hotspot under 1M+ parallel awaits.
+    private static final ThreadLocal<long[]> SAMPLE_COUNTER =
+        ThreadLocal.withInitial(() -> new long[1]);
 
-    // Update completion time tracking with sampling
-    private static void recordCompletionTime(long nanos) {
-        long count = completionCount.incrementAndGet();
-        // OPTIMIZATION: Only update EMA on sampled completions
-        if ((count & (SAMPLE_RATE - 1)) == 0) {
-            if (count < 100 * SAMPLE_RATE) {
-                avgCompletionNanos.updateAndGet(old -> (old + nanos) / 2);
-            } else {
-                // Exponential moving average with alpha = 0.1
-                avgCompletionNanos.updateAndGet(old -> (long)(old * 0.9 + nanos * 0.1));
-            }
-        }
+    /** Returns true iff this thread should sample timing on this await. */
+    private static boolean shouldSampleThisCall() {
+        long[] counter = SAMPLE_COUNTER.get();
+        long next = counter[0]++;
+        return (next & (SAMPLE_RATE - 1)) == 0;
     }
 
-    // Calculate adaptive spin count based on historical completion times
+    // Average completion time in nanoseconds. Plain long with relaxed
+    // semantics — perf heuristic, lossy updates are acceptable.
+    private static volatile long avgCompletionNanos = 1000L;
+    // Count of total sampled completions across all threads — only used
+    // to switch from initialization-EMA to long-run-EMA. Atomic so the
+    // count progresses sanely; not on the hot path.
+    private static final AtomicLong sampledCompletions = new AtomicLong(0);
+
+    // Update completion time tracking — called only when shouldSampleThisCall
+    // returned true (so already sampled, no need to gate again).
+    private static void recordCompletionTime(long nanos) {
+        long count = sampledCompletions.incrementAndGet();
+        long oldAvg = avgCompletionNanos;
+        long newAvg;
+        if (count < 100) {
+            newAvg = (oldAvg + nanos) / 2;
+        } else {
+            // Exponential moving average with alpha = 0.1.
+            newAvg = (long)(oldAvg * 0.9 + nanos * 0.1);
+        }
+        avgCompletionNanos = newAvg;
+    }
+
+    // Calculate adaptive spin count based on historical completion times.
+    // Bounded between 16 and 1024 iterations regardless of avgNanos.
     private static int getAdaptiveSpinCount() {
-        long avgNanos = avgCompletionNanos.get();
-        // Spin for approximately 1/10th of average completion time
-        // Bounded between 16 and 1024 iterations
-        return (int) Math.min(1024, Math.max(16, avgNanos / 100));
+        long avgNanos = avgCompletionNanos;
+        return (int) Math.min(1024L, Math.max(16L, avgNanos / 100));
     }
 
     // ==================== Loom Async Operations ====================
@@ -641,6 +680,9 @@ public final class AsyncNatives {
         // were in scope here. Snapshot copy is safe to ship across threads.
         MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
+        // Single promise: body completes it, parent awaits it. Thread
+        // reference is patched in after construction (single writer:
+        // the spawn site; reader: cancel() which only fires post-spawn).
         MezzePromise promise = new MezzePromise(null, null);
 
         Thread vThread = env.newTruffleThreadBuilder(
@@ -648,8 +690,9 @@ public final class AsyncNatives {
                 () -> callNode.call(f.getCallTarget(), fullArgs))
         ).virtual(true).build();
 
+        promise.setExecutingThread(vThread);
         vThread.start();
-        return new MezzePromise(vThread, null, promise);
+        return promise;
     }
 
     /**
@@ -694,8 +737,9 @@ public final class AsyncNatives {
                     () -> callNode.call(callTarget, fullArgs))
             ).virtual(true).build();
 
+            promise.setExecutingThread(vThread);
             vThread.start();
-            promises[idx] = new MezzePromise(vThread, null, promise);
+            promises[idx] = promise;
         }
 
         // Await all promises and collect results into an array
@@ -754,10 +798,9 @@ public final class AsyncNatives {
             })
         ).virtual(true).build();
 
+        promise.setExecutingThread(vThread);
         vThread.start();
-
-        // Return promise with thread reference for cancellation
-        return new MezzePromise(vThread, semaphore, promise);
+        return promise;
     }
 
     @TruffleBoundary
@@ -767,37 +810,47 @@ public final class AsyncNatives {
     }
 
     /**
-     * OPTIMIZATION: Custom lightweight race without CompletableFuture overhead.
-     * Uses direct polling with adaptive backoff instead of spawning N extra threads.
+     * Cancel every promise in {@code promises} that isn't the {@code winner}
+     * and isn't already done. Used by race to clean up losing siblings
+     * (#122) so they don't keep running in the background after a winner
+     * commits.
+     */
+    private static void cancelOtherPromises(Object[] promises, MezzePromise winner) {
+        for (Object p : promises) {
+            MezzePromise promise = (MezzePromise) p;
+            if (promise != winner && !promise.isDone()) {
+                promise.cancel();
+            }
+        }
+    }
+
+    /**
+     * Race: return the first promise to settle as a {@code Result 'a AsyncError}.
+     * Auto-cancels losing siblings (#122) when a winner commits, so they
+     * stop running in the background. Cancelled promises are skipped —
+     * the race waits for a Completed or Failed promise. If every
+     * promise is cancelled (or the race itself is interrupted), surfaces
+     * AsyncCancelled.
+     *
+     * <p>OPTIMIZATION: direct polling with adaptive backoff instead of
+     * spawning N CompletableFutures + N virtual threads.
      */
     @TruffleBoundary
     public static Object loomRace(MezzeRecord args) {
         Object[] promises = getArray(args, "ps");
         if (promises.length == 0) {
-            throw new RuntimeException("race requires at least one promise");
+            return MezzeVariant.err(createAsyncFailed("race requires at least one promise"));
         }
 
-        // Fast path: single promise
+        // Fast path: single promise — defer to the Result-typed await.
         if (promises.length == 1) {
-            return loomAwaitPromise((MezzePromise) promises[0]);
+            return promiseAwaitResult(args);
         }
-
-        // OPTIMIZATION: Direct polling loop with adaptive backoff
-        // Much faster than creating N CompletableFutures + N virtual threads
 
         // Phase 1: Quick spin check (many promises may already be done)
         for (int spin = 0; spin < 64; spin++) {
-            for (Object p : promises) {
-                MezzePromise promise = (MezzePromise) p;
-                if (promise.isDone()) {
-                    if (promise.isCompleted()) {
-                        return promise.getResult();
-                    } else if (promise.isFailed()) {
-                        throw new RuntimeException("Task failed: " + promise.result);
-                    }
-                    // Cancelled - continue checking others
-                }
-            }
+            Object winner = pollForWinner(promises);
+            if (winner != null) return winner;
             Thread.onSpinWait();
         }
 
@@ -807,27 +860,51 @@ public final class AsyncNatives {
         final long maxParkNanos = 10_000_000; // Cap at 10 milliseconds
 
         while (true) {
-            for (Object p : promises) {
-                MezzePromise promise = (MezzePromise) p;
-                if (promise.isDone()) {
-                    if (promise.isCompleted()) {
-                        return promise.getResult();
-                    } else if (promise.isFailed()) {
-                        throw new RuntimeException("Task failed: " + promise.result);
-                    }
-                }
-            }
+            Object winner = pollForWinner(promises);
+            if (winner != null) return winner;
 
-            // Check for interruption
+            // Interrupted on the race itself — surface as AsyncCancelled.
             if (Thread.interrupted()) {
                 Thread.currentThread().interrupt();
-                throw new RuntimeException("Interrupted during race");
+                return MezzeVariant.err(createAsyncCancelled());
             }
 
             // Park with backoff
             LockSupport.parkNanos(parkNanos);
             parkNanos = Math.min(parkNanos * 2, maxParkNanos);
         }
+    }
+
+    /**
+     * One race-poll pass. Returns a {@code Result 'a AsyncError} MezzeVariant
+     * if a winner has settled (Completed → Ok, Failed → Err AsyncFailed) and
+     * cancels the losing siblings as a side-effect. Returns null if no
+     * non-cancelled promise has settled yet. When every promise is cancelled,
+     * surfaces Err AsyncCancelled to the caller.
+     */
+    private static Object pollForWinner(Object[] promises) {
+        boolean allCancelled = true;
+        for (Object p : promises) {
+            MezzePromise promise = (MezzePromise) p;
+            if (!promise.isDone()) {
+                allCancelled = false;
+                continue;
+            }
+            if (promise.isCancelled()) {
+                continue; // skip cancelled, keep looking
+            }
+            // Completed or Failed — we have a winner.
+            cancelOtherPromises(promises, promise);
+            if (promise.isCompleted()) {
+                return MezzeVariant.ok(promise.getResult());
+            }
+            // Failed: pull AsyncError from the stored result.
+            return MezzeVariant.err(asyncErrorFromResult(promise.result));
+        }
+        if (allCancelled) {
+            return MezzeVariant.err(createAsyncCancelled());
+        }
+        return null;
     }
 
     @TruffleBoundary
@@ -986,6 +1063,59 @@ public final class AsyncNatives {
         }
     }
 
+    /**
+     * Spawn one side of a join. Wraps the body's outcome in
+     * {@code Result 'a AsyncError} and completes {@code resultFuture}.
+     *
+     * <p>Matches {@code futures::join!} semantics: each side runs
+     * independently to completion. No sibling auto-cancel on failure —
+     * a Mezze {@code try_join} (future #122f) will handle that.
+     *
+     * <p>{@code virtual} selects between Loom virtual threads
+     * (true, for {@code __native_loom_join*}) and OS platform threads
+     * (false, for {@code __native_os_join*}).
+     */
+    private static Thread spawnJoinSide(
+            Env env,
+            MezzeRecord[] chain,
+            CompletableFuture<MezzeVariant> resultFuture,
+            boolean virtual,
+            Supplier<Object> body) {
+        return env.newTruffleThreadBuilder(() -> {
+            MezzeVariant result;
+            boolean installed = false;
+            try {
+                if (chain.length > 0) {
+                    EffectFiber.installHandlerChain(chain);
+                    installed = true;
+                }
+                Object value = body.get();
+                // If the body returned a MezzeSuspended, an effect op
+                // (e.g. Exception.throw) propagated past the chain
+                // without a handler — surface as Err AsyncFailed.
+                if (value instanceof MezzeSuspended suspended) {
+                    result = createAsyncFailed(
+                        "join task raised unhandled effect: " + suspended);
+                } else {
+                    result = MezzeVariant.ok(value);
+                }
+            } catch (TaskUnhandledOpException tue) {
+                result = createAsyncFailed(
+                    "join task raised effect operation '" + tue.opCall.opName() + "'");
+            } catch (Throwable e) {
+                if (Thread.currentThread().isInterrupted()) {
+                    result = createAsyncCancelled();
+                } else {
+                    String msg = e.getMessage() == null ? e.toString() : e.getMessage();
+                    result = createAsyncFailed(msg);
+                }
+            } finally {
+                if (installed) EffectFiber.popHandlerChain(chain.length);
+            }
+            resultFuture.complete(result);
+        }).virtual(virtual).build();
+    }
+
     @TruffleBoundary
     public static MezzeRecord loomJoin(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeFunction left = getFunction(args, "l");
@@ -996,8 +1126,6 @@ public final class AsyncNatives {
         var leftTarget = left.getCallTarget();
         var rightTarget = right.getCallTarget();
 
-        // Build argument arrays: closure values + empty record argument
-        // Thunk functions expect {} as argument
         Object[] leftArgs = new Object[leftClosure.length + 1];
         System.arraycopy(leftClosure, 0, leftArgs, 0, leftClosure.length);
         leftArgs[leftClosure.length] = MezzeRecord.empty();
@@ -1006,44 +1134,38 @@ public final class AsyncNatives {
         System.arraycopy(rightClosure, 0, rightArgs, 0, rightClosure.length);
         rightArgs[rightClosure.length] = MezzeRecord.empty();
 
-        MezzeContext context = MezzeContext.get(node);
-        Env env = context.getEnv();
-
+        Env env = MezzeContext.get(node).getEnv();
         MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
-        // Use CompletableFuture for result coordination
-        CompletableFuture<Object> leftFuture = new CompletableFuture<>();
-        CompletableFuture<Object> rightFuture = new CompletableFuture<>();
-
-        // Spawn Truffle-aware threads for both computations
-        Thread leftThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, leftFuture,
-                () -> callNode.call(leftTarget, leftArgs))
-        ).virtual(true).build();
-
-        Thread rightThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, rightFuture,
-                () -> callNode.call(rightTarget, rightArgs))
-        ).virtual(true).build();
+        CompletableFuture<MezzeVariant> leftFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> rightFuture = new CompletableFuture<>();
+        Thread leftThread = spawnJoinSide(env, handlerChain, leftFuture, true,
+            () -> callNode.call(leftTarget, leftArgs));
+        Thread rightThread = spawnJoinSide(env, handlerChain, rightFuture, true,
+            () -> callNode.call(rightTarget, rightArgs));
 
         leftThread.start();
         rightThread.start();
 
         try {
-            // Wait for both
-            Object leftResult = leftFuture.get();
-            Object rightResult = rightFuture.get();
-            // OPTIMIZATION: Use cached field name array
-            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{leftResult, rightResult});
+            MezzeVariant lr = leftFuture.get();
+            MezzeVariant rr = rightFuture.get();
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{lr, rr});
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             leftThread.interrupt();
             rightThread.interrupt();
-            throw new RuntimeException("Join interrupted", e);
+            // Surface as two Err AsyncCancelled — no host exception
+            // escapes; caller pattern-matches the Result.
+            MezzeVariant cancelled = createAsyncCancelled();
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{cancelled, cancelled});
         } catch (ExecutionException e) {
+            // Defensive: futures should always complete with a Result.
             leftThread.interrupt();
             rightThread.interrupt();
-            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "join");
+            MezzeVariant failed = createAsyncFailed(
+                "join: unexpected ExecutionException: " + e);
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{failed, failed});
         }
     }
 
@@ -1053,26 +1175,18 @@ public final class AsyncNatives {
         MezzeFunction b = getFunction(args, "b");
         MezzeFunction c = getFunction(args, "c");
 
-        MezzeContext context = MezzeContext.get(node);
-        Env env = context.getEnv();
-
+        Env env = MezzeContext.get(node).getEnv();
         MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
-        CompletableFuture<Object> aFuture = new CompletableFuture<>();
-        CompletableFuture<Object> bFuture = new CompletableFuture<>();
-        CompletableFuture<Object> cFuture = new CompletableFuture<>();
-
-        Thread aThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, aFuture, () -> callThunkFunction(a, callNode))
-        ).virtual(true).build();
-
-        Thread bThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, bFuture, () -> callThunkFunction(b, callNode))
-        ).virtual(true).build();
-
-        Thread cThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, cFuture, () -> callThunkFunction(c, callNode))
-        ).virtual(true).build();
+        CompletableFuture<MezzeVariant> aFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> bFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> cFuture = new CompletableFuture<>();
+        Thread aThread = spawnJoinSide(env, handlerChain, aFuture, true,
+            () -> callThunkFunction(a, callNode));
+        Thread bThread = spawnJoinSide(env, handlerChain, bFuture, true,
+            () -> callThunkFunction(b, callNode));
+        Thread cThread = spawnJoinSide(env, handlerChain, cFuture, true,
+            () -> callThunkFunction(c, callNode));
 
         aThread.start();
         bThread.start();
@@ -1088,12 +1202,18 @@ public final class AsyncNatives {
             aThread.interrupt();
             bThread.interrupt();
             cThread.interrupt();
-            throw new RuntimeException("Join3 interrupted", e);
+            MezzeVariant cancelled = createAsyncCancelled();
+            return MezzeRecord.fromFields(
+                ABC_FIELDS, new Object[]{cancelled, cancelled, cancelled});
         } catch (ExecutionException e) {
+            // Defensive — futures complete with Result, never exceptionally.
             aThread.interrupt();
             bThread.interrupt();
             cThread.interrupt();
-            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "join3");
+            MezzeVariant failed = createAsyncFailed(
+                "join3: unexpected ExecutionException: " + e);
+            return MezzeRecord.fromFields(
+                ABC_FIELDS, new Object[]{failed, failed, failed});
         }
     }
 
@@ -1580,6 +1700,7 @@ public final class AsyncNatives {
             }
         }).virtual(true).build();
 
+        promise.setExecutingThread(vThread);
         vThread.start();
 
         return promise;
@@ -1635,6 +1756,7 @@ public final class AsyncNatives {
                 () -> callNode.call(callTarget, fullArgs))
         ).build();  // Platform thread (not virtual)
 
+        promise.setExecutingThread(thread);
         thread.start();
 
         return promise;
@@ -1657,39 +1779,36 @@ public final class AsyncNatives {
         MezzeFunction left = getFunction(args, "l");
         MezzeFunction right = getFunction(args, "r");
 
-        MezzeContext context = MezzeContext.get(node);
-        Env env = context.getEnv();
-
+        Env env = MezzeContext.get(node).getEnv();
         MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
-        CompletableFuture<Object> leftFuture = new CompletableFuture<>();
-        CompletableFuture<Object> rightFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> leftFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> rightFuture = new CompletableFuture<>();
 
-        Thread leftThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, leftFuture, () -> callThunkFunction(left, callNode))
-        ).build();
-
-        Thread rightThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, rightFuture, () -> callThunkFunction(right, callNode))
-        ).build();
+        Thread leftThread = spawnJoinSide(env, handlerChain, leftFuture, false,
+            () -> callThunkFunction(left, callNode));
+        Thread rightThread = spawnJoinSide(env, handlerChain, rightFuture, false,
+            () -> callThunkFunction(right, callNode));
 
         leftThread.start();
         rightThread.start();
 
         try {
-            return MezzeRecord.fromFields(
-                LEFT_RIGHT_FIELDS,
-                new Object[]{leftFuture.get(), rightFuture.get()}
-            );
+            MezzeVariant lr = leftFuture.get();
+            MezzeVariant rr = rightFuture.get();
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{lr, rr});
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             leftThread.interrupt();
             rightThread.interrupt();
-            throw new RuntimeException("Join interrupted", e);
+            MezzeVariant cancelled = createAsyncCancelled();
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{cancelled, cancelled});
         } catch (ExecutionException e) {
             leftThread.interrupt();
             rightThread.interrupt();
-            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "join");
+            MezzeVariant failed = createAsyncFailed(
+                "join: unexpected ExecutionException: " + e);
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{failed, failed});
         }
     }
 
@@ -1699,26 +1818,19 @@ public final class AsyncNatives {
         MezzeFunction b = getFunction(args, "b");
         MezzeFunction c = getFunction(args, "c");
 
-        MezzeContext context = MezzeContext.get(node);
-        Env env = context.getEnv();
-
+        Env env = MezzeContext.get(node).getEnv();
         MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
 
-        CompletableFuture<Object> aFuture = new CompletableFuture<>();
-        CompletableFuture<Object> bFuture = new CompletableFuture<>();
-        CompletableFuture<Object> cFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> aFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> bFuture = new CompletableFuture<>();
+        CompletableFuture<MezzeVariant> cFuture = new CompletableFuture<>();
 
-        Thread aThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, aFuture, () -> callThunkFunction(a, callNode))
-        ).build();
-
-        Thread bThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, bFuture, () -> callThunkFunction(b, callNode))
-        ).build();
-
-        Thread cThread = env.newTruffleThreadBuilder(
-            () -> SpawnSupport.runJoinTask(handlerChain, cFuture, () -> callThunkFunction(c, callNode))
-        ).build();
+        Thread aThread = spawnJoinSide(env, handlerChain, aFuture, false,
+            () -> callThunkFunction(a, callNode));
+        Thread bThread = spawnJoinSide(env, handlerChain, bFuture, false,
+            () -> callThunkFunction(b, callNode));
+        Thread cThread = spawnJoinSide(env, handlerChain, cFuture, false,
+            () -> callThunkFunction(c, callNode));
 
         aThread.start();
         bThread.start();
@@ -1731,9 +1843,20 @@ public final class AsyncNatives {
             );
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Join3 interrupted", e);
+            aThread.interrupt();
+            bThread.interrupt();
+            cThread.interrupt();
+            MezzeVariant cancelled = createAsyncCancelled();
+            return MezzeRecord.fromFields(
+                ABC_FIELDS, new Object[]{cancelled, cancelled, cancelled});
         } catch (ExecutionException e) {
-            return (MezzeRecord) SpawnSupport.propagateJoinFailure(e, "join3");
+            aThread.interrupt();
+            bThread.interrupt();
+            cThread.interrupt();
+            MezzeVariant failed = createAsyncFailed(
+                "join3: unexpected ExecutionException: " + e);
+            return MezzeRecord.fromFields(
+                ABC_FIELDS, new Object[]{failed, failed, failed});
         }
     }
 
@@ -1936,7 +2059,7 @@ public final class AsyncNatives {
         return MezzeSeq.fromArray(results.toArray());
     }
 
-    // ==================== AsyncError Variant Helpers ====================
+    // ==================== AsyncError / PromiseState / CancelOutcome Helpers ====================
 
     private static MezzeVariant createAsyncCancelled() {
         int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("AsyncCancelled");
@@ -1950,6 +2073,183 @@ public final class AsyncNatives {
             new Object[]{msg != null ? msg : "Unknown error"}
         );
         return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, errRec);
+    }
+
+    private static MezzeVariant createAsyncTimedOut(long ms) {
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("AsyncTimedOut");
+        MezzeRecord errRec = MezzeRecord.fromFields(
+            new String[]{"ms"}, new Object[]{ms});
+        return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, errRec);
+    }
+
+    // PromiseState constructors. Pending is allocation-free via singleton.
+    private static volatile MezzeVariant PENDING_SINGLETON = null;
+    private static MezzeVariant promiseStatePending() {
+        MezzeVariant v = PENDING_SINGLETON;
+        if (v != null) return v;
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Pending");
+        v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+        PENDING_SINGLETON = v;
+        return v;
+    }
+    private static MezzeVariant promiseStateCompleted(Object val) {
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Completed");
+        MezzeRecord rec = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{val});
+        return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, rec);
+    }
+    private static MezzeVariant promiseStateFailed(Object errVariant) {
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Failed");
+        MezzeRecord rec = MezzeRecord.fromFields(new String[]{"err"}, new Object[]{errVariant});
+        return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, rec);
+    }
+
+    // CancelOutcome constructors. All cached singletons (no payload).
+    private static volatile MezzeVariant CANCEL_DID_CANCEL_V       = null;
+    private static volatile MezzeVariant CANCEL_ALREADY_COMPLETED_V = null;
+    private static volatile MezzeVariant CANCEL_ALREADY_FAILED_V    = null;
+    private static volatile MezzeVariant CANCEL_NOT_CANCELLABLE_V   = null;
+    private static MezzeVariant cancelOutcomeFor(int outcome) {
+        return switch (outcome) {
+            case MezzePromise.CANCEL_DID_CANCEL -> {
+                MezzeVariant v = CANCEL_DID_CANCEL_V;
+                if (v == null) {
+                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Cancelled");
+                    v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+                    CANCEL_DID_CANCEL_V = v;
+                }
+                yield v;
+            }
+            case MezzePromise.CANCEL_ALREADY_COMPLETED -> {
+                MezzeVariant v = CANCEL_ALREADY_COMPLETED_V;
+                if (v == null) {
+                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("AlreadyCompleted");
+                    v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+                    CANCEL_ALREADY_COMPLETED_V = v;
+                }
+                yield v;
+            }
+            case MezzePromise.CANCEL_ALREADY_FAILED -> {
+                MezzeVariant v = CANCEL_ALREADY_FAILED_V;
+                if (v == null) {
+                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("AlreadyFailed");
+                    v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+                    CANCEL_ALREADY_FAILED_V = v;
+                }
+                yield v;
+            }
+            default -> {
+                MezzeVariant v = CANCEL_NOT_CANCELLABLE_V;
+                if (v == null) {
+                    int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("NotCancellable");
+                    v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+                    CANCEL_NOT_CANCELLABLE_V = v;
+                }
+                yield v;
+            }
+        };
+    }
+
+    // ==================== Promise Natives (new API #117/#118/#123) ====================
+
+    /** Non-blocking snapshot of a Promise's state, returns the
+     *  PromiseState 'a ADT value. Used by `Promise.inspect`. */
+    @TruffleBoundary
+    public static MezzeVariant promiseInspect(MezzeRecord args) {
+        MezzePromise p = getPromise(args, "p");
+        int state = p.snapshotState();
+        return switch (state) {
+            case MezzePromise.PENDING   -> promiseStatePending();
+            case MezzePromise.COMPLETED -> promiseStateCompleted(p.snapshotResult());
+            case MezzePromise.FAILED    -> promiseStateFailed(asyncErrorFromResult(p.snapshotResult()));
+            case MezzePromise.CANCELLED -> promiseStateFailed(createAsyncCancelled());
+            default -> throw new RuntimeException("MezzePromise: unknown state " + state);
+        };
+    }
+
+    /** Cancel the Promise and return a CancelOutcome variant. */
+    @TruffleBoundary
+    public static MezzeVariant promiseCancel(MezzeRecord args) {
+        MezzePromise p = getPromise(args, "p");
+        int outcome = p.cancelOutcome();
+        return cancelOutcomeFor(outcome);
+    }
+
+    /** Construct an already-Completed Promise. */
+    @TruffleBoundary
+    public static MezzePromise promiseSucceed(MezzeRecord args) {
+        Object val = getFieldValue(args, "val");
+        MezzePromise p = new MezzePromise(null, null);
+        p.complete(val);
+        return p;
+    }
+
+    /** Construct an already-Failed Promise. err must be an AsyncError variant. */
+    @TruffleBoundary
+    public static MezzePromise promiseFail(MezzeRecord args) {
+        Object err = getFieldValue(args, "err");
+        MezzePromise p = new MezzePromise(null, null);
+        p.fail(err);
+        return p;
+    }
+
+    /** Block until the promise resolves; return a `Result 'a AsyncError`
+     *  variant. Replaces the throw-on-failure behavior of loomAwait. */
+    @TruffleBoundary
+    public static Object promiseAwaitResult(MezzeRecord args) {
+        MezzePromise p = getPromise(args, "p");
+        Object value;
+        try {
+            value = p.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return MezzeVariant.err(createAsyncCancelled());
+        }
+        // Same propagation logic as loomAwaitPromise — MezzeSuspended forcing
+        // and unhandled-op re-raise still happen, those are NOT failure modes
+        // but the body's effect propagation.
+        if (value instanceof MezzeSuspended suspended) {
+            Object forced = suspended.force(IndirectCallNode.getUncached());
+            return MezzeVariant.ok(forced);
+        }
+        OpCall pending = p.getUnhandledOpCall();
+        if (pending != null) {
+            EffectFiber parentFiber = EffectFiber.current();
+            if (parentFiber != null) {
+                Object forced = parentFiber.suspend(pending);
+                return MezzeVariant.ok(forced);
+            }
+            if (EffectFiber.handlerChainDepth() > 0) {
+                throw new EffectHandlerDriver.TaskUnhandledOpException(pending);
+            }
+            // No handler — surface as AsyncFailed so caller sees Result Err.
+            return MezzeVariant.err(createAsyncFailed(
+                "Spawned task raised effect operation '" + pending.opName()
+                + "' with no handler available at await site."));
+        }
+        // Classify by final state.
+        int state = p.snapshotState();
+        return switch (state) {
+            case MezzePromise.COMPLETED -> MezzeVariant.ok(value);
+            case MezzePromise.FAILED    -> MezzeVariant.err(asyncErrorFromResult(value));
+            case MezzePromise.CANCELLED -> MezzeVariant.err(createAsyncCancelled());
+            default -> MezzeVariant.err(createAsyncFailed(
+                "promise.await returned with unexpected state " + state));
+        };
+    }
+
+    /** Convert a MezzePromise's stored result-on-failure into an AsyncError
+     *  variant for the user-side Mezze API.
+     *
+     *  Two shapes the result field can take:
+     *    - MezzeVariant (user constructed via promiseFail OR settle paths
+     *      already stored a Mezze AsyncError there): pass through.
+     *    - Throwable (regular spawned-body-crash path): wrap as
+     *      AsyncFailed { msg = e.getMessage() }.
+     *  Anything else falls through to a generic AsyncFailed for safety. */
+    private static Object asyncErrorFromResult(Object r) {
+        if (r instanceof MezzeVariant v) return v;
+        if (r instanceof Throwable t)    return createAsyncFailed(t.getMessage());
+        return createAsyncFailed(r == null ? "Unknown error" : r.toString());
     }
 
     // ==================== Helper Methods ====================
@@ -1968,16 +2268,24 @@ public final class AsyncNatives {
      * promise.
      */
     private static void runPromiseTask(MezzeRecord[] chain, MezzePromise promise, TaskBody body) {
+        // Inlined EffectFiber.runWithHandlerChain so we don't allocate a
+        // second lambda per spawn. The chain.length == 0 fast path matches
+        // the common case (top-level Async.spawn outside any perform).
+        boolean installed = false;
         try {
-            EffectFiber.runWithHandlerChain(chain, () -> {
-                Object result = body.run();
-                promise.complete(result);
-            });
+            if (chain.length > 0) {
+                EffectFiber.installHandlerChain(chain);
+                installed = true;
+            }
+            Object result = body.run();
+            promise.complete(result);
         } catch (TaskUnhandledOpException tue) {
             promise.setUnhandledOpCall(tue.opCall);
             promise.complete(null);
         } catch (Throwable e) {
             promise.fail(e);
+        } finally {
+            if (installed) EffectFiber.clearHandlerChain();
         }
     }
 
@@ -2106,5 +2414,33 @@ public final class AsyncNatives {
         }
         if (val instanceof MezzeScope s) return s;
         throw new RuntimeException("Expected Scope for '" + name + "'");
+    }
+
+    // ========================================================================
+    // Result<'a, AsyncError> helpers exposed for CoopScheduler (#159 / #122c).
+    // Keep behavior identical to the private equivalents above so Loom and
+    // Coop produce the same Result shape for the same outcome.
+    // ========================================================================
+
+    static MezzeVariant asyncOkResult(Object value) {
+        return MezzeVariant.ok(value);
+    }
+
+    static MezzeVariant asyncCancelledResult() {
+        return createAsyncCancelled();
+    }
+
+    static MezzeVariant asyncFailedResult(String msg) {
+        return createAsyncFailed(msg);
+    }
+
+    static MezzeVariant asyncFailedResultFromPromise(MezzePromise promise) {
+        return MezzeVariant.err(asyncErrorFromResult(promise.result));
+    }
+
+    /** Same as {@link #cancelOtherPromises} but operates on the Object[]
+     *  shape coop uses (its array element type is Object, not MezzePromise). */
+    static void cancelOtherCoopPromises(Object[] promises, MezzePromise winner) {
+        cancelOtherPromises(promises, winner);
     }
 }
