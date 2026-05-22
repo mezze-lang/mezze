@@ -809,37 +809,47 @@ public final class AsyncNatives {
     }
 
     /**
-     * OPTIMIZATION: Custom lightweight race without CompletableFuture overhead.
-     * Uses direct polling with adaptive backoff instead of spawning N extra threads.
+     * Cancel every promise in {@code promises} that isn't the {@code winner}
+     * and isn't already done. Used by race to clean up losing siblings
+     * (#122) so they don't keep running in the background after a winner
+     * commits.
+     */
+    private static void cancelOtherPromises(Object[] promises, MezzePromise winner) {
+        for (Object p : promises) {
+            MezzePromise promise = (MezzePromise) p;
+            if (promise != winner && !promise.isDone()) {
+                promise.cancel();
+            }
+        }
+    }
+
+    /**
+     * Race: return the first promise to settle as a {@code Result 'a AsyncError}.
+     * Auto-cancels losing siblings (#122) when a winner commits, so they
+     * stop running in the background. Cancelled promises are skipped —
+     * the race waits for a Completed or Failed promise. If every
+     * promise is cancelled (or the race itself is interrupted), surfaces
+     * AsyncCancelled.
+     *
+     * <p>OPTIMIZATION: direct polling with adaptive backoff instead of
+     * spawning N CompletableFutures + N virtual threads.
      */
     @TruffleBoundary
     public static Object loomRace(MezzeRecord args) {
         Object[] promises = getArray(args, "ps");
         if (promises.length == 0) {
-            throw new RuntimeException("race requires at least one promise");
+            return MezzeVariant.err(createAsyncFailed("race requires at least one promise"));
         }
 
-        // Fast path: single promise
+        // Fast path: single promise — defer to the Result-typed await.
         if (promises.length == 1) {
-            return loomAwaitPromise((MezzePromise) promises[0]);
+            return promiseAwaitResult(args);
         }
-
-        // OPTIMIZATION: Direct polling loop with adaptive backoff
-        // Much faster than creating N CompletableFutures + N virtual threads
 
         // Phase 1: Quick spin check (many promises may already be done)
         for (int spin = 0; spin < 64; spin++) {
-            for (Object p : promises) {
-                MezzePromise promise = (MezzePromise) p;
-                if (promise.isDone()) {
-                    if (promise.isCompleted()) {
-                        return promise.getResult();
-                    } else if (promise.isFailed()) {
-                        throw new RuntimeException("Task failed: " + promise.result);
-                    }
-                    // Cancelled - continue checking others
-                }
-            }
+            Object winner = pollForWinner(promises);
+            if (winner != null) return winner;
             Thread.onSpinWait();
         }
 
@@ -849,27 +859,51 @@ public final class AsyncNatives {
         final long maxParkNanos = 10_000_000; // Cap at 10 milliseconds
 
         while (true) {
-            for (Object p : promises) {
-                MezzePromise promise = (MezzePromise) p;
-                if (promise.isDone()) {
-                    if (promise.isCompleted()) {
-                        return promise.getResult();
-                    } else if (promise.isFailed()) {
-                        throw new RuntimeException("Task failed: " + promise.result);
-                    }
-                }
-            }
+            Object winner = pollForWinner(promises);
+            if (winner != null) return winner;
 
-            // Check for interruption
+            // Interrupted on the race itself — surface as AsyncCancelled.
             if (Thread.interrupted()) {
                 Thread.currentThread().interrupt();
-                throw new RuntimeException("Interrupted during race");
+                return MezzeVariant.err(createAsyncCancelled());
             }
 
             // Park with backoff
             LockSupport.parkNanos(parkNanos);
             parkNanos = Math.min(parkNanos * 2, maxParkNanos);
         }
+    }
+
+    /**
+     * One race-poll pass. Returns a {@code Result 'a AsyncError} MezzeVariant
+     * if a winner has settled (Completed → Ok, Failed → Err AsyncFailed) and
+     * cancels the losing siblings as a side-effect. Returns null if no
+     * non-cancelled promise has settled yet. When every promise is cancelled,
+     * surfaces Err AsyncCancelled to the caller.
+     */
+    private static Object pollForWinner(Object[] promises) {
+        boolean allCancelled = true;
+        for (Object p : promises) {
+            MezzePromise promise = (MezzePromise) p;
+            if (!promise.isDone()) {
+                allCancelled = false;
+                continue;
+            }
+            if (promise.isCancelled()) {
+                continue; // skip cancelled, keep looking
+            }
+            // Completed or Failed — we have a winner.
+            cancelOtherPromises(promises, promise);
+            if (promise.isCompleted()) {
+                return MezzeVariant.ok(promise.getResult());
+            }
+            // Failed: pull AsyncError from the stored result.
+            return MezzeVariant.err(asyncErrorFromResult(promise.result));
+        }
+        if (allCancelled) {
+            return MezzeVariant.err(createAsyncCancelled());
+        }
+        return null;
     }
 
     @TruffleBoundary
@@ -2335,5 +2369,33 @@ public final class AsyncNatives {
         }
         if (val instanceof MezzeScope s) return s;
         throw new RuntimeException("Expected Scope for '" + name + "'");
+    }
+
+    // ========================================================================
+    // Result<'a, AsyncError> helpers exposed for CoopScheduler (#159 / #122c).
+    // Keep behavior identical to the private equivalents above so Loom and
+    // Coop produce the same Result shape for the same outcome.
+    // ========================================================================
+
+    static MezzeVariant asyncOkResult(Object value) {
+        return MezzeVariant.ok(value);
+    }
+
+    static MezzeVariant asyncCancelledResult() {
+        return createAsyncCancelled();
+    }
+
+    static MezzeVariant asyncFailedResult(String msg) {
+        return createAsyncFailed(msg);
+    }
+
+    static MezzeVariant asyncFailedResultFromPromise(MezzePromise promise) {
+        return MezzeVariant.err(asyncErrorFromResult(promise.result));
+    }
+
+    /** Same as {@link #cancelOtherPromises} but operates on the Object[]
+     *  shape coop uses (its array element type is Object, not MezzePromise). */
+    static void cancelOtherCoopPromises(Object[] promises, MezzePromise winner) {
+        cancelOtherPromises(promises, winner);
     }
 }

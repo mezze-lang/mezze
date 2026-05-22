@@ -307,7 +307,9 @@ class CoopAsyncTest {
                 let p1 = Async.spawn {f = {} -> "first"}
                 let p2 = Async.spawn {f = {} -> "second"}
                 # In coop mode with FIFO queue, first spawned completes first
-                Async.race {ps = [p1, p2]}
+                match Async.race {ps = [p1, p2]} is
+                  Ok { val } -> val
+                  Err { error = _ } -> "err"
         """.trimIndent()
 
         val result = eval(source)

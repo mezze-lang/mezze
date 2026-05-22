@@ -376,7 +376,9 @@ class OSThreadConcurrencyTest {
                 let p1 = Async.spawn {f = {} -> 1}
                 let p2 = Async.spawn {f = {} -> 2}
                 let p3 = Async.spawn {f = {} -> 3}
-                let result = Async.race {ps = [p1, p2, p3]}
+                let result = match Async.race {ps = [p1, p2, p3]} is
+                  Ok { val } -> val
+                  Err { error = _ } -> -1
                 result >= 1
         """
         val result = eval(code)

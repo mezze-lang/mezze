@@ -49,7 +49,7 @@ class ParallelErrorPropagationTest {
         let sleep: {ms: Int} -> {} = {ms} -> __native_loom_sleep {ms = ms}
         let all: {ps: [Promise 'a]} -> ['a] = {ps} -> __native_loom_all {ps = ps}
         let settle: {ps: [Promise 'a]} -> [Result 'a 'e] = {ps} -> __native_loom_settle {ps = ps}
-        let race: {ps: [Promise 'a]} -> 'a = {ps} -> __native_loom_race {ps = ps}
+        let race: {ps: [Promise 'a]} -> Result 'a 'e = {ps} -> __native_loom_race {ps = ps}
         let cancel: {p: Promise 'a} -> {} = {p} -> __native_loom_cancel {p = p}
         let timeout: {p: Promise 'a, ms: Int} -> Option 'a = {p, ms} -> __native_loom_timeout {p = p, ms = ms}
         let is_done: {p: Promise 'a} -> Bool = {p} -> __native_loom_is_done {p = p}
@@ -449,10 +449,12 @@ class ParallelErrorPropagationTest {
                 "p2"
             }
 
-            let result = race {ps = [p1, p2]}
+            let result = match race {ps = [p1, p2]} is
+              Ok { val } -> val
+              Err { error = _ } -> "err"
 
-            # Wait for all to complete to avoid leaving threads
-            let _ = timeout {p = p1, ms = 200}
+            # race auto-cancels the losing promise (#122) — no
+            # cleanup needed.
 
             result
         """

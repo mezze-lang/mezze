@@ -109,7 +109,9 @@ class AsyncModuleTest {
         val result = eval(withCoopAsync("""
             let p1 = Async.spawn {f = {} -> 1}
             let p2 = Async.spawn {f = {} -> 2}
-            Async.race {ps = [p1, p2]}
+            match Async.race {ps = [p1, p2]} is
+              Ok { val } -> val
+              Err { error = _ } -> -1
         """))
         // In coop scheduler, first one wins
         assertEquals(1L, result)

@@ -85,12 +85,17 @@ object LoomTypes {
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
         )
 
-        // __native_loom_race: {ps: [Promise 'a]} -> 'a
+        // __native_loom_race: {ps: [Promise 'a]} -> Result 'a AsyncError
+        val raceAsyncErrorType = MezzeType.VarType(com.mezze.language.ast.TypeVar("AsyncError"))
+        val raceResultType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(
+            MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
+            raceAsyncErrorType
+        ))
         context["__native_loom_race"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "ps" to MezzeType.SeqType(promiseType)
             )),
-            MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            raceResultType
         )
 
         // __native_loom_all: {ps: [Promise 'a]} -> ['a]

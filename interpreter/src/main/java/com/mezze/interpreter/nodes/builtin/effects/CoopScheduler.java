@@ -170,6 +170,15 @@ public final class CoopScheduler {
         CoopFiber task = readyQueue.pollFirst();
         if (task == null) return false;
 
+        // Observe cancellation (#160): if the promise was cancelled while
+        // this fiber sat in the ready queue, skip the body entirely. The
+        // promise is already in CANCELLED state; just close the fiber so
+        // its continuation can be GC'd.
+        if (task.promise.isCancelled()) {
+            try { task.fiber.close(); } catch (Throwable ignored) {}
+            return true;
+        }
+
         CoopScheduler prevSched = CURRENT.get();
         EffectFiber prevFiber = CURRENT_FIBER.get();
         CURRENT.set(this);
@@ -213,6 +222,16 @@ public final class CoopScheduler {
         boolean unparked = false;
         while (it.hasNext()) {
             CoopFiber pf = it.next();
+            // Cancellation (#160): a parked fiber whose promise was
+            // cancelled never wakes — drop it from the parked set so
+            // the scheduler doesn't deadlock waiting on it.
+            if (pf.promise.isCancelled()) {
+                pf.park = null;
+                try { pf.fiber.close(); } catch (Throwable ignored) {}
+                it.remove();
+                unparked = true;  // forward progress: one fewer fiber to track
+                continue;
+            }
             if (pf.park == null || callPredicate(pf.park.predicate, callNode)) {
                 pf.park = null;
                 it.remove();
@@ -242,28 +261,50 @@ public final class CoopScheduler {
     // Collection Operations
     // ========================================================================
 
-    /** Race - wait for first promise to complete. */
+    /**
+     * Race — return the first promise to settle as {@code Result 'a AsyncError},
+     * auto-cancelling losing siblings (#122). Cancelled promises are
+     * skipped — race waits for a Completed or Failed outcome. If every
+     * promise is cancelled or progress is impossible, surfaces Err
+     * AsyncCancelled.
+     */
     @TruffleBoundary
     public Object race(Object[] promiseArray, IndirectCallNode callNode) {
         if (promiseArray.length == 0) {
-            throw new RuntimeException("race requires at least one promise");
-        }
-        // Already-done fast path
-        for (Object p : promiseArray) {
-            if (((AsyncNatives.MezzePromise) p).isDone()) {
-                return resultOrThrow((AsyncNatives.MezzePromise) p);
-            }
+            return AsyncNatives.asyncFailedResult("race requires at least one promise");
         }
         while (true) {
-            for (Object p : promiseArray) {
-                AsyncNatives.MezzePromise promise = (AsyncNatives.MezzePromise) p;
-                if (promise.isDone()) return resultOrThrow(promise);
-            }
+            Object winner = pollForWinner(promiseArray);
+            if (winner != null) return winner;
             if (!tick(callNode)) {
-                throw new RuntimeException(
-                    "Deadlock: no promise completed and no fibers to run");
+                // Driver stalled with no progress possible — treat as cancelled.
+                return AsyncNatives.asyncCancelledResult();
             }
         }
+    }
+
+    /**
+     * Same shape as AsyncNatives.pollForWinner — picks the first
+     * Completed/Failed promise and cancels its losers. Returns null
+     * when no settled non-cancelled promise exists yet.
+     */
+    private static Object pollForWinner(Object[] promiseArray) {
+        boolean allCancelled = true;
+        for (Object p : promiseArray) {
+            AsyncNatives.MezzePromise promise = (AsyncNatives.MezzePromise) p;
+            if (!promise.isDone()) {
+                allCancelled = false;
+                continue;
+            }
+            if (promise.isCancelled()) continue;
+            AsyncNatives.cancelOtherCoopPromises(promiseArray, promise);
+            if (promise.isCompleted()) {
+                return AsyncNatives.asyncOkResult(promise.snapshotResult());
+            }
+            return AsyncNatives.asyncFailedResultFromPromise(promise);
+        }
+        if (allCancelled) return AsyncNatives.asyncCancelledResult();
+        return null;
     }
 
     /** All - wait for all promises to complete. */

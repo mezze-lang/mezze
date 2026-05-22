@@ -88,7 +88,9 @@ class AsyncHelpersTest {
                 Async.sleep { ms = 100 }
                 99
               }
-              race { ps = [fast, slow] }
+              match race { ps = [fast, slow] } is
+                Ok { val } -> val
+                Err { error = _ } -> -1
         """.trimIndent()
         // The fast one resolves immediately; race should observe it first.
         assertEquals(42L, eval(source))

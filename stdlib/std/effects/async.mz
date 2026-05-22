@@ -110,8 +110,16 @@ effect Async where {
   ##   Err { error = AsyncFailed { msg } } — the spawned task crashed.
   ## Never raises; non-raising failure surfaces are part of the contract.
   await: { p: Promise 'a } -> Result 'a AsyncError <Async>,
-  ## Wait for the first Promise to complete.
-  race: { ps: [Promise 'a] } -> 'a <Async>,
+  ## Wait for the first Promise to settle as Ok or Err, auto-cancelling
+  ## the losing siblings. Returns `Result 'a AsyncError`:
+  ##   Ok { val }                          — the winner produced a value.
+  ##   Err { error = AsyncFailed { msg } } — the winner crashed.
+  ##   Err { error = AsyncCancelled }      — every promise was cancelled,
+  ##                                         or the race itself was
+  ##                                         interrupted.
+  ## Cancelled promises in the input are skipped; race waits for a
+  ## non-cancelled outcome.
+  race: { ps: [Promise 'a] } -> Result 'a AsyncError <Async>,
   ## Wait for all Promises to complete.
   all: { ps: [Promise 'a] } -> ['a] <Async>,
   ## Await with timeout, returning None if it expires.
@@ -362,9 +370,10 @@ pub let go : { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
 ## just the primitives. For now both paths coexist.
 ## ==================================================================
 
-## Wait for any of a list of promises to complete; return the first
-## completer's value.
-pub let race : { ps: [Promise 'a] } -> 'a <Async, ...> = { ps } ->
+## Wait for any of a list of promises to settle, returning the first
+## non-cancelled outcome as `Result 'a AsyncError`. Losing siblings are
+## auto-cancelled when the winner commits.
+pub let race : { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps } ->
   Async.race { ps = ps }
 
 ## Wait for all promises; return each one's Result in input order. Never
