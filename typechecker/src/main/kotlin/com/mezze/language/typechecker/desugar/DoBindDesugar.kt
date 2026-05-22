@@ -15,7 +15,9 @@ import com.mezze.language.parsedast.ParsedMemberAccess
 import com.mezze.language.parsedast.ParsedModule
 import com.mezze.language.parsedast.ParsedParens
 import com.mezze.language.parsedast.ParsedPerform
+import com.mezze.language.parsedast.ParsedPerformHandler
 import com.mezze.language.parsedast.ParsedPipe
+import com.mezze.language.parsedast.ParsedQualifiedRef
 import com.mezze.language.parsedast.ParsedRecordEntry
 import com.mezze.language.parsedast.ParsedRecordLit
 import com.mezze.language.parsedast.ParsedSeqElement
@@ -63,101 +65,100 @@ object DoBindDesugar {
      * Result of running the do-bind desugar on a module.
      *
      * @param module the rewritten module (Bind → Let; result wrapped in `Ok`).
-     * @param syntheticBindBlockLocs locs of every do-block whose Binds were
-     *   rewritten. The constraint generator subtracts `<Exception>` from these
-     *   blocks; the TypedAstBuilder wraps them in a synthetic TypedPerform.
+     * @param hasBinds true if any `<-` was found in the module. When true,
+     *   the TypeChecker injects `Exception` + `ExceptionToResult` into the
+     *   import context so the desugar's synthetic `perform ExceptionToResult`
+     *   resolves.
      */
     data class Result(
         val module: ParsedModule,
-        val syntheticBindBlockLocs: Set<Loc>,
-    ) {
-        val hasBinds: Boolean get() = syntheticBindBlockLocs.isNotEmpty()
-    }
+        val hasBinds: Boolean,
+    )
 
     fun desugar(module: ParsedModule): Result {
-        val locs = mutableSetOf<Loc>()
+        var sawBind = false
         val rewritten = module.copy(decls = module.decls.map { decl ->
             when (decl) {
-                is ParsedLetDecl -> decl.copy(value = desugarBindsInExpr(decl.value, locs))
+                is ParsedLetDecl -> decl.copy(value = desugarBindsInExpr(decl.value) { sawBind = true })
                 is ParsedImplAbilityDecl -> decl.copy(operations = decl.operations.map { op ->
-                    op.copy(implementation = desugarBindsInExpr(op.implementation, locs))
+                    op.copy(implementation = desugarBindsInExpr(op.implementation) { sawBind = true })
                 })
-                is ParsedTopLevelExpr -> decl.copy(expression = desugarBindsInExpr(decl.expression, locs))
+                is ParsedTopLevelExpr -> decl.copy(expression = desugarBindsInExpr(decl.expression) { sawBind = true })
                 else -> decl
             }
         })
-        return Result(module = rewritten, syntheticBindBlockLocs = locs)
+        return Result(module = rewritten, hasBinds = sawBind)
     }
 
     // ------------------------------------------------------------------
     // Implementation
     // ------------------------------------------------------------------
 
-    private fun desugarBindsInExpr(expr: ParsedExpr, syntheticLocs: MutableSet<Loc>): ParsedExpr = when (expr) {
+    private fun desugarBindsInExpr(expr: ParsedExpr, onBindFound: () -> Unit): ParsedExpr = when (expr) {
         is ParsedDo -> {
             // Recurse into all sub-expressions first.
             val newStatements = expr.statements.map { stmt ->
                 when (stmt) {
-                    is ParsedStatement.Let -> stmt.copy(value = desugarBindsInExpr(stmt.value, syntheticLocs))
-                    is ParsedStatement.Expr -> stmt.copy(expr = desugarBindsInExpr(stmt.expr, syntheticLocs))
-                    is ParsedStatement.Bind -> stmt.copy(expr = desugarBindsInExpr(stmt.expr, syntheticLocs))
+                    is ParsedStatement.Let -> stmt.copy(value = desugarBindsInExpr(stmt.value, onBindFound))
+                    is ParsedStatement.Expr -> stmt.copy(expr = desugarBindsInExpr(stmt.expr, onBindFound))
+                    is ParsedStatement.Bind -> stmt.copy(expr = desugarBindsInExpr(stmt.expr, onBindFound))
                 }
             }
-            val newResult = desugarBindsInExpr(expr.result, syntheticLocs)
+            val newResult = desugarBindsInExpr(expr.result, onBindFound)
             val processedDo = expr.copy(statements = newStatements, result = newResult)
 
             // If this do-block has any Bind statements, perform the rewrite.
             if (processedDo.statements.any { it is ParsedStatement.Bind }) {
-                rewriteDoWithBinds(processedDo, syntheticLocs)
+                rewriteDoWithBinds(processedDo, onBindFound)
             } else {
                 processedDo
             }
         }
         is ParsedFunctionCall -> expr.copy(
-            function = desugarBindsInExpr(expr.function, syntheticLocs),
-            arguments = desugarBindsInExpr(expr.arguments, syntheticLocs),
+            function = desugarBindsInExpr(expr.function, onBindFound),
+            arguments = desugarBindsInExpr(expr.arguments, onBindFound),
         )
-        is ParsedLambda -> expr.copy(body = desugarBindsInExpr(expr.body, syntheticLocs))
+        is ParsedLambda -> expr.copy(body = desugarBindsInExpr(expr.body, onBindFound))
         is ParsedRecordLit -> expr.copy(entries = expr.entries.map { e ->
             when (e) {
-                is ParsedRecordEntry.Field -> e.copy(value = e.value?.let { desugarBindsInExpr(it, syntheticLocs) })
-                is ParsedRecordEntry.Spread -> e.copy(expr = desugarBindsInExpr(e.expr, syntheticLocs))
+                is ParsedRecordEntry.Field -> e.copy(value = e.value?.let { desugarBindsInExpr(it, onBindFound) })
+                is ParsedRecordEntry.Spread -> e.copy(expr = desugarBindsInExpr(e.expr, onBindFound))
             }
         })
         is ParsedIf -> expr.copy(
-            condition = desugarBindsInExpr(expr.condition, syntheticLocs),
-            thenBranch = desugarBindsInExpr(expr.thenBranch, syntheticLocs),
-            elseBranch = desugarBindsInExpr(expr.elseBranch, syntheticLocs),
+            condition = desugarBindsInExpr(expr.condition, onBindFound),
+            thenBranch = desugarBindsInExpr(expr.thenBranch, onBindFound),
+            elseBranch = desugarBindsInExpr(expr.elseBranch, onBindFound),
         )
         is ParsedMatch -> expr.copy(
-            scrutinee = desugarBindsInExpr(expr.scrutinee, syntheticLocs),
-            cases = expr.cases.map { it.copy(body = desugarBindsInExpr(it.body, syntheticLocs)) },
+            scrutinee = desugarBindsInExpr(expr.scrutinee, onBindFound),
+            cases = expr.cases.map { it.copy(body = desugarBindsInExpr(it.body, onBindFound)) },
         )
-        is ParsedPerform -> expr.copy(body = desugarBindsInExpr(expr.body, syntheticLocs))
-        is ParsedMemberAccess -> expr.copy(receiver = desugarBindsInExpr(expr.receiver, syntheticLocs))
-        is ParsedParens -> expr.copy(expr = desugarBindsInExpr(expr.expr, syntheticLocs))
-        is ParsedVariantConstruct -> expr.copy(value = expr.value?.let { desugarBindsInExpr(it, syntheticLocs) })
+        is ParsedPerform -> expr.copy(body = desugarBindsInExpr(expr.body, onBindFound))
+        is ParsedMemberAccess -> expr.copy(receiver = desugarBindsInExpr(expr.receiver, onBindFound))
+        is ParsedParens -> expr.copy(expr = desugarBindsInExpr(expr.expr, onBindFound))
+        is ParsedVariantConstruct -> expr.copy(value = expr.value?.let { desugarBindsInExpr(it, onBindFound) })
         is ParsedSeqLit -> expr.copy(elements = expr.elements.map { elem ->
             when (elem) {
-                is ParsedSeqElement.Regular -> elem.copy(expr = desugarBindsInExpr(elem.expr, syntheticLocs))
-                is ParsedSeqElement.Spread -> elem.copy(expr = desugarBindsInExpr(elem.expr, syntheticLocs))
+                is ParsedSeqElement.Regular -> elem.copy(expr = desugarBindsInExpr(elem.expr, onBindFound))
+                is ParsedSeqElement.Spread -> elem.copy(expr = desugarBindsInExpr(elem.expr, onBindFound))
             }
         })
-        is ParsedEffectCall -> expr.copy(arguments = desugarBindsInExpr(expr.arguments, syntheticLocs))
+        is ParsedEffectCall -> expr.copy(arguments = desugarBindsInExpr(expr.arguments, onBindFound))
         is ParsedStringLit -> expr.copy(parts = expr.parts.map { part ->
             when (part) {
-                is ParsedStringPart.Interpolation -> part.copy(expr = desugarBindsInExpr(part.expr, syntheticLocs))
+                is ParsedStringPart.Interpolation -> part.copy(expr = desugarBindsInExpr(part.expr, onBindFound))
                 else -> part
             }
         })
         is ParsedBinaryOp -> expr.copy(
-            left = desugarBindsInExpr(expr.left, syntheticLocs),
-            right = desugarBindsInExpr(expr.right, syntheticLocs),
+            left = desugarBindsInExpr(expr.left, onBindFound),
+            right = desugarBindsInExpr(expr.right, onBindFound),
         )
-        is ParsedUnaryOp -> expr.copy(operand = desugarBindsInExpr(expr.operand, syntheticLocs))
+        is ParsedUnaryOp -> expr.copy(operand = desugarBindsInExpr(expr.operand, onBindFound))
         is ParsedPipe -> expr.copy(
-            left = desugarBindsInExpr(expr.left, syntheticLocs),
-            right = desugarBindsInExpr(expr.right, syntheticLocs),
+            left = desugarBindsInExpr(expr.left, onBindFound),
+            right = desugarBindsInExpr(expr.right, onBindFound),
         )
         else -> expr
     }
@@ -172,20 +173,30 @@ object DoBindDesugar {
      *     pat3 <- expr3
      *     result
      *
-     * Output (still a ParsedDo — NO ParsedPerform):
-     *   do
+     * Output (a real `perform ExceptionToResult in do { ... }`):
+     *   perform ExceptionToResult in do
      *     let pat1 = expr1.try {}
      *     stmt2
      *     let pat3 = expr3.try {}
      *     Ok {val = result}
      *
-     * The do-block's loc is registered in `syntheticBindBlockLocs`. Downstream:
-     *   - ConstraintGenerator subtracts `<Exception>` from this do-block's
-     *     effect row.
-     *   - TypedAstBuilder wraps the built TypedBlock in a synthetic TypedPerform
-     *     using well-known Exception + ExceptionToResult hashes.
+     * From this point on, the typechecker sees an ordinary user-written
+     * `perform ExceptionToResult in ...` and types it through the existing
+     * effect-handling machinery — no special-case logic. Each `let` binding's
+     * type carries `<Exception>` (because `.try {}` declares that effect),
+     * and the outer perform discharges it, producing `Result _ _ <*>`.
+     *
+     * Only "magic" left: the `ExceptionToResult` name itself must resolve
+     * even when the user didn't `use std::effects::exception::{ExceptionToResult}`.
+     * The do-block loc is registered in `syntheticBindBlockLocs` so the
+     * constraint generator can resolve the performer via well-known hashes
+     * for performs inserted by this desugar.
      */
-    private fun rewriteDoWithBinds(doExpr: ParsedDo, locs: MutableSet<Loc>): ParsedDo {
+    private fun rewriteDoWithBinds(
+        doExpr: ParsedDo,
+        onBindFound: () -> Unit,
+    ): ParsedPerform {
+        onBindFound()
         // 1. Rewrite each Bind statement to a `let pat = expr.try {}`.
         val rewrittenStatements = doExpr.statements.map { stmt ->
             when (stmt) {
@@ -212,9 +223,30 @@ object DoBindDesugar {
             loc = resultLoc,
         )
 
-        locs.add(doExpr.loc)
-        return doExpr.copy(statements = rewrittenStatements, result = wrappedResult)
+        val rewrittenDo = doExpr.copy(statements = rewrittenStatements, result = wrappedResult)
+
+        // 3. Wrap in `perform ExceptionToResult in <rewrittenDo>`.
+        val performHandler = ParsedPerformHandler(
+            performer = ParsedQualifiedRef(
+                localName = EXCEPTION_TO_RESULT_NAME,
+                qualifier = null,
+                loc = doExpr.loc,
+            ),
+            params = null,
+        )
+        return ParsedPerform(
+            handlers = listOf(performHandler),
+            body = rewrittenDo,
+            loc = doExpr.loc,
+        )
     }
+
+    /**
+     * Performer name resolved at the constraint-generation phase only when
+     * the enclosing perform's loc is in syntheticBindBlockLocs. The
+     * corresponding hash is looked up via [WellKnownHashConstants.PERFORMER_EXCEPTIONTORESULT].
+     */
+    const val EXCEPTION_TO_RESULT_NAME = "ExceptionToResult"
 
     /**
      * Build a `expr.try {}` method-call expression.
@@ -222,6 +254,12 @@ object DoBindDesugar {
      * Uses dot-method syntax (rather than qualified `Tryable.try {it = expr}`)
      * so it goes through the existing method-call dispatch path that handles
      * ability impl resolution via dictionary passing.
+     *
+     * The member-access + function-call locs use the RHS expression's loc
+     * so position-based lookups (LSP, error reporting) point at the user's
+     * `<-` line, not at synthetic internals. The receiver keeps its own
+     * loc (subexpression of the bind) — this matters when the typechecker
+     * builds method-resolution maps keyed by parent-call loc vs receiver loc.
      */
     private fun buildTryableTryCall(expr: ParsedExpr, loc: Loc): ParsedFunctionCall {
         val tryAccess = ParsedMemberAccess(

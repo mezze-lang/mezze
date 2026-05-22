@@ -213,7 +213,7 @@ sealed interface TypedStatement {
         val type: MezzeType,
         val value: TypedExpr,
         val loc: Loc,
-        val isRecursive: Boolean = false
+        val isRecursive: Boolean = false,
     ) : TypedStatement
     @Serializable data class Expr(val expr: TypedExpr, val loc: Loc) : TypedStatement
 }
@@ -239,20 +239,6 @@ data class TypedPerform(
     val body: TypedExpr,
     override val type: MezzeType,
     override val loc: Loc,
-    /**
-     * True when this perform was synthesized by the compiler (e.g. by the
-     * do-bind desugar wrapping a do-with-`<-` block in `perform ExceptionToResult`).
-     *
-     * Synthetic performs suppress the `<*>` performed marker on the result
-     * type when inside a function body, so user-written do-bind blocks don't
-     * leak `<*>` into function signatures. See:
-     *   - docs/design/do-bind-proposal.md §5
-     *   - ExpressionConstraints.kt `removeEffectsFromType`
-     *
-     * Default `false` — user-written `perform` keeps the existing behavior
-     * (sets `performed = true`, which top-level validation enforces).
-     */
-    val synthetic: Boolean = false
 ) : TypedExpr
 
 @Serializable

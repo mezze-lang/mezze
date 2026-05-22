@@ -237,18 +237,18 @@ class TypeChecker(
         var module = desugarPipesInParsedModule(module)
 
         // Desugar do-block <- statements (do-bind feature). See DoBindDesugar.kt.
-        // The desugar rewrites each `pat <- expr` to `let pat = expr.try {}`,
-        // and wraps the do-block's result in `Ok {val = ...}`. Crucially, NO
-        // synthetic `perform` is emitted into the parsed AST — the do-block's
-        // loc is registered in `syntheticPerformLocs`, and:
-        //   - ConstraintGenerator subtracts `<Exception>` from that do-block.
-        //   - TypedAstBuilder wraps the built TypedBlock in a TypedPerform
-        //     using the well-known Exception + ExceptionToResult hashes.
-        // This keeps `ExceptionToResult` invisible to user namespace entirely.
-        syntheticPerformLocs.clear()
+        // Each `pat <- expr` becomes `let pat = expr.try {}`, the do-block's
+        // result is wrapped in `Ok {val = ...}`, and the entire block is
+        // wrapped in a synthetic `perform ExceptionToResult in do { ... }`.
+        // From that point on, the typechecker handles it exactly like a
+        // user-written `perform ExceptionToResult` — same effect discharge,
+        // same `<*>` marker. The only "magic" left is name resolution: the
+        // surgical injection below adds Exception + ExceptionToResult to the
+        // import context whenever the module uses `<-`, so the synthetic
+        // perform's handler name resolves.
         val bindDesugarResult = com.mezze.language.typechecker.desugar.DoBindDesugar.desugar(module)
         module = bindDesugarResult.module
-        syntheticPerformLocs.addAll(bindDesugarResult.syntheticBindBlockLocs)
+        val moduleUsesBind = bindDesugarResult.hasBinds
 
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
@@ -267,14 +267,14 @@ class TypeChecker(
         // Try to use PrecompiledStdlib for fast prelude injection
         val precompiled = try { PrecompiledStdlib } catch (_: Exception) { null }
 
-        val enhancedContext = if (!hasUserImports && shouldInjectPrelude && precompiled != null) {
-            // FAST PATH: no user imports, precompiled prelude available
+        val enhancedContext = if (!hasUserImports && shouldInjectPrelude && precompiled != null && !moduleUsesBind) {
+            // FAST PATH: no user imports, precompiled prelude available, no `<-`.
             importContext = precompiled.preludeImportContext
             if (cachedPreludeLoadedModules == null) {
                 cachedPreludeLoadedModules = precompiled.loadedModules
             }
             precompiled.compiledPrelude.mergeInto(parentContext)
-        } else if (hasUserImports || shouldInjectPrelude) {
+        } else if (hasUserImports || shouldInjectPrelude || moduleUsesBind) {
             val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "."))
             val importResolver = if (precompiled != null && (currentPath == projectRoot || currentPath.startsWith(projectRoot))) {
                 precompiled.importResolver
@@ -302,6 +302,9 @@ class TypeChecker(
                     if (shouldInjectPrelude) {
                         val preludeContext = loadPreludeModules(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
+                    }
+                    if (moduleUsesBind) {
+                        importContext = injectExceptionToResultForBind(importContext!!, importResolver)
                     }
                     mergeImportContext(parentContext, importContext!!)
                 }
@@ -394,7 +397,6 @@ class TypeChecker(
             effectNames = effectNames,
             abilityDeclarations = allAbilityDeclarations,
             effectDeclarations = allEffectDeclarations,
-            syntheticPerformLocs = syntheticPerformLocs.toSet()
         )
         val programConstraintResult = constraintGenerator.generateProgram(parsedModule, context)
         val constraintResults = programConstraintResult.constraintResults
@@ -740,7 +742,6 @@ class TypeChecker(
                         mustBeOpenRowVars = mustBeOpenRowVars,
                         methodCallResolutions = allMethodCallResolutions,
                         callReturnTypes = allCallReturnTypes,
-                        syntheticPerformLocs = syntheticPerformLocs.toSet()
                     )
                     val typed = builder.build(parsedModule)
 
@@ -1182,7 +1183,6 @@ class TypeChecker(
                 mustBeOpenRowVars = emptySet(),
                 methodCallResolutions = methodCallResolutions,
                 callReturnTypes = callReturnTypes,
-                syntheticPerformLocs = syntheticPerformLocs.toSet(),
             )
             builder.build(parsedModule)
         } catch (e: Exception) {
@@ -1207,6 +1207,35 @@ class TypeChecker(
      * Load prelude modules and return a combined ModuleImportContext.
      * Cached globally — computed once per JVM process since stdlib doesn't change.
      */
+    /**
+     * Inject Exception + ExceptionToResult into the import context so the
+     * synthetic `perform ExceptionToResult in ...` emitted by DoBindDesugar
+     * resolves at constraint-generation time. Only called when the module
+     * actually contains `<-`. The names ARE visible elsewhere in the
+     * module too (a small acceptable "leak"); if the user writes
+     * `perform ExceptionToResult` themselves they'll get the regular
+     * performer behavior, no different from importing it.
+     */
+    private fun injectExceptionToResultForBind(
+        baseCtx: ModuleImportContext,
+        importResolver: ImportResolver,
+    ): ModuleImportContext {
+        val exceptionCtx = cachedExceptionForBindCtx ?: run {
+            val syntheticSrc = "use std::effects::exception::{ Exception, ExceptionToResult }"
+            val syntheticModule = MezzeParser().parseParsedModule(syntheticSrc, file = "<dobind-synthetic>")
+            when (val r = importResolver.resolveImports(syntheticModule)) {
+                is ImportResolutionResult.Success -> r.importContext.also {
+                    cachedExceptionForBindCtx = it
+                }
+                is ImportResolutionResult.Failure -> return baseCtx
+            }
+        }
+        return baseCtx.copy(
+            importedEffects = baseCtx.importedEffects + exceptionCtx.importedEffects,
+            importedImpls = baseCtx.importedImpls + exceptionCtx.importedImpls,
+        )
+    }
+
     private fun loadPreludeModules(
         importResolver: ImportResolver,
         userImportContext: ModuleImportContext
@@ -1501,19 +1530,6 @@ class TypeChecker(
     private var cachedTypeAliases: Map<String, TypeAliasInfo> = emptyMap()
 
     /**
-     * Locations of `ParsedPerform` nodes synthesized by the do-bind desugar.
-     *
-     * Populated by `desugarBindsInParsedModule` before constraint generation.
-     * Consulted by `ExpressionConstraintGenerator.generatePerform` to decide
-     * whether to pass `synthetic = true` to `removeEffectsFromType` (which
-     * suppresses the `<*>` performed marker on the enclosing function's
-     * signature). See `docs/design/do-bind-proposal.md` §5.
-     *
-     * The set is cleared at the start of each top-level `typeCheck` call.
-     */
-    internal val syntheticPerformLocs: MutableSet<com.mezze.language.parsedast.Loc> = mutableSetOf()
-
-    /**
      * Get type aliases (compatibility API).
      * Returns type alias information collected during type checking.
      */
@@ -1785,6 +1801,15 @@ class TypeChecker(
         /** Cached prelude context — computed once per JVM process since stdlib doesn't change. */
         @Volatile
         private var cachedPreludeContext: ModuleImportContext? = null
+
+        /**
+         * Cached import context produced by resolving
+         * `use std::effects::exception::{ Exception, ExceptionToResult }`.
+         * Used by [injectExceptionToResultForBind] to surgically resolve
+         * the synthetic `perform ExceptionToResult` inserted by do-bind.
+         */
+        @Volatile
+        internal var cachedExceptionForBindCtx: ModuleImportContext? = null
 
 
         /** Cached prelude loaded modules — shared across all TypeChecker instances */

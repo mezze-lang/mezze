@@ -37,15 +37,7 @@ import com.mezze.language.parsedast.diagnostics.ErrorCode
  * - Lazy effectInstance creation (only when in perform context with associated types)
  * - Short-circuit checks to avoid unnecessary work
  */
-class ExpressionConstraintGenerator(
-    /**
-     * Locations of `ParsedPerform` nodes synthesized by the do-bind desugar.
-     * When a perform's loc is in this set, `removeEffectsFromType` is called
-     * with `synthetic = true` so `<*>` doesn't leak onto the enclosing function.
-     * See `TypeChecker.syntheticPerformLocs` and the do-bind design doc.
-     */
-    private val syntheticPerformLocs: Set<com.mezze.language.parsedast.Loc> = emptySet(),
-) {
+class ExpressionConstraintGenerator() {
 
     // ========================================================================
     // CACHES FOR PERFORMANCE
@@ -4194,34 +4186,6 @@ class ExpressionConstraintGenerator(
         methodCallResolutions.putAll(resultResult.methodCallResolutions)
         callReturnTypes.putAll(resultResult.callReturnTypes)
 
-        // DO-BIND DESUGAR: if this do-block was rewritten by `<-` (its loc is
-        // registered in `syntheticPerformLocs`), the synthetic `ExceptionToResult`
-        // wrap inserted by TypedAstBuilder discharges `<Exception>`. Subtract
-        // it from the effect row so the surrounding function doesn't see
-        // `<Exception>` in its signature.
-        //
-        // We also constrain the result type to `Result 'a 'e`. The desugar wraps
-        // the do-block's tail in `Ok {val = result}` which would otherwise infer
-        // as the bare open variant `| Ok {val: 'a} |`. Without this constraint,
-        // a nested `outer <- (inner_do)` fails: the outer's `.try {}` dispatch
-        // looks for Tryable on the open variant rather than on Result, mis-resolves,
-        // and produces a runtime dict-slot crash. The constraint forces the
-        // expected `Result` shape so dispatch finds the right impl.
-        if (expr.loc in syntheticPerformLocs) {
-            effects.remove(com.mezze.language.typechecker.WellKnownHashConstants.EFFECT_EXCEPTION_NAME)
-            val pinnedResultType = com.mezze.language.typechecker.util.WellKnownTypeApp.result(
-                ok = MezzeType.VarType(TypeVar.fresh()),
-                err = MezzeType.VarType(TypeVar.fresh()),
-            )
-            constraints.add(
-                Constraint.Equality(
-                    left = resultResult.type,
-                    right = pinnedResultType,
-                    loc = expr.loc,
-                )
-            )
-        }
-
         // CRITICAL: If do block has effects or performed effects, wrap the result in SuspendedType
         // This allows perform expressions to properly detect and handle effects
         // BUT: Don't double-wrap if the result is already a SuspendedType!
@@ -4577,10 +4541,7 @@ class ExpressionConstraintGenerator(
         } else {
             exprResult.type
         }
-        // Synthetic performs (from the do-bind desugar) suppress the <*> marker
-        // so the enclosing function's signature stays clean. See do-bind design doc.
-        val isSynthetic = expr.loc in syntheticPerformLocs
-        val resultType = removeEffectsFromType(baseType, handledEffects, synthetic = isSynthetic)
+        val resultType = removeEffectsFromType(baseType, handledEffects)
 
         // CRITICAL: Also remove handled effects from ConstraintResult.effects
         // This is where effects are tracked during constraint generation
@@ -4623,7 +4584,12 @@ class ExpressionConstraintGenerator(
             usedVariables = exprResult.usedVariables,
             referencedBindings = exprResult.referencedBindings,
             methodCallResolutions = exprResult.methodCallResolutions,
-            callReturnTypes = exprResult.callReturnTypes
+            // Record this perform's solved result type so TypedAstBuilder can
+            // emit `TypedPerform.type` as the discharged result (e.g.
+            // `Result _ _`) rather than the raw body type (which would be the
+            // pre-discharge value wrapped in SuspendedType, breaking method
+            // dispatch on the perform expression as a receiver).
+            callReturnTypes = exprResult.callReturnTypes + (expr.loc to resultType),
         )
     }
 
@@ -4716,28 +4682,20 @@ class ExpressionConstraintGenerator(
     }
 
     /**
-     * Remove specific effects from a type.
+     * Remove handled effects from a type and mark it as performed (`<*>`).
      *
-     * For FunctionType with effects: Remove effects from effect row
-     * For SuspendedType with effects: Remove effects from effect row, returning pure value if all removed
-     */
-    /**
-     * Remove handled effects from a type and mark it as performed.
+     * For FunctionType: clears the handled effects from the effect row and
+     * sets `performed = true`.
+     * For SuspendedType: same on the underlying effect row.
      *
-     * @param type the type to strip effects from
-     * @param effectsToRemove names of effects the surrounding perform handles
-     * @param synthetic when true (compiler-synthesized perform from do-bind desugar),
-     *        DO NOT set `performed = true` on the result. This keeps `<*>` out of
-     *        the enclosing function's signature so users don't see internal compiler
-     *        machinery leak through. Default false preserves existing behavior for
-     *        all user-written `perform` expressions. See `docs/design/do-bind-proposal.md` §5.
+     * The performed marker fires for all `perform` blocks — both user-
+     * written and synthesized by the do-bind desugar. The do-bind sugar
+     * is intentionally semantically identical to the explicit form.
      */
     internal fun removeEffectsFromType(
         type: MezzeType,
         effectsToRemove: Set<String>,
-        synthetic: Boolean = false
     ): MezzeType {
-        val markPerformed = !synthetic
         return when (type) {
             is MezzeType.FunctionType -> {
                 val effects = type.effects
@@ -4745,7 +4703,7 @@ class ExpressionConstraintGenerator(
                     MezzeType.FunctionType(
                         paramType = type.paramType,
                         returnType = type.returnType,
-                        effects = MezzeType.EffectRow.simple(emptySet(), null, markPerformed),
+                        effects = MezzeType.EffectRow.simple(emptySet(), null, performed = true),
                         abilityConstraints = type.abilityConstraints
                     )
                 } else {
@@ -4753,7 +4711,7 @@ class ExpressionConstraintGenerator(
                     MezzeType.FunctionType(
                         paramType = type.paramType,
                         returnType = type.returnType,
-                        effects = MezzeType.EffectRow.simple(remainingEffects, effects.rowVar, markPerformed),
+                        effects = MezzeType.EffectRow.simple(remainingEffects, effects.rowVar, performed = true),
                         abilityConstraints = type.abilityConstraints
                     )
                 }
@@ -4762,7 +4720,7 @@ class ExpressionConstraintGenerator(
                 val remainingEffects = type.effects.effects - effectsToRemove
                 MezzeType.SuspendedType(
                     valueType = type.valueType,
-                    effects = MezzeType.EffectRow.simple(remainingEffects, type.effects.rowVar, markPerformed)
+                    effects = MezzeType.EffectRow.simple(remainingEffects, type.effects.rowVar, performed = true)
                 )
             }
             else -> type

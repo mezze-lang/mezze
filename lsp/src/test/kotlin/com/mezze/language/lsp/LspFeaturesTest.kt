@@ -206,15 +206,38 @@ class LspFeaturesTest {
     // Hover and goto-def on `<-`-bound names go through the same TypedAST
     // walk as regular `let` bindings — the desugar rewrites `pat <- expr`
     // into a typed `let pat = expr.try {}` before LSP sees the typed AST.
-    // The synthetic Let inherits the bind statement's loc so position
-    // lookups land on user-written source.
-    //
-    // Known limitation (tracked separately): hovering directly on the `a`
-    // pattern of `a <- make_ok {}` currently lands on the synthetic
-    // `.try` field access and renders the ability method's generic type
-    // (`Tryable.try : { it: 'm } -> 'inner`) instead of the bound name's
-    // inferred type. Workaround: hover on the receiver (`make_ok`) or
-    // on uses of `a` in the body.
+    // The synthetic Let inherits the bind statement's loc and is marked
+    // `isSynthetic = true` so position lookups land on user-written source.
+
+    @Test
+    fun `hover on bind pattern does not leak desugar internals`() {
+        // For `a <- make_ok {}` where make_ok returns Result Int Str,
+        // hovering on `a` should resolve to the bound name's hover,
+        // showing the desugared `.try {}` call's return type (Int with
+        // <Exception> in the row — the user sees this just like a
+        // hand-written `let a = make_ok{}.try{}`).
+        //
+        // The exact type-specialization (Int vs 'a) is tracked
+        // separately by task #33; this test guards against the worse
+        // regression of leaking `Tryable.try` to hover.
+        val (uri, _) = openSingleFile("""
+            let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
+
+            let foo = {} -> do
+                a <- make_ok {}
+                a
+        """.trimIndent())
+
+        val hover = hoverAt(uri, line = 3, character = 4)
+        assertNotNull(hover, "expected hover on the `<-` pattern name")
+        val content = hoverText(hover!!)
+        assertTrue(content.contains("a :") || content.contains("a:"),
+            "expected hover to render as a binding for `a`, got:\n$content")
+        assertFalse(content.contains("Tryable.try"),
+            "hover should NOT leak the synthetic `.try` ability call: $content")
+        assertFalse(content.contains("{ it: "),
+            "hover should NOT leak the ability method's generic param: $content")
+    }
 
     @Test
     fun `hover on receiver function inside bind shows function type`() {

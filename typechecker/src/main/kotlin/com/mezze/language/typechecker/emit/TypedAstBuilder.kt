@@ -58,11 +58,6 @@ class TypedAstBuilder(
     // their generic scheme, and the call's `.type` falls back to `unknown`,
     // breaking LSP per-segment chain inlay hints.
     private val callReturnTypes: Map<Loc, MezzeType> = emptyMap(),
-    // Locations of `ParsedPerform` nodes synthesized by the do-bind desugar
-    // (set in `TypeChecker.syntheticPerformLocs`). When emitting a TypedPerform,
-    // these get `synthetic = true` so the typechecker suppresses `<*>` on the
-    // enclosing function's signature.
-    private val syntheticPerformLocs: Set<Loc> = emptySet()
 ) {
 
     /**
@@ -757,7 +752,16 @@ class TypedAstBuilder(
 
                     val callReturnType = when (val ft = substitution.apply(fn.type)) {
                         is MezzeType.FunctionType -> substitution.apply(ft.returnType)
-                        else -> substitution.apply(contextType)
+                        else -> {
+                            // fn.type couldn't be specialized (e.g. ability-method
+                            // resolution returned no methodFunctionType). Fall back
+                            // to the constraint generator's per-call-site return
+                            // type recorded in callReturnTypes — for ability calls
+                            // this is the inferred return after solving (e.g.
+                            // `Int` for `result.try {}` on a `Result Int Str`).
+                            val perCallSite = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
+                            perCallSite ?: substitution.apply(contextType)
+                        }
                     }
 
                     val isTailCall = isTailCallLocation(expr.loc)
@@ -1007,46 +1011,11 @@ class TypedAstBuilder(
                         }
                     }
                 }
-                // For synthetic do-bind blocks, the desugar wraps the result in
-                // `Ok {val = ...}` and the constraint generator pins the do-block's
-                // result type to `Result 'a 'e`. Pass that shape as the result's
-                // contextType so the variant literal infers as `Result _ _` instead
-                // of an open `| Ok {val: 'a} |`. Without this, a nested
-                // `outer <- (inner_do)` fails to find the Result Tryable impl.
-                val resultContext = if (expr.loc in syntheticPerformLocs) {
-                    com.mezze.language.typechecker.util.WellKnownTypeApp.result(
-                        ok = MezzeType.VarType(TypeVar("dobind_ok")),
-                        err = MezzeType.VarType(TypeVar("dobind_err")),
-                    )
-                } else contextType
-                val result = buildExpr(expr.result, file, resultContext)
+                val result = buildExpr(expr.result, file, contextType)
                 if (pushedBlockScope) {
                     lambdaParamScopes.removeLast()
                 }
-                val builtBlock = TypedBlock(stmts, result, result.type, loc)
-                // DO-BIND DESUGAR: if this do-block was rewritten by `<-`,
-                // wrap it in a synthetic `perform ExceptionToResult` using
-                // the well-known Exception + ExceptionToResult hashes.
-                // `ExceptionToResult` is never resolvable by name from user
-                // code — it reaches the runtime only via this wrapping.
-                if (expr.loc in syntheticPerformLocs) {
-                    val handler = TypedHandlerRef(
-                        performerHash = com.mezze.language.typechecker.WellKnownHashConstants.PERFORMER_EXCEPTIONTORESULT,
-                        effectHash = com.mezze.language.typechecker.WellKnownHashConstants.EFFECT_EXCEPTION,
-                        performerName = com.mezze.language.typechecker.WellKnownHashConstants.PERFORMER_EXCEPTIONTORESULT_NAME,
-                        params = null,
-                        loc = loc,
-                    )
-                    TypedPerform(
-                        handlers = listOf(handler),
-                        body = builtBlock,
-                        type = builtBlock.type,
-                        loc = loc,
-                        synthetic = true,
-                    )
-                } else {
-                    builtBlock
-                }
+                TypedBlock(stmts, result, result.type, loc)
             }
 
             // ------------------------------------------------------------------
@@ -1132,10 +1101,17 @@ class TypedAstBuilder(
                     buildHandlerRef(h, file, loc)
                 }
                 val body = buildExpr(expr.body, file, contextType)
-                // If this loc was registered by the do-bind desugar, mark as
-                // synthetic so consumers (LSP, formatter, runtime) can tell.
-                val isSynthetic = expr.loc in syntheticPerformLocs
-                TypedPerform(handlers, body, body.type, loc, synthetic = isSynthetic)
+                // Prefer the constraint solver's discharged result type
+                // (recorded per-perform-loc). Without this, the perform's
+                // outer type stays at the body's pre-discharge form, which
+                // hides the handler's effect → value transformation (e.g.
+                // `ExceptionToResult` turning `<Exception>` into `Result _ _`).
+                // That matters when the perform is itself a receiver (the
+                // nested do-with-bind case): without the right type here,
+                // `.try {}` mis-dispatches at IR-build time.
+                val performType = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
+                    ?: body.type
+                TypedPerform(handlers, body, performType, loc)
             }
 
             // ------------------------------------------------------------------
