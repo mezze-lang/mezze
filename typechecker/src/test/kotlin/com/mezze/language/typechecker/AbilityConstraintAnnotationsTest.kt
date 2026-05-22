@@ -54,7 +54,7 @@ class AbilityConstraintAnnotationsTest {
                 size = {it} -> 0,
             }
 
-            let getFirst: {c: 'c} -> (Option Int) with Container 'c having 'item = Int = {c} ->
+            let getFirst: {c: 'c} with Container 'c having 'item = Int -> (Option Int) = {c} ->
                 c.get {index = 0}
         """.trimIndent()
 
@@ -80,7 +80,7 @@ class AbilityConstraintAnnotationsTest {
                 size = {it} -> 0,
             }
 
-            let getFirst: {c: 'c} -> (Option 'item) with Container 'c = {c} ->
+            let getFirst: {c: 'c} with Container 'c -> (Option 'item) = {c} ->
                 c.get {index = 0}
         """.trimIndent()
 
@@ -136,7 +136,7 @@ class AbilityConstraintAnnotationsTest {
                 size = {it} -> 0,
             }
 
-            let showAndSize: {c: 'c, v: 'v} -> Int with Container 'c having 'item = Int, Show 'v = {c, v} ->
+            let showAndSize: {c: 'c, v: 'v} with Container 'c having 'item = Int, Show 'v -> Int = {c, v} ->
                 do
                     let s = v.show {}
                     c.size {}
@@ -159,7 +159,7 @@ class AbilityConstraintAnnotationsTest {
                 getValue = {it} -> it.v,
             }
 
-            let getBoth: {c: 'c} -> {key: 'key, value: 'value} with BiContainer 'c = {c} ->
+            let getBoth: {c: 'c} with BiContainer 'c -> {key: 'key, value: 'value} = {c} ->
                 {key = c.getKey {}, value = c.getValue {}}
         """.trimIndent()
 
@@ -180,7 +180,7 @@ class AbilityConstraintAnnotationsTest {
                 getValue = {it} -> it.v,
             }
 
-            let getWithKnownKey: {c: 'c} -> Int with BiContainer 'c having 'key = Int = {c} ->
+            let getWithKnownKey: {c: 'c} with BiContainer 'c having 'key = Int -> Int = {c} ->
                 c.getKey {}
         """.trimIndent()
 
@@ -202,7 +202,7 @@ class AbilityConstraintAnnotationsTest {
                 eq = {it, r} -> True,
             }
 
-            let areEqual: {a: 'a, b: 'a} -> Bool with Eq 'a = {a, b} ->
+            let areEqual: {a: 'a, b: 'a} with Eq 'a -> Bool = {a, b} ->
                 a.eq {r = b}
         """.trimIndent()
 
@@ -238,7 +238,7 @@ class AbilityConstraintAnnotationsTest {
                 show = {it} -> "int",
             }
 
-            let checkAndShow: {a: 'a, b: 'a} -> Str with Eq 'a, Show 'a = {a, b} ->
+            let checkAndShow: {a: 'a, b: 'a} with Eq 'a, Show 'a -> Str = {a, b} ->
                 do
                     let isEqual = a.eq {r = b}
                     a.show {}
@@ -262,7 +262,7 @@ class AbilityConstraintAnnotationsTest {
                 append = {it, element} -> it,
             }
 
-            let addItem: {c: 'c, item: 'item} -> 'c with Container 'c = {c, item} ->
+            let addItem: {c: 'c, item: 'item} with Container 'c -> 'c = {c, item} ->
                 c.append {element = item}
 
             let arr: [Int] = [1, 2, 3]
@@ -288,7 +288,7 @@ class AbilityConstraintAnnotationsTest {
                 getAll = {it} -> it.items,
             }
 
-            let getAllItems: {c: 'c} -> ['item] with Container 'c = {c} ->
+            let getAllItems: {c: 'c} with Container 'c -> ['item] = {c} ->
                 c.getAll {}
         """.trimIndent()
 
@@ -311,7 +311,7 @@ class AbilityConstraintAnnotationsTest {
                 get = {index} -> Some { val = 0 },
             }
 
-            let getFirst: {c: 'c} -> (Option Str) with Container 'c having 'item = Int = {c} ->
+            let getFirst: {c: 'c} with Container 'c having 'item = Int -> (Option Str) = {c} ->
                 c.get {index = 0}
         """.trimIndent()
 
@@ -332,7 +332,7 @@ class AbilityConstraintAnnotationsTest {
                 get = {index} -> Some { val = 0 },
             }
 
-            let getFirst: {c: 'c} -> (Option Int) with Container 'c having 'item = Int = {c} ->
+            let getFirst: {c: 'c} with Container 'c having 'item = Int -> (Option Int) = {c} ->
                 c.get {index = 0}
         """.trimIndent()
 
@@ -356,7 +356,7 @@ class AbilityConstraintAnnotationsTest {
                 get = {index} -> Some { val = 0 },
             }
 
-            let getFirst: {c: 'c} -> (Option Str) with Container 'c having 'item = Int = {c} ->
+            let getFirst: {c: 'c} with Container 'c having 'item = Int -> (Option Str) = {c} ->
                 c.get {index = 0}
         """.trimIndent()
 
@@ -384,7 +384,7 @@ class AbilityConstraintAnnotationsTest {
                 get = {it, index} -> 0,
             }
 
-            let getFirst: {c: 'c} -> Str with Container 'c having 'item = Int = {c} ->
+            let getFirst: {c: 'c} with Container 'c having 'item = Int -> Str = {c} ->
                 c.get {index = 0}
         """.trimIndent()
 
@@ -414,7 +414,7 @@ class AbilityConstraintAnnotationsTest {
                 getValue = {it} -> it.v,
             }
 
-            let getWrongKey: {c: 'c} -> Str with BiContainer 'c having 'key = Int, 'value = Str = {c} ->
+            let getWrongKey: {c: 'c} with BiContainer 'c having 'key = Int, 'value = Str -> Str = {c} ->
                 c.getKey {}
         """.trimIndent()
 

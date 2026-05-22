@@ -179,7 +179,7 @@ class PatternBugProbeTest {
                 mysize = {it} -> 42,
             }
 
-            let f : {m: 'a} -> Int with MySized 'a = {m} -> m.mysize {}
+            let f : {m: 'a} with MySized 'a -> Int = {m} -> m.mysize {}
             let n = f { m = True }
         """.trimIndent()
         val ex = assertThrows<TypeCheckError> { typeCheck(code) }
@@ -207,7 +207,7 @@ class PatternBugProbeTest {
     fun `prelude Sized constraint is functional end-to-end`() {
         // Annotation, body, and call site — all three pieces must work together.
         val code = """
-            let f : {m: 'a} -> Int with Sized 'a = {m} -> m.size {}
+            let f : {m: 'a} with Sized 'a -> Int = {m} -> m.size {}
             let a = f { m = "hello" }
             let b = f { m = [1, 2, 3] }
         """.trimIndent()
@@ -729,7 +729,7 @@ class PatternBugProbeTest {
         // typo in the annotation. This SHOULD be at least a warning. If
         // the typechecker silently accepts, we have a documentation/UX bug.
         val code = """
-            let f : {x: 'a, y: Int} -> Int with Sized 'a = {x, y} -> y + 1
+            let f : {x: 'a, y: Int} with Sized 'a -> Int = {x, y} -> y + 1
         """.trimIndent()
         // Either errors (loud) or accepts. What we DON'T want: silent acceptance
         // PLUS the constraint disappearing from the inferred type.

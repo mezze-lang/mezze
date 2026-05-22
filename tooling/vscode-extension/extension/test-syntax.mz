@@ -143,7 +143,7 @@ let withEffects: {x: Int} -> Int <State> = {x} ->
         current + x
 
 # Lambda with ability constraints
-let genericAdd: {x: 'a, y: 'a} -> 'a with Eq 'a = {x, y} ->
+let genericAdd: {x: 'a, y: 'a} with Eq 'a -> 'a = {x, y} ->
     x
 
 # Lambda with performed marker
@@ -318,8 +318,8 @@ let purePerformed: {} -> {} <*> = {} -> {}
 let effectPerformed: {} -> {} <Log, *> = {} -> {}
 
 # With ability constraints
-let constrained: {x: 'a} -> 'a with Eq 'a = {x} -> x
-let multiConstrained: {x: 'a, y: 'b} -> 'a with Eq 'a, Show 'b = {x, y} -> x
+let constrained: {x: 'a} with Eq 'a -> 'a = {x} -> x
+let multiConstrained: {x: 'a, y: 'b} with Eq 'a, Show 'b -> 'a = {x, y} -> x
 
 # Open records in types
 let processUser: {user: {name: String, age: Int, ...}} -> String =

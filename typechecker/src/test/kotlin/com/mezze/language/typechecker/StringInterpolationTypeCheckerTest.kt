@@ -117,10 +117,10 @@ class StringInterpolationTypeCheckerTest {
                 show = {it} -> __native_int_to_str {n = it}
             }
 
-            let display: {val: 'a} -> Str with Show 'a = {val} ->
+            let display: {val: 'a} with Show 'a -> Str = {val} ->
                 val.show {}
 
-            let format: {x: 'a} -> Str with Show 'a = {x} ->
+            let format: {x: 'a} with Show 'a -> Str = {x} ->
                 "[$(display {val = x})]"
 
             format {x = 42}
@@ -142,7 +142,7 @@ class StringInterpolationTypeCheckerTest {
                 show = {it} -> "\"$(it)\""
             }
 
-            let showBoth: {a: 'x, b: 'y} -> Str with Show 'x, Show 'y = {a, b} ->
+            let showBoth: {a: 'x, b: 'y} with Show 'x, Show 'y -> Str = {a, b} ->
                 "$(a.show {}), $(b.show {})"
 
             showBoth {a = 42, b = "hello"}
@@ -160,10 +160,10 @@ class StringInterpolationTypeCheckerTest {
                 show = {it} -> __native_int_to_str {n = it}
             }
 
-            let wrap: {val: 'a} -> Str with Show 'a = {val} ->
+            let wrap: {val: 'a} with Show 'a -> Str = {val} ->
                 "<$(val.show {})>"
 
-            let doubleWrap: {val: 'a} -> Str with Show 'a = {val} ->
+            let doubleWrap: {val: 'a} with Show 'a -> Str = {val} ->
                 "[[$(wrap {val = val})]]"
 
             doubleWrap {val = 42}
@@ -431,7 +431,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test constrained polymorphic with interpolation and Inspect`() {
         assertTypeChecks("""
-            let debug: {label: Str, val: 'a} -> Str with Inspect 'a = {label, val} ->
+            let debug: {label: Str, val: 'a} with Inspect 'a -> Str = {label, val} ->
                 "$(label): $(val.to_dbg_str {})"
 
             debug {label = "number", val = 42}
@@ -629,10 +629,10 @@ class StringInterpolationTypeCheckerTest {
                 show = {it} -> "\"$(it)\""
             }
 
-            let showPair: {a: 'x, b: 'y} -> Str with Show 'x, Show 'y = {a, b} ->
+            let showPair: {a: 'x, b: 'y} with Show 'x, Show 'y -> Str = {a, b} ->
                 "($(a.show {}), $(b.show {}))"
 
-            let formatPairs: {p1a: 'x, p1b: 'y, p2a: 'x, p2b: 'y} -> Str with Show 'x, Show 'y = {p1a, p1b, p2a, p2b} ->
+            let formatPairs: {p1a: 'x, p1b: 'y, p2a: 'x, p2b: 'y} with Show 'x, Show 'y -> Str = {p1a, p1b, p2a, p2b} ->
                 "Pair1: $(showPair {a = p1a, b = p1b}), Pair2: $(showPair {a = p2a, b = p2b})"
 
             formatPairs {p1a = 1, p1b = "hello", p2a = 2, p2b = "world"}
