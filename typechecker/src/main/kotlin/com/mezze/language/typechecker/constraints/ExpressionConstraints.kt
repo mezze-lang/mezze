@@ -4058,7 +4058,7 @@ class ExpressionConstraintGenerator {
 
                     // LET-POLYMORPHISM: If the user explicitly declares a polymorphic type annotation
                     // with ability constraints, we should create a Polymorphic binding.
-                    // Example: let encode_value: {x: 'a} -> String with Encoder 'a = ...
+                    // Example: let encode_value: {x: 'a} with Encoder 'a -> String = ...
                     // The user is explicitly telling us this should be polymorphic.
                     val contextBindings = if (stmt.pattern is ParsedVariablePattern &&
                         stmt.typeAnnotation is ParsedFunctionType &&

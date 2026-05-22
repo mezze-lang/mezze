@@ -245,7 +245,7 @@ class AbilityValidationTest {
     @Test
     fun `test type variable not specialized should fail`() {
         // With method-call syntax, the ability constraint is inferred on the wrapper.
-        // display gets type {value: 'a} -> Str with Show 'a
+        // display gets type {value: 'a} with Show 'a -> Str
         // Calling display {value = 42} resolves Show Int — should succeed.
         // Test instead that calling with a type that has no impl FAILS.
         val source = """

@@ -30,7 +30,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
  *
  * Example:
  * <pre>
- * pub let encode_all: List 'a -> List Bytes with Encode Json 'a = xs ->
+ * pub let encode_all: List 'a with Encode Json 'a -> List Bytes = xs ->
  *     map {f = {x} -> Encode.encode {val = x, config = default_config}, xs}
  * </pre>
  *
