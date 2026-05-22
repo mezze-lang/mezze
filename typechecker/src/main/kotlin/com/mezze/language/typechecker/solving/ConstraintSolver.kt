@@ -991,8 +991,9 @@ class ConstraintSolver(
         // disagrees between actual and expected. Falls back to the
         // field-set diff for missing/unexpected fields.
         findFieldTypeMismatch(t1, t2)?.let { (path, actualLeaf, expectedLeaf) ->
-            val expectedStr = TypeDiffPrinter.formatType(expectedLeaf)
-            val actualStr = TypeDiffPrinter.formatType(actualLeaf)
+            val rename = com.mezze.language.typechecker.printing.TypeVarRenamer()
+            val expectedStr = TypeDiffPrinter.formatType(expectedLeaf, 0, rename)
+            val actualStr = TypeDiffPrinter.formatType(actualLeaf, 0, rename)
             return "$header — field `$path` expects $expectedStr but got $actualStr"
         }
         val mismatch = findClosedRecordMismatch(t1, t2) ?: return header
@@ -1171,8 +1172,9 @@ class ConstraintSolver(
                 val fieldMismatch = findFieldTypeMismatch(type1, type2)
                 if (fieldMismatch != null) {
                     val (path, actualLeaf, expectedLeaf) = fieldMismatch
-                    val expectedStr = TypeDiffPrinter.formatType(expectedLeaf)
-                    val actualStr = TypeDiffPrinter.formatType(actualLeaf)
+                    val rename = com.mezze.language.typechecker.printing.TypeVarRenamer()
+                    val expectedStr = TypeDiffPrinter.formatType(expectedLeaf, 0, rename)
+                    val actualStr = TypeDiffPrinter.formatType(actualLeaf, 0, rename)
                     val callSite = when {
                         funcName != null -> " in call to `$funcName`"
                         else -> ""
@@ -1180,8 +1182,9 @@ class ConstraintSolver(
                     return "Field `$path` expects $expectedStr but got $actualStr$callSite"
                 }
 
-                val expected = TypeDiffPrinter.formatType(type2)
-                val actual = TypeDiffPrinter.formatType(type1)
+                val rename = com.mezze.language.typechecker.printing.TypeVarRenamer()
+                val expected = TypeDiffPrinter.formatType(type2, 0, rename)
+                val actual = TypeDiffPrinter.formatType(type1, 0, rename)
 
                 val header = if (argName != null && funcName != null) {
                     "Type mismatch for argument '$argName' in call to '$funcName': expected $expected but got $actual"
@@ -1212,8 +1215,9 @@ class ConstraintSolver(
                     return "Type annotation mismatch for '$bindingName': $reason"
                 }
 
-                val expected = TypeDiffPrinter.formatType(type2)
-                val actual = TypeDiffPrinter.formatType(type1)
+                val rename = com.mezze.language.typechecker.printing.TypeVarRenamer()
+                val expected = TypeDiffPrinter.formatType(type2, 0, rename)
+                val actual = TypeDiffPrinter.formatType(type1, 0, rename)
 
                 return if (errorContext.isReturnType) {
                     "Return type mismatch in '$bindingName': declared as $expected but returns $actual"
@@ -1223,8 +1227,9 @@ class ConstraintSolver(
             }
             is ErrorContext.FieldAccess -> {
                 val fieldName = errorContext.fieldName
-                val expected = TypeDiffPrinter.formatType(type2)
-                val actual = TypeDiffPrinter.formatType(type1)
+                val rename = com.mezze.language.typechecker.printing.TypeVarRenamer()
+                val expected = TypeDiffPrinter.formatType(type2, 0, rename)
+                val actual = TypeDiffPrinter.formatType(type1, 0, rename)
 
                 return "Field '$fieldName' has type $actual but expected $expected"
             }

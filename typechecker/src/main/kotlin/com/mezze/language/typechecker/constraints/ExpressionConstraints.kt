@@ -765,6 +765,25 @@ class ExpressionConstraintGenerator {
         )
     }
 
+    /**
+     * Compute the Loc pointing only at the `.member` portion of a
+     * member-access expression, so a Rename FixHint can replace just the
+     * field name. `expr.loc` covers the whole `receiver.member` span,
+     * which would replace the receiver too. We derive the member span
+     * by walking back `member.length` columns from the expression's end.
+     */
+    private fun memberAccessFieldLoc(expr: ParsedMemberAccess): Loc {
+        val len = expr.member.length
+        val startCol = (expr.loc.endCol - len + 1).coerceAtLeast(1)
+        return Loc(
+            file = expr.loc.file,
+            startLine = expr.loc.endLine,
+            startCol = startCol,
+            endLine = expr.loc.endLine,
+            endCol = expr.loc.endCol,
+        )
+    }
+
     private fun generateMemberAccess(expr: ParsedMemberAccess, context: ConstraintContext): ConstraintResult {
         // receiver.member
 
@@ -938,6 +957,16 @@ class ExpressionConstraintGenerator {
                 // Field doesn't exist - check if record is closed or open
                 val suggestion = findClosestMatch(expr.member, fieldNames)
                 val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
+                // Build a Rename FixHint pointing at the misspelled field's
+                // loc so the LSP can offer a one-click "Replace with `x`"
+                // quick fix in addition to the "Did you mean" hint in the
+                // message text. Pin to the member name only (expr.loc covers
+                // the whole `receiver.member` span which is too wide).
+                val memberLoc = memberAccessFieldLoc(expr)
+                val renameHints: List<com.mezze.language.parsedast.diagnostics.FixHint> =
+                    if (suggestion != null) listOf(
+                        com.mezze.language.parsedast.diagnostics.FixHint.Rename(memberLoc, listOf(suggestion))
+                    ) else emptyList()
 
                 if (!isOpen) {
                     // Closed record - field must exist, throw error
@@ -950,6 +979,7 @@ class ExpressionConstraintGenerator {
                             "availableFields" to fieldNames.toList()
                         ),
                         code = ErrorCode.T0205_FIELD_NOT_FOUND,
+                        fixHints = renameHints,
                     )
                 } else {
                     // Open record with explicit literal - still fail
@@ -963,6 +993,7 @@ class ExpressionConstraintGenerator {
                             "availableFields" to fieldNames.toList()
                         ),
                         code = ErrorCode.T0303_OPEN_RECORD_FIELD_MISSING,
+                        fixHints = renameHints,
                     )
                 }
             }
