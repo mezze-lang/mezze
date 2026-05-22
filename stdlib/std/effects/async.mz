@@ -1,6 +1,7 @@
 use std::collections::seq
 use std::effects::concurrent::cancellation::{ CancellationToken }
 use std::abilities::compare::{ Eq }
+use std::result
 
 ## Opaque promise representing an asynchronous computation.
 pub newtype Promise 'a = Promise __NativePromise
@@ -430,6 +431,76 @@ pub let par_filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Async, ..
 ## Wait for p up to ms milliseconds; None if it didn't finish in time.
 pub let with_timeout : { ms: Int, p: Promise 'a } -> Option 'a <Async, ...> = { ms, p } ->
   Async.timeout { ms = ms, p = p }
+
+## ==================================================================
+## try_* — fail-fast variants. On first Err, cancel the rest and
+## return that error. On success of every input, return the unwrapped
+## values. Matches Rust `try_join_all` / `try_join!` semantics.
+## ==================================================================
+
+## Wait for all promises; if any fails, cancel the rest and return
+## the first error. Otherwise return the unwrapped values in input order.
+##
+## Implementation: await each in turn; collect Results into a seq. After
+## all awaits complete (or short-circuit doesn't happen because we already
+## awaited them all sequentially), scan for the first error and either
+## return Ok of unwrapped values or Err with the first error.
+##
+## TODO #169: switch to a fail-fast spawn-of-spawns implementation that
+## cancels siblings as soon as one errs, rather than the current
+## "await everything, then check" approach.
+pub let try_all : { ps: [Promise 'a] } -> Result ['a] AsyncError <Async, ...> = { ps } -> do
+  let results = seq::map { xs = ps, f = { x } -> Async.await { p = x } }
+  match seq::find { xs = results, p = { x } -> result::is_err { result = x } } is
+    Some { val = first_err } -> match first_err is
+      Err { error = e } -> Err { error = e }
+      Ok  { val = _ }   -> Err { error = AsyncFailed { msg = "try_all: impossible" } }
+    None ->
+      Ok { val = seq::map { xs = results, f = { x } ->
+        match x is
+          Ok  { val = v }   -> v
+          Err { error = _ } -> crash { msg = "try_all: impossible" }
+      } }
+
+## Run two thunks concurrently. On the first Err, cancel the surviving
+## sibling and return that error. Otherwise return both unwrapped values.
+pub let try_join : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> Result { l: 'a, r: 'b } AsyncError <Async, ...> =
+  { l, r } -> do
+    let pl = Async.spawn { f = l }
+    let pr = Async.spawn { f = r }
+    match Async.await { p = pl } is
+      Err { error = e } -> do
+        Async.cancel { p = pr }
+        Async.await { p = pr }
+        Err { error = e }
+      Ok { val = vl } ->
+        match Async.await { p = pr } is
+          Err { error = e } -> Err { error = e }
+          Ok  { val = vr }  -> Ok { val = { l = vl, r = vr } }
+
+## Run three thunks concurrently with fail-fast + auto-cancel semantics.
+pub let try_join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> Result { a: 'a, b: 'b, c: 'c } AsyncError <Async, ...> =
+  { a, b, c } -> do
+    let pa = Async.spawn { f = a }
+    let pb = Async.spawn { f = b }
+    let pc = Async.spawn { f = c }
+    match Async.await { p = pa } is
+      Err { error = e } -> do
+        Async.cancel { p = pb }
+        Async.cancel { p = pc }
+        Async.await { p = pb }
+        Async.await { p = pc }
+        Err { error = e }
+      Ok { val = va } ->
+        match Async.await { p = pb } is
+          Err { error = e } -> do
+            Async.cancel { p = pc }
+            Async.await { p = pc }
+            Err { error = e }
+          Ok { val = vb } ->
+            match Async.await { p = pc } is
+              Err { error = e } -> Err { error = e }
+              Ok  { val = vc }  -> Ok { val = { a = va, b = vb, c = vc } }
 
 ## Run a computation with cooperative scheduling.
 pub let run_coop : { computation: {} -> 'a <Async> } -> 'a = { computation } -> perform CoopAsync in computation {}
