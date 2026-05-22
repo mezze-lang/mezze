@@ -7,10 +7,10 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /**
- * Phase-5 regression: errors triggered by `<-` desugar must point at the
- * user-written `<-` line (the original `ParsedStatement.Bind.loc`), NOT
- * at internally-generated `.try {}` synthetic call sites, and must not
- * leak the names of desugar internals (`ExceptionToResult`, `Tryable.try`).
+ * Errors triggered by `<-` desugar must point at the user-written `<-`
+ * line (the original `ParsedStatement.Bind.loc`), NOT at internally-
+ * generated `.try {}` synthetic call sites, and must not leak the names
+ * of desugar internals (`ExceptionToResult`, `Tryable.try`).
  *
  * Locs are checked structurally by asserting:
  *   - The error message includes a `:LINE:COL` span pointing at a line

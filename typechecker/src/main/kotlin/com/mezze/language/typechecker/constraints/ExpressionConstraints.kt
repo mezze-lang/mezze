@@ -37,7 +37,7 @@ import com.mezze.language.parsedast.diagnostics.ErrorCode
  * - Lazy effectInstance creation (only when in perform context with associated types)
  * - Short-circuit checks to avoid unnecessary work
  */
-class ExpressionConstraintGenerator() {
+class ExpressionConstraintGenerator {
 
     // ========================================================================
     // CACHES FOR PERFORMANCE
@@ -1410,23 +1410,10 @@ class ExpressionConstraintGenerator() {
             loc = expr.loc
         ))
 
-        // If the ability method declared effects in its arrow type (e.g. `try: {it: 'm} -> 'inner <Exception>`),
-        // propagate them: wrap the call result in SuspendedType and add to the effect set. This mirrors the
-        // behavior of regular function calls (see generateFunctionCall around line 3486) so that callers
-        // can see effects declared by the method.
-        val methodEffectRow = strippedMethodType.effects
-        val methodHasUnhandledEffects = methodEffectRow != null &&
-            (methodEffectRow.effects.isNotEmpty() ||
-             methodEffectRow.effectInstances.isNotEmpty() ||
-             methodEffectRow.rowVar != null)
-        val methodHasPerformedEffects = methodEffectRow != null && methodEffectRow.performed
-        val callType: MezzeType = if (methodEffectRow != null && (methodHasUnhandledEffects || methodHasPerformedEffects)) {
-            MezzeType.SuspendedType(valueType = resultType, effects = methodEffectRow)
-        } else {
-            resultType
-        }
-        val methodDeclaredEffects = methodEffectRow?.effects ?: emptySet()
-        val methodDeclaredEffectInstances = methodEffectRow?.effectInstances ?: emptySet()
+        // Propagate effects declared by the ability method's arrow type
+        // (e.g. `try: {it: 'm} -> 'inner <Exception>`) into the call result.
+        val (callType, methodDeclaredEffects, methodDeclaredEffectInstances) =
+            wrapCallResultWithEffects(resultType, strippedMethodType.effects)
 
         // Store method call resolution for the TypedAstBuilder
         val methodCallInfo = ConstraintResult.MethodCallInfo(
@@ -1635,21 +1622,10 @@ class ExpressionConstraintGenerator() {
             )
         } else null
 
-        // If the inherent method declared effects in its arrow type, propagate them by wrapping
-        // the result in SuspendedType and adding to the effect set. Mirrors generateFunctionCall.
-        val methodEffectRow = (freshMethodType as? MezzeType.FunctionType)?.effects
-        val methodHasUnhandledEffects = methodEffectRow != null &&
-            (methodEffectRow.effects.isNotEmpty() ||
-             methodEffectRow.effectInstances.isNotEmpty() ||
-             methodEffectRow.rowVar != null)
-        val methodHasPerformedEffects = methodEffectRow != null && methodEffectRow.performed
-        val callType: MezzeType = if (methodEffectRow != null && (methodHasUnhandledEffects || methodHasPerformedEffects)) {
-            MezzeType.SuspendedType(valueType = resultType, effects = methodEffectRow)
-        } else {
-            resultType
-        }
-        val methodDeclaredEffects = methodEffectRow?.effects ?: emptySet()
-        val methodDeclaredEffectInstances = methodEffectRow?.effectInstances ?: emptySet()
+        // Propagate effects declared by the inherent method's arrow type
+        // into the call result. Same logic as ability methods and function calls.
+        val (callType, methodDeclaredEffects, methodDeclaredEffectInstances) =
+            wrapCallResultWithEffects(resultType, (freshMethodType as? MezzeType.FunctionType)?.effects)
 
         return ConstraintResult(
             type = callType,
@@ -3510,21 +3486,10 @@ class ExpressionConstraintGenerator() {
                     effectfulAbilityConstraints = effectfulAbilityConstraints + methodLevelConstraints
                 }
 
-                // If the function has unhandled effects (suspended) or performed effects,
-                // wrap in SuspendedType. This is important for top-level validation to detect <*>.
-                val hasUnhandledEffects = effectRow.effects.isNotEmpty() || effectRow.effectInstances.isNotEmpty() || effectRow.rowVar != null
-                val hasPerformedEffects = effectRow.performed
-                val resultType = if (hasUnhandledEffects || hasPerformedEffects) {
-                    // Calling an effectful function produces a SuspendedType
-                    // The return value is suspended with the function's effects
-                    MezzeType.SuspendedType(
-                        valueType = functionType.returnType,
-                        effects = effectRow
-                    )
-                } else {
-                    // Pure function, no effects at all
-                    functionType.returnType
-                }
+                // Wrap the call's value type in SuspendedType when the callee
+                // has effects (unhandled or performed). Important so top-level
+                // validation can detect `<*>`.
+                val (resultType, _, _) = wrapCallResultWithEffects(functionType.returnType, effectRow)
 
                 return ConstraintResult(
                     type = resultType,
@@ -4152,12 +4117,12 @@ class ExpressionConstraintGenerator() {
                     callReturnTypes.putAll(exprResult.callReturnTypes)
                 }
                 is ParsedStatement.Bind -> {
-                    // Bind statements must be rewritten to Let by the desugar pass before
-                    // constraint generation. If we see one here, the desugar wasn't wired up.
+                    // ParsedStatement.Bind must be eliminated by DoBindDesugar before
+                    // constraint generation. Reaching here means a traversal site in
+                    // the desugar missed this position.
                     throw IllegalStateException(
                         "ParsedStatement.Bind reached constraint generation at ${stmt.loc} — " +
-                        "the do-bind desugar in TypedAstBuilder must rewrite Bind statements " +
-                        "to Let before constraint generation."
+                        "DoBindDesugar must rewrite Bind statements to Let before this phase."
                     )
                 }
             }
@@ -4679,6 +4644,30 @@ class ExpressionConstraintGenerator() {
             is MezzeType.ByteBufferType,
             is MezzeType.NewtypeType -> false
         }
+    }
+
+    /**
+     * Wrap a call's value type in `SuspendedType` if the callee's effect row
+     * is non-empty / performed. Returns `(callType, declaredEffects,
+     * declaredEffectInstances)`.
+     *
+     * Shared by ability method calls, inherent method calls, and regular
+     * function calls — same logic in three places previously.
+     */
+    private fun wrapCallResultWithEffects(
+        valueType: MezzeType,
+        effectRow: MezzeType.EffectRow?,
+    ): Triple<MezzeType, Set<String>, Set<MezzeType.EffectInstance>> {
+        if (effectRow == null) return Triple(valueType, emptySet(), emptySet())
+        val hasUnhandled = effectRow.effects.isNotEmpty() ||
+            effectRow.effectInstances.isNotEmpty() ||
+            effectRow.rowVar != null
+        val callType: MezzeType = if (hasUnhandled || effectRow.performed) {
+            MezzeType.SuspendedType(valueType = valueType, effects = effectRow)
+        } else {
+            valueType
+        }
+        return Triple(callType, effectRow.effects, effectRow.effectInstances)
     }
 
     /**

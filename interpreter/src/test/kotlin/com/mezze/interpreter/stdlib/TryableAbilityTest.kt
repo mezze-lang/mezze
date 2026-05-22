@@ -8,10 +8,9 @@ import org.junit.jupiter.api.BeforeEach
 /**
  * Tests for the `Tryable` ability declared in std::effects::exception.
  *
- * Phase 1 of the do-bind proposal (docs/design/do-bind-proposal.md). These
- * tests verify that the ability + impls work when called manually, inside
- * a hand-written `perform ExceptionToResult` block. The `<-` syntax does
- * not exist yet — it lands in a later phase.
+ * Verifies that the ability + impls work when called manually, inside a
+ * hand-written `perform ExceptionToResult` block — the desugared form
+ * that `<-` produces (see DoBindBasicTest for `<-` itself).
  *
  * Tests use **typed helper functions** to pin receiver types — bare variant
  * literals like `Ok {val = 42}` infer as single-constructor variants and

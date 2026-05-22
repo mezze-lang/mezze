@@ -264,15 +264,26 @@ data class ConstraintResult(
     val patternWarnings: List<String> = emptyList(),  // Warnings from pattern analysis (e.g., float literal patterns)
     val referencedBindings: Set<DefinitionRef.ByName> = emptySet(),  // Module-qualified references for dependency tracking
     val methodCallResolutions: Map<Pair<Loc, String>, MethodCallInfo> = emptyMap(),  // Method call resolutions keyed by (ParsedFunctionCall loc, methodName)
-    // Per-call-site return type — keyed by the ParsedFunctionCall's loc.
-    // Set by the constraint generator to the fresh type var that gets unified
-    // with the call's actual return type. After the substitution is applied
-    // this carries the monomorphized return type that the TypedAstBuilder can
-    // stamp on `TypedCall.type`. Without this, qualified-import calls (like
-    // `seq::filter { ... }`) only know the generic scheme of their function
-    // reference (`{xs:[a], p: a->Bool} -> [a]`) and the call's `.type` falls
-    // back to the surrounding contextType (`unknown`) — which then breaks LSP
-    // per-segment chain inlay hints in pipe / dot-chain expressions.
+    // Per-source-position solved type. Two consumers:
+    //
+    //   1. Call sites — keyed by ParsedFunctionCall.loc. Set by the constraint
+    //      generator to the fresh type var that gets unified with the call's
+    //      actual return type. After substitution this carries the monomorphized
+    //      return type that TypedAstBuilder stamps on `TypedCall.type`. Without
+    //      this, qualified-import calls (like `seq::filter { ... }`) only know
+    //      the generic scheme of their function reference and the call's `.type`
+    //      falls back to the surrounding contextType (`unknown`) — which then
+    //      breaks LSP per-segment chain inlay hints in pipe / dot-chain
+    //      expressions.
+    //
+    //   2. Perform expressions — keyed by ParsedPerform.loc. The discharged
+    //      result type (e.g. `Result _ _ <*>`) is recorded so TypedAstBuilder
+    //      can stamp it on `TypedPerform.type`, rather than the raw body type
+    //      (which would be the pre-discharge value wrapped in SuspendedType,
+    //      breaking method dispatch on the perform expression as a receiver).
+    //
+    // Field name kept as `callReturnTypes` for callsite stability; a sibling
+    // map would multiply plumbing across ~40 sites.
     val callReturnTypes: Map<Loc, MezzeType> = emptyMap(),
     // Per-source-position "expected type" hint, populated wherever a
     // constraint with a Loc fires its `expected` side. Used by the LSP

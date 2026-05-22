@@ -8,7 +8,7 @@ import org.junit.jupiter.api.BeforeEach
 /**
  * Basic end-to-end smoke tests for the `<-` do-bind feature.
  *
- * Phase 4 of the do-bind proposal. Tests that:
+ * Tests that:
  *   - Single `<-` line with Result/Option works
  *   - Multiple `<-` lines short-circuit on first failure
  *   - Mixed `<-` and `let` in same block

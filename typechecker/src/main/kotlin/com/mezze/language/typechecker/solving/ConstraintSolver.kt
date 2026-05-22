@@ -1611,7 +1611,7 @@ class ConstraintSolver(
         // Primary type is concrete - look up the matching impl AND extract
         // the impl's type-parameter bindings (so we can substitute references
         // to impl type-vars in associated-type bindings).
-        val matchingImplPair = findMatchingAbilityImplWithBindings(abilityName, primaryType)
+        val matchingImplPair = findMatchingAbilityImpl(abilityName, primaryType)
         DebugLogger.debug(Category.ConstraintSolver) {
             "  matchingImpl: ${matchingImplPair?.first?.abilityName} with bindings ${matchingImplPair?.first?.associatedTypeBindings}, " +
                 "implTypeVarBindings: ${matchingImplPair?.second}"
@@ -1697,23 +1697,14 @@ class ConstraintSolver(
     }
 
     /**
-     * Find a matching ability impl for the given ability and concrete type.
+     * Find a matching ability impl for the given ability and concrete type,
+     * returning the impl's type-parameter bindings alongside it (e.g. for
+     * `impl Tryable for Result 'a 'e`, matching against `Result Int Str`
+     * returns `{'a → Int, 'e → Str}`). Used by [solveAssociatedTypeResolution]
+     * to substitute associated-type bindings that reference the impl's type
+     * parameters.
      */
     private fun findMatchingAbilityImpl(
-        abilityName: String,
-        primaryType: MezzeType
-    ): TypingContext.AbilityImplInfo? {
-        return findMatchingAbilityImplWithBindings(abilityName, primaryType)?.first
-    }
-
-    /**
-     * Like [findMatchingAbilityImpl] but also returns the impl's type-parameter
-     * bindings (e.g. for `impl Tryable for Result 'a 'e`, matching against
-     * `Result Int Str` returns `{'a → Int, 'e → Str}`). Used by
-     * [solveAssociatedTypeResolution] to substitute associated-type bindings
-     * that reference the impl's type parameters.
-     */
-    private fun findMatchingAbilityImplWithBindings(
         abilityName: String,
         primaryType: MezzeType
     ): Pair<TypingContext.AbilityImplInfo, Map<String, MezzeType>>? {

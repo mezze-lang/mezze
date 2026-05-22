@@ -21,12 +21,6 @@ fun main(args: Array<String>) {
     val abilities = mutableMapOf<String, Hash>() // name → content hash
     val effects = mutableMapOf<String, Hash>()
     val types = mutableMapOf<String, Hash>()     // user-defined types in stdlib
-    // Effect performers needed for compiler-internal references (e.g. the
-    // do-bind desugar's synthetic ExceptionToResult wrap). Keyed by performer
-    // name; we don't collect ALL performers because user-defined performers
-    // aren't well-known.
-    val performersOfInterest = setOf("ExceptionToResult")
-    val performers = mutableMapOf<String, Hash>()
 
     fun scanFile(file: File) {
         try {
@@ -39,11 +33,6 @@ fun main(args: Array<String>) {
                     }
                     is ParsedEffectDecl -> {
                         effects[decl.name] = decl.contentHash ?: ParsedDeclHasher.hashEffectDecl(decl)
-                    }
-                    is ParsedPerformerDecl -> {
-                        if (decl.performerName in performersOfInterest) {
-                            performers[decl.performerName] = decl.contentHash ?: ParsedDeclHasher.hashPerformerDecl(decl)
-                        }
                     }
                     is ParsedTypeDecl -> {
                         // Public types only — private types aren't well-known.
@@ -97,13 +86,6 @@ fun main(args: Array<String>) {
     sb.appendLine("    // Effect hashes")
     for ((name, hash) in effects.toSortedMap()) {
         sb.appendLine("    val EFFECT_${name.uppercase()} = Hash(\"${hash.hex}\")")
-        sb.appendLine("    const val EFFECT_${name.uppercase()}_NAME = \"$name\"")
-    }
-    sb.appendLine()
-    sb.appendLine("    // Performer hashes (compiler-internal references only)")
-    for ((name, hash) in performers.toSortedMap()) {
-        sb.appendLine("    val PERFORMER_${name.uppercase()} = Hash(\"${hash.hex}\")")
-        sb.appendLine("    const val PERFORMER_${name.uppercase()}_NAME = \"$name\"")
     }
     sb.appendLine()
     sb.appendLine("    // Type hashes (public stdlib types)")
@@ -188,5 +170,5 @@ fun main(args: Array<String>) {
     sb.appendLine("}")
 
     output.writeText(sb.toString())
-    println("Generated ${abilities.size} ability + ${effects.size} effect + ${performers.size} performer + ${types.size} type hashes → $outputPath")
+    println("Generated ${abilities.size} ability + ${effects.size} effect + ${types.size} type hashes → $outputPath")
 }

@@ -34,30 +34,28 @@ import com.mezze.language.parsedast.ParsedVariantConstruct
  *
  * For every `ParsedDo` containing one or more `ParsedStatement.Bind` statements:
  *   - rewrite each `pat <- expr` to `let pat = expr.try {}`
- *   - wrap the do-block's result expression in `Ok {val = result}`
- *   - record the do-block's loc in `syntheticBindBlockLocs`
+ *   - wrap the do-block's result in `Ok {val = result}`
+ *   - wrap the whole do-block in `perform ExceptionToResult in ...`
  *
- * The do-block's loc is recognized later by the constraint generator and
- * TypedAstBuilder. The constraint generator subtracts `<Exception>` from
- * the do-block's effect row (the synthetic `ExceptionToResult` "discharges"
- * it). TypedAstBuilder wraps the built TypedBlock in a TypedPerform whose
- * handler references the well-known `ExceptionToResult` performer + `Exception`
- * effect hashes — no `ParsedPerform` is ever emitted into the parsed AST,
- * so the user's namespace never has `ExceptionToResult` or `Exception`
- * resolvable (true scoping: the performer is invoked only by the synthetic
- * desugar machinery).
+ * Once rewritten, the typechecker sees an ordinary user-written perform and
+ * types it through the existing effect-handling machinery — no special-case
+ * logic. Each `let` binding's type carries `<Exception>` (because `.try`
+ * declares that effect), and the outer perform discharges it, producing
+ * `Result _ _`. See `docs/design/do-bind-proposal.md` for the full design.
  *
- * See `docs/design/do-bind-proposal.md` for the full design.
+ * The only "magic" is name resolution: the synthetic perform references
+ * `ExceptionToResult` and `Exception` by name even when the user didn't
+ * `use std::effects::exception::{...}`. `TypeChecker.injectExceptionToResultForBind`
+ * loads those names into the import context for modules that contain `<-`.
  *
  * Recurses into all nested expressions: each `ParsedDo` is desugared
  * independently. Nested do-blocks with `<-` each get their own synthetic
  * wrap; do-blocks without `<-` are left alone.
  *
- * Pure value-shape rewrite — no type information used. `<-` always emits
- * `expr.try {}` (via dot-method syntax). If the RHS doesn't impl Tryable
- * (e.g., it's already a value with `<Exception>` in its row), the
- * typechecker produces a clean "type X does not implement Tryable" error.
- * Users use plain `let` for `<Exception>`-throwing calls.
+ * Pure value-shape rewrite — no type information used. If the RHS doesn't
+ * impl Tryable, the typechecker produces a "type X does not implement
+ * Tryable" error against `expr.try`. Users use plain `let` for
+ * `<Exception>`-throwing calls.
  */
 object DoBindDesugar {
 
@@ -65,18 +63,15 @@ object DoBindDesugar {
      * Result of running the do-bind desugar on a module.
      *
      * @param module the rewritten module (Bind → Let; result wrapped in `Ok`).
-     * @param hasBinds true if any `<-` was found in the module. When true,
-     *   the TypeChecker injects `Exception` + `ExceptionToResult` into the
-     *   import context so the desugar's synthetic `perform ExceptionToResult`
-     *   resolves.
-     * @param bindLetLocs locs of every `ParsedStatement.Let` synthesized
-     *   from a `pat <- expr` bind. Used by LSP to recognize bind-pattern
-     *   hover positions (the synthesized value spans the whole bind line,
-     *   confusing the standard name-region check). NO semantic effect.
+     * @param bindLetLocs locs of every `ParsedStatement.Let` synthesized from
+     *   a `pat <- expr` bind. Used by LSP to recognize bind-pattern hover
+     *   positions (the synthesized value spans the whole bind line, confusing
+     *   the standard name-region check). NO semantic effect. Empty when the
+     *   module contains no `<-`, which TypeChecker uses to skip the
+     *   `Exception` + `ExceptionToResult` import-context injection.
      */
     data class Result(
         val module: ParsedModule,
-        val hasBinds: Boolean,
         val bindLetLocs: Set<Loc> = emptySet(),
     )
 
@@ -92,7 +87,7 @@ object DoBindDesugar {
                 else -> decl
             }
         })
-        return Result(module = rewritten, hasBinds = locs.isNotEmpty(), bindLetLocs = locs)
+        return Result(module = rewritten, bindLetLocs = locs)
     }
 
     // ------------------------------------------------------------------
@@ -165,7 +160,17 @@ object DoBindDesugar {
             left = desugarBindsInExpr(expr.left, onBindFound),
             right = desugarBindsInExpr(expr.right, onBindFound),
         )
-        else -> expr
+        // Leaf nodes — no children to recurse into. Listed explicitly (not
+        // `else -> expr`) so that adding a new ParsedExpr subtype forces a
+        // touch here; otherwise `<-` inside a new node would silently not
+        // desugar.
+        is com.mezze.language.parsedast.ParsedIntLit,
+        is com.mezze.language.parsedast.ParsedNatLit,
+        is com.mezze.language.parsedast.ParsedFloatLit,
+        is com.mezze.language.parsedast.ParsedFracLit,
+        is com.mezze.language.parsedast.ParsedCharLit,
+        is com.mezze.language.parsedast.ParsedIdentifier,
+        is com.mezze.language.parsedast.ParsedPipePlaceholder -> expr
     }
 
     /**
@@ -191,11 +196,11 @@ object DoBindDesugar {
      * type carries `<Exception>` (because `.try {}` declares that effect),
      * and the outer perform discharges it, producing `Result _ _ <*>`.
      *
-     * Only "magic" left: the `ExceptionToResult` name itself must resolve
-     * even when the user didn't `use std::effects::exception::{ExceptionToResult}`.
-     * The do-block loc is registered in `syntheticBindBlockLocs` so the
-     * constraint generator can resolve the performer via well-known hashes
-     * for performs inserted by this desugar.
+     * Name resolution: `ExceptionToResult` must resolve even when the user
+     * didn't `use std::effects::exception::{ExceptionToResult}`. That's
+     * handled by `TypeChecker.injectExceptionToResultForBind`, which adds
+     * `Exception` + `ExceptionToResult` to the import context for any module
+     * whose `bindLetLocs` is non-empty.
      */
     private fun rewriteDoWithBinds(
         doExpr: ParsedDo,
@@ -251,11 +256,17 @@ object DoBindDesugar {
     }
 
     /**
-     * Performer name resolved at the constraint-generation phase only when
-     * the enclosing perform's loc is in syntheticBindBlockLocs. The
-     * corresponding hash is looked up via [WellKnownHashConstants.PERFORMER_EXCEPTIONTORESULT].
+     * Performer name emitted by the synthetic perform wrapping a do-block
+     * with `<-`. Resolved through the import context (Exception + this
+     * performer are injected by `TypeChecker.injectExceptionToResultForBind`).
      */
     const val EXCEPTION_TO_RESULT_NAME = "ExceptionToResult"
+
+    /**
+     * Effect name discharged by the synthetic perform. Same injection rule
+     * as [EXCEPTION_TO_RESULT_NAME].
+     */
+    const val EXCEPTION_EFFECT_NAME = "Exception"
 
     /**
      * Build a `expr.try {}` method-call expression.

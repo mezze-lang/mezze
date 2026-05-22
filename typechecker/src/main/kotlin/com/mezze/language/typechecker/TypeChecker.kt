@@ -248,8 +248,8 @@ class TypeChecker(
         // perform's handler name resolves.
         val bindDesugarResult = com.mezze.language.typechecker.desugar.DoBindDesugar.desugar(module)
         module = bindDesugarResult.module
-        val moduleUsesBind = bindDesugarResult.hasBinds
         val bindLetLocs = bindDesugarResult.bindLetLocs
+        val moduleUsesBind = bindLetLocs.isNotEmpty()
 
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
@@ -1209,10 +1209,6 @@ class TypeChecker(
     }
 
     /**
-     * Load prelude modules and return a combined ModuleImportContext.
-     * Cached globally — computed once per JVM process since stdlib doesn't change.
-     */
-    /**
      * Inject Exception + ExceptionToResult into the import context so the
      * synthetic `perform ExceptionToResult in ...` emitted by DoBindDesugar
      * resolves at constraint-generation time. Only called when the module
@@ -1226,7 +1222,9 @@ class TypeChecker(
         importResolver: ImportResolver,
     ): ModuleImportContext {
         val exceptionCtx = cachedExceptionForBindCtx ?: run {
-            val syntheticSrc = "use std::effects::exception::{ Exception, ExceptionToResult }"
+            val effectName = com.mezze.language.typechecker.desugar.DoBindDesugar.EXCEPTION_EFFECT_NAME
+            val performerName = com.mezze.language.typechecker.desugar.DoBindDesugar.EXCEPTION_TO_RESULT_NAME
+            val syntheticSrc = "use std::effects::exception::{ $effectName, $performerName }"
             val syntheticModule = MezzeParser().parseParsedModule(syntheticSrc, file = "<dobind-synthetic>")
             when (val r = importResolver.resolveImports(syntheticModule)) {
                 is ImportResolutionResult.Success -> r.importContext.also {
@@ -1240,6 +1238,11 @@ class TypeChecker(
             importedImpls = baseCtx.importedImpls + exceptionCtx.importedImpls,
         )
     }
+
+    /**
+     * Load prelude modules and return a combined ModuleImportContext.
+     * Cached globally — computed once per JVM process since stdlib doesn't change.
+     */
 
     private fun loadPreludeModules(
         importResolver: ImportResolver,
@@ -1275,8 +1278,8 @@ class TypeChecker(
                 //
                 // Effects and effect impls are stripped. The Exception effect /
                 // ExceptionToResult performer needed by the do-bind desugar are
-                // injected per-module by `DoBindDesugar.injectSyntheticPerformerCtx`
-                // ONLY when the module contains a `<-`. See do-bind-proposal.md.
+                // injected per-module by `injectExceptionToResultForBind` ONLY
+                // when the module contains a `<-`. See do-bind-proposal.md.
                 val ctx = result.importContext
                 // Cache loaded modules for inclusion in Monomorphizer's allModules
                 cachedPreludeLoadedModules = result.loadedModules

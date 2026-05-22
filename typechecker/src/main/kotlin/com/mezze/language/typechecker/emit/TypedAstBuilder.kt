@@ -1007,11 +1007,12 @@ class TypedAstBuilder(
                             stmts.add(TypedStatement.Expr(exprTyped, stmt.loc))
                         }
                         is ParsedStatement.Bind -> {
-                            // Will be handled by the do-bind desugar (Task #9). For now,
-                            // any Bind reaching here is a wiring error.
+                            // ParsedStatement.Bind must be eliminated by DoBindDesugar
+                            // before TypedAstBuilder runs. Reaching here means a
+                            // traversal site in the desugar missed this position.
                             throw IllegalStateException(
                                 "ParsedStatement.Bind reached TypedAstBuilder at ${stmt.loc} — " +
-                                "the do-bind desugar isn't wired up yet."
+                                "DoBindDesugar must rewrite Bind statements to Let before this phase."
                             )
                         }
                     }

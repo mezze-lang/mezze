@@ -20,6 +20,18 @@ private data class EffectRowParseResult(
     val stream: TokenStream
 )
 
+/**
+ * Error message for `{it: 'm 'a}` — the user is applying a type variable to
+ * another type. The lexer marks `'a` as IDENTIFIER, so the record parser
+ * mistakes it for a missing-annotation case; surfacing this explicitly
+ * points at the real problem.
+ */
+private fun typeVarJuxtaposedMessage(fieldName: String): String =
+    "Type variable '$fieldName' cannot be applied to another type. " +
+    "Type variables in Mezze can only stand alone — they cannot act as type constructors. " +
+    "If you want to parameterize over a wrapper type, declare the relationship in the impl head: " +
+    "`impl Foo for Result 'a 'e where { ... }` not `{it: 'm 'a}`."
+
 // Record type entry parser (helper for record type annotations)
 internal val MezzeParser.recordTypeEntryParser: Parser<ParsedRecordTypeEntry>
     get() = { stream ->
@@ -45,16 +57,9 @@ internal val MezzeParser.recordTypeEntryParser: Parser<ParsedRecordTypeEntry>
                     is ParseResult.Failure -> {
                         val fieldName = ident.value.text
                         val nextToken = ident.remaining.current()
-                        // Type variable juxtaposition: `{it: 'm 'a}` — `'a` is being parsed as
-                        // a field name because the lexer treats type variables as identifiers.
-                        // Real issue is the user trying to apply `'m` to `'a`, which is
-                        // structurally a type-variable-applied-to-type-variable, unsupported.
                         if (fieldName.startsWith("'")) {
                             ident.remaining.failure(
-                                "Type variable '$fieldName' cannot be applied to another type. " +
-                                "Type variables in Mezze can only stand alone — they cannot act as type constructors. " +
-                                "If you want to parameterize over a wrapper type, declare the relationship in the impl head: " +
-                                "`impl Foo for Result 'a 'e where { ... }` not `{it: 'm 'a}`.",
+                                typeVarJuxtaposedMessage(fieldName),
                                 code = com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED
                             )
                         } else {
@@ -513,17 +518,9 @@ internal val MezzeParser.recordTypeAnnotationParser: Parser<ParsedTypeAnnotation
                                     when (currentToken?.type) {
                                         TokenType.IDENTIFIER -> {
                                             val fieldName = currentToken.text
-                                            // Type variable juxtaposition: `{it: 'm 'a}` — user is
-                                            // trying to apply a type variable to another type, which
-                                            // Mezze doesn't support. The lexer marks `'a` as
-                                            // IDENTIFIER, so the record parser mistakes it for a
-                                            // missing-annotation case. Surface the real problem.
                                             if (fieldName.startsWith("'")) {
                                                 stream3.failure(
-                                                    "Type variable '$fieldName' cannot be applied to another type. " +
-                                                    "Type variables in Mezze can only stand alone — they cannot act as type constructors. " +
-                                                    "If you want to parameterize over a wrapper type, declare the relationship in the impl head: " +
-                                                    "`impl Foo for Result 'a 'e where { ... }` not `{it: 'm 'a}`.",
+                                                    typeVarJuxtaposedMessage(fieldName),
                                                     code = com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED
                                                 )
                                             } else {

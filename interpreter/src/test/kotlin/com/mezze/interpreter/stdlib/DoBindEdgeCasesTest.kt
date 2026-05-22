@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 
 /**
- * Phase-6 edge-case coverage for `<-`. Beyond DoBindBasicTest/DoBindAdvancedTest:
+ * Edge-case coverage for `<-`. Beyond DoBindBasicTest/DoBindAdvancedTest:
  *   - destructuring on the LHS
  *   - many binds (scaling sanity)
  *   - recursive function whose body uses `<-`
