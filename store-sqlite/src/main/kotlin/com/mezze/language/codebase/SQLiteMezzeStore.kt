@@ -937,17 +937,26 @@ class SQLiteMezzeStore private constructor(
         }
     }
 
-    /** Get all blob hashes in the store. */
+    /**
+     * Get every blob hash visible to this store — main + stdlib + deps. Used
+     * by bulk-load paths (e.g. `PrecompiledStdlib`) that need to materialise
+     * the entire IR set up front.
+     *
+     * Was `main`-only despite the name; now UNION-ALLs across all three
+     * tiers so a project-mode store (`openProject`) sees its stdlib + deps
+     * blobs too. De-duplicates: a hash present in multiple tiers (impossible
+     * under the scope-disjoint invariant, but defensible) appears once.
+     */
     override fun getAllBlobHashes(): List<Hash> {
-        val result = mutableListOf<Hash>()
+        val result = LinkedHashSet<Hash>()
         conn.createStatement().use { stmt ->
-            stmt.executeQuery("SELECT hash FROM blobs").use { rs ->
+            stmt.executeQuery(unionAll("SELECT hash FROM <DB>.blobs")).use { rs ->
                 while (rs.next()) {
                     result.add(Hash(rs.getString("hash")))
                 }
             }
         }
-        return result
+        return result.toList()
     }
 
     // ====================================================================
@@ -1921,6 +1930,40 @@ class SQLiteMezzeStore private constructor(
         } finally {
             conn.autoCommit = wasAutoCommit
         }
+    }
+
+    /**
+     * Truncate every typecheck-derived table in `main`. Preserves `modules`,
+     * `parsed_modules`, `metadata`, plus SQLite internals (`schema_version`,
+     * `sqlite_sequence`). Discovered dynamically from `sqlite_master`, so a
+     * future table added to the schema is wiped automatically.
+     *
+     * Wraps itself in a transaction so the L1 caches get restored on any
+     * failure mid-wipe. Also invalidates L1 entries that the wipe orphans.
+     */
+    @Synchronized
+    override fun wipeTypecheckCaches() {
+        val preserved = setOf("modules", "parsed_modules", "metadata", "schema_version", "sqlite_sequence")
+        transaction {
+            val tables = mutableListOf<String>()
+            conn.createStatement().use { s ->
+                s.executeQuery("SELECT name FROM main.sqlite_master WHERE type='table'").use { rs ->
+                    while (rs.next()) tables.add(rs.getString(1))
+                }
+            }
+            conn.createStatement().use { s ->
+                for (t in tables) {
+                    if (t in preserved) continue
+                    s.executeUpdate("DELETE FROM main.\"$t\"")
+                }
+            }
+        }
+        // L1 entries for blobs/IR/names/typed_modules are now stale; clear.
+        // parsed_modules + modules survive both in SQLite and in L1.
+        l1Blobs.clear()
+        l1IR.clear()
+        l1Names.clear()
+        l1TypedModules.clear()
     }
 
     @Synchronized

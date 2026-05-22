@@ -85,6 +85,33 @@ class SQLiteMezzeStoreTest {
     }
 
     @Test
+    fun `getAllBlobHashes includes attached tiers`() {
+        // Regression: getAllBlobHashes was `SELECT FROM blobs` (main only).
+        // Now: UNION ALL across main + stdlib + deps. A project-mode store
+        // must see its stdlib's blobs when bulk-loading.
+        val mainHash = Hash("1".repeat(64))
+        val stdlibHash = Hash("2".repeat(64))
+        store.putBlob(mainHash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
+        // Write a blob directly into the attached stdlib tier.
+        store.executeRaw { conn ->
+            conn.prepareStatement(
+                "INSERT INTO stdlib.blobs (hash, kind, visibility, typed, ir) VALUES (?, ?, ?, ?, ?)"
+            ).use { stmt ->
+                stmt.setString(1, stdlibHash.hex)
+                stmt.setString(2, "FUNCTION")
+                stmt.setString(3, "PUBLIC")
+                stmt.setBytes(4, null)
+                stmt.setBytes(5, null)
+                stmt.executeUpdate()
+            }
+        }
+
+        val all = store.getAllBlobHashes()
+        assertTrue(all.contains(mainHash), "Expected main blob in list; got $all")
+        assertTrue(all.contains(stdlibHash), "Expected stdlib blob in list; got $all")
+    }
+
+    @Test
     fun `getIR finds IR in non-main tier even if main has null-ir row`() {
         // Regression test: previously, if `main.blobs` had a row with `ir = NULL`
         // for some hash, `getIR()` returned null even when an attached tier

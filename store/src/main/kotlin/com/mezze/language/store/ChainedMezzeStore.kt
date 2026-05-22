@@ -245,6 +245,9 @@ class ChainedMezzeStore(
 
     override fun <T> transaction(block: () -> T): T = primary.transaction(block)
 
+    /** Wipe primary only — fallbacks are typically read-only mirrors. */
+    override fun wipeTypecheckCaches() = primary.wipeTypecheckCaches()
+
     override fun close() {
         var firstError: Exception? = null
         for (s in all) {

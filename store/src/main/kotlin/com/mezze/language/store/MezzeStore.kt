@@ -36,11 +36,13 @@ interface MezzeStore : AutoCloseable {
     fun getIR(hash: Hash): ByteArray?
 
     /**
-     * Enumerate every blob hash in the store. Used by bulk-load paths
+     * Enumerate every blob hash visible to this store, across all tiers
+     * (main + any chained / attached stores). Used by bulk-load paths
      * (e.g. PrecompiledStdlib startup) that need to materialise the entire
-     * IR set up front instead of chasing decl-by-decl. Default
-     * implementation returns empty — implementations that can iterate
-     * efficiently (SQL, etc.) should override.
+     * IR set up front instead of chasing decl-by-decl. Default implementation
+     * returns empty — implementations that can iterate efficiently (SQL,
+     * etc.) should override. SQL impl UNION-ALLs across main + stdlib + deps;
+     * Chained walks every tier.
      */
     fun getAllBlobHashes(): List<Hash> = emptyList()
 
@@ -227,6 +229,19 @@ interface MezzeStore : AutoCloseable {
     // ====================================================================
 
     fun <T> transaction(block: () -> T): T
+
+    /**
+     * Wipe every table derived from typechecker output. Preserves the three
+     * upstream-of-typecheck tables: `modules` (user-source observations),
+     * `parsed_modules` (parser output), and `metadata` (where version stamps
+     * live). Called by `StoreHydration.invalidateOnVersionShift` when the
+     * `mez_version` stamp changes.
+     *
+     * After wipe, callers should re-stamp via `setMetadata("mez_version", ...)`.
+     * The wipe itself doesn't touch metadata.
+     */
+    fun wipeTypecheckCaches()
+
     override fun close()
 }
 

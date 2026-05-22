@@ -183,55 +183,12 @@ object StoreHydration {
         }
 
         if (recorded != null || hasLegacyOutput) {
-            wipeAllTypecheckDerivedState(store)
+            store.wipeTypecheckCaches()
             store.setMetadata("mez_version", currentVersion)
             return true
         }
         // Truly fresh project — first-time stamp, nothing to wipe.
         store.setMetadata("mez_version", currentVersion)
         return false
-    }
-
-    /**
-     * Truncate every table in [store]'s project DB except the three that
-     * are NOT derived from typechecker output:
-     *   - modules            (user-source observations: path/file/hash)
-     *   - parsed_modules     (parser output, upstream of typecheck)
-     *   - metadata           (where the stamp itself lives)
-     *
-     * Discovered dynamically from sqlite_master, so a future table added
-     * to the schema is wiped automatically without needing to update a
-     * hardcoded list here. The set of "preserved" tables is what we
-     * curate, and it's tiny.
-     */
-    private fun wipeAllTypecheckDerivedState(store: MezzeStore) {
-        if (store !is com.mezze.language.codebase.SQLiteMezzeStore) {
-            // Non-SQLite stores (InMemoryMezzeStore in tests): best-effort
-            // per-module typed-module clear via the public API. Coverage
-            // is intentionally weaker; only the SQLite path is production.
-            for (mod in store.getAllModules()) {
-                if (mod.path.startsWith(com.mezze.language.parsedast.STDLIB_NAMESPACE_PREFIX)) continue
-                store.clearTypedModulesForPath(mod.path)
-            }
-            return
-        }
-        // Caller wraps us in store.transaction { ... } for atomicity, so
-        // we just emit DDL here — touching autoCommit ourselves conflicts
-        // with the outer transaction's bookkeeping.
-        val preserved = setOf("modules", "parsed_modules", "metadata", "schema_version", "sqlite_sequence")
-        store.executeRaw { conn ->
-            val tables = mutableListOf<String>()
-            conn.createStatement().use { s ->
-                s.executeQuery("SELECT name FROM main.sqlite_master WHERE type='table'").use { rs ->
-                    while (rs.next()) tables.add(rs.getString(1))
-                }
-            }
-            conn.createStatement().use { s ->
-                for (t in tables) {
-                    if (t in preserved) continue
-                    s.executeUpdate("DELETE FROM main.\"$t\"")
-                }
-            }
-        }
     }
 }
