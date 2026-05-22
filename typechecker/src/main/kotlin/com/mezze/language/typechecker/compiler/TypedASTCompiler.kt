@@ -2066,11 +2066,19 @@ class TypedASTCompiler(
     }
 
     private fun tryResolveAbilityOp(methodName: String, receiverType: MezzeType): Hash? {
-        // Unwrap SuspendedType — when a receiver is the result of an effectful call
-        // (e.g. `let x = effectful {}` where effectful : ... -> T <SomeEffect>), its
-        // type at the dispatch point is SuspendedType<T, effects>. The effects are
-        // orthogonal to method dispatch; resolve against the underlying value type.
-        val effectiveType = if (receiverType is SuspendedType) receiverType.valueType else receiverType
+        // SuspendedType receivers: only unwrap for non-inlineable ops (e.g. Tryable.try
+        // on `Result Int Str <Exception>`). For inlineable primitive ops like `+`/`-`,
+        // returning null here forces the indirect-call path in compileCall, which the
+        // TruffleCompiler then pattern-matches into DirectAddNode etc. — and those
+        // have MezzeSuspended specializations that propagate suspension at runtime.
+        // Without this guard, `result + 1` for `result : Int <Log>` resolves to a
+        // direct call to Int.add, which crashes when fed a MezzeSuspended receiver
+        // (see RuntimeEffectValidationTest.testNestedEffectfulFunctionValidation).
+        val effectiveType = if (receiverType is SuspendedType && methodName !in inlineableOps) {
+            receiverType.valueType
+        } else {
+            receiverType
+        }
         val candidates = abilityOpIndex[methodName] ?: return null
         val match = candidates.firstOrNull { op ->
             op.targetTypes.any { typeMatchesTarget(effectiveType, it) }
@@ -2086,8 +2094,12 @@ class TypedASTCompiler(
     }
 
     private fun findAbilityOpBody(methodName: String, receiverType: MezzeType): TypedExpr? {
-        // See tryResolveAbilityOp — unwrap SuspendedType for dispatch.
-        val effectiveType = if (receiverType is SuspendedType) receiverType.valueType else receiverType
+        // See tryResolveAbilityOp for the inlineable-ops guard rationale.
+        val effectiveType = if (receiverType is SuspendedType && methodName !in inlineableOps) {
+            receiverType.valueType
+        } else {
+            receiverType
+        }
         for (impl in abilityImpls) {
             if (impl.operations.containsKey(methodName) &&
                 impl.targetTypes.any { typeMatchesTarget(effectiveType, it) }) {
