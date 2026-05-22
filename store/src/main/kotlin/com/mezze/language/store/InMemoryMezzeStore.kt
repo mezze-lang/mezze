@@ -266,5 +266,27 @@ class InMemoryMezzeStore : MezzeStore {
     // ── LIFECYCLE ──
 
     override fun <T> transaction(block: () -> T): T = block()
+
+    /**
+     * Wipe every typecheck-derived collection. Preserves `modules`,
+     * `parsedModules`, `metadata` (mirrors the SQLite policy).
+     */
+    override fun wipeTypecheckCaches() {
+        blobs.clear()
+        names.clear()
+        edges.clear()
+        abilityImpls.clear()
+        effectPerformers.clear()
+        usages.clear()
+        apps.clear()
+        appFunctionHashes.clear()
+        appPerformerRecords.clear()
+        imports.clear()
+        decls.clear()
+        typedModules.clear()
+        monoSpecializations.clear()
+        // Preserved: modules, parsedModules, metadata.
+    }
+
     override fun close() {}
 }

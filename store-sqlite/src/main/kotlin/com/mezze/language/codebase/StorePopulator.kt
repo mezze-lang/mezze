@@ -1,5 +1,7 @@
 package com.mezze.language.codebase
 
+import com.mezze.language.store.*
+
 import com.mezze.language.typechecker.TypeCheckResult
 import com.mezze.language.typedast.*
 import com.mezze.language.truffleir.FunctionIR
@@ -86,7 +88,7 @@ object StorePopulator {
             // even if typecheck/lower below fails. Comments are part of the
             // serialized blob (they're fields on ParsedDecl).
             if (parsedModule != null) {
-                val parsedBlob = CodebaseSerialization.serializeParsedModule(parsedModule)
+                val parsedBlob = StoreSerialization.serializeParsedModule(parsedModule)
                 store.putParsedModule(modulePath, sourceHash, parsedBlob)
             }
 
@@ -97,7 +99,7 @@ object StorePopulator {
                 // Cache the whole TypedModule blob keyed by (path, sourceHash).
                 // Lets future JVM starts skip re-typecheck if source matches.
                 // Idempotent: same (path, hash) → same bytes → INSERT OR REPLACE no-op.
-                val typedBlob = CodebaseSerialization.serializeTypedModule(typedModule)
+                val typedBlob = StoreSerialization.serializeTypedModule(typedModule)
                 store.putTypedModule(modulePath, sourceHash, typedBlob)
 
                 // Per-decl index. Slice F will diff source_hash to skip
@@ -141,7 +143,7 @@ object StorePopulator {
                 val depSource = file.readText()
                 val sha256 = sha256Hex(depSource)
                 store.putModule(loadedPath, src.filePath, sha256)
-                val blob = CodebaseSerialization.serializeTypedModule(loadedTyped)
+                val blob = StoreSerialization.serializeTypedModule(loadedTyped)
                 store.putTypedModule(loadedPath, sha256, blob)
 
                 // Scatter dep decls into per-decl blobs + register names.
@@ -154,7 +156,7 @@ object StorePopulator {
                 // Same (path, sourceHash) keying as typed_modules.
                 val depParsed = loadedParsedModules[loadedPath]
                 if (depParsed != null) {
-                    val parsedBlob = CodebaseSerialization.serializeParsedModule(depParsed)
+                    val parsedBlob = StoreSerialization.serializeParsedModule(depParsed)
                     store.putParsedModule(loadedPath, sha256, parsedBlob)
                 }
 
@@ -554,7 +556,7 @@ object StorePopulator {
             if (decl.hash !in existing) {
                 val visibility = if (decl.isPublic) Visibility.PUBLIC else Visibility.PRIVATE
                 store.putBlob(decl.hash, BlobKind.FUNCTION, visibility,
-                    CodebaseSerialization.serializeTypedLetDecl(decl), null)
+                    StoreSerialization.serializeTypedLetDecl(decl), null)
             }
             store.registerName(modulePath, decl.name, decl.hash)
         }
@@ -563,7 +565,7 @@ object StorePopulator {
             if (decl.hash !in existing) {
                 val visibility = if (decl.isPublic) Visibility.PUBLIC else Visibility.PRIVATE
                 store.putBlob(decl.hash, BlobKind.TYPE, visibility,
-                    CodebaseSerialization.serializeTypedTypeDecl(decl), null)
+                    StoreSerialization.serializeTypedTypeDecl(decl), null)
             }
             store.registerName(modulePath, decl.name, decl.hash)
         }
@@ -571,7 +573,7 @@ object StorePopulator {
         for (decl in module.abilityDecls) {
             if (decl.hash !in existing) {
                 store.putBlob(decl.hash, BlobKind.ABILITY, Visibility.PUBLIC,
-                    CodebaseSerialization.serializeTypedAbilityDecl(decl), null)
+                    StoreSerialization.serializeTypedAbilityDecl(decl), null)
             }
             store.registerName(modulePath, decl.name, decl.hash)
         }
@@ -579,7 +581,7 @@ object StorePopulator {
         for (impl in module.abilityImpls) {
             if (impl.hash !in existing) {
                 store.putBlob(impl.hash, BlobKind.ABILITY_IMPL, Visibility.PUBLIC,
-                    CodebaseSerialization.serializeTypedAbilityImpl(impl), null)
+                    StoreSerialization.serializeTypedAbilityImpl(impl), null)
                 store.addEdge(impl.hash, impl.abilityHash, EdgeKind.IMPLEMENTS)
             }
             val targetType = impl.targetTypes.firstOrNull()?.toString() ?: "unknown"
@@ -589,7 +591,7 @@ object StorePopulator {
         for (decl in module.effectDecls) {
             if (decl.hash !in existing) {
                 store.putBlob(decl.hash, BlobKind.EFFECT, Visibility.PUBLIC,
-                    CodebaseSerialization.serializeTypedEffectDecl(decl), null)
+                    StoreSerialization.serializeTypedEffectDecl(decl), null)
             }
             store.registerName(modulePath, decl.name, decl.hash)
         }
@@ -597,7 +599,7 @@ object StorePopulator {
         for (decl in module.performerDecls) {
             if (decl.hash !in existing) {
                 store.putBlob(decl.hash, BlobKind.PERFORMER, Visibility.PUBLIC,
-                    CodebaseSerialization.serializeTypedPerformerDecl(decl), null)
+                    StoreSerialization.serializeTypedPerformerDecl(decl), null)
                 store.addEdge(decl.hash, decl.effectHash, EdgeKind.IMPLEMENTS)
             }
             store.registerName(modulePath, decl.name, decl.hash)
@@ -627,7 +629,7 @@ object StorePopulator {
             val row = store.getBlob(fn.hash)
             if (row?.ir != null) continue  // already complete
 
-            val irBytes = CodebaseSerialization.serializeFunctionIR(fn)
+            val irBytes = StoreSerialization.serializeFunctionIR(fn)
             store.putBlob(
                 fn.hash,
                 row?.kind ?: BlobKind.FUNCTION,
@@ -824,7 +826,7 @@ object StorePopulator {
                     isPublic = false,
                     loc = spec.specializedBody.loc
                 )
-                val typedBytes = CodebaseSerialization.serializeTypedLetDecl(specializedDecl)
+                val typedBytes = StoreSerialization.serializeTypedLetDecl(specializedDecl)
                 store.putBlob(
                     hash = specHash,
                     kind = BlobKind.FUNCTION,
@@ -832,7 +834,7 @@ object StorePopulator {
                     typed = typedBytes,
                     ir = null
                 )
-                val typeArgsCbor = CodebaseSerialization.serializeTypeList(spec.typeArgs)
+                val typeArgsCbor = StoreSerialization.serializeTypeList(spec.typeArgs)
                 store.putMonoSpecialization(specHash, spec.genericHash, typeArgsCbor)
 
                 // No `edges` row from generic → spec: `edges.from_hash` has

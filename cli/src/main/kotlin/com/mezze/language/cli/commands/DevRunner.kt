@@ -1,7 +1,7 @@
 package com.mezze.language.cli.commands
 
 import com.mezze.interpreter.runtime.MezzeLanguage
-import com.mezze.language.codebase.CodebaseSerialization
+import com.mezze.language.store.StoreSerialization
 import com.mezze.language.codebase.SQLiteMezzeStore
 import com.mezze.language.codebase.StorePopulator
 import com.mezze.language.truffleir.FunctionIR
@@ -725,7 +725,7 @@ object DevRunner {
             store,
             hydrate = { modulePath, blob ->
                 try {
-                    val v2Module = CodebaseSerialization.deserializeTypedModule(blob)
+                    val v2Module = StoreSerialization.deserializeTypedModule(blob)
                     com.mezze.language.typechecker.module.ModuleTypeChecker
                         .hydrateFromV2Module(modulePath, v2Module)
                     true
@@ -882,7 +882,7 @@ object DevRunner {
         val result = store.getAppFunctionHashes(appName).mapNotNull { hash ->
             val irBytes = store.getIR(hash) ?: return@mapNotNull null
             try {
-                CodebaseSerialization.deserializeFunctionIR(irBytes)
+                StoreSerialization.deserializeFunctionIR(irBytes)
             } catch (e: Exception) {
                 // Cached IR blob is unreadable (older serializer format, on-disk
                 // corruption, etc.). Treat as a cache miss — caller will fall

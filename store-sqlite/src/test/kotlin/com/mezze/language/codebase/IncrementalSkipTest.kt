@@ -1,5 +1,7 @@
 package com.mezze.language.codebase
 
+import com.mezze.language.store.*
+
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeCheckResult
 import com.mezze.language.typedast.*
@@ -99,7 +101,7 @@ class IncrementalSkipTest {
             body = LongLitIR(42, src),
             sourceFile = tmpFile.name, sourceSection = src
         )
-        val irBytes = CodebaseSerialization.serializeFunctionIR(fakeIR)
+        val irBytes = StoreSerialization.serializeFunctionIR(fakeIR)
         val existing = store.getBlob(mainHash)
         store.putBlob(
             mainHash,

@@ -1,5 +1,7 @@
 package com.mezze.language.codebase
 
+import com.mezze.language.store.*
+
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.typedast.*
 import com.mezze.language.typechecker.TypeCheckResult
@@ -101,7 +103,7 @@ class StorePopulatorTest {
         assertNotNull(irBytes)
 
         // Deserialize and verify
-        val loaded = CodebaseSerialization.deserializeFunctionIR(irBytes!!)
+        val loaded = StoreSerialization.deserializeFunctionIR(irBytes!!)
         assertEquals("add", loaded.name)
         assertEquals(fnHash, loaded.hash)
     }

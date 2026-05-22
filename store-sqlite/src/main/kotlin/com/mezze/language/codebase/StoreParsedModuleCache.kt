@@ -1,5 +1,7 @@
 package com.mezze.language.codebase
 
+import com.mezze.language.store.*
+
 import com.mezze.language.parser.ParsedModuleCache
 import com.mezze.language.parsedast.ParsedModule
 import java.security.MessageDigest
@@ -25,7 +27,7 @@ class StoreParsedModuleCache(
         return try {
             val modulePath = resolveModulePath(filePath) ?: return null
             val blob = store.getParsedModule(modulePath, sourceHash) ?: return null
-            CodebaseSerialization.deserializeParsedModule(blob)
+            StoreSerialization.deserializeParsedModule(blob)
         } catch (_: Exception) {
             null
         }

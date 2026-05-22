@@ -1,5 +1,7 @@
 package com.mezze.language.codebase
 
+import com.mezze.language.store.*
+
 import com.mezze.language.parsedast.ParsedDecl
 import com.mezze.language.parsedast.ParsedLetDecl
 import com.mezze.language.parsedast.ParsedModule
@@ -185,7 +187,7 @@ object IncrementalSkip {
         val typedBlob = store.getTypedModule(modulePath, entrySourceHash)
             ?: return Result.Miss(MissReason.NO_CACHED_TYPED_MODULE)
         val typedModule = try {
-            CodebaseSerialization.deserializeTypedModule(typedBlob)
+            StoreSerialization.deserializeTypedModule(typedBlob)
         } catch (_: Exception) {
             return Result.Miss(MissReason.NO_CACHED_TYPED_MODULE)
         }
@@ -194,7 +196,7 @@ object IncrementalSkip {
         val functions = store.getAppFunctionHashes(appName).mapNotNull { hash ->
             val irBytes = store.getIR(hash) ?: return@mapNotNull null
             try {
-                CodebaseSerialization.deserializeFunctionIR(irBytes)
+                StoreSerialization.deserializeFunctionIR(irBytes)
             } catch (_: Exception) {
                 null
             }

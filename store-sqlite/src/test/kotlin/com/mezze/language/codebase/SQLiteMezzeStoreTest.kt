@@ -1,5 +1,7 @@
 package com.mezze.language.codebase
 
+import com.mezze.language.store.*
+
 import com.mezze.language.typedast.Hash
 import org.junit.jupiter.api.*
 import org.junit.jupiter.api.Assertions.*
@@ -80,6 +82,69 @@ class SQLiteMezzeStoreTest {
     @Test
     fun `getIR returns null for missing hash`() {
         assertNull(store.getIR(Hash("c".repeat(64))))
+    }
+
+    @Test
+    fun `getAllBlobHashes includes attached tiers`() {
+        // Regression: getAllBlobHashes was `SELECT FROM blobs` (main only).
+        // Now: UNION ALL across main + stdlib + deps. A project-mode store
+        // must see its stdlib's blobs when bulk-loading.
+        val mainHash = Hash("1".repeat(64))
+        val stdlibHash = Hash("2".repeat(64))
+        store.putBlob(mainHash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
+        // Write a blob directly into the attached stdlib tier.
+        store.executeRaw { conn ->
+            conn.prepareStatement(
+                "INSERT INTO stdlib.blobs (hash, kind, visibility, typed, ir) VALUES (?, ?, ?, ?, ?)"
+            ).use { stmt ->
+                stmt.setString(1, stdlibHash.hex)
+                stmt.setString(2, "FUNCTION")
+                stmt.setString(3, "PUBLIC")
+                stmt.setBytes(4, null)
+                stmt.setBytes(5, null)
+                stmt.executeUpdate()
+            }
+        }
+
+        val all = store.getAllBlobHashes()
+        assertTrue(all.contains(mainHash), "Expected main blob in list; got $all")
+        assertTrue(all.contains(stdlibHash), "Expected stdlib blob in list; got $all")
+    }
+
+    @Test
+    fun `getIR finds IR in non-main tier even if main has null-ir row`() {
+        // Regression test: previously, if `main.blobs` had a row with `ir = NULL`
+        // for some hash, `getIR()` returned null even when an attached tier
+        // (stdlib/deps) had the same hash with real IR bytes. The UNION ALL
+        // picked main's null row first and LIMIT 1 cut off the search.
+        // Fix: filter `ir IS NOT NULL` per-tier inside the UNION ALL branches.
+        val hash = Hash("e".repeat(64))
+        val irBytes = "real-ir-bytes".toByteArray()
+
+        // Main has an IR-less placeholder (e.g. a typed-only row written before IR scatter).
+        store.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, "typed".toByteArray(), null)
+
+        // Stdlib has the same hash with real IR. Use executeRaw to write directly
+        // into the attached stdlib database since the public API only writes main.
+        store.executeRaw { conn ->
+            conn.prepareStatement(
+                "INSERT INTO stdlib.blobs (hash, kind, visibility, typed, ir) VALUES (?, ?, ?, ?, ?)"
+            ).use { stmt ->
+                stmt.setString(1, hash.hex)
+                stmt.setString(2, "FUNCTION")
+                stmt.setString(3, "PUBLIC")
+                stmt.setBytes(4, null)
+                stmt.setBytes(5, irBytes)
+                stmt.executeUpdate()
+            }
+        }
+
+        // L1 cache may have memoized the previous main-only read; clear by
+        // creating a fresh store instance against the same hash via getIR.
+        // Actually we haven't read this hash yet, so L1 is empty.
+        assertArrayEquals(irBytes, store.getIR(hash),
+            "Expected getIR to find the IR-bearing row in stdlib, " +
+            "but it returned null — main's null-ir row shadowed the search.")
     }
 
     @Test
@@ -166,6 +231,40 @@ class SQLiteMezzeStoreTest {
 
         val results2 = store.searchExportsByName("s")
         assertEquals(2, results2.size)
+    }
+
+    @Test
+    fun `searchExportsByName escapes LIKE metacharacters`() {
+        // Without escaping, `_` in a query matches any single char, so `foo_bar`
+        // would also match `fooXbar`, `fooQbar`, etc. Same for `%` (any string).
+        // Fix: escape `_`, `%`, `\` in user input before binding.
+        val hash = Hash("b".repeat(64))
+        store.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
+        store.putModule("m", "/tmp/m.mz", "h")
+        store.registerName("m", "foo_bar", hash)
+        store.registerName("m", "fooXbar", hash)
+        store.registerName("m", "fooYbar", hash)
+
+        // Literal underscore should match only `foo_bar`, not the X/Y variants.
+        val results = store.searchExportsByName("foo_bar")
+        assertEquals(1, results.size,
+            "Expected exact-underscore match only; got ${results.map { it.name }}")
+        assertEquals("foo_bar", results[0].name)
+    }
+
+    @Test
+    fun `searchDeclsByName escapes LIKE metacharacters`() {
+        val hash = Hash("c".repeat(64))
+        store.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
+        store.putModule("m", "/tmp/m.mz", "h")
+        // Use stubBlob helper isn't needed — putBlob already done.
+        store.putDecl("m", "foo_bar", DeclKind.LET, "src1", hash, 1, 1, 1, 10)
+        store.putDecl("m", "fooXbar", DeclKind.LET, "src2", hash, 2, 1, 2, 10)
+
+        val results = store.searchDeclsByName("foo_bar")
+        assertEquals(1, results.size,
+            "Expected exact-underscore match only; got ${results.map { it.declName }}")
+        assertEquals("foo_bar", results[0].declName)
     }
 
     // ====================================================================
@@ -521,5 +620,98 @@ class SQLiteMezzeStoreTest {
             val first = errors.first()
             fail<Unit>("concurrent reads raised ${errors.size} error(s); first: $first")
         }
+    }
+
+    // ====================================================================
+    // IMPORTS
+    // ====================================================================
+
+    @Test
+    fun `putImport with null targetHash writes NULL not empty string`() {
+        // Regression: schema used to declare `target_hash NOT NULL` while the API
+        // accepted `Hash?`. `putImport` wrote "" for null, which external SQL
+        // tools couldn't distinguish from a real empty hash. Now: schema allows
+        // NULL, and unresolved imports write a real SQL NULL.
+        store.putModule("m", "/tmp/m.mz", "h")
+        store.putImport(
+            modulePath = "m",
+            localName = "foo",
+            targetModule = "other",
+            targetName = "foo",
+            targetHash = null,
+            startLine = 1, startCol = 1, endLine = 1, endCol = 10,
+        )
+
+        // API round-trip: null in → null out.
+        val rows = store.getImportsForModule("m")
+        assertEquals(1, rows.size)
+        assertNull(rows[0].targetHash)
+
+        // Direct SQL: column is actually NULL, not an empty string.
+        store.executeRaw { conn ->
+            conn.prepareStatement(
+                "SELECT target_hash FROM imports WHERE module_path = 'm' AND local_name = 'foo'"
+            ).use { stmt ->
+                stmt.executeQuery().use { rs ->
+                    assertTrue(rs.next())
+                    val raw = rs.getString("target_hash")
+                    assertNull(raw, "Expected SQL NULL, got '$raw'")
+                    assertTrue(rs.wasNull(), "Expected wasNull() = true")
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `putImport with concrete targetHash round-trips`() {
+        store.putModule("m", "/tmp/m.mz", "h")
+        val hash = Hash("a".repeat(64))
+        store.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
+        store.putImport(
+            modulePath = "m",
+            localName = "bar",
+            targetModule = "other",
+            targetName = "bar",
+            targetHash = hash,
+            startLine = 1, startCol = 1, endLine = 1, endCol = 10,
+        )
+        val rows = store.getImportsForModule("m")
+        assertEquals(1, rows.size)
+        assertEquals(hash, rows[0].targetHash)
+    }
+
+    // ====================================================================
+    // TRANSACTIONS / L1 CACHE
+    // ====================================================================
+
+    @Test
+    fun `transaction rollback restores L1 cache state`() {
+        // Regression: writes during a transaction update L1 immediately. If
+        // the transaction rolls back (throws), L1 used to retain the rolled-
+        // back entries — subsequent reads saw ghost data. Fix: snapshot L1
+        // on entry, restore on rollback.
+        val existingHash = Hash("1".repeat(64))
+        val ghostHash = Hash("2".repeat(64))
+        store.putBlob(existingHash, BlobKind.FUNCTION, Visibility.PUBLIC, null, "real-ir".toByteArray())
+        // Prime L1 by reading.
+        assertNotNull(store.getBlob(existingHash))
+
+        assertThrows<RuntimeException> {
+            store.transaction {
+                // Write a ghost blob inside the transaction; L1 will pick it up.
+                store.putBlob(ghostHash, BlobKind.FUNCTION, Visibility.PUBLIC, null, "ghost-ir".toByteArray())
+                throw RuntimeException("simulated typecheck failure")
+            }
+        }
+
+        // After rollback: the ghost blob must not be visible via any read path.
+        assertNull(store.getBlob(ghostHash),
+            "L1 retained the rolled-back blob — subsequent reads see ghost data.")
+        assertFalse(store.blobExists(ghostHash))
+        assertNull(store.getIR(ghostHash))
+
+        // The pre-existing blob is still there.
+        assertNotNull(store.getBlob(existingHash))
+        assertArrayEquals("real-ir".toByteArray(), store.getIR(existingHash))
     }
 }

@@ -183,9 +183,9 @@ class BuildCommand {
                 if (missing.isNotEmpty()) {
                     store.transaction {
                         for ((hash, fnIR) in missing) {
-                            val irBytes = com.mezze.language.codebase.CodebaseSerialization.serializeFunctionIR(fnIR)
-                            store.putBlob(hash, com.mezze.language.codebase.BlobKind.FUNCTION,
-                                com.mezze.language.codebase.Visibility.PUBLIC, null, irBytes)
+                            val irBytes = com.mezze.language.store.StoreSerialization.serializeFunctionIR(fnIR)
+                            store.putBlob(hash, com.mezze.language.store.BlobKind.FUNCTION,
+                                com.mezze.language.store.Visibility.PUBLIC, null, irBytes)
                             collectEdgesFromIR(fnIR, store, hash)
                         }
                     }
@@ -496,25 +496,25 @@ class BuildCommand {
         fun walk(node: com.mezze.language.truffleir.NodeIR) {
             when (node) {
                 is com.mezze.language.truffleir.CallDirectIR -> {
-                    try { store.addEdge(fromHash, node.targetHash, com.mezze.language.codebase.EdgeKind.CALLS) } catch (_: Exception) {}
+                    try { store.addEdge(fromHash, node.targetHash, com.mezze.language.store.EdgeKind.CALLS) } catch (_: Exception) {}
                     node.args.forEach { walk(it) }
                 }
                 is com.mezze.language.truffleir.PartialApplyDirectIR -> {
-                    try { store.addEdge(fromHash, node.targetHash, com.mezze.language.codebase.EdgeKind.CALLS) } catch (_: Exception) {}
+                    try { store.addEdge(fromHash, node.targetHash, com.mezze.language.store.EdgeKind.CALLS) } catch (_: Exception) {}
                     node.partialFields.forEach { walk(it.value) }
                 }
                 is com.mezze.language.truffleir.MakeLambdaIR -> {
-                    try { store.addEdge(fromHash, node.functionHash, com.mezze.language.codebase.EdgeKind.CALLS) } catch (_: Exception) {}
+                    try { store.addEdge(fromHash, node.functionHash, com.mezze.language.store.EdgeKind.CALLS) } catch (_: Exception) {}
                 }
                 is com.mezze.language.truffleir.HandleIR -> {
                     walk(node.body)
                     for (h in node.handlers) {
-                        try { store.addEdge(fromHash, h.handlerHash, com.mezze.language.codebase.EdgeKind.REFERENCES) } catch (_: Exception) {}
-                        try { store.addEdge(fromHash, h.effectHash, com.mezze.language.codebase.EdgeKind.REFERENCES) } catch (_: Exception) {}
+                        try { store.addEdge(fromHash, h.handlerHash, com.mezze.language.store.EdgeKind.REFERENCES) } catch (_: Exception) {}
+                        try { store.addEdge(fromHash, h.effectHash, com.mezze.language.store.EdgeKind.REFERENCES) } catch (_: Exception) {}
                     }
                 }
                 is com.mezze.language.truffleir.PerformOpIR -> {
-                    try { store.addEdge(fromHash, node.effectHash, com.mezze.language.codebase.EdgeKind.REFERENCES) } catch (_: Exception) {}
+                    try { store.addEdge(fromHash, node.effectHash, com.mezze.language.store.EdgeKind.REFERENCES) } catch (_: Exception) {}
                     walk(node.arg)
                 }
                 is com.mezze.language.truffleir.BlockIR -> {
@@ -551,10 +551,10 @@ class BuildCommand {
                 is com.mezze.language.truffleir.SeqGetIR -> { walk(node.seq); walk(node.index) }
                 is com.mezze.language.truffleir.DictMethodCallIR -> walk(node.arg)
                 is com.mezze.language.truffleir.ReadGlobalByHashIR -> {
-                    try { store.addEdge(fromHash, node.hash, com.mezze.language.codebase.EdgeKind.REFERENCES) } catch (_: Exception) {}
+                    try { store.addEdge(fromHash, node.hash, com.mezze.language.store.EdgeKind.REFERENCES) } catch (_: Exception) {}
                 }
                 is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> {
-                    try { store.addEdge(fromHash, node.hash, com.mezze.language.codebase.EdgeKind.REFERENCES) } catch (_: Exception) {}
+                    try { store.addEdge(fromHash, node.hash, com.mezze.language.store.EdgeKind.REFERENCES) } catch (_: Exception) {}
                 }
                 is com.mezze.language.truffleir.EffectBindingIR -> {} // runtime-supplied effect binding, not a global ref
                 else -> {} // leaf nodes

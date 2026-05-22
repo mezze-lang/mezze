@@ -1,5 +1,7 @@
 package com.mezze.language.codebase
 
+import com.mezze.language.store.*
+
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.typedast.Hash
 import org.junit.jupiter.api.AfterEach
@@ -27,7 +29,7 @@ class MonoSpecializationsTest {
     fun `put and get round-trip`() {
         val gh = Hash("a".repeat(64))
         val sh = stubBlob(Hash("b".repeat(64)))
-        val cbor = CodebaseSerialization.serializeTypeList(listOf(MezzeType.IntType))
+        val cbor = StoreSerialization.serializeTypeList(listOf(MezzeType.IntType))
 
         store.putMonoSpecialization(sh, gh, cbor)
 
@@ -51,8 +53,8 @@ class MonoSpecializationsTest {
         val s3 = stubBlob(Hash("d".repeat(64)))
         val otherGh = Hash("e".repeat(64))
 
-        val intCbor = CodebaseSerialization.serializeTypeList(listOf(MezzeType.IntType))
-        val strCbor = CodebaseSerialization.serializeTypeList(listOf(MezzeType.StringType))
+        val intCbor = StoreSerialization.serializeTypeList(listOf(MezzeType.IntType))
+        val strCbor = StoreSerialization.serializeTypeList(listOf(MezzeType.StringType))
 
         store.putMonoSpecialization(s1, gh, intCbor)
         store.putMonoSpecialization(s2, gh, strCbor)
@@ -68,8 +70,8 @@ class MonoSpecializationsTest {
     fun `put is idempotent (INSERT OR REPLACE)`() {
         val gh = Hash("a".repeat(64))
         val sh = stubBlob(Hash("b".repeat(64)))
-        val v1 = CodebaseSerialization.serializeTypeList(listOf(MezzeType.IntType))
-        val v2 = CodebaseSerialization.serializeTypeList(listOf(MezzeType.StringType))
+        val v1 = StoreSerialization.serializeTypeList(listOf(MezzeType.IntType))
+        val v2 = StoreSerialization.serializeTypeList(listOf(MezzeType.StringType))
 
         store.putMonoSpecialization(sh, gh, v1)
         store.putMonoSpecialization(sh, gh, v2)
@@ -83,7 +85,7 @@ class MonoSpecializationsTest {
     fun `cascade dropping the specialized blob removes its provenance row`() {
         val gh = Hash("a".repeat(64))
         val sh = stubBlob(Hash("b".repeat(64)))
-        store.putMonoSpecialization(sh, gh, CodebaseSerialization.serializeTypeList(listOf(MezzeType.IntType)))
+        store.putMonoSpecialization(sh, gh, StoreSerialization.serializeTypeList(listOf(MezzeType.IntType)))
 
         // Manually delete the blob to verify CASCADE.
         store.transaction {
@@ -104,8 +106,8 @@ class MonoSpecializationsTest {
             MezzeType.StringType,
             MezzeType.ListType(MezzeType.IntType)
         )
-        val bytes = CodebaseSerialization.serializeTypeList(types)
-        val back = CodebaseSerialization.deserializeTypeList(bytes)
+        val bytes = StoreSerialization.serializeTypeList(types)
+        val back = StoreSerialization.deserializeTypeList(bytes)
         assertEquals(types, back)
     }
 
@@ -142,7 +144,7 @@ class MonoSpecializationsTest {
         assertEquals(Visibility.PRIVATE, blob.visibility)
         assertNotNull(blob.typed)
         // typed bytes deserialize back to a TypedLetDecl with the right hash.
-        val decl = CodebaseSerialization.deserializeTypedLetDecl(blob.typed!!)
+        val decl = StoreSerialization.deserializeTypedLetDecl(blob.typed!!)
         assertEquals(sh, decl.hash)
         assertEquals("id", decl.name)
         assertTrue(decl.typeParams.isEmpty())
@@ -151,7 +153,7 @@ class MonoSpecializationsTest {
         val row = store.getMonoSpecialization(sh)
         assertNotNull(row)
         assertEquals(gh, row!!.genericHash)
-        assertEquals(listOf(MezzeType.IntType), CodebaseSerialization.deserializeTypeList(row.typeArgsCbor))
+        assertEquals(listOf(MezzeType.IntType), StoreSerialization.deserializeTypeList(row.typeArgsCbor))
 
         // Reverse-lookup by generic hash returns this specialization.
         val byGeneric = store.getMonoSpecializationsForGeneric(gh)

@@ -1,5 +1,7 @@
 package com.mezze.language.codebase
 
+import com.mezze.language.store.*
+
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.typedast.Hash
 
@@ -29,7 +31,7 @@ class MezzeExecutor(
     fun loadIR(hash: Hash): FunctionIR? {
         for (store in stores) {
             val irBytes = store.getIR(hash) ?: continue
-            return CodebaseSerialization.deserializeFunctionIR(irBytes)
+            return StoreSerialization.deserializeFunctionIR(irBytes)
         }
         return null
     }
