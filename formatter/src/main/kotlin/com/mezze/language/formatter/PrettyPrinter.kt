@@ -996,6 +996,18 @@ class PrettyPrinter {
                     printTypeAnnotation(arg)
                 }
             }
+            // Associated-type bindings: `having 'tv = T, 'tv2 = T2`. Preserve
+            // map insertion order so user-written ordering survives round-trip.
+            // Without this clause the formatter silently drops `having` bindings,
+            // turning `Container 'c having 'item = Int` into `Container 'c`.
+            if (c.associatedTypeBindings.isNotEmpty()) {
+                append(" having ")
+                c.associatedTypeBindings.entries.forEachIndexed { j, (name, type) ->
+                    if (j > 0) append(", ")
+                    append("$name = ")
+                    printTypeAnnotation(type)
+                }
+            }
         }
     }
 
