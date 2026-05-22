@@ -991,8 +991,9 @@ class ConstraintSolver(
         // disagrees between actual and expected. Falls back to the
         // field-set diff for missing/unexpected fields.
         findFieldTypeMismatch(t1, t2)?.let { (path, actualLeaf, expectedLeaf) ->
-            val expectedStr = TypeDiffPrinter.formatType(expectedLeaf)
-            val actualStr = TypeDiffPrinter.formatType(actualLeaf)
+            val rename = com.mezze.language.typechecker.printing.TypeVarRenamer()
+            val expectedStr = TypeDiffPrinter.formatType(expectedLeaf, 0, rename)
+            val actualStr = TypeDiffPrinter.formatType(actualLeaf, 0, rename)
             return "$header — field `$path` expects $expectedStr but got $actualStr"
         }
         val mismatch = findClosedRecordMismatch(t1, t2) ?: return header
@@ -1171,8 +1172,9 @@ class ConstraintSolver(
                 val fieldMismatch = findFieldTypeMismatch(type1, type2)
                 if (fieldMismatch != null) {
                     val (path, actualLeaf, expectedLeaf) = fieldMismatch
-                    val expectedStr = TypeDiffPrinter.formatType(expectedLeaf)
-                    val actualStr = TypeDiffPrinter.formatType(actualLeaf)
+                    val rename = com.mezze.language.typechecker.printing.TypeVarRenamer()
+                    val expectedStr = TypeDiffPrinter.formatType(expectedLeaf, 0, rename)
+                    val actualStr = TypeDiffPrinter.formatType(actualLeaf, 0, rename)
                     val callSite = when {
                         funcName != null -> " in call to `$funcName`"
                         else -> ""
@@ -1180,8 +1182,9 @@ class ConstraintSolver(
                     return "Field `$path` expects $expectedStr but got $actualStr$callSite"
                 }
 
-                val expected = TypeDiffPrinter.formatType(type2)
-                val actual = TypeDiffPrinter.formatType(type1)
+                val rename = com.mezze.language.typechecker.printing.TypeVarRenamer()
+                val expected = TypeDiffPrinter.formatType(type2, 0, rename)
+                val actual = TypeDiffPrinter.formatType(type1, 0, rename)
 
                 val header = if (argName != null && funcName != null) {
                     "Type mismatch for argument '$argName' in call to '$funcName': expected $expected but got $actual"
@@ -1212,8 +1215,9 @@ class ConstraintSolver(
                     return "Type annotation mismatch for '$bindingName': $reason"
                 }
 
-                val expected = TypeDiffPrinter.formatType(type2)
-                val actual = TypeDiffPrinter.formatType(type1)
+                val rename = com.mezze.language.typechecker.printing.TypeVarRenamer()
+                val expected = TypeDiffPrinter.formatType(type2, 0, rename)
+                val actual = TypeDiffPrinter.formatType(type1, 0, rename)
 
                 return if (errorContext.isReturnType) {
                     "Return type mismatch in '$bindingName': declared as $expected but returns $actual"
@@ -1223,8 +1227,9 @@ class ConstraintSolver(
             }
             is ErrorContext.FieldAccess -> {
                 val fieldName = errorContext.fieldName
-                val expected = TypeDiffPrinter.formatType(type2)
-                val actual = TypeDiffPrinter.formatType(type1)
+                val rename = com.mezze.language.typechecker.printing.TypeVarRenamer()
+                val expected = TypeDiffPrinter.formatType(type2, 0, rename)
+                val actual = TypeDiffPrinter.formatType(type1, 0, rename)
 
                 return "Field '$fieldName' has type $actual but expected $expected"
             }
@@ -1608,17 +1613,23 @@ class ConstraintSolver(
             return ConstraintResult.Success(Substitution.empty)
         }
 
-        // Primary type is concrete - look up the matching impl
-        val matchingImpl = findMatchingAbilityImpl(abilityName, primaryType)
+        // Primary type is concrete - look up the matching impl AND extract
+        // the impl's type-parameter bindings (so we can substitute references
+        // to impl type-vars in associated-type bindings).
+        val matchingImplPair = findMatchingAbilityImpl(abilityName, primaryType)
         DebugLogger.debug(Category.ConstraintSolver) {
-            "  matchingImpl: ${matchingImpl?.abilityName} with bindings ${matchingImpl?.associatedTypeBindings}"
+            "  matchingImpl: ${matchingImplPair?.first?.abilityName} with bindings ${matchingImplPair?.first?.associatedTypeBindings}, " +
+                "implTypeVarBindings: ${matchingImplPair?.second}"
         }
 
-        if (matchingImpl == null) {
+        if (matchingImplPair == null) {
             // No impl found - this is handled by AbilityRequired constraint
             // Just return success here (the error will be reported elsewhere)
             return ConstraintResult.Success(Substitution.empty)
         }
+
+        val matchingImpl = matchingImplPair.first
+        val implTypeVarBindings = matchingImplPair.second
 
         // Extract associated type bindings from the impl
         val associatedBindings = matchingImpl.associatedTypeBindings
@@ -1636,8 +1647,11 @@ class ConstraintSolver(
                 ?: associatedBindings["'$assocTypeName"]
 
             if (binding != null) {
-                // Convert the TypeAnnotation to MezzeType
-                val concreteType = typeAnnotationToMezzeType(binding)
+                // Substitute references to the impl's type parameters first.
+                // E.g. for `impl Tryable for Result 'a 'e having 'inner = 'a`,
+                // the binding `'a` is the impl's type parameter — `implTypeVarBindings`
+                // maps it to the receiver's actual type (e.g. Int).
+                val concreteType = substituteAnnotationWithImplBindings(binding, implTypeVarBindings)
 
                 // CRITICAL: Apply current substitution to see what the type variable resolves to
                 // If it's already bound to a different type, unification will fail
@@ -1662,26 +1676,55 @@ class ConstraintSolver(
     }
 
     /**
-     * Find a matching ability impl for the given ability and concrete type.
+     * Convert an associated-type binding annotation to a MezzeType, substituting
+     * references to the impl's type parameters with the bindings collected during
+     * impl-matching.
+     *
+     * Example: impl Tryable for Result 'a 'e having 'inner = 'a, matched against
+     * Result Int Str. The binding annotation `'a` resolves to `Int` via
+     * implTypeVarBindings `{'a → Int, 'e → Str}`.
+     */
+    private fun substituteAnnotationWithImplBindings(
+        annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        implTypeVarBindings: Map<String, MezzeType>,
+    ): MezzeType {
+        // If the annotation is a bare type-variable name (e.g. `'a`), look it up.
+        if (annotation is com.mezze.language.parsedast.ParsedNamedType) {
+            val name = annotation.name
+            // Try both with and without leading apostrophe.
+            implTypeVarBindings[name]?.let { return it }
+            implTypeVarBindings["'$name"]?.let { return it }
+            if (name.startsWith("'")) {
+                implTypeVarBindings[name.removePrefix("'")]?.let { return it }
+            }
+        }
+        return typeAnnotationToMezzeType(annotation)
+    }
+
+    /**
+     * Find a matching ability impl for the given ability and concrete type,
+     * returning the impl's type-parameter bindings alongside it (e.g. for
+     * `impl Tryable for Result 'a 'e`, matching against `Result Int Str`
+     * returns `{'a → Int, 'e → Str}`). Used by [solveAssociatedTypeResolution]
+     * to substitute associated-type bindings that reference the impl's type
+     * parameters.
      */
     private fun findMatchingAbilityImpl(
         abilityName: String,
         primaryType: MezzeType
-    ): TypingContext.AbilityImplInfo? {
+    ): Pair<TypingContext.AbilityImplInfo, Map<String, MezzeType>>? {
         val allImpls = context.getAbilityImpls(abilityName)
 
-        return allImpls.find { impl ->
-            val annotations = impl.targetTypeAnnotations ?: return@find false
-
-            // For abilities with associated types, only match the primary type
-            // (associated types are handled separately)
-            if (annotations.size == 1) {
-                val typeVarBindings = mutableMapOf<String, MezzeType>()
-                TypeAnnotationMatcher.typeMatchesAnnotation(primaryType, annotations.first(), typeDeclarations, impl.typeVars, typeVarBindings)
-            } else {
-                false
-            }
+        for (impl in allImpls) {
+            val annotations = impl.targetTypeAnnotations ?: continue
+            if (annotations.size != 1) continue
+            val typeVarBindings = mutableMapOf<String, MezzeType>()
+            val matched = TypeAnnotationMatcher.typeMatchesAnnotation(
+                primaryType, annotations.first(), typeDeclarations, impl.typeVars, typeVarBindings
+            )
+            if (matched) return impl to typeVarBindings
         }
+        return null
     }
 
     /**
@@ -2190,6 +2233,15 @@ class ConstraintSolver(
                 } else {
                     "$typeNames does not implement '$abilityName'. Ensure the data type is serializable.${formatAbilityCandidates(abilityName)}"
                 }
+            }
+            "Tryable" -> {
+                // Tryable is almost always reached via `<-` desugar. Frame the
+                // error around the user-facing syntax rather than the ability
+                // name, but keep the underlying ability mentioned so the user
+                // can implement it on a custom failure type if they really want.
+                "Cannot use `<-` on $typeNames — no `Tryable` impl. `<-` works " +
+                    "on `Option`, `Result`, or any type implementing `Tryable`. " +
+                    "If you meant a plain binding, use `let x = ...` instead."
             }
             else -> "$typeNames does not implement '$abilityName'. To enable this, implement: impl $abilityName for $primaryType where { ... }${formatAbilityCandidates(abilityName)}"
         }

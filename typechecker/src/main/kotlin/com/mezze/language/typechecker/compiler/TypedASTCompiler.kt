@@ -2065,25 +2065,48 @@ class TypedASTCompiler(
         }
     }
 
+    /**
+     * Strip a SuspendedType wrapper from the receiver for ability dispatch.
+     *
+     * Effectful expressions like `effectful {}` have type `SuspendedType<T,
+     * effects>`. For method dispatch we want the underlying value type.
+     *
+     * Exception: inlineable primitive ops (`add`, `sub`, ...) must keep the
+     * SuspendedType so resolution fails here and the indirect-call path
+     * pattern-matches into DirectAddNode etc. — those nodes have
+     * MezzeSuspended specializations that propagate suspension at runtime.
+     * Without this guard, `result + 1` for `result : Int <Log>` resolves to
+     * a direct call to Int.add and crashes when fed a MezzeSuspended `it`
+     * (see RuntimeEffectValidationTest.testNestedEffectfulFunctionValidation).
+     */
+    private fun receiverTypeForDispatch(methodName: String, receiverType: MezzeType): MezzeType =
+        if (receiverType is SuspendedType && methodName !in inlineableOps) {
+            receiverType.valueType
+        } else {
+            receiverType
+        }
+
     private fun tryResolveAbilityOp(methodName: String, receiverType: MezzeType): Hash? {
+        val effectiveType = receiverTypeForDispatch(methodName, receiverType)
         val candidates = abilityOpIndex[methodName] ?: return null
         val match = candidates.firstOrNull { op ->
-            op.targetTypes.any { typeMatchesTarget(receiverType, it) }
+            op.targetTypes.any { typeMatchesTarget(effectiveType, it) }
         }
         if (match != null) return match.opHash
         // Fallback: if there's exactly one candidate and the receiver is a variant/type-application,
         // use it. This handles user-defined type aliases where the variant type's constructors
         // don't match the known aliases in typeMatchesTarget.
-        if (candidates.size == 1 && (receiverType is VariantType || receiverType is TypeApplication)) {
+        if (candidates.size == 1 && (effectiveType is VariantType || effectiveType is TypeApplication)) {
             return candidates.first().opHash
         }
         return null
     }
 
     private fun findAbilityOpBody(methodName: String, receiverType: MezzeType): TypedExpr? {
+        val effectiveType = receiverTypeForDispatch(methodName, receiverType)
         for (impl in abilityImpls) {
             if (impl.operations.containsKey(methodName) &&
-                impl.targetTypes.any { typeMatchesTarget(receiverType, it) }) {
+                impl.targetTypes.any { typeMatchesTarget(effectiveType, it) }) {
                 return impl.operations[methodName]
             }
         }

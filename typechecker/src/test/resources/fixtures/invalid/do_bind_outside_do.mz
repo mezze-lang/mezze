@@ -1,0 +1,4 @@
+# `<-` outside any do block — e.g., bare RHS of a let binding.
+# Should be a parse error.
+
+let foo = x <- Some { val = 42 }

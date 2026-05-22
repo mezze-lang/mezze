@@ -1006,7 +1006,57 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                             is ParseResult.Failure -> { keepIfFatal(patternResult); break }
                         }
                     } else {
-                        // Not a let statement, try to parse an expression
+                        // Try to parse a bind statement: `pat <- expr`.
+                        // Speculatively parse an irrefutable pattern, then check for
+                        // `<-`. If `<-` isn't there, rewind to the original stream and
+                        // try expression parsing. This is similar to how `let` parses
+                        // but without the leading keyword.
+                        //
+                        // We must be careful: many expressions also start with an
+                        // identifier (a function call, a field access, etc.), so we
+                        // can't commit until we see `<-`.
+                        val bindPatternResult = letBindingPattern(currentStream)
+                        val bindStream: TokenStream? = if (bindPatternResult is ParseResult.Success) {
+                            val afterPattern = skipNewlines(bindPatternResult.remaining)
+                            if (afterPattern.current()?.type == TokenType.BIND) afterPattern else null
+                        } else null
+
+                        if (bindPatternResult is ParseResult.Success && bindStream != null) {
+                            val pattern = bindPatternResult.value
+                            if (!pattern.isIrrefutable()) {
+                                fatalFailure = currentStream.failure(
+                                    "`<-` requires an irrefutable pattern (variable, wildcard, or record destructure). " +
+                                    "Variant patterns like `Some {val}` are not allowed because the bind can short-circuit on failure."
+                                ).copy(isFatal = true)
+                                break
+                            }
+                            // Consume the BIND token
+                            val afterBind = skipNewlines(bindStream.advance())
+                            val rhs = expression(afterBind)
+                            when (rhs) {
+                                is ParseResult.Success -> {
+                                    val firstTok = currentStream.current()
+                                    val stmtLoc = if (firstTok != null)
+                                        spanLocTo(firstTok, rhs.remaining, file)
+                                    else
+                                        rhs.value.loc
+                                    statements.add(
+                                        ParsedStatement.Bind(
+                                            pattern = pattern,
+                                            expr = rhs.value,
+                                            loc = stmtLoc
+                                        )
+                                    )
+                                    currentStream = skipNewlines(rhs.remaining)
+                                    lastStatementWasLet = false
+                                    lastLetName = null
+                                    continue
+                                }
+                                is ParseResult.Failure -> { keepIfFatal(rhs); break }
+                            }
+                        }
+
+                        // Not a let or bind statement, try to parse an expression
                         val expr = expression(currentStream)
                         when (expr) {
                             is ParseResult.Success -> {
@@ -1606,6 +1656,7 @@ internal fun countPipePlaceholders(expr: ParsedExpr): Int {
             when (stmt) {
                 is ParsedStatement.Let -> countPipePlaceholders(stmt.value)
                 is ParsedStatement.Expr -> countPipePlaceholders(stmt.expr)
+                is ParsedStatement.Bind -> countPipePlaceholders(stmt.expr)
             }
         } + countPipePlaceholders(expr.result)
         is ParsedSeqLit -> expr.elements.sumOf { element ->
@@ -1645,6 +1696,7 @@ internal fun findPipePlaceholderLocations(expr: ParsedExpr): List<Loc> {
             when (stmt) {
                 is ParsedStatement.Let -> findPipePlaceholderLocations(stmt.value)
                 is ParsedStatement.Expr -> findPipePlaceholderLocations(stmt.expr)
+                is ParsedStatement.Bind -> findPipePlaceholderLocations(stmt.expr)
             }
         } + findPipePlaceholderLocations(expr.result)
         is ParsedSeqLit -> expr.elements.flatMap { element ->

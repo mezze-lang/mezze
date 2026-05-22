@@ -201,6 +201,81 @@ class LspFeaturesTest {
         )
     }
 
+    // ===== Do-bind (`<-`) ==============================================
+    //
+    // Hover and goto-def on `<-`-bound names go through the same TypedAST
+    // walk as regular `let` bindings — the desugar rewrites `pat <- expr`
+    // into a typed `let pat = expr.try {}` before LSP sees the typed AST.
+    // The synthetic Let inherits the bind statement's loc and is marked
+    // `isSynthetic = true` so position lookups land on user-written source.
+
+    @Test
+    fun `hover on bind pattern does not leak desugar internals`() {
+        val (uri, _) = openSingleFile("""
+            let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
+
+            let foo = {} -> do
+                a <- make_ok {}
+                a
+        """.trimIndent())
+
+        val hover = hoverAt(uri, line = 3, character = 4)
+        assertNotNull(hover, "expected hover on the `<-` pattern name")
+        val content = hoverText(hover!!)
+        assertTrue(content.contains("a :") || content.contains("a:"),
+            "expected hover to render as a binding for `a`, got:\n$content")
+        assertFalse(content.contains("Tryable.try"),
+            "hover should NOT leak the synthetic `.try` ability call: $content")
+    }
+
+    @Test
+    fun `hover on ability-method call result shows specialized return type`() {
+        // For `let v = (make_ok {}).try {}` where make_ok returns
+        // `Result Int Str`, hovering on `v` should show `Int <Exception>`
+        // — `Tryable.try`'s `'inner` associated type should resolve to
+        // Result's value-type parameter (Int). Currently regressing as
+        // `v : 'a <Exception>` (the impl's literal type parameter). See
+        // task #33 for the deeper typechecker fix.
+        val (uri, _) = openSingleFile("""
+            use std::abilities::tryable::{Tryable}
+
+            let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
+
+            let v = (make_ok {}).try {}
+        """.trimIndent())
+
+        // Line 4 (0-indexed) is `let v = (make_ok {}).try {}`, `v` at col 4.
+        val hover = hoverAt(uri, line = 4, character = 4)
+        assertNotNull(hover, "expected hover on the `v` binding")
+        val content = hoverText(hover!!)
+        assertTrue(content.contains("Int"),
+            "expected hover to show specialized `Int` (not generic `'a`), got:\n$content")
+    }
+
+    @Test
+    fun `hover on receiver function inside bind shows function type`() {
+        // `a <- make_ok {}` — hovering on `make_ok` should show its
+        // declared function type, demonstrating that the desugar doesn't
+        // disrupt normal hover on user-written sub-expressions of `<-`.
+        val (uri, _) = openSingleFile("""
+            let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
+
+            let foo = {} -> do
+                a <- make_ok {}
+                a
+        """.trimIndent())
+
+        // Cursor on the `make_ok` call inside the bind. The line is
+        // `    a <- make_ok {}` (3-space indent in trimIndent).
+        // a at col 3 (0-indexed); space; <-; space; make_ok starts at col 8.
+        // Actually the trim is 4 spaces. Verify by hovering and finding `make_ok`.
+        val hover = hoverAt(uri, line = 3, character = 9)
+        assertNotNull(hover, "expected hover on `make_ok` inside the bind")
+        val content = hoverText(hover!!)
+        assertTrue(content.contains("Result") || content.contains("Ok"),
+            "expected hover to surface the function's return type, got:\n$content")
+    }
+
     // ===== Inlay hints =================================================
 
     @Test

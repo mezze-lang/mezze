@@ -2711,7 +2711,7 @@ class ConstraintGenerator(
             abilityNames: Set<String> = emptySet(),
             effectNames: Set<String> = emptySet(),
             abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap(),
-            effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap()
+            effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),
         ): ConstraintGenerator {
             val expressionGen = ExpressionConstraintGenerator()
             val patternGen = PatternConstraintGenerator()

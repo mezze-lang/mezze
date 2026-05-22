@@ -87,7 +87,7 @@ object PrecompiledStdlib {
 
     /** Stdlib dependency graph: hash → set of hashes referenced in its body.
      *  Built eagerly at init from FunctionIR bodies.
-     *  Used by PipelineRunner.collectReferencedHashes for BFS. */
+     *  Used by FunctionIRReachability.collectReferencedHashes for BFS. */
     var stdlibDependencyGraph: Map<Hash, Set<Hash>> = emptyMap()
         private set
 

@@ -1,0 +1,8 @@
+# Design doc 3h: Regular type error inside the body after a `<-`.
+# `a` is Int (Tryable.try unwrapped from Some {val: Int}); calling
+# `.length {}` on Int has no impl — should report the normal Ability /
+# method-not-found error, not anything do-bind-specific.
+
+let foo = { } -> do
+  a <- Some { val = 42 }
+  a.length { }

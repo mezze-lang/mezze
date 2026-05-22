@@ -781,6 +781,11 @@ class PrettyPrinter {
                 printExpr(stmt.value)
             }
             is ParsedStatement.Expr -> printExpr(stmt.expr)
+            is ParsedStatement.Bind -> {
+                printPattern(stmt.pattern)
+                append(" <- ")
+                printExpr(stmt.expr)
+            }
         }
     }
 

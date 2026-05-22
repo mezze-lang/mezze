@@ -20,6 +20,18 @@ private data class EffectRowParseResult(
     val stream: TokenStream
 )
 
+/**
+ * Error message for `{it: 'm 'a}` — the user is applying a type variable to
+ * another type. The lexer marks `'a` as IDENTIFIER, so the record parser
+ * mistakes it for a missing-annotation case; surfacing this explicitly
+ * points at the real problem.
+ */
+private fun typeVarJuxtaposedMessage(fieldName: String): String =
+    "Type variable '$fieldName' cannot be applied to another type. " +
+    "Type variables in Mezze can only stand alone — they cannot act as type constructors. " +
+    "If you want to parameterize over a wrapper type, declare the relationship in the impl head: " +
+    "`impl Foo for Result 'a 'e where { ... }` not `{it: 'm 'a}`."
+
 // Record type entry parser (helper for record type annotations)
 internal val MezzeParser.recordTypeEntryParser: Parser<ParsedRecordTypeEntry>
     get() = { stream ->
@@ -45,20 +57,27 @@ internal val MezzeParser.recordTypeEntryParser: Parser<ParsedRecordTypeEntry>
                     is ParseResult.Failure -> {
                         val fieldName = ident.value.text
                         val nextToken = ident.remaining.current()
-                        val message = when (nextToken?.type) {
-                            TokenType.IDENTIFIER -> "Record type field '$fieldName' is missing a type annotation.\n" +
-                                    "Expected format: { $fieldName: Type }"
-                            TokenType.COMMA ->
-                                "Record type field '$fieldName' is missing a type annotation.\n" +
-                                        "Expected format: { $fieldName: Type, ... }"
-                            else ->
-                                "Record type field '$fieldName' is missing a type annotation. " +
-                                        "Expected ':' followed by a type, but got ${tokenGotDescription(nextToken)}"
+                        if (fieldName.startsWith("'")) {
+                            ident.remaining.failure(
+                                typeVarJuxtaposedMessage(fieldName),
+                                code = com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED
+                            )
+                        } else {
+                            val message = when (nextToken?.type) {
+                                TokenType.IDENTIFIER -> "Record type field '$fieldName' is missing a type annotation.\n" +
+                                        "Expected format: { $fieldName: Type }"
+                                TokenType.COMMA ->
+                                    "Record type field '$fieldName' is missing a type annotation.\n" +
+                                            "Expected format: { $fieldName: Type, ... }"
+                                else ->
+                                    "Record type field '$fieldName' is missing a type annotation. " +
+                                            "Expected ':' followed by a type, but got ${tokenGotDescription(nextToken)}"
+                            }
+                            ident.remaining.failure(
+                                message,
+                                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0117_RECORD_FIELD_MISSING_TYPE
+                            )
                         }
-                        ident.remaining.failure(
-                            message,
-                            code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0117_RECORD_FIELD_MISSING_TYPE
-                        )
                     }
                 }
             }
@@ -499,10 +518,17 @@ internal val MezzeParser.recordTypeAnnotationParser: Parser<ParsedTypeAnnotation
                                     when (currentToken?.type) {
                                         TokenType.IDENTIFIER -> {
                                             val fieldName = currentToken.text
-                                            stream3.failure(
-                                                "Record type field '$fieldName' is missing a type annotation (expected `$fieldName: Type`)",
-                                                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0117_RECORD_FIELD_MISSING_TYPE
-                                            )
+                                            if (fieldName.startsWith("'")) {
+                                                stream3.failure(
+                                                    typeVarJuxtaposedMessage(fieldName),
+                                                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED
+                                                )
+                                            } else {
+                                                stream3.failure(
+                                                    "Record type field '$fieldName' is missing a type annotation (expected `$fieldName: Type`)",
+                                                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0117_RECORD_FIELD_MISSING_TYPE
+                                                )
+                                            }
                                         }
                                         TokenType.COMMA -> stream3.failure("Unexpected comma in record type. Record type fields must have format: { field: Type }")
                                         else -> stream3.failure("Expected '}' to close record type, but got ${tokenGotDescription(currentToken)}. Record type format: { field: Type }")

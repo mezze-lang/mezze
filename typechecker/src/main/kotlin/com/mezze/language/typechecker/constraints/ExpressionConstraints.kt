@@ -765,6 +765,25 @@ class ExpressionConstraintGenerator {
         )
     }
 
+    /**
+     * Compute the Loc pointing only at the `.member` portion of a
+     * member-access expression, so a Rename FixHint can replace just the
+     * field name. `expr.loc` covers the whole `receiver.member` span,
+     * which would replace the receiver too. We derive the member span
+     * by walking back `member.length` columns from the expression's end.
+     */
+    private fun memberAccessFieldLoc(expr: ParsedMemberAccess): Loc {
+        val len = expr.member.length
+        val startCol = (expr.loc.endCol - len + 1).coerceAtLeast(1)
+        return Loc(
+            file = expr.loc.file,
+            startLine = expr.loc.endLine,
+            startCol = startCol,
+            endLine = expr.loc.endLine,
+            endCol = expr.loc.endCol,
+        )
+    }
+
     private fun generateMemberAccess(expr: ParsedMemberAccess, context: ConstraintContext): ConstraintResult {
         // receiver.member
 
@@ -938,6 +957,16 @@ class ExpressionConstraintGenerator {
                 // Field doesn't exist - check if record is closed or open
                 val suggestion = findClosestMatch(expr.member, fieldNames)
                 val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
+                // Build a Rename FixHint pointing at the misspelled field's
+                // loc so the LSP can offer a one-click "Replace with `x`"
+                // quick fix in addition to the "Did you mean" hint in the
+                // message text. Pin to the member name only (expr.loc covers
+                // the whole `receiver.member` span which is too wide).
+                val memberLoc = memberAccessFieldLoc(expr)
+                val renameHints: List<com.mezze.language.parsedast.diagnostics.FixHint> =
+                    if (suggestion != null) listOf(
+                        com.mezze.language.parsedast.diagnostics.FixHint.Rename(memberLoc, listOf(suggestion))
+                    ) else emptyList()
 
                 if (!isOpen) {
                     // Closed record - field must exist, throw error
@@ -950,6 +979,7 @@ class ExpressionConstraintGenerator {
                             "availableFields" to fieldNames.toList()
                         ),
                         code = ErrorCode.T0205_FIELD_NOT_FOUND,
+                        fixHints = renameHints,
                     )
                 } else {
                     // Open record with explicit literal - still fail
@@ -963,6 +993,7 @@ class ExpressionConstraintGenerator {
                             "availableFields" to fieldNames.toList()
                         ),
                         code = ErrorCode.T0303_OPEN_RECORD_FIELD_MISSING,
+                        fixHints = renameHints,
                     )
                 }
             }
@@ -1410,6 +1441,11 @@ class ExpressionConstraintGenerator {
             loc = expr.loc
         ))
 
+        // Propagate effects declared by the ability method's arrow type
+        // (e.g. `try: {it: 'm} -> 'inner <Exception>`) into the call result.
+        val (callType, methodDeclaredEffects, methodDeclaredEffectInstances) =
+            wrapCallResultWithEffects(resultType, strippedMethodType.effects)
+
         // Store method call resolution for the TypedAstBuilder
         val methodCallInfo = ConstraintResult.MethodCallInfo(
             abilityName = resolvedAbilityName,
@@ -1420,16 +1456,16 @@ class ExpressionConstraintGenerator {
         )
 
         return ConstraintResult(
-            type = resultType,
+            type = callType,
             constraints = constraints,
-            effects = receiverResult.effects + argumentResult.effects + extraEffects,
-            effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances,
+            effects = receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects,
+            effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances + methodDeclaredEffectInstances,
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
             usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
             methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf((expr.loc to methodCallInfo.methodName) to methodCallInfo),
-            callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to resultType)
+            callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType)
         )
     }
 
@@ -1617,17 +1653,22 @@ class ExpressionConstraintGenerator {
             )
         } else null
 
+        // Propagate effects declared by the inherent method's arrow type
+        // into the call result. Same logic as ability methods and function calls.
+        val (callType, methodDeclaredEffects, methodDeclaredEffectInstances) =
+            wrapCallResultWithEffects(resultType, (freshMethodType as? MezzeType.FunctionType)?.effects)
+
         return ConstraintResult(
-            type = resultType,
+            type = callType,
             constraints = constraints,
-            effects = receiverResult.effects + argumentResult.effects + extraEffects,
-            effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances,
+            effects = receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects,
+            effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances + methodDeclaredEffectInstances,
             abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints,
             associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
             usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
             methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf((expr.loc to inherentMethodCallInfo.methodName) to inherentMethodCallInfo) else emptyMap()),
-            callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to resultType)
+            callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType)
         )
     }
 
@@ -3476,21 +3517,10 @@ class ExpressionConstraintGenerator {
                     effectfulAbilityConstraints = effectfulAbilityConstraints + methodLevelConstraints
                 }
 
-                // If the function has unhandled effects (suspended) or performed effects,
-                // wrap in SuspendedType. This is important for top-level validation to detect <*>.
-                val hasUnhandledEffects = effectRow.effects.isNotEmpty() || effectRow.effectInstances.isNotEmpty() || effectRow.rowVar != null
-                val hasPerformedEffects = effectRow.performed
-                val resultType = if (hasUnhandledEffects || hasPerformedEffects) {
-                    // Calling an effectful function produces a SuspendedType
-                    // The return value is suspended with the function's effects
-                    MezzeType.SuspendedType(
-                        valueType = functionType.returnType,
-                        effects = effectRow
-                    )
-                } else {
-                    // Pure function, no effects at all
-                    functionType.returnType
-                }
+                // Wrap the call's value type in SuspendedType when the callee
+                // has effects (unhandled or performed). Important so top-level
+                // validation can detect `<*>`.
+                val (resultType, _, _) = wrapCallResultWithEffects(functionType.returnType, effectRow)
 
                 return ConstraintResult(
                     type = resultType,
@@ -4117,6 +4147,15 @@ class ExpressionConstraintGenerator {
                     methodCallResolutions.putAll(exprResult.methodCallResolutions)
                     callReturnTypes.putAll(exprResult.callReturnTypes)
                 }
+                is ParsedStatement.Bind -> {
+                    // ParsedStatement.Bind must be eliminated by DoBindDesugar before
+                    // constraint generation. Reaching here means a traversal site in
+                    // the desugar missed this position.
+                    throw IllegalStateException(
+                        "ParsedStatement.Bind reached constraint generation at ${stmt.loc} — " +
+                        "DoBindDesugar must rewrite Bind statements to Let before this phase."
+                    )
+                }
             }
         }
 
@@ -4541,7 +4580,12 @@ class ExpressionConstraintGenerator {
             usedVariables = exprResult.usedVariables,
             referencedBindings = exprResult.referencedBindings,
             methodCallResolutions = exprResult.methodCallResolutions,
-            callReturnTypes = exprResult.callReturnTypes
+            // Record this perform's solved result type so TypedAstBuilder can
+            // emit `TypedPerform.type` as the discharged result (e.g.
+            // `Result _ _`) rather than the raw body type (which would be the
+            // pre-discharge value wrapped in SuspendedType, breaking method
+            // dispatch on the perform expression as a receiver).
+            callReturnTypes = exprResult.callReturnTypes + (expr.loc to resultType),
         )
     }
 
@@ -4634,51 +4678,72 @@ class ExpressionConstraintGenerator {
     }
 
     /**
-     * Remove specific effects from a type.
+     * Wrap a call's value type in `SuspendedType` if the callee's effect row
+     * is non-empty / performed. Returns `(callType, declaredEffects,
+     * declaredEffectInstances)`.
      *
-     * For FunctionType with effects: Remove effects from effect row
-     * For SuspendedType with effects: Remove effects from effect row, returning pure value if all removed
+     * Shared by ability method calls, inherent method calls, and regular
+     * function calls — same logic in three places previously.
      */
-    private fun removeEffectsFromType(type: MezzeType, effectsToRemove: Set<String>): MezzeType {
+    private fun wrapCallResultWithEffects(
+        valueType: MezzeType,
+        effectRow: MezzeType.EffectRow?,
+    ): Triple<MezzeType, Set<String>, Set<MezzeType.EffectInstance>> {
+        if (effectRow == null) return Triple(valueType, emptySet(), emptySet())
+        val hasUnhandled = effectRow.effects.isNotEmpty() ||
+            effectRow.effectInstances.isNotEmpty() ||
+            effectRow.rowVar != null
+        val callType: MezzeType = if (hasUnhandled || effectRow.performed) {
+            MezzeType.SuspendedType(valueType = valueType, effects = effectRow)
+        } else {
+            valueType
+        }
+        return Triple(callType, effectRow.effects, effectRow.effectInstances)
+    }
+
+    /**
+     * Remove handled effects from a type and mark it as performed (`<*>`).
+     *
+     * For FunctionType: clears the handled effects from the effect row and
+     * sets `performed = true`.
+     * For SuspendedType: same on the underlying effect row.
+     *
+     * The performed marker fires for all `perform` blocks — both user-
+     * written and synthesized by the do-bind desugar. The do-bind sugar
+     * is intentionally semantically identical to the explicit form.
+     */
+    internal fun removeEffectsFromType(
+        type: MezzeType,
+        effectsToRemove: Set<String>,
+    ): MezzeType {
         return when (type) {
             is MezzeType.FunctionType -> {
                 val effects = type.effects
                 if (effects == null) {
-                    // No effects to remove, but mark as performed since we're in a perform block
                     MezzeType.FunctionType(
                         paramType = type.paramType,
                         returnType = type.returnType,
-                        effects = MezzeType.EffectRow.simple(emptySet(), null, true),  // Mark as performed
+                        effects = MezzeType.EffectRow.simple(emptySet(), null, performed = true),
                         abilityConstraints = type.abilityConstraints
                     )
                 } else {
-                    // Remove the handled effects, mark as performed
                     val remainingEffects = effects.effects - effectsToRemove
-
-                    // Always set performed = true since we're handling effects
                     MezzeType.FunctionType(
                         paramType = type.paramType,
                         returnType = type.returnType,
-                        effects = MezzeType.EffectRow.simple(remainingEffects, effects.rowVar, true),
+                        effects = MezzeType.EffectRow.simple(remainingEffects, effects.rowVar, performed = true),
                         abilityConstraints = type.abilityConstraints
                     )
                 }
             }
             is MezzeType.SuspendedType -> {
-                // Remove effects from suspended type, mark as performed
                 val remainingEffects = type.effects.effects - effectsToRemove
-
-                // Keep SuspendedType with performed=true even when all effects are handled
-                // This allows top-level validation to reject values with <*> marker
                 MezzeType.SuspendedType(
                     valueType = type.valueType,
-                    effects = MezzeType.EffectRow.simple(remainingEffects, type.effects.rowVar, true)
+                    effects = MezzeType.EffectRow.simple(remainingEffects, type.effects.rowVar, performed = true)
                 )
             }
-            else -> {
-                // Other types don't have effects
-                type
-            }
+            else -> type
         }
     }
 

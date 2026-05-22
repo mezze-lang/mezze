@@ -58,12 +58,15 @@ internal object AbilityImplFactory {
         // Only ParsedNamedType starting with `'` is a real type var; concrete
         // type names in abilityTypeArgs (e.g. `Str` in `impl Into Str for Int`)
         // are not.
+        //
+        // Also include type vars from targetTypes — for abilities like
+        // `Tryable for 'm having 'inner` the impl has nothing in abilityTypeArgs
+        // (no params between `Tryable` and `for`) but quantifies vars in the
+        // receiver: `impl Tryable for Result 'a 'e having 'inner = 'a`. Without
+        // this, polymorphic ability impls with associated types can't be matched
+        // against concrete receiver types at call sites.
         val typeVars = if (implDecl.isInherent) emptySet() else {
-            implDecl.abilityTypeArgs
-                .filterIsInstance<ParsedNamedType>()
-                .filter { it.name.startsWith("'") }
-                .map { it.name }
-                .toSet()
+            implDecl.forallVars.toSet()
         }
 
         // Method-level constraints — collected from each operation's `with` clause.

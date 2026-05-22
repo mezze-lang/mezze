@@ -43,4 +43,16 @@ internal object WellKnownTypeApp {
             typeHash = typeHash ?: WellKnownHashes.resolveTypeHash(constructor)
         )
     }
+
+    /**
+     * Build `Result <ok> <err>` — typed helper so callers don't string-quote.
+     */
+    fun result(ok: MezzeType, err: MezzeType): MezzeType.TypeApplication =
+        of("Result", listOf(ok, err))
+
+    /**
+     * Build `Option <val>` — typed helper so callers don't string-quote.
+     */
+    fun option(value: MezzeType): MezzeType.TypeApplication =
+        of("Option", listOf(value))
 }

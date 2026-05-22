@@ -1,0 +1,13 @@
+# Design doc 3f: Nested do-blocks each with their own `<-`. Inner do
+# produces Result Int <synthetic_err>; outer do's `<-` discharges that,
+# binds the Ok value, then wraps the final result.
+
+let compute : { n: Int } -> Result Int Str = { n } ->
+  if n > 0 then Ok { val = n + 1 }
+  else Err { error = "non-positive" }
+
+let foo = { x } -> do
+  a <- do
+    b <- compute { n = x }
+    b * 2
+  a + 1

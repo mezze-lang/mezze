@@ -234,7 +234,22 @@ class TypeChecker(
     ): TypeCheckResult {
         // Desugar pipe expressions in ParsedModule before type checking
         @Suppress("NAME_SHADOWING")
-        val module = desugarPipesInParsedModule(module)
+        var module = desugarPipesInParsedModule(module)
+
+        // Desugar do-block <- statements (do-bind feature). See DoBindDesugar.kt.
+        // Each `pat <- expr` becomes `let pat = expr.try {}`, the do-block's
+        // result is wrapped in `Ok {val = ...}`, and the entire block is
+        // wrapped in a synthetic `perform ExceptionToResult in do { ... }`.
+        // From that point on, the typechecker handles it exactly like a
+        // user-written `perform ExceptionToResult` — same effect discharge,
+        // same `<*>` marker. The only "magic" left is name resolution: the
+        // surgical injection below adds Exception + ExceptionToResult to the
+        // import context whenever the module uses `<-`, so the synthetic
+        // perform's handler name resolves.
+        val bindDesugarResult = com.mezze.language.typechecker.desugar.DoBindDesugar.desugar(module)
+        module = bindDesugarResult.module
+        val bindLetLocs = bindDesugarResult.bindLetLocs
+        val moduleUsesBind = bindLetLocs.isNotEmpty()
 
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
@@ -253,14 +268,14 @@ class TypeChecker(
         // Try to use PrecompiledStdlib for fast prelude injection
         val precompiled = try { PrecompiledStdlib } catch (_: Exception) { null }
 
-        val enhancedContext = if (!hasUserImports && shouldInjectPrelude && precompiled != null) {
-            // FAST PATH: no user imports, precompiled prelude available
+        val enhancedContext = if (!hasUserImports && shouldInjectPrelude && precompiled != null && !moduleUsesBind) {
+            // FAST PATH: no user imports, precompiled prelude available, no `<-`.
             importContext = precompiled.preludeImportContext
             if (cachedPreludeLoadedModules == null) {
                 cachedPreludeLoadedModules = precompiled.loadedModules
             }
             precompiled.compiledPrelude.mergeInto(parentContext)
-        } else if (hasUserImports || shouldInjectPrelude) {
+        } else if (hasUserImports || shouldInjectPrelude || moduleUsesBind) {
             val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "."))
             val importResolver = if (precompiled != null && (currentPath == projectRoot || currentPath.startsWith(projectRoot))) {
                 precompiled.importResolver
@@ -285,14 +300,14 @@ class TypeChecker(
                     importContext = importResult.importContext
                     loadedModules = importResult.loadedModules
 
-                    val ctx = if (shouldInjectPrelude) {
+                    if (shouldInjectPrelude) {
                         val preludeContext = loadPreludeModules(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
-                        mergeImportContext(parentContext, importContext!!)
-                    } else {
-                        mergeImportContext(parentContext, importContext!!)
                     }
-                    ctx
+                    if (moduleUsesBind) {
+                        importContext = injectExceptionToResultForBind(importContext!!, importResolver)
+                    }
+                    mergeImportContext(parentContext, importContext!!)
                 }
                 is ImportResolutionResult.Failure -> {
                     throw importResult.errors.firstOrNull()
@@ -382,7 +397,7 @@ class TypeChecker(
             abilityNames = abilityNames,
             effectNames = effectNames,
             abilityDeclarations = allAbilityDeclarations,
-            effectDeclarations = allEffectDeclarations
+            effectDeclarations = allEffectDeclarations,
         )
         val programConstraintResult = constraintGenerator.generateProgram(parsedModule, context)
         val constraintResults = programConstraintResult.constraintResults
@@ -611,6 +626,7 @@ class TypeChecker(
                     allTypeDeclarations = allTypeDeclarations,
                     allAbilityDeclarations = allAbilityDeclarations,
                     allEffectDeclarations = allEffectDeclarations,
+                    bindLetLocs = bindLetLocs,
                 )
                 // expectedTypeAt resolved through whatever substitution we
                 // have. Even on global-solve failure, per-binding solves
@@ -727,7 +743,8 @@ class TypeChecker(
                         tailCallLocations = tailCallLocations,
                         mustBeOpenRowVars = mustBeOpenRowVars,
                         methodCallResolutions = allMethodCallResolutions,
-                        callReturnTypes = allCallReturnTypes
+                        callReturnTypes = allCallReturnTypes,
+                        bindLetLocs = bindLetLocs,
                     )
                     val typed = builder.build(parsedModule)
 
@@ -1137,6 +1154,7 @@ class TypeChecker(
         allTypeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
         allAbilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
         allEffectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
+        bindLetLocs: Set<com.mezze.language.parsedast.Loc> = emptySet(),
     ): com.mezze.language.typedast.TypedModule? {
         return try {
             val resolvedResults = constraintResults.mapValues { (_, r) ->
@@ -1169,6 +1187,7 @@ class TypeChecker(
                 mustBeOpenRowVars = emptySet(),
                 methodCallResolutions = methodCallResolutions,
                 callReturnTypes = callReturnTypes,
+                bindLetLocs = bindLetLocs,
             )
             builder.build(parsedModule)
         } catch (e: Exception) {
@@ -1190,9 +1209,41 @@ class TypeChecker(
     }
 
     /**
+     * Inject Exception + ExceptionToResult into the import context so the
+     * synthetic `perform ExceptionToResult in ...` emitted by DoBindDesugar
+     * resolves at constraint-generation time. Only called when the module
+     * actually contains `<-`. The names ARE visible elsewhere in the
+     * module too (a small acceptable "leak"); if the user writes
+     * `perform ExceptionToResult` themselves they'll get the regular
+     * performer behavior, no different from importing it.
+     */
+    private fun injectExceptionToResultForBind(
+        baseCtx: ModuleImportContext,
+        importResolver: ImportResolver,
+    ): ModuleImportContext {
+        val exceptionCtx = cachedExceptionForBindCtx ?: run {
+            val effectName = com.mezze.language.typechecker.desugar.DoBindDesugar.EXCEPTION_EFFECT_NAME
+            val performerName = com.mezze.language.typechecker.desugar.DoBindDesugar.EXCEPTION_TO_RESULT_NAME
+            val syntheticSrc = "use std::effects::exception::{ $effectName, $performerName }"
+            val syntheticModule = MezzeParser().parseParsedModule(syntheticSrc, file = "<dobind-synthetic>")
+            when (val r = importResolver.resolveImports(syntheticModule)) {
+                is ImportResolutionResult.Success -> r.importContext.also {
+                    cachedExceptionForBindCtx = it
+                }
+                is ImportResolutionResult.Failure -> return baseCtx
+            }
+        }
+        return baseCtx.copy(
+            importedEffects = baseCtx.importedEffects + exceptionCtx.importedEffects,
+            importedImpls = baseCtx.importedImpls + exceptionCtx.importedImpls,
+        )
+    }
+
+    /**
      * Load prelude modules and return a combined ModuleImportContext.
      * Cached globally — computed once per JVM process since stdlib doesn't change.
      */
+
     private fun loadPreludeModules(
         importResolver: ImportResolver,
         userImportContext: ModuleImportContext
@@ -1224,6 +1275,11 @@ class TypeChecker(
                 // Abilities ARE carried so that `with X 'a` constraints in user
                 // code can refer to prelude abilities (Sized, Show, etc.) and
                 // method-call resolution sees their operation types (#304).
+                //
+                // Effects and effect impls are stripped. The Exception effect /
+                // ExceptionToResult performer needed by the do-bind desugar are
+                // injected per-module by `injectExceptionToResultForBind` ONLY
+                // when the module contains a `<-`. See do-bind-proposal.md.
                 val ctx = result.importContext
                 // Cache loaded modules for inclusion in Monomorphizer's allModules
                 cachedPreludeLoadedModules = result.loadedModules
@@ -1754,6 +1810,16 @@ class TypeChecker(
         @Volatile
         private var cachedPreludeContext: ModuleImportContext? = null
 
+        /**
+         * Cached import context produced by resolving
+         * `use std::effects::exception::{ Exception, ExceptionToResult }`.
+         * Used by [injectExceptionToResultForBind] to surgically resolve
+         * the synthetic `perform ExceptionToResult` inserted by do-bind.
+         */
+        @Volatile
+        internal var cachedExceptionForBindCtx: ModuleImportContext? = null
+
+
         /** Cached prelude loaded modules — shared across all TypeChecker instances */
         @Volatile
         @JvmStatic
@@ -1941,6 +2007,7 @@ class TypeChecker(
                 when (stmt) {
                     is com.mezze.language.parsedast.ParsedStatement.Let -> hasPipes(stmt.value)
                     is com.mezze.language.parsedast.ParsedStatement.Expr -> hasPipes(stmt.expr)
+                    is com.mezze.language.parsedast.ParsedStatement.Bind -> hasPipes(stmt.expr)
                 }
             }
             is com.mezze.language.parsedast.ParsedPerform -> hasPipes(expr.body)
@@ -1993,6 +2060,7 @@ class TypeChecker(
                     when (stmt) {
                         is com.mezze.language.parsedast.ParsedStatement.Let -> stmt.copy(value = desugar(stmt.value))
                         is com.mezze.language.parsedast.ParsedStatement.Expr -> stmt.copy(expr = desugar(stmt.expr))
+                        is com.mezze.language.parsedast.ParsedStatement.Bind -> stmt.copy(expr = desugar(stmt.expr))
                     }
                 },
                 result = desugar(expr.result)
@@ -2061,6 +2129,7 @@ class TypeChecker(
                 when (stmt) {
                     is com.mezze.language.parsedast.ParsedStatement.Let -> stmt.copy(value = replaceParsedPlaceholder(stmt.value, replacement))
                     is com.mezze.language.parsedast.ParsedStatement.Expr -> stmt.copy(expr = replaceParsedPlaceholder(stmt.expr, replacement))
+                    is com.mezze.language.parsedast.ParsedStatement.Bind -> stmt.copy(expr = replaceParsedPlaceholder(stmt.expr, replacement))
                 }
             },
             result = replaceParsedPlaceholder(expr.result, replacement)
@@ -2084,6 +2153,7 @@ class TypeChecker(
     }
 
     // V1 pipe desugarer deleted — v2 ParsedModule desugars pipes in desugarPipesInParsedModule()
+    // do-bind desugar (`<-`) lives in DoBindDesugar.kt
 
 }
 

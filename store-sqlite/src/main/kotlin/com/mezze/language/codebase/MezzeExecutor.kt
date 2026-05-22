@@ -235,7 +235,7 @@ class MezzeExecutor(
 
     /**
      * Walk a NodeIR tree and collect all hash references (CallDirect, MakeLambda, etc.).
-     * This is the same traversal as PipelineRunner.collectHashesFromNode but operates
+     * This is the same traversal as FunctionIRReachability.collectHashesFromNode but operates
      * on the FunctionIR level for store-based loading.
      */
     private fun collectReferencedHashes(node: com.mezze.language.truffleir.NodeIR, queue: ArrayDeque<String>) {

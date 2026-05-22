@@ -453,9 +453,27 @@ class ContextBuilder {
                         abilityHash = currentAbilityDecls[constraint.abilityName]?.contentHash
                     )
                 }
+                // Convert the ability operation's declared effect row (if any) onto the
+                // method's FunctionType. Without this, an ability method like
+                // `try: {it: 'm} -> 'inner <Exception>` would lose its `<Exception>`
+                // annotation when stored in the context, causing call sites to treat
+                // the call as pure (see tryGenerateMethodCall / generateInherentMethodCall
+                // in ExpressionConstraints.kt for the corresponding propagation).
+                val opEffects = op.effects?.let { effectRow ->
+                    val hashes = effectRow.effects.mapNotNull { name ->
+                        currentEffectDecls[name]?.contentHash?.let { name to it }
+                    }.toMap()
+                    MezzeType.EffectRow.simple(
+                        effectRow.effects.toSet(),
+                        rowVar = null,
+                        performed = effectRow.isPerformed,
+                        effectHashes = hashes
+                    )
+                }
                 val functionType = MezzeType.FunctionType(
                     paramType = convertParsedTypeAnnotationInternal(op.paramType),
                     returnType = convertParsedTypeAnnotationInternal(op.returnType),
+                    effects = opEffects,
                     abilityConstraints = constraints
                 )
                 op.name to functionType
@@ -579,6 +597,10 @@ class ContextBuilder {
                             }
                             is ParsedStatement.Let -> {
                                 val found = findSuspendWithValueParsed(stmt.value)
+                                if (found != null) return found
+                            }
+                            is ParsedStatement.Bind -> {
+                                val found = findSuspendWithValueParsed(stmt.expr)
                                 if (found != null) return found
                             }
                         }

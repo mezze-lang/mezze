@@ -57,7 +57,11 @@ class TypedAstBuilder(
     // Without this, qualified-import calls (`seq::filter { ... }`) only know
     // their generic scheme, and the call's `.type` falls back to `unknown`,
     // breaking LSP per-segment chain inlay hints.
-    private val callReturnTypes: Map<Loc, MezzeType> = emptyMap()
+    private val callReturnTypes: Map<Loc, MezzeType> = emptyMap(),
+    // Locs of `ParsedStatement.Let` nodes synthesized by the do-bind desugar
+    // from a `pat <- expr` source. Used to set `TypedStatement.Let.isBind = true`
+    // — LSP consults it for hover position-lookup on the bind pattern name.
+    private val bindLetLocs: Set<Loc> = emptySet(),
 ) {
 
     /**
@@ -752,7 +756,16 @@ class TypedAstBuilder(
 
                     val callReturnType = when (val ft = substitution.apply(fn.type)) {
                         is MezzeType.FunctionType -> substitution.apply(ft.returnType)
-                        else -> substitution.apply(contextType)
+                        else -> {
+                            // fn.type couldn't be specialized (e.g. ability-method
+                            // resolution returned no methodFunctionType). Fall back
+                            // to the constraint generator's per-call-site return
+                            // type recorded in callReturnTypes — for ability calls
+                            // this is the inferred return after solving (e.g.
+                            // `Int` for `result.try {}` on a `Result Int Str`).
+                            val perCallSite = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
+                            perCallSite ?: substitution.apply(contextType)
+                        }
                     }
 
                     val isTailCall = isTailCallLocation(expr.loc)
@@ -985,12 +998,22 @@ class TypedAstBuilder(
                                 // Use v1 content hash if available, otherwise compute
                                 val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
                                 val contentHash = v1LetHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(stmt.value)
-                                stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc, isRecursive))
+                                val isBind = stmt.loc in bindLetLocs
+                                stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc, isRecursive, isBind))
                             }
                         }
                         is ParsedStatement.Expr -> {
                             val exprTyped = buildExpr(stmt.expr, file)
                             stmts.add(TypedStatement.Expr(exprTyped, stmt.loc))
+                        }
+                        is ParsedStatement.Bind -> {
+                            // ParsedStatement.Bind must be eliminated by DoBindDesugar
+                            // before TypedAstBuilder runs. Reaching here means a
+                            // traversal site in the desugar missed this position.
+                            throw IllegalStateException(
+                                "ParsedStatement.Bind reached TypedAstBuilder at ${stmt.loc} — " +
+                                "DoBindDesugar must rewrite Bind statements to Let before this phase."
+                            )
                         }
                     }
                 }
@@ -1084,7 +1107,17 @@ class TypedAstBuilder(
                     buildHandlerRef(h, file, loc)
                 }
                 val body = buildExpr(expr.body, file, contextType)
-                TypedPerform(handlers, body, body.type, loc)
+                // Prefer the constraint solver's discharged result type
+                // (recorded per-perform-loc). Without this, the perform's
+                // outer type stays at the body's pre-discharge form, which
+                // hides the handler's effect → value transformation (e.g.
+                // `ExceptionToResult` turning `<Exception>` into `Result _ _`).
+                // That matters when the perform is itself a receiver (the
+                // nested do-with-bind case): without the right type here,
+                // `.try {}` mis-dispatches at IR-build time.
+                val performType = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
+                    ?: body.type
+                TypedPerform(handlers, body, performType, loc)
             }
 
             // ------------------------------------------------------------------

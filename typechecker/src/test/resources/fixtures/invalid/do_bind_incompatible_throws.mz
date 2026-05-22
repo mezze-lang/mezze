@@ -1,0 +1,12 @@
+# Design doc 3i: Two `<-` lines whose throw types can't unify — one
+# throws Int, the other throws Str. Exception's 'error parameter unifies
+# to a single primitive, so Int vs Str produces the existing Handler /
+# unification error.
+
+let make_int_err : { } -> Result Bool Int = { } -> Err { error = 1 }
+let make_str_err : { } -> Result Bool Str = { } -> Err { error = "boom" }
+
+let foo = { } -> do
+  a <- make_int_err { }
+  b <- make_str_err { }
+  { a = a, b = b }

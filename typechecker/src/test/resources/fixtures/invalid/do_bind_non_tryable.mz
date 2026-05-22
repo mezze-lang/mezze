@@ -1,0 +1,7 @@
+# Design doc 3g: `<-` on a primitive (Int). No Tryable impl for Int.
+# Expected: type error pointing at the bind line. (Phase 5 polishes the
+# error message; for now any type error is acceptable.)
+
+let foo = { } -> do
+  x <- 42
+  x

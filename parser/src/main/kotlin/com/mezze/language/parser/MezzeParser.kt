@@ -1003,6 +1003,7 @@ internal fun tokenDescription(type: TokenType): String = when (type) {
     TokenType.AND -> "'&&'"
     TokenType.OR -> "'||'"
     TokenType.NOT -> "'!'"
+    TokenType.BIND -> "'<-'"
 
     // Keywords - show the keyword
     TokenType.LET -> "'let'"
