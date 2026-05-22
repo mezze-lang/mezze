@@ -229,6 +229,30 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `hover on ability-method call result shows specialized return type`() {
+        // For `let v = (make_ok {}).try {}` where make_ok returns
+        // `Result Int Str`, hovering on `v` should show `Int <Exception>`
+        // — `Tryable.try`'s `'inner` associated type should resolve to
+        // Result's value-type parameter (Int). Currently regressing as
+        // `v : 'a <Exception>` (the impl's literal type parameter). See
+        // task #33 for the deeper typechecker fix.
+        val (uri, _) = openSingleFile("""
+            use std::abilities::tryable::{Tryable}
+
+            let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
+
+            let v = (make_ok {}).try {}
+        """.trimIndent())
+
+        // Line 4 (0-indexed) is `let v = (make_ok {}).try {}`, `v` at col 4.
+        val hover = hoverAt(uri, line = 4, character = 4)
+        assertNotNull(hover, "expected hover on the `v` binding")
+        val content = hoverText(hover!!)
+        assertTrue(content.contains("Int"),
+            "expected hover to show specialized `Int` (not generic `'a`), got:\n$content")
+    }
+
+    @Test
     fun `hover on receiver function inside bind shows function type`() {
         // `a <- make_ok {}` — hovering on `make_ok` should show its
         // declared function type, demonstrating that the desugar doesn't
