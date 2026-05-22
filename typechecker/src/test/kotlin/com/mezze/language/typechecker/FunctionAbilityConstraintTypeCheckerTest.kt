@@ -69,7 +69,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
                 encode : {} -> Str
             }
 
-            { val: 'a } -> Str with Encoder 'a = {val} -> "test"
+            { val: 'a } with Encoder 'a -> Str = {val} -> "test"
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -98,7 +98,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
                 show : {} -> Str
             }
 
-            { left: 'a, right: 'a } -> Str with Eq 'a, Show 'a = {left, right} -> "test"
+            { left: 'a, right: 'a } with Eq 'a, Show 'a -> Str = {left, right} -> "test"
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -148,7 +148,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
                 store : {value: 'b} -> {}
             }
 
-            { key: 'a, value: 'b } -> {} with KVStore 'b 'a = {key, value} -> {}
+            { key: 'a, value: 'b } with KVStore 'b 'a -> {} = {key, value} -> {}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -174,7 +174,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
                 show : {} -> Str
             }
 
-            { val: Int } -> Str with Show Int = {val} -> "test"
+            { val: Int } with Show Int -> Str = {val} -> "test"
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")

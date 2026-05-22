@@ -922,7 +922,7 @@ class ParseException(
     val code: com.mezze.language.parsedast.diagnostics.ErrorCode =
         com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED,
     val hints: List<String> = emptyList()
-) : Exception(formatParseError(errorMessage, position, line, column, sourceCode, file, length)) {
+) : Exception(formatParseError(errorMessage, position, line, column, sourceCode, file, length, hints)) {
 
     companion object {
         private fun formatParseError(
@@ -932,7 +932,8 @@ class ParseException(
             column: Int,
             sourceCode: String?,
             file: String?,
-            length: Int = 1
+            length: Int = 1,
+            hints: List<String> = emptyList(),
         ): String {
             val sb = StringBuilder()
 
@@ -957,6 +958,10 @@ class ParseException(
                     sb.appendLine("$padding | $pointer")
                     sb.appendLine("$padding |")
                 }
+            }
+
+            for (hint in hints) {
+                sb.appendLine("  = hint: $hint")
             }
 
             return sb.toString().trim()
