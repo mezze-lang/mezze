@@ -34,7 +34,7 @@ class AsyncExtendedTest {
     @Test
     fun `test join runs two computations concurrently with LoomAsync`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
             perform LoomAsync in do
@@ -51,7 +51,7 @@ class AsyncExtendedTest {
     @Test
     fun `test join runs two computations concurrently with OSThreadAsync`() {
         val code = """
-            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
             perform OSThreadAsync in do
@@ -68,7 +68,7 @@ class AsyncExtendedTest {
     @Test
     fun `test join with different return types`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
             perform LoomAsync in do
@@ -89,7 +89,7 @@ class AsyncExtendedTest {
     @Test
     fun `test join3 runs three computations concurrently`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
             perform LoomAsync in do
@@ -108,7 +108,7 @@ class AsyncExtendedTest {
     fun `test join3 with different types`() {
         // Use CoopAsync for deterministic behavior (avoids Truffle thread issues)
         val code = """
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
             perform CoopAsync in do
@@ -130,7 +130,7 @@ class AsyncExtendedTest {
     @Test
     fun `test map applies function to all elements concurrently`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::collections::seq
 
             perform LoomAsync in do
@@ -149,7 +149,7 @@ class AsyncExtendedTest {
     fun `test map preserves order`() {
         // Use CoopAsync for deterministic ordering
         val code = """
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform CoopAsync in do
                 let xs = [5, 4, 3, 2, 1]
@@ -169,7 +169,7 @@ class AsyncExtendedTest {
     @Test
     fun `test map with empty list`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::collections::seq
 
             perform LoomAsync in do
@@ -184,7 +184,7 @@ class AsyncExtendedTest {
     @Test
     fun `test map with OSThreadAsync`() {
         val code = """
-            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform OSThreadAsync in do
                 let xs = [10, 20, 30]
@@ -206,7 +206,7 @@ class AsyncExtendedTest {
         // for_each is for side effects, test it completes without error
         // We test by verifying it returns {} and doesn't throw
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let xs = [1, 2, 3]
@@ -221,7 +221,7 @@ class AsyncExtendedTest {
     @Test
     fun `test for_each with empty list returns unit`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let xs: [Int] = []
@@ -240,7 +240,7 @@ class AsyncExtendedTest {
     @Test
     fun `test filter keeps elements matching predicate`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let xs = [1, 2, 3, 4, 5, 6]
@@ -256,7 +256,7 @@ class AsyncExtendedTest {
     @Test
     fun `test filter preserves order`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let xs = [10, 5, 20, 3, 15]
@@ -272,7 +272,7 @@ class AsyncExtendedTest {
     @Test
     fun `test filter with no matches returns empty list`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::collections::seq
 
             perform LoomAsync in do
@@ -287,7 +287,7 @@ class AsyncExtendedTest {
     @Test
     fun `test filter with all matches returns all elements`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let xs = [1, 2, 3]
@@ -307,7 +307,7 @@ class AsyncExtendedTest {
     @Test
     fun `test any returns first successful result`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let p1 = Async.spawn {f = {} -> 1}
@@ -324,7 +324,7 @@ class AsyncExtendedTest {
     @Test
     fun `test any with single promise`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let p = Async.spawn {f = {} -> 42}
@@ -342,7 +342,7 @@ class AsyncExtendedTest {
     @Test
     fun `test settle collects all results as Ok`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
@@ -361,7 +361,7 @@ class AsyncExtendedTest {
     @Test
     fun `test settle returns Ok variants for successful promises`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let p = Async.spawn {f = {} -> 42}
@@ -377,7 +377,7 @@ class AsyncExtendedTest {
     @Test
     fun `test settle with empty list returns empty list`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let results = Async.settle {ps = []}
@@ -397,7 +397,7 @@ class AsyncExtendedTest {
     @Test
     fun `test CoopAsync join executes sequentially`() {
         val code = """
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
             perform CoopAsync in do
@@ -414,7 +414,7 @@ class AsyncExtendedTest {
     @Test
     fun `test CoopAsync map executes sequentially`() {
         val code = """
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform CoopAsync in do
                 let xs = [1, 2, 3]
@@ -430,7 +430,7 @@ class AsyncExtendedTest {
     @Test
     fun `test CoopAsync filter works correctly`() {
         val code = """
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform CoopAsync in do
                 let xs = [1, 2, 3, 4, 5]
@@ -452,7 +452,7 @@ class AsyncExtendedTest {
         // join now returns {l: Result [Int] AsyncError, r: Result ...}.
         // The spawned thunks themselves call Async.map.
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let r = join {
@@ -477,7 +477,7 @@ class AsyncExtendedTest {
     @Test
     fun `test nested spawn with await in map`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let xs = [1, 2, 3]
@@ -500,7 +500,7 @@ class AsyncExtendedTest {
     fun `test filter combined with for_each`() {
         // Test that filter and for_each can be chained together
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform LoomAsync in do
                 let xs = [1, 2, 3, 4, 5, 6]

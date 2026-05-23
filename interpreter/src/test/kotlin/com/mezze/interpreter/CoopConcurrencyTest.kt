@@ -28,7 +28,7 @@ class CoopConcurrencyTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private val setupCode = """
-        use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
+        use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
     """.trimIndent()
 
     // =============================================================================

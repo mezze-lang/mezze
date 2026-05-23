@@ -404,29 +404,24 @@ pub let join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> {
   let pc = Async.spawn { f = c }
   { a = Async.await { p = pa }, b = Async.await { p = pb }, c = Async.await { p = pc } }
 
-## Map over a sequence concurrently; results in input order.
-pub let par_map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Async, ...> =
+## Identical to `all` — kept under the `settle` name for callers that
+## think of "wait for everyone, see each result" as settle semantics.
+pub let settle : { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async, ...> = { ps } ->
+  all { ps = ps }
+
+## Map over a sequence concurrently; each result wrapped in
+## `Result 'b AsyncError` so per-element failure is visible. Use
+## `try_par_map` if you want fail-fast + unwrap semantics.
+pub let par_map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> [Result 'b AsyncError] <Async, ...> =
   { xs, f } -> do
     let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> f { x = x } } }
     all { ps = ps }
 
-## Run f over each element concurrently, discard results.
-pub let par_for_each : { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Async, ...> =
-  { xs, f } -> do
-    let _ = par_map { xs = xs, f = f }
-    {}
-
-## Filter a sequence with concurrent predicate evaluation.
-pub let par_filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Async, ...> =
-  { xs, f } -> do
-    let tagged = par_map {
-      xs = xs,
-      f = { x } -> { elem = x, keep = f { x = x } },
-    }
-    seq::map {
-      xs = seq::filter { xs = tagged, p = { x } -> x.keep },
-      f = { x } -> x.elem,
-    }
+## Run f over each element concurrently for side effects; per-element
+## Results returned (any failures visible to the caller). Use
+## `try_par_for_each` if you want fail-fast unit-returning semantics.
+pub let par_for_each : { xs: ['a], f: { x: 'a } -> 'b <...> } -> [Result 'b AsyncError] <Async, ...> =
+  { xs, f } -> par_map { xs = xs, f = f }
 
 ## Wait for p up to ms milliseconds; None if it didn't finish in time.
 pub let with_timeout : { ms: Int, p: Promise 'a } -> Option 'a <Async, ...> = { ms, p } ->
@@ -501,6 +496,53 @@ pub let try_join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } 
             match Async.await { p = pc } is
               Err { error = e } -> Err { error = e }
               Ok  { val = vc }  -> Ok { val = { a = va, b = vb, c = vc } }
+
+## Map over a sequence concurrently. On first failure, cancel siblings
+## and return that error. Otherwise return the unwrapped output values
+## in input order.
+pub let try_par_map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> Result ['b] AsyncError <Async, ...> =
+  { xs, f } -> do
+    let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> f { x = x } } }
+    try_all { ps = ps }
+
+## Run f over each element concurrently; short-circuit on first error,
+## cancel siblings, return the error. On all-Ok, returns {}.
+pub let try_par_for_each : { xs: ['a], f: { x: 'a } -> 'b <...> } -> Result {} AsyncError <Async, ...> =
+  { xs, f } -> match try_par_map { xs = xs, f = f } is
+    Ok  { val = _ }   -> Ok { val = {} }
+    Err { error = e } -> Err { error = e }
+
+## Filter a sequence with concurrent predicate evaluation; fail-fast
+## on first predicate error.
+pub let try_par_filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Result ['a] AsyncError <Async, ...> =
+  { xs, f } -> do
+    let tagged = try_par_map {
+      xs = xs,
+      f = { x } -> { elem = x, keep = f { x = x } },
+    }
+    match tagged is
+      Err { error = e } -> Err { error = e }
+      Ok  { val = ts }  -> Ok { val = seq::map {
+        xs = seq::filter { xs = ts, p = { x } -> x.keep },
+        f = { x } -> x.elem,
+      } }
+
+## Wait for the first successful promise. If every one fails, returns
+## the first error seen. Built on `try_all` semantics — but since `any`
+## wants first-success-wins, we await sequentially: as soon as one is
+## Ok, return its value (cancelling the rest).
+pub let try_any : { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps } -> do
+  let results = seq::map { xs = ps, f = { x } -> Async.await { p = x } }
+  match seq::find { xs = results, p = { x } -> result::is_ok { result = x } } is
+    Some { val = winner } -> match winner is
+      Ok  { val = v }   -> Ok { val = v }
+      Err { error = _ } -> Err { error = AsyncFailed { msg = "try_any: impossible" } }
+    None ->
+      match seq::find { xs = results, p = { x } -> result::is_err { result = x } } is
+        Some { val = first_err } -> match first_err is
+          Err { error = e } -> Err { error = e }
+          Ok  { val = _ }   -> Err { error = AsyncFailed { msg = "try_any: impossible" } }
+        None -> Err { error = AsyncFailed { msg = "try_any: empty input" } }
 
 ## Run a computation with cooperative scheduling.
 pub let run_coop : { computation: {} -> 'a <Async> } -> 'a = { computation } -> perform CoopAsync in computation {}
