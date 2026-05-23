@@ -233,6 +233,59 @@ internal val MezzeParser.lambdaExpression: Parser<ParsedExpr>
                                             )
                                         }
 
+                                        // Targeted error: `{params} -> Ret do body`.
+                                        // Mezze lambdas don't take a return-type annotation
+                                        // inline. Users who try this end up with the type as
+                                        // the lambda body and a stray `do body` that silently
+                                        // gets parsed as something else, hiding the param
+                                        // bindings — the typechecker then says "n is undefined".
+                                        // Catch the shape here.
+                                        //
+                                        // Heuristic: lookahead — capitalised identifier
+                                        // (starts a type) immediately followed by `do`.
+                                        // Conservative; doesn't trigger on lower-case body
+                                        // expressions that happen to be a single identifier
+                                        // (those legitimately can precede a `do` block as
+                                        // separate statements in a do-block-wrapped lambda).
+                                        if (nextTok != null && nextTok.type == TokenType.IDENTIFIER) {
+                                            val firstChar = nextTok.text.firstOrNull()
+                                            val isTypeName = firstChar != null && firstChar.isUpperCase()
+                                            if (isTypeName) {
+                                                // Consume the head type ident plus any same-line
+                                                // identifier args (e.g. `List Int`, `Result Int Str`).
+                                                // Stop at newline, `do`, or anything that isn't an ident.
+                                                var scan = stream4.advance()
+                                                val typeTextParts = mutableListOf(nextTok.text)
+                                                while (true) {
+                                                    val t = scan.current() ?: break
+                                                    if (t.type == TokenType.IDENTIFIER) {
+                                                        typeTextParts.add(t.text)
+                                                        scan = scan.advance()
+                                                    } else break
+                                                }
+                                                val afterType = skipNewlines(scan)
+                                                val maybeDo = afterType.current()
+                                                if (maybeDo?.type == TokenType.DO) {
+                                                    val typeText = typeTextParts.joinToString(" ")
+                                                    return@parser ParseResult.Failure(
+                                                        "Lambda return-type annotation isn't supported inline. " +
+                                                            "Mezze infers return types — drop the `$typeText` and write `-> do body`. " +
+                                                            "If you want to annotate the function's type, put it on the `let`: " +
+                                                            "`let f: { ... } -> $typeText = { ... } -> do body`.",
+                                                        stream4.getSourcePosition(),
+                                                        nextTok.line,
+                                                        nextTok.column,
+                                                        isFatal = true,
+                                                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0123_LAMBDA_INLINE_RETURN_TYPE,
+                                                        hints = listOf(
+                                                            "remove `$typeText` between `->` and `do` (return type is inferred)",
+                                                            "or annotate the whole function: `let f: ... -> $typeText = { ... } -> do ...`"
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        }
+
                                         when (val body = expression(stream4)) {
                                             is ParseResult.Failure -> return@parser body
                                             is ParseResult.Success -> {

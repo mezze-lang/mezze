@@ -55,6 +55,7 @@ enum class ErrorCode {
     P0120_WITH_AFTER_ARROW, // `{p} -> Ret with C 'a` — `with` must come BEFORE the arrow
     P0121_LAMBDA_BODY_BARE_LET, // `{p} -> let x = ...` — wrap in `do` to use let-bindings (#221)
     P0122_MATCH_NEEDS_IS, // `match x { case ... }` or `match x case ...` — Mezze uses `match x is` + indented arms
+    P0123_LAMBDA_INLINE_RETURN_TYPE, // `{ p } -> Ret do body` — return-type annotation must go on the binding, not inline
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,
