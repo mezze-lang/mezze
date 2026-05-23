@@ -33,7 +33,7 @@ class AsyncEffectHandlerPropagationTest {
         // The spawned task should have access to the Console handler from the parent
         val code = """
             use std::effects::log::{Console, println}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
             use std::effects::stm::{STM, tvar, deref, atomically}
 
             let flag = tvar {init = 0}
@@ -58,7 +58,7 @@ class AsyncEffectHandlerPropagationTest {
     fun `test spawned task can use STM effect from parent`() {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
 
             let counter = tvar {init = 100}
 
@@ -78,7 +78,7 @@ class AsyncEffectHandlerPropagationTest {
     fun `test multiple spawned tasks share effect handlers`() {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
 
             let counter = tvar {init = 0}
 
@@ -106,7 +106,7 @@ class AsyncEffectHandlerPropagationTest {
     fun `test nested spawns propagate handlers`() {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
 
             let counter = tvar {init = 0}
 
@@ -138,7 +138,7 @@ class AsyncEffectHandlerPropagationTest {
         val code = """
             use std::effects::log::{Console, println}
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
 
             let result_var = tvar {init = 0}
 
@@ -170,7 +170,7 @@ class AsyncEffectHandlerPropagationTest {
     fun `test parallel spawns all have handlers`() {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
 
             let counter = tvar {init = 0}
 
@@ -204,13 +204,13 @@ class AsyncEffectHandlerPropagationTest {
     fun `test Async join propagates handlers to both branches`() {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
 
             let a = tvar {init = 0}
             let b = tvar {init = 0}
 
             perform LoomAsync in do
-                let result = Async.join {
+                let result = join {
                     l = {} -> atomically {f = {} -> STM.write {var = a, val = 10}},
                     r = {} -> atomically {f = {} -> STM.write {var = b, val = 20}}
                 }

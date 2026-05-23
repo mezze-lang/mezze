@@ -25,7 +25,7 @@ class CoopAsyncTest {
     @Test
     fun `test simple spawn and await`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
@@ -41,7 +41,7 @@ class CoopAsyncTest {
     @Test
     fun `test spawn multiple tasks and await`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
@@ -66,7 +66,7 @@ class CoopAsyncTest {
     @Test
     fun `test spawn with computation`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             let compute = {x} -> x * x + 1
 
@@ -89,7 +89,7 @@ class CoopAsyncTest {
     fun `test tasks can interleave`() {
         // This test verifies that tasks don't block each other
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> "first"}
@@ -115,11 +115,11 @@ class CoopAsyncTest {
     @Test
     fun `test join two computations`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
             use std::result
 
             perform CoopAsync in do
-                let r = Async.join {
+                let r = join {
                     l = {} -> 100,
                     r = {} -> 200
                 }
@@ -133,11 +133,11 @@ class CoopAsyncTest {
     @Test
     fun `test join3 computations`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
             use std::result
 
             perform CoopAsync in do
-                let r = Async.join3 {
+                let r = join3 {
                     a = {} -> 1,
                     b = {} -> 2,
                     c = {} -> 3
@@ -156,7 +156,7 @@ class CoopAsyncTest {
     @Test
     fun `test async map`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let results = Async.map {
@@ -183,7 +183,7 @@ class CoopAsyncTest {
     @Test
     fun `test is_done returns true after await`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
@@ -204,7 +204,7 @@ class CoopAsyncTest {
     @Test
     fun `test nested function with async`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             let async_compute = {x} -> do
                 let p = Async.spawn {f = {} -> x + 10}
@@ -230,7 +230,7 @@ class CoopAsyncTest {
     fun `test is_done returns false before task runs`() {
         // With real scheduler, spawned tasks are queued, not immediately run
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
@@ -246,7 +246,7 @@ class CoopAsyncTest {
     fun `test await runs scheduler to completion`() {
         // Await should run the scheduler until the promise completes
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 1}
@@ -276,7 +276,7 @@ class CoopAsyncTest {
     @Test
     fun `test all waits for all promises`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
@@ -303,13 +303,13 @@ class CoopAsyncTest {
     @Test
     fun `test race returns first completed`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> "first"}
                 let p2 = Async.spawn {f = {} -> "second"}
                 # In coop mode with FIFO queue, first spawned completes first
-                match Async.race {ps = [p1, p2]} is
+                match race {ps = [p1, p2]} is
                   Ok { val } -> val
                   Err { error = _ } -> "err"
         """.trimIndent()
@@ -326,11 +326,11 @@ class CoopAsyncTest {
     fun `test timeout returns Some in coop mode`() {
         // In coop mode, timeout always succeeds (no real time)
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                match Async.timeout {ms = 1000, p = p} is
+                match with_timeout {ms = 1000, p = p} is
                     Some {val} -> val
                     None -> 0
         """.trimIndent()
@@ -346,7 +346,7 @@ class CoopAsyncTest {
     @Test
     fun `test async filter`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let results = Async.filter {
@@ -373,7 +373,7 @@ class CoopAsyncTest {
     @Test
     fun `test async for_each runs all`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let count = { val = 0 }
@@ -397,7 +397,7 @@ class CoopAsyncTest {
     fun `test sleep yields to other tasks`() {
         // In coop mode, sleep just yields - doesn't actually wait
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 Async.sleep {ms = 100}
@@ -415,7 +415,7 @@ class CoopAsyncTest {
     @Test
     fun `test chained async operations`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
@@ -439,7 +439,7 @@ class CoopAsyncTest {
     @Test
     fun `test many concurrent tasks`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
             use std::collections::seq
 
             perform CoopAsync in do
@@ -461,20 +461,20 @@ class CoopAsyncTest {
     @Test
     fun `test nested joins`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
             use std::result
 
             perform CoopAsync in do
-                let outer = Async.join {
+                let outer = join {
                     l = {} -> do
-                        let inner = Async.join {
+                        let inner = join {
                             l = {} -> 1,
                             r = {} -> 2
                         }
                         result::get_or_else { result = inner.l, def = 0 } + result::get_or_else { result = inner.r, def = 0 }
                     ,
                     r = {} -> do
-                        let inner = Async.join {
+                        let inner = join {
                             l = {} -> 3,
                             r = {} -> 4
                         }
@@ -494,7 +494,7 @@ class CoopAsyncTest {
     @Test
     fun `test settle returns Ok for successful tasks`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
             use std::collections::seq
 
             perform CoopAsync in do
@@ -515,7 +515,7 @@ class CoopAsyncTest {
     @Test
     fun `test run helper spawns and awaits`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync, run}
+            use std::effects::async::{Async, CoopAsync, run, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 match run {f = {} -> 42} is
@@ -535,7 +535,7 @@ class CoopAsyncTest {
     fun `test execution order is deterministic`() {
         // Coop scheduler runs tasks in FIFO order
         val source = """
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
 
             perform CoopAsync in do
                 let order = []

@@ -22,7 +22,7 @@ class AsyncModuleTest {
 
     // Helper to wrap code in CoopAsync handler
     private fun withCoopAsync(body: String): String =
-        "use std::effects::async::{Async, CoopAsync}\n" +
+        "use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3}\n" +
         "use std::collections::seq\n" +
         "use std::result\n" +
         "\n" +
@@ -109,7 +109,7 @@ class AsyncModuleTest {
         val result = eval(withCoopAsync("""
             let p1 = Async.spawn {f = {} -> 1}
             let p2 = Async.spawn {f = {} -> 2}
-            match Async.race {ps = [p1, p2]} is
+            match race {ps = [p1, p2]} is
               Ok { val } -> val
               Err { error = _ } -> -1
         """))
@@ -122,7 +122,7 @@ class AsyncModuleTest {
     @Test
     fun `test join runs two computations`() {
         val result = eval(withCoopAsync("""
-            let r = Async.join {
+            let r = join {
                 l = {} -> 10,
                 r = {} -> 20
             }
@@ -136,7 +136,7 @@ class AsyncModuleTest {
     @Test
     fun `test join3 runs three computations`() {
         val result = eval(withCoopAsync("""
-            let r = Async.join3 {
+            let r = join3 {
                 a = {} -> 1,
                 b = {} -> 2,
                 c = {} -> 3
@@ -196,7 +196,7 @@ class AsyncModuleTest {
     fun `test timeout returns Some when fast`() {
         val result = eval(withCoopAsync("""
             let p = Async.spawn {f = {} -> 42}
-            match Async.timeout {ms = 1000, p = p} is
+            match with_timeout {ms = 1000, p = p} is
                 Some {val} -> val
                 None -> 0
         """))

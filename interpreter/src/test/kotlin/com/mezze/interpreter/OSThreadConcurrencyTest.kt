@@ -23,7 +23,7 @@ class OSThreadConcurrencyTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private val setupCode = """
-        use std::effects::async::{Async, OSThreadAsync}
+        use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3 }
     """.trimIndent()
 
     // =============================================================================
@@ -376,7 +376,7 @@ class OSThreadConcurrencyTest {
                 let p1 = Async.spawn {f = {} -> 1}
                 let p2 = Async.spawn {f = {} -> 2}
                 let p3 = Async.spawn {f = {} -> 3}
-                let result = match Async.race {ps = [p1, p2, p3]} is
+                let result = match race {ps = [p1, p2, p3]} is
                   Ok { val } -> val
                   Err { error = _ } -> -1
                 result >= 1
@@ -442,7 +442,7 @@ class OSThreadConcurrencyTest {
 
             perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                let result = Async.timeout {ms = 5000, p = p}
+                let result = with_timeout {ms = 5000, p = p}
                 match result is
                     Some {val} -> val
                     None -> 0

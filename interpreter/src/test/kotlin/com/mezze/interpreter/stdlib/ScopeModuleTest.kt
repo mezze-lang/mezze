@@ -41,7 +41,7 @@ class ScopeModuleTest {
     @Test
     fun `test Async scoped with scope_spawn`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
             use std::result
 
             perform LoomAsync in do
@@ -56,7 +56,7 @@ class ScopeModuleTest {
     @Test
     fun `test Async scoped with multiple spawns`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
             use std::result
 
             perform LoomAsync in do
@@ -78,7 +78,7 @@ class ScopeModuleTest {
     @Test
     fun `test Async scoped returns function result`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
             use std::result
 
             perform LoomAsync in do
@@ -94,7 +94,7 @@ class ScopeModuleTest {
     @Test
     fun `test Async scoped with no child tasks`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
 
             perform LoomAsync in do
                 Async.scoped { f = { sc } -> 42 }
@@ -105,7 +105,7 @@ class ScopeModuleTest {
     @Test
     fun `test deeply nested Async scoped`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
             use std::result
 
             perform LoomAsync in do
@@ -133,7 +133,7 @@ class ScopeModuleTest {
     @Test
     fun `test scoped with join`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
             use std::result
 
             perform LoomAsync in do
@@ -141,7 +141,7 @@ class ScopeModuleTest {
                     let p1 = scope_spawn { sc = sc, f = {} -> 10 }
                     let p2 = scope_spawn { sc = sc, f = {} -> 20 }
 
-                    let joined = Async.join {
+                    let joined = join {
                         l = {} -> 5,
                         r = {} -> 15
                     }
@@ -162,7 +162,7 @@ class ScopeModuleTest {
     @Test
     fun `test scoped with record returns`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
             use std::result
 
             perform LoomAsync in do
@@ -186,7 +186,7 @@ class ScopeModuleTest {
     @Test
     fun `test scoped with closure capture`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
             use std::result
 
             perform LoomAsync in do
