@@ -541,7 +541,14 @@ class TypedASTCompiler(
             compiledHashes.add(spec.specializedHash)
         }
 
-        // Add extracted lambdas
+        // Add extracted lambdas. These are anonymous lambdas hoisted out
+        // of expression positions (e.g. `Async.spawn { f = {} -> ... }`).
+        // Each add-site appends unconditionally, so the same lambda body
+        // can appear multiple times if user code repeats it (e.g. inside
+        // a loop). We rely on the per-hash dedupe pass below to collapse
+        // them — content-addressed lowering means structurally identical
+        // bodies share a hash, so the duplicate rows are semantically the
+        // same function, just compiled more than once.
         functions.addAll(extractedFunctions)
 
         if (System.getenv("MEZZE_DISPATCH_CENSUS") != null && census.total() > 0) {
@@ -566,7 +573,24 @@ class TypedASTCompiler(
             )
         }
 
-        return CompileResult(functions, performerRecords.toList())
+        // Per-hash dedupe. The compiler's three append phases (decls,
+        // mono specializations, extracted lambdas) each have local
+        // dedupe sets, but a hash CAN appear across phases (e.g. a
+        // lambda hoisted from a mono'd body that happens to match an
+        // extracted-lambda body). Content-addressed semantics: every
+        // unique hash represents one function, regardless of how many
+        // times the compiler emitted it. Downstream consumers
+        // (StorePopulator, app_functions table) treat the list as a
+        // set, so collapse it here at the source.
+        //
+        // First occurrence wins for ordering. This is the only place
+        // where dedup happens — never let downstream rediscover it.
+        val seenHashes = HashSet<Hash>(functions.size)
+        val deduped = ArrayList<FunctionIR>(functions.size)
+        for (fn in functions) {
+            if (seenHashes.add(fn.hash)) deduped.add(fn)
+        }
+        return CompileResult(deduped, performerRecords.toList())
     }
 
     private fun compileLetDecl(decl: TypedLetDecl): FunctionIR {

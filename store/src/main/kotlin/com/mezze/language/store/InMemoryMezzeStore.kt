@@ -165,7 +165,12 @@ class InMemoryMezzeStore : MezzeStore {
     override fun getApp(name: String): AppRow? = apps[name]
 
     override fun setAppFunctionHashes(name: String, hashes: List<Hash>) {
-        appFunctionHashes[name] = hashes
+        // Dedupe to match the SQLite-backed store's set semantics (#225).
+        // First-occurrence wins for ordering.
+        val seen = HashSet<Hash>(hashes.size)
+        val deduped = ArrayList<Hash>(hashes.size)
+        for (h in hashes) if (seen.add(h)) deduped.add(h)
+        appFunctionHashes[name] = deduped
     }
 
     override fun getAppFunctionHashes(name: String): List<Hash> =

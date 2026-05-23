@@ -5,6 +5,8 @@ import com.mezze.language.cli.`package`.MezzeToml
 import com.mezze.language.codebase.SQLiteMezzeStore
 import com.mezze.language.codebase.StorePopulator
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.store.StoreSerialization
+import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.printing.ErrorFormatter
@@ -116,60 +118,49 @@ class BuildCommand {
             val timing = System.getenv("MEZZE_TIMING") != null
             fun ms() = (System.nanoTime() - startTime) / 1_000_000
 
-            // 1. Compile
+            // 1. Compile (or load from cache).
+            //
+            // Cache fast-path: if .mz/cache.sqlite already has this app's
+            // IRs AND every project file on disk content-matches the
+            // cached source-hash, skip parse+typecheck+lower entirely.
+            // Mirrors the COLD_START fast-path in mez dev (DevRunner).
+            //
+            // mez dev populates the cache on every save, so the typical
+            // workflow (edit → save → mez build) hits 100%.
             val source = appFile.readText()
             val sourceHash = sha256(source)
             val modulePath = manifest.`package`.name
 
-            val parser = MezzeParser()
-            // mez build is strict-no-errors: if ANY parse error exists,
-            // refuse to write the JAR. But surface ALL parse errors at
-            // once via parseWithRecovery — better DX than fix-one-at-a-time.
-            val parseResult = parser.parseWithRecovery(source, file = appFile.name)
-            if (parseResult.errors.isNotEmpty()) {
-                println(ParseErrorFormatter.formatAll(parseResult.errors))
-                kotlin.system.exitProcess(3)
-            }
-            val ast = parseResult.module
-            if (timing) System.err.println("[${ms()}ms] parsed")
+            val cached = BuildCache.tryLoad(store, appConfig.name)
+            val loweredFunctions: List<FunctionIR>
+            val performerRecords: List<Array<String>>
+            // typedModule available only on the recompile path. The only
+            // downstream consumer is entry-shape validation; that's skipped
+            // on cache hits (if the IR was good enough to cache, the shape
+            // already passed).
+            val typedModuleForValidation: com.mezze.language.typedast.TypedModule?
 
-            val typeChecker = TypeChecker()
-            // Use the result-returning lower-level API so we surface ALL
-            // collected errors (matching `mez check` + `mez dev` + LSP),
-            // not just the first one.
-            val rawResult = try {
-                typeChecker.checkParsedModule(ast, currentDir.toPath(), enablePrelude = true)
-            } catch (e: TypeCheckError) {
-                println(ErrorFormatter.format(e, source))
-                kotlin.system.exitProcess(4)
-            }
-            if (rawResult is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure) {
-                println(TypeCheckRunner.formatErrors(rawResult, source))
-                kotlin.system.exitProcess(4)
-            }
-            val typeCheckResult = TypeCheckRunner.wrapSuccess(
-                rawResult as com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success
-            )
-            if (timing) System.err.println("[${ms()}ms] typechecked + lowered (${typeCheckResult.loweredFunctions.size} fns)")
-
-            // 2. Scatter into store. populate() returns a delta — only blobs
-            //    whose hashes aren't already present get written.
-            val depParsedModules = com.mezze.language.typechecker.ModuleResolver.getAllParsedModules()
-            StorePopulator.populate(
-                store, typeCheckResult, modulePath,
-                appFile.absolutePath, sourceHash,
-                entrySource = source,
-                parsedModule = ast,
-                loadedParsedModules = depParsedModules
-            )
-
-            // Store the user's lowered function manifest for standalone JAR loading.
-            // (StorePopulator already stored the FunctionIRs by hash — manifest links
-            // app -> ordered hashes.)
-            store.transaction {
-                store.putApp(appConfig.name, appConfig.entry, modulePath, appFile.absolutePath)
-                store.setAppFunctionHashes(appConfig.name, typeCheckResult.loweredFunctions.map { it.hash })
-                store.setAppPerformerRecords(appConfig.name, typeCheckResult.performerRecords)
+            if (cached != null) {
+                loweredFunctions = cached.functions
+                performerRecords = cached.performerRecords
+                typedModuleForValidation = null
+                if (timing) System.err.println("[${ms()}ms] cache hit (${cached.functions.size} fns) — skipping typecheck")
+            } else {
+                val compiled = compileFromSource(
+                    store = store,
+                    source = source,
+                    sourceHash = sourceHash,
+                    appFile = appFile,
+                    appName = appConfig.name,
+                    entryName = appConfig.entry,
+                    modulePath = modulePath,
+                    currentDir = currentDir,
+                    timing = timing,
+                    ms = ::ms,
+                )
+                loweredFunctions = compiled.loweredFunctions
+                performerRecords = compiled.performerRecords
+                typedModuleForValidation = compiled.typedModule
             }
 
             // 2b. Load stdlib FunctionIRs into store — but skip ones already present
@@ -197,18 +188,25 @@ class BuildCommand {
 
             // 3. Validate entry function — must exist and have shape `{} -> {} <*>`
             //    (effects allowed, ability constraints allowed, dict params hidden).
+            //
+            // On cache hits we skip this entirely: the IR couldn't have been
+            // cached if it hadn't already passed entry validation at the
+            // original compile time. typedModule is only populated on the
+            // fresh-compile path.
             val entryName = appConfig.entry
-            val mainBinding = typeCheckResult.typedModule?.decls
-                ?.filterIsInstance<TypedLetDecl>()
-                ?.find { it.name == entryName }
+            if (typedModuleForValidation != null) {
+                val mainBinding = typedModuleForValidation.decls
+                    .filterIsInstance<TypedLetDecl>()
+                    .find { it.name == entryName }
 
-            if (mainBinding == null) {
-                println("Error: App must define a '$entryName' function with type {} -> {} <*>")
-                kotlin.system.exitProcess(4)
-            }
-            EntryPointCheck.errorMessage(EntryPointCheck.check(mainBinding!!), entryName)?.let { msg ->
-                println("Error: $msg")
-                kotlin.system.exitProcess(4)
+                if (mainBinding == null) {
+                    println("Error: App must define a '$entryName' function with type {} -> {} <*>")
+                    kotlin.system.exitProcess(4)
+                }
+                EntryPointCheck.errorMessage(EntryPointCheck.check(mainBinding!!), entryName)?.let { msg ->
+                    println("Error: $msg")
+                    kotlin.system.exitProcess(4)
+                }
             }
 
             // 4. Resolve output directory + create it.
@@ -225,7 +223,7 @@ class BuildCommand {
             // 5b. Compute the FunctionIR closure the runtime will need
             //     (user code + reachable stdlib). Same logic the native
             //     build uses — single source of truth.
-            val closure = NativeBuildPath.computeReachableClosure(typeCheckResult.loweredFunctions)
+            val closure = NativeBuildPath.computeReachableClosure(loweredFunctions)
             if (timing) System.err.println("[${ms()}ms] runtime closure (${closure.size} fns)")
 
             // 6. Create runnable JAR — clones mezze-runtime.jar (slim
@@ -238,7 +236,7 @@ class BuildCommand {
                 appName = appConfig.name,
                 entryName = appConfig.entry,
                 closure = closure,
-                performerRecords = typeCheckResult.performerRecords,
+                performerRecords = performerRecords,
             )
             if (timing) System.err.println("[${ms()}ms] standalone JAR packed")
 
@@ -282,8 +280,8 @@ class BuildCommand {
                     outputName = "$outputJarName-native",
                     appName = appConfig.name,
                     entryName = appConfig.entry,
-                    loweredFunctions = typeCheckResult.loweredFunctions,
-                    performerRecords = typeCheckResult.performerRecords,
+                    loweredFunctions = loweredFunctions,
+                    performerRecords = performerRecords,
                     optimized = optimizedBuild,
                     timing = timing,
                     relativeTime = { (System.nanoTime() - startTime) / 1_000_000 },
@@ -310,6 +308,90 @@ class BuildCommand {
         } finally {
             store.close()
         }
+    }
+
+    /**
+     * Output of a fresh compile: the data the jar-packing code needs,
+     * plus the TypedModule for entry-point validation. Mirrors
+     * TypeCheckRunner's success shape minus fields the build path doesn't
+     * read.
+     */
+    private data class CompiledApp(
+        val loweredFunctions: List<FunctionIR>,
+        val performerRecords: List<Array<String>>,
+        val typedModule: com.mezze.language.typedast.TypedModule?,
+    )
+
+    /**
+     * Full parse + typecheck + lower path. Writes the result back to the
+     * store so the next `mez build` / `mez dev` can hit the cache. Calls
+     * exitProcess on parse / typecheck errors (matching prior behaviour).
+     */
+    private fun compileFromSource(
+        store: SQLiteMezzeStore,
+        source: String,
+        sourceHash: String,
+        appFile: File,
+        appName: String,
+        entryName: String,
+        modulePath: String,
+        currentDir: File,
+        timing: Boolean,
+        ms: () -> Long,
+    ): CompiledApp {
+        val parser = MezzeParser()
+        val parseResult = parser.parseWithRecovery(source, file = appFile.name)
+        if (parseResult.errors.isNotEmpty()) {
+            println(ParseErrorFormatter.formatAll(parseResult.errors))
+            kotlin.system.exitProcess(3)
+        }
+        val ast = parseResult.module
+        if (timing) System.err.println("[${ms()}ms] parsed")
+
+        // Pre-load typed modules from cache.sqlite so the typechecker
+        // only re-typechecks modules whose source actually changed.
+        // Stdlib comes from PrecompiledStdlib (no SQLite round-trip);
+        // user modules in the entry's import closure come from store.
+        // Without this every `mez build` re-typechecks every imported
+        // module from scratch.
+        StoreHydrator.hydrate(store, modulePath, timing = timing)
+
+        val typeChecker = TypeChecker()
+        val rawResult = try {
+            typeChecker.checkParsedModule(ast, currentDir.toPath(), enablePrelude = true)
+        } catch (e: TypeCheckError) {
+            println(ErrorFormatter.format(e, source))
+            kotlin.system.exitProcess(4)
+        }
+        if (rawResult is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure) {
+            println(TypeCheckRunner.formatErrors(rawResult, source))
+            kotlin.system.exitProcess(4)
+        }
+        val typeCheckResult = TypeCheckRunner.wrapSuccess(
+            rawResult as com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success
+        )
+        if (timing) System.err.println("[${ms()}ms] typechecked + lowered (${typeCheckResult.loweredFunctions.size} fns)")
+
+        // Scatter result into store so next run hits the cache.
+        val depParsedModules = com.mezze.language.typechecker.ModuleResolver.getAllParsedModules()
+        StorePopulator.populate(
+            store, typeCheckResult, modulePath,
+            appFile.absolutePath, sourceHash,
+            entrySource = source,
+            parsedModule = ast,
+            loadedParsedModules = depParsedModules
+        )
+        store.transaction {
+            store.putApp(appName, entryName, modulePath, appFile.absolutePath)
+            store.setAppFunctionHashes(appName, typeCheckResult.loweredFunctions.map { it.hash })
+            store.setAppPerformerRecords(appName, typeCheckResult.performerRecords)
+        }
+
+        return CompiledApp(
+            loweredFunctions = typeCheckResult.loweredFunctions,
+            performerRecords = typeCheckResult.performerRecords,
+            typedModule = typeCheckResult.typedModule,
+        )
     }
 
     /**
@@ -454,8 +536,14 @@ class BuildCommand {
             put("META-INF/mezze/embedded-app.meta", metaBytes)
 
             // Fresh MANIFEST.MF — points at MezzeAppMain in :interpreter.
+            // Multi-Release MUST be true: Truffle API is a multi-release JAR
+            // and the JDK 21+ overlay of JDKAccessor is what implements
+            // virtual threads. Without this header the pre-21 base class is
+            // loaded and Async.spawn immediately throws
+            // "VirtualThread is not supported on this JDK".
             val manifest = "Manifest-Version: 1.0\n" +
-                "Main-Class: com.mezze.interpreter.standalone.MezzeAppMain\n\n"
+                "Main-Class: com.mezze.interpreter.standalone.MezzeAppMain\n" +
+                "Multi-Release: true\n\n"
             put("META-INF/MANIFEST.MF", manifest.toByteArray())
         }
     }

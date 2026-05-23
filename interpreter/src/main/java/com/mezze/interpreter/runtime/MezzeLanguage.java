@@ -324,22 +324,53 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             projectRoot = Paths.get(".");
         }
 
-        // Parse and typecheck via context-owned instances (proper isolation, native-image safe)
-        var parsedModule = ctx.getParser().parseParsedModule(sourceCode, source.getPath() != null ? source.getPath() : "<unknown>");
-        var typeCheckResult = ctx.getTypeChecker().typeCheck(parsedModule, projectRoot, true, null);
+        // Parse and typecheck via context-owned instances (proper isolation,
+        // native-image safe). Reflective so the slim runtime jar (without
+        // :parser/:typechecker) class-loads fine; this path only fires when
+        // a host calls context.eval() on source (tests, embedders) — the
+        // wire-protocol path took the `directExecutionFunctions` branch above.
+        var parsedModule = invoke(ctx.getParser(), "parseParsedModule",
+            new Class<?>[]{String.class, String.class},
+            sourceCode, source.getPath() != null ? source.getPath() : "<unknown>");
+        var typeCheckResult = invoke(ctx.getTypeChecker(), "typeCheck",
+            new Class<?>[]{Class.forName("com.mezze.language.parsedast.ParsedModule"), Path.class, boolean.class, String.class},
+            parsedModule, projectRoot, true, null);
 
-        var loweredFunctions = typeCheckResult.getLoweredFunctions();
+        // TypeCheckResult is a Kotlin class — use reflection to fetch the
+        // getter outputs without compile-time refs to :typechecker types.
+        @SuppressWarnings("unchecked")
+        java.util.List<FunctionIR> loweredFunctions =
+            (java.util.List<FunctionIR>) typeCheckResult.getClass().getMethod("getLoweredFunctions").invoke(typeCheckResult);
         if (loweredFunctions != null && !loweredFunctions.isEmpty()) {
-            var performers = typeCheckResult.getPerformerRecords();
+            @SuppressWarnings("unchecked")
+            java.util.List<String[]> performers =
+                (java.util.List<String[]>) typeCheckResult.getClass().getMethod("getPerformerRecords").invoke(typeCheckResult);
             return com.mezze.interpreter.compiler.PipelineRunner.compileFromIR(
                 this, loweredFunctions, Collections.emptyList(), projectRoot,
                 performers != null ? performers : Collections.emptyList()
             );
         }
 
+        Object typedModule = typeCheckResult.getClass().getMethod("getTypedModule").invoke(typeCheckResult);
         throw new RuntimeException("TruffleIR not produced by typechecker. loweredFunctions is " +
             (loweredFunctions == null ? "null" : "empty (" + loweredFunctions.size() + ")") +
-            ". typedModule is " + (typeCheckResult.getTypedModule() == null ? "null" : "present"));
+            ". typedModule is " + (typedModule == null ? "null" : "present"));
+    }
+
+    /** Reflectively call a method, unwrapping InvocationTargetException. */
+    private static Object invoke(Object target, String name, Class<?>[] paramTypes, Object... args) {
+        try {
+            return target.getClass().getMethod(name, paramTypes).invoke(target, args);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            // Surface the underlying exception verbatim — parser/typechecker
+            // throws are user-meaningful (ParseException, TypeCheckError).
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException re) throw re;
+            if (cause instanceof Error err) throw err;
+            throw new RuntimeException(cause);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException("Failed to invoke " + name + " on " + target.getClass().getName(), e);
+        }
     }
 
     /**

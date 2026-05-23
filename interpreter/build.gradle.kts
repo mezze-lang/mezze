@@ -175,10 +175,26 @@ val runtimeShadowJar = tasks.register<com.github.jengelman.gradle.plugins.shadow
     archiveClassifier.set("")
     archiveVersion.set("")
 
+    // Truffle API is a multi-release JAR — the JDK 21+ overlay of
+    // JDKAccessor implements virtual threads (Loom). Without this
+    // manifest entry, the pre-21 base class is loaded at runtime and
+    // immediately throws "VirtualThread is not supported on this JDK"
+    // the moment Async.spawn fires. Matches cli/build.gradle.kts's
+    // mezze-lang.jar (which already sets this).
+    manifest {
+        attributes("Multi-Release" to "true")
+    }
+
     from(sourceSets.main.get().output)
     from(project(":cli").layout.buildDirectory.dir("generated/resources")) {
         // Skip the per-library zip — that's CLI-only (for `mez build --native`).
         exclude("META-INF/mezze/native-classpath.zip")
+        // Drop the 30 MB stdlib.sqlite blob — runtime loads stdlib from
+        // META-INF/mezze/stdlib-snapshot.cbor (PrecompiledStdlib's primary
+        // path). The .sqlite was only needed by the legacy code that
+        // round-tripped through JDBC; with #220's wire path the runtime
+        // never opens SQLite.
+        exclude("stdlib.sqlite")
     }
     // Stdlib .mz sources for go-to-definition + the prelude bootstrap
     // fallback (when the CBOR snapshot is somehow missing).
@@ -198,6 +214,10 @@ val runtimeShadowJar = tasks.register<com.github.jengelman.gradle.plugins.shadow
         exclude(dependency("org.graalvm.tools:dap-tool"))
         exclude(dependency("org.graalvm.tools:coverage-tool"))
         exclude(dependency("org.graalvm.tools:insight-tool"))
+        // sqlite-jdbc is pulled in transitively via :typechecker, but the
+        // runtime never opens SQLite — both the wire-protocol path (#220)
+        // and the embedded-app path read FunctionIR from CBOR. Drops 26 MB.
+        exclude(dependency("org.xerial:sqlite-jdbc"))
     }
 
     // Don't merge service files; just include them — each contributor's
@@ -210,6 +230,46 @@ val runtimeShadowJar = tasks.register<com.github.jengelman.gradle.plugins.shadow
     exclude("META-INF/*.SF")
     exclude("META-INF/*.DSA")
     exclude("META-INF/*.RSA")
+
+    // Compile-only modules: only their runtime-needed surface area is
+    // kept. Everything else is dead weight in the user-facing runtime jar
+    // (and in the native-image input → smaller produced binary).
+    //
+    // Runtime needs from :typechecker: PrecompiledStdlib (loads stdlib
+    // IRs at boot), FunctionIRReachability (used by NativeBuildPath
+    // computeReachableClosure), StdlibSnapshot{,Data} (CBOR decoder),
+    // and a few module/* types transitively referenced by PrecompiledStdlib
+    // (TypedModule, etc.). Strip the heavy compile-only packages.
+    //
+    // Approach is conservative: exclude only the packages clearly tied
+    // to the compile pipeline (constraints, mono, codec, compiler/,
+    // emit, debug, scope, dependencies, desugar, abilities, cache,
+    // printing). Keep root-level + module/ + hashing/ + context/ which
+    // are referenced transitively. Validate via :interpreter:test.
+    // :typechecker subpackage trim — only packages confirmed unused at
+    // runtime. Some that LOOK compile-only (debug/, validation/, solving/)
+    // actually have classes referenced transitively from PrecompiledStdlib
+    // initialisation, so they stay. Whitelist approach when there's more
+    // time; for now subtract only what's safely dead.
+    exclude("com/mezze/language/typechecker/codec/**")
+    exclude("com/mezze/language/typechecker/compiler/**")
+    exclude("com/mezze/language/typechecker/emit/**")
+    exclude("com/mezze/language/typechecker/dependencies/**")
+    exclude("com/mezze/language/typechecker/desugar/**")
+    exclude("com/mezze/language/typechecker/cache/**")
+    exclude("com/mezze/language/typechecker/printing/**")
+    // :parser and :parsedast must stay for now.
+    //
+    // - MezzeContext was lifted (MezzeParser/TypeChecker fields now load
+    //   reflectively), but :typechecker/module/ModuleLoader.kt directly
+    //   references MezzeParser and is class-loaded transitively when
+    //   PrecompiledStdlib initialises ImportResolver/moduleLoader. Need
+    //   to add the same reflective lazy lookup there before excluding.
+    // - PrecompiledStdlib's CBOR snapshot serializes parsedast/* nodes.
+    //
+    // Tracked separately. The MezzeContext reflective lift is in place
+    // and lays the groundwork — the same pattern needs to propagate through
+    // :typechecker/module/ before the parser jars can be dropped.
 }
 
 tasks.register<Test>("bench") {

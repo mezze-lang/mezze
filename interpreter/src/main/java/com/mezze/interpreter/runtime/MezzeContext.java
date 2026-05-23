@@ -55,26 +55,46 @@ public final class MezzeContext {
     // Polyglot support (lazy initialization)
     private volatile MezzePolyglotSupport polyglotSupport;
 
-    // Parser and typechecker — per-context, created lazily on first use.
-    // NOT on MezzeLanguage (static fields break GraalVM native-image).
-    // Prelude/stdlib caches live on TypeChecker.companion (JVM-wide singleton) —
-    // so the second context reuses prelude work from the first.
-    private volatile com.mezze.language.parser.MezzeParser parser;
-    private volatile com.mezze.language.typechecker.TypeChecker typeChecker;
+    // Parser and typechecker — per-context, created lazily on first use,
+    // via reflection so the runtime jar can omit :parser and :typechecker
+    // entirely when the host only ever feeds pre-lowered IR (the #220 wire
+    // protocol). Source-eval hosts (tests, embedders) keep both jars on
+    // the classpath, so the reflective lookup succeeds.
+    //
+    // Typed as Object to keep the field signature free of :parser /
+    // :typechecker class refs — JVM class-load of MezzeContext is then
+    // safe even when those jars are absent.
+    private volatile Object parser;
+    private volatile Object typeChecker;
 
     public MezzeContext(MezzeLanguage language, Env env) {
         this.language = language;
         this.env = env;
     }
 
-    /** Get the per-context parser (created lazily). */
-    public com.mezze.language.parser.MezzeParser getParser() {
+    /**
+     * Get the per-context parser (created lazily). Returns Object so the
+     * field is free of :parser refs; callers cast back to
+     * com.mezze.language.parser.MezzeParser. Throws a clear error if
+     * :parser isn't on the classpath (slim-runtime jar deployments).
+     */
+    public Object getParser() {
         var p = parser;
         if (p == null) {
             synchronized (this) {
                 p = parser;
                 if (p == null) {
-                    p = new com.mezze.language.parser.MezzeParser();
+                    try {
+                        var cls = Class.forName("com.mezze.language.parser.MezzeParser");
+                        p = cls.getDeclaredConstructor().newInstance();
+                    } catch (ClassNotFoundException e) {
+                        throw new IllegalStateException(
+                            "MezzeParser not on classpath — this runtime jar was built " +
+                            "without :parser (wire-protocol-only deployment). Hosts that " +
+                            "eval .mz source must add :parser to the classpath.", e);
+                    } catch (ReflectiveOperationException e) {
+                        throw new RuntimeException("Failed to construct MezzeParser", e);
+                    }
                     parser = p;
                 }
             }
@@ -82,14 +102,24 @@ public final class MezzeContext {
         return p;
     }
 
-    /** Get the per-context typechecker (created lazily). */
-    public com.mezze.language.typechecker.TypeChecker getTypeChecker() {
+    /** See getParser for the rationale; same reflective lookup for :typechecker. */
+    public Object getTypeChecker() {
         var tc = typeChecker;
         if (tc == null) {
             synchronized (this) {
                 tc = typeChecker;
                 if (tc == null) {
-                    tc = new com.mezze.language.typechecker.TypeChecker();
+                    try {
+                        var cls = Class.forName("com.mezze.language.typechecker.TypeChecker");
+                        tc = cls.getDeclaredConstructor().newInstance();
+                    } catch (ClassNotFoundException e) {
+                        throw new IllegalStateException(
+                            "TypeChecker not on classpath — this runtime jar was built " +
+                            "without :typechecker (wire-protocol-only deployment). Hosts " +
+                            "that eval .mz source must add :typechecker to the classpath.", e);
+                    } catch (ReflectiveOperationException e) {
+                        throw new RuntimeException("Failed to construct TypeChecker", e);
+                    }
                     typeChecker = tc;
                 }
             }

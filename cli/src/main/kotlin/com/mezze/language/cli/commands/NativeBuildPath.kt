@@ -54,20 +54,51 @@ object NativeBuildPath {
 
         val stagingDir = File(outputDir, ".native-staging").apply { mkdirs() }
 
-        val embeddedJar = packEmbeddedAppJar(
-            stagingDir = stagingDir,
-            loweredFunctions = loweredFunctions,
-            performerRecords = performerRecords,
-            appName = appName,
-            entryName = entryName,
-            timing = timing,
-            relativeTime = relativeTime,
-        )
+        // Compute the closure + CBOR bytes ONCE up front. We hash these
+        // (content-addressed, deterministic) for the native-image cache key,
+        // then pass them to packEmbeddedAppJar which would otherwise
+        // recompute them. Hashing the jar bytes directly is non-determ
+        // because JarEntry stamps with current time.
+        val closure = computeReachableClosure(loweredFunctions)
+        if (timing) System.err.println("[${relativeTime()}ms] native: closure computed (${closure.size} fns)")
+        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryName, performerRecords)
+
+        // Native-image cache: hash everything that determines the produced
+        // binary; on cache hit, copy the prior binary and skip the 70s
+        // native-image invocation. Stored at <projectRoot>/.mz/native-cache/
+        // keyed by the SHA-256 of (closure CBOR + meta CBOR + mez version +
+        // optimized flag + native-image path). Cache hits cost ~10ms
+        // (one sha256 + one file copy).
+        val outBinary = File(outputDir, outputName)
+        val cacheDir = findProjectMzDir(outputDir)?.let { File(it, "native-cache") }
+        // Sentinel: wipe the cache dir on mez upgrade (runtime jar bytes
+        // changed). Cheap — sha256 of a 20 MB file is ~50 ms; far below
+        // the 60 s native-image cost. Decoupled from per-binary cache
+        // keys so user code that didn't change still picks up a fresh
+        // build automatically after upgrade.
+        invalidateOnRuntimeShift(cacheDir, findRuntimeJar(), timing, relativeTime)
+        val cacheKey = computeNativeCacheKey(fnBytes, metaBytes, nativeImage, optimized)
+        val cacheFile = cacheDir?.let { File(it, "$cacheKey.bin") }
+        if (cacheFile != null && cacheFile.exists()) {
+            if (timing) System.err.println("[${relativeTime()}ms] native: cache hit ($cacheKey) — copying instead of building")
+            cacheFile.copyTo(outBinary, overwrite = true)
+            outBinary.setExecutable(true, false)
+            try { stagingDir.deleteRecursively() } catch (_: Exception) {}
+            return outBinary
+        }
+        if (timing) System.err.println("[${relativeTime()}ms] native: cache miss ($cacheKey) — invoking native-image")
+
+        // Only build the staging jars on cache miss.
+        val embeddedJar = File(stagingDir, "embedded-app.jar")
+        writeJar(embeddedJar, mapOf(
+            "META-INF/mezze/embedded-app.cbor" to fnBytes,
+            "META-INF/mezze/embedded-app.meta" to metaBytes,
+        ))
+        if (timing) System.err.println("[${relativeTime()}ms] native: embedded-app.jar (${embeddedJar.length() / 1024}KB)")
 
         val classpathJars = extractRuntimeClasspath(stagingDir, timing, relativeTime)
         val sanitisedUserJar = sanitiseUserJar(jarFile, stagingDir, timing, relativeTime)
 
-        val outBinary = File(outputDir, outputName)
         val cmd = buildNativeImageCommand(
             nativeImage = nativeImage,
             classpathJars = classpathJars,
@@ -99,7 +130,125 @@ object NativeBuildPath {
             return null
         }
         outBinary.setExecutable(true, false)
+
+        // Populate cache for next time.
+        if (cacheFile != null) {
+            try {
+                cacheDir!!.mkdirs()
+                outBinary.copyTo(cacheFile, overwrite = true)
+                if (timing) System.err.println("[${relativeTime()}ms] native: cached binary at ${cacheFile.absolutePath}")
+            } catch (e: Exception) {
+                // Cache write failure is non-fatal — the binary is still produced.
+                if (timing) System.err.println("[${relativeTime()}ms] native: cache write failed: ${e.message}")
+            }
+        }
         return outBinary
+    }
+
+    /**
+     * Cache key for the produced native binary:
+     *   - closure CBOR + meta CBOR (content-addressed user app)
+     *   - native-image path (different graalvm releases → different output)
+     *   - optimized flag (different native-image args)
+     *
+     * SHA-256, hex-encoded.
+     *
+     * Notably NOT in the key: mezze-runtime.jar contents. That's handled
+     * by [invalidateOnRuntimeShift] as a directory-level sentinel (wipe
+     * the cache dir on mez upgrade) rather than mixing it into every
+     * key — the latter would bloat keys and obscure intent.
+     *
+     * Hashing CBOR bytes (not the staging embedded-app.jar): JarEntry
+     * stamps every entry with current time → jar bytes change on every
+     * build. The CBOR is deterministic.
+     */
+    private fun computeNativeCacheKey(
+        fnBytes: ByteArray,
+        metaBytes: ByteArray,
+        nativeImage: File,
+        optimized: Boolean,
+    ): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        digest.update(fnBytes)
+        digest.update(metaBytes)
+        digest.update(nativeImage.absolutePath.toByteArray())
+        digest.update(if (optimized) byteArrayOf(1) else byteArrayOf(0))
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * If the mez runtime jar at `~/.mezze/lib/mezze-runtime.jar` has
+     * changed since we last cached, wipe the native cache dir. Same
+     * spirit as `StoreHydration.invalidateOnVersionShift` for the IR
+     * cache — mez upgrade self-invalidates downstream caches.
+     *
+     * Implementation: stash the jar's sha256 in `<cacheDir>/runtime.sha256`.
+     * If absent or mismatched, delete every `.bin` in the dir and rewrite
+     * the sentinel. Costs one jar sha256 (~50 ms on 20 MB jar).
+     */
+    private fun invalidateOnRuntimeShift(
+        cacheDir: File?,
+        runtimeJar: File?,
+        timing: Boolean,
+        relativeTime: () -> Long,
+    ) {
+        if (cacheDir == null || runtimeJar == null || !runtimeJar.isFile) return
+        val currentSha = sha256OfFile(runtimeJar)
+        val sentinel = File(cacheDir, "runtime.sha256")
+        val priorSha = if (sentinel.isFile) sentinel.readText().trim() else null
+        if (priorSha == currentSha) return
+        if (cacheDir.isDirectory) {
+            cacheDir.listFiles { f -> f.name.endsWith(".bin") }?.forEach { it.delete() }
+            if (timing) System.err.println("[${relativeTime()}ms] native: runtime jar changed — cache wiped")
+        } else {
+            cacheDir.mkdirs()
+        }
+        sentinel.writeText(currentSha)
+    }
+
+    private fun sha256OfFile(file: File): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n <= 0) break
+                digest.update(buf, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Locate mezze-runtime.jar — same logic as BuildCommand.findRuntimeJar.
+     * Production install is at ~/.mezze/lib/; dev tree is at
+     * interpreter/build/libs/.
+     */
+    private fun findRuntimeJar(): File? {
+        System.getProperty("user.home")?.let { home ->
+            val installed = File("$home/.mezze/lib/mezze-runtime.jar")
+            if (installed.isFile) return installed
+        }
+        System.getProperty("mezze.project.root")?.let { root ->
+            val dev = File(root, "interpreter/build/libs/mezze-runtime.jar")
+            if (dev.isFile) return dev
+        }
+        return null
+    }
+
+    /**
+     * Walk upward from outputDir looking for a `.mz/` directory (the
+     * project's cache root, created by SQLiteMezzeStore.openProject).
+     * Returns null if outside any Mezze project.
+     */
+    private fun findProjectMzDir(outputDir: File): File? {
+        var dir: File? = outputDir.absoluteFile
+        repeat(10) {
+            val mz = File(dir, ".mz")
+            if (mz.isDirectory) return mz
+            dir = dir?.parentFile ?: return null
+        }
+        return null
     }
 
     // ─── pipeline steps ──────────────────────────────────────────────────────
@@ -157,19 +306,27 @@ object NativeBuildPath {
         return fnBytes to metaBytes
     }
 
-    /** User code + every stdlib FunctionIR reachable from it. */
+    /**
+     * User code + every stdlib FunctionIR reachable from it.
+     *
+     * Sorted by hash for determinism: same closure → same CBOR bytes
+     * regardless of how callers ordered their input list. That stability
+     * is what makes the native-image cache key reliable — both the
+     * fresh-compile path and the cache-load path (BuildCache) produce
+     * byte-identical CBOR for the same app.
+     */
     fun computeReachableClosure(loweredFunctions: List<FunctionIR>): List<FunctionIR> {
         val needed = com.mezze.language.typechecker.FunctionIRReachability
             .collectReferencedHashes(loweredFunctions)
         val stdlibFns = com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions
-        val closureMap = LinkedHashMap<com.mezze.language.typedast.Hash, FunctionIR>()
+        val closureMap = HashMap<com.mezze.language.typedast.Hash, FunctionIR>()
         for (fn in loweredFunctions) closureMap[fn.hash] = fn
         for (hash in needed) {
             if (hash in closureMap) continue
             val fn = stdlibFns[hash] ?: continue
             closureMap[hash] = fn
         }
-        return closureMap.values.toList()
+        return closureMap.values.sortedBy { it.hash.hex }
     }
 
     /**

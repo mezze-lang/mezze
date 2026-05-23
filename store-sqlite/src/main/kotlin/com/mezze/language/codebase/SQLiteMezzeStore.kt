@@ -1425,19 +1425,42 @@ class SQLiteMezzeStore private constructor(
 
     @Synchronized
     override fun setAppFunctionHashes(name: String, hashes: List<Hash>) {
-        conn.prepareStatement("DELETE FROM app_functions WHERE app_name = ?").use { stmt ->
-            stmt.setString(1, name)
-            stmt.executeUpdate()
-        }
-        if (hashes.isEmpty()) return
-        conn.prepareStatement("INSERT INTO app_functions (app_name, hash, ord) VALUES (?, ?, ?)").use { stmt ->
-            hashes.forEachIndexed { i, h ->
+        // Defense-in-depth dedupe. The interface contract says hashes is
+        // semantically a set; the upstream pipeline (TypedASTCompiler)
+        // already dedupes its output. We dedupe here too so a future
+        // caller can never trigger the schema's UNIQUE constraint —
+        // SQLite errors must never reach a mezze user (#225).
+        //
+        // First-occurrence wins for ordinal stability; downstream
+        // consumers that read with ORDER BY ord see hashes in the same
+        // sequence the caller provided minus repeats.
+        val seen = HashSet<Hash>(hashes.size)
+        val deduped = ArrayList<Hash>(hashes.size)
+        for (h in hashes) if (seen.add(h)) deduped.add(h)
+
+        try {
+            conn.prepareStatement("DELETE FROM app_functions WHERE app_name = ?").use { stmt ->
                 stmt.setString(1, name)
-                stmt.setString(2, h.hex)
-                stmt.setInt(3, i)
-                stmt.addBatch()
+                stmt.executeUpdate()
             }
-            stmt.executeBatch()
+            if (deduped.isEmpty()) return
+            conn.prepareStatement("INSERT INTO app_functions (app_name, hash, ord) VALUES (?, ?, ?)").use { stmt ->
+                deduped.forEachIndexed { i, h ->
+                    stmt.setString(1, name)
+                    stmt.setString(2, h.hex)
+                    stmt.setInt(3, i)
+                    stmt.addBatch()
+                }
+                stmt.executeBatch()
+            }
+        } catch (e: java.sql.SQLException) {
+            // Should be unreachable after the dedupe above. If we ever
+            // see this, it's a mezze internal bug — surface as such, not
+            // as a raw SQLite jargon string to the user.
+            throw IllegalStateException(
+                "internal: mezze store failed to register app function hashes for '$name' " +
+                "(count=${deduped.size}, distinct=${seen.size}): ${e.message}", e
+            )
         }
     }
 

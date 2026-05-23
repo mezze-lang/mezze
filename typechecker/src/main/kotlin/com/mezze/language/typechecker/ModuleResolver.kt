@@ -822,6 +822,33 @@ class ModuleResolver(
     }
 
     /**
+     * Write stdlib source to a STABLE temp-file path (derived from the
+     * resource path, not random). The rest of the pipeline reads source
+     * via `Files.readString(filePath)` and FunctionIR carries the path
+     * as metadata — using `Files.createTempFile("mezze-stdlib-", ".mz")`
+     * embeds a fresh random suffix into the IR every compile, which
+     * blocks any content-addressed caching downstream (#224).
+     *
+     * Layout: `<tmpdir>/mezze-stdlib-cache/<flattened-resource-path>`.
+     * Same resource → same path on every compile, every JVM, every host.
+     * Idempotent: skip write if file already exists with matching bytes.
+     */
+    private fun materializeStdlibTempFile(relativeFilePath: String, content: String): Path {
+        val flat = relativeFilePath.replace('/', '-').replace('\\', '-')
+        val cacheDir = Paths.get(System.getProperty("java.io.tmpdir"), "mezze-stdlib-cache")
+        Files.createDirectories(cacheDir)
+        val target = cacheDir.resolve(flat)
+        // Only write if missing or stale. Avoids racing concurrent JVMs
+        // and keeps the file mtime stable across runs.
+        val bytes = content.toByteArray(Charsets.UTF_8)
+        if (!Files.exists(target) || Files.size(target) != bytes.size.toLong() ||
+            !Files.readAllBytes(target).contentEquals(bytes)) {
+            Files.write(target, bytes)
+        }
+        return target
+    }
+
+    /**
      * Resolve a module file path from module path string.
      */
     private fun resolveModuleFile(modulePath: String): Path? {
@@ -842,12 +869,7 @@ class ModuleResolver(
             // First, try to load from embedded resources (works in JAR and native binary)
             val resourceContent = loadStdlibFromResource(relativeFilePath)
             if (resourceContent != null) {
-                // Write to temp file and return path
-                val tempFile = Files.createTempFile("mezze-stdlib-", ".mz")
-                Files.writeString(tempFile, resourceContent)
-                // Mark for deletion on JVM exit
-                tempFile.toFile().deleteOnExit()
-                return tempFile
+                return materializeStdlibTempFile(relativeFilePath, resourceContent)
             }
 
             // Fall back to filesystem (for development)
@@ -868,17 +890,14 @@ class ModuleResolver(
 
             return null
         }
-        
+
         // For flat stdlib modules (int, string, float, etc.), check resources first, then filesystem
         if (segments.size == 1) {
             // Try to load from embedded resources first (works in JAR and native binary)
             val relativeFilePath = "stdlib/std/${segments[0]}.mz"
             val resourceContent = loadStdlibFromResource(relativeFilePath)
             if (resourceContent != null) {
-                val tempFile = Files.createTempFile("mezze-stdlib-", ".mz")
-                Files.writeString(tempFile, resourceContent)
-                tempFile.toFile().deleteOnExit()
-                return tempFile
+                return materializeStdlibTempFile(relativeFilePath, resourceContent)
             }
 
             // Fall back to filesystem for development

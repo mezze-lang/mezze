@@ -146,6 +146,20 @@ interface MezzeStore : AutoCloseable {
 
     fun putApp(name: String, entryName: String, entryModule: String, sourceFile: String?)
     fun getApp(name: String): AppRow?
+
+    /**
+     * Register the function hashes that compose this app.
+     *
+     * Semantics: this is a SET of hashes — each hash appears at most
+     * once. Order in the passed list is preserved for ordering-sensitive
+     * downstream consumers (e.g. closure walks); duplicates are silently
+     * deduped at first occurrence. The underlying storage enforces
+     * uniqueness; passing duplicates is not an error but a redundancy.
+     *
+     * Callers that produce hash lists from a content-addressed lowering
+     * pipeline already dedupe at the source (see TypedASTCompiler).
+     * The store enforces it as a defense-in-depth invariant.
+     */
     fun setAppFunctionHashes(name: String, hashes: List<Hash>)
     fun getAppFunctionHashes(name: String): List<Hash>
     fun setAppPerformerRecords(name: String, records: List<Array<String>>)

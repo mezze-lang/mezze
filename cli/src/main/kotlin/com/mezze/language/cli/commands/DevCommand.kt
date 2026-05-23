@@ -83,6 +83,20 @@ class DevCommand {
             kotlin.system.exitProcess(1)
         }
 
+        // Wire-protocol path (#220): compile here in native mez, JVM only
+        // executes. Gated by MEZZE_WIRE=1 until validated end-to-end. Once
+        // stable this becomes the default and DevRunner can be removed
+        // (jar slim — drops :parser, :typechecker, :store-sqlite from
+        // mezze-lang.jar).
+        if (System.getenv("MEZZE_WIRE") == "1") {
+            val exit = if (noWatch) {
+                WireRunner.execOnce(currentDir, appFile, entryName, modulePath, appConfig.name)
+            } else {
+                WireRunner.watch(currentDir, appFile, entryName, modulePath, appConfig.name)
+            }
+            kotlin.system.exitProcess(exit)
+        }
+
         val classpath = com.mezze.language.cli.JvmLauncher.buildClasspath()
         val programArgs = mutableListOf(
             "--project-root=${currentDir.absolutePath}",
