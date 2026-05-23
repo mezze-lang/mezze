@@ -19,7 +19,7 @@ public class AsyncInterpreterTest {
     @Test
     void testCoopSpawnAndAwait() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, is_done }
             use std::result
 
             perform CoopAsync in do
@@ -32,7 +32,7 @@ public class AsyncInterpreterTest {
     @Test
     void testCoopSpawnMultipleTasks() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, is_done }
             use std::result
 
             perform CoopAsync in do
@@ -48,7 +48,7 @@ public class AsyncInterpreterTest {
     @Test
     void testCoopJoinTwoComputations() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, is_done }
             use std::result
 
             perform CoopAsync in do
@@ -64,7 +64,7 @@ public class AsyncInterpreterTest {
     @Test
     void testCoopJoin3ThreeComputations() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, is_done }
             use std::result
 
             perform CoopAsync in do
@@ -81,7 +81,7 @@ public class AsyncInterpreterTest {
     @Test
     void testCoopSleep() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, is_done }
 
             perform CoopAsync in do
                 Async.sleep {ms = 1}
@@ -93,13 +93,13 @@ public class AsyncInterpreterTest {
     @Test
     void testCoopIsDone() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, is_done }
             use std::result
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
                 let _ = result::get_or_else { result = Async.await {p = p}, def = -1 }
-                Async.is_done {p = p}
+                is_done {p = p}
         """);
         assertEquals(true, result);
     }
@@ -110,7 +110,7 @@ public class AsyncInterpreterTest {
     @Test
     void testLoomSpawnAndAwait() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, is_done }
             use std::result
 
             perform LoomAsync {} in do
@@ -123,7 +123,7 @@ public class AsyncInterpreterTest {
     @Test
     void testLoomJoinTwoComputations() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, is_done }
             use std::result
 
             perform LoomAsync {} in do
@@ -139,7 +139,7 @@ public class AsyncInterpreterTest {
     @Test
     void testLoomSleep() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, is_done }
 
             perform LoomAsync {} in do
                 Async.sleep {ms = 10}
@@ -154,7 +154,7 @@ public class AsyncInterpreterTest {
     @Test
     void testOsSpawnAndAwait() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3, is_done }
             use std::result
 
             perform OSThreadAsync {} in do
@@ -167,7 +167,7 @@ public class AsyncInterpreterTest {
     @Test
     void testOsJoinTwoComputations() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3, is_done }
             use std::result
 
             perform OSThreadAsync {} in do
@@ -183,7 +183,7 @@ public class AsyncInterpreterTest {
     @Test
     void testOsSleep() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3, is_done }
 
             perform OSThreadAsync {} in do
                 Async.sleep {ms = 10}

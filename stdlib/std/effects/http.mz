@@ -630,7 +630,7 @@ pub let api_key_header : { key: Str, value: Str } -> Map Str Str = { key, value 
 pub let x_api_key : { key: Str } -> Map Str Str = { key } ->
   map::insert { m = map::empty {}, k = "X-API-Key", v = key }
 
-use std::effects::async::{ Async, AsyncError }
+use std::effects::async::{ Async, AsyncError, par_map }
 
 ## Async HTTP helpers
 ## ------------------
@@ -764,8 +764,19 @@ pub let async_post_body_with = { url, body, config } -> do
   flatten_async_http { v = Async.await { p = promise } }
 
 ## Fetch multiple URLs concurrently, returning a list of Results.
+##
+## Each promise is awaited via `par_map`, which returns
+## [Result Response AsyncError] — we then flatten the
+## Result Result Response AsyncError HttpError shape by mapping
+## the AsyncError into HttpError (treating spawn failures as
+## a generic HTTP-level error).
 pub let fetch_all : { urls: [Str] } -> [Result Response HttpError] <Http, Async> = { urls } ->
-  Async.map { xs = urls, f = { x } -> get { url = x } }
+  seq::map {
+    xs = par_map { xs = urls, f = { x } -> get { url = x } },
+    f = { x } -> match x is
+      Ok  { val = inner } -> inner
+      Err { error = e }   -> Err { error = ConnectionFailed { url = "<spawn>", reason = "async task failed" } },
+  }
 
 ## Fetch multiple URLs concurrently, failing on the first error.
 pub let fetch_all_ok : { urls: [Str] } -> Result [Response] HttpError <Http, Async> = { urls } ->

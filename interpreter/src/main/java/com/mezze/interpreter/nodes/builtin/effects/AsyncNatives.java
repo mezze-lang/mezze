@@ -2397,9 +2397,17 @@ public final class AsyncNatives {
         int idx = r.getFieldIndex(name);
         if (idx < 0) throw new RuntimeException("Missing field '" + name + "'");
         Object val = r.getField(idx);
-        // Unwrap Promise newtype
+        // Unwrap Promise newtype — variants from CoopAsync are
+        // `Promise { val = nativePromise }`, where the payload is a
+        // record. Loom passes the bare MezzePromise. Handle both.
         if (val instanceof MezzeVariant v) {
             val = v.getPayloadValue();
+            if (val instanceof MezzeRecord innerRecord) {
+                int valIdx = innerRecord.getFieldIndex("val");
+                if (valIdx >= 0) {
+                    val = innerRecord.getField(valIdx);
+                }
+            }
         }
         if (val instanceof MezzePromise p) return p;
         throw new RuntimeException("Expected Promise for '" + name + "'");

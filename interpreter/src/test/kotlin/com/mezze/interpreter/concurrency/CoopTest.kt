@@ -26,7 +26,7 @@ class CoopTest {
 
     // Setup code for Coop operations using stdlib
     private val coopSetup = """
-        use std::effects::async::{Async, CoopAsync}
+        use std::effects::async::{Async, CoopAsync, is_done }
         use std::result
     """.trimIndent()
 
@@ -42,7 +42,7 @@ class CoopTest {
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
                 # Promise is created but computation not executed yet
-                Async.is_done {p = p}
+                is_done {p = p}
         """
         val result = eval(code)
         // With real scheduler, spawn queues task, it's NOT done yet

@@ -23,7 +23,7 @@ class OSThreadConcurrencyTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private val setupCode = """
-        use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+        use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
         use std::result
     """.trimIndent()
 
@@ -430,7 +430,7 @@ class OSThreadConcurrencyTest {
                 let _ = match Async.await {p = p} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
-                Async.is_done {p = p}
+                is_done {p = p}
         """
         val result = eval(code)
         assertEquals(true, result)

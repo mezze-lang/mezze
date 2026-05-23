@@ -22,7 +22,7 @@ class AsyncModuleTest {
 
     // Helper to wrap code in CoopAsync handler
     private fun withCoopAsync(body: String): String =
-        "use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }\n" +
+        "use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }\n" +
         "use std::collections::seq\n" +
         "use std::result\n" +
         "\n" +
@@ -70,7 +70,7 @@ class AsyncModuleTest {
         val result = eval(withCoopAsync("""
             let p = Async.spawn {f = {} -> 42}
             let _ = result::get_or_else { result = Async.await {p = p}, def = -1 }
-            Async.is_done {p = p}
+            is_done {p = p}
         """))
         assertEquals(true, result)
     }
@@ -208,7 +208,7 @@ class AsyncModuleTest {
     @Test
     fun `test run helper spawns and awaits`() {
         val result = eval("""
-            use std::effects::async::{Async, CoopAsync, run, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{Async, CoopAsync, run, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
             use std::result
 
             perform CoopAsync in do
@@ -222,7 +222,7 @@ class AsyncModuleTest {
     @Test
     fun `test go helper fires and forgets`() {
         val result = eval("""
-            use std::effects::async::{Async, CoopAsync, go, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{Async, CoopAsync, go, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
 
             perform CoopAsync in do
                 go {f = {} -> 42}
@@ -236,7 +236,7 @@ class AsyncModuleTest {
     @Test
     fun `test AsyncFailed construction`() {
         val result = eval("""
-            use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
             use std::result
 
             let err: AsyncError = AsyncFailed {msg = "test error"}
@@ -250,7 +250,7 @@ class AsyncModuleTest {
     @Test
     fun `test AsyncCancelled construction`() {
         val result = eval("""
-            use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
             use std::result
 
             let err: AsyncError = AsyncCancelled
@@ -264,7 +264,7 @@ class AsyncModuleTest {
     @Test
     fun `test AsyncTimedOut construction`() {
         val result = eval("""
-            use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
             use std::result
 
             let err: AsyncError = AsyncTimedOut {ms = 5000}
