@@ -22,7 +22,7 @@ class AsyncModuleTest {
 
     // Helper to wrap code in CoopAsync handler
     private fun withCoopAsync(body: String): String =
-        "use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3}\n" +
+        "use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }\n" +
         "use std::collections::seq\n" +
         "use std::result\n" +
         "\n" +
@@ -83,7 +83,7 @@ class AsyncModuleTest {
             let p1 = Async.spawn {f = {} -> 1}
             let p2 = Async.spawn {f = {} -> 2}
             let p3 = Async.spawn {f = {} -> 3}
-            let results = Async.all {ps = [p1, p2, p3]}
+            let results = result::get_or_else { result = try_all {ps = [p1, p2, p3]}, def = [] }
             seq::size {xs = results}
         """))
         assertEquals(3L, result)
@@ -94,7 +94,7 @@ class AsyncModuleTest {
         val result = eval(withCoopAsync("""
             let p1 = Async.spawn {f = {} -> 10}
             let p2 = Async.spawn {f = {} -> 20}
-            let results = Async.all {ps = [p1, p2]}
+            let results = result::get_or_else { result = try_all {ps = [p1, p2]}, def = [] }
             match seq::get {xs = results, i = 0} is
                 Some {val} -> val
                 None -> 0
@@ -151,7 +151,7 @@ class AsyncModuleTest {
     @Test
     fun `test map applies function concurrently`() {
         val result = eval(withCoopAsync("""
-            let results = Async.map {xs = [1, 2, 3], f = {x} -> x * 2}
+            let results = result::get_or_else { result = try_par_map {xs = [1, 2, 3], f = {x} -> x * 2}, def = [] }
             seq::size {xs = results}
         """))
         assertEquals(3L, result)
@@ -160,7 +160,7 @@ class AsyncModuleTest {
     @Test
     fun `test map preserves order`() {
         val result = eval(withCoopAsync("""
-            let results = Async.map {xs = [10, 20, 30], f = {x} -> x + 1}
+            let results = result::get_or_else { result = try_par_map {xs = [10, 20, 30], f = {x} -> x + 1}, def = [] }
             match seq::get {xs = results, i = 0} is
                 Some {val} -> val
                 None -> 0
@@ -173,7 +173,7 @@ class AsyncModuleTest {
     @Test
     fun `test for_each returns unit`() {
         val result = eval(withCoopAsync("""
-            Async.for_each {xs = [1, 2, 3], f = {x} -> {}}
+            result::get_or_else { result = try_par_for_each {xs = [1, 2, 3], f = {x} -> {}}, def = {} }
             42
         """))
         assertEquals(42L, result)
@@ -184,7 +184,7 @@ class AsyncModuleTest {
     @Test
     fun `test filter keeps matching elements`() {
         val result = eval(withCoopAsync("""
-            let results = Async.filter {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
+            let results = result::get_or_else { result = try_par_filter {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}, def = [] }
             seq::size {xs = results}
         """))
         assertEquals(2L, result)
@@ -208,7 +208,7 @@ class AsyncModuleTest {
     @Test
     fun `test run helper spawns and awaits`() {
         val result = eval("""
-            use std::effects::async::{Async, CoopAsync, run}
+            use std::effects::async::{Async, CoopAsync, run, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
             perform CoopAsync in do
@@ -222,7 +222,7 @@ class AsyncModuleTest {
     @Test
     fun `test go helper fires and forgets`() {
         val result = eval("""
-            use std::effects::async::{Async, CoopAsync, go}
+            use std::effects::async::{Async, CoopAsync, go, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
 
             perform CoopAsync in do
                 go {f = {} -> 42}
@@ -236,7 +236,8 @@ class AsyncModuleTest {
     @Test
     fun `test AsyncFailed construction`() {
         val result = eval("""
-            use std::effects::async::{AsyncError}
+            use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let err: AsyncError = AsyncFailed {msg = "test error"}
             match err is
@@ -249,7 +250,8 @@ class AsyncModuleTest {
     @Test
     fun `test AsyncCancelled construction`() {
         val result = eval("""
-            use std::effects::async::{AsyncError}
+            use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let err: AsyncError = AsyncCancelled
             match err is
@@ -262,7 +264,8 @@ class AsyncModuleTest {
     @Test
     fun `test AsyncTimedOut construction`() {
         val result = eval("""
-            use std::effects::async::{AsyncError}
+            use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let err: AsyncError = AsyncTimedOut {ms = 5000}
             match err is
@@ -293,7 +296,7 @@ class AsyncModuleTest {
         val result = eval(withCoopAsync("""
             let p1 = Async.spawn {f = {} -> 1}
             let p2 = Async.spawn {f = {} -> 2}
-            let results = Async.settle {ps = [p1, p2]}
+            let results = settle {ps = [p1, p2]}
             seq::size {xs = results}
         """))
         assertEquals(2L, result)
@@ -305,10 +308,10 @@ class AsyncModuleTest {
     fun `test complex async workflow`() {
         val result = eval(withCoopAsync("""
             # Spawn multiple tasks
-            let tasks = Async.map {
+            let tasks = result::get_or_else { result = try_par_map {
                 xs = [1, 2, 3, 4, 5],
                 f = {x} -> x * x
-            }
+            }, def = [] }
             # Sum the results
             let sum = seq::fold {
                 xs = tasks,

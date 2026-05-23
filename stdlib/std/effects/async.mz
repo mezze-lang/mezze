@@ -423,6 +423,25 @@ pub let par_map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> [Result 'b AsyncErro
 pub let par_for_each : { xs: ['a], f: { x: 'a } -> 'b <...> } -> [Result 'b AsyncError] <Async, ...> =
   { xs, f } -> par_map { xs = xs, f = f }
 
+## Filter a sequence with concurrent predicate evaluation; each retained
+## element wrapped in `Result 'a AsyncError` so per-element predicate
+## failures are visible. Use `try_par_filter` if you want fail-fast unwrap.
+pub let par_filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> [Result 'a AsyncError] <Async, ...> =
+  { xs, f } -> do
+    let tagged = par_map {
+      xs = xs,
+      f = { x } -> { elem = x, keep = f { x = x } },
+    }
+    seq::map {
+      xs = seq::filter { xs = tagged, p = { x } -> match x is
+        Ok  { val = r }   -> r.keep
+        Err { error = _ } -> True
+      },
+      f = { x } -> match x is
+        Ok  { val = r }   -> Ok { val = r.elem }
+        Err { error = e } -> Err { error = e },
+    }
+
 ## Wait for p up to ms milliseconds; None if it didn't finish in time.
 pub let with_timeout : { ms: Int, p: Promise 'a } -> Option 'a <Async, ...> = { ms, p } ->
   Async.timeout { ms = ms, p = p }

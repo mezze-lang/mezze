@@ -72,7 +72,8 @@ class PerformanceBenchmarkTest {
     // Shared prelude used by every benchmark — pulls in the Async effect
     // and its LoomAsync impl. Tests then write `perform LoomAsync in ...`.
     private val asyncSetup = """
-        use std::effects::async::{Async, LoomAsync, Promise}
+        use std::effects::async::{Async, LoomAsync, Promise, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+        use std::result
     """.trimIndent()
 
     // Helper: build N parallel-spawn-then-await-all source for a body that
@@ -87,7 +88,7 @@ class PerformanceBenchmarkTest {
             appendLine("        $i")
             appendLine("    }")
         }
-        appendLine("    Async.all { ps = [${(1..n).joinToString(", ") { "op$it" }}] }")
+        appendLine("    result::get_or_else { result = try_all { ps = [${(1..n).joinToString(", ") { "op$it" }}] }, def = [] }")
     }
 
     // Helper: sequential N sleeps in a single body — uses Async.sleep so
@@ -197,7 +198,7 @@ class PerformanceBenchmarkTest {
                     appendLine("    }")
                 }
                 val opIds = durations.indices.joinToString(", ") { "op${it + 1}" }
-                appendLine("    Async.all { ps = [$opIds] }")
+                appendLine("    result::get_or_else { result = try_all { ps = [$opIds] }, def = [] }")
             }
             eval(src)
         }
@@ -289,7 +290,7 @@ class PerformanceBenchmarkTest {
                         for (i in 1..count) {
                             appendLine("    let op$i = Async.spawn { f = {} -> $i }")
                         }
-                        appendLine("    Async.all { ps = [${(1..count).joinToString(", ") { "op$it" }}] }")
+                        appendLine("    result::get_or_else { result = try_all { ps = [${(1..count).joinToString(", ") { "op$it" }}] }, def = [] }")
                     }
                     eval(src)
                 }

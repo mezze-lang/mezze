@@ -34,6 +34,7 @@ class AsyncEffectHandlerPropagationTest {
         val code = """
             use std::effects::log::{Console, println}
             use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
             use std::effects::stm::{STM, tvar, deref, atomically}
 
             let flag = tvar {init = 0}
@@ -59,6 +60,7 @@ class AsyncEffectHandlerPropagationTest {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
             use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let counter = tvar {init = 100}
 
@@ -79,6 +81,7 @@ class AsyncEffectHandlerPropagationTest {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
             use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let counter = tvar {init = 0}
 
@@ -107,6 +110,7 @@ class AsyncEffectHandlerPropagationTest {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
             use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let counter = tvar {init = 0}
 
@@ -139,6 +143,7 @@ class AsyncEffectHandlerPropagationTest {
             use std::effects::log::{Console, println}
             use std::effects::stm::{STM, tvar, deref, atomically}
             use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let result_var = tvar {init = 0}
 
@@ -171,6 +176,7 @@ class AsyncEffectHandlerPropagationTest {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
             use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let counter = tvar {init = 0}
 
@@ -205,6 +211,7 @@ class AsyncEffectHandlerPropagationTest {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
             use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let a = tvar {init = 0}
             let b = tvar {init = 0}

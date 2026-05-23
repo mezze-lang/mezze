@@ -26,6 +26,7 @@ class CoopAsyncTest {
     fun `test simple spawn and await`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
@@ -42,6 +43,7 @@ class CoopAsyncTest {
     fun `test spawn multiple tasks and await`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
@@ -67,6 +69,7 @@ class CoopAsyncTest {
     fun `test spawn with computation`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let compute = {x} -> x * x + 1
 
@@ -90,6 +93,7 @@ class CoopAsyncTest {
         // This test verifies that tasks don't block each other
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> "first"}
@@ -157,12 +161,13 @@ class CoopAsyncTest {
     fun `test async map`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
-                let results = Async.map {
+                let results = result::get_or_else { result = try_par_map {
                     xs = [1, 2, 3, 4, 5],
                     f = {x} -> x * 2
-                }
+                }, def = [] }
                 results
         """.trimIndent()
 
@@ -184,6 +189,7 @@ class CoopAsyncTest {
     fun `test is_done returns true after await`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
@@ -205,6 +211,7 @@ class CoopAsyncTest {
     fun `test nested function with async`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let async_compute = {x} -> do
                 let p = Async.spawn {f = {} -> x + 10}
@@ -231,6 +238,7 @@ class CoopAsyncTest {
         // With real scheduler, spawned tasks are queued, not immediately run
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
@@ -247,6 +255,7 @@ class CoopAsyncTest {
         // Await should run the scheduler until the promise completes
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 1}
@@ -277,12 +286,13 @@ class CoopAsyncTest {
     fun `test all waits for all promises`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
-                let results = Async.all {ps = [p1, p2, p3]}
+                let results = result::get_or_else { result = try_all {ps = [p1, p2, p3]}, def = [] }
                 results
         """.trimIndent()
 
@@ -304,6 +314,7 @@ class CoopAsyncTest {
     fun `test race returns first completed`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> "first"}
@@ -327,6 +338,7 @@ class CoopAsyncTest {
         // In coop mode, timeout always succeeds (no real time)
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
@@ -347,12 +359,13 @@ class CoopAsyncTest {
     fun `test async filter`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
-                let results = Async.filter {
+                let results = result::get_or_else { result = try_par_filter {
                     xs = [1, 2, 3, 4, 5, 6],
                     f = {x} -> x % 2 == 0
-                }
+                }, def = [] }
                 results
         """.trimIndent()
 
@@ -374,13 +387,14 @@ class CoopAsyncTest {
     fun `test async for_each runs all`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 let count = { val = 0 }
-                Async.for_each {
+                result::get_or_else { result = try_par_for_each {
                     xs = [1, 2, 3],
                     f = {x} -> count.val
-                }
+                }, def = {} }
                 # for_each returns unit, just verify it completes
                 True
         """.trimIndent()
@@ -398,6 +412,7 @@ class CoopAsyncTest {
         // In coop mode, sleep just yields - doesn't actually wait
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 Async.sleep {ms = 100}
@@ -416,6 +431,7 @@ class CoopAsyncTest {
     fun `test chained async operations`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
@@ -440,6 +456,7 @@ class CoopAsyncTest {
     fun `test many concurrent tasks`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
             use std::collections::seq
 
             perform CoopAsync in do
@@ -449,7 +466,7 @@ class CoopAsyncTest {
                     f = {x} -> Async.spawn {f = {} -> x * x}
                 }
                 # Await all and sum
-                let results = Async.all {ps = promises}
+                let results = result::get_or_else { result = try_all {ps = promises}, def = [] }
                 seq::fold { xs = results, init = 0, f = {acc, x} -> acc + x }
         """.trimIndent()
 
@@ -495,12 +512,13 @@ class CoopAsyncTest {
     fun `test settle returns Ok for successful tasks`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
             use std::collections::seq
 
             perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 1}
                 let p2 = Async.spawn {f = {} -> 2}
-                let results = Async.settle {ps = [p1, p2]}
+                let results = settle {ps = [p1, p2]}
                 seq::size { xs = results }
         """.trimIndent()
 
@@ -516,6 +534,7 @@ class CoopAsyncTest {
     fun `test run helper spawns and awaits`() {
         val source = """
             use std::effects::async::{Async, CoopAsync, run, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 match run {f = {} -> 42} is
@@ -536,6 +555,7 @@ class CoopAsyncTest {
         // Coop scheduler runs tasks in FIFO order
         val source = """
             use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform CoopAsync in do
                 let order = []

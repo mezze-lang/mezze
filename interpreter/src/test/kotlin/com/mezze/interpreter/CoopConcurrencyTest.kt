@@ -29,6 +29,7 @@ class CoopConcurrencyTest {
 
     private val setupCode = """
         use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+        use std::result
     """.trimIndent()
 
     // =============================================================================
@@ -476,7 +477,7 @@ class CoopConcurrencyTest {
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
-                let results = Async.all {ps = [p1, p2, p3]}
+                let results = result::get_or_else { result = try_all {ps = [p1, p2, p3]}, def = [] }
                 sum {xs = results}
         """
         val result = eval(code)

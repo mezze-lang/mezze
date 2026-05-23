@@ -34,7 +34,8 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped with single child task`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform LoomAsync in do
                 Async.scoped {f = {sc} -> do
@@ -52,7 +53,8 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped with multiple child tasks`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform LoomAsync in do
                 Async.scoped {f = {sc} -> do
@@ -80,7 +82,8 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped returns function result`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform LoomAsync in do
                 Async.scoped {f = {sc} -> do
@@ -98,7 +101,8 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped with no child tasks`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform LoomAsync in do
                 Async.scoped {f = {sc} -> 42}
@@ -110,7 +114,8 @@ class ScopedConcurrencyTest {
     @Test
     fun `test nested scopes`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform LoomAsync in do
                 Async.scoped {f = {sc} -> do
@@ -137,7 +142,7 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped with mixed spawn and join`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
             perform LoomAsync in do
@@ -169,7 +174,8 @@ class ScopedConcurrencyTest {
     @Test
     fun `test multiple sequential scoped blocks`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform LoomAsync in do
                 let r1 = Async.scoped {f = {sc} -> do
@@ -205,16 +211,17 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped computation inside spawned task`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform LoomAsync in do
                 Async.scoped {f = {sc} -> do
                     let p = scope_spawn {sc = sc, f = {} -> do
                         # Use concurrent map inside spawned task
-                        let results = Async.map {
+                        let results = result::get_or_else { result = try_par_map {
                             xs = [1, 2, 3],
                             f = {x} -> x * 10
-                        }
+                        }, def = [] }
                         # Compute sum
                         let sum = 10 + 20 + 30
                         sum
@@ -233,7 +240,8 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped with concurrent computation returning record`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform LoomAsync in do
                 Async.scoped {f = {sc} -> do
@@ -257,7 +265,8 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped with closure capturing outer variable`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform LoomAsync in do
                 let multiplier = 10
@@ -276,7 +285,8 @@ class ScopedConcurrencyTest {
     @Test
     fun `test deeply nested scopes`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform LoomAsync in do
                 Async.scoped {f = {sc} -> do

@@ -33,7 +33,8 @@ class AsyncMicroBench {
         // cheap end of spawn+await — most of the cost is virtual thread
         // creation + result handoff.
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let outer : { n: Int, acc: Int } -> Int = { n, acc } ->
                 if n <= 0 then acc
@@ -57,7 +58,8 @@ class AsyncMicroBench {
         // path + Async dispatch, not actual virtual-thread parking (sleep 0
         // returns immediately on most impls but still goes through dispatch).
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             perform LoomAsync in do
                 let body : { n: Int } -> {} <Async> = { n } ->
@@ -86,7 +88,8 @@ class AsyncMicroBench {
         // process doesn't exit before tasks complete.
         val n = 2000
         val source = """
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ Async, LoomAsync, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
             use std::collections::seq
 
             perform LoomAsync in do
@@ -94,7 +97,7 @@ class AsyncMicroBench {
                     xs = seq::range { start = 0, end = $n },
                     f = { x } -> Async.spawn { f = {} -> x },
                 }
-                Async.all { ps = ps }
+                result::get_or_else { result = try_all { ps = ps }, def = [] }
                 $n
         """.trimIndent()
         BenchRecorder.bench(
@@ -119,7 +122,8 @@ class AsyncMicroBench {
         // cost to drop with future work).
         val n = 2000
         val source = """
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ Async, LoomAsync, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
             use std::collections::seq
 
             perform LoomAsync in do
@@ -127,7 +131,7 @@ class AsyncMicroBench {
                     xs = seq::range { start = 1, end = $n + 1 },
                     f = { x } -> Async.spawn { f = {} -> x },
                 }
-                let results = Async.all { ps = ps }
+                let results = result::get_or_else { result = try_all { ps = ps }, def = [] }
                 seq::fold { xs = results, init = 0, f = { acc, x } -> acc + x }
         """.trimIndent()
         // sum 1..n
@@ -247,7 +251,8 @@ class AsyncMicroBench {
         // doesn't, the stack growth is on the await side.
         for (n in intArrayOf(1_000, 5_000, 10_000, 50_000)) {
             val source = """
-                use std::effects::async::{ Async, LoomAsync }
+                use std::effects::async::{ Async, LoomAsync, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+                use std::result
                 use std::collections::seq
 
                 let drive = {} -> do
@@ -299,7 +304,8 @@ class AsyncMicroBench {
         // dropping as JIT compiles the hot path.
         for (n in intArrayOf(1_000, 10_000, 50_000, 200_000, 1_000_000)) {
             val source = """
-                use std::effects::async::{ Async, LoomAsync }
+                use std::effects::async::{ Async, LoomAsync, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+                use std::result
                 use std::collections::seq
 
                 perform LoomAsync in do
@@ -307,7 +313,7 @@ class AsyncMicroBench {
                         xs = seq::range { start = 1, end = $n + 1 },
                         f = { x } -> Async.spawn { f = {} -> x },
                     }
-                    let results = Async.all { ps = ps }
+                    let results = result::get_or_else { result = try_all { ps = ps }, def = [] }
                     seq::fold { xs = results, init = 0, f = { acc, x } -> acc + x }
             """.trimIndent()
             val expected = (n.toLong() * (n + 1)) / 2
@@ -336,7 +342,8 @@ class AsyncMicroBench {
         // spawn cost and the underlying CallDirectScalarNode hot path. Pure
         // CPU, no I/O, so this is mostly call-dispatch + thread coord.
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::result
 
             let fib = {n} ->
                 if n <= 1 then n
