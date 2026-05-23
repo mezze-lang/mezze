@@ -75,13 +75,13 @@ class DevCommand {
         val modulePath = manifest.`package`.name
         val entryName = appConfig.entry
 
-        val java = com.mezze.language.cli.JvmLauncher.findJava()
-        if (java == null) {
-            println("Error: Java 21+ required for 'mez dev'. Install with:")
-            println("  sdk install java 24.0.1-graal    # sdkman")
-            println("  brew install graalvm-jdk          # macOS")
+        val envReport = com.mezze.language.cli.EnvironmentCheck.probe()
+        if (com.mezze.language.cli.EnvironmentCheck.isCriticalFailure(envReport)) {
+            println(com.mezze.language.cli.EnvironmentCheck.longReport(envReport))
             kotlin.system.exitProcess(1)
         }
+        val java = com.mezze.language.cli.JvmLauncher.findJava()
+            ?: error("EnvironmentCheck passed but findJava() returned null — internal inconsistency")
 
         // Wire-protocol path (#220): compile here in native mez, JVM only
         // executes. Gated by MEZZE_WIRE=1 until validated end-to-end. Once

@@ -92,9 +92,16 @@ class BuildCommand {
         // missing — building the JVM jar first and crashing 20 seconds
         // in is a bad UX. The actual native-image invocation is later in
         // the pipeline; this is just the early prereq check.
-        if (nativeBuild && NativeImageRunner.locate() == null) {
-            println(NativeImageRunner.missingMessage())
-            kotlin.system.exitProcess(2)
+        if (nativeBuild) {
+            val envReport = com.mezze.language.cli.EnvironmentCheck.probe()
+            if (com.mezze.language.cli.EnvironmentCheck.isCriticalFailure(envReport)) {
+                println(com.mezze.language.cli.EnvironmentCheck.longReport(envReport))
+                kotlin.system.exitProcess(2)
+            }
+            if (NativeImageRunner.locate() == null) {
+                println(NativeImageRunner.missingMessage())
+                kotlin.system.exitProcess(2)
+            }
         }
 
         val store = SQLiteMezzeStore.openProject(currentDir)

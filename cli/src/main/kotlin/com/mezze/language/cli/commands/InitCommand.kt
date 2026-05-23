@@ -19,113 +19,50 @@ import java.security.MessageDigest
 class InitCommand {
 
     fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
-        // Parse flags and project name
         val hasLibFlag = args.contains("--lib")
         val hasAppFlag = args.contains("--app")
+        val nameArg = args.firstOrNull { !it.startsWith("--") }
 
-        // Get project name (first non-flag argument)
-        val projectName = args.firstOrNull { !it.startsWith("--") }
+        // Resolve type. Flags win; otherwise default to --app. Interactive
+        // (type prompt) only triggers when the user ran `mez init` with no
+        // args at all — see below.
+        var createLib: Boolean
+        var createApp: Boolean
+        when {
+            hasLibFlag && hasAppFlag -> { createLib = true; createApp = true }
+            hasLibFlag -> { createLib = true; createApp = false }
+            else -> { createLib = false; createApp = true }
+        }
 
-        if (projectName == null) {
-            println("❌ Error: Please provide a project name")
-            println()
-            println("Usage: mez init <project-name> [--lib] [--app]")
-            println()
-            println("Examples:")
-            println("  mez init my_project          # Interactive mode")
-            println("  mez init my_project --lib    # Create library package")
-            println("  mez init my_project --app    # Create app package")
+        // Resolve name. Positional wins; otherwise — only when no args at
+        // all — drop into the two-question interactive flow (type, name).
+        // Any flag (e.g. `mez init --lib`) keeps the silent path and just
+        // errors on the missing name; we don't want to half-ask.
+        val projectName: String = if (nameArg != null) {
+            nameArg
+        } else if (args.isEmpty()) {
+            val (t, n) = promptInteractive() ?: return
+            createLib = t.lib
+            createApp = t.app
+            n
+        } else {
+            println("Error: missing project name")
+            println("Usage: mez init <name> [--lib] [--app]")
             return
         }
 
-        // Create target directory
         val targetDir = File(currentDir, projectName)
-
-        // Check if folder already exists
         if (targetDir.exists()) {
-            println("❌ Error: Folder '$projectName' already exists")
-            println()
-            println("Location: ${targetDir.absolutePath}")
-            println()
-            println("💡 Please choose a different name or remove the existing folder.")
+            println("Error: folder '$projectName' already exists at ${targetDir.absolutePath}")
             return
         }
-
-        // Create the project folder
         if (!targetDir.mkdirs()) {
-            println("❌ Error: Failed to create folder '$projectName'")
+            println("Error: failed to create folder '$projectName'")
             return
         }
 
-        println("Creating project in ${targetDir.absolutePath}")
-        println()
-
-        // Use targetDir instead of currentDir from here on
         val projectDir = targetDir
         val mezzeToml = File(projectDir, "Mezze.toml")
-
-        // Determine package type
-        val createLib: Boolean
-        val createApp: Boolean
-
-        when {
-            hasLibFlag && hasAppFlag -> {
-                createLib = true
-                createApp = true
-                println("Creating library and app package...")
-            }
-            hasLibFlag -> {
-                createLib = true
-                createApp = false
-                println("Creating library package...")
-            }
-            hasAppFlag -> {
-                createLib = false
-                createApp = true
-                println("Creating app package...")
-            }
-            else -> {
-                // Interactive mode - ask user
-                println("What type of package do you want to create?")
-                println()
-                println("  1) Library (reusable code for other packages)")
-                println("  2) App (executable program)")
-                println("  3) Both (library with CLI tool)")
-                println()
-                print("Choice [1-3]: ")
-
-                val choice = readLine()?.trim() ?: "1"
-
-                when (choice) {
-                    "1" -> {
-                        createLib = true
-                        createApp = false
-                        println()
-                        println("Creating library package...")
-                    }
-                    "2" -> {
-                        createLib = false
-                        createApp = true
-                        println()
-                        println("Creating app package...")
-                    }
-                    "3" -> {
-                        createLib = true
-                        createApp = true
-                        println()
-                        println("Creating library and app package...")
-                    }
-                    else -> {
-                        println()
-                        println("❌ Invalid choice. Defaulting to library package.")
-                        createLib = true
-                        createApp = false
-                    }
-                }
-            }
-        }
-
-        println()
 
         // Get package name from project name
         val packageName = projectName.lowercase().replace("-", "_")
@@ -133,48 +70,23 @@ class InitCommand {
         try {
             validatePackageName(packageName)
         } catch (e: IllegalArgumentException) {
-            println("❌ Error: Invalid directory name for package")
-            println()
+            println("Error: invalid package name '$packageName'")
             println(e.message)
-            println()
-            println("💡 Please rename the directory to a valid package name (snake_case)")
-            println("   Example: mkdir my_awesome_package && cd my_awesome_package && mezze init")
+            println("Rename the directory to snake_case and retry.")
             return
         }
 
         val version = "0.1.0"
-
-        // Create Mezze.toml
         createMezzeToml(mezzeToml, packageName, version, createLib, createApp)
-        println("  ✅ Created Mezze.toml")
 
-        // Create directory structure
         val srcDir = File(projectDir, "src")
-        if (!srcDir.exists()) {
-            srcDir.mkdirs()
-            println("  ✅ Created src/")
-        }
+        if (!srcDir.exists()) srcDir.mkdirs()
 
-        // Create lib.mz if needed
-        if (createLib) {
-            val libFile = File(srcDir, "lib.mz")
-            createLibFile(libFile, packageName)
-            println("  ✅ Created src/lib.mz")
-        }
+        if (createLib) createLibFile(File(srcDir, "lib.mz"), packageName)
+        if (createApp) createAppFile(File(srcDir, "app.mz"), packageName)
 
-        // Create app.mz if needed
-        if (createApp) {
-            val appFile = File(srcDir, "app.mz")
-            createAppFile(appFile, packageName)
-            println("  ✅ Created src/app.mz")
-        }
-
-        // Create .gitignore
         val gitignore = File(projectDir, ".gitignore")
-        if (!gitignore.exists()) {
-            createGitignore(gitignore)
-            println("  ✅ Created .gitignore")
-        }
+        if (!gitignore.exists()) createGitignore(gitignore)
 
         // Materialise the project's `.mz/` store with stdlib seeded in.
         // openProject creates cache.sqlite + stdlib.sqlite + deps.sqlite,
@@ -196,26 +108,61 @@ class InitCommand {
             store.close()
         }
 
-        println()
-        println("🎉 Package '$packageName' initialized successfully!")
-        println()
-
-        // Show next steps
-        println("📝 Next steps:")
-        println("   cd $projectName")
-        if (createLib && !createApp) {
-            println("   # Edit src/lib.mz to add your library functions")
-            println("   mez check        # Type check your code")
-        } else if (createApp && !createLib) {
-            println("   # Edit src/app.mz to add your application logic")
-            println("   mez dev          # Run your app")
-            println("   mez build        # Create a standalone JAR")
-        } else {
-            println("   # Edit src/lib.mz to add your library functions")
-            println("   # Edit src/app.mz to add your CLI tool logic")
-            println("   mez dev          # Run your app")
-            println("   mez build        # Create a standalone JAR")
+        val kindLabel = when {
+            createLib && createApp -> "lib + app"
+            createLib -> "lib"
+            else -> "app"
         }
+        println("Created $packageName ($kindLabel) in ${targetDir.absolutePath}")
+        println()
+        println("Next steps")
+        println("  cd $projectName")
+        when {
+            createLib && !createApp -> println("  mez check       type-check your library")
+            createApp && !createLib -> {
+                println("  mez dev         run the app")
+                println("  mez build       build a standalone JAR")
+            }
+            else -> {
+                println("  mez dev         run the app")
+                println("  mez build       build a standalone JAR")
+            }
+        }
+
+        com.mezze.language.cli.EnvironmentCheck.shortReport()?.let { println(it) }
+    }
+
+    private data class PackageKind(val lib: Boolean, val app: Boolean)
+
+    /**
+     * Interactive prompt: choose package type, then enter a name.
+     * Returns null if the user aborts (EOF on a required prompt).
+     * Only invoked when the user runs `mez init` with no args at all.
+     */
+    private fun promptInteractive(): Pair<PackageKind, String>? {
+        println("Package type:")
+        println("  1) App (executable program)  [default]")
+        println("  2) Library (reusable code)")
+        println("  3) Both (library with CLI tool)")
+        print("Choice [1-3]: ")
+        val kind = when (readLine()?.trim().orEmpty()) {
+            "", "1" -> PackageKind(lib = false, app = true)
+            "2"     -> PackageKind(lib = true,  app = false)
+            "3"     -> PackageKind(lib = true,  app = true)
+            else -> {
+                println("Invalid choice; defaulting to app.")
+                PackageKind(lib = false, app = true)
+            }
+        }
+        println()
+        print("Project name: ")
+        val name = readLine()?.trim().orEmpty()
+        if (name.isEmpty()) {
+            println("Error: project name is required.")
+            return null
+        }
+        println()
+        return kind to name
     }
 
     private fun createMezzeToml(file: File, packageName: String, version: String, hasLib: Boolean, hasApp: Boolean) {
@@ -309,7 +256,7 @@ class InitCommand {
                 store.setAppFunctionHashes(appName, result.loweredFunctions.map { it.hash })
                 store.setAppPerformerRecords(appName, result.performerRecords)
             }
-            println("  ✅ Pre-typechecked entry (cache populated)")
+            // cache populated silently — surface only on MEZZE_DEBUG (see catch below)
         } catch (e: Exception) {
             // Don't fail `mez init` on a template type error; the user
             // can still edit and re-run. But surface in MEZZE_DEBUG so
