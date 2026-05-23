@@ -54,6 +54,7 @@ enum class ErrorCode {
     P0119_ABILITY_LEVEL_CONSTRAINT, // `ability A for 'a with B 'a` or `where 'a: B` — put it on a method instead
     P0120_WITH_AFTER_ARROW, // `{p} -> Ret with C 'a` — `with` must come BEFORE the arrow
     P0121_LAMBDA_BODY_BARE_LET, // `{p} -> let x = ...` — wrap in `do` to use let-bindings (#221)
+    P0122_MATCH_NEEDS_IS, // `match x { case ... }` or `match x case ...` — Mezze uses `match x is` + indented arms
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,

@@ -215,13 +215,17 @@ internal val MezzeParser.lambdaExpression: Parser<ParsedExpr>
                                         // enclosing let when the parser unwinds.
                                         val nextTok = stream4.current()
                                         if (nextTok?.type == TokenType.LET) {
+                                            // Mark fatal so the enclosing do-block surfaces THIS
+                                            // error verbatim instead of falling through to its
+                                            // generic "Do block is empty / must end with result"
+                                            // recovery message (cascade noise).
                                             return@parser ParseResult.Failure(
                                                 "Lambda body cannot begin with `let` — `let` is a statement, " +
-                                                    "and a lambda body is a single expression. " +
-                                                    "Wrap the body in `do` to use let-bindings: `{ ... } -> do let x = ... in ...`",
+                                                    "and a lambda body is a single expression.",
                                                 stream4.getSourcePosition(),
                                                 nextTok.line,
                                                 nextTok.column,
+                                                isFatal = true,
                                                 code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0121_LAMBDA_BODY_BARE_LET,
                                                 hints = listOf(
                                                     "change `{ ... } ->` to `{ ... } -> do` and put the let-statements + final expression inside"
@@ -1254,7 +1258,39 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
                                     is ParseResult.Failure -> firstCase
                                 }
                             }
-                            is ParseResult.Failure -> isToken
+                            is ParseResult.Failure -> {
+                                // Targeted hint for users coming from Rust/Swift/etc.
+                                // `match x { case Foo -> ... }` is a common attempt;
+                                // Mezze syntax is `match x is\n  Foo -> ...` (no `case`
+                                // keyword, no braces, indented arms after `is`).
+                                val tok = stream2.current()
+                                if (tok != null && (tok.type == TokenType.IDENTIFIER && tok.text == "case" ||
+                                                    tok.type == TokenType.LBRACE)) {
+                                    ParseResult.Failure(
+                                        if (tok.text == "case")
+                                            "Expected `is` after the match expression. " +
+                                                "Mezze match syntax does NOT use a `case` keyword — " +
+                                                "write `match x is` and put each arm indented on its own line: " +
+                                                "`pattern -> body`."
+                                        else
+                                            "Expected `is` after the match expression. " +
+                                                "Mezze match syntax does NOT use `{ ... }` braces — " +
+                                                "write `match x is` and put each arm indented on its own line.",
+                                        stream2.getSourcePosition(),
+                                        tok.line,
+                                        tok.column,
+                                        isFatal = true,
+                                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0122_MATCH_NEEDS_IS,
+                                        hints = listOf(
+                                            "rewrite as: `match x is`",
+                                            "  Pattern1 -> result1",
+                                            "  Pattern2 -> result2",
+                                        )
+                                    )
+                                } else {
+                                    isToken
+                                }
+                            }
                         }
                     }
                     is ParseResult.Failure -> expr

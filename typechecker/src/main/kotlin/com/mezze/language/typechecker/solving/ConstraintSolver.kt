@@ -2222,9 +2222,25 @@ class ConstraintSolver(
             }
         }
 
-        // If we have the original operator from the AST, use it directly
+        // If we have the original operator from the AST, use it directly.
+        // Two cases:
+        // (a) No matching impl exists anywhere → tell user how to implement
+        //     the ability for their type.
+        // (b) An impl for primaryType exists in the current view but isn't
+        //     resolving here — the most common cause is a missing
+        //     `use std::<module>::{...}` that brings the operator's stdlib
+        //     helper into scope. Tell user that instead of suggesting they
+        //     implement something they already have. (#221)
         if (operator != null) {
-            return "Cannot use '$operator' with $typeNames. To enable this, implement: impl $abilityName for $primaryType where { ... }${formatAbilityCandidates(abilityName)}"
+            val implExistsForType = abilityImplExistsForType(abilityName, typeArgs)
+            return if (implExistsForType) {
+                "Cannot use '$operator' with $typeNames. An `impl $abilityName for $primaryType` exists but is not " +
+                    "visible at this call site — most likely the operator's stdlib helper isn't imported. " +
+                    "Try adding `use std::${stdModuleForType(primaryType)}::{ * }` (or import the specific symbol used)." +
+                    formatAbilityCandidates(abilityName)
+            } else {
+                "Cannot use '$operator' with $typeNames. To enable this, implement: impl $abilityName for $primaryType where { ... }${formatAbilityCandidates(abilityName)}"
+            }
         }
 
         // Generic ability error — no hardcoded ability→operator mappings.
@@ -2269,6 +2285,59 @@ class ConstraintSolver(
      *
      * Audit task #208.
      */
+    /**
+     * Does any registered `impl <abilityName>` target the user's primary
+     * type? Used to decide whether the operator error should suggest
+     * "implement" vs "add a `use` import" (#221).
+     *
+     * Compares by formatted-type-string — same surface form the user
+     * sees in their error message and in the "Available impls" line.
+     * Conservative: false-positive favours the import message (more
+     * helpful for the common case where the impl exists in stdlib).
+     */
+    private fun abilityImplExistsForType(abilityName: String, typeArgs: List<MezzeType>): Boolean {
+        val primaryType = typeArgs.firstOrNull() ?: return false
+        val primaryName = formatType(primaryType)
+        val impls = context.getAbilityImpls(abilityName)
+        return impls.any { info ->
+            val targets = info.targetTypeAnnotations
+            val rendered = when {
+                targets != null && targets.isNotEmpty() -> targets.joinToString(", ") { renderAnnotation(it) }
+                info.targetTypes.isNotEmpty() -> info.targetTypes.joinToString(", ")
+                else -> return@any false
+            }
+            // Exact match (e.g. "Int" == "Int") OR the impl's leading
+            // segment matches (e.g. "Result Str Err" starts with "Result"
+            // when user has Result of something).
+            rendered == primaryName || rendered.split(' ').firstOrNull() == primaryName.split(' ').firstOrNull()
+        }
+    }
+
+    /**
+     * Best-effort guess at the stdlib module a primitive type lives in,
+     * used in the "add a `use` import" hint. Returns "<unknown>" for
+     * types we don't have a known mapping for — the hint then reads as
+     * "use std::<unknown>::{...}" which still nudges the user toward the
+     * import direction.
+     */
+    private fun stdModuleForType(primaryType: String): String = when {
+        primaryType.startsWith("Int") -> "int"
+        primaryType.startsWith("Float") -> "float"
+        primaryType.startsWith("Nat") -> "nat"
+        primaryType.startsWith("Bool") -> "bool"
+        primaryType.startsWith("Str") -> "str"
+        primaryType.startsWith("Char") -> "char"
+        primaryType.startsWith("Frac") -> "frac"
+        primaryType.startsWith("List") -> "collections::list"
+        primaryType.startsWith("Map") -> "collections::map"
+        primaryType.startsWith("Set") -> "collections::set"
+        primaryType.startsWith("Seq") -> "collections::seq"
+        primaryType.startsWith("Bytes") -> "collections::bytes"
+        primaryType.startsWith("Option") -> "option"
+        primaryType.startsWith("Result") -> "result"
+        else -> "<unknown>"
+    }
+
     private fun formatAbilityCandidates(abilityName: String): String {
         val impls = context.getAbilityImpls(abilityName)
         if (impls.isEmpty()) return ""
