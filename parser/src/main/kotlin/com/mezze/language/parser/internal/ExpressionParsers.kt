@@ -204,6 +204,31 @@ internal val MezzeParser.lambdaExpression: Parser<ParsedExpr>
                                     is ParseResult.Success -> {
                                         // Parse body
                                         val stream4 = skipNewlines(arrow.remaining)
+
+                                        // Targeted error: lambda body cannot be a `let`.
+                                        // A lambda body is a single expression; `let` is
+                                        // a statement and only legal inside a `do` block.
+                                        // Catching this here gives the user the right
+                                        // location (the arrow) and the right fix (`do`),
+                                        // instead of the misleading "Do block must end
+                                        // with a result expression" surfaced at the
+                                        // enclosing let when the parser unwinds.
+                                        val nextTok = stream4.current()
+                                        if (nextTok?.type == TokenType.LET) {
+                                            return@parser ParseResult.Failure(
+                                                "Lambda body cannot begin with `let` — `let` is a statement, " +
+                                                    "and a lambda body is a single expression. " +
+                                                    "Wrap the body in `do` to use let-bindings: `{ ... } -> do let x = ... in ...`",
+                                                stream4.getSourcePosition(),
+                                                nextTok.line,
+                                                nextTok.column,
+                                                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0121_LAMBDA_BODY_BARE_LET,
+                                                hints = listOf(
+                                                    "change `{ ... } ->` to `{ ... } -> do` and put the let-statements + final expression inside"
+                                                )
+                                            )
+                                        }
+
                                         when (val body = expression(stream4)) {
                                             is ParseResult.Failure -> return@parser body
                                             is ParseResult.Success -> {
