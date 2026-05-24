@@ -370,18 +370,19 @@ class AsyncMicroBench {
         // park). Channel.send fills, Channel.recv drains. Measures the
         // buffered-channel hot path.
         val source = """
-            use std::effects::concurrent::channel::{ Channel, BlockingChannel, chan_bounded }
+            use std::effects::concurrent::channel::{ chan_bounded, send, recv }
+            use std::effects::async::{ Async, LoomAsync }
 
-            perform BlockingChannel in do
+            perform LoomAsync in do
                 let ch = chan_bounded { cap = 256 }
-                let send_loop : { n: Int } -> {} <Channel> = { n } ->
+                let send_loop : { n: Int } -> {} <Async, ...> = { n } ->
                     if n <= 0 then {}
                     else do
-                        Channel.send { ch = ch, value = n }
+                        send { ch = ch, value = n }
                         send_loop { n = n - 1 }
-                let recv_loop : { n: Int, acc: Int } -> Int <Channel> = { n, acc } ->
+                let recv_loop : { n: Int, acc: Int } -> Int <Async, ...> = { n, acc } ->
                     if n <= 0 then acc
-                    else recv_loop { n = n - 1, acc = acc + Channel.recv { ch = ch } }
+                    else recv_loop { n = n - 1, acc = acc + recv { ch = ch } }
                 send_loop { n = 200 }
                 recv_loop { n = 200, acc = 0 }
         """.trimIndent()

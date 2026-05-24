@@ -798,27 +798,16 @@ public final class ConcurrencyNatives {
     }
 
     @TruffleBoundary
-    public static MezzeRecord channelSend(MezzeRecord args) {
-        MezzeChannel ch = getChannel(args, "ch");
-        Object val = getField(args, "value");
-        try { ch.send(val); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-        return MezzeRecord.empty();
-    }
-
-    @TruffleBoundary
-    public static Object channelReceive(MezzeRecord args) {
-        MezzeChannel ch = getChannel(args, "ch");
-        try { return ch.receive(); } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return MezzeUnit.INSTANCE;
-        }
-    }
-
-    @TruffleBoundary
     public static MezzeRecord channelClose(MezzeRecord args) {
         MezzeChannel ch = getChannel(args, "ch");
         ch.close();
         return MezzeRecord.empty();
+    }
+
+    @TruffleBoundary
+    public static boolean channelIsClosed(MezzeRecord args) {
+        MezzeChannel ch = getChannel(args, "ch");
+        return ch.isClosed();
     }
 
     @TruffleBoundary
@@ -1426,25 +1415,6 @@ public final class ConcurrencyNatives {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
-        }
-    }
-
-    // ==================== Additional Channel Functions ====================
-
-    @TruffleBoundary
-    public static MezzeRecord mockChannelSend(MezzeRecord args) {
-        MezzeChannel ch = getChannel(args, "ch");
-        Object val = getField(args, "value");
-        try { ch.send(val); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-        return MezzeRecord.empty();
-    }
-
-    @TruffleBoundary
-    public static Object mockChannelReceive(MezzeRecord args) {
-        MezzeChannel ch = getChannel(args, "ch");
-        try { return ch.receive(); } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return MezzeUnit.INSTANCE;
         }
     }
 
@@ -2281,88 +2251,6 @@ public final class ConcurrencyNatives {
     public static MezzeChannel channelMakeBuffered(MezzeRecord args) {
         long capacity = getLongOrDefault(args, "capacity", 16);
         return new MezzeChannel((int) capacity);
-    }
-
-    @TruffleBoundary
-    public static boolean mockChannelTrySend(MezzeRecord args) {
-        MezzeChannel ch = getChannel(args, "ch");
-        Object val = getField(args, "value");
-        if (ch.isClosed()) return false;
-        // MockChannel is non-blocking - always add to queue
-        ch.queue.add(val);
-        return true;
-    }
-
-    @TruffleBoundary
-    public static Object mockChannelTryRecv(MezzeRecord args) {
-        MezzeChannel ch = getChannel(args, "ch");
-        Object val = ch.queue.poll();
-        if (val == null) return createNone();
-        return createSome(val);
-    }
-
-    @TruffleBoundary
-    public static Object mockChannelRecvAny(MezzeRecord args) {
-        Object[] channels = getArray(args, "channels");
-        // Check all channels - throw if all empty (mock doesn't block)
-        for (int i = 0; i < channels.length; i++) {
-            MezzeChannel ch = extractChannelFromObject(channels[i]);
-            if (ch != null) {
-                Object val = ch.queue.poll();
-                if (val != null) {
-                    return MezzeRecord.fromFields(
-                        new String[]{"index", "value"},
-                        new Object[]{(long) i, val}
-                    );
-                }
-            }
-        }
-        throw new RuntimeException("MockChannel: All channels are empty (would block)");
-    }
-
-    @TruffleBoundary
-    public static Object mockChannelRecvAnyTimeout(MezzeRecord args) {
-        Object[] channels = getArray(args, "channels");
-        long ms = getLongOrDefault(args, "ms", 0);
-        // MockChannel doesn't actually timeout - just check if any have data
-        for (int i = 0; i < channels.length; i++) {
-            MezzeChannel ch = extractChannelFromObject(channels[i]);
-            if (ch != null) {
-                Object val = ch.queue.poll();
-                if (val != null) {
-                    return createSome(MezzeRecord.fromFields(
-                        new String[]{"index", "value"},
-                        new Object[]{(long) i, val}
-                    ));
-                }
-            }
-        }
-        // Return None (simulates timeout when nothing available)
-        return createNone();
-    }
-
-    private static MezzeChannel extractChannelFromObject(Object obj) {
-        if (obj instanceof MezzeChannel ch) return ch;
-        if (obj instanceof MezzeRecord rec) {
-            for (int i = 0; i < rec.getShape().getFieldCount(); i++) {
-                Object inner = rec.getField(i);
-                if (inner instanceof MezzeChannel ch) return ch;
-            }
-        }
-        return null;
-    }
-
-    @TruffleBoundary
-    public static MezzeRecord mockChannelClose(MezzeRecord args) {
-        MezzeChannel ch = getChannel(args, "ch");
-        ch.close();
-        return MezzeRecord.empty();
-    }
-
-    @TruffleBoundary
-    public static boolean mockChannelIsClosed(MezzeRecord args) {
-        MezzeChannel ch = getChannel(args, "ch");
-        return ch.isClosed();
     }
 
     // ==================== Additional Agent Operations ====================

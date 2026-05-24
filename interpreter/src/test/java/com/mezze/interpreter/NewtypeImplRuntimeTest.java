@@ -369,8 +369,10 @@ class NewtypeImplRuntimeTest {
         void chanEqSameReference() {
             Object result = MezzeTestHelper.run("""
                 use std::effects::concurrent::channel::{Chan, chan}
-                let ch: Chan Int = chan {}
-                ch == ch
+                use std::effects::async::{Async, LoomAsync}
+                perform LoomAsync in do
+                    let ch: Chan Int = chan {}
+                    ch == ch
                 """);
             assertEquals(true, result);
         }
@@ -379,9 +381,11 @@ class NewtypeImplRuntimeTest {
         void chanEqDifferentReferences() {
             Object result = MezzeTestHelper.run("""
                 use std::effects::concurrent::channel::{Chan, chan}
-                let ch1: Chan Int = chan {}
-                let ch2: Chan Int = chan {}
-                ch1 == ch2
+                use std::effects::async::{Async, LoomAsync}
+                perform LoomAsync in do
+                    let ch1: Chan Int = chan {}
+                    let ch2: Chan Int = chan {}
+                    ch1 == ch2
                 """);
             assertEquals(false, result);
         }

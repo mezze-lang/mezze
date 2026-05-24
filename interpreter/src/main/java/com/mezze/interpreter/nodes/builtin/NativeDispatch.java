@@ -2608,11 +2608,12 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_waitgroup_count", (r, c) -> ConcurrencyNatives.waitgroupCount(r));
 
         // === Channel ===
+        // Park-aware send/recv live in stdlib (channel.mz) on top of try_send/try_recv +
+        // Async.park. The blocking native send/recv are gone along with the Channel
+        // effect (#115).
         HANDLERS.put("__native_channel_make", (r, c) -> ConcurrencyNatives.channelMake(r));
-        HANDLERS.put("__native_channel_send", (r, c) -> ConcurrencyNatives.channelSend(r));
-        HANDLERS.put("__native_channel_receive", (r, c) -> ConcurrencyNatives.channelReceive(r));
-        HANDLERS.put("__native_channel_recv", (r, c) -> ConcurrencyNatives.channelReceive(r));  // alias for recv
         HANDLERS.put("__native_channel_close", (r, c) -> ConcurrencyNatives.channelClose(r));
+        HANDLERS.put("__native_channel_is_closed", (r, c) -> ConcurrencyNatives.channelIsClosed(r));
         HANDLERS.put("__native_channel_try_send", (r, c) -> ConcurrencyNatives.channelTrySend(r));
         HANDLERS.put("__native_channel_try_recv", (r, c) -> ConcurrencyNatives.channelTryRecv(r));
         HANDLERS.put("__native_channel_recv_any", (r, c) -> ConcurrencyNatives.channelRecvAny(r));
@@ -2658,12 +2659,6 @@ public final class NativeDispatch extends MezzeNode {
         // === Additional WaitGroup functions ===
         HANDLERS.put("__native_waitgroup_get_count", (r, c) -> ConcurrencyNatives.waitgroupGetCount(r));
         HANDLERS.put("__native_waitgroup_wait_timeout", (r, c) -> ConcurrencyNatives.waitgroupWaitTimeout(r));
-
-        // === Additional Channel functions ===
-        HANDLERS.put("__native_mock_channel_send", (r, c) -> ConcurrencyNatives.mockChannelSend(r));
-        HANDLERS.put("__native_mock_channel_receive", (r, c) -> ConcurrencyNatives.mockChannelReceive(r));
-        HANDLERS.put("__native_mock_channel_recv", (r, c) -> ConcurrencyNatives.mockChannelReceive(r));  // alias
-        HANDLERS.put("__native_mock_channel_recv_any", (r, c) -> ConcurrencyNatives.mockChannelRecvAny(r));
 
         // === Additional CancellationToken functions ===
         HANDLERS.put("__native_cancellation_token_create_child", (r, c) -> ConcurrencyNatives.cancellationTokenCreateChild(r));
@@ -2713,11 +2708,6 @@ public final class NativeDispatch extends MezzeNode {
 
         // === Additional Channel ===
         HANDLERS.put("__native_channel_make_buffered", (r, c) -> ConcurrencyNatives.channelMakeBuffered(r));
-        HANDLERS.put("__native_mock_channel_try_send", (r, c) -> ConcurrencyNatives.mockChannelTrySend(r));
-        HANDLERS.put("__native_mock_channel_try_recv", (r, c) -> ConcurrencyNatives.mockChannelTryRecv(r));
-        HANDLERS.put("__native_mock_channel_recv_any_timeout", (r, c) -> ConcurrencyNatives.mockChannelRecvAnyTimeout(r));
-        HANDLERS.put("__native_mock_channel_close", (r, c) -> ConcurrencyNatives.mockChannelClose(r));
-        HANDLERS.put("__native_mock_channel_is_closed", (r, c) -> ConcurrencyNatives.mockChannelIsClosed(r));
 
         // === Additional Agent ===
         HANDLERS.put("__native_agent_restart", (r, c) -> ConcurrencyNatives.agentRestart(r));

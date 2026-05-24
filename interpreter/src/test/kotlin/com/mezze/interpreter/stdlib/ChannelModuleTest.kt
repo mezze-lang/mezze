@@ -9,13 +9,11 @@ import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
 
 /**
- * Tests for std/concurrent/channel module.
- * Migrated from V1 to V2 with unboxed values.
+ * Tests for std/effects/concurrent/channel module.
  *
- * Channels provide typed communication between concurrent tasks.
- * - Chan is the value type (channel handle)
- * - Channel is the effect for operations
- * - BlockingChannel and MockChannel are implementations
+ * Post-#115: `Chan 'a` is a plain newtype carrying `<Async>` on every
+ * operation; there is no `Channel` effect. All tests run under
+ * `perform LoomAsync`.
  */
 @Execution(ExecutionMode.SAME_THREAD)
 class ChannelModuleTest {
@@ -34,11 +32,12 @@ class ChannelModuleTest {
     @Test
     fun `test chan creates unbounded channel`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
-            perform MockChannel in do
-                Channel.try_send { ch = ch, value = 42 }
+            perform LoomAsync in do
+                try_send { ch = ch, value = 42 }
         """)
         assertEquals(true, result)
     }
@@ -46,72 +45,77 @@ class ChannelModuleTest {
     @Test
     fun `test chan_bounded creates bounded channel`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan_bounded, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan_bounded, send, recv, try_send, try_recv, close, is_closed}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan_bounded { cap = 10 }
-            perform MockChannel in do
-                Channel.try_send { ch = ch, value = 42 }
+            perform LoomAsync in do
+                try_send { ch = ch, value = 42 }
         """)
         assertEquals(true, result)
     }
 
     // =============================================================================
-    // MockChannel - Send and Receive
+    // Single-threaded send/recv under LoomAsync
     // =============================================================================
 
     @Test
-    fun `test MockChannel send and recv`() {
+    fun `test single-threaded send and recv`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
-            perform MockChannel in do
-                Channel.send { ch = ch, value = 42 }
-                Channel.recv { ch = ch }
+            perform LoomAsync in do
+                send { ch = ch, value = 42 }
+                recv { ch = ch }
         """)
         assertEquals(42L, result)
     }
 
     @Test
-    fun `test MockChannel multiple values in order`() {
+    fun `test single-threaded multiple values in order`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
-            perform MockChannel in do
-                Channel.send { ch = ch, value = 1 }
-                Channel.send { ch = ch, value = 2 }
-                Channel.send { ch = ch, value = 3 }
-                let a = Channel.recv { ch = ch }
-                let b = Channel.recv { ch = ch }
-                let c = Channel.recv { ch = ch }
+            perform LoomAsync in do
+                send { ch = ch, value = 1 }
+                send { ch = ch, value = 2 }
+                send { ch = ch, value = 3 }
+                let a = recv { ch = ch }
+                let b = recv { ch = ch }
+                let c = recv { ch = ch }
                 a * 100 + b * 10 + c
         """)
         assertEquals(123L, result)
     }
 
     @Test
-    fun `test MockChannel with string values`() {
+    fun `test channel with string values`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
-            perform MockChannel in do
-                Channel.send { ch = ch, value = "hello" }
-                Channel.recv { ch = ch }
+            perform LoomAsync in do
+                send { ch = ch, value = "hello" }
+                recv { ch = ch }
         """)
         assertEquals("hello", result)
     }
 
     @Test
-    fun `test MockChannel with record values`() {
+    fun `test channel with record values`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
-            perform MockChannel in do
-                Channel.send { ch = ch, value = { x = 10, y = 20 } }
-                let point = Channel.recv { ch = ch }
+            perform LoomAsync in do
+                send { ch = ch, value = { x = 10, y = 20 } }
+                let point = recv { ch = ch }
                 point.x + point.y
         """)
         assertEquals(30L, result)
@@ -124,11 +128,12 @@ class ChannelModuleTest {
     @Test
     fun `test try_send returns true when space available`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
-            perform MockChannel in do
-                Channel.try_send { ch = ch, value = 42 }
+            perform LoomAsync in do
+                try_send { ch = ch, value = 42 }
         """)
         assertEquals(true, result)
     }
@@ -136,12 +141,13 @@ class ChannelModuleTest {
     @Test
     fun `test try_recv returns Some when value available`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
-            perform MockChannel in do
-                Channel.send { ch = ch, value = 42 }
-                match Channel.try_recv { ch = ch } is
+            perform LoomAsync in do
+                send { ch = ch, value = 42 }
+                match try_recv { ch = ch } is
                     Some { val } -> val
                     None -> -1
         """)
@@ -151,11 +157,12 @@ class ChannelModuleTest {
     @Test
     fun `test try_recv returns None when empty`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
-            perform MockChannel in do
-                match Channel.try_recv { ch = ch } is
+            perform LoomAsync in do
+                match try_recv { ch = ch } is
                     Some { val } -> False
                     None -> True
         """)
@@ -169,11 +176,12 @@ class ChannelModuleTest {
     @Test
     fun `test is_closed returns false for new channel`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
-            perform MockChannel in do
-                Channel.is_closed { ch = ch }
+            perform LoomAsync in do
+                is_closed { ch = ch }
         """)
         assertEquals(false, result)
     }
@@ -181,13 +189,14 @@ class ChannelModuleTest {
     @Test
     fun `test close marks channel as closed`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
-            perform MockChannel in do
-                let before = Channel.is_closed { ch = ch }
-                Channel.close { ch = ch }
-                let after = Channel.is_closed { ch = ch }
+            perform LoomAsync in do
+                let before = is_closed { ch = ch }
+                close { ch = ch }
+                let after = is_closed { ch = ch }
                 { before = before, after = after }
         """)
         val record = result as MezzeRecord
@@ -198,37 +207,37 @@ class ChannelModuleTest {
     @Test
     fun `test try_send returns false on closed channel`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
-            perform MockChannel in do
-                Channel.close { ch = ch }
-                Channel.try_send { ch = ch, value = 42 }
+            perform LoomAsync in do
+                close { ch = ch }
+                try_send { ch = ch, value = 42 }
         """)
         assertEquals(false, result)
     }
 
     // =============================================================================
-    // BlockingChannel with Virtual Threads
+    // Multi-threaded across spawned tasks
     // =============================================================================
 
     @Test
-    fun `test BlockingChannel send and recv with Loom`() {
+    fun `test channel send and recv across spawned tasks`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, BlockingChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
             perform LoomAsync in do
-                perform BlockingChannel in do
                     # Spawn sender
                     let p = Async.spawn { f = {} -> do
-                        Channel.send { ch = ch, value = 42 }
+                        send { ch = ch, value = 42 }
                         {}
                     }
 
                     # Receive
-                    let received = Channel.recv { ch = ch }
+                    let received = recv { ch = ch }
                     let _ = Async.await { p = p }
                     received
         """)
@@ -236,26 +245,25 @@ class ChannelModuleTest {
     }
 
     @Test
-    fun `test BlockingChannel producer consumer pattern`() {
+    fun `test producer consumer pattern across spawned tasks`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, BlockingChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
             perform LoomAsync in do
-                perform BlockingChannel in do
                     # Producer sends 3 values
                     let producer = Async.spawn { f = {} -> do
-                        Channel.send { ch = ch, value = 10 }
-                        Channel.send { ch = ch, value = 20 }
-                        Channel.send { ch = ch, value = 30 }
+                        send { ch = ch, value = 10 }
+                        send { ch = ch, value = 20 }
+                        send { ch = ch, value = 30 }
                         {}
                     }
 
                     # Consumer receives 3 values
-                    let a = Channel.recv { ch = ch }
-                    let b = Channel.recv { ch = ch }
-                    let c = Channel.recv { ch = ch }
+                    let a = recv { ch = ch }
+                    let b = recv { ch = ch }
+                    let c = recv { ch = ch }
 
                     let _ = Async.await { p = producer }
                     a + b + c
@@ -269,16 +277,17 @@ class ChannelModuleTest {
 
     @Test
     fun `test recv_any returns first available`() {
-        // Skip for now - recv_any with MockChannel has type compatibility issues
+        // Skip for now - recv_any has type compatibility issues
         // The implementation works correctly when tested directly in ChannelTest.kt
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch1 = chan {}
-            perform MockChannel in do
-                Channel.send { ch = ch1, value = 42 }
+            perform LoomAsync in do
+                send { ch = ch1, value = 42 }
                 # Just test basic send/recv works
-                Channel.recv { ch = ch1 }
+                recv { ch = ch1 }
         """)
         assertEquals(42L, result)
     }
@@ -286,12 +295,13 @@ class ChannelModuleTest {
     @Test
     fun `test recv_any_timeout returns None when no data`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch1 = chan {}
             let ch2 = chan {}
-            perform MockChannel in do
-                match Channel.recv_any_timeout { channels = [ch1, ch2], ms = 10 } is
+            perform LoomAsync in do
+                match recv_any_timeout { channels = [ch1, ch2], ms = 10 } is
                     Some { val } -> False
                     None -> True
         """)
@@ -301,14 +311,15 @@ class ChannelModuleTest {
     @Test
     fun `test recv_any_timeout returns Some when data available`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch1 = chan {}
             let ch2 = chan {}
-            perform MockChannel in do
-                Channel.send { ch = ch1, value = 42 }
+            perform LoomAsync in do
+                send { ch = ch1, value = 42 }
 
-                match Channel.recv_any_timeout { channels = [ch1, ch2], ms = 1000 } is
+                match recv_any_timeout { channels = [ch1, ch2], ms = 1000 } is
                     Some { val } -> val.index == 0 && val.value == 42
                     None -> False
         """)
