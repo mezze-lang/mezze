@@ -43,12 +43,17 @@ dependencies {
     implementation(project(":ast"))
     implementation(project(":parser"))
     implementation(project(":typechecker"))
-    implementation(project(":interpreter"))
     implementation(project(":datastructures"))
     implementation(project(":lsp"))
     implementation(project(":formatter"))
     // WireRunner speaks the v1 protocol; payload types live here.
     implementation(project(":wire-protocol"))
+    // NOTE: :interpreter is not on the compile classpath. The CLI
+    // references interpreter classes only by string literal — as the
+    // entry-point class name when spawning a JVM child (RuntimeServer)
+    // or assembling native-image's main class (MezzeAppMain). The
+    // classes live in mezze-runtime.jar at run time, never linked
+    // against here.
 
     // Polyglot API (Context, Value, Source) - host API - match native-image version
     implementation("org.graalvm.sdk:graal-sdk:24.2.2")
@@ -456,6 +461,18 @@ tasks.register<Copy>("installRuntime") {
     dependsOn(":interpreter:runtimeShadowJar")
     from(project(":interpreter").layout.buildDirectory.file("libs/mezze-runtime.jar"))
     into(mezzeHome.map { File(it, "lib") })
+    doFirst {
+        // Reap the 91 MB orphan from older installs (pre-wire-protocol).
+        // installRuntime used to copy mezze-lang.jar here too; new installs
+        // don't, so users who upgrade end up with a stale dead-weight jar.
+        // Safe to delete because nothing at run time loads it anymore —
+        // see WireRunner's classpath (mezze-runtime.jar only).
+        val stale = File(mezzeHome.get(), "lib/mezze-lang.jar")
+        if (stale.exists()) {
+            logger.lifecycle("removing stale ${stale.absolutePath} (${stale.length() / 1024 / 1024} MB)")
+            stale.delete()
+        }
+    }
 }
 
 /**
