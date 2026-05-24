@@ -3,30 +3,15 @@ package com.mezze.language.cli
 import java.io.File
 
 /**
- * Finds a Java executable and spawns JVM subprocesses for `mez dev`.
+ * Locates a Java executable and resolves the `mezze-runtime.jar`
+ * classpath used by the wire-protocol RuntimeServer subprocess.
  *
- * The native `mez` binary handles compilation; execution requires a JVM
- * for Truffle JIT, polyglot interop, and virtual threads.
+ * The native `mez` binary handles parsing / typechecking / lowering;
+ * `mez dev` and `mez exec` spawn a JVM child running `mez-runtime.jar`'s
+ * RuntimeServer for actual execution (Truffle, Loom virtual threads,
+ * polyglot interop). See `docs/wire-protocol/00-design.md`.
  */
 object JvmLauncher {
-
-    private val JVM_ARGS = listOf(
-        "--enable-native-access=ALL-UNNAMED",
-        "--add-opens=java.base/java.lang=ALL-UNNAMED",
-        "--add-opens=java.base/java.nio=ALL-UNNAMED",
-        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
-        // Required by EffectFiber which wraps jdk.internal.vm.Continuation
-        // for Loom-backed effect handlers (mirrors the same flag we set on
-        // standalone JVM-jar launchers in commit 28b3ea5f). Without this,
-        // any `perform` lands at "Loom continuations not available".
-        "--add-opens=java.base/jdk.internal.vm=ALL-UNNAMED",
-        // JDK 24+: Truffle uses Unsafe::objectFieldOffset internally; silence the
-        // deprecation warning rather than letting it flood `mez dev` startup.
-        "--sun-misc-unsafe-memory-access=allow",
-        "-Dpolyglot.engine.WarnInterpreterOnly=false"
-    )
-
-    private val CDS_ARCHIVE = File(System.getProperty("user.home"), ".mezze/cache/mezze.jsa")
 
     /**
      * Find a Java 21+ executable. Returns null if not found.
@@ -38,54 +23,35 @@ object JvmLauncher {
      * 4. Known GraalVM install locations
      */
     fun findJava(): File? {
-        // 1. MEZZE_JAVA_HOME
         System.getenv("MEZZE_JAVA_HOME")?.let { home ->
             val java = File(home, "bin/java")
             if (java.canExecute()) return java
         }
-
-        // 2. JAVA_HOME
         System.getenv("JAVA_HOME")?.let { home ->
             val java = File(home, "bin/java")
             if (java.canExecute()) return java
         }
-
-        // 3. java on PATH
-        val pathJava = findOnPath("java")
-        if (pathJava != null) return pathJava
-
-        // 4. Known locations
-        val knownPaths = listOf(
-            File(System.getProperty("user.home"), ".sdkman/candidates/java/current/bin/java"),
-            File("/usr/lib/jvm/default/bin/java"),
-            File("/usr/local/opt/openjdk/bin/java")
-        )
-        for (path in knownPaths) {
+        findOnPath("java")?.let { return it }
+        for (path in KNOWN_JAVA_LOCATIONS) {
             if (path.canExecute()) return path
         }
-
         return null
     }
 
     /**
-     * Build the classpath for the JVM subprocess.
+     * Build the classpath for the RuntimeServer JVM subprocess.
      *
-     * Always includes mezze-lang.jar. Adds polyglot JARs if declared.
-     * Falls back to development build output if ~/.mezze/lib/ doesn't exist.
+     * Always includes the slim `mezze-runtime.jar`. Adds polyglot JARs
+     * if the project declares them. Falls back to the dev-build output
+     * if no user install exists.
      */
     fun buildClasspath(polyglotDeps: Map<String, String> = emptyMap()): String {
         val jars = mutableListOf<String>()
 
-        // Find mezze-lang.jar
-        val mezzeLangJar = findMezzeLangJar()
-        if (mezzeLangJar != null) {
-            jars.add(mezzeLangJar.absolutePath)
-        } else {
-            System.err.println("Warning: mezze-lang.jar not found, using current classpath")
-            return System.getProperty("java.class.path") ?: ""
-        }
+        val runtimeJar = findRuntimeJar()
+            ?: error("mezze-runtime.jar not found in ~/.mezze/lib/ or sibling locations. Reinstall mez.")
+        jars.add(runtimeJar.absolutePath)
 
-        // Add polyglot JARs from ~/.mezze/lib/
         val mezLib = File(System.getProperty("user.home"), ".mezze/lib")
         for ((language, version) in polyglotDeps) {
             val jarName = when (language) {
@@ -101,42 +67,7 @@ object JvmLauncher {
                 System.err.println("  Install with: mez polyglot add $language $version")
             }
         }
-
         return jars.joinToString(File.pathSeparator)
-    }
-
-    /**
-     * Spawn a JVM subprocess. Forwards stdin/stdout/stderr.
-     * Returns the exit code.
-     */
-    fun spawn(
-        mainClass: String,
-        classpath: String,
-        programArgs: List<String> = emptyList(),
-        extraJvmArgs: List<String> = emptyList()
-    ): Int {
-        val java = findJava() ?: throw RuntimeException("Java not found")
-
-        val command = mutableListOf(java.absolutePath)
-        command.addAll(JVM_ARGS)
-        command.addAll(extraJvmArgs)
-        command.add("-cp")
-        command.add(classpath)
-        command.add(mainClass)
-        command.addAll(programArgs)
-
-        val process = ProcessBuilder(command)
-            .inheritIO()
-            .start()
-
-        // Forward SIGINT to child process
-        Runtime.getRuntime().addShutdownHook(Thread {
-            if (process.isAlive) {
-                process.destroy()
-            }
-        })
-
-        return process.waitFor()
     }
 
     private fun findOnPath(executable: String): File? {
@@ -148,31 +79,36 @@ object JvmLauncher {
         return null
     }
 
-    private fun findMezzeLangJar(): File? {
-        // 1. ~/.mezze/lib/mezze-lang.jar (installed by `gradle :cli:installNative`
-        //    or `:cli:installRuntime`). Single source of truth — see
-        //    cli/build.gradle.kts.
-        val installed = File(System.getProperty("user.home"), ".mezze/lib/mezze-lang.jar")
+    private val KNOWN_JAVA_LOCATIONS = listOf(
+        File(System.getProperty("user.home"), ".sdkman/candidates/java/current/bin/java"),
+        File("/usr/lib/jvm/default/bin/java"),
+        File("/usr/local/opt/openjdk/bin/java"),
+    )
+
+    /**
+     * Locate `mezze-runtime.jar`. Search order:
+     *   1. `~/.mezze/lib/mezze-runtime.jar` (standard install).
+     *   2. Project dev build (`interpreter/build/libs/mezze-runtime.jar`).
+     *   3. Sibling to the `mez` binary or `../lib/` (relocatable installs).
+     */
+    private fun findRuntimeJar(): File? {
+        val installed = File(System.getProperty("user.home"), ".mezze/lib/mezze-runtime.jar")
         if (installed.exists()) return installed
 
-        // 2. Development: cli/build/libs/mezze-lang.jar (shadow JAR output)
         val projectRoot = System.getProperty("mezze.project.root")
         if (projectRoot != null) {
-            val devJar = File(projectRoot, "cli/build/libs/mezze-lang.jar")
+            val devJar = File(projectRoot, "interpreter/build/libs/mezze-runtime.jar")
             if (devJar.exists()) return devJar
         }
 
-        // 3. Sibling to native binary: same directory as mez binary
         val classSource = JvmLauncher::class.java.protectionDomain?.codeSource?.location?.toURI()
         if (classSource != null) {
             val binDir = File(classSource).parentFile
-            val sibling = File(binDir, "mezze-lang.jar")
+            val sibling = File(binDir, "mezze-runtime.jar")
             if (sibling.exists()) return sibling
-            // Also check ../lib/ (standard install layout)
-            val libJar = File(binDir?.parentFile, "lib/mezze-lang.jar")
+            val libJar = File(binDir?.parentFile, "lib/mezze-runtime.jar")
             if (libJar.exists()) return libJar
         }
-
         return null
     }
 }

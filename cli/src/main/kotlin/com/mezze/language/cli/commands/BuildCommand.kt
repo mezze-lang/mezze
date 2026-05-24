@@ -130,10 +130,10 @@ class BuildCommand {
             // Cache fast-path: if .mz/cache.sqlite already has this app's
             // IRs AND every project file on disk content-matches the
             // cached source-hash, skip parse+typecheck+lower entirely.
-            // Mirrors the COLD_START fast-path in mez dev (DevRunner).
             //
-            // mez dev populates the cache on every save, so the typical
-            // workflow (edit → save → mez build) hits 100%.
+            // mez dev populates the cache on every save (the typechecker's
+            // parser cache writes through), so the typical workflow
+            // (edit → save → mez build) hits this fast-path.
             val source = appFile.readText()
             val sourceHash = sha256(source)
             val modulePath = manifest.`package`.name

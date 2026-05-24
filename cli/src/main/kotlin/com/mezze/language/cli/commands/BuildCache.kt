@@ -16,9 +16,9 @@ import java.security.MessageDigest
  * common workflow (edit → save → `mez build`) skip the 1.3 s typecheck
  * cost and pack the jar from cache.
  *
- * Mirrors `DevRunner`'s COLD_START fast-path. Once `mez build` proves
- * out we should extract a single `BuildCacheLookup` shared by both —
- * tracked under #220's follow-up.
+ * Conceptually mirrors `mez dev`'s cache-warm path (handled inside
+ * WireRunner.compile by the typechecker's parser cache). Worth
+ * extracting a shared `BuildCacheLookup` once both paths stabilise.
  */
 object BuildCache {
 

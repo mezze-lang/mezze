@@ -15,27 +15,18 @@ import java.io.File
  * - flag form: `mez exec --app foo` or `mez exec --app=foo`
  *
  * Implementation note: we forward to `DevCommand` with `--no-watch`
- * forced on. The shared `DevRunner.runOnce` path already does exactly
+ * forced on. The wire-protocol path inside `DevCommand` does exactly
  * what `exec` needs (load → typecheck → lower → execute → exit), so
- * `ExecCommand` is a thin shell that strips dev-only flags
- * (`--inspect`, `--profile`, …) and normalises the app-name argument.
+ * `ExecCommand` is a thin shell that normalises the app-name argument.
  *
  * #213
  */
 class ExecCommand {
 
     fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
-        // Strip dev-only flags. Anything that's specific to interactive
-        // development (debuggers, watchers, profilers) doesn't belong on
-        // a one-shot run and we deliberately drop it rather than silently
-        // accept it to avoid users thinking `mez exec --inspect` works.
-        val rejected = setOf("--inspect", "--inspect-brk", "--profile", "--coverage", "--allocations", "--trace-jit")
-        val bad = args.firstOrNull { it in rejected || it.startsWith("--insight=") }
-        if (bad != null) {
-            println("Error: '$bad' is not supported by 'mez exec' — use 'mez dev' for interactive runs.")
-            kotlin.system.exitProcess(1)
-        }
-
+        // Dev-only flags (--inspect, --profile, etc.) are rejected by
+        // DevCommand; no need to filter them here.
+        //
         // Normalise the bare positional `mez exec foo` into the `--app=foo`
         // form DevCommand already understands. A positional is anything
         // that isn't a flag and isn't already consumed by `--app`.

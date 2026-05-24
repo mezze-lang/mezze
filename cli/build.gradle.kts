@@ -433,27 +433,25 @@ tasks.named("nativeCompile") {
 val mezzeHome = providers.systemProperty("user.home").map { File(it, ".mezze") }
 
 /**
- * Install the freshly-built shadow jars to ~/.mezze/lib/.
+ * Install `mezze-runtime.jar` (the slim runtime fat-jar) into
+ * ~/.mezze/lib/. This is the only library artifact users need at run
+ * time:
  *
- * Two artifacts:
- *   - mezze-lang.jar     — the CLI fat-jar (everything: parser, typechecker,
- *                          LSP, formatter, CLI commands, runtime, …).
- *                          Used by `mez dev` (shells out to a JVM with this
- *                          classpath) and by anything else that needs the
- *                          full toolchain.
- *   - mezze-runtime.jar  — the slim runtime fat-jar (just :interpreter +
- *                          its runtime deps). What user-app JVM jars bundle.
- *                          `BuildCommand.createStandaloneJar` clones this
- *                          file, appends the user's embedded-app CBOR,
- *                          and writes a fresh MANIFEST.MF pointing at
- *                          com.mezze.interpreter.standalone.NativeMain.
- *                          ~3× smaller than mezze-lang.jar.
+ *   - `mez dev` / `mez exec` spawn a JVM child loading this jar to
+ *     run user code via the wire protocol.
+ *   - `mez build` clones this jar to template user-app JVM jars
+ *     (`BuildCommand.createStandaloneJar`).
+ *
+ * The old `mezze-lang.jar` (the full CLI fat-jar) is no longer
+ * installed — DevRunner has been deleted, so nothing at run time
+ * needs the parser/typechecker/LSP classes embedded in it. The
+ * `:cli:shadowJar` task still exists because native-image consumes
+ * its output at build time, but the resulting jar is not shipped.
  */
 tasks.register<Copy>("installRuntime") {
     group = "install"
-    description = "Install mezze-lang.jar + mezze-runtime.jar into ~/.mezze/lib/"
-    dependsOn("shadowJar", ":interpreter:runtimeShadowJar")
-    from(layout.buildDirectory.file("libs/mezze-lang.jar"))
+    description = "Install mezze-runtime.jar into ~/.mezze/lib/"
+    dependsOn(":interpreter:runtimeShadowJar")
     from(project(":interpreter").layout.buildDirectory.file("libs/mezze-runtime.jar"))
     into(mezzeHome.map { File(it, "lib") })
 }

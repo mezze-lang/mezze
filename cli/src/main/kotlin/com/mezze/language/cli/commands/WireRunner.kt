@@ -1,5 +1,24 @@
 package com.mezze.language.cli.commands
 
+import com.mezze.interpreter.standalone.wire.Bye
+import com.mezze.interpreter.standalone.wire.Evict
+import com.mezze.interpreter.standalone.wire.Exited
+import com.mezze.interpreter.standalone.wire.Hello
+import com.mezze.interpreter.standalone.wire.Interrupt
+import com.mezze.interpreter.standalone.wire.Load
+import com.mezze.interpreter.standalone.wire.Loaded
+import com.mezze.interpreter.standalone.wire.MessageType
+import com.mezze.interpreter.standalone.wire.ProtocolError
+import com.mezze.interpreter.standalone.wire.Quit
+import com.mezze.interpreter.standalone.wire.Reject
+import com.mezze.interpreter.standalone.wire.Started
+import com.mezze.interpreter.standalone.wire.StderrData
+import com.mezze.interpreter.standalone.wire.StdoutData
+import com.mezze.interpreter.standalone.wire.Welcome
+import com.mezze.interpreter.standalone.wire.WireFrame
+import com.mezze.interpreter.standalone.wire.WireFrameCodec
+import com.mezze.interpreter.standalone.wire.WireProtocol
+import com.mezze.interpreter.standalone.wire.WireProtocolException
 import com.mezze.language.cli.JvmLauncher
 import com.mezze.language.codebase.SQLiteMezzeStore
 import com.mezze.language.parser.MezzeParser
@@ -7,30 +26,41 @@ import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedLetDecl
-import java.io.BufferedReader
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.File
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.io.PrintWriter
+import java.io.InputStream
+import java.io.OutputStream
 
 /**
- * Client for the [com.mezze.interpreter.standalone.RuntimeServer] wire
- * protocol:
+ * Parent-side client of the Mezze wire protocol v1. See
+ * `docs/wire-protocol/00-design.md` for the design.
  *
- *   - parse + typecheck + lower the user app **here** (native mez)
- *   - serialize the closure + meta to two CBOR files
- *   - spawn JVM with main = RuntimeServer
- *   - send LOAD (and EVICT for hot-reload), stream program output,
- *     wait for DONE/ERR
- *   - send QUIT
+ * Flow:
+ *   1. native mez parses + typechecks + lowers the user app.
+ *   2. Serializes the closure + meta to CBOR files under `.mz/run/`.
+ *   3. Spawns a JVM child running [com.mezze.interpreter.standalone.RuntimeServer].
+ *   4. HELLO/WELCOME handshake → caps negotiated.
+ *   5. Sends LOAD (and EVICT for hot-reload); streams STDOUT_DATA /
+ *      STDERR_DATA frames back to the user's terminal; waits for EXITED.
+ *   6. On exit (one-shot) or Ctrl-C (watch): sends QUIT, waits for BYE.
  *
- * Once this is the default path, `:parser`, `:typechecker`, `:formatter`,
- * `:store-sqlite`, and `:lsp` can be excluded from `mezze-lang.jar`.
+ * Exit code propagation: [Exited.code] becomes the parent's exit code
+ * for one-shot runs, surfaced as a status line in watch mode.
  *
- * Today: feature-gated behind `MEZZE_WIRE=1`. Old DevRunner path stays
- * the default until validated end-to-end.
+ * Ctrl-C handling: parent installs a SIGINT handler that sends
+ * INTERRUPT to the child; the runtime cancels the active run cleanly,
+ * sends EXITED with reason="interrupted".
  */
 object WireRunner {
+
+    /** Capabilities the parent claims. Negotiated with server's set. */
+    internal val ADVERTISED_CAPABILITIES = listOf(
+        "core",
+        "exit_code",
+        "interrupt",
+        "structured_errors",
+    )
 
     /** Per-compile output we need to ship to RuntimeServer. */
     data class CompileResult(
@@ -62,26 +92,24 @@ object WireRunner {
         initStore(currentDir)
         val compile = compile(currentDir, appFile, entryName, appName, timing, t0) ?: return 4
 
-        val session = ExecuteSession.start(currentDir, timing, t0) ?: return 1
-        val exit = try {
-            session.runLoad(compile, evict = null, timing = timing, t0 = t0)
+        val session = WireSession.start(currentDir, timing, t0) ?: return 1
+        return try {
+            val outcome = session.runOnce(compile)
+            outcome.exitCode
         } finally {
             session.close()
         }
-        return exit
     }
 
     /**
-     * Watch mode — long-lived RuntimeServer; per-save: recompile, EVICT
+     * Watch mode. Long-lived RuntimeServer; per-save: recompile, EVICT
      * changed hashes, LOAD new closure. The JVM Engine + Context stay
-     * warm so Truffle's per-context caches survive (saves ~30–50 ms per
-     * reload).
+     * warm so Truffle's per-context caches survive (saves ~30–50 ms
+     * per reload).
      *
      * Minimal first cut: re-uses the file-watch / keystroke handling
-     * from DevRunner only conceptually — here we keep it simple and just
-     * watch the entry-file's directory for `.mz` events. The existing
-     * DevRunner watcher is richer (transitive-dep tracking, keyboard
-     * controls); once this path is the default we'll port that over.
+     * from DevRunner only conceptually — here we keep it simple and
+     * just watch the entry-file's directory for `.mz` events.
      */
     fun watch(
         currentDir: File,
@@ -99,20 +127,18 @@ object WireRunner {
         }
         initStore(currentDir)
 
-        val session = ExecuteSession.start(currentDir, timing, t0) ?: return 1
+        val session = WireSession.start(currentDir, timing, t0) ?: return 1
         var prevHashes: Set<Hash> = emptySet()
 
         try {
-            // First run.
             System.err.println("[mez dev] $appName · ${appFile.name}")
             val first = compile(currentDir, appFile, entryName, appName, timing, t0)
             if (first != null) {
-                session.runLoad(first, evict = null, timing = timing, t0 = t0)
+                session.runOnce(first)
                 prevHashes = first.hashes
             }
             System.err.println("[mez dev] watching ${appFile.parentFile.absolutePath}")
 
-            // Watch loop — minimal: parent dir only, debounce 50ms.
             val watcher = java.nio.file.FileSystems.getDefault().newWatchService()
             appFile.parentFile.toPath().register(
                 watcher,
@@ -128,7 +154,6 @@ object WireRunner {
                 }
                 key.reset()
                 if (!sawMz) continue
-                // Debounce — macOS fires multiple events per save.
                 Thread.sleep(50)
                 while (watcher.poll() != null) { /* drain */ }
 
@@ -136,7 +161,7 @@ object WireRunner {
                 val next = compile(currentDir, appFile, entryName, appName, timing, tReload) ?: continue
                 val evict = next.hashes - prevHashes
                 System.err.println("[mez dev] reload — ${evict.size} new hashes")
-                session.runLoad(next, evict = if (evict.isEmpty()) null else evict, timing = timing, t0 = tReload)
+                session.runOnce(next, evict = if (evict.isEmpty()) null else evict)
                 prevHashes = next.hashes
             }
         } finally {
@@ -144,7 +169,7 @@ object WireRunner {
         }
     }
 
-    /** Set up the project store + typechecker singletons. Idempotent per process. */
+    /** Set up the project store + typechecker singletons. */
     private fun initStore(currentDir: File) {
         System.setProperty("mezze.project.root", currentDir.absolutePath)
         val store = SQLiteMezzeStore.openProject(currentDir)
@@ -153,10 +178,8 @@ object WireRunner {
     }
 
     /**
-     * Run the full compile path (parse + typecheck + lower + closure +
-     * pack). Writes CBOR files under `.mz/run/` (overwriting per run).
-     *
-     * Errors are formatted + printed; returns null on failure.
+     * Parse + typecheck + lower the user app. Writes CBOR files under
+     * `.mz/run/` (overwriting per run). Returns null on failure.
      */
     private fun compile(
         currentDir: File,
@@ -219,95 +242,223 @@ object WireRunner {
         if (timing) System.err.println("[${ms()}ms] packed (${fnBytes.size} + ${metaBytes.size} bytes)")
         return CompileResult(fnsFile, metaFile, closure.map { it.hash }.toSet())
     }
+}
+
+/**
+ * One open wire-protocol session with a RuntimeServer subprocess. Tracks
+ * Ctrl-C wiring and the I/O streams; per-run reporting goes through
+ * [runOnce] which sends EVICT/LOAD and consumes frames until EXITED.
+ */
+private class WireSession private constructor(
+    private val process: Process,
+    private val toChild: OutputStream,
+    private val fromChild: InputStream,
+    private val shutdownHook: Thread,
+    private val timing: Boolean,
+) {
+
+    private val signalHandler = SigintForwarder(toChild)
+
+    init {
+        signalHandler.install()
+    }
+
+    /** Result of one LOAD cycle. */
+    data class RunOutcome(val exitCode: Int, val reason: String)
 
     /**
-     * Long-lived handle to a RuntimeServer JVM subprocess. Multiple
-     * LOADs can be sent across its lifetime; `close()` sends QUIT.
+     * Send (optional) EVICT + LOAD, stream output, return when EXITED
+     * arrives. The session stays open for the next run.
      */
-    private class ExecuteSession private constructor(
-        private val process: Process,
-        private val toJvm: PrintWriter,
-        private val fromJvm: BufferedReader,
-        private val shutdownHook: Thread,
-    ) {
-        /**
-         * Send LOAD (optionally preceded by EVICT) and stream output
-         * until DONE/ERR. Returns 0 on success, 1 on error.
-         */
-        fun runLoad(compile: CompileResult, evict: Set<Hash>?, timing: Boolean, t0: Long): Int {
-            fun ms() = (System.nanoTime() - t0) / 1_000_000
-
-            if (evict != null && evict.isNotEmpty()) {
-                toJvm.println("EVICT " + evict.joinToString(",") { it.hex })
-            }
-            toJvm.println("LOAD ${compile.fnsFile.absolutePath} ${compile.metaFile.absolutePath}")
-            toJvm.flush()
-            if (timing) System.err.println("[${ms()}ms] sent LOAD")
-
-            var sawReady = false
-            while (true) {
-                val line = fromJvm.readLine() ?: run {
-                    System.err.println("Error: RuntimeServer exited unexpectedly")
-                    return 1
-                }
-                when {
-                    line == "MEZ> READY" -> { sawReady = true; if (timing) System.err.println("[${ms()}ms] READY") }
-                    line == "MEZ> DONE" -> {
-                        if (timing) System.err.println("[${ms()}ms] DONE")
-                        return if (sawReady) 0 else 1
-                    }
-                    line.startsWith("MEZ> ERR ") -> {
-                        System.err.println(line.removePrefix("MEZ> ERR "))
-                        return 1
-                    }
-                    else -> println(line)
-                }
-            }
-            @Suppress("UNREACHABLE_CODE") return 0
+    fun runOnce(compile: WireRunner.CompileResult, evict: Set<Hash>? = null): RunOutcome {
+        if (evict != null && evict.isNotEmpty()) {
+            send(WireFrame.of(MessageType.EVICT, Evict(hashes = evict.map { it.hex })))
         }
+        send(WireFrame.of(MessageType.LOAD, Load(
+            fnsCborPath = compile.fnsFile.absolutePath,
+            metaCborPath = compile.metaFile.absolutePath,
+            mode = "run",
+        )))
+        return drainUntilExited()
+    }
 
-        fun close() {
-            try { toJvm.println("QUIT"); toJvm.flush(); toJvm.close() } catch (_: Exception) {}
-            try { process.waitFor() } catch (_: Exception) {}
-            try { Runtime.getRuntime().removeShutdownHook(shutdownHook) } catch (_: Exception) {}
-        }
-
-        companion object {
-            fun start(currentDir: File, timing: Boolean, t0: Long): ExecuteSession? {
-                fun ms() = (System.nanoTime() - t0) / 1_000_000
-
-                val java = JvmLauncher.findJava() ?: run {
-                    System.err.println("Error: Java 21+ required.")
-                    return null
+    private fun drainUntilExited(): RunOutcome {
+        while (true) {
+            val frame = try {
+                WireFrameCodec.read(fromChild)
+            } catch (e: WireProtocolException) {
+                System.err.println("Error: wire decode failed: ${e.code} ${e.message}")
+                return RunOutcome(exitCode = 1, reason = "wire_error")
+            } ?: return run {
+                System.err.println("Error: RuntimeServer exited unexpectedly")
+                RunOutcome(exitCode = 1, reason = "crashed")
+            }
+            when (frame.type) {
+                MessageType.LOADED -> { /* ignore — purely advisory */ }
+                MessageType.STARTED -> { /* ignore */ }
+                MessageType.STDOUT_DATA -> {
+                    val d = frame.decode<StdoutData>()
+                    System.out.write(d.bytes)
+                    System.out.flush()
                 }
-                val classpath = JvmLauncher.buildClasspath()
-                val command = mutableListOf(java.absolutePath)
-                command.addAll(jvmArgs())
-                command.add("-Dmezze.project.root=${currentDir.absolutePath}")
-                command.add("-cp"); command.add(classpath)
-                command.add("com.mezze.interpreter.standalone.RuntimeServer")
-
-                val process = ProcessBuilder(command)
-                    .redirectError(ProcessBuilder.Redirect.INHERIT)
-                    .start()
-                val hook = Thread { if (process.isAlive) process.destroy() }
-                Runtime.getRuntime().addShutdownHook(hook)
-
-                val toJvm = PrintWriter(OutputStreamWriter(process.outputStream, Charsets.UTF_8), false)
-                val fromJvm = BufferedReader(InputStreamReader(process.inputStream, Charsets.UTF_8))
-                if (timing) System.err.println("[${ms()}ms] RuntimeServer spawned")
-                return ExecuteSession(process, toJvm, fromJvm, hook)
+                MessageType.STDERR_DATA -> {
+                    val d = frame.decode<StderrData>()
+                    System.err.write(d.bytes)
+                    System.err.flush()
+                }
+                MessageType.EXITED -> {
+                    val e = frame.decode<Exited>()
+                    val detail = e.detail
+                    if (e.reason == "error" && detail != null && detail.message.isNotEmpty()) {
+                        System.err.println(detail.message)
+                    }
+                    return RunOutcome(exitCode = e.code, reason = e.reason)
+                }
+                MessageType.ERROR -> {
+                    val pe = frame.decode<ProtocolError>()
+                    System.err.println("Protocol error: ${pe.code} ${pe.message}")
+                    return RunOutcome(exitCode = 1, reason = "protocol_error")
+                }
+                MessageType.LOG -> {
+                    // Surface child-runtime logs to stderr.
+                    val log = frame.decode<com.mezze.interpreter.standalone.wire.Log>()
+                    System.err.println("[runtime ${log.level}] ${log.message}")
+                }
+                else -> {
+                    System.err.println("[wire] unexpected frame: ${frame.type}")
+                }
             }
         }
     }
 
-    private fun jvmArgs(): List<String> = listOf(
-        "--enable-native-access=ALL-UNNAMED",
-        "--add-opens=java.base/java.lang=ALL-UNNAMED",
-        "--add-opens=java.base/java.nio=ALL-UNNAMED",
-        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
-        "--add-opens=java.base/jdk.internal.vm=ALL-UNNAMED",
-        "--sun-misc-unsafe-memory-access=allow",
-        "-Dpolyglot.engine.WarnInterpreterOnly=false",
-    )
+    fun close() {
+        try { signalHandler.uninstall() } catch (_: Exception) {}
+        try { send(WireFrame.of(MessageType.QUIT, Quit(reason = "done"))) } catch (_: Exception) {}
+        // Drain until BYE or EOF (give it 2s to be polite).
+        val deadline = System.currentTimeMillis() + 2000
+        try {
+            while (System.currentTimeMillis() < deadline) {
+                val frame = WireFrameCodec.read(fromChild) ?: break
+                if (frame.type == MessageType.BYE) break
+            }
+        } catch (_: Exception) {}
+        try { toChild.close() } catch (_: Exception) {}
+        try { process.waitFor() } catch (_: Exception) {}
+        try { Runtime.getRuntime().removeShutdownHook(shutdownHook) } catch (_: IllegalStateException) {}
+    }
+
+    @Synchronized
+    private fun send(frame: WireFrame) {
+        WireFrameCodec.writeFlush(toChild, frame)
+    }
+
+    companion object {
+        fun start(currentDir: File, timing: Boolean, t0: Long): WireSession? {
+            fun ms() = (System.nanoTime() - t0) / 1_000_000
+
+            val java = JvmLauncher.findJava() ?: run {
+                System.err.println("Error: Java 21+ required.")
+                return null
+            }
+            val classpath = JvmLauncher.buildClasspath()
+            val command = mutableListOf(java.absolutePath)
+            command.addAll(jvmArgs())
+            command.add("-Dmezze.project.root=${currentDir.absolutePath}")
+            command.add("-cp"); command.add(classpath)
+            command.add("com.mezze.interpreter.standalone.RuntimeServer")
+
+            val process = ProcessBuilder(command)
+                .redirectError(ProcessBuilder.Redirect.INHERIT)
+                .start()
+            val hook = Thread { if (process.isAlive) process.destroy() }
+            Runtime.getRuntime().addShutdownHook(hook)
+
+            val toChild = BufferedOutputStream(process.outputStream)
+            val fromChild = BufferedInputStream(process.inputStream)
+
+            val session = WireSession(process, toChild, fromChild, hook, timing)
+            if (timing) System.err.println("[${ms()}ms] RuntimeServer spawned")
+
+            // Perform handshake before returning.
+            session.handshake() ?: run {
+                session.close()
+                return null
+            }
+            if (timing) System.err.println("[${ms()}ms] handshake complete")
+            return session
+        }
+
+        private fun jvmArgs(): List<String> = listOf(
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.lang=ALL-UNNAMED",
+            "--add-opens=java.base/java.nio=ALL-UNNAMED",
+            "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+            "--add-opens=java.base/jdk.internal.vm=ALL-UNNAMED",
+            "--sun-misc-unsafe-memory-access=allow",
+            "-Dpolyglot.engine.WarnInterpreterOnly=false",
+        )
+    }
+
+    /** Send HELLO, await WELCOME. Returns the agreed capability set, or null on failure. */
+    private fun handshake(): List<String>? {
+        send(WireFrame.of(MessageType.HELLO, Hello(
+            versionMajor = WireProtocol.PROTOCOL_VERSION_MAJOR,
+            versionMinor = WireProtocol.PROTOCOL_VERSION_MINOR,
+            capabilities = WireRunner.ADVERTISED_CAPABILITIES,
+            client = "mez-dev",
+        )))
+        val reply = try {
+            WireFrameCodec.read(fromChild)
+        } catch (e: WireProtocolException) {
+            System.err.println("Error: wire handshake failed: ${e.code} ${e.message}")
+            return null
+        } ?: run {
+            System.err.println("Error: RuntimeServer exited before WELCOME")
+            return null
+        }
+        return when (reply.type) {
+            MessageType.WELCOME -> reply.decode<Welcome>().agreedCapabilities
+            MessageType.REJECT -> {
+                val r = reply.decode<Reject>()
+                System.err.println("Error: runtime rejected handshake (${r.reason}): ${r.detail}")
+                null
+            }
+            else -> {
+                System.err.println("Error: expected WELCOME after HELLO, got ${reply.type}")
+                null
+            }
+        }
+    }
 }
+
+/**
+ * Forward SIGINT (Ctrl-C) in the parent to an INTERRUPT frame in the
+ * child. The JVM child cancels the active run cleanly; parent's
+ * dispatch loop then sees EXITED with reason="interrupted".
+ */
+private class SigintForwarder(private val toChild: OutputStream) {
+    private var previous: sun.misc.SignalHandler? = null
+    private val handler = sun.misc.SignalHandler {
+        try {
+            val frame = WireFrame.of(MessageType.INTERRUPT, Interrupt())
+            synchronized(toChild) {
+                WireFrameCodec.writeFlush(toChild, frame)
+            }
+        } catch (_: Exception) {}
+    }
+
+    fun install() {
+        try {
+            previous = sun.misc.Signal.handle(sun.misc.Signal("INT"), handler)
+        } catch (_: Throwable) {
+            // sun.misc may not be available — graceful degradation
+        }
+    }
+
+    fun uninstall() {
+        try {
+            previous?.let { sun.misc.Signal.handle(sun.misc.Signal("INT"), it) }
+        } catch (_: Throwable) {}
+    }
+}
+

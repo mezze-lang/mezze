@@ -5,28 +5,46 @@ import com.mezze.language.cli.`package`.MezzeToml
 import java.io.File
 
 /**
- * `mez dev` — spawn JVM subprocess running DevRunner.
+ * `mez dev` — compile here in the native binary, execute via the
+ * wire-protocol RuntimeServer (a slim JVM child).
  *
- * Native binary is a thin shell: validate Mezze.toml, find Java, spawn DevRunner.
- * DevRunner does all the work — stdlib load, compile, store, execute, watch.
+ * Flow: native mez parses + typechecks + lowers user code; spawns
+ * `java -cp mez-runtime.jar com.mezze.interpreter.standalone.RuntimeServer`;
+ * sends LOAD frames; streams user output back; waits for EXITED.
+ *
+ * There is only one execution path. The legacy in-JVM DevRunner is
+ * gone (deleted in this commit's neighbors).
  */
 class DevCommand {
 
+    companion object {
+        /**
+         * Dev instrumentation flags that the wire-protocol RuntimeServer
+         * doesn't implement yet. We explicitly reject them so users
+         * aren't silently surprised by their absence.
+         */
+        private val DEV_FLAGS_NOT_YET_WIRED = setOf(
+            "--inspect", "--inspect-brk",
+            "--profile", "--coverage", "--allocations", "--trace-jit",
+        )
+    }
+
+
     fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
-        val inspect = args.contains("--inspect")
-        val inspectBrk = args.contains("--inspect-brk")
         val noWatch = args.contains("--no-watch") || args.contains("--nw")
-        val profile = args.contains("--profile")
-        val coverage = args.contains("--coverage")
-        val traceJit = args.contains("--trace-jit")
-        val allocations = args.contains("--allocations")
-        // --insight=<path> attaches a JS probe; capture the path arg.
-        val insightFile = args.firstNotNullOfOrNull { arg ->
-            when {
-                arg.startsWith("--insight=") -> arg.substringAfter("=")
-                else -> null
-            }
+
+        // Dev instrumentation flags. The wire-protocol RuntimeServer
+        // doesn't yet implement these (CONFIG frames for inspect / profile
+        // / coverage / allocations / insight / trace-jit are designed in
+        // the v1 spec but not wired). Reject explicitly rather than
+        // silently swallow.
+        val unsupportedDevFlag = args.firstOrNull { it in DEV_FLAGS_NOT_YET_WIRED || it.startsWith("--insight=") }
+        if (unsupportedDevFlag != null) {
+            println("Error: '$unsupportedDevFlag' isn't supported yet on the wire-protocol runtime.")
+            println("Tracking: ${DEV_FLAGS_NOT_YET_WIRED.joinToString()}, --insight=<file>")
+            kotlin.system.exitProcess(2)
         }
+
         val mezzeToml = File(currentDir, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
@@ -80,45 +98,12 @@ class DevCommand {
             println(com.mezze.language.cli.EnvironmentCheck.longReport(envReport))
             kotlin.system.exitProcess(1)
         }
-        val java = com.mezze.language.cli.JvmLauncher.findJava()
-            ?: error("EnvironmentCheck passed but findJava() returned null — internal inconsistency")
 
-        // Wire-protocol path (#220): compile here in native mez, JVM only
-        // executes. Gated by MEZZE_WIRE=1 until validated end-to-end. Once
-        // stable this becomes the default and DevRunner can be removed
-        // (jar slim — drops :parser, :typechecker, :store-sqlite from
-        // mezze-lang.jar).
-        if (System.getenv("MEZZE_WIRE") == "1") {
-            val exit = if (noWatch) {
-                WireRunner.execOnce(currentDir, appFile, entryName, modulePath, appConfig.name)
-            } else {
-                WireRunner.watch(currentDir, appFile, entryName, modulePath, appConfig.name)
-            }
-            kotlin.system.exitProcess(exit)
+        val exit = if (noWatch) {
+            WireRunner.execOnce(currentDir, appFile, entryName, modulePath, appConfig.name)
+        } else {
+            WireRunner.watch(currentDir, appFile, entryName, modulePath, appConfig.name)
         }
-
-        val classpath = com.mezze.language.cli.JvmLauncher.buildClasspath()
-        val programArgs = mutableListOf(
-            "--project-root=${currentDir.absolutePath}",
-            "--entry-file=${appConfig.path}",
-            "--entry-name=${entryName}",
-            "--module-path=${modulePath}",
-            "--app-name=${appConfig.name}"
-        )
-        if (inspect) programArgs.add("--inspect")
-        if (inspectBrk) programArgs.add("--inspect-brk")
-        if (noWatch) programArgs.add("--no-watch")
-        if (profile) programArgs.add("--profile")
-        if (coverage) programArgs.add("--coverage")
-        if (traceJit) programArgs.add("--trace-jit")
-        if (allocations) programArgs.add("--allocations")
-        if (insightFile != null) programArgs.add("--insight=$insightFile")
-
-        val exitCode = com.mezze.language.cli.JvmLauncher.spawn(
-            mainClass = "com.mezze.language.cli.commands.DevRunner",
-            classpath = classpath,
-            programArgs = programArgs
-        )
-        kotlin.system.exitProcess(exitCode)
+        kotlin.system.exitProcess(exit)
     }
 }
