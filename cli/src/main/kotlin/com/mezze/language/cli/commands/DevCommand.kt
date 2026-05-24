@@ -12,8 +12,8 @@ import java.io.File
  * `java -cp mez-runtime.jar com.mezze.interpreter.standalone.RuntimeServer`;
  * sends LOAD frames; streams user output back; waits for EXITED.
  *
- * There is only one execution path. The legacy in-JVM DevRunner is
- * gone (deleted in this commit's neighbors).
+ * There is only one execution path — the wire protocol. The legacy
+ * in-JVM DevRunner was deleted in commit dff800a6.
  */
 class DevCommand {
 

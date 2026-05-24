@@ -107,9 +107,21 @@ object WireRunner {
      * warm so Truffle's per-context caches survive (saves ~30–50 ms
      * per reload).
      *
-     * Minimal first cut: re-uses the file-watch / keystroke handling
-     * from DevRunner only conceptually — here we keep it simple and
-     * just watch the entry-file's directory for `.mz` events.
+     * Behavior:
+     *
+     *   - Tracks every `.mz` file the typechecker actually loaded
+     *     (via ModuleResolver.snapshot) and watches their parent dirs.
+     *     Re-syncs after every successful compile so newly-imported
+     *     modules start being watched. Edits to deeply-imported files
+     *     trigger reload, same as the entry file.
+     *
+     *   - Keyboard shortcuts (when stdin is a TTY): `r` to force re-run,
+     *     `c` to clear screen, `q` to quit. stty-based raw mode; if it
+     *     can't be enabled (CI / non-interactive), keys are silently
+     *     disabled — file watcher still works.
+     *
+     *   - Coalesces fs events (macOS fires multiple per save) and drains
+     *     duplicates after compile to avoid spurious extra reloads.
      */
     fun watch(
         currentDir: File,
@@ -131,42 +143,233 @@ object WireRunner {
         var prevHashes: Set<Hash> = emptySet()
 
         try {
+            // First run. `lastCompile` tracks the most recent successful
+            // compile so the `r` (force re-run) handler can re-execute it
+            // without spending another typecheck cycle.
             System.err.println("[mez dev] $appName · ${appFile.name}")
-            val first = compile(currentDir, appFile, entryName, appName, timing, t0)
-            if (first != null) {
-                session.runOnce(first)
-                prevHashes = first.hashes
+            var lastCompile: CompileResult? = compile(currentDir, appFile, entryName, appName, timing, t0)
+            if (lastCompile != null) {
+                session.runOnce(lastCompile)
+                prevHashes = lastCompile.hashes
             }
-            System.err.println("[mez dev] watching ${appFile.parentFile.absolutePath}")
 
+            // Set up file watcher + keyboard reader.
             val watcher = java.nio.file.FileSystems.getDefault().newWatchService()
-            appFile.parentFile.toPath().register(
-                watcher,
-                java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY,
-                java.nio.file.StandardWatchEventKinds.ENTRY_CREATE,
-            )
-            while (true) {
-                val key = try { watcher.take() } catch (_: InterruptedException) { return 0 }
-                var sawMz = false
-                for (ev in key.pollEvents()) {
-                    val name = ev.context()?.toString() ?: continue
-                    if (name.endsWith(".mz")) sawMz = true
-                }
-                key.reset()
-                if (!sawMz) continue
-                Thread.sleep(50)
-                while (watcher.poll() != null) { /* drain */ }
+            val watchedDirs = HashMap<java.nio.file.Path, java.nio.file.WatchKey>()
+            syncWatchedDirs(watcher, watchedDirs, appFile, currentDir)
 
-                val tReload = System.nanoTime()
-                val next = compile(currentDir, appFile, entryName, appName, timing, tReload) ?: continue
-                val evict = next.hashes - prevHashes
-                System.err.println("[mez dev] reload — ${evict.size} new hashes")
-                session.runOnce(next, evict = if (evict.isEmpty()) null else evict)
-                prevHashes = next.hashes
+            val events = java.util.concurrent.LinkedBlockingQueue<DevEvent>()
+            startFileWatcherThread(watcher, events)
+            val keyboardActive = startKeyboardThread(events)
+            printWatchingBanner(keyboardActive)
+
+            while (true) {
+                when (val event = events.take()) {
+                    is DevEvent.FilesChanged -> {
+                        // Coalesce any events that arrived during the take().
+                        val coalesced = mutableSetOf<String>().apply { addAll(event.files) }
+                        while (true) {
+                            val next = events.poll() ?: break
+                            if (next is DevEvent.FilesChanged) coalesced.addAll(next.files)
+                            else { events.add(next); break }
+                        }
+                        invalidateChangedModules(coalesced, currentDir)
+                        val tReload = System.nanoTime()
+                        val next = compile(currentDir, appFile, entryName, appName, timing, tReload)
+                        if (next != null) {
+                            // EVICT: hashes that were in the previous closure
+                            // but aren't in the new one. They identify
+                            // functions whose source changed (so the hash
+                            // changed) and we need the runtime to drop the
+                            // stale CallTarget. New hashes don't need EVICT
+                            // — they were never cached.
+                            val evict = prevHashes - next.hashes
+                            val outcome = session.runOnce(next, evict = if (evict.isEmpty()) null else evict)
+                            prevHashes = next.hashes
+                            lastCompile = next
+                            if (outcome.reason == "exit_called") {
+                                System.err.println("[mez dev] program exited with code ${outcome.exitCode}")
+                            }
+                        }
+                        syncWatchedDirs(watcher, watchedDirs, appFile, currentDir)
+                        // Drain any duplicate FS events from the same save.
+                        while (true) {
+                            val n = events.poll() ?: break
+                            if (n !is DevEvent.FilesChanged) { events.add(n); break }
+                        }
+                        printWatchingBanner(keyboardActive)
+                    }
+                    DevEvent.Rerun -> {
+                        // `r` — re-execute the last compiled closure. No
+                        // EVICT (nothing changed), no recompile. Useful for
+                        // programs whose output depends on time / external
+                        // state.
+                        val current = lastCompile
+                            ?: compile(currentDir, appFile, entryName, appName, timing, System.nanoTime())
+                        if (current != null) {
+                            session.runOnce(current, evict = null)
+                            lastCompile = current
+                            prevHashes = current.hashes
+                        }
+                        printWatchingBanner(keyboardActive)
+                    }
+                    DevEvent.Clear -> {
+                        System.err.print("[2J[H")
+                        printWatchingBanner(keyboardActive)
+                    }
+                    DevEvent.Quit -> {
+                        System.err.println()
+                        System.err.println("bye")
+                        return 0
+                    }
+                }
             }
         } finally {
             session.close()
         }
+    }
+
+    // ─── Watch helpers: file watcher, keyboard, dep tracking ──────────
+
+    private sealed class DevEvent {
+        data class FilesChanged(val files: Set<String>) : DevEvent()
+        object Rerun : DevEvent()
+        object Clear : DevEvent()
+        object Quit : DevEvent()
+    }
+
+    private fun printWatchingBanner(keyboardActive: Boolean) {
+        val keys = if (keyboardActive) " · press [r] re-run · [c] clear · [q] quit" else " · Ctrl-C to stop"
+        System.err.println("[mez dev] watching$keys")
+    }
+
+    /**
+     * Tell the typechecker that these source files changed, so the next
+     * compile re-reads them from disk instead of returning the cached
+     * typed-module. Only invalidates modules under the project root —
+     * stdlib never changes during a dev session.
+     */
+    private fun invalidateChangedModules(changedFiles: Set<String>, projectRoot: File) {
+        val rootPath = projectRoot.toPath().toAbsolutePath().normalize()
+        val toEvict = mutableSetOf<String>()
+        for ((modulePath, module) in com.mezze.language.typechecker.ModuleResolver.snapshot()) {
+            val filePath = module.filePath.takeIf { it.isNotBlank() } ?: continue
+            val abs = java.nio.file.Paths.get(filePath).toAbsolutePath().normalize()
+            if (!abs.startsWith(rootPath)) continue
+            val basename = abs.fileName.toString()
+            if (basename in changedFiles) toEvict.add(modulePath)
+        }
+        if (toEvict.isNotEmpty()) {
+            com.mezze.language.typechecker.ModuleResolver.invalidateModulePaths(toEvict)
+            com.mezze.language.typechecker.module.ModuleTypeChecker.invalidateModulePaths(toEvict)
+        }
+    }
+
+    /**
+     * Watch every dir that contains a `.mz` file the typechecker
+     * actually loaded for this project. After each compile we recompute
+     * the set — newly-imported modules' dirs get added, no-longer-
+     * imported ones get unregistered.
+     */
+    private fun syncWatchedDirs(
+        watcher: java.nio.file.WatchService,
+        watchedDirs: MutableMap<java.nio.file.Path, java.nio.file.WatchKey>,
+        sourceFile: File,
+        projectRoot: File,
+    ) {
+        val rootPath = projectRoot.toPath().toAbsolutePath().normalize()
+        val wanted = HashSet<java.nio.file.Path>()
+        // Always include the entry file's parent.
+        wanted.add(sourceFile.parentFile.toPath().toAbsolutePath().normalize())
+        for ((_, module) in com.mezze.language.typechecker.ModuleResolver.snapshot()) {
+            val filePath = module.filePath.takeIf { it.isNotBlank() } ?: continue
+            val abs = java.nio.file.Paths.get(filePath).toAbsolutePath().normalize()
+            if (abs.startsWith(rootPath)) {
+                wanted.add(abs.parent ?: continue)
+            }
+        }
+        for (dir in wanted) {
+            if (dir !in watchedDirs && java.nio.file.Files.isDirectory(dir)) {
+                watchedDirs[dir] = dir.register(
+                    watcher,
+                    java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY,
+                    java.nio.file.StandardWatchEventKinds.ENTRY_CREATE,
+                )
+            }
+        }
+        val iter = watchedDirs.entries.iterator()
+        while (iter.hasNext()) {
+            val (dir, key) = iter.next()
+            if (dir !in wanted) { key.cancel(); iter.remove() }
+        }
+    }
+
+    private fun startFileWatcherThread(
+        watcher: java.nio.file.WatchService,
+        events: java.util.concurrent.BlockingQueue<DevEvent>,
+    ) {
+        Thread {
+            while (true) {
+                val key = try { watcher.take() } catch (_: InterruptedException) { return@Thread }
+                val files = mutableSetOf<String>()
+                for (event in key.pollEvents()) {
+                    val filename = event.context()?.toString() ?: continue
+                    if (filename.endsWith(".mz")) files.add(filename)
+                }
+                key.reset()
+                if (files.isNotEmpty()) events.add(DevEvent.FilesChanged(files))
+            }
+        }.apply { isDaemon = true; name = "mez-watch-fs" }.start()
+    }
+
+    /**
+     * Raw-mode stdin reader. Returns true if raw mode was enabled (and
+     * keyboard events will arrive); false on non-interactive stdin or
+     * Windows (no stty). Cleanup restores the saved stty state on JVM
+     * shutdown.
+     */
+    private fun startKeyboardThread(events: java.util.concurrent.BlockingQueue<DevEvent>): Boolean {
+        if (System.console() == null) return false
+        val osName = System.getProperty("os.name").lowercase()
+        if (osName.contains("windows")) return false
+
+        val saved = try {
+            ProcessBuilder("stty", "-g")
+                .redirectInput(ProcessBuilder.Redirect.INHERIT)
+                .redirectErrorStream(true)
+                .start().inputStream.bufferedReader().readText().trim()
+        } catch (_: Exception) { return false }
+        if (saved.isEmpty()) return false
+
+        try {
+            ProcessBuilder("stty", "-icanon", "-echo", "min", "1")
+                .redirectInput(ProcessBuilder.Redirect.INHERIT)
+                .redirectErrorStream(true)
+                .start().waitFor()
+        } catch (_: Exception) { return false }
+
+        Runtime.getRuntime().addShutdownHook(Thread {
+            try {
+                ProcessBuilder("stty", saved)
+                    .redirectInput(ProcessBuilder.Redirect.INHERIT)
+                    .start().waitFor()
+            } catch (_: Exception) {}
+        })
+
+        Thread {
+            try {
+                while (true) {
+                    val ch = System.`in`.read()
+                    if (ch < 0) return@Thread
+                    when (ch.toChar().lowercaseChar()) {
+                        'r' -> events.add(DevEvent.Rerun)
+                        'c' -> events.add(DevEvent.Clear)
+                        'q' -> { events.add(DevEvent.Quit); return@Thread }
+                    }
+                }
+            } catch (_: Exception) {}
+        }.apply { isDaemon = true; name = "mez-watch-keys" }.start()
+        return true
     }
 
     /** Set up the project store + typechecker singletons. */
