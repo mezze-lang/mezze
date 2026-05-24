@@ -348,6 +348,13 @@ graalvmNative {
                 "-H:+AllowVMInspection",
                 "-H:-CheckToolchain",
 
+                // JDK 24+: System.load is a restricted method. SQLite JDBC
+                // calls it during cache.sqlite open. Without this, every
+                // `mez` invocation prints a JVM warning before any user
+                // output. Mirrors what NativeBuildPath sets for user-app
+                // builds — the toolchain itself needed the same.
+                "--enable-native-access=ALL-UNNAMED",
+
                 // Optimization level (smaller binary + faster code)
                 "-O2"
             )
