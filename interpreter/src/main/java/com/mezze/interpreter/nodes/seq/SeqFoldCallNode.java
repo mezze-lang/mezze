@@ -45,14 +45,13 @@ public final class SeqFoldCallNode extends MezzeNode {
     @Child
     private DirectCallNode callNode;
 
+    // Cached CallTarget — safe across threads (monomorphic by source position).
+    // We deliberately do NOT cache the folder's MezzeFunction or its
+    // closureValues array on the node, because concurrent threads with
+    // different folder lambdas would race on these fields (#173). The
+    // per-call closure values are passed as method args.
     @CompilationFinal
-    private MezzeFunction cachedFolder;
-
-    @CompilationFinal(dimensions = 1)
-    private Object[] cachedClosureValues;
-
-    @CompilationFinal
-    private int cachedClosureLength;
+    private com.oracle.truffle.api.CallTarget cachedFolderTarget;
 
     // Storage type profiling for JIT optimization
     @CompilationFinal
@@ -73,17 +72,19 @@ public final class SeqFoldCallNode extends MezzeNode {
         Object init = initNode.execute(frame);
         MezzeFunction folder = (MezzeFunction) folderNode.execute(frame);
 
-        // Fast path: same folder function
-        if (callNode != null && folder == cachedFolder) {
-            return executeFold(seq, init);
+        // Per-call closure values — DO NOT cache on the node (see #173).
+        Object[] closureValues = folder.getClosureValues();
+        int closureLength = closureValues.length;
+
+        if (callNode == null || folder.getCallTarget() != cachedFolderTarget) {
+            resolveCallNode(folder);
         }
 
-        // Slow path: resolve folder
-        resolveFolder(folder);
-        return executeFold(seq, init);
+        return executeFold(seq, init, closureValues, closureLength);
     }
 
-    private Object executeFold(MezzeSeq<?> seq, Object init) {
+    private Object executeFold(MezzeSeq<?> seq, Object init,
+                               Object[] closureValues, int closureLength) {
         int size = seq.size();
         if (size == 0) {
             return init;
@@ -106,46 +107,49 @@ public final class SeqFoldCallNode extends MezzeNode {
         // Type-directed dispatch: JIT can optimize based on storage type
         if (!seenMultipleTypes) {
             if (seenStorageType == LongSeqStorage.class) {
-                return foldLongSeq((LongSeqStorage) storage, init, size);
+                return foldLongSeq((LongSeqStorage) storage, init, size, closureValues, closureLength);
             } else if (seenStorageType == DoubleSeqStorage.class) {
-                return foldDoubleSeq((DoubleSeqStorage) storage, init, size);
+                return foldDoubleSeq((DoubleSeqStorage) storage, init, size, closureValues, closureLength);
             } else if (seenStorageType == ObjectSeqStorage.class) {
-                return foldObjectSeq((ObjectSeqStorage) storage, init, size);
+                return foldObjectSeq((ObjectSeqStorage) storage, init, size, closureValues, closureLength);
             }
         }
 
         // Megamorphic fallback
-        return foldGeneric(seq, init, size);
+        return foldGeneric(seq, init, size, closureValues, closureLength);
     }
 
     /**
      * Specialized path for long sequences.
      * JIT can optimize knowing elements are longs.
      */
-    private Object foldLongSeq(LongSeqStorage storage, Object init, int size) {
+    private Object foldLongSeq(LongSeqStorage storage, Object init, int size,
+                               Object[] closureValues, int closureLength) {
         long[] data = storage.getArray();
 
         if (size <= 8) {
-            return foldLongSmall(data, init, size);
+            return foldLongSmall(data, init, size, closureValues, closureLength);
         } else {
-            return foldLongLarge(data, init, size);
+            return foldLongLarge(data, init, size, closureValues, closureLength);
         }
     }
 
     @ExplodeLoop
-    private Object foldLongSmall(long[] data, Object init, int size) {
+    private Object foldLongSmall(long[] data, Object init, int size,
+                                 Object[] closureValues, int closureLength) {
         Object acc = init;
         for (int i = 0; i < size; i++) {
-            acc = callFolder(acc, data[i]);
+            acc = callFolder(acc, data[i], closureValues, closureLength);
         }
         return acc;
     }
 
     @TruffleBoundary
-    private Object foldLongLarge(long[] data, Object init, int size) {
+    private Object foldLongLarge(long[] data, Object init, int size,
+                                 Object[] closureValues, int closureLength) {
         Object acc = init;
         for (int i = 0; i < size; i++) {
-            acc = callFolder(acc, data[i]);
+            acc = callFolder(acc, data[i], closureValues, closureLength);
         }
         return acc;
     }
@@ -154,30 +158,33 @@ public final class SeqFoldCallNode extends MezzeNode {
      * Specialized path for double sequences.
      * JIT can optimize knowing elements are doubles.
      */
-    private Object foldDoubleSeq(DoubleSeqStorage storage, Object init, int size) {
+    private Object foldDoubleSeq(DoubleSeqStorage storage, Object init, int size,
+                                 Object[] closureValues, int closureLength) {
         double[] data = storage.getArray();
 
         if (size <= 8) {
-            return foldDoubleSmall(data, init, size);
+            return foldDoubleSmall(data, init, size, closureValues, closureLength);
         } else {
-            return foldDoubleLarge(data, init, size);
+            return foldDoubleLarge(data, init, size, closureValues, closureLength);
         }
     }
 
     @ExplodeLoop
-    private Object foldDoubleSmall(double[] data, Object init, int size) {
+    private Object foldDoubleSmall(double[] data, Object init, int size,
+                                   Object[] closureValues, int closureLength) {
         Object acc = init;
         for (int i = 0; i < size; i++) {
-            acc = callFolder(acc, data[i]);
+            acc = callFolder(acc, data[i], closureValues, closureLength);
         }
         return acc;
     }
 
     @TruffleBoundary
-    private Object foldDoubleLarge(double[] data, Object init, int size) {
+    private Object foldDoubleLarge(double[] data, Object init, int size,
+                                   Object[] closureValues, int closureLength) {
         Object acc = init;
         for (int i = 0; i < size; i++) {
-            acc = callFolder(acc, data[i]);
+            acc = callFolder(acc, data[i], closureValues, closureLength);
         }
         return acc;
     }
@@ -185,30 +192,33 @@ public final class SeqFoldCallNode extends MezzeNode {
     /**
      * Specialized path for object sequences.
      */
-    private Object foldObjectSeq(ObjectSeqStorage storage, Object init, int size) {
+    private Object foldObjectSeq(ObjectSeqStorage storage, Object init, int size,
+                                 Object[] closureValues, int closureLength) {
         Object[] data = storage.getArray();
 
         if (size <= 8) {
-            return foldObjectSmall(data, init, size);
+            return foldObjectSmall(data, init, size, closureValues, closureLength);
         } else {
-            return foldObjectLarge(data, init, size);
+            return foldObjectLarge(data, init, size, closureValues, closureLength);
         }
     }
 
     @ExplodeLoop
-    private Object foldObjectSmall(Object[] data, Object init, int size) {
+    private Object foldObjectSmall(Object[] data, Object init, int size,
+                                   Object[] closureValues, int closureLength) {
         Object acc = init;
         for (int i = 0; i < size; i++) {
-            acc = callFolder(acc, data[i]);
+            acc = callFolder(acc, data[i], closureValues, closureLength);
         }
         return acc;
     }
 
     @TruffleBoundary
-    private Object foldObjectLarge(Object[] data, Object init, int size) {
+    private Object foldObjectLarge(Object[] data, Object init, int size,
+                                   Object[] closureValues, int closureLength) {
         Object acc = init;
         for (int i = 0; i < size; i++) {
-            acc = callFolder(acc, data[i]);
+            acc = callFolder(acc, data[i], closureValues, closureLength);
         }
         return acc;
     }
@@ -216,55 +226,57 @@ public final class SeqFoldCallNode extends MezzeNode {
     /**
      * Generic fallback for megamorphic sites.
      */
-    private Object foldGeneric(MezzeSeq<?> seq, Object init, int size) {
+    private Object foldGeneric(MezzeSeq<?> seq, Object init, int size,
+                               Object[] closureValues, int closureLength) {
         if (size <= 8) {
-            return foldGenericSmall(seq, init, size);
+            return foldGenericSmall(seq, init, size, closureValues, closureLength);
         } else {
-            return foldGenericLarge(seq, init, size);
+            return foldGenericLarge(seq, init, size, closureValues, closureLength);
         }
     }
 
     @ExplodeLoop
-    private Object foldGenericSmall(MezzeSeq<?> seq, Object init, int size) {
+    private Object foldGenericSmall(MezzeSeq<?> seq, Object init, int size,
+                                    Object[] closureValues, int closureLength) {
         Object acc = init;
         for (int i = 0; i < size; i++) {
-            acc = callFolder(acc, seq.get(i));
+            acc = callFolder(acc, seq.get(i), closureValues, closureLength);
         }
         return acc;
     }
 
     @TruffleBoundary
-    private Object foldGenericLarge(MezzeSeq<?> seq, Object init, int size) {
+    private Object foldGenericLarge(MezzeSeq<?> seq, Object init, int size,
+                                    Object[] closureValues, int closureLength) {
         Object acc = init;
         for (int i = 0; i < size; i++) {
-            acc = callFolder(acc, seq.get(i));
+            acc = callFolder(acc, seq.get(i), closureValues, closureLength);
         }
         return acc;
     }
 
     @ExplodeLoop
-    private Object callFolder(Object acc, Object element) {
+    private Object callFolder(Object acc, Object element,
+                              Object[] closureValues, int closureLength) {
         // Use fast wrapper - no @TruffleBoundary, pre-cached shape
         MezzeRecord arg = MezzeRecord.wrapAccX(acc, element);
 
-        if (cachedClosureLength == 0) {
+        if (closureLength == 0) {
             return callNode.call(new Object[] { arg });
         } else {
-            Object[] args = new Object[cachedClosureLength + 1];
+            Object[] args = new Object[closureLength + 1];
             // Closure copy loop - JIT can unroll for small closures
-            for (int i = 0; i < cachedClosureLength; i++) {
-                args[i] = cachedClosureValues[i];
+            for (int i = 0; i < closureLength; i++) {
+                args[i] = closureValues[i];
             }
-            args[cachedClosureLength] = arg;
+            args[closureLength] = arg;
             return callNode.call(args);
         }
     }
 
     @TruffleBoundary
-    private void resolveFolder(MezzeFunction folder) {
-        cachedFolder = folder;
-        cachedClosureValues = folder.getClosureValues();
-        cachedClosureLength = cachedClosureValues.length;
+    private void resolveCallNode(MezzeFunction folder) {
+        cachedFolderTarget = folder.getCallTarget();
         callNode = DirectCallNode.create(folder.getCallTarget());
         insert(callNode);
     }

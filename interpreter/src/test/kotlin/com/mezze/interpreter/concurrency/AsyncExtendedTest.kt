@@ -478,10 +478,6 @@ class AsyncExtendedTest {
         assertEquals(30L, eval(code))
     }
 
-    @org.junit.jupiter.api.Disabled("Tracked as #173 — concurrent spawn loses closure isolation across join thunks. " +
-            "Confirmed: when both join sides call try_par_map with different `f` captures, the second-spawned " +
-            "promise from one side uses the OTHER side's `f`. Single-side and same-`f`-different-`xs` work; " +
-            "only different-`f`-across-sides breaks. Root cause is in Truffle frame/closure interaction.")
     @Test
     fun `test combining join and map`() {
         // join now returns {l: Result [Int] AsyncError, r: Result ...}.

@@ -167,7 +167,16 @@ public final class FunctionDefinitionNode extends MezzeNode {
         return new MezzeFunction(callTarget, name, closureValues, parameterNames);
     }
 
-    private void createCallTarget() {
+    private synchronized void createCallTarget() {
+        // Double-checked locking — another thread may have already
+        // created the CallTarget while we were waiting on the monitor.
+        // Without this, two concurrent threads could both build a
+        // MezzeFunctionRootNode that adopts the same `bodyNode`, which
+        // violates Truffle's single-parent invariant for child nodes.
+        if (callTarget != null) {
+            return;
+        }
+
         // If we have a content hash, try to use the cached CallTarget
         if (contentHash != null) {
             CallTarget cached = getCachedCallTarget();
