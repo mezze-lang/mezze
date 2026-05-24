@@ -131,12 +131,19 @@ object RuntimeServer {
             .build()
 
         val state = ServerState(context, engine, runIdCarrier, jitEnabled)
+        // Diagnostics destination: silent by default, opt-in via MEZZE_DEBUG.
+        // Without this, every `mez exec` prints "[RuntimeServer] handshake
+        // ok ..." and "QUIT (done)" lines to the user's terminal.
+        val diag: PrintStream = if (System.getenv("MEZZE_DEBUG") != null) originalStderr
+                                else PrintStream(java.io.OutputStream.nullOutputStream())
 
         try {
-            handshake(controlIn, ::send, originalStderr)
-            dispatchLoop(controlIn, ::send, state, originalStderr)
+            handshake(controlIn, ::send, diag)
+            dispatchLoop(controlIn, ::send, state, diag)
         } catch (e: WireProtocolException) {
-            // Framing-level failure — best-effort report then exit.
+            // Framing-level failure — best-effort report then exit. Always
+            // log this to the real stderr; wire failures are bugs, not
+            // routine.
             tryWriteProtocolError(::send, e.code, e.message ?: "wire failure")
             originalStderr.println("[RuntimeServer] wire failure: ${e.code} ${e.message}")
         } catch (e: Exception) {
