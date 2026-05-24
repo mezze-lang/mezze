@@ -460,7 +460,7 @@ private class WireSession private constructor(
     private val timing: Boolean,
 ) {
 
-    private val signalHandler = SigintForwarder(toChild)
+    private val signalHandler = SigintForwarder(toChild, process)
 
     init {
         signalHandler.install()
@@ -510,6 +510,11 @@ private class WireSession private constructor(
                     System.err.flush()
                 }
                 MessageType.EXITED -> {
+                    // Race-safe: cancel any pending kill BEFORE returning,
+                    // so a slow Ctrl-C escalation timer doesn't fire after
+                    // a graceful EXITED arrived. SigintForwarder's
+                    // cancelEscalation is a no-op if no timer is armed.
+                    signalHandler.cancelEscalation()
                     val e = frame.decode<Exited>()
                     val detail = e.detail
                     if (e.reason == "error" && detail != null && detail.message.isNotEmpty()) {
@@ -636,16 +641,70 @@ private class WireSession private constructor(
 
 /**
  * Forward SIGINT (Ctrl-C) in the parent to an INTERRUPT frame in the
- * child. The JVM child cancels the active run cleanly; parent's
- * dispatch loop then sees EXITED with reason="interrupted".
+ * child, then escalate to process kill if the child doesn't respond.
+ *
+ * Flow per Ctrl-C:
+ *   1. Send INTERRUPT frame. Child cancels via Truffle.interrupt
+ *      and sends EXITED reason=interrupted.
+ *   2. Start a deadline timer (default 5 s, override via
+ *      MEZZE_INTERRUPT_TIMEOUT_MS env var). If EXITED arrives in
+ *      time, [cancelEscalation] is called and the timer is cancelled.
+ *   3. If the deadline fires (user code is in a tight loop with no
+ *      safepoints, or polyglot ignored cancel), call
+ *      process.destroyForcibly(). This closes the pipe; parent's
+ *      drainUntilExited sees EOF and surfaces as reason=crashed.
+ *
+ * Second Ctrl-C inside the grace window also escalates immediately
+ * — same "tap to stop, double-tap to kill" UX as common dev tools.
  */
-private class SigintForwarder(private val toChild: OutputStream) {
+private class SigintForwarder(
+    private val toChild: OutputStream,
+    private val process: Process,
+) {
     private var previous: sun.misc.SignalHandler? = null
+    @Volatile private var pendingEscalation: java.util.concurrent.ScheduledFuture<*>? = null
+    private val timer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "mez-interrupt-timer").apply { isDaemon = true }
+    }
+
+    private val timeoutMs: Long =
+        System.getenv("MEZZE_INTERRUPT_TIMEOUT_MS")?.toLongOrNull()?.coerceAtLeast(100L) ?: 5_000L
+
     private val handler = sun.misc.SignalHandler {
+        // Second Ctrl-C while we're already waiting → escalate now.
+        val already = pendingEscalation
+        if (already != null && !already.isDone) {
+            already.cancel(false)
+            kill("user pressed Ctrl-C twice")
+            return@SignalHandler
+        }
         try {
             val frame = WireFrame.of(MessageType.INTERRUPT, Interrupt())
             synchronized(toChild) {
                 WireFrameCodec.writeFlush(toChild, frame)
+            }
+        } catch (_: Exception) {
+            // Wire write failed — child is probably already dead; bail.
+            return@SignalHandler
+        }
+        pendingEscalation = timer.schedule(
+            { kill("graceful interrupt timed out after ${timeoutMs}ms") },
+            timeoutMs,
+            java.util.concurrent.TimeUnit.MILLISECONDS,
+        )
+    }
+
+    /** Called by WireSession when EXITED arrives — cancel any pending kill. */
+    fun cancelEscalation() {
+        pendingEscalation?.cancel(false)
+        pendingEscalation = null
+    }
+
+    private fun kill(reason: String) {
+        try {
+            if (process.isAlive) {
+                System.err.println("[mez] $reason; killing runtime")
+                process.destroyForcibly()
             }
         } catch (_: Exception) {}
     }
@@ -662,6 +721,7 @@ private class SigintForwarder(private val toChild: OutputStream) {
         try {
             previous?.let { sun.misc.Signal.handle(sun.misc.Signal("INT"), it) }
         } catch (_: Throwable) {}
+        try { timer.shutdownNow() } catch (_: Exception) {}
     }
 }
 
