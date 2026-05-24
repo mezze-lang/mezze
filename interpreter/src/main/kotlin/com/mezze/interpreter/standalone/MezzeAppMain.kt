@@ -76,6 +76,17 @@ object MezzeAppMain {
             )
             EmbeddedExec.run(args.toList(), timing, t0)
             mark("execute returned")
+        } catch (e: org.graalvm.polyglot.PolyglotException) {
+            // User code called Environment.exit { code = N } — Polyglot
+            // wraps MezzeExitException with isExit() == true. Propagate
+            // the carried exit status verbatim; this is intentional
+            // termination, not an error.
+            if (e.isExit) {
+                kotlin.system.exitProcess(e.exitStatus)
+            }
+            System.err.println("Error: ${e.message}")
+            if (args.contains("--debug")) e.printStackTrace()
+            kotlin.system.exitProcess(1)
         } catch (e: Exception) {
             System.err.println("Error: ${e.message}")
             if (args.contains("--debug")) e.printStackTrace()

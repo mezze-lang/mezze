@@ -1,6 +1,7 @@
 package com.mezze.interpreter.nodes.builtin.effects;
 
 import com.mezze.datastructures.list.MezzeList;
+import com.mezze.interpreter.runtime.MezzeExitException;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.MezzeUnit;
@@ -106,9 +107,17 @@ public final class EnvironmentNatives {
 
     @TruffleBoundary
     public static Object exit(MezzeRecord args) {
+        // Throw a Truffle exit exception instead of calling System.exit
+        // directly. Different hosts unwind differently:
+        //   - Standalone app jar / native binary: MezzeAppMain catches at
+        //     top level and exits with the carried code.
+        //   - Wire-protocol RuntimeServer: catches, sends EXITED frame,
+        //     stays alive for the next LOAD.
+        //   - Tests: caller can catch and assert.
+        // Direct System.exit would kill the JVM in all hosts and prevent
+        // the wire host from staying alive across runs.
         long code = getLong(args, "code");
-        System.exit((int) code);
-        return MezzeUnit.INSTANCE;  // Never reached
+        throw new MezzeExitException((int) code);
     }
 
     // ============== Field Helpers ==============

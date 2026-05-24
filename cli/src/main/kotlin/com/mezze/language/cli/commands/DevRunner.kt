@@ -748,6 +748,15 @@ object DevRunner {
         try {
             executeWithTruffle(functions, performers, projectRoot.toPath(), entryName, inspect, inspectBrk, engine, sharedContext)
         } catch (e: org.graalvm.polyglot.PolyglotException) {
+            // User code called Environment.exit { code = N }. In watch
+            // mode we shouldn't kill the whole dev session over this —
+            // just report the exit code and let the watcher keep going.
+            // In --no-watch, the outer caller will exit. (When wire path
+            // becomes the default, RuntimeServer handles this cleanly.)
+            if (e.isExit) {
+                System.err.println("${ANSI_GRAY}program exited with code ${e.exitStatus}${ANSI_RESET}")
+                return
+            }
             printError("Runtime Error", e.message ?: "Unknown error")
             return
         } catch (e: Exception) {
