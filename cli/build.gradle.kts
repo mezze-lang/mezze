@@ -461,18 +461,6 @@ tasks.register<Copy>("installRuntime") {
     dependsOn(":interpreter:runtimeShadowJar")
     from(project(":interpreter").layout.buildDirectory.file("libs/mezze-runtime.jar"))
     into(mezzeHome.map { File(it, "lib") })
-    doFirst {
-        // Reap the 91 MB orphan from older installs (pre-wire-protocol).
-        // installRuntime used to copy mezze-lang.jar here too; new installs
-        // don't, so users who upgrade end up with a stale dead-weight jar.
-        // Safe to delete because nothing at run time loads it anymore —
-        // see WireRunner's classpath (mezze-runtime.jar only).
-        val stale = File(mezzeHome.get(), "lib/mezze-lang.jar")
-        if (stale.exists()) {
-            logger.lifecycle("removing stale ${stale.absolutePath} (${stale.length() / 1024 / 1024} MB)")
-            stale.delete()
-        }
-    }
 }
 
 /**
@@ -500,18 +488,25 @@ tasks.register<Copy>("installStdlibSources") {
 }
 
 /**
- * Install the native binary to ~/.mezze/bin/mez. ~3 minutes the first
+ * Install the full mez toolchain into ~/.mezze/. ~3 minutes the first
  * time; faster on subsequent runs thanks to incremental compile.
  *
- * Also depends on `installRuntime` because the native binary is NOT
- * self-contained — `mez dev` shells out to a JVM subprocess that loads
- * `~/.mezze/lib/mezze-lang.jar`, and `mez build` templates user app jars
- * from the same file. Installing one without the other gives users a
- * broken setup, so we couple them at the gradle layer.
+ * Three artifacts go down:
+ *   - ~/.mezze/bin/mez               native binary (AOT-compiled CLI)
+ *   - ~/.mezze/lib/mezze-runtime.jar slim runtime jar (JVM child for
+ *                                    mez dev / mez exec; templated by
+ *                                    mez build for user app jars)
+ *   - ~/.mezze/stdlib/std/...        stdlib .mz sources for editor
+ *                                    go-to-definition (LSP)
+ *
+ * The native binary is NOT self-contained: it spawns a JVM child for
+ * `mez dev` / `mez exec` to execute user code (Truffle/Loom need a real
+ * JVM). Coupling installRuntime ensures users never end up with a
+ * binary that can't find its runtime jar.
  */
 tasks.register("installNative") {
     group = "install"
-    description = "Install native `mez` binary + runtime jar into ~/.mezze/"
+    description = "Install native `mez` binary + runtime jar + stdlib sources into ~/.mezze/"
     dependsOn("installRuntime", "installStdlibSources", "nativeCompile")
     doLast {
         // rm-then-cp to defeat the macOS launch-services kernel cache —
