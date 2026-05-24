@@ -106,6 +106,29 @@ public final class CoopScheduler {
         return resultOrThrow(promise);
     }
 
+    /**
+     * Await a promise and return its final state as a `Result 'a AsyncError`
+     * variant — never throws on FAILED / CANCELLED. The counterpart to
+     * Loom's {@code promiseAwaitResult}: keeps the Result contract honest
+     * under CoopAsync.
+     */
+    @TruffleBoundary
+    public Object awaitResult(AsyncNatives.MezzePromise promise, IndirectCallNode callNode) {
+        if (!promise.isDone()) {
+            runUntil(promise, callNode);
+        }
+        if (promise.isCompleted()) {
+            return AsyncNatives.asyncOkResult(promise.snapshotResult());
+        }
+        if (promise.isFailed()) {
+            return AsyncNatives.asyncFailedResultFromPromise(promise);
+        }
+        if (promise.isCancelled()) {
+            return AsyncNatives.asyncCancelledResult();
+        }
+        return AsyncNatives.asyncFailedResult("scheduler await: promise never settled");
+    }
+
     /** Drain — run all tasks until both ready and parked are empty (or stuck). */
     @TruffleBoundary
     public void drain(IndirectCallNode callNode) {

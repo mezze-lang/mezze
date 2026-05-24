@@ -45,6 +45,22 @@ object SchedulerTypes {
             MezzeType.VarType(TypeVar("a"))
         )
 
+        // __native_scheduler_await_result: {sched, p} -> Result 'a AsyncError
+        // (the non-throwing counterpart used by CoopAsync.await to keep the
+        //  Result contract honest under cooperative scheduling).
+        val asyncErrorType = MezzeType.VarType(TypeVar("AsyncError"))
+        val schedulerAwaitResultType = com.mezze.language.typechecker.util.WellKnownTypeApp.of(
+            "Result",
+            listOf(MezzeType.VarType(TypeVar("a")), asyncErrorType)
+        )
+        context["__native_scheduler_await_result"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf(
+                "sched" to schedulerType,
+                "p" to nativePromiseType
+            )),
+            schedulerAwaitResultType
+        )
+
         // __native_scheduler_drain: {sched: __NativeScheduler} -> {}
         context["__native_scheduler_drain"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(

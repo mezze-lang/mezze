@@ -45,6 +45,18 @@ public final class SchedulerNatives {
     }
 
     /**
+     * Await a promise and return a `Result 'a AsyncError` — never throws
+     * on FAILED / CANCELLED. The counterpart to Loom's
+     * {@code __native_promise_await_result} for CoopAsync.
+     */
+    @TruffleBoundary
+    public static Object schedulerAwaitResult(MezzeRecord args, IndirectCallNode callNode) {
+        CoopScheduler scheduler = getScheduler(args, "sched");
+        AsyncNatives.MezzePromise promise = getPromise(args, "p");
+        return scheduler.awaitResult(promise, callNode);
+    }
+
+    /**
      * Drain all pending tasks.
      */
     @TruffleBoundary

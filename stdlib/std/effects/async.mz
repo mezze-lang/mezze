@@ -203,15 +203,12 @@ impl Async for CoopAsync where {
   spawn = { f } -> Promise {
     val = __native_scheduler_spawn { sched = scope, f = f },
   },
-  ## CoopAsync's await blocks the cooperative scheduler — running other
-  ## ready tasks until the target promise completes. The scheduler's await
-  ## native still throws on task failure today (technical debt — same as
-  ## pre-#143). Wrap in Ok for the common case; failure propagation
-  ## through Coop is a separate follow-up.
+  ## CoopAsync's await routes through __native_scheduler_await_result,
+  ## which observes FAILED / CANCELLED state and returns Err — the
+  ## Result contract is honest under Coop just like under Loom.
   await = { p } -> match p is
-    Promise { val = native_p } -> Ok {
-      val = __native_scheduler_await { sched = scope, p = native_p },
-    },
+    Promise { val = native_p } ->
+      __native_scheduler_await_result { sched = scope, p = native_p },
   cancel = { p } -> __native_promise_cancel { p = p },
   sleep = { ms } -> __native_scheduler_sleep { sched = scope, ms = ms },
   is_cancelled = {} -> False,

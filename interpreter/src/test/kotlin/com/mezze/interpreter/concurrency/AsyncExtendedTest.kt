@@ -461,8 +461,27 @@ class AsyncExtendedTest {
     // =============================================================================
     // Integration Tests
     // =============================================================================
+    @Test
+    fun `debug join with two simple thunks`() {
+        // No try_par_map. Just join two simple thunks returning Int.
+        val code = """
+            use std::effects::async::{Async, LoomAsync, join}
 
-    @org.junit.jupiter.api.Disabled("Returns 29 instead of 27 — likely interaction between concurrent try_par_map inside join thunks; revisit.")
+            perform LoomAsync in do
+                let r = join { l = {} -> 10, r = {} -> 20 }
+                match r.l is
+                    Ok { val = lv } -> match r.r is
+                        Ok { val = rv } -> lv + rv
+                        _ -> -1
+                    _ -> -2
+        """
+        assertEquals(30L, eval(code))
+    }
+
+    @org.junit.jupiter.api.Disabled("Tracked as #173 — concurrent spawn loses closure isolation across join thunks. " +
+            "Confirmed: when both join sides call try_par_map with different `f` captures, the second-spawned " +
+            "promise from one side uses the OTHER side's `f`. Single-side and same-`f`-different-`xs` work; " +
+            "only different-`f`-across-sides breaks. Root cause is in Truffle frame/closure interaction.")
     @Test
     fun `test combining join and map`() {
         // join now returns {l: Result [Int] AsyncError, r: Result ...}.

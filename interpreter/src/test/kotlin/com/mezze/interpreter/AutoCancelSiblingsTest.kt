@@ -1,6 +1,5 @@
 package com.mezze.interpreter
 
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
@@ -85,15 +84,21 @@ class AutoCancelSiblingsTest {
     // fiber must be cancelled before counter has time to mutate.
 
     @Test
-    @Disabled("moves to Async.try_join (#122f / #169) — join is now Rust-style: each side runs to completion, no auto-cancel. Re-enable against try_join once it lands.")
-    fun `join cancels surviving sibling when one fails under LoomAsync`() {
+    fun `try_join cancels surviving sibling when one fails under LoomAsync`() {
         // failer uses crash {} (an unrecoverable host error) — the spawn
         // boundary catches the throwable and records AsyncFailed on the
-        // l side of the join result. First-failure auto-cancel then
-        // interrupts slow before it can bump the counter (slow is in
-        // Thread.sleep, so the interrupt takes effect immediately).
+        // l side. try_join's fail-fast semantics then cancels slow before
+        // it can bump the counter (slow is in Thread.sleep, so the
+        // interrupt takes effect immediately).
+        //
+        // We use `crash` rather than `throw` here because `throw` raises
+        // an Exception effect that the typechecker tracks through the
+        // spawned thunk's effect row. With no Exception handler in scope,
+        // the program won't type-check — even though the runtime spawn
+        // boundary would intercept the throw before it left the task.
+        // `crash` is host-level and side-steps the effect row.
         val source = """
-            use std::effects::async::{ Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, LoomAsync, try_join }
             use std::effects::concurrent::atom::{ atom, deref, reset }
 
             perform LoomAsync in do
@@ -101,9 +106,9 @@ class AutoCancelSiblingsTest {
               let failer = {} -> crash { msg = "boom" }
               let slow = {} -> do
                 Async.sleep { ms = 200 }
-                let _ = reset { atom = counter, value = 1 }
+                reset { atom = counter, value = 1 }
                 0
-              let _ = join { l = failer, r = slow }
+              try_join { l = failer, r = slow }
               Async.sleep { ms = 400 }
               deref { atom = counter }
         """.trimIndent()
@@ -111,21 +116,22 @@ class AutoCancelSiblingsTest {
     }
 
     @Test
-    @Disabled("moves to Async.try_join (#122f / #169) — join no longer auto-cancels.")
-    fun `join cancels surviving sibling when one fails under CoopAsync`() {
+    fun `try_join cancels surviving sibling when one fails under CoopAsync`() {
+        // Same shape as the Loom test but under CoopAsync. The
+        // cooperative scheduler must observe the spawn boundary's
+        // AsyncFailed and cancel `slow` before its sleep resumes.
         val source = """
-            use std::effects::async::{ Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, CoopAsync, try_join }
             use std::effects::concurrent::atom::{ atom, deref, reset }
-            use std::effects::exception::{ Exception, throw }
 
             perform CoopAsync in do
               let counter = atom { value = 0 }
-              let failer = {} -> throw { error = "boom" }
+              let failer = {} -> crash { msg = "boom" }
               let slow = {} -> do
                 Async.sleep { ms = 200 }
-                let _ = reset { atom = counter, value = 1 }
+                reset { atom = counter, value = 1 }
                 0
-              let _ = join { l = failer, r = slow }
+              try_join { l = failer, r = slow }
               Async.sleep { ms = 400 }
               deref { atom = counter }
         """.trimIndent()
@@ -158,10 +164,9 @@ class AutoCancelSiblingsTest {
     // ─── join3 — first failure cancels the other two ──────────────────────
 
     @Test
-    @Disabled("moves to Async.try_join3 (#122f / #169) — join3 no longer auto-cancels.")
-    fun `join3 cancels two surviving siblings when one fails under LoomAsync`() {
+    fun `try_join3 cancels two surviving siblings when one fails under LoomAsync`() {
         val source = """
-            use std::effects::async::{ Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, LoomAsync, try_join3 }
             use std::effects::concurrent::atom::{ atom, deref, swap }
 
             perform LoomAsync in do
@@ -169,13 +174,13 @@ class AutoCancelSiblingsTest {
               let failer = {} -> crash { msg = "boom" }
               let slow1 = {} -> do
                 Async.sleep { ms = 200 }
-                let _ = swap { atom = counter, f = { current } -> current + 1 }
+                swap { atom = counter, f = { current } -> current + 1 }
                 0
               let slow2 = {} -> do
                 Async.sleep { ms = 200 }
-                let _ = swap { atom = counter, f = { current } -> current + 1 }
+                swap { atom = counter, f = { current } -> current + 1 }
                 0
-              let _ = join3 { a = failer, b = slow1, c = slow2 }
+              try_join3 { a = failer, b = slow1, c = slow2 }
               Async.sleep { ms = 400 }
               deref { atom = counter }
         """.trimIndent()

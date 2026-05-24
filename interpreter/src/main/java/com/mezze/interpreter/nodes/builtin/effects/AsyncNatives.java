@@ -2203,6 +2203,18 @@ public final class AsyncNatives {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return MezzeVariant.err(createAsyncCancelled());
+        } catch (RuntimeException e) {
+            // p.await() throws on FAILED / CANCELLED via getResultOrThrow.
+            // Classify by the promise's final state and return Result Err.
+            int state = p.snapshotState();
+            if (state == MezzePromise.CANCELLED) {
+                return MezzeVariant.err(createAsyncCancelled());
+            }
+            if (state == MezzePromise.FAILED) {
+                return MezzeVariant.err(asyncErrorFromResult(p.snapshotResult()));
+            }
+            // Some other RuntimeException — re-throw.
+            throw e;
         }
         // Same propagation logic as loomAwaitPromise — MezzeSuspended forcing
         // and unhandled-op re-raise still happen, those are NOT failure modes
