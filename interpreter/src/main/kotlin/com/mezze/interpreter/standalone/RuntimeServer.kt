@@ -113,11 +113,44 @@ object RuntimeServer {
 
         val jitEnabled = System.getenv("MEZZE_JIT")?.let { it == "1" || it.equals("true", ignoreCase = true) } ?: false
 
-        val engine = Engine.newBuilder()
+        // Dev instrumentation flags arrive as command-line args from the
+        // parent's WireRunner. Mirror EmbeddedExec's wiring so behavior
+        // matches between `mez dev`/`mez exec` and a standalone-jar/native
+        // user-app binary. Outputs land under <project>/.mz/profile/ (the
+        // wire path; EmbeddedExec uses <cwd>/mezze-*.txt for user-app
+        // binaries since they may run from anywhere).
+        val devFlags = DevFlags.parse(args, originalStderr)
+
+        val engineBuilder = Engine.newBuilder()
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
             .option("engine.Compilation", jitEnabled.toString())
-            .build()
+        if (devFlags.traceJit) engineBuilder.option("engine.TraceCompilation", "true")
+        if (devFlags.profile != null) {
+            engineBuilder.option("cpusampler", "true")
+                .option("cpusampler.OutputFile", devFlags.profile.absolutePath)
+            originalStderr.println("[mezze] profile → ${devFlags.profile.absolutePath}")
+        }
+        if (devFlags.coverage != null) {
+            engineBuilder.option("coverage", "true")
+                .option("coverage.OutputFile", devFlags.coverage.absolutePath)
+            originalStderr.println("[mezze] coverage → ${devFlags.coverage.absolutePath}")
+        }
+        if (devFlags.allocations != null) {
+            engineBuilder.option("mezze-allocations", "true")
+                .out(PrintStream(devFlags.allocations.outputStream(), true))
+            originalStderr.println("[mezze] allocations → ${devFlags.allocations.absolutePath}")
+        }
+        if (devFlags.insightFile != null) {
+            engineBuilder.option("insight", devFlags.insightFile.absolutePath)
+            originalStderr.println("[mezze] insight probe → ${devFlags.insightFile.absolutePath}")
+        }
+        if (devFlags.inspect) {
+            engineBuilder.option("inspect", "4242")
+            if (devFlags.inspectBrk) engineBuilder.option("inspect.Suspend", "true")
+            originalStderr.println("[mezze] devtools listening on chrome://inspect — port 4242")
+        }
+        val engine = engineBuilder.build()
 
         val context = Context.newBuilder(MezzeLanguage.ID)
             .engine(engine)
@@ -493,5 +526,52 @@ private class WireFrameOutputStream(
     override fun close() {
         // Don't actually close the underlying stream — RuntimeServer
         // controls its lifecycle. Flushing is a no-op (see above).
+    }
+}
+
+// ─── Dev instrumentation flags ───────────────────────────────────────
+
+/**
+ * Parsed dev-instrumentation flags. Mirrors what EmbeddedExec accepts
+ * so behavior matches between `mez dev` / `mez exec` (wire path) and
+ * a standalone-jar / native user-app binary.
+ *
+ * Outputs land under <project>/.mz/profile/ — derived from the
+ * `mezze.project.root` system property the parent sets when spawning.
+ * Falls back to cwd if for some reason that property isn't set.
+ */
+private data class DevFlags(
+    val inspect: Boolean,
+    val inspectBrk: Boolean,
+    val traceJit: Boolean,
+    val profile: File?,
+    val coverage: File?,
+    val allocations: File?,
+    val insightFile: File?,
+) {
+    companion object {
+        fun parse(args: Array<String>, diag: PrintStream): DevFlags {
+            val inspect = args.contains("--inspect") || args.contains("--inspect-brk")
+            val inspectBrk = args.contains("--inspect-brk")
+            val traceJit = args.contains("--trace-jit")
+            val profile = if (args.contains("--profile")) profileOut("mezze-profile.txt") else null
+            val coverage = if (args.contains("--coverage")) profileOut("mezze-coverage.txt") else null
+            val allocations = if (args.contains("--allocations")) profileOut("mezze-allocations.txt") else null
+            val insight = args.firstNotNullOfOrNull { a ->
+                if (a.startsWith("--insight=")) a.substringAfter("=") else null
+            }?.let { File(it) }
+            if (insight != null && !insight.exists()) {
+                diag.println("Error: --insight=${insight.path}: file not found")
+                kotlin.system.exitProcess(1)
+            }
+            return DevFlags(inspect, inspectBrk, traceJit, profile, coverage, allocations, insight)
+        }
+
+        private fun profileOut(name: String): File {
+            val root = System.getProperty("mezze.project.root")?.let { File(it) } ?: File(".")
+            val dir = File(root, ".mz/profile")
+            dir.mkdirs()
+            return File(dir, name)
+        }
     }
 }

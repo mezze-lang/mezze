@@ -72,6 +72,11 @@ object WireRunner {
     /**
      * Compile + execute once via RuntimeServer. Returns process exit code.
      * Equivalent to the `--no-watch` path of `mez dev` / `mez exec`.
+     *
+     * [devFlags] are pass-through CLI tokens (e.g. "--inspect",
+     * "--profile", "--insight=/abs/probe.js") that the child runtime
+     * applies to its Truffle Context/Engine at startup. See
+     * [RuntimeServer]'s DevFlags helper for the accepted set.
      */
     fun execOnce(
         currentDir: File,
@@ -79,6 +84,7 @@ object WireRunner {
         entryName: String,
         modulePath: String,
         appName: String,
+        devFlags: List<String> = emptyList(),
     ): Int {
         val timing = System.getenv("MEZZE_TIMING") != null
         val t0 = System.nanoTime()
@@ -92,7 +98,7 @@ object WireRunner {
         initStore(currentDir)
         val compile = compile(currentDir, appFile, entryName, appName, timing, t0) ?: return 4
 
-        val session = WireSession.start(currentDir, timing, t0) ?: return 1
+        val session = WireSession.start(currentDir, timing, t0, devFlags) ?: return 1
         return try {
             val outcome = session.runOnce(compile)
             outcome.exitCode
@@ -129,6 +135,7 @@ object WireRunner {
         entryName: String,
         modulePath: String,
         appName: String,
+        devFlags: List<String> = emptyList(),
     ): Int {
         val timing = System.getenv("MEZZE_TIMING") != null
         val t0 = System.nanoTime()
@@ -139,7 +146,7 @@ object WireRunner {
         }
         initStore(currentDir)
 
-        val session = WireSession.start(currentDir, timing, t0) ?: return 1
+        val session = WireSession.start(currentDir, timing, t0, devFlags) ?: return 1
         var prevHashes: Set<Hash> = emptySet()
 
         try {
@@ -561,7 +568,12 @@ private class WireSession private constructor(
     }
 
     companion object {
-        fun start(currentDir: File, timing: Boolean, t0: Long): WireSession? {
+        fun start(
+            currentDir: File,
+            timing: Boolean,
+            t0: Long,
+            devFlags: List<String> = emptyList(),
+        ): WireSession? {
             fun ms() = (System.nanoTime() - t0) / 1_000_000
 
             val java = JvmLauncher.findJava() ?: run {
@@ -574,6 +586,10 @@ private class WireSession private constructor(
             command.add("-Dmezze.project.root=${currentDir.absolutePath}")
             command.add("-cp"); command.add(classpath)
             command.add("com.mezze.interpreter.standalone.RuntimeServer")
+            // Dev instrumentation flags get appended as RuntimeServer's
+            // args[] — DevFlags.parse picks them up before building the
+            // Truffle Engine. Order doesn't matter; they're flag-named.
+            command.addAll(devFlags)
 
             val process = ProcessBuilder(command)
                 .redirectError(ProcessBuilder.Redirect.INHERIT)

@@ -19,11 +19,10 @@ class DevCommand {
 
     companion object {
         /**
-         * Dev instrumentation flags that the wire-protocol RuntimeServer
-         * doesn't implement yet. We explicitly reject them so users
-         * aren't silently surprised by their absence.
+         * Dev instrumentation flags forwarded to RuntimeServer as args.
+         * It parses them via DevFlags.parse before building the Engine.
          */
-        private val DEV_FLAGS_NOT_YET_WIRED = setOf(
+        private val DEV_FLAGS_BOOLEAN = setOf(
             "--inspect", "--inspect-brk",
             "--profile", "--coverage", "--allocations", "--trace-jit",
         )
@@ -33,17 +32,9 @@ class DevCommand {
     fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
         val noWatch = args.contains("--no-watch") || args.contains("--nw")
 
-        // Dev instrumentation flags. The wire-protocol RuntimeServer
-        // doesn't yet implement these (CONFIG frames for inspect / profile
-        // / coverage / allocations / insight / trace-jit are designed in
-        // the v1 spec but not wired). Reject explicitly rather than
-        // silently swallow.
-        val unsupportedDevFlag = args.firstOrNull { it in DEV_FLAGS_NOT_YET_WIRED || it.startsWith("--insight=") }
-        if (unsupportedDevFlag != null) {
-            println("Error: '$unsupportedDevFlag' isn't supported yet on the wire-protocol runtime.")
-            println("Tracking: ${DEV_FLAGS_NOT_YET_WIRED.joinToString()}, --insight=<file>")
-            kotlin.system.exitProcess(2)
-        }
+        // Collect dev instrumentation flags to forward to the child.
+        // Boolean flags pass through verbatim; --insight=<path> too.
+        val devFlags = args.filter { it in DEV_FLAGS_BOOLEAN || it.startsWith("--insight=") }
 
         val mezzeToml = File(currentDir, "Mezze.toml")
 
@@ -100,9 +91,9 @@ class DevCommand {
         }
 
         val exit = if (noWatch) {
-            WireRunner.execOnce(currentDir, appFile, entryName, modulePath, appConfig.name)
+            WireRunner.execOnce(currentDir, appFile, entryName, modulePath, appConfig.name, devFlags)
         } else {
-            WireRunner.watch(currentDir, appFile, entryName, modulePath, appConfig.name)
+            WireRunner.watch(currentDir, appFile, entryName, modulePath, appConfig.name, devFlags)
         }
         kotlin.system.exitProcess(exit)
     }
