@@ -470,6 +470,53 @@ tasks.register<Copy>("installRuntime") {
     into(mezzeHome.map { File(it, "lib") })
 }
 
+// A separate configuration that pulls in the GraalVM Truffle dev tools
+// (chromeinspector, profiler, coverage, dap, insight) without putting
+// them on the main runtime classpath. The slim mezze-runtime.jar
+// deliberately excludes these so user-app builds stay small; we install
+// them as separate jars under ~/.mezze/lib/tools/ and WireRunner adds
+// that dir to the classpath only when --inspect / --profile / etc.
+val devTools by configurations.creating {
+    isCanBeResolved = true
+    isCanBeConsumed = false
+}
+dependencies {
+    devTools("org.graalvm.tools:profiler-tool:24.2.2")
+    devTools("org.graalvm.tools:chromeinspector-tool:24.2.2")
+    devTools("org.graalvm.tools:dap-tool:24.2.2")
+    devTools("org.graalvm.tools:coverage-tool:24.2.2")
+    devTools("org.graalvm.tools:insight-tool:24.2.2")
+}
+
+/**
+ * Install Truffle dev-tool jars to ~/.mezze/lib/tools/.
+ *
+ * Only loaded when the user passes --inspect / --profile / --coverage /
+ * --allocations / --insight / --trace-jit to mez dev or mez exec. The
+ * slim mezze-runtime.jar bundled into user-app builds stays small (no
+ * 20-30 MB of profiler/inspector machinery in every distributed app).
+ */
+tasks.register<Copy>("installDevTools") {
+    group = "install"
+    description = "Install Truffle dev-tool jars (~20MB) to ~/.mezze/lib/tools/"
+    from(devTools) {
+        // The configuration resolves to many jars including transitive
+        // graal-sdk / truffle-api dups that are already in the runtime
+        // jar. Skip those — only ship the tool-specific bits.
+        include("profiler-*.jar", "chromeinspector-*.jar", "dap-tool-*.jar",
+                "coverage-*.jar", "insight-tool-*.jar",
+                // Tools depend on org.graalvm.shadowed.* packages so include those too
+                "icu4j-*.jar", "regex-*.jar")
+    }
+    into(mezzeHome.map { File(it, "lib/tools") })
+    // Wipe the dir before copying so old tool jars from prior installs
+    // don't accumulate across upgrades.
+    doFirst {
+        val toolsDir = File(mezzeHome.get(), "lib/tools")
+        if (toolsDir.exists()) toolsDir.listFiles()?.forEach { it.delete() }
+    }
+}
+
 /**
  * Install stdlib sources to ~/.mezze/stdlib/ so cmd-click on imported
  * stdlib symbols can land at a stable file path. Without these on
@@ -514,7 +561,7 @@ tasks.register<Copy>("installStdlibSources") {
 tasks.register("installNative") {
     group = "install"
     description = "Install native `mez` binary + runtime jar + stdlib sources into ~/.mezze/"
-    dependsOn("installRuntime", "installStdlibSources", "nativeCompile")
+    dependsOn("installRuntime", "installDevTools", "installStdlibSources", "nativeCompile")
     doLast {
         // rm-then-cp to defeat the macOS launch-services kernel cache —
         // overwriting an existing `mez` in place hangs because the cached

@@ -580,7 +580,20 @@ private class WireSession private constructor(
                 System.err.println("Error: Java 21+ required.")
                 return null
             }
-            val classpath = JvmLauncher.buildClasspath()
+            // Base classpath = mezze-runtime.jar. When dev flags are
+            // present, also append ~/.mezze/lib/tools/*.jar so the
+            // chromeinspector / profiler / coverage / dap / insight
+            // tool jars are visible to Truffle's option parser.
+            // installDevTools laid these down at install time.
+            val baseClasspath = JvmLauncher.buildClasspath()
+            val classpath = if (devFlags.isNotEmpty()) {
+                val toolsDir = File(System.getProperty("user.home"), ".mezze/lib/tools")
+                val toolJars = toolsDir.listFiles { f -> f.name.endsWith(".jar") }
+                    ?.joinToString(File.pathSeparator) { it.absolutePath }
+                    ?: ""
+                if (toolJars.isNotEmpty()) "$baseClasspath${File.pathSeparator}$toolJars" else baseClasspath
+            } else baseClasspath
+
             val command = mutableListOf(java.absolutePath)
             command.addAll(jvmArgs())
             command.add("-Dmezze.project.root=${currentDir.absolutePath}")

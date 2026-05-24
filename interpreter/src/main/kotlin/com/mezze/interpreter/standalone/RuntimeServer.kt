@@ -103,13 +103,21 @@ object RuntimeServer {
             WireFrameCodec.writeFlush(controlOut, frame)
         }
 
-        // Redirect user-visible System.out / System.err to wire frames.
-        // The original stderr stays as fd 2 — runtime diagnostics and any
-        // pre-redirect log output bypass the protocol.
+        // Save original stderr — used for runtime diagnostics that
+        // must NOT go through the wire (handshake-time warnings, dev-
+        // flag announce, fatal protocol errors). The parent inherits
+        // fd 2 from us, so these surface in the user's terminal
+        // verbatim with no protocol involvement.
         val originalStderr = System.err
         val runIdCarrier = AtomicLong(0)
-        System.setOut(PrintStream(WireFrameOutputStream(MessageType.STDOUT_DATA, runIdCarrier, ::send), true))
-        System.setErr(PrintStream(WireFrameOutputStream(MessageType.STDERR_DATA, runIdCarrier, ::send), true))
+        // We'll redirect System.out / System.err to wire-frame streams,
+        // but ONLY after dev-flag init has had a chance to write its
+        // "[mezze] profile → /path" announce lines via originalStderr.
+        // Mezze's println native writes to System.out directly (not via
+        // Truffle Context.out), so redirecting System.out is required to
+        // capture user output into the wire.
+        val wireOut = PrintStream(WireFrameOutputStream(MessageType.STDOUT_DATA, runIdCarrier, ::send), true)
+        val wireErr = PrintStream(WireFrameOutputStream(MessageType.STDERR_DATA, runIdCarrier, ::send), true)
 
         val jitEnabled = System.getenv("MEZZE_JIT")?.let { it == "1" || it.equals("true", ignoreCase = true) } ?: false
 
@@ -157,10 +165,13 @@ object RuntimeServer {
             .allowAllAccess(true)
             .allowCreateThread(true)
             .allowExperimentalOptions(true)
-            // Route user output through our captured System.out/err so it
-            // ends up in STDOUT_DATA / STDERR_DATA frames.
-            .out(System.out)
-            .err(System.err)
+            // Truffle's Context.out is the channel for tool-emitted text
+            // (cpusampler reports etc.) and any language-internal writes.
+            // Send through the wire so timing matches user output. err
+            // intentionally not set — defaults to System.err which is
+            // inherited fd 2 (parent's terminal); avoids wire frames for
+            // dev-tool startup banners.
+            .out(wireOut)
             .build()
 
         val state = ServerState(context, engine, runIdCarrier, jitEnabled)
@@ -172,6 +183,20 @@ object RuntimeServer {
 
         try {
             handshake(controlIn, ::send, diag)
+            // Redirect System.out (used by Mezze's println native) to the
+            // wire so user output arrives at the parent as STDOUT_DATA
+            // frames. Done late — after engine/context init and after
+            // handshake — so tool init warnings (cpusampler, inspect)
+            // and the dev-flag announce can write to the terminal via
+            // the original fd 2 without becoming out-of-band wire frames.
+            //
+            // Stderr stays inherited: user code's stderr writes and any
+            // runtime diagnostic land on the user's terminal directly.
+            // No need for STDERR_DATA frames — the framed protocol is
+            // for control channel + user stdout (which we sometimes
+            // want to capture/redirect downstream). Stderr is just for
+            // human consumption.
+            System.setOut(wireOut)
             dispatchLoop(controlIn, ::send, state, diag)
         } catch (e: WireProtocolException) {
             // Framing-level failure — best-effort report then exit. Always
