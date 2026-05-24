@@ -1,6 +1,9 @@
 plugins {
     java
     kotlin("jvm")
+    // Required by the wire-protocol module (@Serializable on payload classes
+    // in com.mezze.interpreter.standalone.wire). See docs/wire-protocol/.
+    kotlin("plugin.serialization")
     // shadowJar: produces the slim "mezze-runtime.jar" that user apps
     // bundle. Contains :interpreter + its runtime deps only — no parser,
     // typechecker, CLI, LSP, formatter, etc. See the runtimeShadowJar
@@ -38,6 +41,11 @@ dependencies {
     implementation(project(":store"))
     implementation(project(":typechecker"))
     implementation(project(":datastructures"))
+
+    // CBOR for wire-protocol payloads (com.mezze.interpreter.standalone.wire).
+    // :store also uses kotlinx-serialization-cbor but declares it
+    // `implementation`, so we redeclare here for direct use.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-cbor:1.6.2")
 
     // Truffle API - for language implementation
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
