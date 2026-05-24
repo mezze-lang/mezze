@@ -47,6 +47,8 @@ dependencies {
     implementation(project(":datastructures"))
     implementation(project(":lsp"))
     implementation(project(":formatter"))
+    // WireRunner speaks the v1 protocol; payload types live here.
+    implementation(project(":wire-protocol"))
 
     // Polyglot API (Context, Value, Source) - host API - match native-image version
     implementation("org.graalvm.sdk:graal-sdk:24.2.2")

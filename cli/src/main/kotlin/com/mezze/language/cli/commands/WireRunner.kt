@@ -1,24 +1,24 @@
 package com.mezze.language.cli.commands
 
-import com.mezze.interpreter.standalone.wire.Bye
-import com.mezze.interpreter.standalone.wire.Evict
-import com.mezze.interpreter.standalone.wire.Exited
-import com.mezze.interpreter.standalone.wire.Hello
-import com.mezze.interpreter.standalone.wire.Interrupt
-import com.mezze.interpreter.standalone.wire.Load
-import com.mezze.interpreter.standalone.wire.Loaded
-import com.mezze.interpreter.standalone.wire.MessageType
-import com.mezze.interpreter.standalone.wire.ProtocolError
-import com.mezze.interpreter.standalone.wire.Quit
-import com.mezze.interpreter.standalone.wire.Reject
-import com.mezze.interpreter.standalone.wire.Started
-import com.mezze.interpreter.standalone.wire.StderrData
-import com.mezze.interpreter.standalone.wire.StdoutData
-import com.mezze.interpreter.standalone.wire.Welcome
-import com.mezze.interpreter.standalone.wire.WireFrame
-import com.mezze.interpreter.standalone.wire.WireFrameCodec
-import com.mezze.interpreter.standalone.wire.WireProtocol
-import com.mezze.interpreter.standalone.wire.WireProtocolException
+import com.mezze.wire.Bye
+import com.mezze.wire.Evict
+import com.mezze.wire.Exited
+import com.mezze.wire.Hello
+import com.mezze.wire.Interrupt
+import com.mezze.wire.Load
+import com.mezze.wire.Loaded
+import com.mezze.wire.MessageType
+import com.mezze.wire.ProtocolError
+import com.mezze.wire.Quit
+import com.mezze.wire.Reject
+import com.mezze.wire.Started
+import com.mezze.wire.StderrData
+import com.mezze.wire.StdoutData
+import com.mezze.wire.Welcome
+import com.mezze.wire.WireFrame
+import com.mezze.wire.WireFrameCodec
+import com.mezze.wire.WireProtocol
+import com.mezze.wire.WireProtocolException
 import com.mezze.language.cli.JvmLauncher
 import com.mezze.language.codebase.SQLiteMezzeStore
 import com.mezze.language.parser.MezzeParser
@@ -321,7 +321,7 @@ private class WireSession private constructor(
                 }
                 MessageType.LOG -> {
                     // Surface child-runtime logs to stderr.
-                    val log = frame.decode<com.mezze.interpreter.standalone.wire.Log>()
+                    val log = frame.decode<com.mezze.wire.Log>()
                     System.err.println("[runtime ${log.level}] ${log.message}")
                 }
                 else -> {

@@ -1,4 +1,4 @@
-package com.mezze.interpreter.standalone.wire
+package com.mezze.wire
 
 import kotlinx.serialization.ExperimentalSerializationApi
 import org.junit.jupiter.api.Assertions.assertEquals

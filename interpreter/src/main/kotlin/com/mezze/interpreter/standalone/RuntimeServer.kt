@@ -2,38 +2,38 @@ package com.mezze.interpreter.standalone
 
 import com.mezze.interpreter.runtime.MezzeExitException
 import com.mezze.interpreter.runtime.MezzeLanguage
-import com.mezze.interpreter.standalone.wire.AttachDenied
-import com.mezze.interpreter.standalone.wire.AttachGranted
-import com.mezze.interpreter.standalone.wire.AttachRequest
-import com.mezze.interpreter.standalone.wire.Bye
-import com.mezze.interpreter.standalone.wire.Config
-import com.mezze.interpreter.standalone.wire.ConfigAck
-import com.mezze.interpreter.standalone.wire.Eval
-import com.mezze.interpreter.standalone.wire.EvalResult
-import com.mezze.interpreter.standalone.wire.Evict
-import com.mezze.interpreter.standalone.wire.ExitDetail
-import com.mezze.interpreter.standalone.wire.Exited
-import com.mezze.interpreter.standalone.wire.Hello
-import com.mezze.interpreter.standalone.wire.Interrupt
-import com.mezze.interpreter.standalone.wire.Load
-import com.mezze.interpreter.standalone.wire.Loaded
-import com.mezze.interpreter.standalone.wire.MessageType
-import com.mezze.interpreter.standalone.wire.Ping
-import com.mezze.interpreter.standalone.wire.Pong
-import com.mezze.interpreter.standalone.wire.ProtocolError
-import com.mezze.interpreter.standalone.wire.Quit
-import com.mezze.interpreter.standalone.wire.RuntimeInfo
-import com.mezze.interpreter.standalone.wire.StackFrame
-import com.mezze.interpreter.standalone.wire.Started
-import com.mezze.interpreter.standalone.wire.StatusReply
-import com.mezze.interpreter.standalone.wire.StatusReq
-import com.mezze.interpreter.standalone.wire.StderrData
-import com.mezze.interpreter.standalone.wire.StdoutData
-import com.mezze.interpreter.standalone.wire.Welcome
-import com.mezze.interpreter.standalone.wire.WireFrame
-import com.mezze.interpreter.standalone.wire.WireFrameCodec
-import com.mezze.interpreter.standalone.wire.WireProtocol
-import com.mezze.interpreter.standalone.wire.WireProtocolException
+import com.mezze.wire.AttachDenied
+import com.mezze.wire.AttachGranted
+import com.mezze.wire.AttachRequest
+import com.mezze.wire.Bye
+import com.mezze.wire.Config
+import com.mezze.wire.ConfigAck
+import com.mezze.wire.Eval
+import com.mezze.wire.EvalResult
+import com.mezze.wire.Evict
+import com.mezze.wire.ExitDetail
+import com.mezze.wire.Exited
+import com.mezze.wire.Hello
+import com.mezze.wire.Interrupt
+import com.mezze.wire.Load
+import com.mezze.wire.Loaded
+import com.mezze.wire.MessageType
+import com.mezze.wire.Ping
+import com.mezze.wire.Pong
+import com.mezze.wire.ProtocolError
+import com.mezze.wire.Quit
+import com.mezze.wire.RuntimeInfo
+import com.mezze.wire.StackFrame
+import com.mezze.wire.Started
+import com.mezze.wire.StatusReply
+import com.mezze.wire.StatusReq
+import com.mezze.wire.StderrData
+import com.mezze.wire.StdoutData
+import com.mezze.wire.Welcome
+import com.mezze.wire.WireFrame
+import com.mezze.wire.WireFrameCodec
+import com.mezze.wire.WireProtocol
+import com.mezze.wire.WireProtocolException
 import com.mezze.language.store.StoreSerialization
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.typedast.Hash
@@ -164,7 +164,7 @@ object RuntimeServer {
         // Version negotiation. Major mismatch is fatal; minor mismatch
         // uses the lower version's vocabulary.
         if (hello.versionMajor != WireProtocol.PROTOCOL_VERSION_MAJOR) {
-            send(WireFrame.of(MessageType.REJECT, com.mezze.interpreter.standalone.wire.Reject(
+            send(WireFrame.of(MessageType.REJECT, com.mezze.wire.Reject(
                 reason = "version_unsupported",
                 detail = "client wants v${hello.versionMajor}.${hello.versionMinor}, " +
                          "server is v${WireProtocol.PROTOCOL_VERSION_MAJOR}.${WireProtocol.PROTOCOL_VERSION_MINOR}",

@@ -1,4 +1,4 @@
-package com.mezze.interpreter.standalone.wire
+package com.mezze.wire
 
 import java.io.DataInputStream
 import java.io.DataOutputStream
