@@ -38,19 +38,18 @@ class SemaphoreTest {
     """.trimIndent()
 
     // Atom setup for shared state tests
-    private val atomSetup = """
-        newtype Atom 'a = Atom __NativeAtomicRef
-        let atom: {value: 'a} -> Atom 'a = {value} -> __native_atom_new {value = value}
-        let deref: {atom: Atom 'a} -> 'a = {atom} -> __native_atom_deref {atom = atom}
-        let swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> 'a = {atom, f} -> __native_atom_swap {atom = atom, f = f}
-    """.trimIndent()
+    private val atomSetup = ""
 
     // Loom primitives for concurrent tests
     private val loomSetup = """
-        newtype Promise 'a = Promise __NativePromise
-        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
-        let await: {p: Promise 'a} -> 'a = {p} -> __native_loom_await {p = p}
-        let sleep: {ms: Int} -> {} = {ms} -> __native_loom_sleep {ms = ms}
+        use std::effects::concurrent::atom::{
+            atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
+            add_watch, remove_watch, atom_validated, set_validator
+        }
+        use std::effects::async::{ Async, LoomAsync }
+        use std::effects::exception::{ Exception, CrashException, unwrap }
+
+        perform LoomAsync in do
     """.trimIndent()
 
     // =============================================================================
@@ -180,23 +179,23 @@ class SemaphoreTest {
                     if now > current then now else current
                 }
                 # Small delay to overlap with other threads
-                let _ = sleep {ms = 20}
+                let _ = Async.sleep {ms = 20}
                 # Decrement current count
                 let _ = swap {atom = current, f = {current} -> current - 1}
                 release {sem = sem}
 
             # Spawn 5 threads
-            let p1 = spawn {f = work}
-            let p2 = spawn {f = work}
-            let p3 = spawn {f = work}
-            let p4 = spawn {f = work}
-            let p5 = spawn {f = work}
+            let p1 = Async.spawn {f = work}
+            let p2 = Async.spawn {f = work}
+            let p3 = Async.spawn {f = work}
+            let p4 = Async.spawn {f = work}
+            let p5 = Async.spawn {f = work}
 
-            let _ = await {p = p1}
-            let _ = await {p = p2}
-            let _ = await {p = p3}
-            let _ = await {p = p4}
-            let _ = await {p = p5}
+            let _ = unwrap { result = Async.await {p = p1} }
+            let _ = unwrap { result = Async.await {p = p2} }
+            let _ = unwrap { result = Async.await {p = p3} }
+            let _ = unwrap { result = Async.await {p = p4} }
+            let _ = unwrap { result = Async.await {p = p5} }
 
             # Max concurrent should be <= 2
             deref {atom = max_concurrent}
@@ -216,13 +215,13 @@ class SemaphoreTest {
             let result = atom {value = 0}
 
             # Thread 1: Wait for permit, then set result
-            let p1 = spawn {f = {} -> do
+            let p1 = Async.spawn {f = {} -> do
                 let _ = acquire {sem = sem}
                 swap {atom = result, f = {current} -> 42}
             }
 
             # Give thread 1 time to start waiting
-            let _ = sleep {ms = 20}
+            let _ = Async.sleep {ms = 20}
 
             # Result should still be 0 (thread 1 is blocked)
             let before_release = deref {atom = result}
@@ -230,7 +229,7 @@ class SemaphoreTest {
             # Release a permit to unblock thread 1
             let _ = release {sem = sem}
 
-            let _ = await {p = p1}
+            let _ = unwrap { result = Async.await {p = p1} }
 
             {before = before_release, after = deref {atom = result}}
         """

@@ -28,7 +28,7 @@ class MutexTest {
         newtype Mutex = Mutex __NativeLock
 
         let mutex: {} -> Mutex = {} -> __native_mutex_new {}
-        let with_lock: {mutex: Mutex, f: {} -> 'a} -> 'a = {mutex, f} -> __native_mutex_with_lock {mutex = mutex, f = f}
+        let with_lock: {mutex: Mutex, f: {} -> 'a <...>} -> 'a <...> = {mutex, f} -> __native_mutex_with_lock {mutex = mutex, f = f}
         let lock: {mutex: Mutex} -> {} = {mutex} -> __native_mutex_lock {mutex = mutex}
         let unlock: {mutex: Mutex} -> {} = {mutex} -> __native_mutex_unlock {mutex = mutex}
         let try_lock: {mutex: Mutex} -> Bool = {mutex} -> __native_mutex_try_lock {mutex = mutex}
@@ -36,20 +36,18 @@ class MutexTest {
     """.trimIndent()
 
     // Atom setup for shared state tests
-    private val atomSetup = """
-        newtype Atom 'a = Atom __NativeAtomicRef
-        let atom: {value: 'a} -> Atom 'a = {value} -> __native_atom_new {value = value}
-        let deref: {atom: Atom 'a} -> 'a = {atom} -> __native_atom_deref {atom = atom}
-        let reset: {atom: Atom 'a, value: 'a} -> 'a = {atom, value} -> __native_atom_reset {atom = atom, value = value}
-        let swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> 'a = {atom, f} -> __native_atom_swap {atom = atom, f = f}
-    """.trimIndent()
+    private val atomSetup = ""
 
     // Loom primitives for concurrent tests
     private val loomSetup = """
-        newtype Promise 'a = Promise __NativePromise
-        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
-        let await: {p: Promise 'a} -> 'a = {p} -> __native_loom_await {p = p}
-        let sleep: {ms: Int} -> {} = {ms} -> __native_loom_sleep {ms = ms}
+        use std::effects::concurrent::atom::{
+            atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
+            add_watch, remove_watch, atom_validated, set_validator
+        }
+        use std::effects::async::{ Async, LoomAsync }
+        use std::effects::exception::{ Exception, CrashException, unwrap }
+
+        perform LoomAsync in do
     """.trimIndent()
 
     // =============================================================================
@@ -176,13 +174,13 @@ class MutexTest {
                 }
 
             # Spawn 3 threads
-            let p1 = spawn {f = increment_5}
-            let p2 = spawn {f = increment_5}
-            let p3 = spawn {f = increment_5}
+            let p1 = Async.spawn {f = increment_5}
+            let p2 = Async.spawn {f = increment_5}
+            let p3 = Async.spawn {f = increment_5}
 
-            let _ = await {p = p1}
-            let _ = await {p = p2}
-            let _ = await {p = p3}
+            let _ = unwrap { result = Async.await {p = p1} }
+            let _ = unwrap { result = Async.await {p = p2} }
+            let _ = unwrap { result = Async.await {p = p3} }
 
             deref {atom = counter}
         """
@@ -199,21 +197,21 @@ class MutexTest {
             let m = mutex {}
 
             # First thread takes lock, does work, releases
-            let p1 = spawn {f = {} ->
+            let p1 = Async.spawn {f = {} ->
                 with_lock {mutex = m, f = {} ->
-                    sleep {ms = 10}
+                    Async.sleep {ms = 10}
                 }
             }
 
             # Wait for first to finish
-            let _ = await {p = p1}
+            let _ = unwrap { result = Async.await {p = p1} }
 
             # Second thread should be able to acquire lock
-            let p2 = spawn {f = {} ->
+            let p2 = Async.spawn {f = {} ->
                 with_lock {mutex = m, f = {} -> 42}
             }
 
-            await {p = p2}
+            unwrap { result = Async.await {p = p2} }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -230,24 +228,24 @@ class MutexTest {
             let try_result = atom {value = True}
 
             # Thread 1 holds lock for a while
-            let p1 = spawn {f = {} -> do
+            let p1 = Async.spawn {f = {} -> do
                 let _ = lock {mutex = m}
-                let _ = sleep {ms = 100}
+                let _ = Async.sleep {ms = 100}
                 unlock {mutex = m}
             }
 
             # Give thread 1 time to acquire
-            let _ = sleep {ms = 20}
+            let _ = Async.sleep {ms = 20}
 
             # Thread 2 tries to acquire - should fail
-            let p2 = spawn {f = {} -> do
+            let p2 = Async.spawn {f = {} -> do
                 let acquired = try_lock {mutex = m}
                 let _ = reset {atom = try_result, value = acquired}
                 if acquired then unlock {mutex = m} else {}
             }
 
-            let _ = await {p = p2}
-            let _ = await {p = p1}
+            let _ = unwrap { result = Async.await {p = p2} }
+            let _ = unwrap { result = Async.await {p = p1} }
 
             deref {atom = try_result}
         """

@@ -28,20 +28,18 @@ class StructuredConcurrencyTest {
 
     // Setup code for Loom virtual thread primitives
     private val loomSetup = """
-        newtype Promise 'a = Promise __NativePromise
-        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
-        let await: {p: Promise 'a} -> 'a = {p} -> __native_loom_await {p = p}
-        let sleep: {ms: Int} -> {} = {ms} -> __native_loom_sleep {ms = ms}
+        use std::effects::concurrent::atom::{
+            atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
+            add_watch, remove_watch, atom_validated, set_validator
+        }
+        use std::effects::async::{ Async, LoomAsync }
+        use std::effects::exception::{ Exception, CrashException, unwrap }
+
+        perform LoomAsync in do
     """.trimIndent()
 
     // Atom primitives for concurrency tests
-    private val atomSetup = """
-        newtype Atom 'a = Atom __NativeAtomicRef
-        let atom: {value: 'a} -> Atom 'a = {value} -> __native_atom_new {value = value}
-        let deref: {atom: Atom 'a} -> 'a = {atom} -> __native_atom_deref {atom = atom}
-        let reset: {atom: Atom 'a, value: 'a} -> 'a = {atom, value} -> __native_atom_reset {atom = atom, value = value}
-        let swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> 'a = {atom, f} -> __native_atom_swap {atom = atom, f = f}
-    """.trimIndent()
+    private val atomSetup = ""
 
     // =============================================================================
     // Basic Structured Scope Tests
@@ -57,37 +55,37 @@ class StructuredConcurrencyTest {
             let completedTasks = atom {value = 0}
 
             # Submit 5 tasks
-            let t1 = spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+            let t1 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 50}
                 let _ = swap {atom = completedTasks, f = {current} -> current + 1}
                 2
             }
-            let t2 = spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+            let t2 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 50}
                 let _ = swap {atom = completedTasks, f = {current} -> current + 1}
                 4
             }
-            let t3 = spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+            let t3 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 50}
                 let _ = swap {atom = completedTasks, f = {current} -> current + 1}
                 6
             }
-            let t4 = spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+            let t4 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 50}
                 let _ = swap {atom = completedTasks, f = {current} -> current + 1}
                 8
             }
-            let t5 = spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+            let t5 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 50}
                 let _ = swap {atom = completedTasks, f = {current} -> current + 1}
                 10
             }
 
-            let r1 = await {p = t1}
-            let r2 = await {p = t2}
-            let r3 = await {p = t3}
-            let r4 = await {p = t4}
-            let r5 = await {p = t5}
+            let r1 = unwrap { result = Async.await {p = t1} }
+            let r2 = unwrap { result = Async.await {p = t2} }
+            let r3 = unwrap { result = Async.await {p = t3} }
+            let r4 = unwrap { result = Async.await {p = t4} }
+            let r5 = unwrap { result = Async.await {p = t5} }
 
             let count = deref {atom = completedTasks}
             # Return sum: 2+4+6+8+10 = 30
@@ -107,22 +105,22 @@ class StructuredConcurrencyTest {
             let counter = atom {value = 0}
 
             # Run 3 tasks
-            let t1 = spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+            let t1 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 50}
                 swap {atom = counter, f = {current} -> current + 1}
             }
-            let t2 = spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+            let t2 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 50}
                 swap {atom = counter, f = {current} -> current + 1}
             }
-            let t3 = spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+            let t3 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 50}
                 swap {atom = counter, f = {current} -> current + 1}
             }
 
-            let _ = await {p = t1}
-            let _ = await {p = t2}
-            let _ = await {p = t3}
+            let _ = unwrap { result = Async.await {p = t1} }
+            let _ = unwrap { result = Async.await {p = t2} }
+            let _ = unwrap { result = Async.await {p = t3} }
 
             # Scope should be cleaned up - verify all tasks completed
             deref {atom = counter}
@@ -141,32 +139,32 @@ class StructuredConcurrencyTest {
             let outerResults = atom {value = 0}
             let innerResults = atom {value = 0}
 
-            let parent = spawn {f = {} -> do
+            let parent = Async.spawn {f = {} -> do
                 let _ = swap {atom = outerResults, f = {current} -> current + 1}
 
                 # Nested scope
-                let child1 = spawn {f = {} -> do
+                let child1 = Async.spawn {f = {} -> do
                     let _ = swap {atom = innerResults, f = {current} -> current + 1}
                     "inner-result-1"
                 }
-                let child2 = spawn {f = {} -> do
+                let child2 = Async.spawn {f = {} -> do
                     let _ = swap {atom = innerResults, f = {current} -> current + 1}
                     "inner-result-2"
                 }
 
-                let _ = await {p = child1}
-                let _ = await {p = child2}
+                let _ = unwrap { result = Async.await {p = child1} }
+                let _ = unwrap { result = Async.await {p = child2} }
 
                 "outer-result-1"
             }
 
-            let parent2 = spawn {f = {} -> do
+            let parent2 = Async.spawn {f = {} -> do
                 let _ = swap {atom = outerResults, f = {current} -> current + 1}
                 "outer-result-2"
             }
 
-            let _ = await {p = parent}
-            let _ = await {p = parent2}
+            let _ = unwrap { result = Async.await {p = parent} }
+            let _ = unwrap { result = Async.await {p = parent2} }
 
             let outer = deref {atom = outerResults}
             let inner = deref {atom = innerResults}
@@ -193,22 +191,22 @@ class StructuredConcurrencyTest {
             let counter = atom {value = 0}
 
             # Spawn 3 tasks that each sleep for 200ms
-            let t1 = spawn {f = {} -> do
-                let _ = sleep {ms = 200}
+            let t1 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 200}
                 swap {atom = counter, f = {current} -> current + 1}
             }
-            let t2 = spawn {f = {} -> do
-                let _ = sleep {ms = 200}
+            let t2 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 200}
                 swap {atom = counter, f = {current} -> current + 1}
             }
-            let t3 = spawn {f = {} -> do
-                let _ = sleep {ms = 200}
+            let t3 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 200}
                 swap {atom = counter, f = {current} -> current + 1}
             }
 
-            let _ = await {p = t1}
-            let _ = await {p = t2}
-            let _ = await {p = t3}
+            let _ = unwrap { result = Async.await {p = t1} }
+            let _ = unwrap { result = Async.await {p = t2} }
+            let _ = unwrap { result = Async.await {p = t3} }
 
             deref {atom = counter}
         """
@@ -236,26 +234,26 @@ class StructuredConcurrencyTest {
 
             # Track spawning
             let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
-            let t1 = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+            let t1 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 10}
                 swap {atom = totalCompleted, f = {current} -> current + 1}
             }
 
             let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
-            let t2 = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+            let t2 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 10}
                 swap {atom = totalCompleted, f = {current} -> current + 1}
             }
 
             let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
-            let t3 = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+            let t3 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 10}
                 swap {atom = totalCompleted, f = {current} -> current + 1}
             }
 
-            let _ = await {p = t1}
-            let _ = await {p = t2}
-            let _ = await {p = t3}
+            let _ = unwrap { result = Async.await {p = t1} }
+            let _ = unwrap { result = Async.await {p = t2} }
+            let _ = unwrap { result = Async.await {p = t3} }
 
             let spawned = deref {atom = totalSpawned}
             let completed = deref {atom = totalCompleted}
@@ -281,18 +279,18 @@ class StructuredConcurrencyTest {
             let parentValue = atom {value = 0}
             let childValue = atom {value = 0}
 
-            let parent = spawn {f = {} -> do
+            let parent = Async.spawn {f = {} -> do
                 let _ = reset {atom = parentValue, value = 10}
 
-                let child = spawn {f = {} -> do
+                let child = Async.spawn {f = {} -> do
                     let _ = reset {atom = childValue, value = 20}
                     "child done"
                 }
-                let _ = await {p = child}
+                let _ = unwrap { result = Async.await {p = child} }
                 "parent done"
             }
 
-            let _ = await {p = parent}
+            let _ = unwrap { result = Async.await {p = parent} }
 
             let pv = deref {atom = parentValue}
             let cv = deref {atom = childValue}
@@ -309,19 +307,19 @@ class StructuredConcurrencyTest {
         val code = """
             $loomSetup
 
-            let level1 = spawn {f = {} -> do
-                let level2 = spawn {f = {} -> do
-                    let level3 = spawn {f = {} -> do
-                        let level4 = spawn {f = {} ->
+            let level1 = Async.spawn {f = {} -> do
+                let level2 = Async.spawn {f = {} -> do
+                    let level3 = Async.spawn {f = {} -> do
+                        let level4 = Async.spawn {f = {} ->
                             "deep"
                         }
-                        await {p = level4}
+                        unwrap { result = Async.await {p = level4} }
                     }
-                    await {p = level3}
+                    unwrap { result = Async.await {p = level3} }
                 }
-                await {p = level2}
+                unwrap { result = Async.await {p = level2} }
             }
-            await {p = level1}
+            unwrap { result = Async.await {p = level1} }
         """
         val result = eval(code)
         assertEquals("deep", result)
@@ -338,8 +336,8 @@ class StructuredConcurrencyTest {
             $loomSetup
 
             let testKey = "test-value"
-            let thread = spawn {f = {} -> testKey}
-            await {p = thread}
+            let thread = Async.spawn {f = {} -> testKey}
+            unwrap { result = Async.await {p = thread} }
         """
         val result = eval(code)
         assertEquals("test-value", result)
@@ -352,11 +350,11 @@ class StructuredConcurrencyTest {
             $loomSetup
 
             let config = {name = "test", multiplier = 5}
-            let thread = spawn {f = {} -> do
+            let thread = Async.spawn {f = {} -> do
                 let result = config.multiplier * 10
                 result
             }
-            await {p = thread}
+            unwrap { result = Async.await {p = thread} }
         """
         val result = eval(code)
         assertEquals(50L, result)
@@ -388,13 +386,13 @@ class StructuredConcurrencyTest {
                 let _ = swap {atom = counter, f = {current} -> current + 1}
                 swap {atom = counter, f = {current} -> current + 1}
 
-            let t1 = spawn {f = increment_10}
-            let t2 = spawn {f = increment_10}
-            let t3 = spawn {f = increment_10}
+            let t1 = Async.spawn {f = increment_10}
+            let t2 = Async.spawn {f = increment_10}
+            let t3 = Async.spawn {f = increment_10}
 
-            let _ = await {p = t1}
-            let _ = await {p = t2}
-            let _ = await {p = t3}
+            let _ = unwrap { result = Async.await {p = t1} }
+            let _ = unwrap { result = Async.await {p = t2} }
+            let _ = unwrap { result = Async.await {p = t3} }
 
             deref {atom = counter}
         """
@@ -414,13 +412,13 @@ class StructuredConcurrencyTest {
 
             let compute = {n: Int} -> n * n + n
 
-            let t1 = spawn {f = {} -> compute {n = 3}}
-            let t2 = spawn {f = {} -> compute {n = 4}}
-            let t3 = spawn {f = {} -> compute {n = 5}}
+            let t1 = Async.spawn {f = {} -> compute {n = 3}}
+            let t2 = Async.spawn {f = {} -> compute {n = 4}}
+            let t3 = Async.spawn {f = {} -> compute {n = 5}}
 
-            let r1 = await {p = t1}
-            let r2 = await {p = t2}
-            let r3 = await {p = t3}
+            let r1 = unwrap { result = Async.await {p = t1} }
+            let r2 = unwrap { result = Async.await {p = t2} }
+            let r3 = unwrap { result = Async.await {p = t3} }
 
             # 3*3+3 = 12, 4*4+4 = 20, 5*5+5 = 30
             r1 + r2 + r3
@@ -439,8 +437,8 @@ class StructuredConcurrencyTest {
                 if n <= 1 then n
                 else fib {n = n - 1} + fib {n = n - 2}
 
-            let thread = spawn {f = {} -> fib {n = 10}}
-            await {p = thread}
+            let thread = Async.spawn {f = {} -> fib {n = 10}}
+            unwrap { result = Async.await {p = thread} }
         """
         val result = eval(code)
         assertEquals(55L, result) // fib(10) = 55
@@ -456,8 +454,8 @@ class StructuredConcurrencyTest {
         val code = """
             $loomSetup
 
-            let thread = spawn {f = {} -> True}
-            await {p = thread}
+            let thread = Async.spawn {f = {} -> True}
+            unwrap { result = Async.await {p = thread} }
         """
         val result = eval(code)
         assertEquals(true, result)
@@ -469,8 +467,8 @@ class StructuredConcurrencyTest {
         val code = """
             $loomSetup
 
-            let thread = spawn {f = {} -> {}}
-            let _ = await {p = thread}
+            let thread = Async.spawn {f = {} -> {}}
+            let _ = unwrap { result = Async.await {p = thread} }
             True
         """
         val result = eval(code)
@@ -483,8 +481,8 @@ class StructuredConcurrencyTest {
         val code = """
             $loomSetup
 
-            let thread = spawn {f = {} -> {x = 10, y = 20, name = "result"}}
-            let result = await {p = thread}
+            let thread = Async.spawn {f = {} -> {x = 10, y = 20, name = "result"}}
+            let result = unwrap { result = Async.await {p = thread} }
             result.x + result.y
         """
         val result = eval(code)
@@ -501,11 +499,11 @@ class StructuredConcurrencyTest {
         val code = """
             $loomSetup
 
-            let thread = spawn {f = {} -> do
-                let _ = sleep {ms = 0}
+            let thread = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 0}
                 42
             }
-            await {p = thread}
+            unwrap { result = Async.await {p = thread} }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -517,14 +515,14 @@ class StructuredConcurrencyTest {
         val code = """
             $loomSetup
 
-            let t1 = spawn {f = {} -> 10}
-            let r1 = await {p = t1}
+            let t1 = Async.spawn {f = {} -> 10}
+            let r1 = unwrap { result = Async.await {p = t1} }
 
-            let t2 = spawn {f = {} -> r1 + 10}
-            let r2 = await {p = t2}
+            let t2 = Async.spawn {f = {} -> r1 + 10}
+            let r2 = unwrap { result = Async.await {p = t2} }
 
-            let t3 = spawn {f = {} -> r2 + 10}
-            let r3 = await {p = t3}
+            let t3 = Async.spawn {f = {} -> r2 + 10}
+            let r3 = unwrap { result = Async.await {p = t3} }
 
             r3
         """
@@ -538,27 +536,27 @@ class StructuredConcurrencyTest {
         val code = """
             $loomSetup
 
-            let t1 = spawn {f = {} -> 1}
-            let t2 = spawn {f = {} -> 2}
-            let t3 = spawn {f = {} -> 3}
-            let t4 = spawn {f = {} -> 4}
-            let t5 = spawn {f = {} -> 5}
-            let t6 = spawn {f = {} -> 6}
-            let t7 = spawn {f = {} -> 7}
-            let t8 = spawn {f = {} -> 8}
-            let t9 = spawn {f = {} -> 9}
-            let t10 = spawn {f = {} -> 10}
+            let t1 = Async.spawn {f = {} -> 1}
+            let t2 = Async.spawn {f = {} -> 2}
+            let t3 = Async.spawn {f = {} -> 3}
+            let t4 = Async.spawn {f = {} -> 4}
+            let t5 = Async.spawn {f = {} -> 5}
+            let t6 = Async.spawn {f = {} -> 6}
+            let t7 = Async.spawn {f = {} -> 7}
+            let t8 = Async.spawn {f = {} -> 8}
+            let t9 = Async.spawn {f = {} -> 9}
+            let t10 = Async.spawn {f = {} -> 10}
 
-            let r1 = await {p = t1}
-            let r2 = await {p = t2}
-            let r3 = await {p = t3}
-            let r4 = await {p = t4}
-            let r5 = await {p = t5}
-            let r6 = await {p = t6}
-            let r7 = await {p = t7}
-            let r8 = await {p = t8}
-            let r9 = await {p = t9}
-            let r10 = await {p = t10}
+            let r1 = unwrap { result = Async.await {p = t1} }
+            let r2 = unwrap { result = Async.await {p = t2} }
+            let r3 = unwrap { result = Async.await {p = t3} }
+            let r4 = unwrap { result = Async.await {p = t4} }
+            let r5 = unwrap { result = Async.await {p = t5} }
+            let r6 = unwrap { result = Async.await {p = t6} }
+            let r7 = unwrap { result = Async.await {p = t7} }
+            let r8 = unwrap { result = Async.await {p = t8} }
+            let r9 = unwrap { result = Async.await {p = t9} }
+            let r10 = unwrap { result = Async.await {p = t10} }
 
             r1 + r2 + r3 + r4 + r5 + r6 + r7 + r8 + r9 + r10
         """
@@ -580,22 +578,22 @@ class StructuredConcurrencyTest {
 
             let results = atom {value = ""}
 
-            let t1 = spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+            let t1 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 50}
                 swap {atom = results, f = {current} -> str::concat {l = current, r = "A"}}
             }
-            let t2 = spawn {f = {} -> do
-                let _ = sleep {ms = 30}
+            let t2 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 30}
                 swap {atom = results, f = {current} -> str::concat {l = current, r = "B"}}
             }
-            let t3 = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+            let t3 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 10}
                 swap {atom = results, f = {current} -> str::concat {l = current, r = "C"}}
             }
 
-            let _ = await {p = t1}
-            let _ = await {p = t2}
-            let _ = await {p = t3}
+            let _ = unwrap { result = Async.await {p = t1} }
+            let _ = unwrap { result = Async.await {p = t2} }
+            let _ = unwrap { result = Async.await {p = t3} }
 
             let final = deref {atom = results}
             # All should complete, order may vary but length should be 3
@@ -615,22 +613,22 @@ class StructuredConcurrencyTest {
 
             let data = atom {value = list::empty {}}
 
-            let t1 = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+            let t1 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 10}
                 swap {atom = data, f = {current} -> list::cons {head = 1, tail = current}}
             }
-            let t2 = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+            let t2 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 10}
                 swap {atom = data, f = {current} -> list::cons {head = 2, tail = current}}
             }
-            let t3 = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+            let t3 = Async.spawn {f = {} -> do
+                let _ = Async.sleep {ms = 10}
                 swap {atom = data, f = {current} -> list::cons {head = 3, tail = current}}
             }
 
-            let _ = await {p = t1}
-            let _ = await {p = t2}
-            let _ = await {p = t3}
+            let _ = unwrap { result = Async.await {p = t1} }
+            let _ = unwrap { result = Async.await {p = t2} }
+            let _ = unwrap { result = Async.await {p = t3} }
 
             let final = deref {atom = data}
             list::size {xs = final}

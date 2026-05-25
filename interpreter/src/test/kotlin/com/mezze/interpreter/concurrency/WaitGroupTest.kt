@@ -35,19 +35,18 @@ class WaitGroupTest {
     """.trimIndent()
 
     // Atom setup for shared state tests
-    private val atomSetup = """
-        newtype Atom 'a = Atom __NativeAtomicRef
-        let atom: {value: 'a} -> Atom 'a = {value} -> __native_atom_new {value = value}
-        let deref: {atom: Atom 'a} -> 'a = {atom} -> __native_atom_deref {atom = atom}
-        let swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> 'a = {atom, f} -> __native_atom_swap {atom = atom, f = f}
-    """.trimIndent()
+    private val atomSetup = ""
 
     // Loom primitives for concurrent tests
     private val loomSetup = """
-        newtype Promise 'a = Promise __NativePromise
-        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
-        let await_promise: {p: Promise 'a} -> 'a = {p} -> __native_loom_await {p = p}
-        let sleep: {ms: Int} -> {} = {ms} -> __native_loom_sleep {ms = ms}
+        use std::effects::concurrent::atom::{
+            atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
+            add_watch, remove_watch, atom_validated, set_validator
+        }
+        use std::effects::async::{ Async, LoomAsync }
+        use std::effects::exception::{ Exception, CrashException, unwrap }
+
+        perform LoomAsync in do
     """.trimIndent()
 
     // =============================================================================
@@ -180,15 +179,15 @@ class WaitGroupTest {
             let _ = add {wg = wg, delta = 3}
 
             # Spawn 3 workers
-            let p1 = spawn {f = {} -> do
+            let p1 = Async.spawn {f = {} -> do
                 let _ = swap {atom = counter, f = {current} -> current + 1}
                 done {wg = wg}
             }
-            let p2 = spawn {f = {} -> do
+            let p2 = Async.spawn {f = {} -> do
                 let _ = swap {atom = counter, f = {current} -> current + 1}
                 done {wg = wg}
             }
-            let p3 = spawn {f = {} -> do
+            let p3 = Async.spawn {f = {} -> do
                 let _ = swap {atom = counter, f = {current} -> current + 1}
                 done {wg = wg}
             }
@@ -215,19 +214,19 @@ class WaitGroupTest {
 
             # Add tasks one at a time
             let _ = add {wg = wg, delta = 1}
-            let p1 = spawn {f = {} -> do
+            let p1 = Async.spawn {f = {} -> do
                 let _ = swap {atom = counter, f = {current} -> current + 1}
                 done {wg = wg}
             }
 
             let _ = add {wg = wg, delta = 1}
-            let p2 = spawn {f = {} -> do
+            let p2 = Async.spawn {f = {} -> do
                 let _ = swap {atom = counter, f = {current} -> current + 1}
                 done {wg = wg}
             }
 
             let _ = add {wg = wg, delta = 1}
-            let p3 = spawn {f = {} -> do
+            let p3 = Async.spawn {f = {} -> do
                 let _ = swap {atom = counter, f = {current} -> current + 1}
                 done {wg = wg}
             }
@@ -254,13 +253,13 @@ class WaitGroupTest {
             let _ = add {wg = wg, delta = 1}
 
             # Thread 1: Wait for waitgroup, then set result
-            let p1 = spawn {f = {} -> do
+            let p1 = Async.spawn {f = {} -> do
                 let _ = wait {wg = wg}
                 swap {atom = result, f = {current} -> 42}
             }
 
             # Give thread 1 time to start waiting
-            let _ = sleep {ms = 20}
+            let _ = Async.sleep {ms = 20}
 
             # Result should still be 0 (thread 1 is blocked)
             let before = deref {atom = result}
@@ -268,7 +267,7 @@ class WaitGroupTest {
             # Done to release thread 1
             let _ = done {wg = wg}
 
-            let _ = await_promise {p = p1}
+            let _ = perform CrashException in unwrap { result = Async.await {p = p1} }
 
             {before = before, after = deref {atom = result}}
         """

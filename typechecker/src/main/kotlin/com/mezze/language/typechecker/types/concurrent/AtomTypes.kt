@@ -6,7 +6,9 @@ import com.mezze.language.ast.TypeVar
 /**
  * Type definitions for Clojure-style atomic reference operations.
  *
- * Atoms provide thread-safe, lock-free state management using compare-and-swap.
+ * Every native carries `<Async>` because `Atom 'a` is an Async-family
+ * primitive — its construction and every operation observes or mutates
+ * hidden state. See #170 for the design.
  *
  * IMPORTANT: Each function gets its own fresh type variables!
  * This is critical because these types are registered as polymorphic and get
@@ -14,11 +16,10 @@ import com.mezze.language.ast.TypeVar
  */
 object AtomTypes {
 
-    /**
-     * Register all atom native function types.
-     */
     fun registerAll(context: MutableMap<String, MezzeType>) {
-        // __native_atom_new: {value: 'a} -> Atom 'a
+        val asyncEffect = MezzeType.EffectRow(effects = setOf("Async"))
+
+        // __native_atom_new: {value: 'a} -> Atom 'a <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val atomType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Atom", listOf(elementType))
@@ -26,11 +27,12 @@ object AtomTypes {
                 MezzeType.RecordType(mapOf(
                     "value" to elementType
                 )),
-                atomType
+                atomType,
+                effects = asyncEffect
             )
         }
 
-        // __native_atom_deref: {atom: Atom 'a} -> 'a
+        // __native_atom_deref: {atom: Atom 'a} -> 'a <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val atomType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Atom", listOf(elementType))
@@ -38,11 +40,12 @@ object AtomTypes {
                 MezzeType.RecordType(mapOf(
                     "atom" to atomType
                 )),
-                elementType
+                elementType,
+                effects = asyncEffect
             )
         }
 
-        // __native_atom_reset: {atom: Atom 'a, value: 'a} -> 'a
+        // __native_atom_reset: {atom: Atom 'a, value: 'a} -> 'a <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val atomType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Atom", listOf(elementType))
@@ -51,11 +54,12 @@ object AtomTypes {
                     "atom" to atomType,
                     "value" to elementType
                 )),
-                elementType
+                elementType,
+                effects = asyncEffect
             )
         }
 
-        // __native_atom_swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> 'a
+        // __native_atom_swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> 'a <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val atomType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Atom", listOf(elementType))
@@ -68,11 +72,12 @@ object AtomTypes {
                     "atom" to atomType,
                     "f" to funcType
                 )),
-                elementType
+                elementType,
+                effects = asyncEffect
             )
         }
 
-        // __native_atom_swap_with: {atom: Atom 'a, f: {current: 'a, arg: 'b} -> 'a, arg: 'b} -> 'a
+        // __native_atom_swap_with: {atom: Atom 'a, f: {current: 'a, arg: 'b} -> 'a, arg: 'b} -> 'a <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val argType = MezzeType.VarType(TypeVar("b"))
@@ -90,11 +95,12 @@ object AtomTypes {
                     "f" to funcType,
                     "arg" to argType
                 )),
-                elementType
+                elementType,
+                effects = asyncEffect
             )
         }
 
-        // __native_atom_cas: {atom: Atom 'a, expected: 'a, new: 'a} -> Bool
+        // __native_atom_cas: {atom: Atom 'a, expected: 'a, new: 'a} -> Bool <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val atomType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Atom", listOf(elementType))
@@ -104,11 +110,12 @@ object AtomTypes {
                     "expected" to elementType,
                     "new" to elementType
                 )),
-                MezzeType.BoolType
+                MezzeType.BoolType,
+                effects = asyncEffect
             )
         }
 
-        // __native_atom_get_and_swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> {old: 'a, new: 'a}
+        // __native_atom_get_and_swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> {old: 'a, new: 'a} <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val atomType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Atom", listOf(elementType))
@@ -124,11 +131,12 @@ object AtomTypes {
                 MezzeType.RecordType(mapOf(
                     "old" to elementType,
                     "new" to elementType
-                ))
+                )),
+                effects = asyncEffect
             )
         }
 
-        // __native_atom_add_watch: {atom: Atom 'a, key: String, f: {key: String, old: 'a, new: 'a} -> {}} -> {}
+        // __native_atom_add_watch: {atom: Atom 'a, key: String, f: {key: String, old: 'a, new: 'a} -> {}} -> {} <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val atomType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Atom", listOf(elementType))
@@ -146,11 +154,12 @@ object AtomTypes {
                     "key" to MezzeType.StringType,
                     "f" to watchFuncType
                 )),
-                MezzeType.RecordType(emptyMap())  // Unit
+                MezzeType.RecordType(emptyMap()),  // Unit
+                effects = asyncEffect
             )
         }
 
-        // __native_atom_remove_watch: {atom: Atom 'a, key: String} -> {}
+        // __native_atom_remove_watch: {atom: Atom 'a, key: String} -> {} <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val atomType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Atom", listOf(elementType))
@@ -159,11 +168,12 @@ object AtomTypes {
                     "atom" to atomType,
                     "key" to MezzeType.StringType
                 )),
-                MezzeType.RecordType(emptyMap())  // Unit
+                MezzeType.RecordType(emptyMap()),  // Unit
+                effects = asyncEffect
             )
         }
 
-        // __native_atom_new_validated: {value: 'a, validator: {val: 'a} -> Bool} -> Atom 'a
+        // __native_atom_new_validated: {value: 'a, validator: {val: 'a} -> Bool} -> Atom 'a <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val atomType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Atom", listOf(elementType))
@@ -176,11 +186,12 @@ object AtomTypes {
                     "value" to elementType,
                     "validator" to validatorType
                 )),
-                atomType
+                atomType,
+                effects = asyncEffect
             )
         }
 
-        // __native_atom_set_validator: {atom: Atom 'a, validator: {val: 'a} -> Bool} -> {}
+        // __native_atom_set_validator: {atom: Atom 'a, validator: {val: 'a} -> Bool} -> {} <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val atomType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Atom", listOf(elementType))
@@ -193,12 +204,12 @@ object AtomTypes {
                     "atom" to atomType,
                     "validator" to validatorType
                 )),
-                MezzeType.RecordType(emptyMap())  // Unit
+                MezzeType.RecordType(emptyMap()),  // Unit
+                effects = asyncEffect
             )
         }
 
-        // __native_atom_get_validator: {atom: Atom 'a} -> Option ({val: 'a} -> Bool)
-        // Note: We can't express the full Option type here, so we use a generic return
+        // __native_atom_get_validator: {atom: Atom 'a} -> Option ({val: 'a} -> Bool) <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val atomType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Atom", listOf(elementType))
@@ -211,7 +222,8 @@ object AtomTypes {
                 MezzeType.RecordType(mapOf(
                     "atom" to atomType
                 )),
-                optionType
+                optionType,
+                effects = asyncEffect
             )
         }
     }

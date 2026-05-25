@@ -23,29 +23,21 @@ class AtomTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    // Setup code for atom operations
+    /**
+     * Imports + opens a `perform LoomAsync in do` block. Atom operations
+     * all carry <Async> (post-#170), so every test must run inside an
+     * Async handler. Test bodies follow as nested do-block content.
+     */
     private val atomSetup = """
-        # Atom type - wraps native atomic reference
-        newtype Atom 'a = Atom __NativeAtomicRef
+        use std::effects::concurrent::atom::{
+            atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
+            add_watch, remove_watch, atom_validated, set_validator
+        }
+        use std::effects::async::{ Async, LoomAsync }
 
-        let atom: {value: 'a} -> Atom 'a = {value} -> __native_atom_new {value = value}
-        let deref: {atom: Atom 'a} -> 'a = {atom} -> __native_atom_deref {atom = atom}
-        let reset: {atom: Atom 'a, value: 'a} -> 'a = {atom, value} -> __native_atom_reset {atom = atom, value = value}
-        let swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> 'a = {atom, f} -> __native_atom_swap {atom = atom, f = f}
-        let compare_and_set: {atom: Atom 'a, expected: 'a, new: 'a} -> Bool = {atom, expected, new} -> __native_atom_cas {atom = atom, expected = expected, new = new}
-        let add_watch: {atom: Atom 'a, key: Str, f: {key: Str, old: 'a, new: 'a} -> {}} -> {} = {atom, key, f} -> __native_atom_add_watch {atom = atom, key = key, f = f}
-        let remove_watch: {atom: Atom 'a, key: Str} -> {} = {atom, key} -> __native_atom_remove_watch {atom = atom, key = key}
-        let atom_validated: {value: 'a, validator: {val: 'a} -> Bool} -> Atom 'a = {value, validator} -> __native_atom_new_validated {value = value, validator = validator}
-        let set_validator: {atom: Atom 'a, validator: {val: 'a} -> Bool} -> {} = {atom, validator} -> __native_atom_set_validator {atom = atom, validator = validator}
+        perform LoomAsync in do
     """.trimIndent()
 
-    // Loom primitives for concurrent tests
-    private val loomSetup = """
-        newtype Promise 'a = Promise __NativePromise
-        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
-        let await: {p: Promise 'a} -> 'a = {p} -> __native_loom_await {p = p}
-        let sleep: {ms: Int} -> {} = {ms} -> __native_loom_sleep {ms = ms}
-    """.trimIndent()
 
     // =============================================================================
     // Basic Atom Operations
@@ -220,7 +212,6 @@ class AtomTest {
     fun `test concurrent increments with swap`() {
         val code = """
             $atomSetup
-            $loomSetup
 
             let counter = atom {value = 0}
 
@@ -238,13 +229,13 @@ class AtomTest {
                 swap {atom = counter, f = {current} -> current + 1}
 
             # Spawn multiple threads that each increment 10 times
-            let p1 = spawn {f = increment_10}
-            let p2 = spawn {f = increment_10}
-            let p3 = spawn {f = increment_10}
+            let p1 = Async.spawn {f = increment_10}
+            let p2 = Async.spawn {f = increment_10}
+            let p3 = Async.spawn {f = increment_10}
 
-            let _ = await {p = p1}
-            let _ = await {p = p2}
-            let _ = await {p = p3}
+            let _ = Async.await {p = p1}
+            let _ = Async.await {p = p2}
+            let _ = Async.await {p = p3}
 
             deref {atom = counter}
         """

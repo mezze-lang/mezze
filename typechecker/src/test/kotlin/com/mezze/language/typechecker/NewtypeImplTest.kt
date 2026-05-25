@@ -93,32 +93,39 @@ class NewtypeImplTest {
         fun `Chan has Eq`() {
             checkPasses("""
                 use std::effects::concurrent::channel::{Chan, chan}
-                let ch1: Chan Int = chan {}
-                let ch2 = ch1
-                let same = ch1 == ch2
+                use std::effects::async::{Async, LoomAsync}
+                let main = {} -> perform LoomAsync in do
+                    let ch1: Chan Int = chan {}
+                    let ch2 = ch1
+                    let same = ch1 == ch2
+                    same
             """.trimIndent(), "Chan Eq")
         }
 
         @Test
-        fun `Chan send and recv via effect`() {
+        fun `Chan send and recv`() {
+            // Post-#115: Channel is a plain newtype; `send`/`recv` are
+            // park-aware free functions in std::effects::concurrent::channel.
             checkPasses("""
-                use std::effects::concurrent::channel::{Chan, Channel, BlockingChannel, chan}
-                let main = {} -> perform BlockingChannel in do
+                use std::effects::concurrent::channel::{Chan, chan, send, recv}
+                use std::effects::async::{Async, LoomAsync}
+                let main = {} -> perform LoomAsync in do
                     let ch: Chan Int = chan {}
-                    Channel.send {ch = ch, value = 42}
-                    Channel.recv {ch = ch}
-            """.trimIndent(), "Chan send/recv via effect")
+                    send {ch = ch, value = 42}
+                    recv {ch = ch}
+            """.trimIndent(), "Chan send/recv")
         }
 
         @Test
-        fun `Chan close and is_closed via effect`() {
+        fun `Chan close and is_closed`() {
             checkPasses("""
-                use std::effects::concurrent::channel::{Chan, Channel, BlockingChannel, chan}
-                let main = {} -> perform BlockingChannel in do
+                use std::effects::concurrent::channel::{Chan, chan, close, is_closed}
+                use std::effects::async::{Async, LoomAsync}
+                let main = {} -> perform LoomAsync in do
                     let ch: Chan Int = chan {}
-                    let closed = Channel.is_closed {ch = ch}
-                    Channel.close {ch = ch}
-            """.trimIndent(), "Chan close/is_closed via effect")
+                    let closed = is_closed {ch = ch}
+                    close {ch = ch}
+            """.trimIndent(), "Chan close/is_closed")
         }
     }
 
@@ -251,8 +258,11 @@ class NewtypeImplTest {
         fun `Atom has Eq`() {
             checkPasses("""
                 use std::effects::concurrent::atom::{Atom, atom}
-                let a: Atom Int = atom {value = 42}
-                let same = a == a
+                use std::effects::async::{Async, LoomAsync}
+                let main = {} -> perform LoomAsync in do
+                    let a: Atom Int = atom {value = 42}
+                    let same = a == a
+                    same
             """.trimIndent(), "Atom Eq")
         }
 
@@ -260,9 +270,11 @@ class NewtypeImplTest {
         fun `Atom deref and reset methods`() {
             checkPasses("""
                 use std::effects::concurrent::atom::{Atom, atom}
-                let a = atom {value = 42}
-                let v = a.deref {}
-                let _ = a.reset {value = 100}
+                use std::effects::async::{Async, LoomAsync}
+                let main = {} -> perform LoomAsync in do
+                    let a = atom {value = 42}
+                    let v = a.deref {}
+                    a.reset {value = 100}
             """.trimIndent(), "Atom .deref/.reset")
         }
     }

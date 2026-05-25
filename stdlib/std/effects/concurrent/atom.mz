@@ -1,4 +1,5 @@
 use std::abilities::compare::{ Eq }
+use std::effects::async::{ Async }
 
 ## Lock-free atomic reference for shared mutable state.
 pub newtype Atom 'a = Atom __NativeAtomicRef
@@ -22,43 +23,45 @@ impl Atom 'a where {
 }
 
 ## Create a new atom with an initial value.
-pub let atom : { value: 'a } -> Atom 'a = { value } -> __native_atom_new { value = value }
+pub let atom : { value: 'a } -> Atom 'a <Async> = { value } ->
+  __native_atom_new { value = value }
 
 ## Read the current value of an atom (non-blocking).
-pub let deref : { atom: Atom 'a } -> 'a = { atom } -> __native_atom_deref { atom = atom }
+pub let deref : { atom: Atom 'a } -> 'a <Async> = { atom } ->
+  __native_atom_deref { atom = atom }
 
 ## Set the atom to a new value directly (not atomic with reads -- use swap for CAS).
-pub let reset : { atom: Atom 'a, value: 'a } -> 'a = { atom, value } ->
+pub let reset : { atom: Atom 'a, value: 'a } -> 'a <Async> = { atom, value } ->
   __native_atom_reset { atom = atom, value = value }
 
 ## Atomically apply f to the atom's value, retrying on contention.
-pub let swap : { atom: Atom 'a, f: { current: 'a } -> 'a } -> 'a = { atom, f } ->
+pub let swap : { atom: Atom 'a, f: { current: 'a } -> 'a } -> 'a <Async> = { atom, f } ->
   __native_atom_swap { atom = atom, f = f }
 
 ## Compare-and-set: update only if current value equals expected.
-pub let compare_and_set : { atom: Atom 'a, expected: 'a, new: 'a } -> Bool = { atom, expected, new } ->
+pub let compare_and_set : { atom: Atom 'a, expected: 'a, new: 'a } -> Bool <Async> = { atom, expected, new } ->
   __native_atom_cas { atom = atom, expected = expected, new = new }
 
 ## Atomically apply f with an extra argument.
-pub let swap_with : { atom: Atom 'a, f: { current: 'a, arg: 'b } -> 'a, arg: 'b } -> 'a = { atom, f, arg } ->
+pub let swap_with : { atom: Atom 'a, f: { current: 'a, arg: 'b } -> 'a, arg: 'b } -> 'a <Async> = { atom, f, arg } ->
   __native_atom_swap_with { atom = atom, f = f, arg = arg }
 
 ## Atomically apply f, returning both old and new values.
-pub let get_and_swap : { atom: Atom 'a, f: { current: 'a } -> 'a } -> { old: 'a, new: 'a } = { atom, f } ->
+pub let get_and_swap : { atom: Atom 'a, f: { current: 'a } -> 'a } -> { old: 'a, new: 'a } <Async> = { atom, f } ->
   __native_atom_get_and_swap { atom = atom, f = f }
 
 ## Register a watch callback invoked on every state change.
-pub let add_watch : { atom: Atom 'a, key: Str, f: { key: Str, old: 'a, new: 'a } -> {} <...> } -> {} <...> = { atom, key, f } ->
+pub let add_watch : { atom: Atom 'a, key: Str, f: { key: Str, old: 'a, new: 'a } -> {} <...> } -> {} <Async, ...> = { atom, key, f } ->
   __native_atom_add_watch { atom = atom, key = key, f = f }
 
 ## Remove a watch by its key.
-pub let remove_watch : { atom: Atom 'a, key: Str } -> {} = { atom, key } ->
+pub let remove_watch : { atom: Atom 'a, key: Str } -> {} <Async> = { atom, key } ->
   __native_atom_remove_watch { atom = atom, key = key }
 
 ## Create an atom with a validator that rejects invalid updates.
-pub let atom_validated : { value: 'a, validator: { val: 'a } -> Bool } -> Atom 'a = { value, validator } ->
+pub let atom_validated : { value: 'a, validator: { val: 'a } -> Bool } -> Atom 'a <Async> = { value, validator } ->
   __native_atom_new_validated { value = value, validator = validator }
 
 ## Set a validator on an existing atom. Future updates must pass it.
-pub let set_validator : { atom: Atom 'a, validator: { val: 'a } -> Bool } -> {} = { atom, validator } ->
+pub let set_validator : { atom: Atom 'a, validator: { val: 'a } -> Bool } -> {} <Async> = { atom, validator } ->
   __native_atom_set_validator { atom = atom, validator = validator }
