@@ -679,9 +679,25 @@ class TypedAstBuilder(
                             val effectHash = resolveEffectHash(receiverName)
                             val opName = memberAccess.member
                             val argExpr = buildExpr(expr.arguments, file)
+                            // Type the perform-op as the operation's declared return type.
+                            // We can't rely on contextType because the caller's expected
+                            // type is often a stub TypeVar (e.g. `let_os` from a let
+                            // binding without annotation). Reading the op's return type
+                            // from the effect decl gives us the concrete return type
+                            // that downstream method calls (`os.size {}`) need to
+                            // resolve their ability dicts.
+                            val effectDecl = effectDeclarations[receiverName]
+                                ?: importContext?.importedEffects?.get(receiverName)
+                            val resolvedReturnType = effectDecl?.operations
+                                ?.firstOrNull { it.name == opName }
+                                ?.let { convertParsedTypeAnnotation(it.returnType) }
+                            val applied = substitution.apply(contextType)
+                            val finalType = if (applied is MezzeType.VarType && resolvedReturnType != null) {
+                                resolvedReturnType
+                            } else applied
                             return TypedPerformOp(
                                 effectHash, opName, argExpr,
-                                substitution.apply(contextType), loc
+                                finalType, loc
                             )
                         }
                     }

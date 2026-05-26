@@ -1041,7 +1041,8 @@ class ModuleResolver(
                     val fromContext = typeContext?.get(name)
                     val fromAnnotation = decl.typeAnnotation
                         ?.let { TypeAnnotationConverter.convert(it, faithful = false) }
-                    val mezzeType: MezzeType = fromContext ?: fromAnnotation
+                    val mezzeType: MezzeType = fromContext
+                        ?: fromAnnotation
                         ?: MezzeType.VarType(TypeVar.fresh())
 
                     // Compute content hash via ParsedDeclHasher (v2-native, Unison-style)
@@ -1130,20 +1131,10 @@ class ModuleResolver(
                         kind = DeclarationKind.EFFECT
                     )
 
-                    // Also export each operation as a FUNCTION
-                    for (op in decl.operations) {
-                        val opType: MezzeType = MezzeType.FunctionType(
-                            paramType = TypeAnnotationConverter.convert(op.paramType, faithful = false),
-                            returnType = TypeAnnotationConverter.convert(op.returnType, faithful = false)
-                        )
-                        exports[op.name] = ExportedItem(
-                            name = op.name,
-                            type = ExportedItemType.FUNCTION,
-                            mezzeType = opType,
-                            originalName = op.name,
-                            contentHash = contentHash
-                        )
-                    }
+                    // Effect operations are NOT exported as standalone functions.
+                    // They are only callable through their effect: `Environment.process_args {}`.
+                    // Importing `process_args` standalone was a footgun — the call
+                    // didn't go through ability-method dispatch and crashed at runtime.
                 }
 
                 // ----------------------------------------------------------------
