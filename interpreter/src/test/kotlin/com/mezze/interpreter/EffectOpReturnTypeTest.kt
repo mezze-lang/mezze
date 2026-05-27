@@ -1,7 +1,6 @@
 package com.mezze.interpreter
 
 import org.junit.jupiter.api.Assertions.*
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 
 /**
@@ -66,7 +65,6 @@ class EffectOpReturnTypeTest {
         assertEquals(3L, result, "size of [a, b, c] should be 3")
     }
 
-    @Disabled("Task #230 — inherent-impl dispatch (e.g. `to_upper`) doesn't see the concrete Str type because the constraint generator stores g : VarType('d) instead of Str. Ability-impl dispatch (`.size {}` via Sized) works fine, hence the other tests pass.")
     @Test
     fun `to_upper inherent method on Str returned from effect-op`() {
         val code = """

@@ -312,10 +312,18 @@ class ExpressionConstraintGenerator {
                     effects.addAll(result.effects)
                     methodCallResolutions.putAll(result.methodCallResolutions)
                     callReturnTypes.putAll(result.callReturnTypes)
+                    // Unwrap SuspendedType from element types before unification —
+                    // effects are already extracted into `effects` above. Without
+                    // this, the seq's elementType TypeVar gets bound to a
+                    // SuspendedType wrapper that the runtime can't reduce.
+                    val elementValueType = when (val t = result.type) {
+                        is MezzeType.SuspendedType -> t.valueType
+                        else -> t
+                    }
                     // Regular element must match element type
                     constraints.add(
                         Constraint.Equality(
-                            left = result.type,
+                            left = elementValueType,
                             right = elementType,
                             context = "Seq elements must have same type",
                             loc = element.expr.loc,
@@ -333,10 +341,16 @@ class ExpressionConstraintGenerator {
                     effects.addAll(result.effects)
                     methodCallResolutions.putAll(result.methodCallResolutions)
                     callReturnTypes.putAll(result.callReturnTypes)
+                    // Unwrap SuspendedType from spread expr — same reason as
+                    // regular element above.
+                    val spreadValueType = when (val t = result.type) {
+                        is MezzeType.SuspendedType -> t.valueType
+                        else -> t
+                    }
                     // Spread element must be a seq with matching element type
                     constraints.add(
                         Constraint.Equality(
-                            left = result.type,
+                            left = spreadValueType,
                             right = MezzeType.SeqType(elementType),
                             context = "Spread element must be a seq",
                             loc = element.expr.loc,
@@ -3542,8 +3556,28 @@ class ExpressionConstraintGenerator {
 
         // Normal function call (no effects in the function type itself)
         // BUT: the function may have tracked effects in ConstraintResult.effects
-        // For example, effect operations like Log.println track effects this way
-        val returnType = MezzeType.VarType(TypeVar.fresh())
+        // For example, effect operations like Log.println track effects this way.
+        //
+        // Prefer the function's concrete return type when it has no free
+        // TypeVars. Using a fresh VarType here means downstream consumers
+        // (e.g. let-binding typing context, used by inherent-method dispatch)
+        // see an unresolved VarType until the solver runs. Pulling a
+        // monomorphic returnType directly gives them the concrete type
+        // immediately, which is required for inherent-impl dispatch on
+        // effect-op results (e.g. `Greet.greet {}.to_upper {}`).
+        //
+        // For polymorphic returns (e.g. `'a` from `throw : … -> 'a`), keep
+        // the fresh VarType — variant-merging tests rely on each call site
+        // producing its own labelable result so that distinct error types
+        // from different branches accumulate instead of collapsing.
+        val returnType: MezzeType = run {
+            val ft = functionResult.type
+            if (ft is MezzeType.FunctionType) {
+                val freeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(ft.returnType)
+                if (freeVars.isEmpty()) ft.returnType
+                else MezzeType.VarType(TypeVar.fresh())
+            } else MezzeType.VarType(TypeVar.fresh())
+        }
 
         val constraints = mutableListOf<Constraint>()
         constraints.addAll(functionResult.constraints)
@@ -3587,8 +3621,34 @@ class ExpressionConstraintGenerator {
         val rowVarEffects = if (functionResult.effects.isNotEmpty())
             collectClosureArgEffects(argumentResult.type)
         else emptySet()
-        val collectedEffects = functionResult.effects + argumentResult.effects + rowVarEffects
-        val collectedPerformed = functionResult.performed || argumentResult.performed
+        // Extract effects directly from the function's type. Required for
+        // pub-let helpers that wrap effect ops: a binding like
+        //   `pub let process_args : {} -> [Str] <Environment> = ...`
+        // is stored as a FunctionType with effects=<Environment>, but the
+        // identifier-lookup path returns only the type, not its effect row
+        // (and tryGenerateEffectOperationCall only fires on `Effect.op`
+        // syntax). Without this, calling the helper looks "pure" at the
+        // call site even though its signature declares effects.
+        // Extract effects declared on the function's type itself. Required
+        // for pub-let helpers that wrap effect ops — e.g.
+        //   `pub let process_args : {} -> [Str] <Environment> = ...`
+        // — where the helper's effect row otherwise wouldn't reach the
+        // call site (identifier lookup returns the type but not its
+        // effect row; tryGenerateEffectOperationCall only fires on
+        // direct `Effect.op` syntax). The known-broken case is in
+        // EnvironmentEffectModuleTest::pub-let helper imported standalone.
+        val funcTypeEffects: Set<String>
+        val funcTypePerformed: Boolean
+        if (functionResult.type is MezzeType.FunctionType) {
+            val ft = functionResult.type as MezzeType.FunctionType
+            funcTypeEffects = ft.effects?.effects ?: emptySet()
+            funcTypePerformed = ft.effects?.performed ?: false
+        } else {
+            funcTypeEffects = emptySet()
+            funcTypePerformed = false
+        }
+        val collectedEffects = functionResult.effects + argumentResult.effects + rowVarEffects + funcTypeEffects
+        val collectedPerformed = functionResult.performed || argumentResult.performed || funcTypePerformed
 
         // CRITICAL: Propagate ability constraints from function and arguments
         var collectedAbilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints
@@ -3872,7 +3932,17 @@ class ExpressionConstraintGenerator {
                 }
             }
 
-            caseResultTypes.add(caseBodyResult.type)
+            // Unwrap SuspendedType from the case body's result. Effects from
+            // the body are already extracted into `effects` (above), so we
+            // only need the inner value type for arm-shape unification.
+            // Without this, the fresh `resultType` TypeVar gets bound to a
+            // SuspendedType wrapper which downstream `perform` discharges
+            // can't peel — even after all effects are handled.
+            val caseBodyValueType = when (val t = caseBodyResult.type) {
+                is MezzeType.SuspendedType -> t.valueType
+                else -> t
+            }
+            caseResultTypes.add(caseBodyValueType)
         }
 
         // Step 4: All case bodies must have the same type
