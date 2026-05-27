@@ -931,6 +931,16 @@ class ExpressionConstraintGenerator {
         val receiverResult = generate(expr.receiver, context)
         val fieldType = MezzeType.VarType(TypeVar.fresh())
 
+        // Unwrap SuspendedType from receiver — effects are tracked
+        // separately and propagated to the outer ConstraintResult below.
+        // Without this, the HasField constraint binds against the
+        // SuspendedType wrapper rather than the inner record, and the
+        // field type drifts to a wrong shape.
+        val receiverValueType = when (val t = receiverResult.type) {
+            is MezzeType.SuspendedType -> t.valueType
+            else -> t
+        }
+
         // CRITICAL: Validate field access on record literals (matches OldTypeChecker.kt:6260-6310)
         // Check if field exists for:
         // 1. Identifiers bound to record literals (e.g., let x = {a = 1}; x.b)
@@ -1023,10 +1033,12 @@ class ExpressionConstraintGenerator {
         // 2. Nested access on a record literal binding: data.point.z where data = {point = {...}, ...}
         val isStrictFieldCheck = isRecordLiteralAccess(expr.receiver, context)
 
-        // Add HasField constraint
+        // Add HasField constraint — use the unwrapped value type so the
+        // solver matches the field against the underlying record, not the
+        // SuspendedType wrapper.
         constraints.add(
             Constraint.HasField(
-                recordType = receiverResult.type,
+                recordType = receiverValueType,
                 fieldName = expr.member,
                 fieldType = fieldType,
                 context = "Field access ${expr.member}",
@@ -1035,10 +1047,21 @@ class ExpressionConstraintGenerator {
             )
         )
 
+        // Propagate the receiver's effects to the outer ConstraintResult.
+        // Without this, `(Foo.run {}).a` loses the <Foo> effect entirely
+        // (the receiver's ConstraintResult carries it, but the member
+        // access used to drop it on the floor).
         return ConstraintResult(
             type = fieldType,
-            constraints = constraints,
+            constraints = constraints + receiverResult.constraints,
+            effects = receiverResult.effects,
+            effectInstances = receiverResult.effectInstances,
+            performed = receiverResult.performed,
+            abilityConstraints = receiverResult.abilityConstraints,
+            associatedTypeConstraints = receiverResult.associatedTypeConstraints,
             undefinedVariables = receiverResult.undefinedVariables,
+            usedVariables = receiverResult.usedVariables,
+            referencedBindings = receiverResult.referencedBindings,
             methodCallResolutions = receiverResult.methodCallResolutions,
             callReturnTypes = receiverResult.callReturnTypes
         )
