@@ -119,9 +119,18 @@ public final class MonomorphicCallNode extends MezzeNode {
         }
 
         if (value == null) {
+            // Internal compiler bug: lowering emitted a CallByHash whose target
+            // hash isn't in this context's globals or the precompiled stdlib.
+            // The user can't act on this — turn it into a clearer error so it
+            // gets reported as a bug instead of looking like user code at
+            // fault. The cryptic hex hash stays for diagnostic copy-paste.
+            String name = (functionName != null && !functionName.startsWith(contentHash.getHex().substring(0, 8))) ? functionName : "<anonymous>";
             throw new RuntimeException(
-                "Function not found" + (contentHash != null ? " for content hash: " + contentHash.getHex() : "") +
-                " (function name: " + functionName + ")"
+                "internal compiler error: function '" + name + "' was referenced by hash " +
+                (contentHash != null ? contentHash.getHex() : "<null>") +
+                " but is not registered. This is a bug in mezze — please report it with the program that triggered this. " +
+                "(Likely cause: a code path emitted a CallByHash for a function the runtime never received. " +
+                "Try clearing .mz/cache.sqlite and re-running.)"
             );
         }
 

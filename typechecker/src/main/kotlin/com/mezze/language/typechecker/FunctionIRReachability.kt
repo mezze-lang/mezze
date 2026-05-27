@@ -176,4 +176,152 @@ object FunctionIRReachability {
             is com.mezze.language.truffleir.FracLitIR -> {}
         }
     }
+
+    /**
+     * A CallDirectIR or kin that targets a Hash unknown to both the user
+     * function set and the precompiled stdlib graph. If this list is
+     * non-empty, lowering produced a call site that the runtime cannot
+     * resolve — it would crash with `MonomorphicCallNode$resolveFunction`'s
+     * "Function not found for content hash: …" RuntimeException.
+     *
+     * Reporting these at the end of lowering converts that bare runtime
+     * error into a structured compiler diagnostic the user can act on.
+     */
+    data class OrphanHashRef(
+        val callerHash: Hash,
+        val callerName: String,
+        val targetHash: Hash,
+        val src: com.mezze.language.truffleir.SourceInfo,
+    )
+
+    /**
+     * Find every CallDirectIR / ReadGlobalByHash / etc. reference whose
+     * target is neither a user-compiled function nor a stdlib function.
+     *
+     * This is the runtime-resolvability check: if a hash isn't in
+     * `userFunctions + PrecompiledStdlib`, the call would explode at
+     * runtime. Catching it at lowering is strictly better.
+     */
+    @JvmStatic
+    fun findOrphanHashRefs(userFunctions: List<FunctionIR>): List<OrphanHashRef> {
+        val known = mutableSetOf<Hash>()
+        userFunctions.forEach { known.add(it.hash) }
+        try {
+            known.addAll(PrecompiledStdlib.preloweredFunctions.keys)
+        } catch (_: Throwable) { /* stdlib may be uninitialized in unusual contexts */ }
+
+        val orphans = mutableListOf<OrphanHashRef>()
+        for (fn in userFunctions) {
+            scanForOrphans(fn.body, fn.hash, fn.name, known, orphans)
+        }
+        return orphans
+    }
+
+    private fun scanForOrphans(
+        node: NodeIR,
+        callerHash: Hash,
+        callerName: String,
+        known: Set<Hash>,
+        out: MutableList<OrphanHashRef>,
+    ) {
+        when (node) {
+            is com.mezze.language.truffleir.CallDirectIR -> {
+                if (node.targetHash !in known) {
+                    out.add(OrphanHashRef(callerHash, callerName, node.targetHash, node.src))
+                }
+                node.args.forEach { scanForOrphans(it, callerHash, callerName, known, out) }
+            }
+            is com.mezze.language.truffleir.PartialApplyDirectIR -> {
+                if (node.targetHash !in known) {
+                    out.add(OrphanHashRef(callerHash, callerName, node.targetHash, node.src))
+                }
+                node.partialFields.forEach { scanForOrphans(it.value, callerHash, callerName, known, out) }
+            }
+            is com.mezze.language.truffleir.MakeLambdaIR -> {
+                if (node.functionHash !in known) {
+                    out.add(OrphanHashRef(callerHash, callerName, node.functionHash, node.src))
+                }
+            }
+            is com.mezze.language.truffleir.ReadGlobalByHashIR -> {
+                if (node.hash !in known) {
+                    out.add(OrphanHashRef(callerHash, callerName, node.hash, node.src))
+                }
+            }
+            is com.mezze.language.truffleir.ReadGlobalFnByHashIR -> {
+                if (node.hash !in known) {
+                    out.add(OrphanHashRef(callerHash, callerName, node.hash, node.src))
+                }
+            }
+            is com.mezze.language.truffleir.HandleIR -> {
+                scanForOrphans(node.body, callerHash, callerName, known, out)
+                for (h in node.handlers) {
+                    if (h.handlerHash !in known) {
+                        out.add(OrphanHashRef(callerHash, callerName, h.handlerHash, node.src))
+                    }
+                    // h.effectHash is an effect identity, not a function hash; skip.
+                }
+            }
+            is com.mezze.language.truffleir.BlockIR -> {
+                for (stmt in node.stmts) {
+                    when (stmt) {
+                        is com.mezze.language.truffleir.StmtIR.Let -> scanForOrphans(stmt.value, callerHash, callerName, known, out)
+                        is com.mezze.language.truffleir.StmtIR.Expr -> scanForOrphans(stmt.node, callerHash, callerName, known, out)
+                    }
+                }
+                scanForOrphans(node.result, callerHash, callerName, known, out)
+            }
+            is com.mezze.language.truffleir.PerformOpIR -> scanForOrphans(node.arg, callerHash, callerName, known, out)
+            is com.mezze.language.truffleir.CallLocalIR -> scanForOrphans(node.arg, callerHash, callerName, known, out)
+            is com.mezze.language.truffleir.CallNativeIR -> scanForOrphans(node.arg, callerHash, callerName, known, out)
+            is com.mezze.language.truffleir.CallIndirectIR -> {
+                scanForOrphans(node.function, callerHash, callerName, known, out)
+                scanForOrphans(node.arg, callerHash, callerName, known, out)
+            }
+            is com.mezze.language.truffleir.CallIndirectScalarIR -> {
+                scanForOrphans(node.function, callerHash, callerName, known, out)
+                node.args.forEach { scanForOrphans(it, callerHash, callerName, known, out) }
+            }
+            is com.mezze.language.truffleir.MakeRecordIR -> node.fields.forEach { scanForOrphans(it.value, callerHash, callerName, known, out) }
+            is com.mezze.language.truffleir.ReadFieldIR -> scanForOrphans(node.record, callerHash, callerName, known, out)
+            is com.mezze.language.truffleir.RecordUpdateIR -> {
+                scanForOrphans(node.record, callerHash, callerName, known, out)
+                node.updates.forEach { scanForOrphans(it.value, callerHash, callerName, known, out) }
+            }
+            is com.mezze.language.truffleir.MakeVariantIR -> node.payload?.let { scanForOrphans(it, callerHash, callerName, known, out) }
+            is com.mezze.language.truffleir.MatchIR -> {
+                scanForOrphans(node.scrutinee, callerHash, callerName, known, out)
+                for (c in node.cases) {
+                    scanForOrphans(c.body, callerHash, callerName, known, out)
+                    c.guard?.let { scanForOrphans(it, callerHash, callerName, known, out) }
+                    for (ilb in c.ifLetBindings) scanForOrphans(ilb.expr, callerHash, callerName, known, out)
+                }
+            }
+            is com.mezze.language.truffleir.IfIR -> {
+                scanForOrphans(node.cond, callerHash, callerName, known, out)
+                scanForOrphans(node.thenBr, callerHash, callerName, known, out)
+                scanForOrphans(node.elseBr, callerHash, callerName, known, out)
+            }
+            is com.mezze.language.truffleir.WriteLocalIR -> scanForOrphans(node.value, callerHash, callerName, known, out)
+            is com.mezze.language.truffleir.InlineBinaryOpIR -> {
+                scanForOrphans(node.left, callerHash, callerName, known, out)
+                scanForOrphans(node.right, callerHash, callerName, known, out)
+            }
+            is com.mezze.language.truffleir.SpecializedCallIR -> node.args.forEach { scanForOrphans(it, callerHash, callerName, known, out) }
+            is com.mezze.language.truffleir.InterpolatedStringIR -> {
+                for (p in node.parts) if (p is com.mezze.language.truffleir.StringPartIR.Expr) scanForOrphans(p.node, callerHash, callerName, known, out)
+            }
+            is com.mezze.language.truffleir.MakeSeqIR -> {
+                for (e in node.elements) when (e) {
+                    is com.mezze.language.truffleir.SeqElementIR.Regular -> scanForOrphans(e.node, callerHash, callerName, known, out)
+                    is com.mezze.language.truffleir.SeqElementIR.Spread -> scanForOrphans(e.node, callerHash, callerName, known, out)
+                }
+            }
+            is com.mezze.language.truffleir.SeqGetIR -> {
+                scanForOrphans(node.seq, callerHash, callerName, known, out)
+                scanForOrphans(node.index, callerHash, callerName, known, out)
+            }
+            is com.mezze.language.truffleir.DictMethodCallIR -> scanForOrphans(node.arg, callerHash, callerName, known, out)
+            else -> {} // leaves carry no hash refs
+        }
+    }
 }

@@ -58,6 +58,10 @@ public final class FunctionLookupNode extends MezzeNode {
             cachedFunction = fn;
             return fn;
         }
-        throw new RuntimeException("Function not found for tail call: " + contentHash.getHex());
+        throw new RuntimeException(
+            "internal compiler error: tail-call target with hash " + contentHash.getHex() +
+            " is not registered. This is a bug in mezze — please report it with the program that triggered this. " +
+            "(Try clearing .mz/cache.sqlite and re-running.)"
+        );
     }
 }
