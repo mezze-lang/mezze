@@ -22,26 +22,13 @@ class SemaphoreTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    // Setup code for semaphore operations
+    // Post-#170: all primitive ops are <Async>; tests use stdlib imports
+    // and open a `perform LoomAsync in do` block.
     private val semaphoreSetup = """
-        newtype Semaphore = Semaphore __NativeSemaphore
-
-        let semaphore: {permits: Int} -> Semaphore = {permits} -> __native_semaphore_new {permits = permits}
-        let acquire: {sem: Semaphore} -> {} = {sem} -> __native_semaphore_acquire {sem = sem}
-        let acquire_n: {sem: Semaphore, permits: Int} -> {} = {sem, permits} -> __native_semaphore_acquire_n {sem = sem, permits = permits}
-        let release: {sem: Semaphore} -> {} = {sem} -> __native_semaphore_release {sem = sem}
-        let release_n: {sem: Semaphore, permits: Int} -> {} = {sem, permits} -> __native_semaphore_release_n {sem = sem, permits = permits}
-        let try_acquire: {sem: Semaphore} -> Bool = {sem} -> __native_semaphore_try_acquire {sem = sem}
-        let try_acquire_n: {sem: Semaphore, permits: Int} -> Bool = {sem, permits} -> __native_semaphore_try_acquire_n {sem = sem, permits = permits}
-        let available: {sem: Semaphore} -> Int = {sem} -> __native_semaphore_available {sem = sem}
-        let with_permit: {sem: Semaphore, f: {} -> 'a} -> 'a = {sem, f} -> __native_semaphore_with_permit {sem = sem, f = f}
-    """.trimIndent()
-
-    // Atom setup for shared state tests
-    private val atomSetup = ""
-
-    // Loom primitives for concurrent tests
-    private val loomSetup = """
+        use std::effects::concurrent::semaphore::{
+            semaphore, acquire, acquire_n, release, release_n,
+            try_acquire, try_acquire_n, available, with_permit
+        }
         use std::effects::concurrent::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
@@ -51,6 +38,9 @@ class SemaphoreTest {
 
         perform LoomAsync in do
     """.trimIndent()
+
+    private val atomSetup = ""
+    private val loomSetup = ""
 
     // =============================================================================
     // Basic Semaphore Operations

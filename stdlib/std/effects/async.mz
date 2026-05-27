@@ -1,5 +1,4 @@
 use std::collections::seq
-use std::effects::concurrent::cancellation::{ CancellationToken }
 use std::abilities::compare::{ Eq }
 use std::result
 
@@ -470,3 +469,92 @@ pub let scope_get_token : { sc: Scope 'a } -> CancellationToken = { sc } ->
 ## Check if a scope has been cancelled.
 pub let scope_is_cancelled : { sc: Scope 'a } -> Bool = { sc } ->
   __native_loom_scope_is_cancelled { sc = sc }
+
+# ============================================================================
+# Cancellation tokens
+#
+# Cooperative cancellation primitive: a flag that tasks can check (via
+# `is_token_cancelled`) at safe points and bail out early. Cancelling the
+# token doesn't kill any running code — it only signals; watchers must
+# respect the signal themselves. Mirrors Go's context.Cancel(), .NET's
+# CancellationTokenSource.Cancel(), Kotlin's Job.cancel().
+#
+# Used to live in std::effects::concurrent::cancellation but moved here
+# because Async.cancel returns CancelOutcome (which talks about token
+# cancellation semantics) and `Scope` exposes `scope_get_token` — the
+# token type belongs with the rest of the async surface, not in a
+# separate module.
+#
+# The `_token` suffix on `cancel_token` and `is_token_cancelled` is to
+# disambiguate from `Async.cancel { p = ... }` / `Promise.is_cancelled
+# { p = ... }`, which operate on Promises (different shape, different
+# return type).
+# ============================================================================
+
+## Cooperative cancellation token supporting hierarchical cancellation.
+pub newtype CancellationToken = CancellationToken __NativeCancellationToken
+
+impl Eq for CancellationToken where {
+  eq = { it, r } -> __native_ref_eq { l = it, r = r },
+  neq = { it, r } -> __native_ref_neq { l = it, r = r },
+}
+
+impl CancellationToken where {
+  cancel_token = { it, reason } -> cancel_token { token = it, reason = reason },
+  cancel_default = { it } -> cancel_default { token = it },
+  is_token_cancelled = { it } -> is_token_cancelled { token = it },
+  get_reason = { it } -> get_reason { token = it },
+  check_cancelled = { it } -> check_cancelled { token = it },
+  on_cancel = { it, callback } -> on_cancel { token = it, callback = callback },
+  remove_callback = { it, id } -> remove_callback { token = it, id = id },
+  create_child = { it } -> create_child { token = it },
+  with_cancellation = { it, f } -> with_cancellation { token = it, f = f },
+}
+
+## Create a new cancellation token.
+pub let token : {} -> CancellationToken <Async> = {} -> __native_cancellation_token_new {}
+
+## Alias for token.
+pub let new : {} -> CancellationToken <Async> = token
+
+## Cancel the token with a reason, invoking all registered callbacks.
+pub let cancel_token : { token: CancellationToken, reason: Str } -> {} <Async> = { token, reason } ->
+  __native_cancellation_token_cancel { token = token, reason = reason }
+
+## Cancel with a default reason.
+pub let cancel_default : { token: CancellationToken } -> {} <Async> = { token } ->
+  cancel_token { token = token, reason = "Operation cancelled" }
+
+## Check if the token has been cancelled.
+pub let is_token_cancelled : { token: CancellationToken } -> Bool <Async> = { token } ->
+  __native_cancellation_token_is_cancelled { token = token }
+
+## Get the cancellation reason, or None if not cancelled.
+pub let get_reason : { token: CancellationToken } -> Option Str <Async> = { token } ->
+  __native_cancellation_token_get_reason { token = token }
+
+## Throw an exception if the token is cancelled (cancellation checkpoint).
+pub let check_cancelled : { token: CancellationToken } -> {} <Async> = { token } ->
+  __native_cancellation_token_throw_if_cancelled { token = token }
+
+## Alias for check_cancelled.
+pub let throw_if_cancelled : { token: CancellationToken } -> {} <Async> = check_cancelled
+
+## Register a callback invoked on cancellation. Returns a callback ID.
+pub let on_cancel : { token: CancellationToken, callback: {} -> {} } -> Str <Async> = { token, callback } ->
+  __native_cancellation_token_on_cancellation { token = token, callback = callback }
+
+## Alias for on_cancel.
+pub let on_cancellation : { token: CancellationToken, callback: {} -> {} } -> Str <Async> = on_cancel
+
+## Remove a previously registered callback by ID.
+pub let remove_callback : { token: CancellationToken, id: Str } -> {} <Async> = { token, id } ->
+  __native_cancellation_token_remove_callback { token = token, id = id }
+
+## Create a child token cancelled when the parent is cancelled.
+pub let create_child : { token: CancellationToken } -> CancellationToken <Async> = { token } ->
+  __native_cancellation_token_create_child { token = token }
+
+## Run f if not cancelled, returning Some on success, None if cancelled.
+pub let with_cancellation : { token: CancellationToken, f: {} -> 'a <...> } -> Option 'a <Async, ...> = { token, f } ->
+  if is_token_cancelled { token = token } then None else Some { val = f {} }

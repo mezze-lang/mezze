@@ -21,14 +21,15 @@ impl Semaphore where {
 }
 
 ## Create a semaphore with the given number of permits.
-pub let semaphore : { permits: Int } -> Semaphore = { permits } ->
+pub let semaphore : { permits: Int } -> Semaphore <Async> = { permits } ->
   __native_semaphore_new { permits = permits }
 
 ## Acquire one permit (blocks until available).
-pub let acquire : { sem: Semaphore } -> {} = { sem } -> __native_semaphore_acquire { sem = sem }
+pub let acquire : { sem: Semaphore } -> {} <Async> = { sem } ->
+  __native_semaphore_acquire { sem = sem }
 
 ## Acquire n permits (blocks until all available).
-pub let acquire_n : { sem: Semaphore, permits: Int } -> {} = { sem, permits } ->
+pub let acquire_n : { sem: Semaphore, permits: Int } -> {} <Async> = { sem, permits } ->
   __native_semaphore_acquire_n { sem = sem, permits = permits }
 
 ## Park-aware acquire: routes through Async.park so the same code works
@@ -43,24 +44,25 @@ pub let acquire_n_async : { sem: Semaphore, permits: Int } -> {} <Async, ...> = 
   }
 
 ## Release one permit.
-pub let release : { sem: Semaphore } -> {} = { sem } -> __native_semaphore_release { sem = sem }
+pub let release : { sem: Semaphore } -> {} <Async> = { sem } ->
+  __native_semaphore_release { sem = sem }
 
 ## Release n permits.
-pub let release_n : { sem: Semaphore, permits: Int } -> {} = { sem, permits } ->
+pub let release_n : { sem: Semaphore, permits: Int } -> {} <Async> = { sem, permits } ->
   __native_semaphore_release_n { sem = sem, permits = permits }
 
 ## Try to acquire one permit without blocking.
-pub let try_acquire : { sem: Semaphore } -> Bool = { sem } ->
+pub let try_acquire : { sem: Semaphore } -> Bool <Async> = { sem } ->
   __native_semaphore_try_acquire { sem = sem }
 
 ## Try to acquire n permits without blocking.
-pub let try_acquire_n : { sem: Semaphore, permits: Int } -> Bool = { sem, permits } ->
+pub let try_acquire_n : { sem: Semaphore, permits: Int } -> Bool <Async> = { sem, permits } ->
   __native_semaphore_try_acquire_n { sem = sem, permits = permits }
 
 ## Get the number of currently available permits.
-pub let available : { sem: Semaphore } -> Int = { sem } ->
+pub let available : { sem: Semaphore } -> Int <Async> = { sem } ->
   __native_semaphore_available { sem = sem }
 
 ## Acquire a permit, run f, release automatically.
-pub let with_permit : { sem: Semaphore, f: {} -> 'a <...> } -> 'a <...> = { sem, f } ->
+pub let with_permit : { sem: Semaphore, f: {} -> 'a <...> } -> 'a <Async, ...> = { sem, f } ->
   __native_semaphore_with_permit { sem = sem, f = f }

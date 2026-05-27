@@ -31,8 +31,14 @@ class SynchronizationPointsTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    // Setup code for Loom virtual thread primitives
+    // Post-#170: all primitive ops are <Async>; tests use stdlib imports
+    // and open a `perform LoomAsync in do` block. latchSetup is folded
+    // into loomSetup (the latch shims were removed; we import latch from
+    // stdlib instead).
     private val loomSetup = """
+        use std::effects::concurrent::latch::{
+            latch, count_down, await_latch, await_latch_timeout, get_count
+        }
         use std::effects::concurrent::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
@@ -43,18 +49,8 @@ class SynchronizationPointsTest {
         perform LoomAsync in do
     """.trimIndent()
 
-    // Atom setup for shared state
     private val atomSetup = ""
-
-    // Latch setup for synchronization points
-    private val latchSetup = """
-        newtype Latch = Latch __NativeLatch
-        let latch: {count: Int} -> Latch = {count} -> __native_latch_new {count = count}
-        let count_down: {latch: Latch} -> {} = {latch} -> __native_latch_count_down {latch = latch}
-        let await_latch: {latch: Latch} -> {} = {latch} -> __native_latch_await {latch = latch}
-        let await_latch_timeout: {latch: Latch, ms: Int} -> Bool = {latch, ms} -> __native_latch_await_timeout {latch = latch, ms = ms}
-        let get_count: {latch: Latch} -> Int = {latch} -> __native_latch_get_count {latch = latch}
-    """.trimIndent()
+    private val latchSetup = ""
 
     // =============================================================================
     // Simple Synchronization Points
@@ -174,7 +170,7 @@ class SynchronizationPointsTest {
     @Test
     fun `test synchronization point with latch timeout - times out`() {
         val code = """
-            $latchSetup
+            $loomSetup
 
             let syncPoint = latch {count = 1}
             # Don't count down, so it should timeout
@@ -313,7 +309,7 @@ class SynchronizationPointsTest {
     @Test
     fun `test synchronization point tracking with latches`() {
         val code = """
-            $latchSetup
+            $loomSetup
 
             # Create several sync points (latches)
             let l0 = latch {count = 1}
@@ -610,7 +606,7 @@ class SynchronizationPointsTest {
     @Test
     fun `test sync point with immediate completion`() {
         val code = """
-            $latchSetup
+            $loomSetup
 
             # Create a latch with count 0 (already released)
             let l = latch {count = 0}

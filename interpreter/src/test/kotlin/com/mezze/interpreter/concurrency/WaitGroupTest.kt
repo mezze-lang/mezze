@@ -22,23 +22,12 @@ class WaitGroupTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    // Setup code for wait group operations
+    // Post-#170: all primitive ops are <Async>; tests use stdlib imports
+    // and open a `perform LoomAsync in do` block.
     private val waitGroupSetup = """
-        newtype WaitGroup = WaitGroup __NativeWaitGroup
-
-        let wait_group: {} -> WaitGroup = {} -> __native_waitgroup_new {}
-        let add: {wg: WaitGroup, delta: Int} -> {} = {wg, delta} -> __native_waitgroup_add {wg = wg, delta = delta}
-        let done: {wg: WaitGroup} -> {} = {wg} -> __native_waitgroup_done {wg = wg}
-        let wait: {wg: WaitGroup} -> {} = {wg} -> __native_waitgroup_wait {wg = wg}
-        let wait_timeout: {wg: WaitGroup, ms: Int} -> Bool = {wg, ms} -> __native_waitgroup_wait_timeout {wg = wg, ms = ms}
-        let get_count_wg: {wg: WaitGroup} -> Int = {wg} -> __native_waitgroup_get_count {wg = wg}
-    """.trimIndent()
-
-    // Atom setup for shared state tests
-    private val atomSetup = ""
-
-    // Loom primitives for concurrent tests
-    private val loomSetup = """
+        use std::effects::concurrent::waitgroup::{
+            wait_group, add, done, wait, wait_timeout, get_count_wg
+        }
         use std::effects::concurrent::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
@@ -48,6 +37,9 @@ class WaitGroupTest {
 
         perform LoomAsync in do
     """.trimIndent()
+
+    private val atomSetup = ""
+    private val loomSetup = ""
 
     // =============================================================================
     // Basic WaitGroup Operations

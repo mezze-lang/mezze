@@ -6,6 +6,8 @@ import com.mezze.language.ast.TypeVar
 /**
  * Type definitions for Clojure-style agents (async atoms).
  *
+ * Every native carries `<Async>` (post-#170).
+ *
  * Agents provide asynchronous, queued state updates with these properties:
  * - State changes happen asynchronously (send returns immediately)
  * - Actions are processed sequentially in order
@@ -15,11 +17,10 @@ import com.mezze.language.ast.TypeVar
  */
 object AgentTypes {
 
-    /**
-     * Register all agent native function types.
-     */
     fun registerAll(context: MutableMap<String, MezzeType>) {
-        // __native_agent_new: {value: 'a} -> Agent 'a
+        val asyncEffect = MezzeType.EffectRow(effects = setOf("Async"))
+
+        // __native_agent_new: {value: 'a} -> Agent 'a <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
@@ -27,11 +28,12 @@ object AgentTypes {
                 MezzeType.RecordType(mapOf(
                     "value" to elementType
                 )),
-                agentType
+                agentType,
+                effects = asyncEffect
             )
         }
 
-        // __native_agent_deref: {agent: Agent 'a} -> 'a
+        // __native_agent_deref: {agent: Agent 'a} -> 'a <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
@@ -39,11 +41,12 @@ object AgentTypes {
                 MezzeType.RecordType(mapOf(
                     "agent" to agentType
                 )),
-                elementType
+                elementType,
+                effects = asyncEffect
             )
         }
 
-        // __native_agent_send: {agent: Agent 'a, f: {current: 'a} -> 'a} -> {}
+        // __native_agent_send: {agent: Agent 'a, f: {current: 'a} -> 'a} -> {} <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
@@ -56,11 +59,12 @@ object AgentTypes {
                     "agent" to agentType,
                     "f" to funcType
                 )),
-                MezzeType.RecordType(emptyMap())
+                MezzeType.RecordType(emptyMap()),
+                effects = asyncEffect
             )
         }
 
-        // __native_agent_send_off: {agent: Agent 'a, f: {current: 'a} -> 'a} -> {}
+        // __native_agent_send_off: {agent: Agent 'a, f: {current: 'a} -> 'a} -> {} <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
@@ -73,11 +77,12 @@ object AgentTypes {
                     "agent" to agentType,
                     "f" to funcType
                 )),
-                MezzeType.RecordType(emptyMap())
+                MezzeType.RecordType(emptyMap()),
+                effects = asyncEffect
             )
         }
 
-        // __native_agent_await: {agent: Agent 'a, timeout_ms: Int} -> Bool
+        // __native_agent_await: {agent: Agent 'a, timeout_ms: Int} -> Bool <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
@@ -86,11 +91,12 @@ object AgentTypes {
                     "agent" to agentType,
                     "timeout_ms" to MezzeType.IntType
                 )),
-                MezzeType.BoolType
+                MezzeType.BoolType,
+                effects = asyncEffect
             )
         }
 
-        // __native_agent_error: {agent: Agent 'a} -> Option String
+        // __native_agent_error: {agent: Agent 'a} -> Option String <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
@@ -105,11 +111,12 @@ object AgentTypes {
                 MezzeType.RecordType(mapOf(
                     "agent" to agentType
                 )),
-                optionStringType
+                optionStringType,
+                effects = asyncEffect
             )
         }
 
-        // __native_agent_restart: {agent: Agent 'a, value: 'a} -> {}
+        // __native_agent_restart: {agent: Agent 'a, value: 'a} -> {} <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
@@ -118,11 +125,12 @@ object AgentTypes {
                     "agent" to agentType,
                     "value" to elementType
                 )),
-                MezzeType.RecordType(emptyMap())
+                MezzeType.RecordType(emptyMap()),
+                effects = asyncEffect
             )
         }
 
-        // __native_agent_set_error_handler: {agent: Agent 'a, handler: {agent: Agent 'a, error: String} -> {}} -> {}
+        // __native_agent_set_error_handler: {agent: Agent 'a, handler: {agent: Agent 'a, error: String} -> {}} -> {} <Async>
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             val agentType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Agent", listOf(elementType))
@@ -138,7 +146,8 @@ object AgentTypes {
                     "agent" to agentType,
                     "handler" to handlerType
                 )),
-                MezzeType.RecordType(emptyMap())
+                MezzeType.RecordType(emptyMap()),
+                effects = asyncEffect
             )
         }
     }

@@ -19,17 +19,19 @@ impl WaitGroup where {
 }
 
 ## Create a new wait group with count 0.
-pub let wait_group : {} -> WaitGroup = {} -> __native_waitgroup_new {}
+pub let wait_group : {} -> WaitGroup <Async> = {} -> __native_waitgroup_new {}
 
 ## Add delta to the counter (positive to register tasks, negative to complete).
-pub let add : { wg: WaitGroup, delta: Int } -> {} = { wg, delta } ->
+pub let add : { wg: WaitGroup, delta: Int } -> {} <Async> = { wg, delta } ->
   __native_waitgroup_add { wg = wg, delta = delta }
 
 ## Decrement the counter by 1 (call when a task completes).
-pub let done : { wg: WaitGroup } -> {} = { wg } -> __native_waitgroup_done { wg = wg }
+pub let done : { wg: WaitGroup } -> {} <Async> = { wg } ->
+  __native_waitgroup_done { wg = wg }
 
 ## Wait until the counter reaches zero.
-pub let wait : { wg: WaitGroup } -> {} = { wg } -> __native_waitgroup_wait { wg = wg }
+pub let wait : { wg: WaitGroup } -> {} <Async> = { wg } ->
+  __native_waitgroup_wait { wg = wg }
 
 ## Park-aware wait: routes through Async.park so the same code works
 ## under LoomAsync and CoopAsync.
@@ -37,9 +39,9 @@ pub let wait_async : { wg: WaitGroup } -> {} <Async, ...> = { wg } ->
   Async.park { predicate = {} -> __native_waitgroup_get_count { wg = wg } == 0 }
 
 ## Wait with timeout. Returns True if counter reached zero, False on timeout.
-pub let wait_timeout : { wg: WaitGroup, ms: Int } -> Bool = { wg, ms } ->
+pub let wait_timeout : { wg: WaitGroup, ms: Int } -> Bool <Async> = { wg, ms } ->
   __native_waitgroup_wait_timeout { wg = wg, ms = ms }
 
 ## Get the current count.
-pub let get_count_wg : { wg: WaitGroup } -> Int = { wg } ->
+pub let get_count_wg : { wg: WaitGroup } -> Int <Async> = { wg } ->
   __native_waitgroup_get_count { wg = wg }

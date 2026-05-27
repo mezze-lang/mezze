@@ -23,23 +23,12 @@ class MutexTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    // Setup code for mutex operations
+    // Post-#170 atom+mutex: every primitive op is <Async>. Tests must
+    // import from stdlib and open a `perform LoomAsync in do` block.
     private val mutexSetup = """
-        newtype Mutex = Mutex __NativeLock
-
-        let mutex: {} -> Mutex = {} -> __native_mutex_new {}
-        let with_lock: {mutex: Mutex, f: {} -> 'a <...>} -> 'a <...> = {mutex, f} -> __native_mutex_with_lock {mutex = mutex, f = f}
-        let lock: {mutex: Mutex} -> {} = {mutex} -> __native_mutex_lock {mutex = mutex}
-        let unlock: {mutex: Mutex} -> {} = {mutex} -> __native_mutex_unlock {mutex = mutex}
-        let try_lock: {mutex: Mutex} -> Bool = {mutex} -> __native_mutex_try_lock {mutex = mutex}
-        let is_held_by_current_thread: {mutex: Mutex} -> Bool = {mutex} -> __native_mutex_is_held_by_current_thread {mutex = mutex}
-    """.trimIndent()
-
-    // Atom setup for shared state tests
-    private val atomSetup = ""
-
-    // Loom primitives for concurrent tests
-    private val loomSetup = """
+        use std::effects::concurrent::mutex::{
+            mutex, lock, unlock, with_lock, try_lock, is_held_by_current_thread
+        }
         use std::effects::concurrent::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
@@ -49,6 +38,9 @@ class MutexTest {
 
         perform LoomAsync in do
     """.trimIndent()
+
+    private val atomSetup = ""
+    private val loomSetup = ""
 
     // =============================================================================
     // Basic Mutex Operations

@@ -22,22 +22,12 @@ class LatchTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    // Setup code for latch operations
+    // Post-#170: all primitive ops are <Async>; tests use stdlib imports
+    // and open a `perform LoomAsync in do` block.
     private val latchSetup = """
-        newtype Latch = Latch __NativeLatch
-
-        let latch: {count: Int} -> Latch = {count} -> __native_latch_new {count = count}
-        let count_down: {latch: Latch} -> {} = {latch} -> __native_latch_count_down {latch = latch}
-        let await_latch: {latch: Latch} -> {} = {latch} -> __native_latch_await {latch = latch}
-        let await_latch_timeout: {latch: Latch, ms: Int} -> Bool = {latch, ms} -> __native_latch_await_timeout {latch = latch, ms = ms}
-        let get_count: {latch: Latch} -> Int = {latch} -> __native_latch_get_count {latch = latch}
-    """.trimIndent()
-
-    // Atom setup for shared state tests
-    private val atomSetup = ""
-
-    // Loom primitives for concurrent tests
-    private val loomSetup = """
+        use std::effects::concurrent::latch::{
+            latch, count_down, await_latch, await_latch_timeout, get_count
+        }
         use std::effects::concurrent::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
@@ -47,6 +37,9 @@ class LatchTest {
 
         perform LoomAsync in do
     """.trimIndent()
+
+    private val atomSetup = ""
+    private val loomSetup = ""
 
     // =============================================================================
     // Basic Latch Operations

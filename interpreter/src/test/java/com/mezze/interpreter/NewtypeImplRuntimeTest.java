@@ -279,9 +279,10 @@ class NewtypeImplRuntimeTest {
         @Test
         void cancellationTokenEqSameReference() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::cancellation::{CancellationToken, token}
-                let t = token {}
-                t == t
+                use std::effects::async::{Async, LoomAsync, CancellationToken, token}
+                perform LoomAsync in do
+                    let t = token {}
+                    t == t
                 """);
             assertEquals(true, result);
         }
@@ -289,10 +290,11 @@ class NewtypeImplRuntimeTest {
         @Test
         void cancellationTokenEqDifferentReferences() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::cancellation::{CancellationToken, token}
-                let t1 = token {}
-                let t2 = token {}
-                t1 == t2
+                use std::effects::async::{Async, LoomAsync, CancellationToken, token}
+                perform LoomAsync in do
+                    let t1 = token {}
+                    let t2 = token {}
+                    t1 == t2
                 """);
             assertEquals(false, result);
         }
@@ -300,10 +302,11 @@ class NewtypeImplRuntimeTest {
         @Test
         void cancellationTokenCancelAndIsCancelledMethods() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::cancellation::{CancellationToken, token}
-                let t = token {}
-                let _ = t.cancel {reason = "done"}
-                t.is_cancelled {}
+                use std::effects::async::{Async, LoomAsync, CancellationToken, token}
+                perform LoomAsync in do
+                    let t = token {}
+                    let _ = t.cancel_token {reason = "done"}
+                    t.is_token_cancelled {}
                 """);
             assertEquals(true, result);
         }
@@ -311,9 +314,10 @@ class NewtypeImplRuntimeTest {
         @Test
         void cancellationTokenNotCancelledInitially() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::cancellation::{CancellationToken, token}
-                let t = token {}
-                t.is_cancelled {}
+                use std::effects::async::{Async, LoomAsync, CancellationToken, token}
+                perform LoomAsync in do
+                    let t = token {}
+                    t.is_token_cancelled {}
                 """);
             assertEquals(false, result);
         }

@@ -25,6 +25,9 @@ class AgentTest {
     fun `test agent creation`() {
         val result = eval("""
             use std::effects::concurrent::agent::{agent, deref_agent}
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
 
             let counter = agent {value = 42}
             deref_agent {agent = counter}
@@ -37,6 +40,9 @@ class AgentTest {
     fun `test agent with record value`() {
         val result = eval("""
             use std::effects::concurrent::agent::{agent, deref_agent}
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
 
             let stats = agent {value = {count = 0, sum = 0}}
             let current = deref_agent {agent = stats}
@@ -52,6 +58,9 @@ class AgentTest {
     fun `test agent send single update`() {
         val result = eval("""
             use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
 
             let counter = agent {value = 0}
             send {agent = counter, f = {current} -> current + 1}
@@ -66,6 +75,9 @@ class AgentTest {
     fun `test agent send multiple updates`() {
         val result = eval("""
             use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
 
             let counter = agent {value = 0}
             send {agent = counter, f = {current} -> current + 1}
@@ -83,6 +95,9 @@ class AgentTest {
         // Each update should see the result of the previous one
         val result = eval("""
             use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
 
             let counter = agent {value = 1}
             send {agent = counter, f = {current} -> current * 2}  # 2
@@ -101,6 +116,9 @@ class AgentTest {
     fun `test agent no error initially`() {
         val result = eval("""
             use std::effects::concurrent::agent::{agent, agent_error}
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
 
             let counter = agent {value = 0}
             agent_error {agent = counter}
@@ -114,6 +132,9 @@ class AgentTest {
     fun `test agent has_error false initially`() {
         val result = eval("""
             use std::effects::concurrent::agent::{agent, has_error}
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
 
             let counter = agent {value = 0}
             has_error {agent = counter}
@@ -128,6 +149,9 @@ class AgentTest {
     fun `test agent await_agent_timeout success`() {
         val result = eval("""
             use std::effects::concurrent::agent::{agent, send, await_agent_timeout}
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
 
             let counter = agent {value = 0}
             send {agent = counter, f = {current} -> current + 1}
@@ -143,6 +167,9 @@ class AgentTest {
     fun `test agent restart sets new value`() {
         val result = eval("""
             use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent, restart_agent}
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
 
             let counter = agent {value = 0}
             send {agent = counter, f = {current} -> current + 10}
@@ -161,6 +188,9 @@ class AgentTest {
     fun `test agent with record value updates`() {
         val result = eval("""
             use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
 
             let stats = agent {value = {count = 0, sum = 0}}
             send {agent = stats, f = {current} -> {count = current.count + 1, sum = current.sum + 10}}
@@ -178,6 +208,9 @@ class AgentTest {
     fun `test agent with string value`() {
         val result = eval("""
             use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
 
             let log = agent {value = "start"}
             send {agent = log, f = {current} -> "updated"}

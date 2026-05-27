@@ -12,15 +12,17 @@ class RepeatedEvalRegressionTest {
 
     private val mutexSource = """
         use std::effects::concurrent::mutex::{ mutex, with_lock }
+        use std::effects::async::{ Async, LoomAsync }
 
-        let m = mutex {}
-        let loop : { n: Int, acc: Int } -> Int = { n, acc } ->
-            if n <= 0 then acc
-            else loop {
-                n = n - 1,
-                acc = with_lock { mutex = m, f = {} -> acc + 1 },
-            }
-        loop { n = 50, acc = 0 }
+        perform LoomAsync in do
+            let m = mutex {}
+            let loop : { n: Int, acc: Int } -> Int <Async, ...> = { n, acc } ->
+                if n <= 0 then acc
+                else loop {
+                    n = n - 1,
+                    acc = with_lock { mutex = m, f = {} -> acc + 1 },
+                }
+            loop { n = 50, acc = 0 }
     """.trimIndent()
 
     @Test

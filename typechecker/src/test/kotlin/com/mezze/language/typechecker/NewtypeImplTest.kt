@@ -326,20 +326,24 @@ class NewtypeImplTest {
         @Test
         fun `CancellationToken has Eq`() {
             checkPasses("""
-                use std::effects::concurrent::cancellation::{CancellationToken, token}
-                let t = token {}
-                let same = t == t
+                use std::effects::async::{Async, LoomAsync, CancellationToken, token}
+                let main = {} -> perform LoomAsync in do
+                    let t = token {}
+                    let same = t == t
+                    same
             """.trimIndent(), "CancellationToken Eq")
         }
 
         @Test
-        fun `CancellationToken cancel and is_cancelled methods`() {
+        fun `CancellationToken cancel_token and is_token_cancelled methods`() {
             checkPasses("""
-                use std::effects::concurrent::cancellation::{CancellationToken, token}
-                let t = token {}
-                let _ = t.cancel {reason = "done"}
-                let cancelled = t.is_cancelled {}
-            """.trimIndent(), "CancellationToken .cancel/.is_cancelled")
+                use std::effects::async::{Async, LoomAsync, CancellationToken, token}
+                let main = {} -> perform LoomAsync in do
+                    let t = token {}
+                    let _ = t.cancel_token {reason = "done"}
+                    let cancelled = t.is_token_cancelled {}
+                    cancelled
+            """.trimIndent(), "CancellationToken .cancel_token/.is_token_cancelled")
         }
     }
 
