@@ -241,21 +241,26 @@ class MezzeParser {
         while (current.current()?.type != TokenType.EOF) {
             val token = current.current() ?: break
 
-            // If we hit a newline followed by a declaration keyword, we've found a sync point
+            // Only consider keywords at COLUMN 1 as top-level declaration boundaries.
+            // Without this, a recovery from a lambda-body parse error (e.g. P0121's
+            // `{p} -> let x = p + 1`) would re-enter parsing at the indented `let x = ...`
+            // and successfully parse it as a new top-level decl — surfacing a cascading
+            // V0702 "Undefined p" error against the indented body. Top-level decls in
+            // Mezze always start at column 1; indented `let`/`use`/etc. are bodies.
             if (token.type == TokenType.NEWLINE) {
                 val afterNewline = skipNewlines(current)
                 val nextToken = afterNewline.current()
 
-                if (nextToken != null && isDeclarationStart(nextToken.type)) {
+                if (nextToken != null &&
+                    isDeclarationStart(nextToken.type) &&
+                    nextToken.column == 1) {
                     return afterNewline
                 }
             }
 
-            // Also sync if we directly hit a declaration keyword at start of line
-            // (after skipping bad tokens)
-            if (isDeclarationStart(token.type)) {
-                // Check if this looks like a fresh declaration (not in middle of expression)
-                // Heuristic: if previous was newline or we've skipped several tokens
+            // Also sync if we directly hit a declaration keyword at column 1
+            // (after skipping bad tokens within a broken inner scope).
+            if (isDeclarationStart(token.type) && token.column == 1) {
                 return current
             }
 

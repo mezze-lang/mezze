@@ -1250,6 +1250,43 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
             is ParseResult.Success -> {
                 val matchTok = matchToken.value
                 val stream1 = skipNewlines(matchToken.remaining)
+
+                // Pre-scan for the Rust/Swift-style `match x case ...` shape.
+                // Without this, the inner expression parser eats `x case` as a
+                // juxtaposed function call and surfaces P0118 ("Function calls
+                // must use {} syntax") pointing at `case`, which is misleading.
+                // Only the `case` form is detected here — a bare `{` after the
+                // scrutinee is too ambiguous with legitimate function-call
+                // scrutinees like `match f { x = 1 } is …` and the existing
+                // post-`is` P0122 hint catches the `match x { pattern -> ... }`
+                // shape via the inner case parser failing.
+                run {
+                    val first = stream1.current()
+                    if (first?.type == TokenType.IDENTIFIER) {
+                        val streamAfter = stream1.advance()
+                        val afterScrutinee = streamAfter.current()
+                        val isCase = afterScrutinee?.type == TokenType.IDENTIFIER &&
+                            afterScrutinee.text == "case"
+                        if (isCase) {
+                            throw createParseException(
+                                "Expected `is` after the match expression. " +
+                                    "Mezze match syntax does NOT use a `case` keyword — " +
+                                    "write `match x is` and put each arm indented on its own line: " +
+                                    "`pattern -> body`.",
+                                streamAfter,
+                                currentSource,
+                                currentFile,
+                                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0122_MATCH_NEEDS_IS,
+                                hints = listOf(
+                                    "rewrite as: `match x is`",
+                                    "  Pattern1 -> result1",
+                                    "  Pattern2 -> result2",
+                                ),
+                            )
+                        }
+                    }
+                }
+
                 val expr = expression(stream1)
 
                 when (expr) {
