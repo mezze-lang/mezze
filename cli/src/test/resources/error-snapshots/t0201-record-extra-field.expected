@@ -1,4 +1,4 @@
-error[T0201]: Type mismatch for argument 'r' in call to 'take': expected {r: {x: Int}} -> Int but got {r: {x: Int, y: Int}} -> 'a — unexpected 'y'
+error[T0201]: Type mismatch for argument 'r' in call to 'take': expected {r: {x: Int}} -> Int but got {r: {x: Int, y: Int}} -> Int — unexpected 'y'
   --> t0201-record-extra-field.mz:2:16
    |
  1 | let take = { r: { x: Int } } -> r.x

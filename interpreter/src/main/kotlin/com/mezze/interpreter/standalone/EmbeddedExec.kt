@@ -28,6 +28,29 @@ object EmbeddedExec {
         val embedded = com.mezze.interpreter.standalone.EmbeddedApp
         check(embedded.present) { "EmbeddedExec.run called but EmbeddedApp.present is false" }
 
+        // Strict-mode stdlib check (#202). In a user binary the snapshot
+        // is the only correct fast-path: SQLite isn't shipped, source
+        // recompile would be O(seconds) and depends on stdlib sources
+        // existing on disk. Fail loud now rather than letting the user
+        // app drift into the slow path silently.
+        //
+        // Override with MEZZE_STDLIB_NONSTRICT=1 for debugging.
+        val nonStrict = System.getenv("MEZZE_STDLIB_NONSTRICT")?.let {
+            it == "1" || it.equals("true", ignoreCase = true)
+        } ?: false
+        if (!nonStrict &&
+            !com.mezze.language.typechecker.StdlibSnapshotData.present) {
+            System.err.println(
+                "Error: built-in stdlib snapshot is missing or failed to decode.\n" +
+                "  This binary was built without a working stdlib-snapshot.cbor,\n" +
+                "  or the resource was corrupted during packaging.\n" +
+                "  Rebuild with `mez build --native` against a fresh stdlib jar.\n" +
+                "  To bypass and use the slow source-compile path, set\n" +
+                "  MEZZE_STDLIB_NONSTRICT=1 (intended only for diagnostics)."
+            )
+            kotlin.system.exitProcess(70) // EX_SOFTWARE
+        }
+
         executeWithTruffle(
             functions = embedded.functions,
             performers = embedded.performerRecords,

@@ -46,6 +46,15 @@ object StdlibSnapshotData {
         // Read + decode the bundled CBOR resource. Wrapped in try/catch
         // because missing resources are a normal "older build" state —
         // we fall back to the SQLite path in PrecompiledStdlib.
+        //
+        // Distinguish three states:
+        //   resource missing → silent null (older build, dev mode).
+        //   resource present + version mismatch → silent null (rebuild
+        //     pending, already-warned-elsewhere via PrecompiledStdlib).
+        //   resource present + decode threw → ALWAYS emit a one-line
+        //     warning (not gated on MEZZE_DEBUG) so a silent ~1.5s perf
+        //     regression doesn't hide a real data-format break. Full
+        //     stacktrace stays gated. See task #203 + #201.
         val decoded: StdlibSnapshot? = try {
             val cl = StdlibSnapshotData::class.java.classLoader
             val stream = cl.getResourceAsStream(StdlibSnapshot.RESOURCE_PATH)
@@ -57,10 +66,13 @@ object StdlibSnapshotData {
                 if (snapshot.version != StdlibSnapshot.CURRENT_VERSION) null else snapshot
             }
         } catch (e: Exception) {
+            System.err.println(
+                "[mezze] stdlib snapshot decode failed (${e.javaClass.simpleName}): " +
+                "${e.message ?: "<no message>"} — falling back to source/SQLite compile " +
+                "(slower boot). Set MEZZE_DEBUG=1 for full stacktrace."
+            )
             if (System.getenv("MEZZE_DEBUG") != null) {
-                System.err.println(
-                    "[StdlibSnapshotData] decode failed (${e.javaClass.simpleName}): ${e.message}"
-                )
+                e.printStackTrace(System.err)
             }
             null
         }
