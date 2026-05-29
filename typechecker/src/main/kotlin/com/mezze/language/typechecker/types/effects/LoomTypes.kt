@@ -46,16 +46,6 @@ object LoomTypes {
             )
         }
 
-        // __native_loom_spawn_cfg: {f: {} -> 'a <...>, max_concurrent: Int} -> Promise 'a
-        // The f parameter accepts any effects (<...>)
-        context["__native_loom_spawn_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "f" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-                "max_concurrent" to MezzeType.IntType
-            )),
-            promiseType
-        )
-
         // __native_loom_await: {p: Promise 'a} -> 'a
         context["__native_loom_await"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
@@ -64,80 +54,12 @@ object LoomTypes {
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
         )
 
-        // __native_loom_spawn_all: {fs: [{} -> 'a <...>]} -> ['a] <Concurrency>
-        // Bare-call wrapper from `concurrency.all` declares <Concurrency>, so the
-        // native must too — same pattern as STM's read_all/write_all (#310).
-        context["__native_loom_spawn_all"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "fs" to MezzeType.SeqType(effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
-            )),
-            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-            MezzeType.EffectRow(effects = setOf("Concurrency"))
-        )
-
-        // __native_loom_spawn_race: {fs: [{} -> 'a <...>]} -> 'a
-        // Spawns all computations on virtual threads and returns first result
-        // The fs parameter accepts functions with any effects
-        context["__native_loom_spawn_race"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "fs" to MezzeType.SeqType(effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
-            )),
-            MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-        )
-
-        // __native_loom_race: {ps: [Promise 'a]} -> Result 'a AsyncError
-        val raceAsyncErrorType = MezzeType.VarType(com.mezze.language.ast.TypeVar("AsyncError"))
-        val raceResultType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(
-            MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
-            raceAsyncErrorType
-        ))
-        context["__native_loom_race"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.SeqType(promiseType)
-            )),
-            raceResultType
-        )
-
-        // __native_loom_all: {ps: [Promise 'a]} -> ['a]
-        context["__native_loom_all"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.SeqType(promiseType)
-            )),
-            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
-        )
-
-        // __native_loom_timeout: {ms: Int, p: Promise 'a} -> Option 'a
-        val optionType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
-        context["__native_loom_timeout"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "ms" to MezzeType.IntType,
-                "p" to promiseType
-            )),
-            optionType
-        )
-
-        // __native_loom_cancel: {p: Promise 'a} -> {}
-        context["__native_loom_cancel"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "p" to promiseType
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
-
         // __native_loom_sleep: {ms: Int} -> {}
         context["__native_loom_sleep"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "ms" to MezzeType.IntType
             )),
             MezzeType.RecordType(emptyMap())
-        )
-
-        // __native_loom_is_done: {p: Promise 'a} -> Bool
-        context["__native_loom_is_done"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "p" to promiseType
-            )),
-            MezzeType.BoolType
         )
 
         // __native_loom_is_cancelled: {} -> Bool
@@ -168,116 +90,12 @@ object LoomTypes {
             MezzeType.BoolType
         )
 
-        // === Structured Concurrency ===
-
-        // Result 'x AsyncError helper for join* return shapes.
-        val joinAsyncErrorType = MezzeType.VarType(com.mezze.language.ast.TypeVar("AsyncError"))
-        fun resultOf(elemType: MezzeType): MezzeType =
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(elemType, joinAsyncErrorType))
-
-        // __native_loom_join: {l: {} -> 'a <...>, r: {} -> 'b <...>}
-        //   -> {l: Result 'a AsyncError, r: Result 'b AsyncError}
-        context["__native_loom_join"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "l" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-                "r" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
-            )),
-            MezzeType.RecordType(mapOf(
-                "l" to resultOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-                "r" to resultOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
-            ))
-        )
-
-        // __native_loom_join3: {a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...>}
-        //   -> {a: Result 'a AsyncError, b: Result 'b AsyncError, c: Result 'c AsyncError}
-        context["__native_loom_join3"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "a" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-                "b" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))),
-                "c" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("c")))
-            )),
-            MezzeType.RecordType(mapOf(
-                "a" to resultOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-                "b" to resultOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))),
-                "c" to resultOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("c")))
-            ))
-        )
-
-        // === Collection Operations ===
-
-        // Helper: Create an effect-polymorphic function type {x: 'a} -> 'b <...>
-        fun effectPolymorphicMapper(inputType: MezzeType, outputType: MezzeType): MezzeType.FunctionType {
-            return MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("x" to inputType)),
-                outputType,
-                effects = MezzeType.EffectRow.simple(emptySet<String>(), RowVar.fresh(), performed = false)
-            )
-        }
-
-        // __native_loom_map: {xs: ['a], f: {x: 'a} -> 'b <...>} -> ['b]
-        // The f parameter accepts any effects (<...>)
-        context["__native_loom_map"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-                "f" to effectPolymorphicMapper(
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
-                )
-            )),
-            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
-        )
-
-        // __native_loom_for_each: {xs: ['a], f: {x: 'a} -> {} <...>} -> {}
-        // The f parameter accepts any effects (<...>)
-        context["__native_loom_for_each"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-                "f" to effectPolymorphicMapper(
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
-                    MezzeType.RecordType(emptyMap())
-                )
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
-
-        // __native_loom_filter: {xs: ['a], f: {x: 'a} -> Bool <...>} -> ['a]
-        // The f parameter accepts any effects (<...>)
-        context["__native_loom_filter"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-                "f" to effectPolymorphicMapper(
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
-                    MezzeType.BoolType
-                )
-            )),
-            MezzeType.SeqType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
-        )
-
-        // === Error Handling ===
-
-        // __native_loom_any: {ps: [Promise 'a]} -> 'a
-        context["__native_loom_any"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.SeqType(promiseType)
-            )),
-            MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-        )
-
-        // __native_loom_settle: {ps: [Promise 'a]} -> [Result 'a AsyncError]
-        // AsyncError is a variant: Failed {message: String} | Cancelled | TimedOut {ms: Int}
+        // === Promise-value natives (#117/#118/#123) ===
         val asyncErrorType = MezzeType.VarType(com.mezze.language.ast.TypeVar("AsyncError"))
         val resultType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
             asyncErrorType
         ))
-        context["__native_loom_settle"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "ps" to MezzeType.SeqType(promiseType)
-            )),
-            MezzeType.SeqType(resultType)
-        )
-
-        // === Promise-value natives (#117/#118/#123) ===
         // PromiseState 'a — variant: Pending | Completed{val: 'a} | Failed{err: AsyncError}
         val promiseStateType = MezzeType.VarType(com.mezze.language.ast.TypeVar("PromiseState"))
         // CancelOutcome — Cancelled | AlreadyCompleted | AlreadyFailed | NotCancellable

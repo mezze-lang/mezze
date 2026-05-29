@@ -2485,14 +2485,7 @@ public final class NativeDispatch extends MezzeNode {
         // === Loom (Virtual Threads) - scales to millions ===
         // Operations that need TruffleContext for cross-thread execution use HANDLERS_WITH_NODE
         HANDLERS_WITH_NODE.put("__native_loom_spawn", (r, c, n) -> AsyncNatives.loomSpawn(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_loom_spawn_cfg", (r, c, n) -> AsyncNatives.loomSpawnCfg(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_loom_spawn_all", (r, c, n) -> AsyncNatives.loomSpawnAll(r, c, n));
         HANDLERS_WITH_NODE.put("__native_loom_spawn_tracked", (r, c, n) -> AsyncNatives.loomSpawnTracked(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_loom_join", (r, c, n) -> AsyncNatives.loomJoin(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_loom_join3", (r, c, n) -> AsyncNatives.loomJoin3(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_loom_map", (r, c, n) -> AsyncNatives.loomMap(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_loom_for_each", (r, c, n) -> AsyncNatives.loomForEach(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_loom_filter", (r, c, n) -> AsyncNatives.loomFilter(r, c, n));
         HANDLERS_WITH_NODE.put("__native_loom_scoped", (r, c, n) -> AsyncNatives.loomScoped(r, c, n));
         HANDLERS_WITH_NODE.put("__native_loom_scope_spawn", (r, c, n) -> AsyncNatives.loomScopeSpawn(r, c, n));
 
@@ -2502,17 +2495,10 @@ public final class NativeDispatch extends MezzeNode {
 
         // Simple operations that don't spawn threads use regular HANDLERS
         HANDLERS.put("__native_loom_await", (r, c) -> AsyncNatives.loomAwait(r));
-        HANDLERS.put("__native_loom_race", (r, c) -> AsyncNatives.loomRace(r));
-        HANDLERS.put("__native_loom_all", (r, c) -> AsyncNatives.loomAll(r));
-        HANDLERS.put("__native_loom_timeout", (r, c) -> AsyncNatives.loomTimeout(r));
-        HANDLERS.put("__native_loom_cancel", (r, c) -> AsyncNatives.loomCancel(r));
         HANDLERS.put("__native_loom_sleep", (r, c) -> AsyncNatives.loomSleep(r));
-        HANDLERS.put("__native_loom_is_done", (r, c) -> AsyncNatives.loomIsDone(r));
         HANDLERS.put("__native_loom_is_cancelled", (r, c) -> AsyncNatives.loomIsCancelled(r));
         HANDLERS.put("__native_loom_check", (r, c) -> AsyncNatives.loomCheck(r));
         HANDLERS.put("__native_loom_park_until", (r, c) -> AsyncNatives.loomParkUntil(r, c));
-        HANDLERS.put("__native_loom_any", (r, c) -> AsyncNatives.loomAny(r));
-        HANDLERS.put("__native_loom_settle", (r, c) -> AsyncNatives.loomSettle(r));
         HANDLERS.put("__native_loom_scope_cancel_all", (r, c) -> AsyncNatives.loomScopeCancelAll(r));
         HANDLERS.put("__native_loom_scope_is_cancelled", (r, c) -> AsyncNatives.loomScopeIsCancelled(r));
         HANDLERS.put("__native_loom_scope_get_token", (r, c) -> AsyncNatives.loomScopeGetToken(r));
@@ -2528,16 +2514,10 @@ public final class NativeDispatch extends MezzeNode {
 
         // === OS Threads - true parallelism, limited scale ===
         // Only ops that genuinely create platform threads keep their own
-        // natives. Stateless ops (await/race/all/etc.) operate on
-        // MezzePromise values that carry their own thread reference; the
-        // OS impls route those to __native_loom_* (see async.mz).
-        HANDLERS_WITH_NODE.put("__native_os_spawn_cfg", (r, c, n) -> AsyncNatives.osSpawnCfg(r, c, n));
+        // natives. Stateless ops (await/race/all/etc.) and parallel
+        // collection ops are now pure-Mezze in stdlib/std/effects/async.mz,
+        // dispatching to __native_loom_* against MezzePromise values.
         HANDLERS_WITH_NODE.put("__native_os_spawn_tracked", (r, c, n) -> AsyncNatives.osSpawnTracked(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_os_join", (r, c, n) -> AsyncNatives.osJoin(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_os_join3", (r, c, n) -> AsyncNatives.osJoin3(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_os_map", (r, c, n) -> AsyncNatives.osMap(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_os_for_each", (r, c, n) -> AsyncNatives.osForEach(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_os_filter", (r, c, n) -> AsyncNatives.osFilter(r, c, n));
 
         // OS thread scope lifecycle (scoped effects)
         HANDLERS.put("__native_os_init_scope", (r, c) -> AsyncNatives.osInitScope(r));
