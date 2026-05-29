@@ -88,20 +88,49 @@ object EmbeddedExec {
         // is on the classpath; engine.Compilation defaults to true). Users
         // can disable with MEZZE_JIT=0 if a startup-sensitive workload
         // prefers interpreter-only.
-        val jitDisabled = System.getenv("MEZZE_JIT")?.let {
+        val jitRequestedOff = System.getenv("MEZZE_JIT")?.let {
             it == "0" || it.equals("false", ignoreCase = true)
         } ?: false
+        // Detect whether we're running on the JIT-capable Truffle runtime
+        // (HotSpotTruffleRuntime) or the interpreter-only fallback
+        // (DefaultTruffleRuntime — used in native-image builds where Graal
+        // partial evaluation isn't available). On the latter,
+        // `engine.Compilation` is not a recognized option and trying to
+        // set it throws "Could not find option with name engine.Compilation"
+        // before we even start running user code. Treat MEZZE_JIT=0 as a
+        // no-op there with a warning: JIT was never available anyway, so
+        // there's nothing to switch off. (#195)
+        val jitCapable = try {
+            val rt = com.oracle.truffle.api.Truffle.getRuntime()
+            // DefaultTruffleRuntime is the pure-interpreter fallback;
+            // anything else (HotSpotTruffleRuntime in JVM mode) is JIT-capable.
+            !rt.javaClass.name.endsWith("DefaultTruffleRuntime")
+        } catch (_: Throwable) { true }
+        val jitDisabled = jitRequestedOff && jitCapable
+        if (jitRequestedOff && !jitCapable) {
+            System.err.println(
+                "[mezze] MEZZE_JIT=0 ignored — this binary is interpreter-only " +
+                "(no Truffle JIT available). No-op."
+            )
+        }
         // MEZZE_TRACE_COMPILATION=1 surfaces Truffle's "function X
         // compiled" log lines — the cleanest yes/no for whether JIT
         // is actually running in this binary.
         val traceCompilation = System.getenv("MEZZE_TRACE_COMPILATION")?.let {
             it == "1" || it.equals("true", ignoreCase = true)
         } ?: false
+        val traceRequestedOnButNotCapable = traceCompilation && !jitCapable
+        if (traceRequestedOnButNotCapable) {
+            System.err.println(
+                "[mezze] MEZZE_TRACE_COMPILATION=1 ignored — this binary is " +
+                "interpreter-only (no compilation events to trace). No-op."
+            )
+        }
         val engineBuilder = Engine.newBuilder()
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
             .apply { if (jitDisabled) option("engine.Compilation", "false") }
-            .apply { if (traceCompilation) option("engine.TraceCompilation", "true") }
+            .apply { if (traceCompilation && jitCapable) option("engine.TraceCompilation", "true") }
 
         val profile = args.contains("--profile")
         val coverage = args.contains("--coverage")
@@ -148,7 +177,14 @@ object EmbeddedExec {
         }
 
         val engine = engineBuilder.build()
-        mark("Engine built (JIT ${if (jitDisabled) "OFF" else "ON"})")
+        // Three states: JIT capable + requested on, JIT capable + requested off,
+        // JIT unavailable (native).
+        val jitState = when {
+            !jitCapable -> "N/A (interpreter-only runtime)"
+            jitDisabled -> "OFF (MEZZE_JIT=0)"
+            else -> "ON"
+        }
+        mark("Engine built (JIT $jitState)")
         // Ground truth for "does this binary JIT?".
         //   HotSpotTruffleRuntime → JIT via Graal partial evaluation
         //   DefaultTruffleRuntime → pure interpreter
