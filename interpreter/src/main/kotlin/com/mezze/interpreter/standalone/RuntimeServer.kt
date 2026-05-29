@@ -18,6 +18,8 @@ import com.mezze.wire.Interrupt
 import com.mezze.wire.Load
 import com.mezze.wire.Loaded
 import com.mezze.wire.MessageType
+import com.mezze.wire.PasswordReply
+import com.mezze.wire.PasswordRequest
 import com.mezze.wire.Ping
 import com.mezze.wire.Pong
 import com.mezze.wire.ProtocolError
@@ -28,12 +30,17 @@ import com.mezze.wire.Started
 import com.mezze.wire.StatusReply
 import com.mezze.wire.StatusReq
 import com.mezze.wire.StderrData
+import com.mezze.wire.StdinData
+import com.mezze.wire.StdinEof
+import com.mezze.wire.StdinRequest
 import com.mezze.wire.StdoutData
 import com.mezze.wire.Welcome
 import com.mezze.wire.WireFrame
 import com.mezze.wire.WireFrameCodec
 import com.mezze.wire.WireProtocol
 import com.mezze.wire.WireProtocolException
+import com.mezze.interpreter.nodes.builtin.effects.StdinNatives
+import com.mezze.interpreter.standalone.wire.WireStdinBuffer
 import com.mezze.language.store.StoreSerialization
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.typedast.Hash
@@ -78,10 +85,12 @@ object RuntimeServer {
 
     /** Capabilities this server advertises in [Welcome]. */
     private val ADVERTISED_CAPABILITIES = listOf(
-        "core",
-        "exit_code",
-        "interrupt",
-        "structured_errors",
+        WireProtocol.Capability.CORE,
+        WireProtocol.Capability.EXIT_CODE,
+        WireProtocol.Capability.INTERRUPT,
+        WireProtocol.Capability.STRUCTURED_ERRORS,
+        WireProtocol.Capability.STDIN,
+        WireProtocol.Capability.STDERR_FRAMES,
     )
 
     @JvmStatic
@@ -181,22 +190,58 @@ object RuntimeServer {
         val diag: PrintStream = if (System.getenv("MEZZE_DEBUG") != null) originalStderr
                                 else PrintStream(java.io.OutputStream.nullOutputStream())
 
+        // Wire stdin: buffer that the dispatch loop feeds from STDIN_DATA
+        // frames, exposed to StdinNatives as an InputStream. The
+        // first-read callback sends STDIN_REQUEST so the parent knows to
+        // start forwarding user-stdin bytes.
+        val stdinBuffer = WireStdinBuffer()
+        StdinNatives.installWireStreams(stdinBuffer.asInputStream()) {
+            try {
+                send(WireFrame.of(MessageType.STDIN_REQUEST, StdinRequest(runId = runIdCarrier.get())))
+            } catch (_: Exception) {
+                // best-effort; if the wire is broken the read will simply EOF
+            }
+        }
+        state.stdinBuffer = stdinBuffer
+
+        // Wire password reader: parent owns the real terminal, so password
+        // reads must round-trip via PASSWORD_REQUEST / PASSWORD_REPLY. We
+        // block the eval thread on the reply queue; the dispatch loop
+        // unblocks it when the parent's PASSWORD_REPLY arrives.
+        StdinNatives.installWirePasswordReader {
+            try {
+                // Drop any stale reply from a prior cancelled request before
+                // sending fresh PASSWORD_REQUEST — defensive against bugs in
+                // the parent that double-replied.
+                state.passwordReplies.clear()
+                send(WireFrame.of(MessageType.PASSWORD_REQUEST,
+                    PasswordRequest(runId = runIdCarrier.get())))
+                // Block until the dispatch loop hands us the reply.
+                state.passwordReplies.take().value
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                null
+            } catch (_: Exception) {
+                // Wire broken or framing error: treat as EOF for the user.
+                null
+            }
+        }
+
         try {
             handshake(controlIn, ::send, diag)
-            // Redirect System.out (used by Mezze's println native) to the
-            // wire so user output arrives at the parent as STDOUT_DATA
+            // Redirect System.out / System.err to the wire so all user
+            // output arrives at the parent as STDOUT_DATA / STDERR_DATA
             // frames. Done late — after engine/context init and after
             // handshake — so tool init warnings (cpusampler, inspect)
-            // and the dev-flag announce can write to the terminal via
-            // the original fd 2 without becoming out-of-band wire frames.
+            // and the dev-flag announce can write to the *real* terminal
+            // via `originalStderr` without becoming out-of-band wire frames.
             //
-            // Stderr stays inherited: user code's stderr writes and any
-            // runtime diagnostic land on the user's terminal directly.
-            // No need for STDERR_DATA frames — the framed protocol is
-            // for control channel + user stdout (which we sometimes
-            // want to capture/redirect downstream). Stderr is just for
-            // human consumption.
+            // The parent re-emits STDOUT_DATA → its own stdout and
+            // STDERR_DATA → its own stderr, preserving the user's
+            // expectation that `Log.print` writes to stdout and
+            // panics/exceptions land on stderr.
             System.setOut(wireOut)
+            System.setErr(wireErr)
             dispatchLoop(controlIn, ::send, state, diag)
         } catch (e: WireProtocolException) {
             // Framing-level failure — best-effort report then exit. Always
@@ -226,6 +271,11 @@ object RuntimeServer {
             throw WireProtocolException("PROTO_STATE_INVALID", "expected HELLO first, got ${first.type}")
         }
         val hello = first.decode<Hello>()
+        // Capture parent's TTY/terminal snapshot so the child's
+        // `is_tty` etc. natives can serve it without OS access. The
+        // child's fd 0 is the wire, not a real TTY, so without this
+        // info `is_tty` would always return false.
+        StdinNatives.setWireIsTty(hello.isattyStdin, hello.isattyStdout, hello.isattyStderr)
         // Version negotiation. Major mismatch is fatal; minor mismatch
         // uses the lower version's vocabulary.
         if (hello.versionMajor != WireProtocol.PROTOCOL_VERSION_MAJOR) {
@@ -258,34 +308,68 @@ object RuntimeServer {
         state: ServerState,
         diag: PrintStream,
     ) {
-        while (true) {
-            val frame = try {
-                WireFrameCodec.read(input) ?: return  // EOF — parent closed, leave quietly
-            } catch (e: WireProtocolException) {
-                tryWriteProtocolError(send, e.code, e.message ?: "decode error")
-                continue
+        // Dedicated worker for LOAD-triggered evals. The dispatch loop
+        // MUST stay free to read frames concurrently with eval — otherwise
+        // STDIN_DATA / INTERRUPT / EVICT frames would buffer on the wire
+        // until eval returned, which means stdin reads would deadlock.
+        // Single-thread executor enforces "one active run at a time" (v1).
+        val evalWorker = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "mez-runtime-eval").apply { isDaemon = true }
+        }
+        try {
+            while (true) {
+                val frame = try {
+                    WireFrameCodec.read(input) ?: return  // EOF — parent closed, leave quietly
+                } catch (e: WireProtocolException) {
+                    tryWriteProtocolError(send, e.code, e.message ?: "decode error")
+                    continue
+                }
+                when (frame.type) {
+                    MessageType.QUIT -> {
+                        val q = frame.decode<Quit>()
+                        diag.println("[RuntimeServer] QUIT (${q.reason})")
+                        return
+                    }
+                    MessageType.EVICT -> handleEvict(frame.decode())
+                    MessageType.LOAD -> {
+                        val load = frame.decode<Load>()
+                        // Hand off to worker so we can keep reading frames
+                        // (including STDIN_DATA, INTERRUPT) concurrently.
+                        evalWorker.submit { handleLoad(load, state, send) }
+                    }
+                    MessageType.PING -> send(WireFrame.of(MessageType.PONG, Pong()))
+                    MessageType.STATUS -> send(WireFrame.of(MessageType.STATUS_REPLY, state.snapshotStatus()))
+                    MessageType.INTERRUPT -> handleInterrupt(frame.decode(), state, diag)
+                    MessageType.CONFIG -> handleConfig(frame.decode(), send)
+                    MessageType.STDIN_DATA -> {
+                        val data = frame.decode<StdinData>()
+                        state.stdinBuffer?.push(data.bytes)
+                    }
+                    MessageType.STDIN_EOF -> {
+                        state.stdinBuffer?.pushEof()
+                    }
+                    MessageType.PASSWORD_REPLY -> {
+                        // Hand off to the eval thread that's blocked in
+                        // wirePasswordReader.get(). offer is non-blocking
+                        // (capacity 1, slot is empty by contract since the
+                        // requester drained before sending PASSWORD_REQUEST).
+                        state.passwordReplies.offer(frame.decode<PasswordReply>())
+                    }
+                    MessageType.HELLO -> {
+                        tryWriteProtocolError(send, "PROTO_STATE_INVALID", "duplicate HELLO after handshake")
+                    }
+                    else -> {
+                        // Unknown-in-this-version or capability-gated commands
+                        // (EVAL, REF_GET, ATTACH_REQUEST, …). Reject cleanly.
+                        tryWriteProtocolError(send, "PROTO_STATE_INVALID", "unsupported in v1 server: ${frame.type}")
+                    }
+                }
             }
-            when (frame.type) {
-                MessageType.QUIT -> {
-                    val q = frame.decode<Quit>()
-                    diag.println("[RuntimeServer] QUIT (${q.reason})")
-                    return
-                }
-                MessageType.EVICT -> handleEvict(frame.decode())
-                MessageType.LOAD -> handleLoad(frame.decode(), state, send)
-                MessageType.PING -> send(WireFrame.of(MessageType.PONG, Pong()))
-                MessageType.STATUS -> send(WireFrame.of(MessageType.STATUS_REPLY, state.snapshotStatus()))
-                MessageType.INTERRUPT -> handleInterrupt(frame.decode(), state, diag)
-                MessageType.CONFIG -> handleConfig(frame.decode(), send)
-                MessageType.HELLO -> {
-                    tryWriteProtocolError(send, "PROTO_STATE_INVALID", "duplicate HELLO after handshake")
-                }
-                else -> {
-                    // Unknown-in-this-version or capability-gated commands
-                    // (EVAL, REF_GET, ATTACH_REQUEST, …). Reject cleanly.
-                    tryWriteProtocolError(send, "PROTO_STATE_INVALID", "unsupported in v1 server: ${frame.type}")
-                }
-            }
+        } finally {
+            // Best-effort shutdown of the eval worker. If a run is in
+            // progress when we exit (e.g. parent closed mid-run), it's
+            // already going to die with the process anyway.
+            evalWorker.shutdownNow()
         }
     }
 
@@ -354,6 +438,27 @@ object RuntimeServer {
         send(WireFrame.of(MessageType.STARTED, Started(runId = runId)))
         state.runStarted(runId)
 
+        // Reset stdin: drop any buffered bytes / EOF from a previous run,
+        // and re-arm the demand-request flag so the first stdin read in
+        // this run triggers a fresh STDIN_REQUEST to the parent.
+        state.stdinBuffer?.reset()
+        StdinNatives.resetRequestFlag()
+
+        // Install per-run process surface from the LOAD payload. Null fields
+        // mean parent didn't ship them; child falls back to JVM-inherited
+        // values. Refreshed per LOAD so dev-mode reload picks up cwd/env
+        // changes between saves.
+        com.mezze.interpreter.nodes.builtin.effects.EnvironmentNatives.setWireArgv(
+            load.argv?.toTypedArray()
+        )
+        if (load.cwd != null) {
+            System.setProperty("user.dir", load.cwd)
+        }
+        // env: per-key System.setProperty (Java doesn't expose a mutable
+        // env API). Only consulted by env-style natives; doesn't affect
+        // sub-processes the user might spawn.
+        load.env?.forEach { (k, v) -> System.setProperty(k, v) }
+
         val source = Source.newBuilder(
             MezzeLanguage.ID,
             "# RuntimeServer $runId",
@@ -411,6 +516,11 @@ object RuntimeServer {
         reason: String,
         detail: ExitDetail?,
     ) {
+        // Flush any pending user output before announcing EXITED so the
+        // last line of stdout/stderr can't race with the exit-status arrival
+        // at the parent. PrintStream.flush is idempotent and cheap.
+        try { System.out.flush() } catch (_: Exception) {}
+        try { System.err.flush() } catch (_: Exception) {}
         val runId = state.activeRunId ?: 0L
         send(WireFrame.of(MessageType.EXITED, Exited(runId = runId, code = code, reason = reason, detail = detail)))
     }
@@ -475,6 +585,17 @@ private class ServerState(
     @Volatile var activeRunId: Long? = null
         private set
     @Volatile private var interrupting: Boolean = false
+    /** Wire-fed stdin buffer; reset between runs. */
+    var stdinBuffer: WireStdinBuffer? = null
+    /**
+     * Single-slot rendezvous for the password round-trip. Holds the parent's
+     * reply (PasswordReply: string or null = EOF/cancelled) for one
+     * outstanding PASSWORD_REQUEST. Capacity 1 so the dispatch loop's offer
+     * never blocks even if no reader is waiting (a stale reply would be
+     * dropped by clear() at the next request anyway).
+     */
+    val passwordReplies: java.util.concurrent.ArrayBlockingQueue<PasswordReply> =
+        java.util.concurrent.ArrayBlockingQueue(1)
 
     fun nextRunId(): Long = runIdCarrier.incrementAndGet()
 

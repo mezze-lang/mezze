@@ -56,10 +56,12 @@ object WireRunner {
 
     /** Capabilities the parent claims. Negotiated with server's set. */
     internal val ADVERTISED_CAPABILITIES = listOf(
-        "core",
-        "exit_code",
-        "interrupt",
-        "structured_errors",
+        WireProtocol.Capability.CORE,
+        WireProtocol.Capability.EXIT_CODE,
+        WireProtocol.Capability.INTERRUPT,
+        WireProtocol.Capability.STRUCTURED_ERRORS,
+        WireProtocol.Capability.STDIN,
+        WireProtocol.Capability.STDERR_FRAMES,
     )
 
     /** Per-compile output we need to ship to RuntimeServer. */
@@ -85,6 +87,7 @@ object WireRunner {
         modulePath: String,
         appName: String,
         devFlags: List<String> = emptyList(),
+        appArgs: List<String> = emptyList(),
     ): Int {
         val timing = System.getenv("MEZZE_TIMING") != null
         val t0 = System.nanoTime()
@@ -100,7 +103,7 @@ object WireRunner {
 
         val session = WireSession.start(currentDir, timing, t0, devFlags) ?: return 1
         return try {
-            val outcome = session.runOnce(compile)
+            val outcome = session.runOnce(compile, appArgs = appArgs)
             outcome.exitCode
         } finally {
             session.close()
@@ -121,13 +124,12 @@ object WireRunner {
      *     modules start being watched. Edits to deeply-imported files
      *     trigger reload, same as the entry file.
      *
-     *   - Keyboard shortcuts (when stdin is a TTY): `r` to force re-run,
-     *     `c` to clear screen, `q` to quit. stty-based raw mode; if it
-     *     can't be enabled (CI / non-interactive), keys are silently
-     *     disabled — file watcher still works.
-     *
      *   - Coalesces fs events (macOS fires multiple per save) and drains
      *     duplicates after compile to avoid spurious extra reloads.
+     *
+     *   - No keyboard shortcuts: stdin belongs entirely to the user
+     *     program (see `std::effects::stdin`). Reload happens on file
+     *     save; Ctrl-C stops the watch.
      */
     fun watch(
         currentDir: File,
@@ -150,9 +152,6 @@ object WireRunner {
         var prevHashes: Set<Hash> = emptySet()
 
         try {
-            // First run. `lastCompile` tracks the most recent successful
-            // compile so the `r` (force re-run) handler can re-execute it
-            // without spending another typecheck cycle.
             System.err.println("[mez dev] $appName · ${appFile.name}")
             var lastCompile: CompileResult? = compile(currentDir, appFile, entryName, appName, timing, t0)
             if (lastCompile != null) {
@@ -160,15 +159,16 @@ object WireRunner {
                 prevHashes = lastCompile.hashes
             }
 
-            // Set up file watcher + keyboard reader.
+            // Set up file watcher. No keyboard shortcuts — stdin belongs
+            // to the user program (see std::effects::stdin). Reload via
+            // file save; quit via Ctrl-C.
             val watcher = java.nio.file.FileSystems.getDefault().newWatchService()
             val watchedDirs = HashMap<java.nio.file.Path, java.nio.file.WatchKey>()
             syncWatchedDirs(watcher, watchedDirs, appFile, currentDir)
 
             val events = java.util.concurrent.LinkedBlockingQueue<DevEvent>()
             startFileWatcherThread(watcher, events)
-            val keyboardActive = startKeyboardThread(events)
-            printWatchingBanner(keyboardActive)
+            printWatchingBanner()
 
             while (true) {
                 when (val event = events.take()) {
@@ -204,30 +204,7 @@ object WireRunner {
                             val n = events.poll() ?: break
                             if (n !is DevEvent.FilesChanged) { events.add(n); break }
                         }
-                        printWatchingBanner(keyboardActive)
-                    }
-                    DevEvent.Rerun -> {
-                        // `r` — re-execute the last compiled closure. No
-                        // EVICT (nothing changed), no recompile. Useful for
-                        // programs whose output depends on time / external
-                        // state.
-                        val current = lastCompile
-                            ?: compile(currentDir, appFile, entryName, appName, timing, System.nanoTime())
-                        if (current != null) {
-                            session.runOnce(current, evict = null)
-                            lastCompile = current
-                            prevHashes = current.hashes
-                        }
-                        printWatchingBanner(keyboardActive)
-                    }
-                    DevEvent.Clear -> {
-                        System.err.print("[2J[H")
-                        printWatchingBanner(keyboardActive)
-                    }
-                    DevEvent.Quit -> {
-                        System.err.println()
-                        System.err.println("bye")
-                        return 0
+                        printWatchingBanner()
                     }
                 }
             }
@@ -236,18 +213,14 @@ object WireRunner {
         }
     }
 
-    // ─── Watch helpers: file watcher, keyboard, dep tracking ──────────
+    // ─── Watch helpers: file watcher, dep tracking ──────────
 
     private sealed class DevEvent {
         data class FilesChanged(val files: Set<String>) : DevEvent()
-        object Rerun : DevEvent()
-        object Clear : DevEvent()
-        object Quit : DevEvent()
     }
 
-    private fun printWatchingBanner(keyboardActive: Boolean) {
-        val keys = if (keyboardActive) " · press [r] re-run · [c] clear · [q] quit" else " · Ctrl-C to stop"
-        System.err.println("[mez dev] watching$keys")
+    private fun printWatchingBanner() {
+        System.err.println("[mez dev] watching · Ctrl-C to stop")
     }
 
     /**
@@ -327,56 +300,6 @@ object WireRunner {
                 if (files.isNotEmpty()) events.add(DevEvent.FilesChanged(files))
             }
         }.apply { isDaemon = true; name = "mez-watch-fs" }.start()
-    }
-
-    /**
-     * Raw-mode stdin reader. Returns true if raw mode was enabled (and
-     * keyboard events will arrive); false on non-interactive stdin or
-     * Windows (no stty). Cleanup restores the saved stty state on JVM
-     * shutdown.
-     */
-    private fun startKeyboardThread(events: java.util.concurrent.BlockingQueue<DevEvent>): Boolean {
-        if (System.console() == null) return false
-        val osName = System.getProperty("os.name").lowercase()
-        if (osName.contains("windows")) return false
-
-        val saved = try {
-            ProcessBuilder("stty", "-g")
-                .redirectInput(ProcessBuilder.Redirect.INHERIT)
-                .redirectErrorStream(true)
-                .start().inputStream.bufferedReader().readText().trim()
-        } catch (_: Exception) { return false }
-        if (saved.isEmpty()) return false
-
-        try {
-            ProcessBuilder("stty", "-icanon", "-echo", "min", "1")
-                .redirectInput(ProcessBuilder.Redirect.INHERIT)
-                .redirectErrorStream(true)
-                .start().waitFor()
-        } catch (_: Exception) { return false }
-
-        Runtime.getRuntime().addShutdownHook(Thread {
-            try {
-                ProcessBuilder("stty", saved)
-                    .redirectInput(ProcessBuilder.Redirect.INHERIT)
-                    .start().waitFor()
-            } catch (_: Exception) {}
-        })
-
-        Thread {
-            try {
-                while (true) {
-                    val ch = System.`in`.read()
-                    if (ch < 0) return@Thread
-                    when (ch.toChar().lowercaseChar()) {
-                        'r' -> events.add(DevEvent.Rerun)
-                        'c' -> events.add(DevEvent.Clear)
-                        'q' -> { events.add(DevEvent.Quit); return@Thread }
-                    }
-                }
-            } catch (_: Exception) {}
-        }.apply { isDaemon = true; name = "mez-watch-keys" }.start()
-        return true
     }
 
     /** Set up the project store + typechecker singletons. */
@@ -469,6 +392,16 @@ private class WireSession private constructor(
 
     private val signalHandler = SigintForwarder(toChild, process)
 
+    /**
+     * Stdin forwarder: lazily spawned when the child first asks for stdin
+     * via STDIN_REQUEST. Reads from parent's System.in, ships STDIN_DATA
+     * frames to the child, sends STDIN_EOF on EOF. Stays alive for the
+     * rest of the session; subsequent STDIN_REQUEST frames are no-ops
+     * because the reader is already pulling.
+     */
+    @Volatile private var stdinForwarder: Thread? = null
+    private val stdinForwarderLock = Any()
+
     init {
         signalHandler.install()
     }
@@ -480,14 +413,25 @@ private class WireSession private constructor(
      * Send (optional) EVICT + LOAD, stream output, return when EXITED
      * arrives. The session stays open for the next run.
      */
-    fun runOnce(compile: WireRunner.CompileResult, evict: Set<Hash>? = null): RunOutcome {
+    fun runOnce(
+        compile: WireRunner.CompileResult,
+        evict: Set<Hash>? = null,
+        appArgs: List<String> = emptyList(),
+    ): RunOutcome {
         if (evict != null && evict.isNotEmpty()) {
             send(WireFrame.of(MessageType.EVICT, Evict(hashes = evict.map { it.hex })))
         }
+        // Ship per-run process surface so the child's process_args / env
+        // / cwd reflect what the user passed to mez, not the JVM launcher.
+        val env: Map<String, String>? = try { System.getenv() } catch (_: Exception) { null }
+        val cwd: String? = try { File("").absoluteFile.path } catch (_: Exception) { null }
         send(WireFrame.of(MessageType.LOAD, Load(
             fnsCborPath = compile.fnsFile.absolutePath,
             metaCborPath = compile.metaFile.absolutePath,
             mode = "run",
+            argv = appArgs,
+            cwd = cwd,
+            env = env,
         )))
         return drainUntilExited()
     }
@@ -539,10 +483,100 @@ private class WireSession private constructor(
                     val log = frame.decode<com.mezze.wire.Log>()
                     System.err.println("[runtime ${log.level}] ${log.message}")
                 }
+                MessageType.STDIN_REQUEST -> {
+                    if (System.getenv("MEZZE_DEBUG") != null) {
+                        System.err.println("[wire] STDIN_REQUEST received, ensuring forwarder")
+                    }
+                    // Child asked for stdin. Start the parent-side reader
+                    // if not already running. Idempotent.
+                    ensureStdinForwarder()
+                }
+                MessageType.PASSWORD_REQUEST -> {
+                    val req = frame.decode<com.mezze.wire.PasswordRequest>()
+                    handlePasswordRequest(req)
+                }
                 else -> {
                     System.err.println("[wire] unexpected frame: ${frame.type}")
                 }
             }
+        }
+    }
+
+    /**
+     * Child sent PASSWORD_REQUEST — read a password from the parent's real
+     * terminal (no echo) and ship the bytes back via PASSWORD_REPLY. When
+     * stdin is piped or redirected (System.console() == null) there's no
+     * TTY to disable echo on, so we reply with null and the child surfaces
+     * that as `None` to the user program.
+     */
+    private fun handlePasswordRequest(req: com.mezze.wire.PasswordRequest) {
+        val cons = System.console()
+        val value: String? = if (cons == null) {
+            null
+        } else {
+            try {
+                val chars = cons.readPassword()
+                chars?.let { String(it) }
+            } catch (_: Exception) {
+                null
+            }
+        }
+        try {
+            send(WireFrame.of(MessageType.PASSWORD_REPLY,
+                com.mezze.wire.PasswordReply(runId = req.runId, value = value)))
+        } catch (_: Exception) {
+            // best-effort; if wire is broken, child will eventually fail too
+        }
+    }
+
+    /**
+     * Start (once per session) a thread that reads parent's stdin and
+     * forwards bytes to the child as STDIN_DATA frames. Sends STDIN_EOF
+     * when System.in returns -1. Subsequent calls are no-ops — the
+     * forwarder is shared across runs.
+     *
+     * The child sends STDIN_REQUEST on the first stdin read of each run;
+     * we only need the forwarder once because once running it pumps any
+     * available bytes regardless of which run is active. (Run-id on the
+     * STDIN_DATA frames is filled in opportunistically; the child's
+     * buffer is run-agnostic — bytes that arrive between runs are
+     * dropped at run-start via reset.)
+     */
+    private fun ensureStdinForwarder() {
+        if (stdinForwarder != null) return
+        synchronized(stdinForwarderLock) {
+            if (stdinForwarder != null) return
+            val debug = System.getenv("MEZZE_DEBUG") != null
+            val thread = Thread({
+                if (debug) System.err.println("[wire] stdin forwarder starting")
+                val buf = ByteArray(4096)
+                try {
+                    while (true) {
+                        val n = System.`in`.read(buf)
+                        if (debug) System.err.println("[wire] stdin read returned $n")
+                        if (n < 0) {
+                            try { send(WireFrame.of(MessageType.STDIN_EOF, com.mezze.wire.StdinEof(runId = 0))) } catch (_: Exception) {}
+                            if (debug) System.err.println("[wire] sent STDIN_EOF")
+                            return@Thread
+                        }
+                        if (n == 0) continue
+                        val chunk = if (n == buf.size) buf.copyOf() else buf.copyOf(n)
+                        try {
+                            send(WireFrame.of(MessageType.STDIN_DATA, com.mezze.wire.StdinData(runId = 0, bytes = chunk)))
+                            if (debug) System.err.println("[wire] sent STDIN_DATA n=$n")
+                        } catch (_: Exception) {
+                            return@Thread
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (debug) System.err.println("[wire] stdin forwarder error: ${e.message}")
+                    try { send(WireFrame.of(MessageType.STDIN_EOF, com.mezze.wire.StdinEof(runId = 0))) } catch (_: Exception) {}
+                }
+            }, "mez-wire-stdin-fwd").apply {
+                isDaemon = true
+            }
+            stdinForwarder = thread
+            thread.start()
         }
     }
 
@@ -638,11 +672,27 @@ private class WireSession private constructor(
 
     /** Send HELLO, await WELCOME. Returns the agreed capability set, or null on failure. */
     private fun handshake(): List<String>? {
+        // Parent owns the real terminal. Capture isatty/term info now so
+        // the child's `is_tty` / `term_size` natives can serve it without
+        // needing direct OS access (their fd 0 is the wire, not a TTY).
+        val cons = System.console()
+        val stdinIsTty = cons != null
+        val stdoutIsTty = cons != null  // best-effort proxy; System.console() needs both
+        val stderrIsTty = cons != null
+        val termRows = System.getenv("LINES")?.toIntOrNull() ?: 0
+        val termCols = System.getenv("COLUMNS")?.toIntOrNull() ?: 0
+        val term = System.getenv("TERM") ?: ""
         send(WireFrame.of(MessageType.HELLO, Hello(
             versionMajor = WireProtocol.PROTOCOL_VERSION_MAJOR,
             versionMinor = WireProtocol.PROTOCOL_VERSION_MINOR,
             capabilities = WireRunner.ADVERTISED_CAPABILITIES,
             client = "mez-dev",
+            isattyStdin = stdinIsTty,
+            isattyStdout = stdoutIsTty,
+            isattyStderr = stderrIsTty,
+            termRows = termRows,
+            termCols = termCols,
+            term = term,
         )))
         val reply = try {
             WireFrameCodec.read(fromChild)

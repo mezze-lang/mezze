@@ -1,0 +1,197 @@
+package com.mezze.interpreter.nodes.builtin.effects;
+
+import com.mezze.interpreter.nodes.builtin.io.BytesNatives;
+import com.mezze.interpreter.values.MezzeRecord;
+import com.mezze.interpreter.values.MezzeVariant;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+
+/**
+ * Native implementations for the Stdin effect.
+ *
+ * Corresponds to stdlib file: std/effects/stdin.mz
+ *
+ * Reads go through a single BufferedReader so line/char modes don't mis-split
+ * the stream. Byte mode reads from the raw stdin (System.in) directly — mixing
+ * byte and char/line reads in the same program will lose bytes the reader has
+ * already buffered. That's the same caveat Java's BufferedReader carries.
+ *
+ * The reader and byte-stream references are settable via {@link #setStreams}
+ * so tests can substitute a fake stdin without forking a subprocess. In
+ * production they default to wrapping System.in.
+ */
+public final class StdinNatives {
+
+    private StdinNatives() {}
+
+    private static volatile BufferedReader reader =
+        new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+    private static volatile InputStream byteStream = System.in;
+
+    /**
+     * Demand-request hook. When wire mode is active, the first stdin read
+     * of a run invokes this so the parent knows to start forwarding bytes.
+     * Default: no-op (direct-fd mode in built user binaries, JVM jar, and tests).
+     */
+    private static volatile Runnable onFirstReadRequest = (Runnable) () -> {};
+
+    /**
+     * Tracks whether the request hook has fired for the current run. Reset
+     * via {@link #resetRequestFlag()} at the start of each LOAD.
+     */
+    private static volatile boolean requestSent = false;
+
+    /**
+     * Wire-mode password reader. When the child JVM is talking to a parent
+     * native binary over the wire, the child has no TTY of its own — but the
+     * parent does. This hook performs the PASSWORD_REQUEST → PASSWORD_REPLY
+     * round-trip: parent puts its real terminal into raw mode (echo off),
+     * reads the password, ships it back. Default: null (no-op, falls back
+     * to System.console() which returns None for piped stdin).
+     */
+    private static volatile java.util.function.Supplier<String> wirePasswordReader = null;
+
+    /** Runtime hook (RuntimeServer): install the wire-mode password round-trip. */
+    public static void installWirePasswordReader(java.util.function.Supplier<String> reader) {
+        wirePasswordReader = reader;
+    }
+
+    /** Test hook: swap in a fake stdin. Both reader and raw stream are updated. */
+    public static void setStreams(InputStream in) {
+        byteStream = in;
+        reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+    }
+
+    /** Test hook: restore the real System.in-backed streams. */
+    public static void resetStreams() {
+        byteStream = System.in;
+        reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        onFirstReadRequest = (Runnable) () -> {};
+        requestSent = false;
+    }
+
+    /**
+     * Runtime hook (RuntimeServer): plug in the wire-fed buffer and the
+     * "I want stdin" demand-request callback. Once installed, all native
+     * stdin reads pull from {@code in} and the first read of each run
+     * triggers {@code onFirstReadRequest} (so the parent starts forwarding).
+     */
+    public static void installWireStreams(InputStream in, Runnable onFirstRead) {
+        byteStream = in;
+        reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+        onFirstReadRequest = onFirstRead;
+        requestSent = false;
+    }
+
+    /** Runtime hook: call at the start of each LOAD so the demand-request fires fresh. */
+    public static void resetRequestFlag() {
+        requestSent = false;
+    }
+
+    private static void maybeRequest() {
+        if (!requestSent) {
+            requestSent = true;
+            try {
+                onFirstReadRequest.run();
+            } catch (Throwable ignored) {
+                // Best-effort. If the hook fails the read will simply block
+                // until the parent independently provides bytes (or EOF).
+            }
+        }
+    }
+
+    @TruffleBoundary
+    public static Object readLine(MezzeRecord args) {
+        maybeRequest();
+        try {
+            String line = reader.readLine();
+            return line == null ? MezzeVariant.none() : MezzeVariant.some(line);
+        } catch (IOException e) {
+            return MezzeVariant.none();
+        }
+    }
+
+    @TruffleBoundary
+    public static Object readChar(MezzeRecord args) {
+        maybeRequest();
+        try {
+            int c = reader.read();
+            if (c < 0) return MezzeVariant.none();
+            return MezzeVariant.some(String.valueOf((char) c));
+        } catch (IOException e) {
+            return MezzeVariant.none();
+        }
+    }
+
+    @TruffleBoundary
+    public static BytesNatives.MezzeBytes readBytes(MezzeRecord args) {
+        maybeRequest();
+        long max = getLong(args, "max");
+        if (max <= 0) return BytesNatives.empty();
+        int cap = (int) Math.min(max, Integer.MAX_VALUE);
+        byte[] buf = new byte[cap];
+        try {
+            int n = byteStream.read(buf, 0, cap);
+            if (n <= 0) return BytesNatives.empty();
+            if (n == cap) return new BytesNatives.MezzeBytes(buf);
+            byte[] trimmed = new byte[n];
+            System.arraycopy(buf, 0, trimmed, 0, n);
+            return new BytesNatives.MezzeBytes(trimmed);
+        } catch (IOException e) {
+            return BytesNatives.empty();
+        }
+    }
+
+    /**
+     * Parent-reported isatty(0). Default null = no wire host installed;
+     * fall back to System.console() which reflects this process's own
+     * fd 0 (correct for in-process / built user binaries).
+     */
+    private static volatile Boolean wireIsTtyStdin = null;
+
+    /** Runtime hook: install parent's TTY snapshot at handshake time. */
+    public static void setWireIsTty(boolean stdin, boolean stdout, boolean stderr) {
+        wireIsTtyStdin = stdin;
+        // stdout/stderr are flagged here for future readers; not currently surfaced as natives.
+    }
+
+    @TruffleBoundary
+    public static boolean isTty(MezzeRecord args) {
+        Boolean wired = wireIsTtyStdin;
+        if (wired != null) return wired;
+        return System.console() != null;
+    }
+
+    @TruffleBoundary
+    public static Object readPassword(MezzeRecord args) {
+        // Wire mode: parent owns the terminal — ask it to read the password
+        // with echo off and ship the bytes back. The child JVM never had
+        // a TTY of its own (stdin is the wire pipe).
+        java.util.function.Supplier<String> wire = wirePasswordReader;
+        if (wire != null) {
+            String pw = wire.get();
+            return pw == null ? MezzeVariant.none() : MezzeVariant.some(pw);
+        }
+        // Direct-fd mode (built native binary, JVM jar run with real TTY):
+        // delegate to Java's Console.readPassword which handles echo off
+        // for us. Returns None on piped input (Console is null).
+        java.io.Console console = System.console();
+        if (console == null) return MezzeVariant.none();
+        char[] pw = console.readPassword();
+        if (pw == null) return MezzeVariant.none();
+        return MezzeVariant.some(new String(pw));
+    }
+
+    private static long getLong(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new RuntimeException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof Long l) return l;
+        throw new RuntimeException("Expected Long for field '" + name + "'");
+    }
+}

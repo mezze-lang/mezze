@@ -22,6 +22,7 @@ import com.mezze.language.typechecker.types.effects.LogTypes
 import com.mezze.language.typechecker.types.effects.FilesystemTypes
 import com.mezze.language.typechecker.types.effects.TimeTypes
 import com.mezze.language.typechecker.types.effects.EnvironmentTypes
+import com.mezze.language.typechecker.types.effects.StdinTypes
 import com.mezze.language.typechecker.types.effects.LoomTypes
 import com.mezze.language.typechecker.types.effects.OSThreadTypes
 import com.mezze.language.typechecker.types.effects.SchedulerTypes
@@ -122,6 +123,7 @@ object NativeFunctionTypes {
         FilesystemTypes.registerAll(capturingContext)
         TimeTypes.registerAll(capturingContext)
         EnvironmentTypes.registerAll(capturingContext)
+        StdinTypes.registerAll(capturingContext)
         LoomTypes.registerAll(capturingContext)
         OSThreadTypes.registerAll(capturingContext)
         SchedulerTypes.registerAll(capturingContext)
