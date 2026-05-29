@@ -98,6 +98,7 @@ object NativeBuildPath {
 
         val classpathJars = extractRuntimeClasspath(stagingDir, timing, relativeTime)
         val sanitisedUserJar = sanitiseUserJar(jarFile, stagingDir, timing, relativeTime)
+        val logbackConfig = writeSilentLogbackConfig(stagingDir)
 
         val cmd = buildNativeImageCommand(
             nativeImage = nativeImage,
@@ -106,6 +107,7 @@ object NativeBuildPath {
             embeddedJar = embeddedJar,
             outBinary = outBinary,
             optimized = optimized,
+            logbackConfig = logbackConfig,
         )
 
         if (timing) System.err.println("[${relativeTime()}ms] invoking native-image (${cmd.size} args)")
@@ -448,6 +450,7 @@ object NativeBuildPath {
         embeddedJar: File,
         outBinary: File,
         optimized: Boolean,
+        logbackConfig: File,
     ): List<String> {
         val cp = (classpathJars + sanitisedUserJar + embeddedJar)
             .joinToString(File.pathSeparator) { it.absolutePath }
@@ -457,6 +460,10 @@ object NativeBuildPath {
         cmd.addAll(NativeImageFlags.userInitAtBuildTimeArgs())
 
         cmd.addAll(USER_BUILD_SPECIFIC_FLAGS)
+        // Point logback at the silent config we just wrote to the staging
+        // dir (#193). Has to be an absolute path: relative paths would be
+        // resolved against the builder JVM's cwd, which is outputDir.
+        cmd.add("-J-Dlogback.configurationFile=${logbackConfig.absolutePath}")
 
         // -Ob: native-image's "quick build" mode — ~30-50s, ~20% slower
         // binary. Default for fast iteration.
@@ -510,7 +517,42 @@ object NativeBuildPath {
         // wrapped clang. The wrapped binary is still used for linking;
         // we just skip the probe.
         "-H:-CheckToolchain",
+        // Note: `-J-Dlogback.configurationFile=<absolute-path>` is added
+        // in buildNativeImageCommand — it needs the staging dir, which is
+        // per-build. See writeSilentLogbackConfig.
     )
+
+    /**
+     * Logback config that silences Netty's startup DEBUG chatter on the
+     * native-image builder JVM (#193). mezze-runtime.jar transitively
+     * pulls in logback-classic 1.4.11 + slf4j; Netty auto-picks logback
+     * as its SLF4J binding, and with no logback.xml on the classpath
+     * logback's default config emits DEBUG. That's ~50 lines of
+     * "sun.misc.Unsafe.theUnsafe: available" / platform-detection noise
+     * per build — drowns out actual native-image diagnostics when
+     * MEZZE_NATIVE_VERBOSE=1.
+     *
+     * Tried `-Dorg.slf4j.simpleLogger.defaultLogLevel=error` first —
+     * doesn't help because logback (not slf4j-simple) is the binding.
+     * Tried `-Dio.netty.logger.factory=...JdkLoggerFactory` — Netty only
+     * checks that via API call, not system property. The reliable path is
+     * to write an actual logback config and point logback at it.
+     *
+     * `:cli` already ships a similar config in its resources for the
+     * mez CLI itself, but the user-build classpath doesn't include the
+     * CLI jar — we have to provide a copy from here.
+     */
+    private fun writeSilentLogbackConfig(stagingDir: File): File {
+        val xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <configuration>
+                <statusListener class="ch.qos.logback.core.status.NopStatusListener"/>
+                <logger name="io.netty" level="ERROR"/>
+                <root level="ERROR"/>
+            </configuration>
+        """.trimIndent()
+        return File(stagingDir, "logback-silent.xml").apply { writeText(xml) }
+    }
 
     /**
      * META-INF/native-image properties files inside the shadowJar that
