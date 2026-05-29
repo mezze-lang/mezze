@@ -110,21 +110,54 @@ object NativeBuildPath {
 
         if (timing) System.err.println("[${relativeTime()}ms] invoking native-image (${cmd.size} args)")
 
-        val exit = ProcessBuilder(cmd)
+        // Quiet-by-default native-image output (#191).
+        // native-image is loud: pages of warnings, deprecation notes, build
+        // progress, and image-info banners. Useful when debugging, but noise
+        // for the common-case `mez build --native` run that just needs to
+        // succeed. Capture to a temp log; on success, throw it away; on
+        // failure, dump the log so the user can see what broke. Set
+        // MEZZE_NATIVE_VERBOSE=1 to opt back into INHERIT (stream straight
+        // to the user's terminal).
+        val verbose = System.getenv("MEZZE_NATIVE_VERBOSE")?.let {
+            it == "1" || it.equals("true", ignoreCase = true)
+        } ?: timing // timing implies the user already wants the noise
+        val logFile = if (!verbose) {
+            File.createTempFile("mez-native-image-", ".log").apply { deleteOnExit() }
+        } else null
+
+        val pb = ProcessBuilder(cmd)
             .directory(outputDir)
             .redirectErrorStream(true)
-            .redirectOutput(ProcessBuilder.Redirect.INHERIT)
-            .start()
-            .waitFor()
+        val exit = if (logFile != null) {
+            pb.redirectOutput(logFile).start().waitFor()
+        } else {
+            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT).start().waitFor()
+        }
 
         if (timing) System.err.println("[${relativeTime()}ms] native-image exit=$exit")
 
         try { stagingDir.deleteRecursively() } catch (_: Exception) {}
 
         if (exit != 0) {
-            println("Error: native-image failed (exit $exit). See output above for details.")
+            if (logFile != null) {
+                // Surface the captured output so the user can act. We dump
+                // the whole log — failure cases are rare enough that the
+                // noise tradeoff favours user clarity over brevity.
+                System.err.println("--- native-image output (last build) ---")
+                try {
+                    logFile.readLines().forEach { System.err.println(it) }
+                } catch (_: Exception) {
+                    System.err.println("(failed to read $logFile)")
+                }
+                System.err.println("--- end native-image output ---")
+            }
+            println("Error: native-image failed (exit $exit). " +
+                if (logFile != null) "See output above for details. Re-run with MEZZE_NATIVE_VERBOSE=1 to stream output live."
+                else "See output above for details.")
             return null
         }
+        // Successful build — drop the captured log silently.
+        if (logFile != null) try { logFile.delete() } catch (_: Exception) {}
         if (!outBinary.exists()) {
             println("Error: native-image succeeded but output binary not found: ${outBinary.absolutePath}")
             return null

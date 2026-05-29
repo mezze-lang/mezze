@@ -3,6 +3,7 @@ package com.mezze.interpreter
 import com.mezze.datastructures.seq.MezzeSeq
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.RepeatedTest
 import org.junit.jupiter.api.Assertions.*
 
 /**
@@ -78,6 +79,25 @@ class TruffleAndLoomIntegrationTest {
         """
         val result = eval(code)
         assertEquals(26L, result) // fib(7)=13, fib(6)=8, fib(5)=5, sum=13+8+5=26
+    }
+
+    /**
+     * Stress variant of [testConcurrentRecursiveFunctions] — #205.
+     *
+     * The single-shot test had historically been flaky on CI, with the
+     * sum coming out as the wrong number (e.g. -4 instead of 26). The
+     * root cause was never positively identified — running it 20× in a
+     * single invocation here lets one bad run break the build, instead
+     * of needing to re-run the suite multiple times to see the failure
+     * window.
+     *
+     * If this ever starts failing intermittently we have a concrete
+     * lead: probably a shared engine + virtual-thread state leaking
+     * between Contexts. See MezzeTestHelper's sharedEngine.
+     */
+    @RepeatedTest(20, name = "testConcurrentRecursiveFunctionsStress {currentRepetition}/{totalRepetitions}")
+    fun testConcurrentRecursiveFunctionsStress() {
+        testConcurrentRecursiveFunctions()
     }
 
     @Test
