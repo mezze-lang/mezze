@@ -1,6 +1,7 @@
 use std::collections::seq
 use std::abilities::compare::{ Eq }
 use std::result
+use std::effects::exception::{ unwrap }
 
 ## Opaque promise representing an asynchronous computation.
 pub newtype Promise 'a = Promise __NativePromise
@@ -62,6 +63,47 @@ pub let is_cancelled : { p: Promise 'a } -> Bool = { p } ->
 pub let cancel : { p: Promise 'a } -> CancelOutcome <Async> = { p } ->
   Async.cancel { p = p }
 
+## Chain another async step. Runs f only if p succeeded; on upstream Err
+## the new Promise fails with AsyncFailed (the specific AsyncError variant
+## from p is flattened — use `await` + match on `inspect` if you need
+## error fidelity).
+## Equivalent to Java's CompletableFuture.thenCompose / Rust's and_then.
+## (named `and_then` because `then` is a reserved keyword.)
+pub let and_then : { p: Promise 'a, f: { val: 'a } -> Promise 'b <Async, ...> } -> Promise 'b <Async, ...> = { p, f } -> Async.spawn { f = {} -> do
+    let v = unwrap { result =Async.await { p = p } }
+    unwrap { result =Async.await { p = f { val = v } } }
+  }
+
+## Apply a pure transform to the success value. On upstream Err, the new
+## Promise fails with AsyncFailed (lossy on error variant).
+## Equivalent to Java's CompletableFuture.thenApply / Rust's map_ok.
+pub let map_ok : { p: Promise 'a, f: { val: 'a } -> 'b <...> } -> Promise 'b <Async, ...> = { p, f } -> Async.spawn { f = {} ->
+    f { val = unwrap { result =Async.await { p = p } } }
+  }
+
+## Recover from failure. f runs only on Err; Ok values pass through.
+## Equivalent to Java's CompletableFuture.exceptionally / Scala's recover.
+pub let recover : { p: Promise 'a, f: { err: AsyncError } -> 'a <...> } -> Promise 'a <Async, ...> = { p, f } -> Async.spawn { f = {} ->
+    match Async.await { p = p } is
+      Ok  { val }       -> val
+      Err { error = e } -> f { err = e }
+  }
+
+## Side-effecting observer that sees both branches. Returns a Promise
+## resolving to the same value as p (or failing the same way), after f
+## has run. Equivalent to Java's CompletableFuture.whenComplete.
+pub let on_complete : { p: Promise 'a, f: { result: Result 'a AsyncError } -> {} <...> } -> Promise 'a <Async, ...> = { p, f } -> Async.spawn { f = {} -> do
+    let r = Async.await { p = p }
+    f { result = r }
+    unwrap { result =r }
+  }
+
+## Block on the Promise; return None on any failure, dropping error info.
+pub let try_await : { p: Promise 'a } -> Option 'a <Async> = { p } ->
+  match Async.await { p = p } is
+    Ok  { val }       -> Some { val = val }
+    Err { error = _ } -> None
+
 impl Promise 'a where {
   await        = { it } -> await        { p = it },
   inspect      = { it } -> inspect      { p = it },
@@ -70,6 +112,11 @@ impl Promise 'a where {
   is_failed    = { it } -> is_failed    { p = it },
   is_cancelled = { it } -> is_cancelled { p = it },
   cancel       = { it } -> cancel       { p = it },
+  and_then     = { it, f } -> and_then    { p = it, f = f },
+  map_ok       = { it, f } -> map_ok      { p = it, f = f },
+  recover      = { it, f } -> recover     { p = it, f = f },
+  on_complete  = { it, f } -> on_complete { p = it, f = f },
+  try_await    = { it } -> try_await { p = it },
 }
 
 ## Error type for async operations.
