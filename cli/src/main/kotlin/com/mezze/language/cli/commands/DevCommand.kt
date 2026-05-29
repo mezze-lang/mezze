@@ -29,7 +29,11 @@ class DevCommand {
     }
 
 
-    fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
+    fun execute(
+        args: List<String>,
+        currentDir: File = File(System.getProperty("user.dir")),
+        appArgs: List<String> = emptyList(),
+    ) {
         val noWatch = args.contains("--no-watch") || args.contains("--nw")
 
         // Collect dev instrumentation flags to forward to the child.
@@ -91,7 +95,7 @@ class DevCommand {
         }
 
         val exit = if (noWatch) {
-            WireRunner.execOnce(currentDir, appFile, entryName, modulePath, appConfig.name, devFlags)
+            WireRunner.execOnce(currentDir, appFile, entryName, modulePath, appConfig.name, devFlags, appArgs = appArgs)
         } else {
             WireRunner.watch(currentDir, appFile, entryName, modulePath, appConfig.name, devFlags)
         }

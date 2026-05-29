@@ -24,24 +24,32 @@ import java.io.File
 class ExecCommand {
 
     fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
+        // Split user-program arguments off at `--`. Everything before is
+        // mez/dev flags; everything after is forwarded verbatim into the
+        // user program's `Environment.process_args`. Mirrors the conventional
+        // shape of `cargo run -- foo bar`, `npm run script -- --flag`.
+        val sepIdx = args.indexOf("--")
+        val mezArgs = if (sepIdx >= 0) args.subList(0, sepIdx) else args
+        val userArgs = if (sepIdx >= 0) args.subList(sepIdx + 1, args.size) else emptyList()
+
         // Dev-only flags (--inspect, --profile, etc.) are rejected by
         // DevCommand; no need to filter them here.
         //
         // Normalise the bare positional `mez exec foo` into the `--app=foo`
         // form DevCommand already understands. A positional is anything
         // that isn't a flag and isn't already consumed by `--app`.
-        val hasAppFlag = args.any { it == "--app" || it.startsWith("--app=") }
-        val positional = if (!hasAppFlag) args.firstOrNull { !it.startsWith("-") } else null
+        val hasAppFlag = mezArgs.any { it == "--app" || it.startsWith("--app=") }
+        val positional = if (!hasAppFlag) mezArgs.firstOrNull { !it.startsWith("-") } else null
 
         val forwarded = buildList {
             if (positional != null) add("--app=$positional")
-            for (a in args) {
+            for (a in mezArgs) {
                 if (a == positional) continue
                 add(a)
             }
             add("--no-watch")
         }
 
-        DevCommand().execute(forwarded, currentDir)
+        DevCommand().execute(forwarded, currentDir, appArgs = userArgs)
     }
 }

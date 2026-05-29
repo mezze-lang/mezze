@@ -202,6 +202,17 @@ object EmbeddedExec {
 
         try {
             val projectRoot = java.nio.file.Paths.get(".")
+            // process_args returns what the user passed to the binary, not
+            // what the JVM/native launcher saw. Strip our instrumentation
+            // flags first — they're mez surface, not user-program input.
+            val mezzeFlags = setOf("--profile", "--coverage", "--allocations",
+                "--inspect", "--inspect-brk", "--debug", "--help", "-h")
+            val userArgv = args.filter { a ->
+                a !in mezzeFlags && !a.startsWith("--insight=")
+            }.toTypedArray()
+            com.mezze.interpreter.nodes.builtin.effects.EnvironmentNatives
+                .setWireArgv(userArgv)
+
             if (entryName != null) {
                 MezzeLanguage.setFunctionsForDirectExecution(functions, performers, projectRoot, entryName)
             } else {

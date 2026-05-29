@@ -494,6 +494,176 @@ class ImportedPerformerTest {
         )
     }
 
+    // ========== MINIMAL REPROS: SuspendedType leaking through match/if ==========
+
+    /** Helper: assert main's return type is RecordType `{}` (no SuspendedType wrapper). */
+    private fun assertMainReturnsUnit(source: String) {
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
+        val mainType = result.getVariableType("main") as? MezzeType.FunctionType
+        assertNotNull(mainType, "main should be a function type")
+        val ret = mainType!!.returnType
+        assertTrue(
+            ret is MezzeType.RecordType,
+            "main returnType should be RecordType `{}`, got: ${ret::class.simpleName}: $ret"
+        )
+    }
+
+    @Test
+    fun `single perform with match returning effect call discharges the effect`() {
+        // Simplest possible repro: one effect (Log), one handler (Console),
+        // body is a do-block whose terminal expression is a `match` whose
+        // arms call an effect operation (println).
+        val source = """
+            use std::effects::log::{println, Console}
+
+            let main = {} -> perform Console in do
+                match 1 is
+                    1 -> println { msg = "one" }
+                    _ -> println { msg = "other" }
+        """.trimIndent()
+
+        assertMainReturnsUnit(source)
+    }
+
+    @Test
+    fun `single perform with if-else returning effect call discharges the effect`() {
+        // Same as above, but using if/else instead of match. Should behave
+        // identically since `if e then a else b` desugars to a match.
+        val source = """
+            use std::effects::log::{println, Console}
+
+            let main = {} -> perform Console in do
+                if True then println { msg = "yes" } else println { msg = "no" }
+        """.trimIndent()
+
+        assertMainReturnsUnit(source)
+    }
+
+    @Test
+    fun `single perform with match as sole body discharges the effect`() {
+        // Even simpler: no `do` block, just `perform Console in match ...`.
+        val source = """
+            use std::effects::log::{println, Console}
+
+            let main = {} -> perform Console in
+                match 1 is
+                    1 -> println { msg = "one" }
+                    _ -> println { msg = "other" }
+        """.trimIndent()
+
+        assertMainReturnsUnit(source)
+    }
+
+    @Test
+    fun `seq literal of effect calls is accepted under perform`() {
+        // A seq containing effect-call results — like `[println{a}, println{b}]`
+        // — same conflation potential as match: the seq's fresh element
+        // TypeVar gets unified with each element's type, which is a
+        // SuspendedType wrapper if the element is an effect call.
+        val source = """
+            use std::effects::log::{println, Console}
+
+            let main = {} -> perform Console in do
+                let xs = [println { msg = "a" }, println { msg = "b" }]
+                {}
+        """.trimIndent()
+
+        assertMainReturnsUnit(source)
+    }
+
+    // ========== REGRESSION: Console + SystemStdin together ==========
+
+    @Test
+    fun `nested perform Console and SystemStdin discharges both effects`() {
+        // Regression: real-world `mez dev` test rejected this shape with
+        // "Entry 'main' must return {}, got: SuspendedType(Log)" even though
+        // Console handles Log and SystemStdin handles Stdin.
+        val source = """
+            use std::effects::log::{println, Console}
+            use std::effects::stdin::{SystemStdin, read_line}
+
+            let main = {} -> perform Console in perform SystemStdin in do
+                let line = read_line {}
+                println { msg = "done" }
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
+
+        val mainType = result.getVariableType("main") as? MezzeType.FunctionType
+        assertNotNull(mainType, "main should be a function type")
+
+        val effectRow = mainType!!.effects
+        assertNotNull(effectRow, "main should have effect row")
+        assertTrue(effectRow!!.performed, "main should have performed marker")
+        assertTrue(
+            effectRow.effects.isEmpty(),
+            "main should have no unhandled effects, but has: ${effectRow.effects}"
+        )
+    }
+
+    @Test
+    fun `checkParsedModule accepts main using Console plus SystemStdin`() {
+        val source = """
+            use std::effects::log::{println, Console}
+            use std::effects::stdin::{SystemStdin, read_line}
+
+            let main = {} -> perform Console in perform SystemStdin in do
+                let line = read_line {}
+                println { msg = "done" }
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.checkParsedModule(parsedModule, Paths.get("."), currentModulePath = null)
+
+        assertTrue(
+            result is TypeChecker.TypeCheckResult.Success,
+            "checkParsedModule should succeed: ${(result as? TypeChecker.TypeCheckResult.Failure)?.errors?.joinToString { it.message }}"
+        )
+    }
+
+    @Test
+    fun `nested perform SystemStdin inside Console with match on Option discharges both`() {
+        // The original failing shape from the smoke test — match on read_line result,
+        // both arms call println.
+        val source = """
+            use std::effects::log::{println, Console}
+            use std::effects::stdin::{SystemStdin, read_line}
+
+            let main = {} -> perform Console in perform SystemStdin in do
+                match read_line {} is
+                    Some { val = name } -> println { msg = "hi" }
+                    None -> println { msg = "(no input)" }
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
+
+        val mainType = result.getVariableType("main") as? MezzeType.FunctionType
+        assertNotNull(mainType, "main should be a function type")
+
+        val effectRow = mainType!!.effects
+        println("[DBG] main type:     $mainType")
+        println("[DBG] returnType:    ${mainType.returnType}")
+        println("[DBG] returnType cls:${mainType.returnType::class.simpleName}")
+        println("[DBG] effects row:   $effectRow")
+
+        assertTrue(
+            effectRow != null && effectRow.performed && effectRow.effects.isEmpty(),
+            "main should be {} -> {} <*>, but effect row has: ${effectRow?.effects}"
+        )
+
+        // EntryPointCheck inspects returnType — it must be an empty closed
+        // record `{}`, NOT a SuspendedType. This is what `mez dev`/`mez exec`
+        // require to accept the binding as an entry point.
+        val ret = mainType.returnType
+        assertTrue(
+            ret is MezzeType.RecordType,
+            "returnType should be RecordType `{}`, got: ${ret::class.simpleName}: $ret"
+        )
+    }
+
     @Test
     fun `error message should suggest effect qualifier for imported effect operation`() {
         // User wrote "log" instead of "Log.log" with imported Log effect

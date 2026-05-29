@@ -99,9 +99,25 @@ public final class EnvironmentNatives {
         return ProcessHandle.current().pid();
     }
 
+    /**
+     * Per-run argv override. Set by RuntimeServer at the start of each
+     * LOAD when the parent ships argv in the LOAD frame. Null = no
+     * override; fall back to {@link ProcessHandle}'s view of the JVM
+     * launcher's argv (correct for in-process / built user binaries).
+     */
+    private static volatile String[] wireArgvOverride = null;
+
+    /** Runtime hook (RuntimeServer): set the per-run argv supplied by the parent. */
+    public static void setWireArgv(String[] argv) {
+        wireArgvOverride = argv;
+    }
+
     @TruffleBoundary
     public static Object processArgs(MezzeRecord args) {
-        String[] procArgs = ProcessHandle.current().info().arguments().orElse(new String[0]);
+        String[] override = wireArgvOverride;
+        String[] procArgs = (override != null)
+            ? override
+            : ProcessHandle.current().info().arguments().orElse(new String[0]);
         return MezzeSeq.fromArray(procArgs);
     }
 
