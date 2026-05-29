@@ -141,28 +141,72 @@ object EmbeddedExec {
             if (a.startsWith("--insight=")) a.substringAfter("=") else null
         }
 
-        if (profile) {
+        // User-app native binaries don't ship the Truffle instrumentation
+        // tool jars (cpusampler, coverage, chromeinspector, insight) — they
+        // were dropped from the classpath in NativeBuildPath.extractRuntimeClasspath
+        // to keep the binary slim. The options they expose simply don't
+        // exist at runtime, and trying to set them crashes with
+        // "Could not find option with name cpusampler" before user code
+        // runs. Same root cause as #195 (MEZZE_JIT=0 on DefaultTruffleRuntime).
+        //
+        // Treat the dev-instrumentation flags as no-ops with a one-line
+        // warning when the runtime can't honor them. Users who want
+        // profiling / coverage / inspect should run via `mez dev` or
+        // `mez exec` which spawn a JVM child with the tools on its
+        // classpath. (#236)
+        if (profile && !jitCapable) {
+            System.err.println(
+                "[mezze] --profile ignored — this binary doesn't ship the cpusampler tool. " +
+                "Run via `mez exec` / `mez dev` for profiling."
+            )
+        }
+        if (coverage && !jitCapable) {
+            System.err.println(
+                "[mezze] --coverage ignored — this binary doesn't ship the coverage tool. " +
+                "Run via `mez exec` / `mez dev` for coverage."
+            )
+        }
+        if (allocations && !jitCapable) {
+            System.err.println(
+                "[mezze] --allocations ignored — this binary doesn't ship the allocations tool. " +
+                "Run via `mez exec` / `mez dev` for allocation tracking."
+            )
+        }
+        if (insightFile != null && !jitCapable) {
+            System.err.println(
+                "[mezze] --insight=... ignored — this binary doesn't ship the GraalVM Insight tool. " +
+                "Run via `mez exec` / `mez dev` for Insight."
+            )
+        }
+        if ((inspect || inspectBrk) && !jitCapable) {
+            System.err.println(
+                "[mezze] --inspect ignored — this binary doesn't ship the Chrome DevTools inspector. " +
+                "Run via `mez exec` / `mez dev` for the debugger."
+            )
+        }
+
+        if (profile && jitCapable) {
             val out = File(outputDir(), "mezze-profile.txt")
             out.parentFile?.mkdirs()
             engineBuilder.option("cpusampler", "true")
                 .option("cpusampler.OutputFile", out.absolutePath)
             System.err.println("[mezze] profile → ${out.absolutePath}")
         }
-        if (coverage) {
+        if (coverage && jitCapable) {
             val out = File(outputDir(), "mezze-coverage.txt")
             out.parentFile?.mkdirs()
             engineBuilder.option("coverage", "true")
                 .option("coverage.OutputFile", out.absolutePath)
             System.err.println("[mezze] coverage → ${out.absolutePath}")
         }
-        if (allocations) {
+        if (allocations && jitCapable) {
             val out = File(outputDir(), "mezze-allocations.txt")
             out.parentFile?.mkdirs()
             engineBuilder.option("mezze-allocations", "true")
                 .out(PrintStream(out.outputStream(), true))
             System.err.println("[mezze] allocations → ${out.absolutePath}")
         }
-        if (insightFile != null) {
+        if (insightFile != null && jitCapable) {
             val f = File(insightFile)
             if (!f.exists()) {
                 System.err.println("Error: --insight=$insightFile: file not found")
@@ -170,7 +214,7 @@ object EmbeddedExec {
             }
             engineBuilder.option("insight", f.absolutePath)
         }
-        if (inspect || inspectBrk) {
+        if ((inspect || inspectBrk) && jitCapable) {
             engineBuilder.option("inspect", "4242")
             if (inspectBrk) engineBuilder.option("inspect.Suspend", "true")
             System.err.println("[mezze] devtools listening on chrome://inspect — port 4242")
