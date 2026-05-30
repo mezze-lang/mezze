@@ -148,8 +148,20 @@ object WireRunner {
         }
         initStore(currentDir)
 
-        val session = WireSession.start(currentDir, timing, t0, devFlags) ?: return 1
+        var session = WireSession.start(currentDir, timing, t0, devFlags) ?: return 1
         var prevHashes: Set<Hash> = emptySet()
+
+        /** Rebuild the session after wire corruption — keeps the watch
+         *  loop alive across framing errors. Returns false if rebuild
+         *  fails (subprocess won't start, etc); caller should bail. */
+        fun restartSession(): Boolean {
+            try { session.close() } catch (_: Exception) {}
+            val fresh = WireSession.start(currentDir, timing, System.nanoTime(), devFlags)
+                ?: return false
+            session = fresh
+            prevHashes = emptySet()  // child has no cached state anymore
+            return true
+        }
 
         try {
             System.err.println("[mez dev] $appName · ${appFile.name}")
@@ -196,6 +208,16 @@ object WireRunner {
                             lastCompile = next
                             if (outcome.reason == "exit_called") {
                                 System.err.println("[mez dev] program exited with code ${outcome.exitCode}")
+                            } else if (outcome.reason == "wire_error" || outcome.reason == "crashed") {
+                                // Session is unusable — wire corrupted or
+                                // child died. Restart so the next file save
+                                // gets a fresh runtime. Bail entirely if
+                                // even the restart fails.
+                                System.err.println("[mez dev] runtime session lost (${outcome.reason}) — restarting")
+                                if (!restartSession()) {
+                                    System.err.println("[mez dev] couldn't restart runtime — exiting")
+                                    return 1
+                                }
                             }
                         }
                         syncWatchedDirs(watcher, watchedDirs, appFile, currentDir)
@@ -442,12 +464,42 @@ private class WireSession private constructor(
     }
 
     private fun drainUntilExited(): RunOutcome {
+        // Consecutive framing-error counter. PROTO_UNKNOWN_TYPE is fully
+        // recoverable (length+payload were read correctly, we just don't
+        // recognize the tag), and many PROTO_DECODE errors are also
+        // recoverable as long as the next length-prefix is still aligned.
+        // PROTO_TOO_LARGE desynchronizes the stream and can't be skipped.
+        //
+        // Bail when we hit too many in a row — the stream is probably
+        // unrecoverable and continuing just produces noise.
+        var consecutiveFraming = 0
+        val maxConsecutive = 5
         while (true) {
             val frame = try {
-                WireFrameCodec.read(fromChild)
+                val f = WireFrameCodec.read(fromChild)
+                consecutiveFraming = 0  // clean read → reset
+                f
             } catch (e: WireProtocolException) {
-                System.err.println("Error: wire decode failed: ${e.code} ${e.message}")
-                return RunOutcome(exitCode = 1, reason = "wire_error")
+                // PROTO_TOO_LARGE means we know the wire is desynchronized
+                // (we read a length but won't read the payload). No point
+                // trying to skip; the next bytes are mid-payload junk.
+                if (e.code == "PROTO_TOO_LARGE") {
+                    System.err.println("Error: wire decode failed: ${e.code} ${e.message} — stream unrecoverable")
+                    return RunOutcome(exitCode = 1, reason = "wire_error")
+                }
+                consecutiveFraming++
+                System.err.println(
+                    "[mez] wire frame skipped (${e.code} ${e.message}); " +
+                    "continuing (errors in a row: $consecutiveFraming)"
+                )
+                if (consecutiveFraming >= maxConsecutive) {
+                    System.err.println(
+                        "Error: $maxConsecutive framing errors in a row, " +
+                        "giving up on this run"
+                    )
+                    return RunOutcome(exitCode = 1, reason = "wire_error")
+                }
+                continue
             } ?: return run {
                 System.err.println("Error: RuntimeServer exited unexpectedly")
                 RunOutcome(exitCode = 1, reason = "crashed")
