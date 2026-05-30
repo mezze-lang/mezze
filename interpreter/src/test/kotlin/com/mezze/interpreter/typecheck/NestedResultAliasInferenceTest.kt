@@ -10,23 +10,24 @@ import org.junit.jupiter.api.parallel.ExecutionMode
 /**
  * Regression tests around `seq::fold` + `match` patterns. Originally
  * filed as #174 (alleged typechecker bug) but turned out to be two
- * separate runtime issues:
+ * separate runtime issues, both now fixed:
  *
- * 1. **fixed**: Lambda parameter captured as itself.
- *    `walkForCaptures` in TypedAstBuilder collected the lambda's own
- *    params (e.g. `acc` in `{acc, x} -> match x is Ok... acc + val`) as
- *    captures because the Local-binding branch was missing the
- *    `paramNames` guard that the ByHash branch already had. The fix is
- *    a 1-line change in `walkForCaptures` to skip `expr.name !in
- *    paramNames`. Effect: closures sized correctly → fold's native call
- *    arg layout matches receiver's frame layout → `match x` reads the
- *    right slot.
+ * 1. **Lambda param captured as itself.** `walkForCaptures` in
+ *    TypedAstBuilder collected the lambda's own params (e.g. `acc` in
+ *    `{acc, x} -> match x is Ok... acc + val`) as captures because the
+ *    Local-binding branch was missing the `paramNames` guard that the
+ *    ByHash branch already had. One-line fix in walkForCaptures.
  *
- * 2. **still open**: nested Async.spawn + fold + match produces a
- *    "No matching record pattern" at runtime. Likely an unrelated
- *    interpreter issue with how the inner Result's `Ok { val = ... }`
- *    record-pattern destructures when `val` is itself a Seq from a
- *    Promise. Last test below is `@Disabled` for that.
+ * 2. **`SeqFoldCallNode` re-entrancy hazard.** The same node is
+ *    reused across all `seq::fold` call sites in compiled stdlib
+ *    code. When an outer fold's `f` lambda transitively triggered an
+ *    INNER fold (e.g. `sum_arr` inside `f`), the inner call mutated
+ *    the node's cached @Child DirectCallNode to point at the inner
+ *    folder. When the outer fold's loop resumed, it was calling the
+ *    inner lambda with outer-folder args — ABI mismatch, runtime
+ *    "No matching record pattern". Fix: snapshot the resolved
+ *    DirectCallNode into a local before entering the loop, and
+ *    thread it through the helper chain as a parameter.
  */
 @Execution(ExecutionMode.SAME_THREAD)
 class NestedResultAliasInferenceTest {
@@ -214,7 +215,6 @@ class NestedResultAliasInferenceTest {
         assertEquals(42L, result)
     }
 
-    @Disabled("Separate bug — 'No matching record pattern' in nested Async.spawn + fold + match")
     @Test
     fun `nested all() composed through fold infers without annotation`() {
         // Replicates the doubly-nested all-of-all pattern from
