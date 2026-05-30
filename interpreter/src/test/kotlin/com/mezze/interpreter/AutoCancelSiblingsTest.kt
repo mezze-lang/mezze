@@ -161,6 +161,26 @@ class AutoCancelSiblingsTest {
         assertEquals(2L, eval(source))
     }
 
+    @Test
+    fun `join with all success does NOT cancel anyone under CoopAsync`() {
+        // Same as the LoomAsync variant — under CoopAsync the cooperative
+        // scheduler must still run both bumps to completion when neither
+        // fails. Confirms join doesn't ALSO cancel-on-success.
+        val source = """
+            use std::effects::async::{ Async, CoopAsync, race, with_timeout, join, join3 }
+            use std::effects::concurrent::atom::{ atom, deref, swap }
+
+            perform CoopAsync in do
+              let counter = atom { value = 0 }
+              let bump = {} -> do
+                let _ = swap { atom = counter, f = { current } -> current + 1 }
+                0
+              let _ = join { l = bump, r = bump }
+              deref { atom = counter }
+        """.trimIndent()
+        assertEquals(2L, eval(source))
+    }
+
     // ─── join3 — first failure cancels the other two ──────────────────────
 
     @Test
@@ -185,5 +205,69 @@ class AutoCancelSiblingsTest {
               deref { atom = counter }
         """.trimIndent()
         assertEquals(0L, eval(source))
+    }
+
+    @Test
+    fun `try_join3 cancels two surviving siblings when one fails under CoopAsync`() {
+        // CoopAsync counterpart — cooperative scheduler must observe the
+        // failer's AsyncFailed and cancel both slow1 and slow2 before
+        // their sleeps resume.
+        val source = """
+            use std::effects::async::{ Async, CoopAsync, try_join3 }
+            use std::effects::concurrent::atom::{ atom, deref, swap }
+
+            perform CoopAsync in do
+              let counter = atom { value = 0 }
+              let failer = {} -> crash { msg = "boom" }
+              let slow1 = {} -> do
+                Async.sleep { ms = 200 }
+                swap { atom = counter, f = { current } -> current + 1 }
+                0
+              let slow2 = {} -> do
+                Async.sleep { ms = 200 }
+                swap { atom = counter, f = { current } -> current + 1 }
+                0
+              try_join3 { a = failer, b = slow1, c = slow2 }
+              Async.sleep { ms = 400 }
+              deref { atom = counter }
+        """.trimIndent()
+        assertEquals(0L, eval(source))
+    }
+
+    // ─── join3 — all-success doesn't cancel anyone ────────────────────────
+
+    @Test
+    fun `join3 with all success does NOT cancel anyone under LoomAsync`() {
+        // All three siblings run to completion when none fail — counter = 3.
+        val source = """
+            use std::effects::async::{ Async, LoomAsync, join3 }
+            use std::effects::concurrent::atom::{ atom, deref, swap }
+
+            perform LoomAsync in do
+              let counter = atom { value = 0 }
+              let bump = {} -> do
+                let _ = swap { atom = counter, f = { current } -> current + 1 }
+                0
+              let _ = join3 { a = bump, b = bump, c = bump }
+              deref { atom = counter }
+        """.trimIndent()
+        assertEquals(3L, eval(source))
+    }
+
+    @Test
+    fun `join3 with all success does NOT cancel anyone under CoopAsync`() {
+        val source = """
+            use std::effects::async::{ Async, CoopAsync, join3 }
+            use std::effects::concurrent::atom::{ atom, deref, swap }
+
+            perform CoopAsync in do
+              let counter = atom { value = 0 }
+              let bump = {} -> do
+                let _ = swap { atom = counter, f = { current } -> current + 1 }
+                0
+              let _ = join3 { a = bump, b = bump, c = bump }
+              deref { atom = counter }
+        """.trimIndent()
+        assertEquals(3L, eval(source))
     }
 }
