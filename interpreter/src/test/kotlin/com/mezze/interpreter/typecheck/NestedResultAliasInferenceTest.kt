@@ -8,30 +8,33 @@ import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
 
 /**
- * Minimal reproducer for the typechecker inference limitation hit by
- * ParallelErrorPropagationTest's "test concurrent group operations".
+ * Pattern hit by ParallelErrorPropagationTest's "test concurrent group
+ * operations": doubly-nested Result-of-Seq-of-Result, fed through nested
+ * `seq::fold` calls.
  *
- * Shape: `seq::fold` over a `Seq (Result (Seq (Result Int AsyncError)) AsyncError)`
- * — doubly-nested Result-of-Seq-of-Result with a structural variant alias
- * (`AsyncError = | AsyncFailed | AsyncCancelled | AsyncTimedOut |`) at both
- * nesting levels.
+ * Originally filed as #174 (alleged typechecker inference bug). Turned
+ * out the typechecker is fine — the original test source used `{acc, g}`
+ * for fold's `f` lambda, but fold's signature names that record field
+ * literally `x` (`f: { acc: 'b, x: 'a } -> 'b`) and Mezze requires the
+ * lambda's destructure names to match. After renaming `g` → `x` the
+ * typechecker is happy, but a separate interpreter issue surfaces (a
+ * runtime "No matching pattern for value: null" inside the nested fold).
  *
- * The typechecker fails to unify the outer `xs: Seq 'a` parameter of `seq::fold`
- * against the inferred type, reporting both Result variants expanded as the
- * full alias carrier set.
- *
- * Expected once fixed: both tests below pass without annotation.
+ * The remaining issue is being investigated separately.
  */
 @Execution(ExecutionMode.SAME_THREAD)
 class NestedResultAliasInferenceTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    @Disabled("Typechecker inference bug — tracked as #174")
+    @Disabled("Runtime null in nested fold/match — see updated #174")
     @Test
     fun `nested all() composed through fold infers without annotation`() {
         // Replicates the doubly-nested all-of-all pattern from
         // ParallelErrorPropagationTest > test concurrent group operations.
+        // Note: fold's signature names the lambda's x-param literally `x`
+        // (`f: { acc: 'b, x: 'a } -> 'b`) — Mezze lambda destructure must
+        // match those field names exactly. Use `x` at both call sites.
         val code = """
             use std::effects::async::{ Async, LoomAsync, all }
             use std::collections::seq
@@ -57,7 +60,7 @@ class NestedResultAliasInferenceTest {
                 seq::fold {
                     xs = groups,
                     init = 0,
-                    f = { acc, g } -> match g is
+                    f = { acc, x } -> match x is
                         Ok { val } -> acc + sum_arr { arr = val }
                         Err { error = _ } -> acc
                 }
