@@ -14,7 +14,14 @@ effect Stdin where {
   ## Disables terminal echo for the duration of the read. None on EOF or when stdin isn't a terminal.
   read_password: {} -> Option Str <Stdin>,
   ## Current terminal dimensions, refreshed live on SIGWINCH. Both fields are 0 when stdin isn't a terminal.
-  term_size: {} -> { rows: Int, cols: Int } <Stdin>
+  term_size: {} -> { rows: Int, cols: Int } <Stdin>,
+  ## Switch the terminal into raw mode: disable canonical line-buffering and echo so
+  ## read_char returns each keypress as it arrives (including arrow keys, Ctrl, etc).
+  ## No-op when stdin isn't a terminal. Always pair with unset_raw_mode.
+  set_raw_mode: {} -> {} <Stdin>,
+  ## Restore the terminal to cooked (line-buffered, echo on) mode. Safe to call
+  ## even if set_raw_mode wasn't called first.
+  unset_raw_mode: {} -> {} <Stdin>
 }
 
 ## Real stdin backed by the process's System.in.
@@ -25,6 +32,8 @@ impl Stdin for SystemStdin where {
   is_tty = {} -> __native_stdin_is_tty {},
   read_password = {} -> __native_stdin_read_password {},
   term_size = {} -> __native_stdin_term_size {},
+  set_raw_mode = {} -> __native_stdin_set_raw_mode {},
+  unset_raw_mode = {} -> __native_stdin_unset_raw_mode {},
 }
 
 ## In-memory stdin for testing. Reads share one cursor across all ops.
@@ -35,6 +44,8 @@ impl Stdin for MockStdin { lines: [Str] } where {
   is_tty = {} -> False,
   read_password = {} -> __native_mock_stdin_read_password { lines = lines },
   term_size = {} -> { rows = 0, cols = 0 },
+  set_raw_mode = {} -> {},
+  unset_raw_mode = {} -> {},
 }
 
 ## Read a line from stdin. Trailing newline stripped. None on EOF.
@@ -54,3 +65,10 @@ pub let read_password : {} -> Option Str <Stdin> = {} -> Stdin.read_password {}
 
 ## Current terminal dimensions. `{ rows = 0, cols = 0 }` means stdin isn't a terminal.
 pub let term_size : {} -> { rows: Int, cols: Int } <Stdin> = {} -> Stdin.term_size {}
+
+## Switch the terminal to raw mode. read_char returns each keypress as it arrives.
+## No-op when stdin isn't a terminal. Pair with unset_raw_mode.
+pub let set_raw_mode : {} -> {} <Stdin> = {} -> Stdin.set_raw_mode {}
+
+## Restore the terminal to cooked (line-buffered, echo on) mode.
+pub let unset_raw_mode : {} -> {} <Stdin> = {} -> Stdin.unset_raw_mode {}

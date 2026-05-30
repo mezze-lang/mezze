@@ -111,6 +111,17 @@ public final class MockStdinNatives {
         return readLine(args);
     }
 
+    /** Mock terminals have no termios state — set/unset are no-ops. */
+    @TruffleBoundary
+    public static com.mezze.interpreter.values.MezzeUnit setRawMode(MezzeRecord args) {
+        return com.mezze.interpreter.values.MezzeUnit.INSTANCE;
+    }
+
+    @TruffleBoundary
+    public static com.mezze.interpreter.values.MezzeUnit unsetRawMode(MezzeRecord args) {
+        return com.mezze.interpreter.values.MezzeUnit.INSTANCE;
+    }
+
     /** UTF-8 byte-length from the leading byte. -1 on invalid. */
     private static int utf8Len(int b) {
         if ((b & 0x80) == 0) return 1;

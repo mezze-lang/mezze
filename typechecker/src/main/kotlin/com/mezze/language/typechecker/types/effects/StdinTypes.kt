@@ -48,6 +48,16 @@ object StdinTypes {
             ))
         )
 
+        context["__native_stdin_set_raw_mode"] = MezzeType.FunctionType(
+            unitArg,
+            MezzeType.RecordType(emptyMap())
+        )
+
+        context["__native_stdin_unset_raw_mode"] = MezzeType.FunctionType(
+            unitArg,
+            MezzeType.RecordType(emptyMap())
+        )
+
         val linesArg = MezzeType.RecordType(mapOf("lines" to MezzeType.SeqType(MezzeType.StringType)))
 
         context["__native_mock_stdin_read_line"] = MezzeType.FunctionType(

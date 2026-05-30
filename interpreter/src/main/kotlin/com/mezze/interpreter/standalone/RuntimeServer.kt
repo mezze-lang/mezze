@@ -15,6 +15,8 @@ import com.mezze.wire.Loaded
 import com.mezze.wire.MessageType
 import com.mezze.wire.PasswordReply
 import com.mezze.wire.PasswordRequest
+import com.mezze.wire.RawModeSet
+import com.mezze.wire.RawModeUnset
 import com.mezze.wire.Signal
 import com.mezze.wire.Winch
 import com.mezze.wire.Ping
@@ -200,6 +202,21 @@ object RuntimeServer {
             }
         }
         state.stdinBuffer = stdinBuffer
+
+        // Wire raw-mode toggles. Parent owns the terminal; child asks via
+        // RAW_MODE_SET / RAW_MODE_UNSET frames. Best-effort: if the wire
+        // is dead, the request is dropped and the next read just sees
+        // cooked-mode bytes.
+        StdinNatives.installWireRawModeHooks(
+            /* setter   */ {
+                try { send(WireFrame.of(MessageType.RAW_MODE_SET, RawModeSet())) }
+                catch (_: Exception) {}
+            },
+            /* unsetter */ {
+                try { send(WireFrame.of(MessageType.RAW_MODE_UNSET, RawModeUnset())) }
+                catch (_: Exception) {}
+            },
+        )
 
         // Wire password reader: parent owns the real terminal, so password
         // reads must round-trip via PASSWORD_REQUEST / PASSWORD_REPLY. We

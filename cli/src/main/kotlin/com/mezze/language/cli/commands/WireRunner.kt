@@ -393,6 +393,7 @@ private class WireSession private constructor(
     private val signalHandler = SigintForwarder(toChild, process)
     private val winchForwarder = WinchForwarder(toChild)
     private val sigtermForwarder = SigtermForwarder(toChild, process)
+    private val rawModeManager = RawModeManager()
 
     /**
      * Stdin forwarder: lazily spawned when the child first asks for stdin
@@ -500,6 +501,8 @@ private class WireSession private constructor(
                     val req = frame.decode<com.mezze.wire.PasswordRequest>()
                     handlePasswordRequest(req)
                 }
+                MessageType.RAW_MODE_SET -> rawModeManager.enter()
+                MessageType.RAW_MODE_UNSET -> rawModeManager.leave()
                 else -> {
                     System.err.println("[wire] unexpected frame: ${frame.type}")
                 }
@@ -589,6 +592,7 @@ private class WireSession private constructor(
         try { signalHandler.uninstall() } catch (_: Exception) {}
         try { winchForwarder.uninstall() } catch (_: Exception) {}
         try { sigtermForwarder.uninstall() } catch (_: Exception) {}
+        try { rawModeManager.restore() } catch (_: Exception) {}
         try { send(WireFrame.of(MessageType.QUIT, Quit(reason = "done"))) } catch (_: Exception) {}
         // Drain until BYE or EOF (give it 2s to be polite).
         val deadline = System.currentTimeMillis() + 2000
@@ -977,6 +981,88 @@ private class SigtermForwarder(
             previous?.let { sun.misc.Signal.handle(sun.misc.Signal("TERM"), it) }
         } catch (_: Throwable) {}
         try { timer.shutdownNow() } catch (_: Exception) {}
+    }
+}
+
+/**
+ * Manages the parent terminal's raw-mode state on behalf of child requests
+ * (#240). The child sends RAW_MODE_SET to enter (disable canonical line
+ * buffering + echo so single keypresses are visible to the user program),
+ * RAW_MODE_UNSET to leave. The trickiest part is *restoring* termios:
+ *
+ *   - User-program crash mid-eval → close() restores via restore()
+ *   - Ctrl-C (SIGINT) → SigintForwarder triggers graceful shutdown,
+ *     close() restores
+ *   - SIGTERM → SigtermForwarder same path, close() restores
+ *   - mez parent itself crashes → JVM shutdown hook restores
+ *   - Unexpected hard kill (SIGKILL) → can't restore, terminal is hosed.
+ *     User runs `stty sane` to recover. Documented limitation.
+ *
+ * Implementation: capture termios state via `stty -g < /dev/tty` (returns
+ * an opaque restore string), run `stty raw -echo < /dev/tty` to enter raw
+ * mode. On exit, run `stty <saved> < /dev/tty`. Idempotent: enter()
+ * doesn't re-snapshot if already in raw mode; leave()/restore() are no-ops
+ * if not currently in raw mode.
+ */
+private class RawModeManager {
+    @Volatile private var savedState: String? = null
+    private val shutdownHook = Thread { restore() }
+    private val installed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun ensureShutdownHook() {
+        if (installed.compareAndSet(false, true)) {
+            try { Runtime.getRuntime().addShutdownHook(shutdownHook) } catch (_: Throwable) {}
+        }
+    }
+
+    @Synchronized fun enter() {
+        if (savedState != null) return  // already in raw mode
+        ensureShutdownHook()
+        val state = sttyGet() ?: return  // not a TTY → silently no-op
+        savedState = state
+        runStty("raw", "-echo")
+    }
+
+    @Synchronized fun leave() {
+        val state = savedState ?: return  // not in raw mode → no-op
+        runStty(state)
+        savedState = null
+    }
+
+    /**
+     * Best-effort restore on session close / shutdown hook. Distinct from
+     * leave() because we want both close() and the shutdown hook to be
+     * safe to call without coordination — only one actually does work.
+     */
+    fun restore() {
+        leave()
+        try { Runtime.getRuntime().removeShutdownHook(shutdownHook) } catch (_: IllegalStateException) {}
+    }
+
+    /** Read termios state as an opaque restore string. Returns null on non-TTY. */
+    private fun sttyGet(): String? {
+        return try {
+            val proc = ProcessBuilder("stty", "-g")
+                .redirectInput(java.io.File("/dev/tty"))
+                .redirectErrorStream(true)
+                .start()
+            val out = proc.inputStream.bufferedReader().readText().trim()
+            val ec = proc.waitFor()
+            if (ec != 0 || out.isEmpty()) null else out
+        } catch (_: Exception) { null }
+    }
+
+    /** Apply stty flags against /dev/tty. Silent on failure. */
+    private fun runStty(vararg flags: String) {
+        try {
+            val cmd = mutableListOf("stty")
+            cmd.addAll(flags)
+            ProcessBuilder(cmd)
+                .redirectInput(java.io.File("/dev/tty"))
+                .redirectErrorStream(true)
+                .start()
+                .waitFor()
+        } catch (_: Exception) {}
     }
 }
 

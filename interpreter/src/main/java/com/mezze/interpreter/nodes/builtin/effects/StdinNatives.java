@@ -190,6 +190,71 @@ public final class StdinNatives {
     }
 
     /**
+     * Wire-mode raw-mode toggles. In wire mode the parent owns the
+     * terminal, so the child can't directly change termios; it asks the
+     * parent via RAW_MODE_SET / RAW_MODE_UNSET frames and the parent does
+     * stty raw -echo / restore. Default null = direct mode; the native
+     * runs `stty raw -echo < /dev/tty` itself, which works in the built
+     * native binary and JVM jar paths where the process owns the TTY.
+     */
+    private static volatile Runnable wireRawModeSetter = null;
+    private static volatile Runnable wireRawModeUnsetter = null;
+
+    /** Runtime hook (RuntimeServer): install the wire-mode raw-mode toggles. */
+    public static void installWireRawModeHooks(Runnable setter, Runnable unsetter) {
+        wireRawModeSetter = setter;
+        wireRawModeUnsetter = unsetter;
+    }
+
+    /**
+     * Toggle the terminal into raw mode (no canonical line-buffering, no echo).
+     * Wire mode: ask the parent. Direct mode: run stty against /dev/tty.
+     * No-op when stdin isn't a terminal — stty would silently fail and
+     * we just keep going.
+     */
+    @TruffleBoundary
+    public static com.mezze.interpreter.values.MezzeUnit setRawMode(MezzeRecord args) {
+        Runnable wire = wireRawModeSetter;
+        if (wire != null) {
+            try { wire.run(); } catch (Throwable ignored) {}
+        } else {
+            runStty("raw", "-echo");
+        }
+        return com.mezze.interpreter.values.MezzeUnit.INSTANCE;
+    }
+
+    /** Restore the terminal to cooked mode. Idempotent. */
+    @TruffleBoundary
+    public static com.mezze.interpreter.values.MezzeUnit unsetRawMode(MezzeRecord args) {
+        Runnable wire = wireRawModeUnsetter;
+        if (wire != null) {
+            try { wire.run(); } catch (Throwable ignored) {}
+        } else {
+            runStty("-raw", "echo");
+        }
+        return com.mezze.interpreter.values.MezzeUnit.INSTANCE;
+    }
+
+    /**
+     * Shell out to `stty <flags> < /dev/tty`. Direct-mode helper. Failure
+     * is silent — common reasons (no controlling TTY, sandboxed shell,
+     * Windows) all reduce to "we tried, nothing changed", which is the
+     * documented contract for non-TTY stdin.
+     */
+    private static void runStty(String... flags) {
+        try {
+            java.util.List<String> cmd = new java.util.ArrayList<>();
+            cmd.add("stty");
+            for (String f : flags) cmd.add(f);
+            new ProcessBuilder(cmd)
+                .redirectInput(new java.io.File("/dev/tty"))
+                .redirectErrorStream(true)
+                .start()
+                .waitFor();
+        } catch (Throwable ignored) {}
+    }
+
+    /**
      * Returns the current terminal size as a `{ rows: Int, cols: Int }`
      * record. Wire mode: served from the parent-reported snapshot (live
      * SIGWINCH updates). Direct mode: probes the JNI System.console()
