@@ -391,6 +391,7 @@ private class WireSession private constructor(
 ) {
 
     private val signalHandler = SigintForwarder(toChild, process)
+    private val winchForwarder = WinchForwarder(toChild)
 
     /**
      * Stdin forwarder: lazily spawned when the child first asks for stdin
@@ -404,6 +405,7 @@ private class WireSession private constructor(
 
     init {
         signalHandler.install()
+        winchForwarder.install()
     }
 
     /** Result of one LOAD cycle. */
@@ -582,6 +584,7 @@ private class WireSession private constructor(
 
     fun close() {
         try { signalHandler.uninstall() } catch (_: Exception) {}
+        try { winchForwarder.uninstall() } catch (_: Exception) {}
         try { send(WireFrame.of(MessageType.QUIT, Quit(reason = "done"))) } catch (_: Exception) {}
         // Drain until BYE or EOF (give it 2s to be polite).
         val deadline = System.currentTimeMillis() + 2000
@@ -679,8 +682,27 @@ private class WireSession private constructor(
         val stdinIsTty = cons != null
         val stdoutIsTty = cons != null  // best-effort proxy; System.console() needs both
         val stderrIsTty = cons != null
-        val termRows = System.getenv("LINES")?.toIntOrNull() ?: 0
-        val termCols = System.getenv("COLUMNS")?.toIntOrNull() ?: 0
+        // Initial terminal dimensions. Prefer LINES/COLUMNS env vars if
+        // set (shells like bash/zsh export them on resize); else ask stty
+        // directly. Live updates ride in on SIGWINCH via WinchForwarder
+        // after handshake.
+        var termRows = System.getenv("LINES")?.toIntOrNull() ?: 0
+        var termCols = System.getenv("COLUMNS")?.toIntOrNull() ?: 0
+        if (termRows == 0 || termCols == 0) {
+            try {
+                val proc = ProcessBuilder("stty", "size")
+                    .redirectInput(java.io.File("/dev/tty"))
+                    .redirectErrorStream(true)
+                    .start()
+                val out = proc.inputStream.bufferedReader().readText().trim()
+                proc.waitFor()
+                val parts = out.split(Regex("\\s+"))
+                if (parts.size >= 2) {
+                    termRows = parts[0].toIntOrNull() ?: termRows
+                    termCols = parts[1].toIntOrNull() ?: termCols
+                }
+            } catch (_: Exception) { /* stay 0 */ }
+        }
         val term = System.getenv("TERM") ?: ""
         send(WireFrame.of(MessageType.HELLO, Hello(
             versionMajor = WireProtocol.PROTOCOL_VERSION_MAJOR,
@@ -801,6 +823,75 @@ private class SigintForwarder(
             previous?.let { sun.misc.Signal.handle(sun.misc.Signal("INT"), it) }
         } catch (_: Throwable) {}
         try { timer.shutdownNow() } catch (_: Exception) {}
+    }
+}
+
+/**
+ * SIGWINCH handler: when the user resizes the terminal the parent receives
+ * SIGWINCH from the OS; we read the new rows/cols and ship a WINCH frame
+ * to the child so `Stdin.term_size` reflects the live size. Without this,
+ * the child's term-size snapshot is frozen at handshake values and any
+ * user-program TUI render after a resize draws at the old dimensions.
+ *
+ * The "WINCH" signal name isn't part of the Java POSIX signal contract,
+ * but sun.misc.Signal accepts it on Unix JVMs. Windows JVMs throw — we
+ * swallow that and the feature degrades to "no live updates" (initial
+ * handshake values stay sticky).
+ *
+ * We read TIOCGWINSZ-style values from `stty size` since JVM has no
+ * portable getwinsize API. That spawns a process per SIGWINCH — small
+ * cost for a UI-rate event (typically < 1 per second during a drag).
+ */
+private class WinchForwarder(private val toChild: OutputStream) {
+    private var previous: sun.misc.SignalHandler? = null
+
+    private val handler = sun.misc.SignalHandler {
+        val (rows, cols) = readSize() ?: return@SignalHandler
+        try {
+            val frame = WireFrame.of(MessageType.WINCH, com.mezze.wire.Winch(rows = rows, cols = cols))
+            synchronized(toChild) {
+                WireFrameCodec.writeFlush(toChild, frame)
+            }
+        } catch (_: Exception) {
+            // Child dead or wire torn — give up quietly; next handshake
+            // ships fresh values anyway.
+        }
+    }
+
+    private fun readSize(): Pair<Int, Int>? {
+        return try {
+            // `stty size` writes "<rows> <cols>" on stdout when stdin is
+            // a TTY. We bind /dev/tty as stdin so it works even if the
+            // JVM's own stdin is piped (which it is under `mez exec`).
+            val proc = ProcessBuilder("stty", "size")
+                .redirectInput(java.io.File("/dev/tty"))
+                .redirectErrorStream(true)
+                .start()
+            val out = proc.inputStream.bufferedReader().readText().trim()
+            proc.waitFor()
+            val parts = out.split(Regex("\\s+"))
+            if (parts.size < 2) return null
+            val r = parts[0].toIntOrNull() ?: return null
+            val c = parts[1].toIntOrNull() ?: return null
+            r to c
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun install() {
+        try {
+            previous = sun.misc.Signal.handle(sun.misc.Signal("WINCH"), handler)
+        } catch (_: Throwable) {
+            // Non-Unix JVM or SIGWINCH unavailable — initial handshake
+            // values stick, no live updates. Acceptable degradation.
+        }
+    }
+
+    fun uninstall() {
+        try {
+            previous?.let { sun.misc.Signal.handle(sun.misc.Signal("WINCH"), it) }
+        } catch (_: Throwable) {}
     }
 }
 

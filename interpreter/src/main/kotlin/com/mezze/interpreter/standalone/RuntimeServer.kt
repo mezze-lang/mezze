@@ -20,6 +20,7 @@ import com.mezze.wire.Loaded
 import com.mezze.wire.MessageType
 import com.mezze.wire.PasswordReply
 import com.mezze.wire.PasswordRequest
+import com.mezze.wire.Winch
 import com.mezze.wire.Ping
 import com.mezze.wire.Pong
 import com.mezze.wire.ProtocolError
@@ -276,6 +277,9 @@ object RuntimeServer {
         // child's fd 0 is the wire, not a real TTY, so without this
         // info `is_tty` would always return false.
         StdinNatives.setWireIsTty(hello.isattyStdin, hello.isattyStdout, hello.isattyStderr)
+        // Initial terminal dimensions — refreshed live by WINCH dispatch
+        // when the parent's SIGWINCH handler ships an update.
+        StdinNatives.setWireTermSize(hello.termRows, hello.termCols)
         // Version negotiation. Major mismatch is fatal; minor mismatch
         // uses the lower version's vocabulary.
         if (hello.versionMajor != WireProtocol.PROTOCOL_VERSION_MAJOR) {
@@ -354,6 +358,13 @@ object RuntimeServer {
                         // (capacity 1, slot is empty by contract since the
                         // requester drained before sending PASSWORD_REQUEST).
                         state.passwordReplies.offer(frame.decode<PasswordReply>())
+                    }
+                    MessageType.WINCH -> {
+                        // Parent's terminal resized — refresh the static
+                        // snapshot that Stdin.term_size reads. Cheap: two
+                        // volatile assignments, no thread coordination.
+                        val w = frame.decode<Winch>()
+                        StdinNatives.setWireTermSize(w.rows, w.cols)
                     }
                     MessageType.HELLO -> {
                         tryWriteProtocolError(send, "PROTO_STATE_INVALID", "duplicate HELLO after handshake")

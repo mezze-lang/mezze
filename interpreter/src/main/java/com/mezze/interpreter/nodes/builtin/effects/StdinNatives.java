@@ -154,10 +154,32 @@ public final class StdinNatives {
      */
     private static volatile Boolean wireIsTtyStdin = null;
 
+    /**
+     * Parent-reported terminal size. Updated by HELLO (initial snapshot)
+     * and refreshed by every WINCH frame the parent ships when its
+     * terminal resizes. Zero means "unknown" — the parent didn't have a
+     * TTY at handshake time, or we're running directly in a built binary
+     * with no wire host. Reads under contention are safe because every
+     * publisher does a single 64-bit assignment via packing rows/cols.
+     */
+    private static volatile int wireTermRows = 0;
+    private static volatile int wireTermCols = 0;
+
     /** Runtime hook: install parent's TTY snapshot at handshake time. */
     public static void setWireIsTty(boolean stdin, boolean stdout, boolean stderr) {
         wireIsTtyStdin = stdin;
         // stdout/stderr are flagged here for future readers; not currently surfaced as natives.
+    }
+
+    /**
+     * Runtime hook: install/refresh parent's terminal size. Called from
+     * HELLO handler at handshake (initial values) and from every WINCH
+     * dispatch (live updates after SIGWINCH on the parent). Both rows
+     * and cols are non-negative; 0 signals "unknown".
+     */
+    public static void setWireTermSize(int rows, int cols) {
+        wireTermRows = rows;
+        wireTermCols = cols;
     }
 
     @TruffleBoundary
@@ -165,6 +187,37 @@ public final class StdinNatives {
         Boolean wired = wireIsTtyStdin;
         if (wired != null) return wired;
         return System.console() != null;
+    }
+
+    /**
+     * Returns the current terminal size as a `{ rows: Int, cols: Int }`
+     * record. Wire mode: served from the parent-reported snapshot (live
+     * SIGWINCH updates). Direct mode: probes the JNI System.console()
+     * width if available, else returns zeros.
+     *
+     * Why zeros instead of None: simpler to surface as a flat record;
+     * the user-program can check `rows == 0 || cols == 0` to mean
+     * "no terminal".
+     */
+    @TruffleBoundary
+    public static Object termSize(MezzeRecord args) {
+        int rows = wireTermRows;
+        int cols = wireTermCols;
+        if (rows == 0 && cols == 0) {
+            // No wire snapshot — direct mode. Java's Console doesn't
+            // expose getTerminalSize() pre-23; rely on env vars LINES /
+            // COLUMNS as the conventional fallback (set by most shells).
+            try {
+                String l = System.getenv("LINES");
+                String c = System.getenv("COLUMNS");
+                if (l != null) rows = Integer.parseInt(l.trim());
+                if (c != null) cols = Integer.parseInt(c.trim());
+            } catch (NumberFormatException ignored) {}
+        }
+        return MezzeRecord.fromFields(
+            new String[] { "rows", "cols" },
+            new Object[] { (long) rows, (long) cols }
+        );
     }
 
     @TruffleBoundary

@@ -2489,6 +2489,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_stdin_read_bytes", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.StdinNatives.readBytes(r));
         HANDLERS.put("__native_stdin_is_tty", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.StdinNatives.isTty(r));
         HANDLERS.put("__native_stdin_read_password", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.StdinNatives.readPassword(r));
+        HANDLERS.put("__native_stdin_term_size", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.StdinNatives.termSize(r));
 
         HANDLERS.put("__native_mock_stdin_read_line", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.MockStdinNatives.readLine(r));
         HANDLERS.put("__native_mock_stdin_read_char", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.MockStdinNatives.readChar(r));

@@ -40,6 +40,14 @@ object StdinTypes {
             optionType(MezzeType.StringType)
         )
 
+        context["__native_stdin_term_size"] = MezzeType.FunctionType(
+            unitArg,
+            MezzeType.RecordType(mapOf(
+                "rows" to MezzeType.IntType,
+                "cols" to MezzeType.IntType,
+            ))
+        )
+
         val linesArg = MezzeType.RecordType(mapOf("lines" to MezzeType.SeqType(MezzeType.StringType)))
 
         context["__native_mock_stdin_read_line"] = MezzeType.FunctionType(

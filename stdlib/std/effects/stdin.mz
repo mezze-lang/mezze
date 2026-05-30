@@ -12,7 +12,9 @@ effect Stdin where {
   ## True if stdin is connected to a terminal (vs. piped or redirected from a file).
   is_tty: {} -> Bool <Stdin>,
   ## Disables terminal echo for the duration of the read. None on EOF or when stdin isn't a terminal.
-  read_password: {} -> Option Str <Stdin>
+  read_password: {} -> Option Str <Stdin>,
+  ## Current terminal dimensions, refreshed live on SIGWINCH. Both fields are 0 when stdin isn't a terminal.
+  term_size: {} -> { rows: Int, cols: Int } <Stdin>
 }
 
 ## Real stdin backed by the process's System.in.
@@ -22,6 +24,7 @@ impl Stdin for SystemStdin where {
   read_bytes = { max } -> __native_stdin_read_bytes { max = max },
   is_tty = {} -> __native_stdin_is_tty {},
   read_password = {} -> __native_stdin_read_password {},
+  term_size = {} -> __native_stdin_term_size {},
 }
 
 ## In-memory stdin for testing. Reads share one cursor across all ops.
@@ -31,6 +34,7 @@ impl Stdin for MockStdin { lines: [Str] } where {
   read_bytes = { max } -> __native_mock_stdin_read_bytes { lines = lines, max = max },
   is_tty = {} -> False,
   read_password = {} -> __native_mock_stdin_read_password { lines = lines },
+  term_size = {} -> { rows = 0, cols = 0 },
 }
 
 ## Read a line from stdin. Trailing newline stripped. None on EOF.
@@ -47,3 +51,6 @@ pub let is_tty : {} -> Bool <Stdin> = {} -> Stdin.is_tty {}
 
 ## Read a password with terminal echo disabled. None on EOF or non-terminal stdin.
 pub let read_password : {} -> Option Str <Stdin> = {} -> Stdin.read_password {}
+
+## Current terminal dimensions. `{ rows = 0, cols = 0 }` means stdin isn't a terminal.
+pub let term_size : {} -> { rows: Int, cols: Int } <Stdin> = {} -> Stdin.term_size {}
