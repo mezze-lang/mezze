@@ -1305,7 +1305,12 @@ class TypedAstBuilder(
     private fun walkForCaptures(expr: TypedExpr, paramNames: Set<String>, captures: MutableList<TypedCapture>, seen: MutableSet<String>) {
         if (expr is TypedVar) {
             val binding = expr.binding
-            if (binding is BindingRef.Local && binding.depth > 0 && expr.name !in seen) {
+            // Skip the lambda's own params — they're not captures, they're inputs.
+            // The ByHash branch below already does this check; the Local branch
+            // was missing it, which caused inner references to params (e.g. `acc`
+            // inside `match x is Ok ... acc + val`) to be mis-collected as
+            // captures. Fix: same guard, both branches.
+            if (binding is BindingRef.Local && binding.depth > 0 && expr.name !in seen && expr.name !in paramNames) {
                 seen.add(expr.name)
                 captures.add(TypedCapture(expr.name, expr.type, binding))
             }
