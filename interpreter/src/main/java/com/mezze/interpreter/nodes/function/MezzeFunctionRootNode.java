@@ -54,11 +54,6 @@ public final class MezzeFunctionRootNode extends RootNode {
     @CompilationFinal(dimensions = 1)
     private final int[] slotTypes;
 
-    // Ability operation slot indices - where to write passed ability operations
-    // Layout: abilities are passed after the record argument
-    @CompilationFinal(dimensions = 1)
-    private final int[] abilitySlots;
-
     // Cached field indices for fast record access (populated after shape stabilizes)
     @CompilationFinal(dimensions = 1)
     private int[] cachedFieldIndices;
@@ -73,16 +68,10 @@ public final class MezzeFunctionRootNode extends RootNode {
     @CompilationFinal
     private final int parameterCount;
 
-    @CompilationFinal
-    private final int abilityCount;
-
     // Source section for debugger/profiler integration — set after construction by TruffleCompiler
     @CompilationFinal
     private SourceSection sourceSection;
 
-    /**
-     * Standard constructor without ability slots.
-     */
     public MezzeFunctionRootNode(
             MezzeLanguage language,
             FrameDescriptor frameDescriptor,
@@ -92,33 +81,14 @@ public final class MezzeFunctionRootNode extends RootNode {
             int[] closureSlots,
             int[] slotTypes
     ) {
-        this(language, frameDescriptor, bodyNode, name, parameterNames, closureSlots, slotTypes, null);
-    }
-
-    /**
-     * Full constructor with ability slots for polymorphic functions.
-     * Ability operations are passed after the record argument and written to the specified slots.
-     */
-    public MezzeFunctionRootNode(
-            MezzeLanguage language,
-            FrameDescriptor frameDescriptor,
-            MezzeNode bodyNode,
-            String name,
-            String[] parameterNames,
-            int[] closureSlots,
-            int[] slotTypes,
-            int[] abilitySlots
-    ) {
         super(language, frameDescriptor);
         this.bodyNode = bodyNode;
         this.name = name;
         this.parameterNames = parameterNames != null ? parameterNames : EMPTY_STRINGS;
         this.closureSlots = closureSlots != null ? closureSlots : EMPTY_INTS;
         this.slotTypes = slotTypes != null ? slotTypes : EMPTY_INTS;
-        this.abilitySlots = abilitySlots != null ? abilitySlots : EMPTY_INTS;
         this.closureCount = this.closureSlots.length;
         this.parameterCount = this.parameterNames.length;
-        this.abilityCount = this.abilitySlots.length;
     }
 
     /**
@@ -163,7 +133,6 @@ public final class MezzeFunctionRootNode extends RootNode {
                 && args[closureCount] == ScalarLongPayloadMarker.INSTANCE
                 && args[closureCount + 1] instanceof long[] longArgs) {
             bindLongPayload(frame, longArgs);
-            bindAbilityOpsAfter(frame, args, closureCount + 2);
             return runBodyLoop(frame);
         }
 
@@ -172,7 +141,6 @@ public final class MezzeFunctionRootNode extends RootNode {
                 && args[closureCount] == ScalarDoublePayloadMarker.INSTANCE
                 && args[closureCount + 1] instanceof double[] doubleArgs) {
             bindDoublePayload(frame, doubleArgs);
-            bindAbilityOpsAfter(frame, args, closureCount + 2);
             return runBodyLoop(frame);
         }
 
@@ -186,7 +154,6 @@ public final class MezzeFunctionRootNode extends RootNode {
             double[] mDouble = args[closureCount + 3] instanceof double[] d ? d : null;
             Object[] mObj = args[closureCount + 4] instanceof Object[] o ? o : null;
             bindMixedPayload(frame, mixedKinds, mLong, mDouble, mObj);
-            bindAbilityOpsAfter(frame, args, closureCount + 5);
             return runBodyLoop(frame);
         }
 
@@ -210,11 +177,11 @@ public final class MezzeFunctionRootNode extends RootNode {
                 && args[closureCount] == ScalarABIMarker.INSTANCE;
         } else {
             // parameterCount >= 2: disambiguate by arity alone.
-            // Record ABI:   args.length == closureCount + 1 (+ abilityCount).
-            // Scalar ABI:   args.length == closureCount + parameterCount (+ abilityCount).
+            // Record ABI:   args.length == closureCount + 1.
+            // Scalar ABI:   args.length == closureCount + parameterCount.
             // Since parameterCount > 1, these arities are distinct regardless of arg values.
-            int recordArity = closureCount + 1 + abilityCount;
-            int scalarArity = closureCount + parameterCount + abilityCount;
+            int recordArity = closureCount + 1;
+            int scalarArity = closureCount + parameterCount;
             scalarABI = args.length == scalarArity && args.length != recordArity;
         }
 
@@ -235,29 +202,6 @@ public final class MezzeFunctionRootNode extends RootNode {
                     " closureCount=" + closureCount +
                     " args.length=" + args.length +
                     ", got: " + (recordArg == null ? "null" : recordArg.getClass().getName()));
-            }
-        }
-
-        // Bind ability operation functions (passed after the param payload).
-        // Record ABI layout:   [closure..., recordArg, abilityOps...]
-        // Scalar ABI layouts:
-        //   paramCount == 1:   [closure..., MARKER, scalar0, abilityOps...]
-        //   paramCount != 1:   [closure..., scalar0, ..., scalarN-1, abilityOps...]
-        if (abilityCount > 0) {
-            int abilityArgStart;
-            if (!scalarABI) {
-                abilityArgStart = closureCount + 1;
-            } else if (parameterCount == 1) {
-                abilityArgStart = closureCount + 1 + parameterCount;
-            } else {
-                abilityArgStart = closureCount + parameterCount;
-            }
-            for (int i = 0; i < abilityCount; i++) {
-                int argIndex = abilityArgStart + i;
-                if (argIndex < args.length) {
-                    int slotIndex = abilitySlots[i];
-                    frame.setObject(slotIndex, args[argIndex]);
-                }
             }
         }
 
@@ -347,17 +291,6 @@ public final class MezzeFunctionRootNode extends RootNode {
                 frame.setDouble(slot, doubleArgs[di++]);
             } else {
                 frame.setObject(slot, objArgs[oi++]);
-            }
-        }
-    }
-
-    /** Bind ability-op functions stored at args[abilityArgStart..]. */
-    @ExplodeLoop
-    private void bindAbilityOpsAfter(VirtualFrame frame, Object[] args, int abilityArgStart) {
-        for (int i = 0; i < abilityCount; i++) {
-            int argIndex = abilityArgStart + i;
-            if (argIndex < args.length) {
-                frame.setObject(abilitySlots[i], args[argIndex]);
             }
         }
     }

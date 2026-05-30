@@ -36,7 +36,6 @@ public final class FunctionDefinitionNode extends MezzeNode {
     private static final Object[] EMPTY_CLOSURE = new Object[0];
     private static final int[] EMPTY_SLOTS = new int[0];
     private static final String[] EMPTY_STRINGS = new String[0];
-    private static final MezzeFunction.AbilitySlotRequirement[] EMPTY_ABILITY_REQS = new MezzeFunction.AbilitySlotRequirement[0];
 
     // Slot kind constants (must match ReadLocalNode)
     public static final int KIND_LONG = 0;
@@ -72,17 +71,9 @@ public final class FunctionDefinitionNode extends MezzeNode {
     @CompilationFinal
     private final FrameDescriptor frameDescriptor;
 
-    // Ability operation slot requirements for polymorphic functions
-    // Each entry describes where an ability operation function should be stored
-    @CompilationFinal(dimensions = 1)
-    private final MezzeFunction.AbilitySlotRequirement[] abilitySlotRequirements;
-
     @CompilationFinal
     private CallTarget callTarget;
 
-    /**
-     * Full constructor with typed closure slots and ability slot requirements.
-     */
     public FunctionDefinitionNode(
             String name,
             Hash contentHash,
@@ -90,8 +81,7 @@ public final class FunctionDefinitionNode extends MezzeNode {
             int[] closureKinds,
             String[] parameterNames,
             MezzeNode bodyNode,
-            FrameDescriptor frameDescriptor,
-            MezzeFunction.AbilitySlotRequirement[] abilitySlotRequirements
+            FrameDescriptor frameDescriptor
     ) {
         this.name = name;
         this.contentHash = contentHash;
@@ -102,31 +92,6 @@ public final class FunctionDefinitionNode extends MezzeNode {
         this.parameterCount = this.parameterNames.length;
         this.bodyNode = bodyNode;
         this.frameDescriptor = frameDescriptor;
-        this.abilitySlotRequirements = abilitySlotRequirements != null ? abilitySlotRequirements : EMPTY_ABILITY_REQS;
-    }
-
-    private void initializeCallTarget(MezzeLanguage language) {
-        // Extract ability slot indices from requirements
-        int[] abilitySlots = null;
-        if (abilitySlotRequirements.length > 0) {
-            abilitySlots = new int[abilitySlotRequirements.length];
-            for (int i = 0; i < abilitySlotRequirements.length; i++) {
-                abilitySlots[i] = abilitySlotRequirements[i].slotIndex;
-            }
-        }
-
-        // Use MezzeFunctionRootNode for proper record argument unpacking
-        MezzeFunctionRootNode rootNode = new MezzeFunctionRootNode(
-            language,
-            frameDescriptor,
-            bodyNode,
-            name,
-            parameterNames,
-            closureSlots,
-            null,  // slotTypes - auto-detect
-            abilitySlots
-        );
-        callTarget = rootNode.getCallTarget();
     }
 
     @Override
@@ -138,14 +103,9 @@ public final class FunctionDefinitionNode extends MezzeNode {
             createCallTarget();
         }
 
-        // Fast path: no closure variables and no ability requirements
-        if (closureCount == 0 && abilitySlotRequirements.length == 0) {
-            return new MezzeFunction(callTarget, name, EMPTY_CLOSURE, parameterNames);
-        }
-
-        // Fast path: no closure variables but has ability requirements
+        // Fast path: no closure variables
         if (closureCount == 0) {
-            return new MezzeFunction(callTarget, name, EMPTY_CLOSURE, parameterNames, null, abilitySlotRequirements);
+            return new MezzeFunction(callTarget, name, EMPTY_CLOSURE, parameterNames);
         }
 
         // Capture closure variables from current frame
@@ -157,11 +117,6 @@ public final class FunctionDefinitionNode extends MezzeNode {
         Object[] closureValues = new Object[closureCount];
         for (int i = 0; i < closureCount; i++) {
             closureValues[i] = frame.getValue(closureSlots[i]);
-        }
-
-        // Pass ability slot requirements if present
-        if (abilitySlotRequirements.length > 0) {
-            return new MezzeFunction(callTarget, name, closureValues, parameterNames, null, abilitySlotRequirements);
         }
 
         return new MezzeFunction(callTarget, name, closureValues, parameterNames);
@@ -186,16 +141,6 @@ public final class FunctionDefinitionNode extends MezzeNode {
             }
         }
 
-        // Extract ability slot indices from requirements
-        int[] abilitySlots = null;
-        if (abilitySlotRequirements.length > 0) {
-            abilitySlots = new int[abilitySlotRequirements.length];
-            for (int i = 0; i < abilitySlotRequirements.length; i++) {
-                abilitySlots[i] = abilitySlotRequirements[i].slotIndex;
-            }
-        }
-
-        // Create new CallTarget with ability slots
         MezzeFunctionRootNode rootNode = new MezzeFunctionRootNode(
             MezzeLanguage.get(this),
             frameDescriptor,
@@ -203,8 +148,7 @@ public final class FunctionDefinitionNode extends MezzeNode {
             name,
             parameterNames,
             closureSlots,
-            null,  // slotTypes - auto-detect
-            abilitySlots
+            null  // slotTypes - auto-detect
         );
         callTarget = rootNode.getCallTarget();
 

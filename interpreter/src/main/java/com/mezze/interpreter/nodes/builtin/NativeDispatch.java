@@ -131,6 +131,31 @@ public final class NativeDispatch extends MezzeNode {
     // ==================== Handler Registration ====================
 
     private static void initHandlers() {
+        registerAllHandlers();
+        validateNoDuplicateHandlers();
+    }
+
+    /**
+     * Sanity check after registration: same key must not appear in both
+     * dispatch maps, otherwise the per-instance cache silently prefers
+     * the with-node handler (line 101-104) and the plain handler is
+     * unreachable. This is a class-load-time check — never triggered in
+     * a healthy build, but catches misregistration during development
+     * before it becomes a silent dispatch bug. Same pattern as #246: a
+     * string-keyed dispatch site where the loser is invisible.
+     */
+    private static void validateNoDuplicateHandlers() {
+        java.util.Set<String> overlap = new java.util.HashSet<>(HANDLERS.keySet());
+        overlap.retainAll(HANDLERS_WITH_NODE.keySet());
+        if (!overlap.isEmpty()) {
+            throw new IllegalStateException(
+                "Native function name registered in both HANDLERS and "
+                + "HANDLERS_WITH_NODE — dispatch silently prefers with-node "
+                + "and shadows the other: " + overlap);
+        }
+    }
+
+    private static void registerAllHandlers() {
         // Core primitive operations (Int, Float, String, Bool, Console)
         registerIntHandlers();
         registerFloatBasicHandlers();
