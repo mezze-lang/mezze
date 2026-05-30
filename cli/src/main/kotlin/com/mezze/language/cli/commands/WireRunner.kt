@@ -418,6 +418,15 @@ private class WireSession private constructor(
     private val rawModeManager = RawModeManager()
 
     /**
+     * Set to the child's exit code when the RuntimeServer process dies.
+     * Initialized via process.onExit() in init{}; consulted by
+     * drainUntilExited so we can report crash promptly instead of waiting
+     * on a blocking read that won't terminate until the OS finishes
+     * closing the pipe. -1 means "not dead yet".
+     */
+    @Volatile private var childExitCode: Int = -1
+
+    /**
      * Stdin forwarder: lazily spawned when the child first asks for stdin
      * via STDIN_REQUEST. Reads from parent's System.in, ships STDIN_DATA
      * frames to the child, sends STDIN_EOF on EOF. Stays alive for the
@@ -431,6 +440,15 @@ private class WireSession private constructor(
         signalHandler.install()
         winchForwarder.install()
         sigtermForwarder.install()
+        // When the child exits (for any reason), record its exit code
+        // and close fromChild so any blocked WireFrameCodec.read returns
+        // promptly. Without this, a SIGKILL or OOM on the child can leave
+        // the parent hanging until the kernel decides to close the pipe,
+        // which on some systems takes seconds.
+        process.onExit().thenAccept { p ->
+            childExitCode = p.exitValue()
+            try { fromChild.close() } catch (_: Exception) {}
+        }
     }
 
     /** Result of one LOAD cycle. */
@@ -479,6 +497,12 @@ private class WireSession private constructor(
                 val f = WireFrameCodec.read(fromChild)
                 consecutiveFraming = 0  // clean read → reset
                 f
+            } catch (e: java.io.IOException) {
+                // Stream was closed underneath us — almost certainly
+                // because onExit fired and closed fromChild to unblock
+                // this read. Treat as clean EOF; the ?: return below
+                // surfaces the child's exit code.
+                null
             } catch (e: WireProtocolException) {
                 // PROTO_TOO_LARGE means we know the wire is desynchronized
                 // (we read a length but won't read the payload). No point
@@ -501,8 +525,30 @@ private class WireSession private constructor(
                 }
                 continue
             } ?: return run {
-                System.err.println("Error: RuntimeServer exited unexpectedly")
-                RunOutcome(exitCode = 1, reason = "crashed")
+                // Either the child closed its stdout cleanly (rare —
+                // should always send BYE first) or the onExit hook
+                // already closed fromChild because the process died.
+                // Race: we may see EOF before onExit fires, so wait up to
+                // 500 ms for the exit code if it's not in yet.
+                if (childExitCode < 0) {
+                    try {
+                        process.onExit().get(500, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    } catch (_: Exception) { /* still alive or timeout */ }
+                }
+                val ec = childExitCode
+                if (ec >= 0) {
+                    val signal = signalFromExitCode(ec)
+                    val msg = if (signal != null) {
+                        "Error: RuntimeServer killed by $signal (exit $ec)"
+                    } else {
+                        "Error: RuntimeServer exited unexpectedly (exit $ec)"
+                    }
+                    System.err.println(msg)
+                    RunOutcome(exitCode = ec, reason = "crashed")
+                } else {
+                    System.err.println("Error: RuntimeServer exited unexpectedly")
+                    RunOutcome(exitCode = 1, reason = "crashed")
+                }
             }
             when (frame.type) {
                 MessageType.LOADED -> { /* ignore — purely advisory */ }
@@ -569,6 +615,30 @@ private class WireSession private constructor(
      * TTY to disable echo on, so we reply with null and the child surfaces
      * that as `None` to the user program.
      */
+    /**
+     * Translate a process exit code into a signal name when it matches
+     * POSIX's "killed by signal N → exit 128+N" convention. Used when we
+     * detect a crashed RuntimeServer so the surfaced error tells the user
+     * "killed by SIGKILL" rather than the cryptic "exit 137".
+     *
+     * Unix shells report this convention; on macOS / Linux it's standard.
+     * Returns null for codes that aren't in the 128+N range, or for codes
+     * outside the common signals (1, 2, 6, 9, 11, 15) we'd actually see
+     * from a RuntimeServer death.
+     */
+    private fun signalFromExitCode(code: Int): String? {
+        if (code !in 129..143) return null
+        return when (code - 128) {
+            1 -> "SIGHUP"
+            2 -> "SIGINT"
+            6 -> "SIGABRT"  // e.g. JVM assertion failure
+            9 -> "SIGKILL"  // OOM-killer or external kill -9
+            11 -> "SIGSEGV"
+            15 -> "SIGTERM"
+            else -> null
+        }
+    }
+
     private fun handlePasswordRequest(req: com.mezze.wire.PasswordRequest) {
         val cons = System.console()
         val value: String? = if (cons == null) {
