@@ -1,6 +1,7 @@
 use std::collections::list
 use std::int
 use std::abilities::compare::{ Eq }
+use std::effects::async::{ Async }
 
 ## Transactional variable -- can only be read/written inside STM transactions.
 pub newtype TVar 'a = TVar __NativeTVar
@@ -96,7 +97,16 @@ impl STM for SequentialSTM where {
 }
 
 ## Run a transaction atomically with OptimisticSTM.
-pub let atomically : { f: {} -> 'a <STM> } -> 'a = { f } -> perform OptimisticSTM in __native_stm_atomic { f = f }
+pub let atomically : { f: {} -> 'a <STM> } -> 'a <Async, ...> = { f } -> do
+  # STM.retry / STM.check-false abort the perform and set a flag; park
+  # via Async so the carrier yields to other tasks under CoopAsync, then
+  # re-run the whole transaction.
+  let result = perform OptimisticSTM in __native_stm_atomic { f = f }
+  match __native_stm_check_and_clear_retry_flag {} is
+    True -> do
+      Async.park { predicate = {} -> __native_stm_read_set_changed {} }
+      atomically { f = f }
+    False -> result
 
 ## Transfer amount between two TVar Int accounts. Returns False if insufficient funds.
 pub let transfer : { from: TVar Int, to: TVar Int, amount: Int } -> Bool <STM> = { from, to, amount } ->

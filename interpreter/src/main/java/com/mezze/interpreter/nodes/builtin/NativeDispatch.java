@@ -2719,6 +2719,13 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_stm_swap", (r, c) -> ConcurrencyNatives.stmSwap(r));
         HANDLERS.put("__native_stm_check", (r, c) -> ConcurrencyNatives.stmCheck(r));
         HANDLERS.put("__native_stm_seq_check", (r, c) -> ConcurrencyNatives.stmSeqCheck(r));
+        HANDLERS.put("__native_stm_retry", (r, c) -> ConcurrencyNatives.stmRetry(r));
+        HANDLERS.put("__native_stm_seq_retry", (r, c) -> ConcurrencyNatives.stmSeqRetry(r));
+        HANDLERS.put("__native_stm_or_else", (r, c) -> ConcurrencyNatives.stmOrElse(r, c));
+        HANDLERS.put("__native_stm_seq_or_else", (r, c) -> ConcurrencyNatives.stmSeqOrElse(r, c));
+        HANDLERS.put("__native_stm_check_and_clear_retry_flag", (r, c) -> ConcurrencyNatives.stmCheckAndClearRetryFlag(r));
+        HANDLERS.put("__native_stm_park_for_retry", (r, c) -> ConcurrencyNatives.stmParkForRetry(r));
+        HANDLERS.put("__native_stm_read_set_changed", (r, c) -> ConcurrencyNatives.stmReadSetChanged(r));
         HANDLERS.put("__native_stm_modify_cfg", (r, c) -> ConcurrencyNatives.stmModifyCfg(r, c));
         HANDLERS.put("__native_stm_begin_transaction", (r, c) -> ConcurrencyNatives.stmBeginTransaction(r));
         HANDLERS.put("__native_stm_commit_transaction", (r, c) -> ConcurrencyNatives.stmCommitTransaction(r));

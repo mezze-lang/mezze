@@ -116,6 +116,24 @@ object STMTypes {
             )),
             MezzeType.RecordType(emptyMap())
         )
+
+        // __native_stm_check_and_clear_retry_flag: {} -> Bool
+        context["__native_stm_check_and_clear_retry_flag"] = MezzeType.FunctionType(
+            MezzeType.RecordType(emptyMap()),
+            MezzeType.BoolType
+        )
+
+        // __native_stm_park_for_retry: {} -> {}
+        context["__native_stm_park_for_retry"] = MezzeType.FunctionType(
+            MezzeType.RecordType(emptyMap()),
+            MezzeType.RecordType(emptyMap())
+        )
+
+        // __native_stm_read_set_changed: {} -> Bool
+        context["__native_stm_read_set_changed"] = MezzeType.FunctionType(
+            MezzeType.RecordType(emptyMap()),
+            MezzeType.BoolType
+        )
     }
 
     private fun registerConfigurableSTMOperations(context: MutableMap<String, MezzeType>) {

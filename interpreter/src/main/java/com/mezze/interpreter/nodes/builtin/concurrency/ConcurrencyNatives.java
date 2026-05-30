@@ -74,6 +74,19 @@ public final class ConcurrencyNatives {
     // Thread-local transaction context
     private static final ThreadLocal<Transaction> currentTransaction = new ThreadLocal<>();
     private static final ThreadLocal<Integer> transactionNestingDepth = ThreadLocal.withInitial(() -> 0);
+    /**
+     * Flag set by stmRetry/stmCheck-false to signal that the surrounding
+     * atomically must park and retry after the perform aborts. The stdlib
+     * atomically free function checks this flag, parks on the saved read
+     * set, then loops.
+     */
+    private static final ThreadLocal<Boolean> stmRetryPending = ThreadLocal.withInitial(() -> Boolean.FALSE);
+    /**
+     * Snapshot of the txn's read set at the moment of retry — held so the
+     * stdlib park-helper can wait on those specific TVar versions even
+     * after the abort has cleared {@code currentTransaction}.
+     */
+    private static final ThreadLocal<List<Transaction.ReadEntry>> stmRetryReadSet = new ThreadLocal<>();
     private static final AtomicLong globalVersion = new AtomicLong(0);
     private static final ReentrantLock commitLock = new ReentrantLock();
 
@@ -1167,20 +1180,85 @@ public final class ConcurrencyNatives {
         MezzeFunction f = getFunction(args, "f");
         int maxRetries = 1000;
         for (int i = 0; i < maxRetries; i++) {
-            currentTransaction.set(new Transaction());
+            Transaction txn = new Transaction();
+            currentTransaction.set(txn);
+            boolean blocked = false;
             try {
-                Object result = callNode.call(f.getCallTarget(), f.getClosureValues());
-                Transaction txn = currentTransaction.get();
-                if (txn != null && txn.commit()) {
+                Object result;
+                try {
+                    result = callNode.call(f.getCallTarget(), f.getClosureValues());
+                } catch (StmRetryException retry) {
+                    // User-initiated retry from STM.retry / STM.check: park on
+                    // read set until something changes, then re-run the
+                    // transaction body with a fresh Transaction.
+                    //
+                    // NOTE: In the effect-handler dispatch architecture, the
+                    // StmRetryException thrown by __native_stm_retry inside the
+                    // OptimisticSTM handler does NOT actually unwind back here
+                    // — the op-call is dispatched on a fiber, and the exception
+                    // unwinds the fiber driver, not stmAtomic's call frame.
+                    // The catch is kept for the SeqSTM path and any future
+                    // direct-call paths; the real retry mechanism for op-call
+                    // STM.retry requires stdlib-level loop (see task #176).
+                    blocked = true;
+                    blockUntilReadSetChanged(txn);
+                    continue;
+                }
+                Transaction current = currentTransaction.get();
+                if (current != null && current.commit()) {
                     return result;
                 }
+                // Commit conflict: fall through to retry without sleep.
             } finally {
                 currentTransaction.remove();
             }
-            // Retry with backoff
-            try { Thread.sleep(Math.min(i, 10)); } catch (InterruptedException e) { break; }
+            // Commit-conflict retry path: exponential-ish backoff.
+            if (!blocked) {
+                try { Thread.sleep(Math.min(i, 10)); } catch (InterruptedException e) { break; }
+            }
         }
         throw new RuntimeException("STM transaction failed after max retries");
+    }
+
+    /**
+     * Block the current thread until any TVar in the transaction's read set
+     * advances past its read version. Registers as a waiter on each read
+     * TVar; existing {@code forceWrite()} wakes all waiters via
+     * {@code LockSupport.unpark()}.
+     *
+     * Pre-checks for the change before parking — if a write landed between
+     * the user's read and our park, we don't park at all.
+     */
+    private static void blockUntilReadSetChanged(Transaction txn) {
+        if (txn.readSet.isEmpty()) {
+            throw new RuntimeException("STM.retry called with empty read set — would deadlock");
+        }
+
+        Thread self = Thread.currentThread();
+        // Register as waiter on every read TVar.
+        for (Transaction.ReadEntry entry : txn.readSet.values()) {
+            entry.tvar().addWaiter(self);
+        }
+
+        try {
+            while (true) {
+                // Check if any tvar version has advanced past its read entry.
+                for (Transaction.ReadEntry entry : txn.readSet.values()) {
+                    if (entry.tvar().readVersioned().version() != entry.version()) {
+                        return;
+                    }
+                }
+                LockSupport.park(txn);
+                if (Thread.interrupted()) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("STM.retry interrupted");
+                }
+            }
+        } finally {
+            for (Transaction.ReadEntry entry : txn.readSet.values()) {
+                entry.tvar().removeWaiter(self);
+            }
+        }
     }
 
     @TruffleBoundary
@@ -2159,15 +2237,200 @@ public final class ConcurrencyNatives {
         return old;
     }
 
+    /**
+     * Control-flow exception thrown by {@link #stmRetry} and {@link #stmCheck}
+     * (when cond is false) to abort the current STM transaction and block
+     * until at least one TVar in the read set has changed.
+     *
+     * Caught by {@link #stmAtomic} which then parks via the TVar waiter
+     * mechanism — same approach as the channel/mutex park-aware ops.
+     *
+     * Extends ControlFlowException — Truffle's standard "do not pollute the
+     * profile with this exception" marker. Singleton-reusable since CFE
+     * doesn't preserve stack traces.
+     */
+    public static final class StmRetryException
+        extends com.oracle.truffle.api.nodes.ControlFlowException {
+        public static final StmRetryException INSTANCE = new StmRetryException();
+        private StmRetryException() { super(); }
+    }
+
+    /** {@code STM.check { cond: Bool }} — retry if cond is false. */
     @TruffleBoundary
-    public static boolean stmCheck(MezzeRecord args) {
+    public static MezzeRecord stmCheck(MezzeRecord args) {
+        Object cond = getField(args, "cond");
+        if (cond instanceof Boolean b && b) return MezzeRecord.empty();
+        // Same path as stmRetry — snapshot read set + flag + abort.
         Transaction txn = currentTransaction.get();
-        return txn != null && txn.validate();
+        snapshotReadSetForRetry(txn);
+        stmRetryPending.set(Boolean.TRUE);
+        throw new com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException(MezzeRecord.empty());
     }
 
     @TruffleBoundary
-    public static boolean stmSeqCheck(MezzeRecord args) {
-        return true; // Always succeeds in sequential mode
+    public static MezzeRecord stmSeqCheck(MezzeRecord args) {
+        Object cond = getField(args, "cond");
+        if (cond instanceof Boolean b && b) return MezzeRecord.empty();
+        // Sequential STM has no scheduler to park on — fail loudly.
+        throw new RuntimeException("SequentialSTM.check failed: cond was False (would require blocking)");
+    }
+
+    /**
+     * {@code STM.retry {}} — signal the stdlib atomically loop that this
+     * transaction needs to park-and-retry, then abort the surrounding
+     * perform. The stdlib reads {@link #stmCheckAndClearRetryFlag} after
+     * the perform returns; on True it calls {@link #stmParkForRetry} which
+     * blocks on the saved read set.
+     *
+     * Sets {@code stmRetryPending = true} and snapshots the current txn's
+     * read set; then throws {@link com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException}
+     * with a dummy value (the stdlib ignores the result when the flag is
+     * set).
+     */
+    @TruffleBoundary
+    public static Object stmRetry(MezzeRecord args) {
+        Transaction txn = currentTransaction.get();
+        snapshotReadSetForRetry(txn);
+        stmRetryPending.set(Boolean.TRUE);
+        throw new com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException(MezzeRecord.empty());
+    }
+
+    private static void snapshotReadSetForRetry(Transaction txn) {
+        if (txn == null) {
+            // Defensive — STM.retry called outside a transaction. Park
+            // would deadlock, so we still set the flag but with an empty
+            // snapshot. stmParkForRetry surfaces a clear error.
+            stmRetryReadSet.set(java.util.Collections.emptyList());
+            return;
+        }
+        stmRetryReadSet.set(new java.util.ArrayList<>(txn.readSet.values()));
+    }
+
+    /** Read & clear the retry flag — called by stdlib atomically. */
+    @TruffleBoundary
+    public static boolean stmCheckAndClearRetryFlag(MezzeRecord args) {
+        boolean v = stmRetryPending.get();
+        if (v) stmRetryPending.set(Boolean.FALSE);
+        return v;
+    }
+
+    /**
+     * Park the current thread until any TVar in the snapshotted read set
+     * advances past its read version. Uses LockSupport.park — works for
+     * LoomAsync (each task on its own virtual thread, parked thread
+     * doesn't block others). Under CoopAsync use stmReadSetChanged as an
+     * Async.park predicate instead.
+     */
+    @TruffleBoundary
+    public static MezzeRecord stmParkForRetry(MezzeRecord args) {
+        List<Transaction.ReadEntry> readSet = stmRetryReadSet.get();
+        if (readSet == null || readSet.isEmpty()) {
+            stmRetryReadSet.remove();
+            throw new RuntimeException("STM.retry called with empty read set — would deadlock");
+        }
+        Thread self = Thread.currentThread();
+        for (Transaction.ReadEntry entry : readSet) {
+            entry.tvar().addWaiter(self);
+        }
+        try {
+            while (true) {
+                for (Transaction.ReadEntry entry : readSet) {
+                    if (entry.tvar().readVersioned().version() != entry.version()) {
+                        return MezzeRecord.empty();
+                    }
+                }
+                LockSupport.park(readSet);
+                if (Thread.interrupted()) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("STM.retry interrupted");
+                }
+            }
+        } finally {
+            for (Transaction.ReadEntry entry : readSet) {
+                entry.tvar().removeWaiter(self);
+            }
+            stmRetryReadSet.remove();
+        }
+    }
+
+    /**
+     * Predicate for Async.park — returns True when any TVar in the
+     * snapshotted read set has been updated since the transaction's
+     * read. Used by stdlib atomically under CoopAsync (where blocking
+     * the carrier thread would deadlock).
+     *
+     * Clears the snapshot once it observes a change so the next retry
+     * iteration starts fresh.
+     */
+    @TruffleBoundary
+    public static boolean stmReadSetChanged(MezzeRecord args) {
+        List<Transaction.ReadEntry> readSet = stmRetryReadSet.get();
+        if (readSet == null || readSet.isEmpty()) return true;
+        for (Transaction.ReadEntry entry : readSet) {
+            if (entry.tvar().readVersioned().version() != entry.version()) {
+                stmRetryReadSet.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** SequentialSTM.retry — no scheduler to park on, always fails. */
+    @TruffleBoundary
+    public static Object stmSeqRetry(MezzeRecord args) {
+        throw new RuntimeException("SequentialSTM.retry: no scheduler available to block on");
+    }
+
+    /**
+     * {@code STM.or_else { primary, fallback }} — try primary; if it retries,
+     * roll back the txn's reads/writes added by primary and try fallback.
+     * If fallback also retries, the whole or_else block retries (caller-level
+     * StmRetryException propagates).
+     */
+    @TruffleBoundary
+    public static Object stmOrElse(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        MezzeFunction primary = getFunction(args, "primary");
+        MezzeFunction fallback = getFunction(args, "fallback");
+        Transaction txn = getOrCreateTransaction();
+
+        // Snapshot txn state so we can roll back primary's effects on retry.
+        var savedReadSet = new HashMap<>(txn.readSet);
+        var savedWriteSet = new HashMap<>(txn.writeSet);
+        var savedEnsureSet = new HashSet<>(txn.ensureSet);
+        long savedBloom = txn.readBloom;
+
+        try {
+            return callNode.call(primary.getCallTarget(), primary.getClosureValues());
+        } catch (StmRetryException ignored) {
+            // Roll back primary's mutations, then try fallback.
+            txn.readSet.clear();
+            txn.readSet.putAll(savedReadSet);
+            txn.writeSet.clear();
+            txn.writeSet.putAll(savedWriteSet);
+            txn.ensureSet.clear();
+            txn.ensureSet.addAll(savedEnsureSet);
+            txn.readBloom = savedBloom;
+            return callNode.call(fallback.getCallTarget(), fallback.getClosureValues());
+        }
+    }
+
+    /** SequentialSTM.or_else — try primary; if it throws StmRetryException (or the
+     *  SequentialSTM.retry sentinel), try fallback. */
+    @TruffleBoundary
+    public static Object stmSeqOrElse(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        MezzeFunction primary = getFunction(args, "primary");
+        MezzeFunction fallback = getFunction(args, "fallback");
+        try {
+            return callNode.call(primary.getCallTarget(), primary.getClosureValues());
+        } catch (StmRetryException ignored) {
+            return callNode.call(fallback.getCallTarget(), fallback.getClosureValues());
+        } catch (RuntimeException e) {
+            String msg = e.getMessage();
+            if (msg != null && msg.contains("SequentialSTM.retry")) {
+                return callNode.call(fallback.getCallTarget(), fallback.getClosureValues());
+            }
+            throw e;
+        }
     }
 
     @TruffleBoundary
