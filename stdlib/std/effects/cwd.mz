@@ -1,0 +1,25 @@
+# Current working directory effect.
+# Mirrors Rust's std::env::current_dir / set_current_dir.
+
+## Read and change the process's working directory.
+effect Cwd where {
+  ## Absolute path of the current working directory.
+  path: {} -> Str <Cwd>,
+  ## Change the working directory. Path may be absolute or relative.
+  change: { path: Str } -> {} <Cwd>
+}
+
+## Real cwd backed by the JVM/native process.
+impl Cwd for SystemCwd where {
+  path = {} -> __native_env_current_dir {},
+  change = { path } -> __native_env_change_dir { path = path },
+}
+
+## Test cwd: returns `dir` for path; change is a silent no-op.
+impl Cwd for MockCwd { dir: Str } where {
+  path = {} -> dir,
+  change = { path } -> {},
+}
+
+## Get the current working directory.
+pub let path : {} -> Str <Cwd> = {} -> Cwd.path {}

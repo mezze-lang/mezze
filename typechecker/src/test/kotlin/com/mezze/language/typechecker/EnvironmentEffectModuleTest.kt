@@ -7,8 +7,13 @@ import org.junit.jupiter.api.BeforeEach
 import kotlin.test.assertNotNull
 
 /**
- * Tests for std/effects/environment module functions.
- * Verifies that importing and using environment effect functions works correctly.
+ * Typecheck tests for the five OS-surface effect modules that replaced
+ * the old monolithic `std/effects/environment`:
+ *   env, args, cwd, os, process.
+ *
+ * Each test imports the effect + a handler and confirms that the
+ * resulting source typechecks. Runtime behavior is covered by
+ * EnvironmentEffectTest in :interpreter:test.
  */
 class EnvironmentEffectModuleTest {
 
@@ -17,10 +22,9 @@ class EnvironmentEffectModuleTest {
 
     @BeforeEach
     fun setup() {
-        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
+        ModuleResolver.clearCache()
         TypeChecker.clearCache()
         typeChecker = TypeChecker()
-        // Set project root for module resolution
         TestUtils.setupProjectRoot()
     }
 
@@ -30,143 +34,118 @@ class EnvironmentEffectModuleTest {
     }
 
     @Test
-    fun `test SystemEnvironment get function`() {
+    fun `Env get and all typecheck under SystemEnv`() {
         val source = """
-            use std::effects::environment::{Environment, SystemEnvironment}
+            use std::effects::env::{Env, SystemEnv}
             let main = {} ->
-                perform SystemEnvironment in do
-                    let path = Environment.get_env { name = "PATH" }
-                    path
+                perform SystemEnv in do
+                    let v = Env.lookup { name = "PATH" }
+                    let all = Env.all {}
+                    v
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test SystemEnvironment set function`() {
+    fun `Env set typechecks under SystemEnv`() {
         val source = """
-            use std::effects::environment::{Environment, SystemEnvironment}
+            use std::effects::env::{Env, SystemEnv}
             let main = {} ->
-                perform SystemEnvironment in Environment.set_env { name = "MY_VAR", value = "test" }
+                perform SystemEnv in Env.set { name = "X", value = "y" }
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test SystemEnvironment current_dir function`() {
+    fun `MockEnv with vars typechecks`() {
         val source = """
-            use std::effects::environment::{Environment, SystemEnvironment}
+            use std::effects::env::{Env, MockEnv}
             let main = {} ->
-                perform SystemEnvironment in do
-                    let dir = Environment.current_dir {}
-                    dir
+                perform MockEnv { vars = [{ key = "FOO", value = "bar" }] } in do
+                    let v = Env.lookup { name = "FOO" }
+                    v
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test SystemEnvironment change_dir function`() {
+    fun `Args get typechecks under SystemArgs`() {
         val source = """
-            use std::effects::environment::{Environment, SystemEnvironment}
+            use std::effects::args::{Args, SystemArgs}
             let main = {} ->
-                perform SystemEnvironment in Environment.change_dir { path = "/tmp" }
+                perform SystemArgs in do
+                    let a = Args.argv {}
+                    a
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test SystemEnvironment os_name function`() {
+    fun `MockArgs with vals typechecks`() {
         val source = """
-            use std::effects::environment::{Environment, SystemEnvironment}
+            use std::effects::args::{Args, MockArgs}
             let main = {} ->
-                perform SystemEnvironment in do
-                    let os = Environment.os_name {}
-                    os
+                perform MockArgs { vals = ["a", "b"] } in Args.argv {}
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test SystemEnvironment os_version function`() {
+    fun `Cwd get and set typecheck under SystemCwd`() {
         val source = """
-            use std::effects::environment::{Environment, SystemEnvironment}
+            use std::effects::cwd::{Cwd, SystemCwd}
             let main = {} ->
-                perform SystemEnvironment in do
-                    let version = Environment.os_version {}
-                    version
+                perform SystemCwd in do
+                    let d = Cwd.path {}
+                    Cwd.change { path = "/tmp" }
+                    d
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test SystemEnvironment arch function`() {
+    fun `MockCwd with dir typechecks`() {
         val source = """
-            use std::effects::environment::{Environment, SystemEnvironment}
+            use std::effects::cwd::{Cwd, MockCwd}
             let main = {} ->
-                perform SystemEnvironment in do
-                    let arch = Environment.arch {}
-                    arch
+                perform MockCwd { dir = "/mock" } in Cwd.path {}
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test SystemEnvironment process_id function`() {
+    fun `Os name version arch typecheck under SystemOs`() {
         val source = """
-            use std::effects::environment::{Environment, SystemEnvironment}
+            use std::effects::os::{Os, SystemOs}
             let main = {} ->
-                perform SystemEnvironment in do
-                    let pid = Environment.process_id {}
-                    pid
+                perform SystemOs in do
+                    let n = Os.name {}
+                    let v = Os.version {}
+                    let a = Os.arch {}
+                    n
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test MockEnvironment with custom env vars`() {
+    fun `MockOs typechecks`() {
         val source = """
-            use std::effects::environment::{Environment, MockEnvironment}
+            use std::effects::os::{Os, MockOs}
             let main = {} ->
-                perform MockEnvironment {
-                    env_vars = [],
-                    current_directory = "/mock",
-                    mock_os = "MockOS"
-                } in do
-                    let os = Environment.os_name {}
-                    os
+                perform MockOs { os_name = "Linux", os_version = "1", os_arch = "x86_64" } in Os.name {}
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test combining environment operations`() {
+    fun `Process pid and exit typecheck under SystemProcess`() {
         val source = """
-            use std::effects::environment::{Environment, SystemEnvironment}
+            use std::effects::process::{Process, SystemProcess}
             let main = {} ->
-                perform SystemEnvironment in do
-                    let os = Environment.os_name {}
-                    let arch = Environment.arch {}
-                    os
+                perform SystemProcess in do
+                    let p = Process.pid {}
+                    p
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 }

@@ -1,0 +1,36 @@
+# Operating system information effect.
+# Read-only. Mirrors Rust's std::env::consts (which is compile-time, but Mezze
+# reads it at runtime — same conceptual surface).
+
+## Static facts about the host OS.
+effect Os where {
+  ## Short name: "linux", "macos", "windows", etc.
+  name: {} -> Str <Os>,
+  ## Version string. Format varies by OS — best-effort, prefer `name` for branching.
+  version: {} -> Str <Os>,
+  ## CPU architecture: "x86_64", "aarch64", etc.
+  arch: {} -> Str <Os>
+}
+
+## Real OS info via the running JVM.
+impl Os for SystemOs where {
+  name = {} -> __native_env_os_name {},
+  version = {} -> __native_env_os_version {},
+  arch = {} -> __native_env_arch {},
+}
+
+## Test OS info: returns whatever the caller passed.
+impl Os for MockOs { os_name: Str, os_version: Str, os_arch: Str } where {
+  name = {} -> os_name,
+  version = {} -> os_version,
+  arch = {} -> os_arch,
+}
+
+## OS short name.
+pub let name : {} -> Str <Os> = {} -> Os.name {}
+
+## OS version string.
+pub let version : {} -> Str <Os> = {} -> Os.version {}
+
+## CPU architecture.
+pub let arch : {} -> Str <Os> = {} -> Os.arch {}

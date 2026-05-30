@@ -50,6 +50,35 @@ public final class EnvironmentNatives {
         return MezzeUnit.INSTANCE;
     }
 
+    /**
+     * MockEnv.get: linear search over the user-supplied vars list for the
+     * key. Returns Some value on hit, None on miss. O(n) — adequate for
+     * tests, which is the only caller.
+     */
+    @TruffleBoundary
+    public static Object envGetMock(MezzeRecord args) {
+        String name = getString(args, "name");
+        Object envVars = args.getField(args.getFieldIndex("env_vars"));
+        if (envVars instanceof com.mezze.datastructures.seq.MezzeSeq seq) {
+            int n = seq.size();
+            for (int i = 0; i < n; i++) {
+                Object entry = seq.get(i);
+                if (entry instanceof MezzeRecord rec) {
+                    int keyIdx = rec.getFieldIndex("key");
+                    int valIdx = rec.getFieldIndex("value");
+                    if (keyIdx >= 0 && valIdx >= 0) {
+                        Object key = rec.getField(keyIdx);
+                        if (name.equals(key)) {
+                            Object val = rec.getField(valIdx);
+                            return val == null ? MezzeVariant.none() : MezzeVariant.some(val);
+                        }
+                    }
+                }
+            }
+        }
+        return MezzeVariant.none();
+    }
+
     @TruffleBoundary
     public static Object envGetAll(MezzeRecord args) {
         Map<String, String> env = System.getenv();

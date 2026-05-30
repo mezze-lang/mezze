@@ -1,0 +1,22 @@
+# Command-line arguments effect.
+# Mirrors Rust's std::env::args / Go's os.Args / Node's process.argv.
+
+## Access to the process's argv as it was passed by the shell.
+effect Args where {
+  ## The arguments verbatim. Includes `--`, `-`, `--flag=value` etc as separate tokens —
+  ## interpretation belongs to an arg-parser library, not this effect.
+  argv: {} -> [Str] <Args>
+}
+
+## Real argv from the JVM launcher / native binary / mez exec wire.
+impl Args for SystemArgs where {
+  argv = {} -> __native_env_process_args {},
+}
+
+## Test argv: whatever the caller passed in `vals`.
+impl Args for MockArgs { vals: [Str] } where {
+  argv = {} -> vals,
+}
+
+## Get the process's argv.
+pub let argv : {} -> [Str] <Args> = {} -> Args.argv {}

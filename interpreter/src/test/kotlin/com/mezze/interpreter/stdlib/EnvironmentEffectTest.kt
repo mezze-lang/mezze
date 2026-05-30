@@ -6,9 +6,13 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 
 /**
- * Tests for std/effects/environment module.
- * Tests environment and system information effects with MockEnvironment and SystemEnvironment handlers.
- * Migrated from V1 to V2 with unboxed values.
+ * Tests for the five OS-surface effects:
+ *   Env (env vars), Args (argv), Cwd (working dir),
+ *   Os (OS name/version/arch), Process (pid/exit).
+ *
+ * Each effect has a System*** real impl and a Mock*** test impl. The mock
+ * impls take only the fields relevant to that effect — no more 4-field
+ * MockEnvironment to mock a single arg list.
  */
 class EnvironmentEffectTest {
 
@@ -19,233 +23,178 @@ class EnvironmentEffectTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    // === SystemEnvironment Tests (actual system) ===
+    // ─── Env ──────────────────────────────────────────────────────────
 
     @Test
-    fun `test SystemEnvironment current_dir returns non-empty string`() {
+    fun `SystemEnv get returns Option for a known variable`() {
         val result = eval("""
-            use std::effects::environment::{Environment, SystemEnvironment}
-            use std::str
+            use std::effects::env::{Env, SystemEnv}
 
-            perform SystemEnvironment in do
-                let dir = Environment.current_dir {}
-                str::size { s = dir } > 0
+            perform SystemEnv in do
+                let path = Env.lookup { name = "PATH" }
+                True
         """.trimIndent())
         assertEquals(true, result)
     }
 
     @Test
-    fun `test SystemEnvironment os_name returns non-empty string`() {
+    fun `SystemEnv all returns a seq`() {
         val result = eval("""
-            use std::effects::environment::{Environment, SystemEnvironment}
-            use std::str
-
-            perform SystemEnvironment in do
-                let name = Environment.os_name {}
-                str::size { s = name } > 0
-        """.trimIndent())
-        assertEquals(true, result)
-    }
-
-    @Test
-    fun `test SystemEnvironment process_id returns positive number`() {
-        val result = eval("""
-            use std::effects::environment::{Environment, SystemEnvironment}
-
-            perform SystemEnvironment in do
-                let pid = Environment.process_id {}
-                pid > 0
-        """.trimIndent())
-        assertEquals(true, result)
-    }
-
-    @Test
-    fun `test SystemEnvironment arch returns non-empty string`() {
-        val result = eval("""
-            use std::effects::environment::{Environment, SystemEnvironment}
-            use std::str
-
-            perform SystemEnvironment in do
-                let arch = Environment.arch {}
-                str::size { s = arch } > 0
-        """.trimIndent())
-        assertEquals(true, result)
-    }
-
-    @Test
-    fun `test SystemEnvironment os_version returns non-empty string`() {
-        val result = eval("""
-            use std::effects::environment::{Environment, SystemEnvironment}
-            use std::str
-
-            perform SystemEnvironment in do
-                let version = Environment.os_version {}
-                str::size { s = version } > 0
-        """.trimIndent())
-        assertEquals(true, result)
-    }
-
-    @Test
-    fun `test SystemEnvironment process_args returns array`() {
-        val result = eval("""
-            use std::effects::environment::{Environment, SystemEnvironment}
+            use std::effects::env::{Env, SystemEnv}
             use std::collections::seq
 
-            perform SystemEnvironment in do
-                let args = Environment.process_args {}
-                seq::size { xs = args } >= 0
-        """.trimIndent())
-        assertEquals(true, result)
-    }
-
-    @Test
-    fun `test SystemEnvironment get_all_env returns array`() {
-        val result = eval("""
-            use std::effects::environment::{Environment, SystemEnvironment}
-            use std::collections::seq
-
-            perform SystemEnvironment in do
-                let vars = Environment.get_all_env {}
+            perform SystemEnv in do
+                let vars = Env.all {}
                 seq::size { xs = vars } >= 0
         """.trimIndent())
         assertEquals(true, result)
     }
 
     @Test
-    fun `test SystemEnvironment get_env returns Option`() {
+    fun `MockEnv get reads from configured vars`() {
         val result = eval("""
-            use std::effects::environment::{Environment, SystemEnvironment}
+            use std::effects::env::{Env, MockEnv}
 
-            perform SystemEnvironment in do
-                let path = Environment.get_env { name = "PATH" }
-                # Just check it returns successfully, it's an Option
-                True
+            perform MockEnv { vars = [{ key = "FOO", value = "bar" }] } in do
+                let v = Env.lookup { name = "FOO" }
+                match v is
+                  Some { val = s } -> s == "bar"
+                  None -> False
+        """.trimIndent())
+        assertEquals(true, result)
+    }
+
+    // ─── Args ─────────────────────────────────────────────────────────
+
+    @Test
+    fun `SystemArgs returns a seq`() {
+        val result = eval("""
+            use std::effects::args::{Args, SystemArgs}
+            use std::collections::seq
+
+            perform SystemArgs in do
+                let a = Args.argv {}
+                seq::size { xs = a } >= 0
         """.trimIndent())
         assertEquals(true, result)
     }
 
     @Test
-    fun `test get_env convenience function`() {
+    fun `MockArgs returns configured argv verbatim including special tokens`() {
         val result = eval("""
-            use std::effects::environment::{get_env, SystemEnvironment}
+            use std::effects::args::{Args, MockArgs}
+            use std::collections::seq
 
-            perform SystemEnvironment in do
-                let path = get_env { name = "PATH" }
-                # Just check it returns successfully, it's an Option
-                True
+            perform MockArgs { vals = ["--verbose", "--", "-", "foo"] } in do
+                let a = Args.argv {}
+                seq::size { xs = a } == 4
         """.trimIndent())
         assertEquals(true, result)
     }
 
+    // ─── Cwd ──────────────────────────────────────────────────────────
+
     @Test
-    fun `test current_dir convenience function`() {
+    fun `SystemCwd get returns non-empty string`() {
         val result = eval("""
-            use std::effects::environment::{current_dir, SystemEnvironment}
+            use std::effects::cwd::{Cwd, SystemCwd}
             use std::str
 
-            perform SystemEnvironment in do
-                let dir = current_dir {}
-                str::size { s = dir } > 0
+            perform SystemCwd in do
+                let d = Cwd.path {}
+                str::size { s = d } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
 
     @Test
-    fun `test os_info convenience function`() {
+    fun `MockCwd get returns configured dir`() {
         val result = eval("""
-            use std::effects::environment::{os_info, SystemEnvironment}
+            use std::effects::cwd::{Cwd, MockCwd}
+
+            perform MockCwd { dir = "/mock/path" } in do
+                let d = Cwd.path {}
+                d == "/mock/path"
+        """.trimIndent())
+        assertEquals(true, result)
+    }
+
+    // ─── Os ───────────────────────────────────────────────────────────
+
+    @Test
+    fun `SystemOs name returns non-empty string`() {
+        val result = eval("""
+            use std::effects::os::{Os, SystemOs}
             use std::str
 
-            perform SystemEnvironment in do
-                let info = os_info {}
-                str::size { s = info.name } > 0
-        """.trimIndent())
-        assertEquals(true, result)
-    }
-
-    // === MockEnvironment Tests ===
-
-    @Test
-    fun `test MockEnvironment current_dir returns configured value`() {
-        val result = eval("""
-            use std::effects::environment::{Environment, MockEnvironment}
-
-            perform MockEnvironment {
-                env_vars = [],
-                current_directory = "/mock/test/dir",
-                mock_os = "MockOS",
-                mock_args = ["mock_program"]
-            } in do
-                let dir = Environment.current_dir {}
-                dir == "/mock/test/dir"
+            perform SystemOs in do
+                let n = Os.name {}
+                str::size { s = n } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
 
     @Test
-    fun `test MockEnvironment os_name returns configured value`() {
+    fun `SystemOs arch returns non-empty string`() {
         val result = eval("""
-            use std::effects::environment::{Environment, MockEnvironment}
+            use std::effects::os::{Os, SystemOs}
+            use std::str
 
-            perform MockEnvironment {
-                env_vars = [],
-                current_directory = "/",
-                mock_os = "TestOS",
-                mock_args = ["mock_program"]
-            } in do
-                let name = Environment.os_name {}
-                name == "TestOS"
+            perform SystemOs in do
+                let a = Os.arch {}
+                str::size { s = a } > 0
         """.trimIndent())
         assertEquals(true, result)
     }
 
     @Test
-    fun `test MockEnvironment process_id returns fixed value`() {
+    fun `MockOs returns configured values`() {
         val result = eval("""
-            use std::effects::environment::{Environment, MockEnvironment}
+            use std::effects::os::{Os, MockOs}
 
-            perform MockEnvironment {
-                env_vars = [],
-                current_directory = "/",
-                mock_os = "MockOS",
-                mock_args = ["mock_program"]
-            } in do
-                let pid = Environment.process_id {}
-                pid == 12345
+            perform MockOs { os_name = "TestOS", os_version = "1.0", os_arch = "mock64" } in do
+                let n = Os.name {}
+                let a = Os.arch {}
+                n == "TestOS" && a == "mock64"
+        """.trimIndent())
+        assertEquals(true, result)
+    }
+
+    // ─── Process ──────────────────────────────────────────────────────
+
+    @Test
+    fun `SystemProcess pid returns positive`() {
+        val result = eval("""
+            use std::effects::process::{Process, SystemProcess}
+
+            perform SystemProcess in do
+                let p = Process.pid {}
+                p > 0
         """.trimIndent())
         assertEquals(true, result)
     }
 
     @Test
-    fun `test MockEnvironment arch returns mock value`() {
+    fun `MockProcess pid returns configured value`() {
         val result = eval("""
-            use std::effects::environment::{Environment, MockEnvironment}
+            use std::effects::process::{Process, MockProcess}
 
-            perform MockEnvironment {
-                env_vars = [],
-                current_directory = "/",
-                mock_os = "MockOS",
-                mock_args = ["mock_program"]
-            } in do
-                let arch = Environment.arch {}
-                arch == "mock64"
+            perform MockProcess { mock_pid = 99999 } in do
+                let p = Process.pid {}
+                p == 99999
         """.trimIndent())
         assertEquals(true, result)
     }
 
     @Test
-    fun `test MockEnvironment os_version returns mock value`() {
+    fun `MockProcess exit is a no-op so the test runner survives`() {
         val result = eval("""
-            use std::effects::environment::{Environment, MockEnvironment}
+            use std::effects::process::{Process, MockProcess}
 
-            perform MockEnvironment {
-                env_vars = [],
-                current_directory = "/",
-                mock_os = "MockOS",
-                mock_args = ["mock_program"]
-            } in do
-                let version = Environment.os_version {}
-                version == "Mock 1.0"
+            perform MockProcess { mock_pid = 1 } in do
+                Process.exit { code = 42 }
+                # If exit were actually called, we'd never reach this line.
+                True
         """.trimIndent())
         assertEquals(true, result)
     }

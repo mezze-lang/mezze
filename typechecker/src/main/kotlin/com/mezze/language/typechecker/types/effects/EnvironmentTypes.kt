@@ -10,17 +10,19 @@ private fun optionType(elementType: MezzeType): MezzeType {
 }
 
 /**
- * Type signatures for environment effect operations
+ * Type signatures for the five OS-surface native functions that back the
+ * Env / Args / Cwd / Os / Process effects (in stdlib/std/effects/{env,
+ * args, cwd, os, process}.mz). The natives share a common __native_env_*
+ * prefix for historical reasons — they all live in EnvironmentNatives.java
+ * — even though they're surfaced as distinct effects to user code.
  *
- * Corresponds to stdlib file: std/effects/environment.mz
- *
- * Provides types for:
- * - Environment variable access (get, set, get_all)
- * - Directory operations (current_dir, change_dir)
- * - System information (os_name, os_version, arch)
- * - Process information (process_id, process_args)
- * - Process control (exit)
- * - Mock environment operations (for testing)
+ * Categories:
+ * - Env vars: __native_env_get, __native_env_set, __native_env_get_all,
+ *   __native_mock_env_get
+ * - Cwd:      __native_env_current_dir, __native_env_change_dir
+ * - Os:       __native_env_os_name, __native_env_os_version, __native_env_arch
+ * - Process:  __native_env_process_id, __native_env_process_args,
+ *   __native_env_exit
  */
 object EnvironmentTypes {
     fun registerAll(context: MutableMap<String, MezzeType>) {

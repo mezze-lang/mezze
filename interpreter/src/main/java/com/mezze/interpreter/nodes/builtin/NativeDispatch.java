@@ -2471,6 +2471,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_env_get", (r, c) -> EnvironmentNatives.envGet(r));
         HANDLERS.put("__native_env_set", (r, c) -> EnvironmentNatives.envSet(r));
         HANDLERS.put("__native_env_get_all", (r, c) -> EnvironmentNatives.envGetAll(r));
+        HANDLERS.put("__native_mock_env_get", (r, c) -> EnvironmentNatives.envGetMock(r));
         HANDLERS.put("__native_env_current_dir", (r, c) -> EnvironmentNatives.currentDir(r));
         HANDLERS.put("__native_env_change_dir", (r, c) -> EnvironmentNatives.changeDir(r));
         HANDLERS.put("__native_env_os_name", (r, c) -> EnvironmentNatives.osName(r));

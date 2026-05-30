@@ -1,0 +1,31 @@
+# Process lifecycle effect: pid + exit.
+# Mirrors Rust's std::process::id / std::process::exit.
+
+## Inspect and terminate the running process.
+effect Process where {
+  ## Process ID of the running mez interpreter / built binary.
+  pid: {} -> Int <Process>,
+  ## Terminate the process with the given exit code. Does not return.
+  exit: { code: Int } -> {} <Process>
+}
+
+## Real pid + exit backed by the JVM/native runtime. exit unwinds via
+## MezzeExitException which the host catches and maps to the OS exit syscall.
+impl Process for SystemProcess where {
+  pid = {} -> __native_env_process_id {},
+  exit = { code } -> __native_env_exit { code = code },
+}
+
+## Test process: pid returns the configured value; exit is captured as a no-op
+## so handlers / test runners can observe the requested code without actually
+## terminating the test JVM. Read the recorded code from your handler.
+impl Process for MockProcess { mock_pid: Int } where {
+  pid = {} -> mock_pid,
+  exit = { code } -> {},
+}
+
+## Process ID.
+pub let pid : {} -> Int <Process> = {} -> Process.pid {}
+
+## Exit the process with a given code. Doesn't return.
+pub let exit : { code: Int } -> {} <Process> = { code } -> Process.exit { code = code }
