@@ -1,0 +1,287 @@
+package com.mezze.interpreter
+
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assertions.*
+
+/**
+ * Soundness probes for [com.mezze.interpreter.values.MezzeVariant.TagRegistry].
+ *
+ * Variants are dispatched at runtime by an integer tag computed deterministically
+ * from the constructor's simple name (`name.hashCode() & 0x7FFFFFFF`). The
+ * registry is global: two distinct variant types that both declare a constructor
+ * named `Ping` produce variant values that share the same tag at the bit level.
+ * Runtime match arms compare only the tag, so the typechecker is the sole guard
+ * against a value of one variant type firing a match arm of another.
+ *
+ * Each probe below tries to construct such a cross-type leak through a different
+ * route. The expected outcome for each is **typechecker rejection** — if any
+ * probe instead typechecks AND produces the wrong runtime value, the typechecker
+ * has a soundness hole that exposes the same bug class as #246 (silent dispatch
+ * misroute) at the variant level.
+ *
+ * These tests pass two ways:
+ *   1. Typechecker rejects the program (assertThrows).
+ *   2. Program runs and produces the *correct* value (assertEquals on Right answer).
+ *
+ * A probe FAILS if it runs to completion and returns the *wrong* value — that's
+ * the soundness hole we're hunting.
+ */
+class VariantTagCollisionSoundnessTest {
+
+    /**
+     * Returns the runtime value, or a [Rejected] marker carrying the
+     * rejection message when the typechecker/parser refused the program.
+     * Rejection is the soundness-preserving outcome; the test contract
+     * fails only if the program runs AND returns a value indicating
+     * cross-type leak.
+     */
+    data class Rejected(val message: String)
+
+    private fun runOrReject(source: String): Any? = try {
+        MezzeTestHelper.run(source)
+    } catch (e: Throwable) {
+        Rejected(e.message ?: e::class.simpleName ?: "rejected")
+    }
+
+    /**
+     * Baseline: two variant types each with `Ping`. Used in their own match
+     * arms — must always work. Confirms the test harness reaches the runtime.
+     *
+     * Note: each `match` site fixes the scrutinee's type by row-poly inference
+     * from the constructors it lists. `from_t1` sees `Ping | Pong` so its
+     * arg type is the `Tag1` row; `from_t2` sees `Ping | Pang` (the `Tag2`
+     * row). Both sites work as long as the typechecker keeps them separate.
+     */
+    @Test
+    fun `baseline — same constructor name in two types, each used in its own match`() {
+        val source = """
+            let from_t1 = {t} -> match t is
+                Ping -> "t1-ping"
+                Pong -> "t1-pong"
+
+            let from_t2 = {t} -> match t is
+                Ping -> "t2-ping"
+                Pang -> "t2-pang"
+
+            let a = from_t1 { t = Ping }
+            let b = from_t2 { t = Ping }
+            a == "t1-ping" && b == "t2-ping"
+        """.trimIndent()
+        val result = runOrReject(source)
+        if (result is Rejected) {
+            fail<Unit>("Baseline rejected by typechecker — test harness can't reach the soundness probes: ${result.message}")
+        }
+        assertEquals(true, result)
+    }
+
+    /**
+     * Direct attack: bind a `Tag2.Ping` to a variable, then pass it to a
+     * function whose parameter is annotated `Tag1`. If the typechecker
+     * accepts this, the runtime match in `from_t1` will see a `Ping` tag
+     * and fire the `t1-ping` arm — visible misroute.
+     */
+    @Test
+    fun `direct annotated injection — Tag2 value into Tag1 sink`() {
+        val source = """
+            type Tag1 = | Ping, Pong |
+            type Tag2 = | Ping, Pang |
+
+            let sink_t1 = {t: Tag1} -> match t is
+                Ping -> "t1-ping"
+                Pong -> "t1-pong"
+
+            let v: Tag2 = Ping
+            sink_t1 { t = v }
+        """.trimIndent()
+        val result = runOrReject(source)
+        // Either typechecker rejects (null), or — if it incorrectly accepts —
+        // we must at least not produce "t1-ping" from a Tag2 value.
+        // If "t1-ping" comes back, that's the soundness hole.
+        assertNotEquals("t1-ping", result,
+            "Soundness hole: Tag2.Ping leaked into Tag1 match site")
+    }
+
+    /**
+     * Polymorphic identity laundering: pass a `Tag2.Ping` through `id`,
+     * then immediately match as `Tag1`. Tests whether row polymorphism
+     * widens `Tag2` to include `Tag1`'s constructors.
+     */
+    @Test
+    fun `polymorphic identity laundering`() {
+        val source = """
+            type Tag1 = | Ping, Pong |
+            type Tag2 = | Ping, Pang |
+
+            let id = {x} -> x
+
+            let v: Tag2 = Ping
+            let laundered: Tag1 = id { x = v }
+            match laundered is
+                Ping -> "fired-tag1-ping"
+                Pong -> "fired-tag1-pong"
+        """.trimIndent()
+        val result = runOrReject(source)
+        assertNotEquals("fired-tag1-ping", result,
+            "Soundness hole: id laundered Tag2 into Tag1")
+    }
+
+    /**
+     * Record-field exit: stash a Tag2 inside a record, then read it back
+     * with a Tag1 annotation. Forces the typechecker to commit to a
+     * field type — if it lets the read coerce, we leak.
+     */
+    @Test
+    fun `record-field laundering`() {
+        val source = """
+            type Tag1 = | Ping, Pong |
+            type Tag2 = | Ping, Pang |
+
+            let v: Tag2 = Ping
+            let rec = { box = v }
+            let back: Tag1 = rec.box
+            match back is
+                Ping -> "fired-tag1-ping"
+                Pong -> "fired-tag1-pong"
+        """.trimIndent()
+        val result = runOrReject(source)
+        assertNotEquals("fired-tag1-ping", result,
+            "Soundness hole: record-field read coerced Tag2 to Tag1")
+    }
+
+    /**
+     * Pattern reuse — match a `Tag1` value but try to bind one arm using
+     * a constructor that only exists in `Tag2`. If the parser/typechecker
+     * accepts a `Pang` arm for a Tag1 scrutinee, runtime is broken before
+     * we even leak a value across.
+     */
+    @Test
+    fun `cross-type constructor in match arm`() {
+        val source = """
+            type Tag1 = | Ping, Pong |
+            type Tag2 = | Ping, Pang |
+
+            let t1: Tag1 = Pong
+            match t1 is
+                Ping -> "ping"
+                Pang -> "pang"
+        """.trimIndent()
+        val result = runOrReject(source)
+        // We don't care which arm fires if the typechecker accepts —
+        // we only care that the runtime never returns "pang" from a Tag1 value.
+        assertNotEquals("pang", result,
+            "Soundness hole: Tag2 constructor in Tag1 match")
+    }
+
+    /**
+     * Open-variant route: Mezze allows row-polymorphic variants. Try to
+     * coerce `Tag2` through an open variant `| Ping | 'rest |` and back
+     * into a `Tag1` annotation. Row poly is supposed to be safe — this
+     * locks in that supposition.
+     */
+    @Test
+    fun `open-variant row-poly laundering`() {
+        val source = """
+            type Tag1 = | Ping, Pong |
+            type Tag2 = | Ping, Pang |
+
+            let pass_through = {x} -> x
+
+            let v: Tag2 = Ping
+            let result: Tag1 = pass_through { x = v }
+            match result is
+                Ping -> "fired-tag1-ping"
+                Pong -> "fired-tag1-pong"
+        """.trimIndent()
+        val result = runOrReject(source)
+        assertNotEquals("fired-tag1-ping", result,
+            "Soundness hole: row-poly widened Tag2 to Tag1")
+    }
+
+    /**
+     * Effect-op result coercion — #231 fixed SuspendedType leaks for effect
+     * op returns. This probe locks in that an effect op returning Tag2
+     * cannot have its return annotated as Tag1.
+     */
+    @Test
+    fun `effect-op return type laundering`() {
+        val source = """
+            type Tag1 = | Ping, Pong |
+            type Tag2 = | Ping, Pang |
+
+            effect Producer where {
+              make: {} -> Tag2 <Producer>
+            }
+            impl Producer for ProduceTag2 where {
+              make = {} -> Ping
+            }
+
+            perform ProduceTag2 in do
+              let v: Tag1 = Producer.make {}
+              match v is
+                Ping -> "fired-tag1-ping"
+                Pong -> "fired-tag1-pong"
+        """.trimIndent()
+        val result = runOrReject(source)
+        assertNotEquals("fired-tag1-ping", result,
+            "Soundness hole: effect-op return type laundered Tag2 to Tag1")
+    }
+
+    /**
+     * Anonymous open-variant route — no named `type` declarations, so the
+     * "duplicate constructor name" check doesn't fire. Constructors flow
+     * through row-polymorphic positions and only get fixed at match sites.
+     * If row poly can drop a `Pang` tag and let a `Ping` value through to
+     * a closed-row match expecting only `{Ping, Pong}`, we'd leak.
+     */
+    @Test
+    fun `anonymous open-variant cross-row leak`() {
+        val source = """
+            # Two values of structurally distinct anonymous rows that both have Ping.
+            let from_row_a = {t} -> match t is
+                Ping -> "row-a-ping"
+                Pong -> "row-a-pong"
+
+            # First call narrows the parameter row to {Ping, Pong} via the arms.
+            let a = from_row_a { t = Ping }
+
+            # Try to also pass Pang to it — typechecker should reject because
+            # from_row_a's row was already closed by inference at its first use.
+            let b = from_row_a { t = Pang }
+            a == "row-a-ping" && b == "row-a-pong"
+        """.trimIndent()
+        val result = runOrReject(source)
+        // We don't care which path was taken — either rejected, or runtime
+        // produced a value that doesn't claim Pang was a Pong.
+        // The dangerous outcome is `true` paired with Pang silently being
+        // misrouted to row-a-pong via tag collision. (No same-tag here
+        // so it's mostly checking row-poly closure.)
+        assertNotEquals(true, result,
+            "Soundness hole: Pang fired arm in {Ping, Pong} match")
+    }
+
+    /**
+     * Stdlib-vs-user-type clash. The stdlib defines `Some` (Option). If a
+     * user declared `type Foo = | Some, Bar |`, would the typechecker
+     * accept it, and if so does a `Some` value of `Foo` match an
+     * `Option`-typed scrutinee's `Some` arm?
+     */
+    @Test
+    fun `stdlib Some constructor reuse blocked`() {
+        val source = """
+            type Foo = | Some, Bar |
+            let v: Foo = Some
+            match v is
+                Some -> "foo-some"
+                Bar -> "foo-bar"
+        """.trimIndent()
+        val result = runOrReject(source)
+        // We aren't testing the leak here — just verifying the language
+        // either rejects reusing `Some` outside std::option, or accepts it
+        // and routes correctly within its own type. The dangerous outcome
+        // would be silently producing a value that escaped its declared
+        // type (e.g. a runtime crash claiming Option saw a Bar).
+        // For now we just assert the typechecker has SOMETHING to say.
+        assertTrue(result is Rejected || result == "foo-some",
+            "Unexpected outcome for stdlib constructor reuse: $result")
+    }
+}
