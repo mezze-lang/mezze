@@ -173,7 +173,8 @@ class EnvironmentEffectTest {
             perform MockEnvironment {
                 env_vars = [],
                 current_directory = "/mock/test/dir",
-                mock_os = "MockOS"
+                mock_os = "MockOS",
+                mock_args = ["mock_program"]
             } in do
                 let dir = Environment.current_dir {}
                 dir == "/mock/test/dir"
@@ -189,7 +190,8 @@ class EnvironmentEffectTest {
             perform MockEnvironment {
                 env_vars = [],
                 current_directory = "/",
-                mock_os = "TestOS"
+                mock_os = "TestOS",
+                mock_args = ["mock_program"]
             } in do
                 let name = Environment.os_name {}
                 name == "TestOS"
@@ -205,7 +207,8 @@ class EnvironmentEffectTest {
             perform MockEnvironment {
                 env_vars = [],
                 current_directory = "/",
-                mock_os = "MockOS"
+                mock_os = "MockOS",
+                mock_args = ["mock_program"]
             } in do
                 let pid = Environment.process_id {}
                 pid == 12345
@@ -221,7 +224,8 @@ class EnvironmentEffectTest {
             perform MockEnvironment {
                 env_vars = [],
                 current_directory = "/",
-                mock_os = "MockOS"
+                mock_os = "MockOS",
+                mock_args = ["mock_program"]
             } in do
                 let arch = Environment.arch {}
                 arch == "mock64"
@@ -237,7 +241,8 @@ class EnvironmentEffectTest {
             perform MockEnvironment {
                 env_vars = [],
                 current_directory = "/",
-                mock_os = "MockOS"
+                mock_os = "MockOS",
+                mock_args = ["mock_program"]
             } in do
                 let version = Environment.os_version {}
                 version == "Mock 1.0"
