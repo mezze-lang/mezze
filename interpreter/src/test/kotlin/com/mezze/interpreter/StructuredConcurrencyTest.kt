@@ -29,8 +29,8 @@ class StructuredConcurrencyTest {
 
         newtype Promise 'a = Promise __NativePromise
 
-        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
-        let await: {p: Promise 'a} -> 'a = {p} -> __native_loom_await {p = p}
+        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_async_spawn {f = f}
+        let await: {p: Promise 'a} -> 'a = {p} -> __native_promise_await {p = p}
     """.trimIndent()
 
     // =============================================================================

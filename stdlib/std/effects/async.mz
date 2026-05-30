@@ -182,63 +182,63 @@ effect Async where {
 
 ## Default handler using Project Loom virtual threads.
 impl Async for LoomAsync where {
-  initialize_scope = {} -> __native_loom_init_scope {},
-  finalize_scope = {} -> __native_loom_finalize_scope { tracker = scope },
-  spawn = { f } -> __native_loom_spawn_tracked { f = f, max_concurrent = 0, tracker = scope },
+  initialize_scope = {} -> __native_async_init_scope {},
+  finalize_scope = {} -> __native_async_finalize_scope { tracker = scope },
+  spawn = { f } -> __native_async_spawn_tracked { f = f, max_concurrent = 0, tracker = scope },
   await = { p } -> __native_promise_await_result { p = p },
   cancel = { p } -> __native_promise_cancel { p = p },
-  sleep = { ms } -> __native_loom_sleep { ms = ms },
-  is_cancelled = {} -> __native_loom_is_cancelled {},
-  check = {} -> __native_loom_check {},
-  scoped = { f } -> __native_loom_scoped { f = f },
-  park = { predicate } -> __native_loom_park_until { predicate = predicate },
+  sleep = { ms } -> __native_async_sleep { ms = ms },
+  is_cancelled = {} -> __native_async_is_cancelled {},
+  check = {} -> __native_async_check {},
+  scoped = { f } -> __native_async_scoped { f = f },
+  park = { predicate } -> __native_async_park_until { predicate = predicate },
 }
 
 ## LoomAsync with configurable concurrency limit (0 = unbounded).
 impl Async for LoomAsyncWith { max_concurrent: Int } where {
-  initialize_scope = {} -> __native_loom_init_scope {},
-  finalize_scope = {} -> __native_loom_finalize_scope { tracker = scope },
+  initialize_scope = {} -> __native_async_init_scope {},
+  finalize_scope = {} -> __native_async_finalize_scope { tracker = scope },
   spawn = { f } ->
-    __native_loom_spawn_tracked {
+    __native_async_spawn_tracked {
       f = f,
       max_concurrent = max_concurrent,
       tracker = scope,
     },
   await = { p } -> __native_promise_await_result { p = p },
   cancel = { p } -> __native_promise_cancel { p = p },
-  sleep = { ms } -> __native_loom_sleep { ms = ms },
-  is_cancelled = {} -> __native_loom_is_cancelled {},
-  check = {} -> __native_loom_check {},
-  scoped = { f } -> __native_loom_scoped { f = f },
-  park = { predicate } -> __native_loom_park_until { predicate = predicate },
+  sleep = { ms } -> __native_async_sleep { ms = ms },
+  is_cancelled = {} -> __native_async_is_cancelled {},
+  check = {} -> __native_async_check {},
+  scoped = { f } -> __native_async_scoped { f = f },
+  park = { predicate } -> __native_async_park_until { predicate = predicate },
 }
 
 ## OS platform thread implementation for true parallelism on CPU-bound work.
 impl Async for OSThreadAsync where {
-  initialize_scope = {} -> __native_os_init_scope {},
-  finalize_scope = {} -> __native_os_finalize_scope { tracker = scope },
-  spawn = { f } -> __native_os_spawn_tracked { f = f, pool_size = 0, tracker = scope },
+  initialize_scope = {} -> __native_async_init_scope_os {},
+  finalize_scope = {} -> __native_async_finalize_scope_os { tracker = scope },
+  spawn = { f } -> __native_async_spawn_tracked_os { f = f, pool_size = 0, tracker = scope },
   await = { p } -> __native_promise_await_result { p = p },
   cancel = { p } -> __native_promise_cancel { p = p },
-  sleep = { ms } -> __native_loom_sleep { ms = ms },
-  is_cancelled = {} -> __native_loom_is_cancelled {},
-  check = {} -> __native_loom_check {},
-  scoped = { f } -> __native_loom_scoped { f = f },
-  park = { predicate } -> __native_loom_park_until { predicate = predicate },
+  sleep = { ms } -> __native_async_sleep { ms = ms },
+  is_cancelled = {} -> __native_async_is_cancelled {},
+  check = {} -> __native_async_check {},
+  scoped = { f } -> __native_async_scoped { f = f },
+  park = { predicate } -> __native_async_park_until { predicate = predicate },
 }
 
 ## OSThreadAsync with configurable thread pool size (0 = unbounded).
 impl Async for OSThreadAsyncWith { pool_size: Int } where {
-  initialize_scope = {} -> __native_os_init_scope {},
-  finalize_scope = {} -> __native_os_finalize_scope { tracker = scope },
-  spawn = { f } -> __native_os_spawn_tracked { f = f, pool_size = pool_size, tracker = scope },
+  initialize_scope = {} -> __native_async_init_scope_os {},
+  finalize_scope = {} -> __native_async_finalize_scope_os { tracker = scope },
+  spawn = { f } -> __native_async_spawn_tracked_os { f = f, pool_size = pool_size, tracker = scope },
   await = { p } -> __native_promise_await_result { p = p },
   cancel = { p } -> __native_promise_cancel { p = p },
-  sleep = { ms } -> __native_loom_sleep { ms = ms },
-  is_cancelled = {} -> __native_loom_is_cancelled {},
-  check = {} -> __native_loom_check {},
-  scoped = { f } -> __native_loom_scoped { f = f },
-  park = { predicate } -> __native_loom_park_until { predicate = predicate },
+  sleep = { ms } -> __native_async_sleep { ms = ms },
+  is_cancelled = {} -> __native_async_is_cancelled {},
+  check = {} -> __native_async_check {},
+  scoped = { f } -> __native_async_scoped { f = f },
+  park = { predicate } -> __native_async_park_until { predicate = predicate },
 }
 
 ## Cooperative single-threaded scheduler using continuations.
@@ -503,19 +503,19 @@ pub let run_coop : { computation: {} -> 'a <Async> } -> 'a = { computation } -> 
 
 ## Spawn a task within a structured concurrency scope.
 pub let scope_spawn : { sc: Scope 'a, f: {} -> 'b <...> } -> Promise 'b = { sc, f } ->
-  __native_loom_scope_spawn { sc = sc, f = f }
+  __native_async_scope_spawn { sc = sc, f = f }
 
 ## Cancel all tasks in a scope.
 pub let scope_cancel_all : { sc: Scope 'a } -> {} = { sc } ->
-  __native_loom_scope_cancel_all { sc = sc }
+  __native_async_scope_cancel_all { sc = sc }
 
 ## Get the CancellationToken for a scope.
 pub let scope_get_token : { sc: Scope 'a } -> CancellationToken = { sc } ->
-  __native_loom_scope_get_token { sc = sc }
+  __native_async_scope_get_token { sc = sc }
 
 ## Check if a scope has been cancelled.
 pub let scope_is_cancelled : { sc: Scope 'a } -> Bool = { sc } ->
-  __native_loom_scope_is_cancelled { sc = sc }
+  __native_async_scope_is_cancelled { sc = sc }
 
 # ============================================================================
 # Cancellation tokens

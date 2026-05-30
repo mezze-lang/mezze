@@ -2484,24 +2484,24 @@ public final class NativeDispatch extends MezzeNode {
     private static void registerAsyncHandlers() {
         // === Loom (Virtual Threads) - scales to millions ===
         // Operations that need TruffleContext for cross-thread execution use HANDLERS_WITH_NODE
-        HANDLERS_WITH_NODE.put("__native_loom_spawn", (r, c, n) -> AsyncNatives.loomSpawn(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_loom_spawn_tracked", (r, c, n) -> AsyncNatives.loomSpawnTracked(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_loom_scoped", (r, c, n) -> AsyncNatives.loomScoped(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_loom_scope_spawn", (r, c, n) -> AsyncNatives.loomScopeSpawn(r, c, n));
+        HANDLERS_WITH_NODE.put("__native_async_spawn", (r, c, n) -> AsyncNatives.loomSpawn(r, c, n));
+        HANDLERS_WITH_NODE.put("__native_async_spawn_tracked", (r, c, n) -> AsyncNatives.loomSpawnTracked(r, c, n));
+        HANDLERS_WITH_NODE.put("__native_async_scoped", (r, c, n) -> AsyncNatives.loomScoped(r, c, n));
+        HANDLERS_WITH_NODE.put("__native_async_scope_spawn", (r, c, n) -> AsyncNatives.loomScopeSpawn(r, c, n));
 
         // Loom scope lifecycle (scoped effects)
-        HANDLERS.put("__native_loom_init_scope", (r, c) -> AsyncNatives.loomInitScope(r));
-        HANDLERS.put("__native_loom_finalize_scope", (r, c) -> AsyncNatives.loomFinalizeScope(r));
+        HANDLERS.put("__native_async_init_scope", (r, c) -> AsyncNatives.loomInitScope(r));
+        HANDLERS.put("__native_async_finalize_scope", (r, c) -> AsyncNatives.loomFinalizeScope(r));
 
         // Simple operations that don't spawn threads use regular HANDLERS
-        HANDLERS.put("__native_loom_await", (r, c) -> AsyncNatives.loomAwait(r));
-        HANDLERS.put("__native_loom_sleep", (r, c) -> AsyncNatives.loomSleep(r));
-        HANDLERS.put("__native_loom_is_cancelled", (r, c) -> AsyncNatives.loomIsCancelled(r));
-        HANDLERS.put("__native_loom_check", (r, c) -> AsyncNatives.loomCheck(r));
-        HANDLERS.put("__native_loom_park_until", (r, c) -> AsyncNatives.loomParkUntil(r, c));
-        HANDLERS.put("__native_loom_scope_cancel_all", (r, c) -> AsyncNatives.loomScopeCancelAll(r));
-        HANDLERS.put("__native_loom_scope_is_cancelled", (r, c) -> AsyncNatives.loomScopeIsCancelled(r));
-        HANDLERS.put("__native_loom_scope_get_token", (r, c) -> AsyncNatives.loomScopeGetToken(r));
+        HANDLERS.put("__native_promise_await", (r, c) -> AsyncNatives.loomAwait(r));
+        HANDLERS.put("__native_async_sleep", (r, c) -> AsyncNatives.loomSleep(r));
+        HANDLERS.put("__native_async_is_cancelled", (r, c) -> AsyncNatives.loomIsCancelled(r));
+        HANDLERS.put("__native_async_check", (r, c) -> AsyncNatives.loomCheck(r));
+        HANDLERS.put("__native_async_park_until", (r, c) -> AsyncNatives.loomParkUntil(r, c));
+        HANDLERS.put("__native_async_scope_cancel_all", (r, c) -> AsyncNatives.loomScopeCancelAll(r));
+        HANDLERS.put("__native_async_scope_is_cancelled", (r, c) -> AsyncNatives.loomScopeIsCancelled(r));
+        HANDLERS.put("__native_async_scope_get_token", (r, c) -> AsyncNatives.loomScopeGetToken(r));
 
         // === Promise-value operations (#117/#118/#123) ===
         // Promise is the user-facing newtype; these natives operate on the
@@ -2516,12 +2516,12 @@ public final class NativeDispatch extends MezzeNode {
         // Only ops that genuinely create platform threads keep their own
         // natives. Stateless ops (await/race/all/etc.) and parallel
         // collection ops are now pure-Mezze in stdlib/std/effects/async.mz,
-        // dispatching to __native_loom_* against MezzePromise values.
-        HANDLERS_WITH_NODE.put("__native_os_spawn_tracked", (r, c, n) -> AsyncNatives.osSpawnTracked(r, c, n));
+        // dispatching to __native_async_* / __native_promise_* against MezzePromise values.
+        HANDLERS_WITH_NODE.put("__native_async_spawn_tracked_os", (r, c, n) -> AsyncNatives.osSpawnTracked(r, c, n));
 
         // OS thread scope lifecycle (scoped effects)
-        HANDLERS.put("__native_os_init_scope", (r, c) -> AsyncNatives.osInitScope(r));
-        HANDLERS.put("__native_os_finalize_scope", (r, c) -> AsyncNatives.osFinalizeScope(r));
+        HANDLERS.put("__native_async_init_scope_os", (r, c) -> AsyncNatives.osInitScope(r));
+        HANDLERS.put("__native_async_finalize_scope_os", (r, c) -> AsyncNatives.osFinalizeScope(r));
 
         // === Cooperative Scheduler - real continuation-based coop async ===
         HANDLERS.put("__native_scheduler_new", (r, c) -> SchedulerNatives.schedulerNew());

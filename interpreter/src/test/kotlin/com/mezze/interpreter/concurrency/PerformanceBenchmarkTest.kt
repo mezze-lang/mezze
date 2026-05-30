@@ -25,7 +25,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  *
  * which routes through the new dispatch (HandleNode → EffectHandlerDriver
  * → handler chain on the spawned thread → AsyncNatives). Previously this
- * test used raw `__native_loom_spawn`/`__native_loom_await` directly,
+ * test used raw `__native_async_spawn`/`__native_promise_await` directly,
  * bypassing the dispatch we just rewrote.
  *
  * Disabled by default — concurrency benchmarks are inherently flaky on

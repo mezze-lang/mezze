@@ -10,7 +10,7 @@ class DebugNestedLambda {
         val code = """
             newtype Promise 'a = Promise __NativePromise
 
-            let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
+            let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_async_spawn {f = f}
 
             let f = {x} -> spawn {f = {} -> x * 2}
         """.trimIndent()

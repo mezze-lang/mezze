@@ -832,7 +832,7 @@ public final class AsyncNatives {
     // ==================== OS Thread Operations ====================
     // Only osSpawnTracked and osInitScope / osFinalizeScope (above) keep
     // their own platform-thread implementations. All other OS Async ops
-    // are now pure-Mezze passthroughs to __native_loom_* — see
+    // are now pure-Mezze passthroughs to __native_async_* / __native_promise_* — see
     // stdlib/std/effects/async.mz (OSThreadAsync impl).
 
     // ==================== AsyncError / PromiseState / CancelOutcome Helpers ====================

@@ -56,8 +56,8 @@ class MinimalTypeVarTest {
         // pulling in the heavy std::effects::async module (which causes OOM).
         val code = """
             newtype Promise 'a = Promise __NativePromise
-            let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
-            let await: {p: Promise 'a} -> 'a = {p} -> __native_loom_await {p = p}
+            let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_async_spawn {f = f}
+            let await: {p: Promise 'a} -> 'a = {p} -> __native_promise_await {p = p}
 
             let p1 = spawn {f = {} -> 1 * 2}
             let p2 = spawn {f = {} -> 2 * 2}

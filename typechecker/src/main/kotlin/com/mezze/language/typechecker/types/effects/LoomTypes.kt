@@ -25,8 +25,8 @@ object LoomTypes {
     fun registerAll(context: MutableMap<String, MezzeType>) {
         val promiseType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Promise", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
 
-        // __native_loom_spawn: {f: {} -> 'a} -> Promise 'a
-        context["__native_loom_spawn"] = MezzeType.FunctionType(
+        // __native_async_spawn: {f: {} -> 'a} -> Promise 'a
+        context["__native_async_spawn"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(emptyMap()),
@@ -46,36 +46,36 @@ object LoomTypes {
             )
         }
 
-        // __native_loom_await: {p: Promise 'a} -> 'a
-        context["__native_loom_await"] = MezzeType.FunctionType(
+        // __native_promise_await: {p: Promise 'a} -> 'a
+        context["__native_promise_await"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "p" to promiseType
             )),
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
         )
 
-        // __native_loom_sleep: {ms: Int} -> {}
-        context["__native_loom_sleep"] = MezzeType.FunctionType(
+        // __native_async_sleep: {ms: Int} -> {}
+        context["__native_async_sleep"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "ms" to MezzeType.IntType
             )),
             MezzeType.RecordType(emptyMap())
         )
 
-        // __native_loom_is_cancelled: {} -> Bool
-        context["__native_loom_is_cancelled"] = MezzeType.FunctionType(
+        // __native_async_is_cancelled: {} -> Bool
+        context["__native_async_is_cancelled"] = MezzeType.FunctionType(
             MezzeType.RecordType(emptyMap()),
             MezzeType.BoolType
         )
 
-        // __native_loom_check: {} -> {}
-        context["__native_loom_check"] = MezzeType.FunctionType(
+        // __native_async_check: {} -> {}
+        context["__native_async_check"] = MezzeType.FunctionType(
             MezzeType.RecordType(emptyMap()),
             MezzeType.RecordType(emptyMap())
         )
 
-        // __native_loom_park_until: {predicate: {} -> Bool <...>} -> {}
-        context["__native_loom_park_until"] = MezzeType.FunctionType(
+        // __native_async_park_until: {predicate: {} -> Bool <...>} -> {}
+        context["__native_async_park_until"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "predicate" to effectPolymorphicThunk(MezzeType.BoolType)
             )),
@@ -147,19 +147,19 @@ object LoomTypes {
             )
         }
 
-        // __native_loom_scoped: {f: {sc: Scope 'a} -> 'a <...>} -> 'a
+        // __native_async_scoped: {f: {sc: Scope 'a} -> 'a <...>} -> 'a
         // The callback f can have any effects (<...>)
-        context["__native_loom_scoped"] = MezzeType.FunctionType(
+        context["__native_async_scoped"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "f" to effectPolymorphicScopedCallback(scopeType, MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
             )),
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
         )
 
-        // __native_loom_scope_spawn: {sc: Scope 'a, f: {} -> 'b <...>} -> Promise 'b
+        // __native_async_scope_spawn: {sc: Scope 'a, f: {} -> 'b <...>} -> Promise 'b
         // The f parameter can have any effects (<...>)
         val scopeSpawnPromiseType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Promise", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))))
-        context["__native_loom_scope_spawn"] = MezzeType.FunctionType(
+        context["__native_async_scope_spawn"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "sc" to scopeType,
                 "f" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
@@ -167,25 +167,25 @@ object LoomTypes {
             scopeSpawnPromiseType
         )
 
-        // __native_loom_scope_cancel_all: {sc: Scope 'a} -> {}
-        context["__native_loom_scope_cancel_all"] = MezzeType.FunctionType(
+        // __native_async_scope_cancel_all: {sc: Scope 'a} -> {}
+        context["__native_async_scope_cancel_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "sc" to scopeType
             )),
             MezzeType.RecordType(emptyMap())
         )
 
-        // __native_loom_scope_get_token: {sc: Scope 'a} -> CancellationToken
+        // __native_async_scope_get_token: {sc: Scope 'a} -> CancellationToken
         val cancellationTokenType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("CancellationToken", emptyList())
-        context["__native_loom_scope_get_token"] = MezzeType.FunctionType(
+        context["__native_async_scope_get_token"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "sc" to scopeType
             )),
             cancellationTokenType
         )
 
-        // __native_loom_scope_is_cancelled: {sc: Scope 'a} -> Bool
-        context["__native_loom_scope_is_cancelled"] = MezzeType.FunctionType(
+        // __native_async_scope_is_cancelled: {sc: Scope 'a} -> Bool
+        context["__native_async_scope_is_cancelled"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "sc" to scopeType
             )),
@@ -196,26 +196,26 @@ object LoomTypes {
         // These natives support initialize_scope/finalize_scope in effect handlers
         // The tracker type is polymorphic - it can be any type returned by initialize_scope
 
-        // __native_loom_init_scope: {} -> 't (polymorphic - returns opaque tracker)
+        // __native_async_init_scope: {} -> 't (polymorphic - returns opaque tracker)
         // Creates a new promise tracker for structured concurrency
         val scopeTrackerVar = MezzeType.VarType(com.mezze.language.ast.TypeVar("tracker"))
-        context["__native_loom_init_scope"] = MezzeType.FunctionType(
+        context["__native_async_init_scope"] = MezzeType.FunctionType(
             MezzeType.RecordType(emptyMap()),
             scopeTrackerVar
         )
 
-        // __native_loom_finalize_scope: {tracker: 't} -> {}
+        // __native_async_finalize_scope: {tracker: 't} -> {}
         // Awaits all unawaited promises registered with the tracker
-        context["__native_loom_finalize_scope"] = MezzeType.FunctionType(
+        context["__native_async_finalize_scope"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "tracker" to MezzeType.VarType(com.mezze.language.ast.TypeVar("tracker"))
             )),
             MezzeType.RecordType(emptyMap())
         )
 
-        // __native_loom_spawn_tracked: {f: {} -> 'a <...>, max_concurrent: Int, tracker: 't} -> Promise 'a
+        // __native_async_spawn_tracked: {f: {} -> 'a <...>, max_concurrent: Int, tracker: 't} -> Promise 'a
         // Spawns a computation and registers the promise with the tracker
-        context["__native_loom_spawn_tracked"] = MezzeType.FunctionType(
+        context["__native_async_spawn_tracked"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "f" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
                 "max_concurrent" to MezzeType.IntType,
