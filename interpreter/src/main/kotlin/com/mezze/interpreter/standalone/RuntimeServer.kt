@@ -2,14 +2,9 @@ package com.mezze.interpreter.standalone
 
 import com.mezze.interpreter.runtime.MezzeExitException
 import com.mezze.interpreter.runtime.MezzeLanguage
-import com.mezze.wire.AttachDenied
-import com.mezze.wire.AttachGranted
-import com.mezze.wire.AttachRequest
 import com.mezze.wire.Bye
 import com.mezze.wire.Config
 import com.mezze.wire.ConfigAck
-import com.mezze.wire.Eval
-import com.mezze.wire.EvalResult
 import com.mezze.wire.Evict
 import com.mezze.wire.ExitDetail
 import com.mezze.wire.Exited
@@ -372,8 +367,11 @@ object RuntimeServer {
                         tryWriteProtocolError(send, "PROTO_STATE_INVALID", "duplicate HELLO after handshake")
                     }
                     else -> {
-                        // Unknown-in-this-version or capability-gated commands
-                        // (EVAL, REF_GET, ATTACH_REQUEST, …). Reject cleanly.
+                        // Frame type the v1 server doesn't recognize.
+                        // Defensive against forward-compat clients sending
+                        // a higher minor-version frame we don't have a
+                        // handler for. Reject cleanly so the client knows
+                        // not to expect a reply.
                         tryWriteProtocolError(send, "PROTO_STATE_INVALID", "unsupported in v1 server: ${frame.type}")
                     }
                 }

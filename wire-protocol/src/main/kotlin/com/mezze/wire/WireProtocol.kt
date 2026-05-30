@@ -86,12 +86,13 @@ object WireProtocol {
 // One byte per type. Reserve ranges:
 //   0x00–0x0F  handshake + lifecycle
 //   0x10–0x1F  code lifecycle (LOAD, EXITED, etc.)
-//   0x20–0x2F  interaction (EVAL, REF_GET — REPL/attach)
 //   0x30–0x3F  control (INTERRUPT, STATUS)
 //   0x40–0x4F  configuration
 //   0x50–0x5F  user I/O (STDOUT_DATA, STDIN_DATA)
 //   0x60–0x6F  diagnostics (LOG, PING, ERROR)
-//   0x70–0x7F  attach (future)
+// Ranges 0x20–0x2F and 0x70–0x7F are intentionally unused — reserved
+// for if/when multi-client attach or a REPL evaluation channel ever
+// gets a real design driver.
 //
 // Gaps in numbering are intentional — leaves room within each range to
 // add related messages without renumbering. Once published, type bytes
@@ -112,13 +113,6 @@ enum class MessageType(val tag: Byte) {
     LOADED(0x12),
     STARTED(0x13),
     EXITED(0x14),
-
-    // Interaction — REPL/attach (0x20–0x2F)
-    EVAL(0x20),
-    EVAL_RESULT(0x21),
-    REF_GET(0x22),
-    REF_RELEASE(0x23),
-    BINDINGS(0x24),
 
     // Control (0x30–0x3F)
     INTERRUPT(0x30),
@@ -148,12 +142,6 @@ enum class MessageType(val tag: Byte) {
     PING(0x61),
     PONG(0x62),
     ERROR(0x63),
-
-    // Attach — future (0x70–0x7F)
-    ATTACH_REQUEST(0x70),
-    ATTACH_GRANTED(0x71),
-    ATTACH_DENIED(0x72),
-    DETACH(0x73),
     ;
 
     constructor(tag: Int) : this(tag.toByte())
@@ -246,7 +234,7 @@ data class Evict(val hashes: List<String>)
 data class Load(
     @SerialName("fns_cbor_path") val fnsCborPath: String,
     @SerialName("meta_cbor_path") val metaCborPath: String,
-    /** `"run"` to compile and execute; `"register"` to compile only (REPL warmup). */
+    /** `"run"` to compile and execute. Reserved for future compile-only mode. */
     val mode: String = "run",
     /**
      * Parent-supplied argv tail (everything the user passed after `--` to
@@ -466,66 +454,6 @@ data class ProtocolError(
     /** Optional: the tag byte of the message we're complaining about. */
     @SerialName("in_reply_to") val inReplyTo: Byte? = null,
 )
-
-// REPL / attach payloads — schemas defined for forward-compat. Servers
-// reject these unless the corresponding capability was negotiated.
-
-@Serializable
-data class Eval(
-    @SerialName("run_id") val runId: Long? = null,
-    val source: String,
-    @SerialName("scope_id") val scopeId: String? = null,
-)
-
-@Serializable
-data class EvalResult(
-    @SerialName("eval_id") val evalId: Long,
-    /** Opaque handle; `REF_GET` / `REF_RELEASE` accept this. */
-    val handle: String? = null,
-    /** Pretty-printed form for display. */
-    val rendered: String,
-    /** Type name as Mezze would render it. */
-    val type: String,
-    val error: ExitDetail? = null,
-)
-
-@Serializable
-data class RefGet(
-    val handle: String,
-    val depth: Int = 1,
-    /** Optional path into structure: `.field`, `[0]`, etc. */
-    val path: String? = null,
-)
-
-@Serializable
-data class RefRelease(val handles: List<String>)
-
-@Serializable
-data class Bindings(
-    @SerialName("scope_id") val scopeId: String,
-    /** `"list"` or `"clear"`. */
-    val action: String,
-)
-
-@Serializable
-data class AttachRequest(
-    val token: String? = null,
-    /** `"read_only"` or `"interactive"`. */
-    val mode: String,
-)
-
-@Serializable
-data class AttachGranted(
-    @SerialName("session_id") val sessionId: String,
-    /** Free-form snapshot of current child state at attach time. */
-    val snapshot: Map<String, String> = emptyMap(),
-)
-
-@Serializable
-data class AttachDenied(val reason: String)
-
-@Serializable
-class Detach
 
 // ─── Frame: type + payload pair ───────────────────────────────────────
 

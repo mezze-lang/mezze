@@ -99,13 +99,8 @@ class WireProtocolTest {
 
     @Test
     fun `unknown tag throws PROTO_UNKNOWN_TYPE`() {
-        // Length = 1 (just the tag), tag = 0x7F (unused). Future-reserved
-        // for attach; not in v1 enum.
-        val buf = ByteArrayOutputStream()
-        java.io.DataOutputStream(buf).writeInt(1)
-        buf.write(0x7F)  // ATTACH range, future
-        // Actually 0x7F isn't claimed yet — wait, DETACH is 0x73. Pick
-        // 0x7E which is genuinely unused.
+        // Length = 1 (just the tag), tag = 0x7E which is unused. The
+        // 0x20–0x2F and 0x70–0x7F ranges are reserved for future use.
         val input = ByteArrayInputStream(
             byteArrayOf(0x00, 0x00, 0x00, 0x01, 0x7E.toByte())
         )
@@ -269,23 +264,6 @@ class WireProtocolTest {
     fun `Log round-trips`() {
         val l = Log(level = "warn", source = "runtime", message = "polyglot context rebuilding")
         assertEquals(l, WireFrame.of(MessageType.LOG, l).decode<Log>())
-    }
-
-    @Test
-    fun `Eval round-trips REPL-style input`() {
-        val e = Eval(source = "let xs = [1,2,3]", scopeId = "default")
-        assertEquals(e, WireFrame.of(MessageType.EVAL, e).decode<Eval>())
-    }
-
-    @Test
-    fun `EvalResult round-trips with handle`() {
-        val r = EvalResult(
-            evalId = 1,
-            handle = "h_42",
-            rendered = "[1, 2, 3]",
-            type = "Seq Int",
-        )
-        assertEquals(r, WireFrame.of(MessageType.EVAL_RESULT, r).decode<EvalResult>())
     }
 
     @Test
