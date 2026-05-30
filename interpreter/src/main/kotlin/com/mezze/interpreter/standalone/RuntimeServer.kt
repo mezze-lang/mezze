@@ -350,9 +350,17 @@ object RuntimeServer {
                     MessageType.EVICT -> handleEvict(frame.decode())
                     MessageType.LOAD -> {
                         val load = frame.decode<Load>()
+                        // Eagerly bump the runId carrier here in the
+                        // dispatch loop (not in handleLoad on the eval
+                        // worker), so any STDIN_DATA for this run that
+                        // arrives in the dispatch loop before handleLoad
+                        // gets a chance to setActiveRunId is correctly
+                        // attributed via routeStdin's "expected next runId"
+                        // check (#243 Race C).
+                        val runId = state.nextRunId()
                         // Hand off to worker so we can keep reading frames
                         // (including STDIN_DATA, INTERRUPT) concurrently.
-                        evalWorker.submit { handleLoad(load, state, send) }
+                        evalWorker.submit { handleLoad(load, runId, state, send) }
                     }
                     MessageType.PING -> send(WireFrame.of(MessageType.PONG, Pong()))
                     MessageType.STATUS -> send(WireFrame.of(MessageType.STATUS_REPLY, state.snapshotStatus()))
@@ -361,10 +369,11 @@ object RuntimeServer {
                     MessageType.CONFIG -> handleConfig(frame.decode(), send)
                     MessageType.STDIN_DATA -> {
                         val data = frame.decode<StdinData>()
-                        state.stdinBuffer?.push(data.bytes)
+                        routeStdin(state, data.runId, data.bytes, false, diag)
                     }
                     MessageType.STDIN_EOF -> {
-                        state.stdinBuffer?.pushEof()
+                        val eof = frame.decode<StdinEof>()
+                        routeStdin(state, eof.runId, ByteArray(0), true, diag)
                     }
                     MessageType.PASSWORD_REPLY -> {
                         // Hand off to the eval thread that's blocked in
@@ -408,7 +417,39 @@ object RuntimeServer {
         if (hashes.isNotEmpty()) MezzeLanguage.setHashesToInvalidate(hashes)
     }
 
-    private fun handleLoad(load: Load, state: ServerState, send: (WireFrame) -> Unit) {
+    /**
+     * Route a STDIN_DATA or STDIN_EOF frame into the active run's buffer,
+     * dropping bytes intended for a stale (already-finished) run (#243).
+     *
+     * Acceptance rule: a frame with runId R is accepted when R == the
+     * latest LOAD-assigned runId on this child (state.peekLatestRunId()).
+     * The dispatch loop bumps the carrier as soon as LOAD arrives, so:
+     *   - bytes that left the parent before the LOAD they're meant for
+     *     also carry the new runId (parent bumps before sending LOAD)
+     *   - bytes for a prior run that arrive after we've seen the new LOAD
+     *     get dropped as stale
+     *   - legacy frames with runId=0 (pre-tagging client) are always
+     *     accepted, for back-compat
+     */
+    private fun routeStdin(
+        state: ServerState,
+        runId: Long,
+        bytes: ByteArray,
+        isEof: Boolean,
+        diag: PrintStream,
+    ) {
+        val latest = state.peekLatestRunId()
+        if (runId == 0L || runId == latest) {
+            if (isEof) state.stdinBuffer?.pushEof()
+            else state.stdinBuffer?.push(bytes)
+        } else {
+            if (System.getenv("MEZZE_DEBUG") != null) {
+                diag.println("[RuntimeServer] dropped stale stdin (run $runId, latest $latest)")
+            }
+        }
+    }
+
+    private fun handleLoad(load: Load, runId: Long, state: ServerState, send: (WireFrame) -> Unit) {
         val fnsFile = File(load.fnsCborPath)
         val metaFile = File(load.metaCborPath)
         if (!fnsFile.exists()) {
@@ -436,7 +477,9 @@ object RuntimeServer {
             return
         }
 
-        val runId = state.nextRunId()
+        // runId was assigned in the dispatch loop (in advance of this
+        // worker starting) so STDIN_DATA frames for the same run can be
+        // correctly attributed. See dispatch's LOAD handler.
         send(WireFrame.of(MessageType.LOADED, Loaded(runId = runId, fnCount = functions.size)))
 
         if (load.mode != "run") {
@@ -466,10 +509,12 @@ object RuntimeServer {
         send(WireFrame.of(MessageType.STARTED, Started(runId = runId)))
         state.runStarted(runId)
 
-        // Reset stdin: drop any buffered bytes / EOF from a previous run,
-        // and re-arm the demand-request flag so the first stdin read in
-        // this run triggers a fresh STDIN_REQUEST to the parent.
-        state.stdinBuffer?.reset()
+        // Re-arm the demand-request flag so the first stdin read in this
+        // run triggers a fresh STDIN_REQUEST to the parent. Note: we no
+        // longer reset the buffer — runId-tagged STDIN_DATA frames are
+        // already filtered by the dispatch loop's routeStdin, so any
+        // bytes still in the buffer here belong to this run (they arrived
+        // after the parent's currentRunId was bumped for this LOAD).
         StdinNatives.resetRequestFlag()
 
         // Install per-run process surface from the LOAD payload. Null fields
@@ -687,6 +732,14 @@ private class ServerState(
         java.util.concurrent.ArrayBlockingQueue(1)
 
     fun nextRunId(): Long = runIdCarrier.incrementAndGet()
+
+    /**
+     * Latest runId the dispatch loop has assigned to a LOAD, whether or
+     * not handleLoad has begun executing it yet. Used by routeStdin to
+     * decide if incoming stdin frames are for "the current/upcoming run"
+     * (accept) or "a stale prior run" (drop). See #243.
+     */
+    fun peekLatestRunId(): Long = runIdCarrier.get()
 
     fun runStarted(runId: Long) {
         activeRunId = runId

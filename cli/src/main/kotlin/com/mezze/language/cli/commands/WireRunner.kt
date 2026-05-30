@@ -427,6 +427,19 @@ private class WireSession private constructor(
     @Volatile private var childExitCode: Int = -1
 
     /**
+     * Parent-side mirror of the runId the child will assign to the next
+     * (or current) run. Used to tag STDIN_DATA frames so the child can
+     * drop bytes intended for a prior run after a `mez dev` reload (#243
+     * Race C: forwarder ships bytes between the parent's LOAD send and
+     * the child's per-run reset; without runId tagging those bytes
+     * silently land in the wrong run's buffer or get reset away).
+     *
+     * Incremented at the top of runOnce; the forwarder reads the current
+     * value when shipping each chunk.
+     */
+    private val currentRunId = java.util.concurrent.atomic.AtomicLong(0)
+
+    /**
      * Stdin forwarder: lazily spawned when the child first asks for stdin
      * via STDIN_REQUEST. Reads from parent's System.in, ships STDIN_DATA
      * frames to the child, sends STDIN_EOF on EOF. Stays alive for the
@@ -463,6 +476,12 @@ private class WireSession private constructor(
         evict: Set<Hash>? = null,
         appArgs: List<String> = emptyList(),
     ): RunOutcome {
+        // Bump our parent-side runId mirror BEFORE sending LOAD, so any
+        // STDIN_DATA the forwarder ships from now on is tagged for the
+        // new run. Bytes the forwarder shipped before this point still
+        // carry the prior runId and the child can correctly drop them
+        // as stale.
+        currentRunId.incrementAndGet()
         if (evict != null && evict.isNotEmpty()) {
             send(WireFrame.of(MessageType.EVICT, Evict(hashes = evict.map { it.hex })))
         }
@@ -685,22 +704,32 @@ private class WireSession private constructor(
                         val n = System.`in`.read(buf)
                         if (debug) System.err.println("[wire] stdin read returned $n")
                         if (n < 0) {
-                            try { send(WireFrame.of(MessageType.STDIN_EOF, com.mezze.wire.StdinEof(runId = 0))) } catch (_: Exception) {}
-                            if (debug) System.err.println("[wire] sent STDIN_EOF")
+                            // Tag EOF with the runId active when we observed EOF
+                            // — child uses this to decide whether to push EOF
+                            // into the active run's buffer or drop it as stale.
+                            val rid = currentRunId.get()
+                            try { send(WireFrame.of(MessageType.STDIN_EOF, com.mezze.wire.StdinEof(runId = rid))) } catch (_: Exception) {}
+                            if (debug) System.err.println("[wire] sent STDIN_EOF (run $rid)")
                             return@Thread
                         }
                         if (n == 0) continue
                         val chunk = if (n == buf.size) buf.copyOf() else buf.copyOf(n)
+                        // Tag with the runId active at the moment we shipped
+                        // these bytes. If a reload races in between, bytes
+                        // from the previous run get correctly attributed and
+                        // the child drops them (#243 Race C).
+                        val rid = currentRunId.get()
                         try {
-                            send(WireFrame.of(MessageType.STDIN_DATA, com.mezze.wire.StdinData(runId = 0, bytes = chunk)))
-                            if (debug) System.err.println("[wire] sent STDIN_DATA n=$n")
+                            send(WireFrame.of(MessageType.STDIN_DATA, com.mezze.wire.StdinData(runId = rid, bytes = chunk)))
+                            if (debug) System.err.println("[wire] sent STDIN_DATA n=$n run=$rid")
                         } catch (_: Exception) {
                             return@Thread
                         }
                     }
                 } catch (e: Exception) {
                     if (debug) System.err.println("[wire] stdin forwarder error: ${e.message}")
-                    try { send(WireFrame.of(MessageType.STDIN_EOF, com.mezze.wire.StdinEof(runId = 0))) } catch (_: Exception) {}
+                    val rid = currentRunId.get()
+                    try { send(WireFrame.of(MessageType.STDIN_EOF, com.mezze.wire.StdinEof(runId = rid))) } catch (_: Exception) {}
                 }
             }, "mez-wire-stdin-fwd").apply {
                 isDaemon = true
