@@ -126,7 +126,14 @@ public final class TimeNatives {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
+            // Restore the interrupt flag so any outer Java code observes
+            // it, AND surface the interrupt to Mezze. Swallowing it (the
+            // previous behavior) made SIGINT/SIGTERM during a long Time.sleep
+            // silently no-op — the program kept running with no visible
+            // signal. Matches AsyncNatives.loomSleep's behavior so Time and
+            // Async behave identically on interrupt.
             Thread.currentThread().interrupt();
+            throw new RuntimeException("Sleep interrupted", e);
         }
         return MezzeUnit.INSTANCE;
     }
@@ -139,6 +146,7 @@ public final class TimeNatives {
             Thread.sleep(millis, remainingNanos);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new RuntimeException("Sleep interrupted", e);
         }
         return MezzeUnit.INSTANCE;
     }
