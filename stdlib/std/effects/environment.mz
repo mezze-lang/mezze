@@ -39,8 +39,10 @@ impl Environment for SystemEnvironment where {
   exit = { code } -> __native_env_exit { code = code },
 }
 
-## Mock environment for testing with fixed values.
-impl Environment for MockEnvironment { env_vars: [{ key: Str, value: Str }], current_directory: Str, mock_os: Str } where {
+## Mock environment for testing with fixed values. process_args is a field
+## so tests can drive the user program with any argv they want (including
+## --, -, --flag=value, etc — everything in the Seq is verbatim).
+impl Environment for MockEnvironment { env_vars: [{ key: Str, value: Str }], current_directory: Str, mock_os: Str, mock_args: [Str] } where {
   get_env = { name } -> __native_mock_env_get { env_vars = env_vars, name = name },
   set_env = { name, value } -> {},
   get_all_env = {} -> env_vars,
@@ -50,7 +52,7 @@ impl Environment for MockEnvironment { env_vars: [{ key: Str, value: Str }], cur
   os_version = {} -> "Mock 1.0",
   arch = {} -> "mock64",
   process_id = {} -> 12345,
-  process_args = {} -> ["mock_program"],
+  process_args = {} -> mock_args,
   exit = { code } -> {},
 }
 
