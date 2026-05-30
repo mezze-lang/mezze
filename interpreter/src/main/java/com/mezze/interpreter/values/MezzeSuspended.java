@@ -131,9 +131,15 @@ public final class MezzeSuspended implements TruffleObject {
             return forceComposedBlock(composedThunk, fiber, callNode);
         }
         if (computation.isDeferredEffectCall()) {
+            // Forward the effect content hash so the dispatcher can
+            // disambiguate when two effects in scope declare an op with
+            // the same simple name (#246). Dropping it here would silently
+            // misroute on force, reintroducing the bug for any op that
+            // was deferred outside a perform and forced inside one.
             return fiber.suspend(new com.mezze.interpreter.nodes.continuation.OpCall(
                 computation.getOperationName(),
-                computation.getArguments()
+                computation.getArguments(),
+                computation.getEffectContentHash()
             ));
         }
         // Regular function thunk — no effect to dispatch, just execute.
@@ -161,7 +167,8 @@ public final class MezzeSuspended implements TruffleObject {
         } else if (originalThunk.isDeferredEffectCall()) {
             effectResult = fiber.suspend(new com.mezze.interpreter.nodes.continuation.OpCall(
                 originalThunk.getOperationName(),
-                originalThunk.getArguments()
+                originalThunk.getArguments(),
+                originalThunk.getEffectContentHash()
             ));
         } else {
             effectResult = originalThunk.execute(callNode);

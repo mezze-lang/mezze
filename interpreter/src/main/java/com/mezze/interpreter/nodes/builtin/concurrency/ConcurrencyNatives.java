@@ -988,7 +988,7 @@ public final class ConcurrencyNatives {
      * the function dispatch through the same handlers that were in scope
      * at the send site.
      */
-    private record AgentAction(MezzeFunction func, com.oracle.truffle.api.TruffleLanguage.Env env, MezzeRecord[] chain) {}
+    private record AgentAction(MezzeFunction func, com.oracle.truffle.api.TruffleLanguage.Env env, com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain) {}
 
     /**
      * Clojure-style Agent for async state updates.
@@ -1029,7 +1029,7 @@ public final class ConcurrencyNatives {
                 throw new RuntimeException("Agent is in error state: " + error.get());
             }
 
-            actionQueue.add(new AgentAction(func, env, EffectFiber.snapshotHandlerChain()));
+            actionQueue.add(new AgentAction(func, env, EffectFiber.snapshotHandlerChainEntries()));
             processQueue();
         }
 
@@ -1685,7 +1685,7 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
-        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
         AtomicReference<Throwable> errSink = new AtomicReference<>();
 
@@ -1763,7 +1763,7 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
-        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
         AtomicReference<Throwable> errSink = new AtomicReference<>();
 
@@ -1866,7 +1866,7 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
-        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
         AtomicReference<Throwable> errSink = new AtomicReference<>();
 
@@ -1989,7 +1989,7 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
-        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
         AtomicReference<Throwable> errSink = new AtomicReference<>();
 
@@ -2074,7 +2074,7 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
-        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
         AtomicReference<Throwable> errSink = new AtomicReference<>();
 
@@ -2354,7 +2354,7 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
-        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
         AtomicReference<Throwable> errSink = new AtomicReference<>();
 
@@ -2446,7 +2446,7 @@ public final class ConcurrencyNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE);
         int numBatches = (store.length + batchSize - 1) / batchSize;
 
-        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
         AtomicReference<Throwable> errSink = new AtomicReference<>();
 
@@ -2549,7 +2549,7 @@ public final class ConcurrencyNatives {
 
         Env env = MezzeContext.get(node).getEnv();
 
-        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         CompletableFuture<Object> leftFuture = new CompletableFuture<>();
         CompletableFuture<Object> rightFuture = new CompletableFuture<>();
 
@@ -2596,7 +2596,7 @@ public final class ConcurrencyNatives {
 
         Env env = MezzeContext.get(node).getEnv();
 
-        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         CompletableFuture<Object> aFuture = new CompletableFuture<>();
         CompletableFuture<Object> bFuture = new CompletableFuture<>();
         CompletableFuture<Object> cFuture = new CompletableFuture<>();

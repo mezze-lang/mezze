@@ -4,6 +4,7 @@ import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.MezzeRootNode;
 import com.mezze.interpreter.nodes.continuation.BodyResult;
 import com.mezze.interpreter.nodes.continuation.EffectFiber;
+import com.mezze.interpreter.nodes.continuation.HandlerChainEntry;
 import com.mezze.interpreter.nodes.continuation.OpCall;
 import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.runtime.MezzeLanguage;
@@ -123,7 +124,7 @@ public final class EffectHandlerDriver {
      */
     @TruffleBoundary
     public static Object runFunctionThroughChain(
-            MezzeRecord[] chain,
+            HandlerChainEntry[] chain,
             MezzeFunction body,
             Object[] bodyArgs,
             IndirectCallNode callNode,
@@ -146,7 +147,7 @@ public final class EffectHandlerDriver {
         // chain[0] is innermost; iterate in reverse so outermost is
         // pushed first.
         for (int i = chain.length - 1; i >= 0; i--) {
-            EffectFiber.pushHandlerOnChain(chain[i]);
+            EffectFiber.pushHandlerOnChain(chain[i].handler(), chain[i].effectHash());
         }
 
         Boolean prevBoundary = TASK_BOUNDARY.get();
@@ -173,7 +174,7 @@ public final class EffectHandlerDriver {
      */
     @TruffleBoundary
     private static Object driveWithChain(
-            MezzeRecord[] chain,
+            HandlerChainEntry[] chain,
             EffectFiber fiber,
             Object resumeWith,
             IndirectCallNode callNode) {
@@ -192,11 +193,14 @@ public final class EffectHandlerDriver {
                 + (suspended == null ? "null" : suspended.getClass().getName()));
         }
 
-        // Find the innermost handler in the chain whose record has a
-        // field matching this op-name.
+        // Find the innermost handler in the chain that implements this
+        // op-call's effect. Match by (effectHash, opName) — bare opName
+        // match silently misroutes when two effects in scope declare an
+        // op with the same simple name (#246).
         MezzeFunction opHandler = null;
         for (int i = 0; i < chain.length; i++) {
-            Object f = chain[i].getField(opCall.opName());
+            if (!handlerMatchesEffect(chain[i], opCall)) continue;
+            Object f = chain[i].handler().getField(opCall.opName());
             if (f instanceof MezzeFunction mf) {
                 opHandler = mf;
                 break;
@@ -217,6 +221,20 @@ public final class EffectHandlerDriver {
         return driveWithChain(chain, fiber, result.opResult(), callNode);
     }
 
+    /**
+     * True if {@code entry} implements the effect carried by {@code opCall}.
+     * Either side may have a null hash (legacy synthetic handlers / callers
+     * without a hash); in that case fall back to "match any effect" so the
+     * legacy code paths keep working. Once OpCall.effectHash and all push
+     * sites carry hashes, the null fallbacks become dead code.
+     */
+    private static boolean handlerMatchesEffect(HandlerChainEntry entry, OpCall opCall) {
+        Hash handlerEffect = entry.effectHash();
+        Hash callEffect = opCall.effectHash();
+        if (handlerEffect == null || callEffect == null) return true;
+        return handlerEffect.equals(callEffect);
+    }
+
     // Cache one CallTarget for chain-dispatch resume, mirroring the
     // CACHED_RESUME_TARGET pattern from #88 for the in-perform resume.
     // Per-dispatch state (chain, fiber, callNode) flows through the
@@ -226,7 +244,7 @@ public final class EffectHandlerDriver {
     private static volatile RootCallTarget CACHED_CHAIN_RESUME_TARGET = null;
 
     private static MezzeFunction makeChainResumeFunction(
-            MezzeRecord[] chain,
+            HandlerChainEntry[] chain,
             EffectFiber fiber,
             IndirectCallNode callNode) {
         RootCallTarget target = CACHED_CHAIN_RESUME_TARGET;
@@ -250,7 +268,7 @@ public final class EffectHandlerDriver {
             public Object execute(VirtualFrame frame) {
                 Object[] frameArgs = frame.getArguments();
                 // frameArgs layout: [chain, fiber, callNode, argRecord]
-                MezzeRecord[] chain = (MezzeRecord[]) frameArgs[0];
+                HandlerChainEntry[] chain = (HandlerChainEntry[]) frameArgs[0];
                 EffectFiber fiber = (EffectFiber) frameArgs[1];
                 IndirectCallNode callNode = (IndirectCallNode) frameArgs[2];
                 int recordIdx = frameArgs.length - 1;
@@ -289,9 +307,15 @@ public final class EffectHandlerDriver {
      * body inside a Loom-backed fiber so op calls can suspend.
      *
      * @param handler      the handler record (fields are op handler functions)
+     * @param effectHash   content hash of the effect this handler implements,
+     *                     used so the dispatcher disambiguates when two
+     *                     in-scope effects declare ops with the same simple
+     *                     name (#246). May be null only for legacy callers
+     *                     that predate the runId-tag rollout; null falls
+     *                     back to "match any effect" so old behavior holds.
      * @param bodyNode     the body to execute; runs inside the fiber
-     * @param outerFrame   the caller's virtual frame (used to materialize a
-     *                     captured frame for body execution inside the fiber)
+     * @param bodyFrame    the materialized caller frame used to execute body
+     *                     across suspend/resume cycles
      * @param callNode     shared IndirectCallNode for downstream calls
      * @param dispatchNode the owning Truffle node (for MezzeContext.get)
      * @return the perform's result — body's natural return or an aborted value
@@ -299,6 +323,7 @@ public final class EffectHandlerDriver {
     @TruffleBoundary
     public static Object run(
             MezzeRecord handler,
+            Hash effectHash,
             MezzeNode bodyNode,
             MaterializedFrame bodyFrame,
             IndirectCallNode callNode,
@@ -339,11 +364,11 @@ public final class EffectHandlerDriver {
         // finally blocks, so popHandlerOffChain in the conventional path
         // wouldn't fire for nested performs.
         int chainDepthBefore = EffectFiber.handlerChainDepth();
-        EffectFiber.pushHandlerOnChain(handler);
+        EffectFiber.pushHandlerOnChain(handler, effectHash);
 
         Object performResult;
         try {
-            performResult = drive(handler, fiberHolder[0], outerFiber, null, callNode);
+            performResult = drive(handler, effectHash, fiberHolder[0], outerFiber, null, callNode);
         } catch (AbortPerformException abort) {
             performResult = abort.value;
         } finally {
@@ -415,6 +440,7 @@ public final class EffectHandlerDriver {
     @TruffleBoundary
     private static Object drive(
             MezzeRecord handler,
+            Hash handlerEffectHash,
             EffectFiber fiber,
             EffectFiber outerFiber,
             Object resumeWith,
@@ -440,8 +466,17 @@ public final class EffectHandlerDriver {
                     + (suspended == null ? "null" : suspended.getClass().getName()));
             }
 
-            // Look up the handler operation by name.
-            Object opHandlerObj = handler.getField(opCall.opName());
+            // Look up the handler operation. Filter by (effect_hash, op_name):
+            // a handler only dispatches an op if it implements the effect
+            // the op-call belongs to (#246). Null on either side falls back
+            // to the legacy "match any effect" behavior.
+            boolean effectMatch =
+                handlerEffectHash == null
+                    || opCall.effectHash() == null
+                    || handlerEffectHash.equals(opCall.effectHash());
+            Object opHandlerObj = effectMatch
+                ? handler.getField(opCall.opName())
+                : null;
             if (!(opHandlerObj instanceof MezzeFunction opHandler)) {
                 // Op isn't handled here — propagate to the outer fiber so a
                 // surrounding HandleNode's driver can try to dispatch it.
@@ -473,7 +508,7 @@ public final class EffectHandlerDriver {
             // op handler body reads them via EffectBindingNode.
             OpDispatchResult result = dispatchOp(
                 opHandler, opCall, fiber,
-                makeResumeFunction(handler, fiber, outerFiber, callNode),
+                makeResumeFunction(handler, handlerEffectHash, fiber, outerFiber, callNode),
                 makeAbortFunction(),
                 callNode);
 
@@ -514,18 +549,19 @@ public final class EffectHandlerDriver {
      */
     private static MezzeFunction makeResumeFunction(
             MezzeRecord handler,
+            Hash handlerEffectHash,
             EffectFiber fiber,
             EffectFiber outerFiber,
             IndirectCallNode callNode) {
         RootCallTarget target = CACHED_RESUME_TARGET;
         if (target == null) target = buildAndCacheResumeTarget();
         // Closure layout matches the order resumeBody reads them in
-        // frame.getArguments(): [handler, fiber, outerFiber, callNode]
+        // frame.getArguments(): [handler, handlerEffectHash, fiber, outerFiber, callNode]
         // followed by the user arg ({val = X}).
         return new MezzeFunction(
             target,
             ScopedEffectConstants.RESUME,
-            new Object[]{handler, fiber, outerFiber, callNode}
+            new Object[]{handler, handlerEffectHash, fiber, outerFiber, callNode}
         );
     }
 
@@ -537,13 +573,14 @@ public final class EffectHandlerDriver {
             @Override
             public Object execute(VirtualFrame frame) {
                 Object[] frameArgs = frame.getArguments();
-                // frameArgs layout: [handler, fiber, outerFiber, callNode, argRecord]
+                // frameArgs layout: [handler, handlerEffectHash, fiber, outerFiber, callNode, argRecord]
                 MezzeRecord handler = (MezzeRecord) frameArgs[0];
-                EffectFiber fiber = (EffectFiber) frameArgs[1];
-                EffectFiber outerFiber = (EffectFiber) frameArgs[2];
-                IndirectCallNode callNode = (IndirectCallNode) frameArgs[3];
+                Hash handlerEffectHash = (Hash) frameArgs[1];
+                EffectFiber fiber = (EffectFiber) frameArgs[2];
+                EffectFiber outerFiber = (EffectFiber) frameArgs[3];
+                IndirectCallNode callNode = (IndirectCallNode) frameArgs[4];
                 int recordIdx = frameArgs.length - 1;
-                if (recordIdx < 4 || !(frameArgs[recordIdx] instanceof MezzeRecord rec)) {
+                if (recordIdx < 5 || !(frameArgs[recordIdx] instanceof MezzeRecord rec)) {
                     throw new RuntimeException(
                         "resume expects record argument {val = ...}");
                 }
@@ -557,7 +594,7 @@ public final class EffectHandlerDriver {
                 // outermost `run` only catches abort once; deferred resume
                 // re-entry needs its own catch.
                 try {
-                    return drive(handler, fiber, outerFiber, val, callNode);
+                    return drive(handler, handlerEffectHash, fiber, outerFiber, val, callNode);
                 } catch (AbortPerformException abort) {
                     return abort.value;
                 }
@@ -568,7 +605,7 @@ public final class EffectHandlerDriver {
             fd,
             resumeBody,
             "effect-handler-resume",
-            4,   // closureCount
+            5,   // closureCount
             1,   // paramCount
             new int[0]
         ).getCallTarget();

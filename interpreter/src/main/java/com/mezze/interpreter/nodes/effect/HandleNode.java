@@ -167,11 +167,17 @@ public final class HandleNode extends MezzeNode {
     @Child private MezzeNode handlerNode;
     @Child private MezzeNode bodyNode;
     @Child private IndirectCallNode callNode;
+    @CompilationFinal private final Hash effectHash;
 
     public HandleNode(MezzeNode handlerNode, MezzeNode bodyNode) {
+        this(handlerNode, bodyNode, null);
+    }
+
+    public HandleNode(MezzeNode handlerNode, MezzeNode bodyNode, Hash effectHash) {
         this.handlerNode = handlerNode;
         this.bodyNode = bodyNode;
         this.callNode = IndirectCallNode.create();
+        this.effectHash = effectHash;
     }
 
     @Override
@@ -185,7 +191,8 @@ public final class HandleNode extends MezzeNode {
         // Body executes inside a Loom continuation, which may yield back to
         // the driver across the frame boundary. Materialize so body's frame
         // survives the suspend/resume cycles.
-        return EffectHandlerDriver.run(handler, bodyNode, frame.materialize(), callNode, this);
+        return EffectHandlerDriver.run(
+            handler, effectHash, bodyNode, frame.materialize(), callNode, this);
     }
 
     // ------------------------------------------------------------------

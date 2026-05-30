@@ -6,6 +6,7 @@ import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
 import com.mezze.interpreter.nodes.continuation.EffectFiber;
+import com.mezze.interpreter.nodes.continuation.HandlerChainEntry;
 import com.mezze.interpreter.nodes.continuation.OpCall;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeFunction;
@@ -79,7 +80,7 @@ public final class OpCallNode extends MezzeNode {
         if (fiber != null) {
             return fiber.suspend(new OpCall(operationName, args, effectHash));
         }
-        MezzeRecord[] chain = EffectFiber.snapshotHandlerChain();
+        HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         if (chain.length > 0) {
             return chainDispatch(chain, args);
         }
@@ -113,9 +114,18 @@ public final class OpCallNode extends MezzeNode {
      * </ul>
      */
     @TruffleBoundary
-    private Object chainDispatch(MezzeRecord[] chain, Object args) {
+    private Object chainDispatch(HandlerChainEntry[] chain, Object args) {
         for (int i = 0; i < chain.length; i++) {
-            Object f = chain[i].getField(operationName);
+            // Filter by (effect_hash, op_name) — bare op_name match silently
+            // misroutes when two effects in scope declare an op with the
+            // same simple name (#246). Null on either side falls back to
+            // the legacy "match any effect" behavior.
+            Hash chainEffect = chain[i].effectHash();
+            if (chainEffect != null && effectHash != null
+                    && !chainEffect.equals(effectHash)) {
+                continue;
+            }
+            Object f = chain[i].handler().getField(operationName);
             if (f instanceof MezzeFunction op) {
                 if (chainCallNode == null) {
                     CompilerDirectives.transferToInterpreterAndInvalidate();

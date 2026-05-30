@@ -514,8 +514,7 @@ class TruffleCompiler(
                         closureKinds,
                         fnIR.paramNames.toTypedArray(),
                         bodyNode,
-                        innerFd,
-                        null
+                        innerFd
                     )
                 } else {
                     // Fallback: lookup by hash at runtime
@@ -529,8 +528,7 @@ class TruffleCompiler(
                         closureKinds,
                         emptyArray(),
                         bodyNode,
-                        innerFd,
-                        null
+                        innerFd
                     )
                 }
             }
@@ -554,7 +552,7 @@ class TruffleCompiler(
                                 -1, handler.handlerHash, handler.performerName
                             )
                         }
-                        currentBody = HandleNode(handlerNode, currentBody)
+                        currentBody = HandleNode(handlerNode, currentBody, handler.effectHash)
                     }
                     currentBody
                 } else {

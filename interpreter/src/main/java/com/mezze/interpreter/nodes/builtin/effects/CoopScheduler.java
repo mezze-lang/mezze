@@ -70,10 +70,11 @@ public final class CoopScheduler {
     @TruffleBoundary
     public AsyncNatives.MezzePromise spawn(MezzeFunction f, IndirectCallNode callNode) {
         AsyncNatives.MezzePromise promise = new AsyncNatives.MezzePromise(null, null);
-        MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] handlerChain =
+            EffectFiber.snapshotHandlerChainEntries();
 
         Runnable body = () -> {
-            EffectFiber.installHandlerChain(handlerChain);
+            EffectFiber.installHandlerChainEntries(handlerChain);
             try {
                 Object result = callMezzeThunk(f, callNode);
                 promise.complete(result);

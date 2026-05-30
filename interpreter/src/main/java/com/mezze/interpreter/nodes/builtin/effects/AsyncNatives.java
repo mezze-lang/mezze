@@ -6,6 +6,7 @@ import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver;
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
 import com.mezze.interpreter.nodes.continuation.EffectFiber;
+import com.mezze.interpreter.nodes.continuation.HandlerChainEntry;
 import com.mezze.interpreter.nodes.continuation.OpCall;
 import com.mezze.interpreter.nodes.continuation.SpawnSupport;
 import com.mezze.interpreter.runtime.MezzeContext;
@@ -475,7 +476,7 @@ public final class AsyncNatives {
         // Capture the parent's effect-handler chain at spawn time so the
         // spawned task's OpCallNode (fiber-less dispatch path) can find
         // the same handlers that were in scope at the spawn site.
-        MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
+        HandlerChainEntry[] handlerChain = EffectFiber.snapshotHandlerChainEntries();
 
         // Single promise: body completes it, parent awaits it. Thread
         // reference is patched in after construction (single writer:
@@ -547,7 +548,7 @@ public final class AsyncNatives {
         // Capture the parent's effect-handler chain at spawn time so the
         // spawned task's OpCallNode (fiber-less dispatch path) can find
         // the same handlers that were in scope at the spawn site.
-        MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
+        HandlerChainEntry[] handlerChain = EffectFiber.snapshotHandlerChainEntries();
 
         MezzePromise promise = new MezzePromise(null, null);
 
@@ -643,7 +644,7 @@ public final class AsyncNatives {
         // Capture the parent's effect-handler chain at spawn time so the
         // spawned task dispatches op-calls through the same handlers that
         // were in scope here. Snapshot copy is safe to ship across threads.
-        MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
+        HandlerChainEntry[] handlerChain = EffectFiber.snapshotHandlerChainEntries();
 
         // Single promise: body completes it, parent awaits it. Thread
         // reference is patched in after construction (single writer:
@@ -778,7 +779,7 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = scope.env != null ? scope.env : context.getEnv();
 
-        MezzeRecord[] handlerChain = EffectFiber.snapshotHandlerChain();
+        HandlerChainEntry[] handlerChain = EffectFiber.snapshotHandlerChainEntries();
 
         MezzePromise promise = new MezzePromise(null, null);
         scope.addChild(promise);
@@ -1055,14 +1056,14 @@ public final class AsyncNatives {
      * can re-issue it on the parent fiber. Any other throwable fails the
      * promise.
      */
-    private static void runPromiseTask(MezzeRecord[] chain, MezzePromise promise, TaskBody body) {
+    private static void runPromiseTask(HandlerChainEntry[] chain, MezzePromise promise, TaskBody body) {
         // Inlined EffectFiber.runWithHandlerChain so we don't allocate a
         // second lambda per spawn. The chain.length == 0 fast path matches
         // the common case (top-level Async.spawn outside any perform).
         boolean installed = false;
         try {
             if (chain.length > 0) {
-                EffectFiber.installHandlerChain(chain);
+                EffectFiber.installHandlerChainEntries(chain);
                 installed = true;
             }
             Object result = body.run();

@@ -1,7 +1,6 @@
 package com.mezze.interpreter.nodes.continuation;
 
 import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
-import com.mezze.interpreter.values.MezzeRecord;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -52,7 +51,7 @@ public final class SpawnSupport {
      * future. The awaiter on the main thread sees the failure via
      * {@code future.get()}'s {@code ExecutionException} cause.
      */
-    public static void runJoinTask(MezzeRecord[] chain, CompletableFuture<Object> future, Supplier<Object> body) {
+    public static void runJoinTask(HandlerChainEntry[] chain, CompletableFuture<Object> future, Supplier<Object> body) {
         try {
             EffectFiber.runWithHandlerChain(chain, () -> future.complete(body.get()));
         } catch (Throwable e) {
@@ -96,7 +95,7 @@ public final class SpawnSupport {
      * carries information the parent driver can act on.
      */
     public static void runBatchTask(
-        MezzeRecord[] chain,
+        HandlerChainEntry[] chain,
         AtomicReference<TaskUnhandledOpException> opSink,
         AtomicReference<Throwable> errSink,
         Runnable body

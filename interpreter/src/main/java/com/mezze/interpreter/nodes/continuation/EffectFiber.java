@@ -50,16 +50,19 @@ import java.util.concurrent.atomic.AtomicLong;
  * an outer finally that fires only when control finally returns.
  *
  * <p><b>Handler chain.</b> Independent of fiber state, every thread has
- * a {@link #HANDLER_CHAIN} stack of effect-handler records that
+ * a {@link #HANDLER_CHAIN} stack of {@link HandlerChainEntry} pairs
+ * (handler record + the content hash of the effect it implements) that
  * spawned tasks inherit at spawn time
- * ({@link #snapshotHandlerChain()} +
- * {@link #installHandlerChain(MezzeRecord[])}). The chain participates
- * in {@link com.mezze.interpreter.nodes.effect.OpCallNode}'s fiber-less
- * dispatch path: when there's no current fiber but a chain is
- * installed, the op-call walks the chain to find a matching handler and
- * invokes it directly. Unhandled ops at the chain bottom are surfaced
- * as {@code TaskUnhandledOpException} for the spawning code to
- * re-issue on the parent fiber at await time. See
+ * ({@link #snapshotHandlerChainEntries()} +
+ * {@link #installHandlerChainEntries(HandlerChainEntry[])}). The chain
+ * participates in {@link com.mezze.interpreter.nodes.effect.OpCallNode}'s
+ * fiber-less dispatch path: when there's no current fiber but a chain
+ * is installed, the op-call walks the chain to find a matching handler
+ * and invokes it directly. Matching is by (effect_hash, op_name) so two
+ * in-scope effects with the same op simple name don't collide (#246).
+ * Unhandled ops at the chain bottom are surfaced as
+ * {@code TaskUnhandledOpException} for the spawning code to re-issue on
+ * the parent fiber at await time. See
  * {@link com.mezze.interpreter.nodes.continuation.SpawnSupport}.
  *
  * <p><b>Late resume.</b> A {@code resume} reference captured inside an
@@ -177,11 +180,18 @@ public final class EffectFiber {
     // task dispatch through the same handler chain.
     // ----------------------------------------------------------------
 
-    private static final ThreadLocal<java.util.ArrayDeque<com.mezze.interpreter.values.MezzeRecord>>
+    private static final ThreadLocal<java.util.ArrayDeque<HandlerChainEntry>>
         HANDLER_CHAIN = ThreadLocal.withInitial(java.util.ArrayDeque::new);
 
-    public static void pushHandlerOnChain(com.mezze.interpreter.values.MezzeRecord handler) {
-        HANDLER_CHAIN.get().push(handler);
+    /**
+     * Push a handler with the content hash of the effect it implements.
+     * The effect hash is required for correct dispatch when two effects in
+     * scope declare ops with the same simple name (#246).
+     */
+    public static void pushHandlerOnChain(
+            com.mezze.interpreter.values.MezzeRecord handler,
+            com.mezze.language.typedast.Hash effectHash) {
+        HANDLER_CHAIN.get().push(new HandlerChainEntry(handler, effectHash));
     }
 
     public static void popHandlerOffChain() {
@@ -212,30 +222,32 @@ public final class EffectFiber {
      *  Most spawn sites snapshot a chain with no handlers above them
      *  (top-level Async.spawn outside any perform installs zero handlers
      *  on this thread), so this is the overwhelmingly common case. */
-    private static final MezzeRecord[] EMPTY_CHAIN = new MezzeRecord[0];
+    private static final HandlerChainEntry[] EMPTY_ENTRY_CHAIN = new HandlerChainEntry[0];
 
     /**
      * Snapshot of the handler chain on this thread, innermost-first
      * (matching the iteration order callers want for "innermost matches
-     * first" dispatch). Returns an array so callers can safely iterate
-     * after thread boundaries.
+     * first" dispatch). Returns an array of (handler, effect_hash) entries
+     * so chain-dispatch can match by (effect_hash, op_name) — required to
+     * disambiguate when two effects in scope declare an op with the same
+     * simple name (#246).
      */
-    public static MezzeRecord[] snapshotHandlerChain() {
-        ArrayDeque<MezzeRecord> chain = HANDLER_CHAIN.get();
+    public static HandlerChainEntry[] snapshotHandlerChainEntries() {
+        ArrayDeque<HandlerChainEntry> chain = HANDLER_CHAIN.get();
         int size = chain.size();
-        if (size == 0) return EMPTY_CHAIN;
-        return chain.toArray(new MezzeRecord[size]);
+        if (size == 0) return EMPTY_ENTRY_CHAIN;
+        return chain.toArray(new HandlerChainEntry[size]);
     }
 
     /**
-     * Install a captured handler chain on the current thread. Caller is
-     * responsible for {@link #clearHandlerChain()} on the same thread
-     * when done (typically in a finally block). For one-shot scope use,
-     * {@link #runWithHandlerChain} is safer.
+     * Install a captured (handler, effect-hash) chain on the current
+     * thread. Caller is responsible for {@link #clearHandlerChain()} on
+     * the same thread when done (typically in a finally block). For
+     * one-shot scope use, {@link #runWithHandlerChain} is safer.
      */
-    public static void installHandlerChain(MezzeRecord[] chain) {
-        ArrayDeque<MezzeRecord> stack = HANDLER_CHAIN.get();
-        // Push in reverse so the innermost (snapshot[0]) ends up on top.
+    public static void installHandlerChainEntries(HandlerChainEntry[] chain) {
+        ArrayDeque<HandlerChainEntry> stack = HANDLER_CHAIN.get();
+        // Push in reverse so the innermost (chain[0]) ends up on top.
         for (int i = chain.length - 1; i >= 0; i--) {
             stack.push(chain[i]);
         }
@@ -247,14 +259,14 @@ public final class EffectFiber {
 
     /**
      * Pop {@code count} handlers from the top of this thread's chain.
-     * Companion to {@link #installHandlerChain} when the caller must
-     * preserve any handlers underneath the chunk it installed (e.g. the
-     * coop scheduler runs spawned bodies on its driver thread, which
+     * Companion to {@link #installHandlerChainEntries} when the caller
+     * must preserve any handlers underneath the chunk it installed (e.g.
+     * the coop scheduler runs spawned bodies on its driver thread, which
      * itself sits inside an outer perform).
      */
     public static void popHandlerChain(int count) {
         if (count <= 0) return;
-        ArrayDeque<MezzeRecord> stack = HANDLER_CHAIN.get();
+        ArrayDeque<HandlerChainEntry> stack = HANDLER_CHAIN.get();
         for (int i = 0; i < count && !stack.isEmpty(); i++) {
             stack.pop();
         }
@@ -264,13 +276,17 @@ public final class EffectFiber {
      * Install {@code chain} on the current thread, run {@code body}, then
      * clear. Use this in spawned-task bodies that need to inherit the
      * parent's handler chain. Empty chain is a no-op fast path.
+     * Effect-hash-preserving: required so cross-thread spawn paths retain
+     * effect identity and the inherited chain's op-name lookup can
+     * disambiguate when two in-scope effects declare an op with the same
+     * simple name (#246).
      */
-    public static void runWithHandlerChain(MezzeRecord[] chain, Runnable body) {
+    public static void runWithHandlerChain(HandlerChainEntry[] chain, Runnable body) {
         if (chain.length == 0) {
             body.run();
             return;
         }
-        installHandlerChain(chain);
+        installHandlerChainEntries(chain);
         try {
             body.run();
         } finally {
