@@ -20,6 +20,7 @@ import com.mezze.wire.Loaded
 import com.mezze.wire.MessageType
 import com.mezze.wire.PasswordReply
 import com.mezze.wire.PasswordRequest
+import com.mezze.wire.Signal
 import com.mezze.wire.Winch
 import com.mezze.wire.Ping
 import com.mezze.wire.Pong
@@ -344,6 +345,7 @@ object RuntimeServer {
                     MessageType.PING -> send(WireFrame.of(MessageType.PONG, Pong()))
                     MessageType.STATUS -> send(WireFrame.of(MessageType.STATUS_REPLY, state.snapshotStatus()))
                     MessageType.INTERRUPT -> handleInterrupt(frame.decode(), state, diag)
+                    MessageType.SIGNAL -> handleSignal(frame.decode(), state, diag)
                     MessageType.CONFIG -> handleConfig(frame.decode(), send)
                     MessageType.STDIN_DATA -> {
                         val data = frame.decode<StdinData>()
@@ -482,8 +484,22 @@ object RuntimeServer {
         } catch (e: PolyglotException) {
             if (e.isExit) {
                 sendExited(send, state, code = e.exitStatus, reason = "exit_called", detail = null)
-            } else if (e.isCancelled) {
-                sendExited(send, state, code = 130, reason = "interrupted", detail = null)
+            } else if (e.isCancelled || e.isInterrupted) {
+                // Distinguish SIGTERM (143) from SIGINT/Ctrl-C (130) so
+                // supervisors that read POSIX exit codes (systemd, k8s)
+                // see "terminated by signal 15" not "ctrl-c". Default
+                // path (terminatingSignal == null) is SIGINT.
+                //
+                // isInterrupted: Context.interrupt() path (used by both
+                // handleInterrupt for SIGINT and handleSignal for SIGTERM).
+                // isCancelled: Context.close(cancelIfRunning=true) path
+                // (not currently used here but accept it defensively).
+                val (code, reason) = when (val sig = state.terminatingSignal) {
+                    "SIGTERM" -> 143 to "terminated"
+                    null -> 130 to "interrupted"
+                    else -> (128 + signumOf(sig)) to "terminated"
+                }
+                sendExited(send, state, code = code, reason = reason, detail = null)
             } else {
                 sendExited(send, state, code = 1, reason = "error", detail = exitDetailFor(e))
             }
@@ -493,6 +509,31 @@ object RuntimeServer {
             ))
         } finally {
             state.runEnded()
+        }
+    }
+
+    /**
+     * Parent forwarded a terminating signal (SIGTERM today; could grow to
+     * SIGHUP/SIGUSR* without protocol changes — Signal carries a name).
+     * Treated as a graceful-shutdown variant of INTERRUPT: cancel the
+     * current eval, flag the state so the cancel-catch path knows to
+     * surface POSIX-conventional exit code 128 + signum (143 for TERM)
+     * instead of 130 (SIGINT).
+     *
+     * Per-run state.terminatingSignal acts as the single piece of out-of-band
+     * data; the eval thread's PolyglotException catch reads it to pick the
+     * right exit code.
+     */
+    private fun handleSignal(sig: Signal, state: ServerState, diag: PrintStream) {
+        val active = state.activeRunId
+        if (active == null) return
+        diag.println("[RuntimeServer] SIGNAL ${sig.name} run $active")
+        state.terminatingSignal = sig.name
+        state.markInterrupting()
+        try {
+            state.context.interrupt(java.time.Duration.ofSeconds(5))
+        } catch (e: Exception) {
+            diag.println("[RuntimeServer] interrupt-from-signal failed: ${e.message}")
         }
     }
 
@@ -519,6 +560,21 @@ object RuntimeServer {
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
+
+    /**
+     * POSIX signal number for the names we may receive over the wire.
+     * Used to compute exit code = 128 + signum. Falls back to 0 (so the
+     * full code becomes 128) for unknown names — safer than crashing the
+     * runtime on an unexpected SIGNAL frame.
+     */
+    private fun signumOf(name: String): Int = when (name) {
+        "SIGHUP" -> 1
+        "SIGINT" -> 2
+        "SIGTERM" -> 15
+        "SIGUSR1" -> 30  // values vary by OS; we use macOS/Darwin
+        "SIGUSR2" -> 31
+        else -> 0
+    }
 
     private fun sendExited(
         send: (WireFrame) -> Unit,
@@ -596,6 +652,13 @@ private class ServerState(
     @Volatile var activeRunId: Long? = null
         private set
     @Volatile private var interrupting: Boolean = false
+    /**
+     * Set by handleSignal when the parent forwarded a SIGTERM (or other
+     * terminating signal). Causes the cancel-catch branch in handleLoad
+     * to surface exit code 143 (POSIX 128 + 15) instead of 130 (SIGINT).
+     * Reset per-run alongside `interrupting`.
+     */
+    @Volatile var terminatingSignal: String? = null
     /** Wire-fed stdin buffer; reset between runs. */
     var stdinBuffer: WireStdinBuffer? = null
     /**
@@ -613,11 +676,13 @@ private class ServerState(
     fun runStarted(runId: Long) {
         activeRunId = runId
         interrupting = false
+        terminatingSignal = null
     }
 
     fun runEnded() {
         activeRunId = null
         interrupting = false
+        terminatingSignal = null
     }
 
     fun markInterrupting() {

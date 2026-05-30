@@ -392,6 +392,7 @@ private class WireSession private constructor(
 
     private val signalHandler = SigintForwarder(toChild, process)
     private val winchForwarder = WinchForwarder(toChild)
+    private val sigtermForwarder = SigtermForwarder(toChild, process)
 
     /**
      * Stdin forwarder: lazily spawned when the child first asks for stdin
@@ -406,6 +407,7 @@ private class WireSession private constructor(
     init {
         signalHandler.install()
         winchForwarder.install()
+        sigtermForwarder.install()
     }
 
     /** Result of one LOAD cycle. */
@@ -468,6 +470,7 @@ private class WireSession private constructor(
                     // a graceful EXITED arrived. SigintForwarder's
                     // cancelEscalation is a no-op if no timer is armed.
                     signalHandler.cancelEscalation()
+                    sigtermForwarder.cancelEscalation()
                     val e = frame.decode<Exited>()
                     val detail = e.detail
                     if (e.reason == "error" && detail != null && detail.message.isNotEmpty()) {
@@ -585,6 +588,7 @@ private class WireSession private constructor(
     fun close() {
         try { signalHandler.uninstall() } catch (_: Exception) {}
         try { winchForwarder.uninstall() } catch (_: Exception) {}
+        try { sigtermForwarder.uninstall() } catch (_: Exception) {}
         try { send(WireFrame.of(MessageType.QUIT, Quit(reason = "done"))) } catch (_: Exception) {}
         // Drain until BYE or EOF (give it 2s to be polite).
         val deadline = System.currentTimeMillis() + 2000
@@ -892,6 +896,87 @@ private class WinchForwarder(private val toChild: OutputStream) {
         try {
             previous?.let { sun.misc.Signal.handle(sun.misc.Signal("WINCH"), it) }
         } catch (_: Throwable) {}
+    }
+}
+
+/**
+ * SIGTERM handler: when systemd / Docker / Kubernetes / `kill <pid>`
+ * sends SIGTERM to the mez parent process, we forward it as a SIGNAL
+ * frame so the child can drain stdout/stderr and close its Polyglot
+ * context cleanly before the OS escalates to SIGKILL (default 10 s on
+ * most schedulers). Without this, the parent dies on default JVM
+ * SIGTERM handling and orphans the child mid-eval — partial output,
+ * undefined exit code, ugly logs.
+ *
+ * Mechanism mirrors SigintForwarder: ship the frame, arm a grace timer,
+ * cancel the timer when EXITED arrives. The grace window matches
+ * MEZZE_INTERRUPT_TIMEOUT_MS (default 5 s) — slightly shorter than the
+ * typical 10 s supervisor SIGKILL deadline so we have headroom.
+ *
+ * No "double tap to kill" UX here — a second SIGTERM from a supervisor
+ * is rare and usually means the supervisor lost patience; we don't
+ * need to escalate ourselves. The grace timer handles that case.
+ */
+private class SigtermForwarder(
+    private val toChild: OutputStream,
+    private val process: Process,
+) {
+    private var previous: sun.misc.SignalHandler? = null
+    @Volatile private var pendingEscalation: java.util.concurrent.ScheduledFuture<*>? = null
+    private val timer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "mez-sigterm-timer").apply { isDaemon = true }
+    }
+
+    private val timeoutMs: Long =
+        System.getenv("MEZZE_INTERRUPT_TIMEOUT_MS")?.toLongOrNull()?.coerceAtLeast(100L) ?: 5_000L
+
+    private val handler = sun.misc.SignalHandler {
+        try {
+            val frame = WireFrame.of(MessageType.SIGNAL, com.mezze.wire.Signal(name = "SIGTERM"))
+            synchronized(toChild) {
+                WireFrameCodec.writeFlush(toChild, frame)
+            }
+        } catch (_: Exception) {
+            // Wire dead — child probably already gone; let JVM run its
+            // default SIGTERM behaviour (terminate).
+            return@SignalHandler
+        }
+        pendingEscalation = timer.schedule(
+            { kill("graceful SIGTERM timed out after ${timeoutMs}ms") },
+            timeoutMs,
+            java.util.concurrent.TimeUnit.MILLISECONDS,
+        )
+    }
+
+    /** Called by WireSession when EXITED arrives — cancel pending kill. */
+    fun cancelEscalation() {
+        pendingEscalation?.cancel(false)
+        pendingEscalation = null
+    }
+
+    private fun kill(reason: String) {
+        try {
+            if (process.isAlive) {
+                System.err.println("[mez] $reason; killing runtime")
+                process.destroyForcibly()
+            }
+        } catch (_: Exception) {}
+    }
+
+    fun install() {
+        try {
+            previous = sun.misc.Signal.handle(sun.misc.Signal("TERM"), handler)
+        } catch (_: Throwable) {
+            // sun.misc unavailable / Windows / sandbox — graceful
+            // degradation: JVM default SIGTERM handling kicks in (die).
+        }
+    }
+
+    fun uninstall() {
+        try {
+            previous?.let { sun.misc.Signal.handle(sun.misc.Signal("TERM"), it) }
+        } catch (_: Throwable) {}
+        try { timer.shutdownNow() } catch (_: Exception) {}
     }
 }
 
