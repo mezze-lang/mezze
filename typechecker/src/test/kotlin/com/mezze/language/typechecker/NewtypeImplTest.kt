@@ -92,7 +92,7 @@ class NewtypeImplTest {
         @Test
         fun `Chan has Eq`() {
             checkPasses("""
-                use std::effects::concurrent::channel::{Chan, chan}
+                use std::effects::async::channel::{Chan, chan}
                 use std::effects::async::{Async, LoomAsync}
                 let main = {} -> perform LoomAsync in do
                     let ch1: Chan Int = chan {}
@@ -105,9 +105,9 @@ class NewtypeImplTest {
         @Test
         fun `Chan send and recv`() {
             // Post-#115: Channel is a plain newtype; `send`/`recv` are
-            // park-aware free functions in std::effects::concurrent::channel.
+            // park-aware free functions in std::effects::async::channel.
             checkPasses("""
-                use std::effects::concurrent::channel::{Chan, chan, send, recv}
+                use std::effects::async::channel::{Chan, chan, send, recv}
                 use std::effects::async::{Async, LoomAsync}
                 let main = {} -> perform LoomAsync in do
                     let ch: Chan Int = chan {}
@@ -119,7 +119,7 @@ class NewtypeImplTest {
         @Test
         fun `Chan close and is_closed`() {
             checkPasses("""
-                use std::effects::concurrent::channel::{Chan, chan, close, is_closed}
+                use std::effects::async::channel::{Chan, chan, close, is_closed}
                 use std::effects::async::{Async, LoomAsync}
                 let main = {} -> perform LoomAsync in do
                     let ch: Chan Int = chan {}
@@ -139,7 +139,7 @@ class NewtypeImplTest {
         @Test
         fun `WaitGroup has Eq`() {
             checkPasses("""
-                use std::effects::concurrent::waitgroup::{WaitGroup, wait_group}
+                use std::effects::async::waitgroup::{WaitGroup, wait_group}
                 let wg1 = wait_group {}
                 let same = wg1 == wg1
             """.trimIndent(), "WaitGroup Eq")
@@ -148,7 +148,7 @@ class NewtypeImplTest {
         @Test
         fun `WaitGroup done and wait methods`() {
             checkPasses("""
-                use std::effects::concurrent::waitgroup::{WaitGroup, wait_group}
+                use std::effects::async::waitgroup::{WaitGroup, wait_group}
                 let wg = wait_group {}
                 let _ = wg.done {}
                 let _ = wg.wait {}
@@ -158,7 +158,7 @@ class NewtypeImplTest {
         @Test
         fun `WaitGroup add via free function`() {
             checkPasses("""
-                use std::effects::concurrent::waitgroup::{WaitGroup, wait_group, add}
+                use std::effects::async::waitgroup::{WaitGroup, wait_group, add}
                 let wg = wait_group {}
                 let _ = add {wg = wg, delta = 1}
                 let _ = wg.wait {}
@@ -176,7 +176,7 @@ class NewtypeImplTest {
         @Test
         fun `Latch has Eq`() {
             checkPasses("""
-                use std::effects::concurrent::latch::{Latch, latch}
+                use std::effects::async::latch::{Latch, latch}
                 let l = latch {count = 1}
                 let same = l == l
             """.trimIndent(), "Latch Eq")
@@ -185,7 +185,7 @@ class NewtypeImplTest {
         @Test
         fun `Latch count_down and await methods`() {
             checkPasses("""
-                use std::effects::concurrent::latch::{Latch, latch}
+                use std::effects::async::latch::{Latch, latch}
                 let l = latch {count = 1}
                 let _ = l.count_down {}
                 let _ = l.await {}
@@ -203,7 +203,7 @@ class NewtypeImplTest {
         @Test
         fun `Semaphore has Eq`() {
             checkPasses("""
-                use std::effects::concurrent::semaphore::{Semaphore, semaphore}
+                use std::effects::async::semaphore::{Semaphore, semaphore}
                 let s = semaphore {permits = 3}
                 let same = s == s
             """.trimIndent(), "Semaphore Eq")
@@ -212,7 +212,7 @@ class NewtypeImplTest {
         @Test
         fun `Semaphore acquire and release methods`() {
             checkPasses("""
-                use std::effects::concurrent::semaphore::{Semaphore, semaphore}
+                use std::effects::async::semaphore::{Semaphore, semaphore}
                 let s = semaphore {permits = 3}
                 let _ = s.acquire {}
                 let _ = s.release {}
@@ -230,7 +230,7 @@ class NewtypeImplTest {
         @Test
         fun `Mutex has Eq`() {
             checkPasses("""
-                use std::effects::concurrent::mutex::{Mutex, mutex}
+                use std::effects::async::mutex::{Mutex, mutex}
                 let m = mutex {}
                 let same = m == m
             """.trimIndent(), "Mutex Eq")
@@ -239,7 +239,7 @@ class NewtypeImplTest {
         @Test
         fun `Mutex lock and unlock methods`() {
             checkPasses("""
-                use std::effects::concurrent::mutex::{Mutex, mutex}
+                use std::effects::async::mutex::{Mutex, mutex}
                 let m = mutex {}
                 let _ = m.lock {}
                 let _ = m.unlock {}
@@ -257,7 +257,7 @@ class NewtypeImplTest {
         @Test
         fun `Atom has Eq`() {
             checkPasses("""
-                use std::effects::concurrent::atom::{Atom, atom}
+                use std::effects::async::atom::{Atom, atom}
                 use std::effects::async::{Async, LoomAsync}
                 let main = {} -> perform LoomAsync in do
                     let a: Atom Int = atom {value = 42}
@@ -269,7 +269,7 @@ class NewtypeImplTest {
         @Test
         fun `Atom deref and reset methods`() {
             checkPasses("""
-                use std::effects::concurrent::atom::{Atom, atom}
+                use std::effects::async::atom::{Atom, atom}
                 use std::effects::async::{Async, LoomAsync}
                 let main = {} -> perform LoomAsync in do
                     let a = atom {value = 42}

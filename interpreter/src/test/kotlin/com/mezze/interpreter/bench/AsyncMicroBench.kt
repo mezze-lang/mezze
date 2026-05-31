@@ -370,7 +370,7 @@ class AsyncMicroBench {
         // park). Channel.send fills, Channel.recv drains. Measures the
         // buffered-channel hot path.
         val source = """
-            use std::effects::concurrent::channel::{ chan_bounded, send, recv }
+            use std::effects::async::channel::{ chan_bounded, send, recv }
             use std::effects::async::{ Async, LoomAsync }
 
             perform LoomAsync in do
@@ -405,7 +405,7 @@ class AsyncMicroBench {
         // Now safe to run with warmup since #129 is fixed; using the
         // default cadence so the number reflects JIT-warm behavior.
         val source = """
-            use std::effects::concurrent::mutex::{ mutex, with_lock }
+            use std::effects::async::mutex::{ mutex, with_lock }
 
             let m = mutex {}
             let loop : { n: Int, acc: Int } -> Int = { n, acc } ->

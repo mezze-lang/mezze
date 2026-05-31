@@ -25,7 +25,7 @@ class LatchModuleTest {
     @Test
     fun `test latch creates with count`() {
         val result = eval("""
-            use std::effects::concurrent::latch::{latch, get_count}
+            use std::effects::async::latch::{latch, get_count}
 
             let l = latch {count = 5}
             get_count {latch = l}
@@ -36,7 +36,7 @@ class LatchModuleTest {
     @Test
     fun `test count_down decreases count`() {
         val result = eval("""
-            use std::effects::concurrent::latch::{latch, count_down, get_count}
+            use std::effects::async::latch::{latch, count_down, get_count}
 
             let l = latch {count = 3}
             let _ = count_down {latch = l}
@@ -48,7 +48,7 @@ class LatchModuleTest {
     @Test
     fun `test multiple count_downs`() {
         val result = eval("""
-            use std::effects::concurrent::latch::{latch, count_down, get_count}
+            use std::effects::async::latch::{latch, count_down, get_count}
 
             let l = latch {count = 5}
             let _ = count_down {latch = l}
@@ -62,7 +62,7 @@ class LatchModuleTest {
     @Test
     fun `test count_down to zero`() {
         val result = eval("""
-            use std::effects::concurrent::latch::{latch, count_down, get_count}
+            use std::effects::async::latch::{latch, count_down, get_count}
 
             let l = latch {count = 2}
             let _ = count_down {latch = l}
@@ -75,7 +75,7 @@ class LatchModuleTest {
     @Test
     fun `test count_down below zero has no effect`() {
         val result = eval("""
-            use std::effects::concurrent::latch::{latch, count_down, get_count}
+            use std::effects::async::latch::{latch, count_down, get_count}
 
             let l = latch {count = 1}
             let _ = count_down {latch = l}
@@ -91,7 +91,7 @@ class LatchModuleTest {
     @Test
     fun `test await_latch returns immediately when zero`() {
         val result = eval("""
-            use std::effects::concurrent::latch::{latch, count_down, await_latch}
+            use std::effects::async::latch::{latch, count_down, await_latch}
 
             let l = latch {count = 1}
             let _ = count_down {latch = l}
@@ -104,7 +104,7 @@ class LatchModuleTest {
     @Test
     fun `test await_latch on zero count latch`() {
         val result = eval("""
-            use std::effects::concurrent::latch::{latch, await_latch}
+            use std::effects::async::latch::{latch, await_latch}
 
             let l = latch {count = 0}
             let _ = await_latch {latch = l}
@@ -118,7 +118,7 @@ class LatchModuleTest {
     @Test
     fun `test await_latch_timeout returns true when zero`() {
         val result = eval("""
-            use std::effects::concurrent::latch::{latch, count_down, await_latch_timeout}
+            use std::effects::async::latch::{latch, count_down, await_latch_timeout}
 
             let l = latch {count = 1}
             let _ = count_down {latch = l}
@@ -130,7 +130,7 @@ class LatchModuleTest {
     @Test
     fun `test await_latch_timeout returns false on timeout`() {
         val result = eval("""
-            use std::effects::concurrent::latch::{latch, await_latch_timeout}
+            use std::effects::async::latch::{latch, await_latch_timeout}
 
             let l = latch {count = 5}
             await_latch_timeout {latch = l, ms = 10}
@@ -141,7 +141,7 @@ class LatchModuleTest {
     @Test
     fun `test await_latch_timeout on zero count returns true`() {
         val result = eval("""
-            use std::effects::concurrent::latch::{latch, await_latch_timeout}
+            use std::effects::async::latch::{latch, await_latch_timeout}
 
             let l = latch {count = 0}
             await_latch_timeout {latch = l, ms = 10}
@@ -154,7 +154,7 @@ class LatchModuleTest {
     @Test
     fun `test latch with count one`() {
         val result = eval("""
-            use std::effects::concurrent::latch::{latch, count_down, get_count, await_latch}
+            use std::effects::async::latch::{latch, count_down, get_count, await_latch}
 
             let l = latch {count = 1}
             let before = get_count {latch = l}
@@ -169,7 +169,7 @@ class LatchModuleTest {
     @Test
     fun `test multiple latches independent`() {
         val result = eval("""
-            use std::effects::concurrent::latch::{latch, count_down, get_count}
+            use std::effects::async::latch::{latch, count_down, get_count}
 
             let l1 = latch {count = 5}
             let l2 = latch {count = 10}

@@ -31,7 +31,7 @@ class CoopParkTest {
         // run; after it runs, the atom is True and park exits.
         val source = """
             use std::effects::async::{Async, CoopAsync}
-            use std::effects::concurrent::atom::{atom, deref, reset}
+            use std::effects::async::atom::{atom, deref, reset}
 
             perform CoopAsync in do
               let flag = atom { value = 0 }

@@ -29,7 +29,7 @@ class AtomTest {
      * Async handler. Test bodies follow as nested do-block content.
      */
     private val atomSetup = """
-        use std::effects::concurrent::atom::{
+        use std::effects::async::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }

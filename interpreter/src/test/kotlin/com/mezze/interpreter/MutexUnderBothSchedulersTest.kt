@@ -15,8 +15,8 @@ class MutexUnderBothSchedulersTest {
 
     private fun program(handler: String) = """
         use std::effects::async::{ Async, $handler }
-        use std::effects::concurrent::mutex::{ mutex, lock_async, unlock }
-        use std::effects::concurrent::atom::{ atom, deref, reset }
+        use std::effects::async::mutex::{ mutex, lock_async, unlock }
+        use std::effects::async::atom::{ atom, deref, reset }
 
         perform $handler in do
           let m = mutex {}

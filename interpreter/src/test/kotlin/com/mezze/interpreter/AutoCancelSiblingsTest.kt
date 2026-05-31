@@ -31,7 +31,7 @@ class AutoCancelSiblingsTest {
     fun `race cancels losing sibling under LoomAsync`() {
         val source = """
             use std::effects::async::{ Async, LoomAsync, race, with_timeout, join, join3 }
-            use std::effects::concurrent::atom::{ atom, deref, reset }
+            use std::effects::async::atom::{ atom, deref, reset }
 
             perform LoomAsync in do
               let counter = atom { value = 0 }
@@ -55,7 +55,7 @@ class AutoCancelSiblingsTest {
     fun `race cancels losing sibling under CoopAsync`() {
         val source = """
             use std::effects::async::{ Async, CoopAsync, race, with_timeout, join, join3 }
-            use std::effects::concurrent::atom::{ atom, deref, reset }
+            use std::effects::async::atom::{ atom, deref, reset }
 
             perform CoopAsync in do
               let counter = atom { value = 0 }
@@ -99,7 +99,7 @@ class AutoCancelSiblingsTest {
         // `crash` is host-level and side-steps the effect row.
         val source = """
             use std::effects::async::{ Async, LoomAsync, try_join }
-            use std::effects::concurrent::atom::{ atom, deref, reset }
+            use std::effects::async::atom::{ atom, deref, reset }
 
             perform LoomAsync in do
               let counter = atom { value = 0 }
@@ -122,7 +122,7 @@ class AutoCancelSiblingsTest {
         // AsyncFailed and cancel `slow` before its sleep resumes.
         val source = """
             use std::effects::async::{ Async, CoopAsync, try_join }
-            use std::effects::concurrent::atom::{ atom, deref, reset }
+            use std::effects::async::atom::{ atom, deref, reset }
 
             perform CoopAsync in do
               let counter = atom { value = 0 }
@@ -148,7 +148,7 @@ class AutoCancelSiblingsTest {
         // safe under real concurrency.
         val source = """
             use std::effects::async::{ Async, LoomAsync, race, with_timeout, join, join3 }
-            use std::effects::concurrent::atom::{ atom, deref, swap }
+            use std::effects::async::atom::{ atom, deref, swap }
 
             perform LoomAsync in do
               let counter = atom { value = 0 }
@@ -168,7 +168,7 @@ class AutoCancelSiblingsTest {
         // fails. Confirms join doesn't ALSO cancel-on-success.
         val source = """
             use std::effects::async::{ Async, CoopAsync, race, with_timeout, join, join3 }
-            use std::effects::concurrent::atom::{ atom, deref, swap }
+            use std::effects::async::atom::{ atom, deref, swap }
 
             perform CoopAsync in do
               let counter = atom { value = 0 }
@@ -187,7 +187,7 @@ class AutoCancelSiblingsTest {
     fun `try_join3 cancels two surviving siblings when one fails under LoomAsync`() {
         val source = """
             use std::effects::async::{ Async, LoomAsync, try_join3 }
-            use std::effects::concurrent::atom::{ atom, deref, swap }
+            use std::effects::async::atom::{ atom, deref, swap }
 
             perform LoomAsync in do
               let counter = atom { value = 0 }
@@ -214,7 +214,7 @@ class AutoCancelSiblingsTest {
         // their sleeps resume.
         val source = """
             use std::effects::async::{ Async, CoopAsync, try_join3 }
-            use std::effects::concurrent::atom::{ atom, deref, swap }
+            use std::effects::async::atom::{ atom, deref, swap }
 
             perform CoopAsync in do
               let counter = atom { value = 0 }
@@ -241,7 +241,7 @@ class AutoCancelSiblingsTest {
         // All three siblings run to completion when none fail — counter = 3.
         val source = """
             use std::effects::async::{ Async, LoomAsync, join3 }
-            use std::effects::concurrent::atom::{ atom, deref, swap }
+            use std::effects::async::atom::{ atom, deref, swap }
 
             perform LoomAsync in do
               let counter = atom { value = 0 }
@@ -258,7 +258,7 @@ class AutoCancelSiblingsTest {
     fun `join3 with all success does NOT cancel anyone under CoopAsync`() {
         val source = """
             use std::effects::async::{ Async, CoopAsync, join3 }
-            use std::effects::concurrent::atom::{ atom, deref, swap }
+            use std::effects::async::atom::{ atom, deref, swap }
 
             perform CoopAsync in do
               let counter = atom { value = 0 }

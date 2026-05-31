@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Assertions.*
 class RepeatedEvalRegressionTest {
 
     private val mutexSource = """
-        use std::effects::concurrent::mutex::{ mutex, with_lock }
+        use std::effects::async::mutex::{ mutex, with_lock }
         use std::effects::async::{ Async, LoomAsync }
 
         perform LoomAsync in do

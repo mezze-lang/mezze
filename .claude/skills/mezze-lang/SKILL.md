@@ -789,7 +789,7 @@ But most custom effects need **state** across operations (e.g., a counter needs 
 ```mezze
 use std::control::continuation
 use std::control::continuation::{Continuation}
-use std::effects::concurrent::atom::{Atom, atom, deref, swap}
+use std::effects::async::atom::{Atom, atom, deref, swap}
 
 impl Counter for AtomicCounter where {
   # Called ONCE when entering `perform AtomicCounter in ...`
@@ -1087,7 +1087,7 @@ perform OptimisticSTM in do
 
 **Channels (typed communication between threads):**
 ```mezze
-use std::effects::concurrent::channel::{Chan, Channel, BlockingChannel, chan, chan_bounded}
+use std::effects::async::channel::{Chan, Channel, BlockingChannel, chan, chan_bounded}
 
 # Create channels (outside perform)
 let ch = chan {}                    # unbounded
@@ -1110,7 +1110,7 @@ perform BlockingChannel in do
 
 **Atoms (lock-free atomic references, no effect needed):**
 ```mezze
-use std::effects::concurrent::atom::{Atom, atom, deref, swap}
+use std::effects::async::atom::{Atom, atom, deref, swap}
 
 let counter = atom {value = 0}
 swap {atom = counter, f = {current} -> current + 1}    # atomic increment
@@ -1120,7 +1120,7 @@ counter.swap {f = {current} -> current + 10}            # dot syntax
 
 **Agents (async queued state updates, no effect needed):**
 ```mezze
-use std::effects::concurrent::agent::{Agent, agent, send, deref_agent, await_agent}
+use std::effects::async::agent::{Agent, agent, send, deref_agent, await_agent}
 
 let stats = agent {value = {count = 0, total = 0}}
 send {agent = stats, f = {current} -> {...current, count = current.count + 1}}

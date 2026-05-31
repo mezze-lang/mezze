@@ -13,7 +13,7 @@ class WaitGroupUnderBothSchedulersTest {
 
     private fun program(handler: String) = """
         use std::effects::async::{ Async, $handler }
-        use std::effects::concurrent::waitgroup::{ wait_group, add, done, wait_async }
+        use std::effects::async::waitgroup::{ wait_group, add, done, wait_async }
 
         perform $handler in do
           let wg = wait_group {}

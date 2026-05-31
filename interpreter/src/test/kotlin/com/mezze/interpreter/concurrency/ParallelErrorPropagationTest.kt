@@ -42,7 +42,7 @@ class ParallelErrorPropagationTest {
     // Loom primitives for concurrent tests
     // Note: Using Array types [Promise 'a] not List types
     private val loomSetup = """
-        use std::effects::concurrent::atom::{
+        use std::effects::async::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }

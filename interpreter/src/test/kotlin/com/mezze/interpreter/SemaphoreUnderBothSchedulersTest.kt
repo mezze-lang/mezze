@@ -14,8 +14,8 @@ class SemaphoreUnderBothSchedulersTest {
 
     private fun program(handler: String) = """
         use std::effects::async::{ Async, $handler }
-        use std::effects::concurrent::semaphore::{ semaphore, acquire_async, release }
-        use std::effects::concurrent::atom::{ atom, deref, reset }
+        use std::effects::async::semaphore::{ semaphore, acquire_async, release }
+        use std::effects::async::atom::{ atom, deref, reset }
 
         perform $handler in do
           let s = semaphore { permits = 1 }

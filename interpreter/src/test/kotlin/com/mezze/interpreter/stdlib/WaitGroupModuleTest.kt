@@ -25,7 +25,7 @@ class WaitGroupModuleTest {
     @Test
     fun `test wait_group creates with zero count`() {
         val result = eval("""
-            use std::effects::concurrent::waitgroup::{wait_group, get_count_wg}
+            use std::effects::async::waitgroup::{wait_group, get_count_wg}
 
             let wg = wait_group {}
             get_count_wg {wg = wg}
@@ -36,7 +36,7 @@ class WaitGroupModuleTest {
     @Test
     fun `test add increases count`() {
         val result = eval("""
-            use std::effects::concurrent::waitgroup::{wait_group, add, get_count_wg}
+            use std::effects::async::waitgroup::{wait_group, add, get_count_wg}
 
             let wg = wait_group {}
             let _ = add {wg = wg, delta = 3}
@@ -48,7 +48,7 @@ class WaitGroupModuleTest {
     @Test
     fun `test done decreases count`() {
         val result = eval("""
-            use std::effects::concurrent::waitgroup::{wait_group, add, done, get_count_wg}
+            use std::effects::async::waitgroup::{wait_group, add, done, get_count_wg}
 
             let wg = wait_group {}
             let _ = add {wg = wg, delta = 3}
@@ -61,7 +61,7 @@ class WaitGroupModuleTest {
     @Test
     fun `test multiple adds and dones`() {
         val result = eval("""
-            use std::effects::concurrent::waitgroup::{wait_group, add, done, get_count_wg}
+            use std::effects::async::waitgroup::{wait_group, add, done, get_count_wg}
 
             let wg = wait_group {}
             let _ = add {wg = wg, delta = 5}
@@ -79,7 +79,7 @@ class WaitGroupModuleTest {
     @Test
     fun `test wait returns immediately when zero`() {
         val result = eval("""
-            use std::effects::concurrent::waitgroup::{wait_group, wait}
+            use std::effects::async::waitgroup::{wait_group, wait}
 
             let wg = wait_group {}
             let _ = wait {wg = wg}
@@ -91,7 +91,7 @@ class WaitGroupModuleTest {
     @Test
     fun `test wait after add and done`() {
         val result = eval("""
-            use std::effects::concurrent::waitgroup::{wait_group, add, done, wait}
+            use std::effects::async::waitgroup::{wait_group, add, done, wait}
 
             let wg = wait_group {}
             let _ = add {wg = wg, delta = 2}
@@ -108,7 +108,7 @@ class WaitGroupModuleTest {
     @Test
     fun `test wait_timeout returns true when zero`() {
         val result = eval("""
-            use std::effects::concurrent::waitgroup::{wait_group, wait_timeout}
+            use std::effects::async::waitgroup::{wait_group, wait_timeout}
 
             let wg = wait_group {}
             wait_timeout {wg = wg, ms = 1000}
@@ -119,7 +119,7 @@ class WaitGroupModuleTest {
     @Test
     fun `test wait_timeout returns false on timeout`() {
         val result = eval("""
-            use std::effects::concurrent::waitgroup::{wait_group, add, wait_timeout}
+            use std::effects::async::waitgroup::{wait_group, add, wait_timeout}
 
             let wg = wait_group {}
             let _ = add {wg = wg, delta = 5}
@@ -131,7 +131,7 @@ class WaitGroupModuleTest {
     @Test
     fun `test wait_timeout after completion`() {
         val result = eval("""
-            use std::effects::concurrent::waitgroup::{wait_group, add, done, wait_timeout}
+            use std::effects::async::waitgroup::{wait_group, add, done, wait_timeout}
 
             let wg = wait_group {}
             let _ = add {wg = wg, delta = 1}
@@ -146,7 +146,7 @@ class WaitGroupModuleTest {
     @Test
     fun `test add with delta greater than 1`() {
         val result = eval("""
-            use std::effects::concurrent::waitgroup::{wait_group, add, get_count_wg}
+            use std::effects::async::waitgroup::{wait_group, add, get_count_wg}
 
             let wg = wait_group {}
             let _ = add {wg = wg, delta = 10}
@@ -158,7 +158,7 @@ class WaitGroupModuleTest {
     @Test
     fun `test multiple wait_groups independent`() {
         val result = eval("""
-            use std::effects::concurrent::waitgroup::{wait_group, add, get_count_wg}
+            use std::effects::async::waitgroup::{wait_group, add, get_count_wg}
 
             let wg1 = wait_group {}
             let wg2 = wait_group {}
@@ -172,7 +172,7 @@ class WaitGroupModuleTest {
     @Test
     fun `test reuse after reaching zero`() {
         val result = eval("""
-            use std::effects::concurrent::waitgroup::{wait_group, add, done, wait, get_count_wg}
+            use std::effects::async::waitgroup::{wait_group, add, done, wait, get_count_wg}
 
             let wg = wait_group {}
             let _ = add {wg = wg, delta = 1}

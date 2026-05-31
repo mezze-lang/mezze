@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 
 /**
- * Tests for std/effects/concurrent/cancellation module.
+ * Tests for std/effects/async/cancellation module.
  * Tests cancellation tokens for cooperative task cancellation.
  * Migrated from V1 to V2 with unboxed values.
  */

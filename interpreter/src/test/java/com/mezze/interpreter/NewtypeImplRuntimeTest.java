@@ -30,7 +30,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void atomEqSameReference() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::atom::{Atom, atom}
+                use std::effects::async::atom::{Atom, atom}
                 let a = atom {value = 42}
                 a == a
                 """);
@@ -40,7 +40,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void atomEqDifferentReferences() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::atom::{Atom, atom}
+                use std::effects::async::atom::{Atom, atom}
                 let a1 = atom {value = 42}
                 let a2 = atom {value = 42}
                 a1 == a2
@@ -51,7 +51,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void atomNeq() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::atom::{Atom, atom}
+                use std::effects::async::atom::{Atom, atom}
                 let a1 = atom {value = 1}
                 let a2 = atom {value = 1}
                 a1 != a2
@@ -62,7 +62,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void atomDerefMethod() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::atom::{Atom, atom}
+                use std::effects::async::atom::{Atom, atom}
                 let a = atom {value = 99}
                 a.deref {}
                 """);
@@ -72,7 +72,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void atomResetMethod() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::atom::{Atom, atom}
+                use std::effects::async::atom::{Atom, atom}
                 let a = atom {value = 10}
                 let _ = a.reset {value = 20}
                 a.deref {}
@@ -83,7 +83,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void atomSwapMethod() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::atom::{Atom, atom}
+                use std::effects::async::atom::{Atom, atom}
                 let a = atom {value = 5}
                 let _ = a.swap {f = {current} -> current + 10}
                 a.deref {}
@@ -102,7 +102,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void waitGroupEqSameReference() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::waitgroup::{WaitGroup, wait_group}
+                use std::effects::async::waitgroup::{WaitGroup, wait_group}
                 let wg = wait_group {}
                 wg == wg
                 """);
@@ -112,7 +112,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void waitGroupEqDifferentReferences() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::waitgroup::{WaitGroup, wait_group}
+                use std::effects::async::waitgroup::{WaitGroup, wait_group}
                 let wg1 = wait_group {}
                 let wg2 = wait_group {}
                 wg1 == wg2
@@ -124,7 +124,7 @@ class NewtypeImplRuntimeTest {
         void waitGroupDoneAndWaitMethods() {
             // add 1, done 1, then wait should return immediately
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::waitgroup::{WaitGroup, wait_group, add}
+                use std::effects::async::waitgroup::{WaitGroup, wait_group, add}
                 let wg = wait_group {}
                 let _ = add {wg = wg, delta = 1}
                 let _ = wg.done {}
@@ -145,7 +145,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void latchEqSameReference() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::latch::{Latch, latch}
+                use std::effects::async::latch::{Latch, latch}
                 let l = latch {count = 1}
                 l == l
                 """);
@@ -155,7 +155,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void latchEqDifferentReferences() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::latch::{Latch, latch}
+                use std::effects::async::latch::{Latch, latch}
                 let l1 = latch {count = 1}
                 let l2 = latch {count = 1}
                 l1 == l2
@@ -166,7 +166,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void latchCountDownAndAwaitMethods() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::latch::{Latch, latch}
+                use std::effects::async::latch::{Latch, latch}
                 let l = latch {count = 1}
                 let _ = l.count_down {}
                 let _ = l.await {}
@@ -178,7 +178,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void latchGetCountMethod() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::latch::{Latch, latch}
+                use std::effects::async::latch::{Latch, latch}
                 let l = latch {count = 3}
                 let _ = l.count_down {}
                 l.get_count {}
@@ -197,7 +197,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void semaphoreEqSameReference() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::semaphore::{Semaphore, semaphore}
+                use std::effects::async::semaphore::{Semaphore, semaphore}
                 let s = semaphore {permits = 3}
                 s == s
                 """);
@@ -207,7 +207,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void semaphoreEqDifferentReferences() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::semaphore::{Semaphore, semaphore}
+                use std::effects::async::semaphore::{Semaphore, semaphore}
                 let s1 = semaphore {permits = 3}
                 let s2 = semaphore {permits = 3}
                 s1 == s2
@@ -218,7 +218,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void semaphoreAcquireAndReleaseMethods() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::semaphore::{Semaphore, semaphore}
+                use std::effects::async::semaphore::{Semaphore, semaphore}
                 let s = semaphore {permits = 2}
                 let _ = s.acquire {}
                 let _ = s.release {}
@@ -238,7 +238,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void mutexEqSameReference() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::mutex::{Mutex, mutex}
+                use std::effects::async::mutex::{Mutex, mutex}
                 let m = mutex {}
                 m == m
                 """);
@@ -248,7 +248,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void mutexEqDifferentReferences() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::mutex::{Mutex, mutex}
+                use std::effects::async::mutex::{Mutex, mutex}
                 let m1 = mutex {}
                 let m2 = mutex {}
                 m1 == m2
@@ -259,7 +259,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void mutexLockAndUnlockMethods() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::mutex::{Mutex, mutex}
+                use std::effects::async::mutex::{Mutex, mutex}
                 let m = mutex {}
                 let _ = m.lock {}
                 let _ = m.unlock {}
@@ -372,7 +372,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void chanEqSameReference() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::channel::{Chan, chan}
+                use std::effects::async::channel::{Chan, chan}
                 use std::effects::async::{Async, LoomAsync}
                 perform LoomAsync in do
                     let ch: Chan Int = chan {}
@@ -384,7 +384,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void chanEqDifferentReferences() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::concurrent::channel::{Chan, chan}
+                use std::effects::async::channel::{Chan, chan}
                 use std::effects::async::{Async, LoomAsync}
                 perform LoomAsync in do
                     let ch1: Chan Int = chan {}

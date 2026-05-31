@@ -34,7 +34,7 @@ class CrossEffectCompositionTest {
 
     private fun asyncChannelStm(handler: String) = """
         use std::effects::async::{ Async, $handler }
-        use std::effects::concurrent::channel::{ chan_bounded, send, recv }
+        use std::effects::async::channel::{ chan_bounded, send, recv }
         use std::effects::stm::{ tvar, deref, atomically, STM }
 
         perform $handler in do
@@ -139,7 +139,7 @@ class CrossEffectCompositionTest {
 
     private fun asyncMutexStm(handler: String) = """
         use std::effects::async::{ Async, $handler }
-        use std::effects::concurrent::mutex::{ mutex, lock_async, unlock }
+        use std::effects::async::mutex::{ mutex, lock_async, unlock }
         use std::effects::stm::{ tvar, deref, atomically, STM }
 
         perform $handler in do
@@ -174,9 +174,9 @@ class CrossEffectCompositionTest {
 
     private fun asyncChannelMutex(handler: String) = """
         use std::effects::async::{ Async, $handler }
-        use std::effects::concurrent::channel::{ chan_bounded, send, recv }
-        use std::effects::concurrent::mutex::{ mutex, lock_async, unlock }
-        use std::effects::concurrent::atom::{ atom, deref, reset }
+        use std::effects::async::channel::{ chan_bounded, send, recv }
+        use std::effects::async::mutex::{ mutex, lock_async, unlock }
+        use std::effects::async::atom::{ atom, deref, reset }
 
         perform $handler in do
           let ch = chan_bounded { cap = 4 }
@@ -216,8 +216,8 @@ class CrossEffectCompositionTest {
 
     private fun asyncWaitGroupChannel(handler: String) = """
         use std::effects::async::{ Async, $handler }
-        use std::effects::concurrent::channel::{ chan_bounded, send, recv }
-        use std::effects::concurrent::waitgroup::{ wait_group, add, done, wait_async }
+        use std::effects::async::channel::{ chan_bounded, send, recv }
+        use std::effects::async::waitgroup::{ wait_group, add, done, wait_async }
 
         perform $handler in do
           let ch = chan_bounded { cap = 4 }
@@ -255,7 +255,7 @@ class CrossEffectCompositionTest {
 
     private fun asyncStmCheckChannel(handler: String) = """
         use std::effects::async::{ Async, $handler }
-        use std::effects::concurrent::channel::{ chan_bounded, send, recv }
+        use std::effects::async::channel::{ chan_bounded, send, recv }
         use std::effects::stm::{ tvar, deref, atomically, STM }
 
         perform $handler in do
@@ -295,8 +295,8 @@ class CrossEffectCompositionTest {
 
     private fun asyncSemaphoreChannel(handler: String) = """
         use std::effects::async::{ Async, $handler }
-        use std::effects::concurrent::channel::{ chan_bounded, send, recv }
-        use std::effects::concurrent::semaphore::{ semaphore, acquire_async, release }
+        use std::effects::async::channel::{ chan_bounded, send, recv }
+        use std::effects::async::semaphore::{ semaphore, acquire_async, release }
 
         perform $handler in do
           let sem = semaphore { permits = 2 }
@@ -340,7 +340,7 @@ class CrossEffectCompositionTest {
     private fun exceptionAsyncChannel(handler: String) = """
         use std::effects::exception::{ Exception, ExceptionToResult }
         use std::effects::async::{ Async, $handler }
-        use std::effects::concurrent::channel::{ chan_bounded, send, recv }
+        use std::effects::async::channel::{ chan_bounded, send, recv }
 
         perform ExceptionToResult in perform $handler in do
           let ch = chan_bounded { cap = 1 }

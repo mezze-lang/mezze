@@ -24,7 +24,7 @@ class AgentTest {
     @Test
     fun `test agent creation`() {
         val result = eval("""
-            use std::effects::concurrent::agent::{agent, deref_agent}
+            use std::effects::async::agent::{agent, deref_agent}
             use std::effects::async::{ Async, LoomAsync }
 
             perform LoomAsync in do
@@ -39,7 +39,7 @@ class AgentTest {
     @Test
     fun `test agent with record value`() {
         val result = eval("""
-            use std::effects::concurrent::agent::{agent, deref_agent}
+            use std::effects::async::agent::{agent, deref_agent}
             use std::effects::async::{ Async, LoomAsync }
 
             perform LoomAsync in do
@@ -57,7 +57,7 @@ class AgentTest {
     @Test
     fun `test agent send single update`() {
         val result = eval("""
-            use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::async::agent::{agent, send, deref_agent, await_agent}
             use std::effects::async::{ Async, LoomAsync }
 
             perform LoomAsync in do
@@ -74,7 +74,7 @@ class AgentTest {
     @Test
     fun `test agent send multiple updates`() {
         val result = eval("""
-            use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::async::agent::{agent, send, deref_agent, await_agent}
             use std::effects::async::{ Async, LoomAsync }
 
             perform LoomAsync in do
@@ -94,7 +94,7 @@ class AgentTest {
     fun `test agent updates are sequential`() {
         // Each update should see the result of the previous one
         val result = eval("""
-            use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::async::agent::{agent, send, deref_agent, await_agent}
             use std::effects::async::{ Async, LoomAsync }
 
             perform LoomAsync in do
@@ -115,7 +115,7 @@ class AgentTest {
     @Test
     fun `test agent no error initially`() {
         val result = eval("""
-            use std::effects::concurrent::agent::{agent, agent_error}
+            use std::effects::async::agent::{agent, agent_error}
             use std::effects::async::{ Async, LoomAsync }
 
             perform LoomAsync in do
@@ -131,7 +131,7 @@ class AgentTest {
     @Test
     fun `test agent has_error false initially`() {
         val result = eval("""
-            use std::effects::concurrent::agent::{agent, has_error}
+            use std::effects::async::agent::{agent, has_error}
             use std::effects::async::{ Async, LoomAsync }
 
             perform LoomAsync in do
@@ -148,7 +148,7 @@ class AgentTest {
     @Test
     fun `test agent await_agent_timeout success`() {
         val result = eval("""
-            use std::effects::concurrent::agent::{agent, send, await_agent_timeout}
+            use std::effects::async::agent::{agent, send, await_agent_timeout}
             use std::effects::async::{ Async, LoomAsync }
 
             perform LoomAsync in do
@@ -166,7 +166,7 @@ class AgentTest {
     @Test
     fun `test agent restart sets new value`() {
         val result = eval("""
-            use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent, restart_agent}
+            use std::effects::async::agent::{agent, send, deref_agent, await_agent, restart_agent}
             use std::effects::async::{ Async, LoomAsync }
 
             perform LoomAsync in do
@@ -187,7 +187,7 @@ class AgentTest {
     @Test
     fun `test agent with record value updates`() {
         val result = eval("""
-            use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::async::agent::{agent, send, deref_agent, await_agent}
             use std::effects::async::{ Async, LoomAsync }
 
             perform LoomAsync in do
@@ -207,7 +207,7 @@ class AgentTest {
     @Test
     fun `test agent with string value`() {
         val result = eval("""
-            use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::async::agent::{agent, send, deref_agent, await_agent}
             use std::effects::async::{ Async, LoomAsync }
 
             perform LoomAsync in do

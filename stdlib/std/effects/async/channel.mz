@@ -1,6 +1,6 @@
 use std::abilities::compare::{ Eq }
 use std::effects::async::{ Async }
-use std::effects::concurrent::atom::{ atom, deref, reset }
+use std::effects::async::atom::{ atom, deref, reset }
 
 ## Typed channel for thread-safe message passing.
 pub newtype Chan 'a = Chan __NativeChannel

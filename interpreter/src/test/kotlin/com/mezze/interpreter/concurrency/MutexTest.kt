@@ -26,10 +26,10 @@ class MutexTest {
     // Post-#170 atom+mutex: every primitive op is <Async>. Tests must
     // import from stdlib and open a `perform LoomAsync in do` block.
     private val mutexSetup = """
-        use std::effects::concurrent::mutex::{
+        use std::effects::async::mutex::{
             mutex, lock, unlock, with_lock, try_lock, is_held_by_current_thread
         }
-        use std::effects::concurrent::atom::{
+        use std::effects::async::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }

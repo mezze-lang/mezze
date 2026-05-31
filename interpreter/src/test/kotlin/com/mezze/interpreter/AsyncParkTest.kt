@@ -29,7 +29,7 @@ class AsyncParkTest {
         // Spawn a task that flips an atom; main parks until atom == 1.
         val source = """
             use std::effects::async::{Async, LoomAsync}
-            use std::effects::concurrent::atom::{atom, deref, reset}
+            use std::effects::async::atom::{atom, deref, reset}
 
             perform LoomAsync in do
               let flag = atom { value = 0 }

@@ -131,7 +131,7 @@ class AsyncHelpersTest {
         // Use an atom-style counter to observe that each element was processed.
         val source = """
             use std::effects::async::{Async, LoomAsync, par_for_each}
-            use std::effects::concurrent::atom::{atom, deref, swap}
+            use std::effects::async::atom::{atom, deref, swap}
 
             perform LoomAsync in do
               let counter = atom { value = 0 }

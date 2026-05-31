@@ -526,7 +526,7 @@ pub let scope_is_cancelled : { sc: Scope 'a } -> Bool = { sc } ->
 # respect the signal themselves. Mirrors Go's context.Cancel(), .NET's
 # CancellationTokenSource.Cancel(), Kotlin's Job.cancel().
 #
-# Used to live in std::effects::concurrent::cancellation but moved here
+# Used to live in std::effects::async::cancellation but moved here
 # because Async.cancel returns CancelOutcome (which talks about token
 # cancellation semantics) and `Scope` exposes `scope_get_token` — the
 # token type belongs with the rest of the async surface, not in a

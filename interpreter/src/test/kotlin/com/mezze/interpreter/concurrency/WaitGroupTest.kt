@@ -25,10 +25,10 @@ class WaitGroupTest {
     // Post-#170: all primitive ops are <Async>; tests use stdlib imports
     // and open a `perform LoomAsync in do` block.
     private val waitGroupSetup = """
-        use std::effects::concurrent::waitgroup::{
+        use std::effects::async::waitgroup::{
             wait_group, add, done, wait, wait_timeout, get_count_wg
         }
-        use std::effects::concurrent::atom::{
+        use std::effects::async::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }

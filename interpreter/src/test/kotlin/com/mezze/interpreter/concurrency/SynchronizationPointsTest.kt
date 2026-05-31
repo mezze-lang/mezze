@@ -36,10 +36,10 @@ class SynchronizationPointsTest {
     // into loomSetup (the latch shims were removed; we import latch from
     // stdlib instead).
     private val loomSetup = """
-        use std::effects::concurrent::latch::{
+        use std::effects::async::latch::{
             latch, count_down, await_latch, await_latch_timeout, get_count
         }
-        use std::effects::concurrent::atom::{
+        use std::effects::async::atom::{
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }

@@ -32,7 +32,7 @@ class ChannelTest {
     @Test
     fun `test create unbounded channel`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -46,7 +46,7 @@ class ChannelTest {
     @Test
     fun `test create buffered channel`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan_bounded, send, recv, try_send, try_recv, close, is_closed}
+            use std::effects::async::channel::{chan_bounded, send, recv, try_send, try_recv, close, is_closed}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan_bounded { cap = 10 }
@@ -64,7 +64,7 @@ class ChannelTest {
     @Test
     fun `test send and receive single value`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -78,7 +78,7 @@ class ChannelTest {
     @Test
     fun `test send and receive multiple values preserves order`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -104,7 +104,7 @@ class ChannelTest {
     @Test
     fun `test send to closed channel fails`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -123,7 +123,7 @@ class ChannelTest {
     @Test
     fun `test try_send succeeds when channel has space`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -136,7 +136,7 @@ class ChannelTest {
     @Test
     fun `test try_send fails on closed channel`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -150,7 +150,7 @@ class ChannelTest {
     @Test
     fun `test try_recv returns Some when value available`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -166,7 +166,7 @@ class ChannelTest {
     @Test
     fun `test try_recv returns None when channel empty`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -185,7 +185,7 @@ class ChannelTest {
     @Test
     fun `test close channel marks it closed`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -203,7 +203,7 @@ class ChannelTest {
     @Test
     fun `test is_closed returns correct value`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -221,7 +221,7 @@ class ChannelTest {
     @Test
     fun `test close is idempotent`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -237,7 +237,7 @@ class ChannelTest {
     @Test
     fun `test can receive remaining values from closed channel`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -261,7 +261,7 @@ class ChannelTest {
     @Test
     fun `test recv_any returns first available value`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch1 = chan {}
@@ -280,7 +280,7 @@ class ChannelTest {
     @Test
     fun `test recv_any with multiple channels having data`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch1 = chan {}
@@ -301,7 +301,7 @@ class ChannelTest {
     @Test
     fun `test recv_any_timeout returns None on timeout`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch1 = chan {}
@@ -318,7 +318,7 @@ class ChannelTest {
     @Test
     fun `test recv_any_timeout returns Some when data available`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch1 = chan {}
@@ -340,7 +340,7 @@ class ChannelTest {
     @Test
     fun `test single-threaded send and recv`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -354,7 +354,7 @@ class ChannelTest {
     @Test
     fun `test recv_any_timeout returns None when all channels empty`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch1 = chan {}
@@ -374,7 +374,7 @@ class ChannelTest {
     @Test
     fun `test producer consumer pattern`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -417,7 +417,7 @@ class ChannelTest {
     @Test
     fun `test multiple producers single consumer`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -464,7 +464,7 @@ class ChannelTest {
     @Test
     fun `test channel send and recv across spawned tasks`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -487,7 +487,7 @@ class ChannelTest {
     fun `test channel blocks receiver when empty`() {
         // In this test, the receiver will block until the sender sends
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -514,7 +514,7 @@ class ChannelTest {
     @Test
     fun `test channel with string values`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -528,7 +528,7 @@ class ChannelTest {
     @Test
     fun `test channel with record values`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
@@ -543,7 +543,7 @@ class ChannelTest {
     @Test
     fun `test channel with variant values`() {
         val result = eval("""
-            use std::effects::concurrent::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
+            use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
 
             type Message = | Ping, Pong { value: Int } |

@@ -13,7 +13,7 @@ class LatchUnderBothSchedulersTest {
 
     private fun program(handler: String) = """
         use std::effects::async::{ Async, $handler }
-        use std::effects::concurrent::latch::{ latch, count_down, await_latch_async }
+        use std::effects::async::latch::{ latch, count_down, await_latch_async }
 
         perform $handler in do
           let l = latch { count = 3 }

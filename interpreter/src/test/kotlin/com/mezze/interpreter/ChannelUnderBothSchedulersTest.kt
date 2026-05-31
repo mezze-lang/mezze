@@ -20,7 +20,7 @@ class ChannelUnderBothSchedulersTest {
 
     private fun program(handler: String) = """
         use std::effects::async::{ Async, $handler }
-        use std::effects::concurrent::channel::{ chan_bounded, send, recv }
+        use std::effects::async::channel::{ chan_bounded, send, recv }
 
         perform $handler in do
           let ch = chan_bounded { cap = 2 }
