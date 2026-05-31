@@ -605,3 +605,32 @@ pub let create_child : { token: CancellationToken } -> CancellationToken <Async>
 ## Run f if not cancelled, returning Some on success, None if cancelled.
 pub let with_cancellation : { token: CancellationToken, f: {} -> 'a <...> } -> Option 'a <Async, ...> = { token, f } ->
   if is_token_cancelled { token = token } then None else Some { val = f {} }
+
+## Park until any predicate is True; return the index of the first to fire.
+## Returns None if the predicates list is empty (otherwise would deadlock).
+##
+## Predicates MUST be idempotent — they're polled twice on a successful
+## wake (once by the park, once to identify the index). Reading atoms,
+## promise.is_done, and try_send {} are all safe. Consuming reads like
+## channel try_recv {} are NOT safe to use directly — wrap the consume
+## in the corresponding branch's `run` and use a non-consuming check
+## (e.g. spawn a recv promise and use is_done) in the `when`.
+pub let park_any : { predicates: [{} -> Bool <...>] } -> Option Int <Async, ...> = { predicates } ->
+  match seq::is_empty { xs = predicates } is
+    True -> None
+    False -> do
+      Async.park { predicate = {} -> seq::any { xs = predicates, p = { x } -> x {} } }
+      seq::find_index { xs = predicates, p = { x } -> x {} }
+
+## A select branch: predicate + action. (`then` is reserved; use `run`.)
+pub type SelectBranch 'a = { when: {} -> Bool <...>, run: {} -> 'a <...> }
+
+## Wait on multiple sources; run the action for whichever fires first.
+## Returns None if branches is empty (otherwise would deadlock).
+pub let select : { branches: [SelectBranch 'a] } -> Option 'a <Async, ...> = { branches } -> do
+  let preds = seq::map { xs = branches, f = { x } -> x.when }
+  match park_any { predicates = preds } is
+    None -> None
+    Some { val = i } -> match seq::get { xs = branches, i = i } is
+      Some { val = b } -> Some { val = b.run {} }
+      None -> None
