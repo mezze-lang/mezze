@@ -298,11 +298,29 @@ class ImportResolver(
                 val exportsToUse = typedModule?.exports?.takeIf { it.isNotEmpty() } ?: module.exports
 
                 // Extract specific items
-                val context = buildContextFromSelectiveImports(
+                var context = buildContextFromSelectiveImports(
                     exports = exportsToUse,
                     modulePath = modulePath,
                     items = path.items
                 )
+
+                // Harvest inferred return types for inherent-impl operations
+                // from the home module's TypedAbilityImpl. The selective path
+                // ALSO needs this — without it, `use std::effects::async::{...}`
+                // loses the Promise impl methods' return types and `p.map_ok {…}`
+                // dispatch produces a bare TypeVar. (Same fix as #213, extended
+                // to selective imports for #175.)
+                val v2ModuleSel = typedModule?.typedModule
+                if (v2ModuleSel != null) {
+                    val opTypes = harvestInherentImplOpReturnTypes(v2ModuleSel, exportsToUse)
+                    if (opTypes.isNotEmpty()) {
+                        context = context.copy(inherentImplOpReturnTypes = opTypes)
+                    }
+                    val opParamTypes = harvestInherentImplOpParamTypes(v2ModuleSel, exportsToUse)
+                    if (opParamTypes.isNotEmpty()) {
+                        context = context.copy(inherentImplOpParamTypes = opParamTypes)
+                    }
+                }
 
                 // Check if all requested items were found
                 // Also check if items exist but are private (not exported)
