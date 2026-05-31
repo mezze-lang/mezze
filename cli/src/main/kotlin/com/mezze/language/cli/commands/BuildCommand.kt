@@ -170,28 +170,27 @@ class BuildCommand {
                 typedModuleForValidation = compiled.typedModule
             }
 
-            // 2b. Load stdlib FunctionIRs into store — but skip ones already present
-            //     (typically all of them after `mez dev` has run).
-            try {
-                val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
-                val stdlibFunctions = precompiled.preloweredFunctions
-                val candidates = stdlibFunctions.keys.toList()
-                val present = store.blobsExist(candidates)
-                val missing = stdlibFunctions.filter { (hash, _) -> hash !in present }
-                if (missing.isNotEmpty()) {
-                    store.transaction {
-                        for ((hash, fnIR) in missing) {
-                            val irBytes = com.mezze.language.store.StoreSerialization.serializeFunctionIR(fnIR)
-                            store.putBlob(hash, com.mezze.language.store.BlobKind.FUNCTION,
-                                com.mezze.language.store.Visibility.PUBLIC, null, irBytes)
-                            collectEdgesFromIR(fnIR, store, hash)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                System.err.println("Warning: Could not load stdlib into store: ${e.message}")
-            }
-            if (timing) System.err.println("[${ms()}ms] stdlib seed checked")
+            // 2b. Stdlib FunctionIRs are NOT seeded into cache.sqlite.
+            //     The old seed loop wrote ~1164 stdlib functions (~4.8 MB)
+            //     into every project's cache. Two of the three things that
+            //     needed it now resolve elsewhere:
+            //
+            //       - Build closure walk: NativeBuildPath.computeReachableClosure
+            //         resolves stdlib hashes from PrecompiledStdlib in memory.
+            //       - BuildCache.tryLoad: only reads user-code IRs (the closure
+            //         saved in app_functions is loweredFunctions, which is user
+            //         code only — stdlib is re-resolved from PrecompiledStdlib
+            //         when computeReachableClosure runs on cache hit).
+            //       - Unresolved-hash check (BuildCache.collectUnresolvedHashes):
+            //         already ORs PrecompiledStdlib.containsKey before falling
+            //         back to store.blobExists, so stdlib presence in the store
+            //         is redundant.
+            //
+            //     The one thing we lose: edges from stdlib functions in the
+            //     `edges` table — LSP find-references into stdlib won't return
+            //     stdlib-to-stdlib edges from the user's cache. LSP can still
+            //     read them from the bundled stdlib snapshot if needed (or via
+            //     a future shared install-time store).
 
             // 3. Validate entry function — must exist and have shape `{} -> {} <*>`
             //    (effects allowed, ability constraints allowed, dict params hidden).
