@@ -164,7 +164,7 @@ class MezzeTextDocumentService(
             val (pkg, entry) = readMezzeTomlEntries(projectRoot)
             packageName = pkg
             entryFilePath = entry?.let { File(projectRoot, it).absolutePath }
-            server.logInfo("Using project store at ${SQLiteMezzeStore.resolveCacheFile(projectRoot).absolutePath} (package=$packageName, entry=$entry)")
+            server.logInfo("Using project store at ${SQLiteMezzeStore.resolveSrcFile(projectRoot).absolutePath} (package=$packageName, entry=$entry)")
 
             // Stdlib hydration removed (#233): the previous code populated
             // ModuleTypeChecker.globalCache from cache.sqlite for every
@@ -186,7 +186,7 @@ class MezzeTextDocumentService(
             // User modules still hydrate lazily via ModuleResolver on
             // first import.
             val store = projectStore!!
-            server.logInfo("Project store opened: ${SQLiteMezzeStore.resolveCacheFile(rootFile).absolutePath}")
+            server.logInfo("Project store opened: ${SQLiteMezzeStore.resolveSrcFile(rootFile).absolutePath}")
         } catch (e: Exception) {
             server.logError("Failed to create store: ${e.message}")
             e.printStackTrace()
@@ -204,7 +204,7 @@ class MezzeTextDocumentService(
     }
 
     /**
-     * `mezze.clearCache`: wipe `.mz/cache.sqlite`, `stdlib.sqlite`,
+     * `mezze.clearCache`: wipe `.mez/store/src.sqlite`, `stdlib.sqlite`,
      * `deps.sqlite` and reopen the store. Re-seeds stdlib from the JAR
      * resource on reopen. Re-analyzes every open document so diagnostics
      * stay live.
@@ -222,7 +222,7 @@ class MezzeTextDocumentService(
         projectStore = SQLiteMezzeStore.openProject(root)
         com.mezze.language.typechecker.PrecompiledStdlib.setStore(projectStore!!)
         com.mezze.language.typechecker.ModuleResolver.setStore(projectStore!!)
-        server.logInfo("Cleared cache at ${SQLiteMezzeStore.resolveProjectDir(root).absolutePath}")
+        server.logInfo("Cleared cache at ${com.mezze.language.store.ProjectLayout.projectDir(root).absolutePath}")
         reanalyzeOpenDocuments()
     }
 

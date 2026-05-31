@@ -65,7 +65,7 @@ object NativeBuildPath {
 
         // Native-image cache: hash everything that determines the produced
         // binary; on cache hit, copy the prior binary and skip the 70s
-        // native-image invocation. Stored at <projectRoot>/.mz/native-cache/
+        // native-image invocation. Stored at <projectRoot>/.mez/native-cache/
         // keyed by the SHA-256 of (closure CBOR + meta CBOR + mez version +
         // optimized flag + native-image path). Cache hits cost ~10ms
         // (one sha256 + one file copy).
@@ -272,15 +272,25 @@ object NativeBuildPath {
     }
 
     /**
-     * Walk upward from outputDir looking for a `.mz/` directory (the
-     * project's cache root, created by SQLiteMezzeStore.openProject).
-     * Returns null if outside any Mezze project.
+     * Walk upward from outputDir looking for the project metadata
+     * directory (created by SQLiteMezzeStore.openProject). Returns null
+     * if outside any Mezze project.
+     *
+     * Env-override fast path: when MEZZE_CACHE_DIR is set, projectDir is
+     * project-independent — there's nothing to walk, just probe the
+     * override path directly.
      */
     private fun findProjectMzDir(outputDir: File): File? {
+        // Env-override path is absolute and project-independent.
+        if (System.getenv(com.mezze.language.store.ProjectLayout.CACHE_DIR_ENV)?.isNotBlank() == true) {
+            val overrideDir = com.mezze.language.store.ProjectLayout.projectDir(outputDir)
+            return if (overrideDir.isDirectory) overrideDir else null
+        }
+        // Default: walk upward looking for `<dir>/.mez`.
         var dir: File? = outputDir.absoluteFile
         repeat(10) {
-            val mz = File(dir, ".mz")
-            if (mz.isDirectory) return mz
+            val candidate = File(dir, com.mezze.language.store.ProjectLayout.PROJECT_DIR)
+            if (candidate.isDirectory) return candidate
             dir = dir?.parentFile ?: return null
         }
         return null

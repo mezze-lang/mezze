@@ -131,7 +131,7 @@ object StorePopulator {
                 val loadedPath = loadedPathTyped.fullPath
                 if (loadedPath == modulePath) continue
                 // Skip stdlib here. Stdlib lives in its own attached
-                // `.mz/stdlib.sqlite`, materialised once at openProject
+                // `.mez/store/stdlib.sqlite`, materialised once at openProject
                 // from the bundled JAR resource. The stdlib precompiler
                 // tool writes to a separate file (not a project store),
                 // so this filter doesn't affect it.

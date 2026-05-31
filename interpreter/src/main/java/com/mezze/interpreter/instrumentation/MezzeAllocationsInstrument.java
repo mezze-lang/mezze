@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.LongAdder;
  * --allocations today.
  *
  * Output is written to the engine's `out` stream on dispose. DevRunner
- * redirects that stream to .mz/allocations.txt; user `println` writes
+ * redirects that stream to .mez/profile/mezze-allocations.txt; user `println` writes
  * directly to System.out from the Console effect handler, so the two
  * channels don't collide.
  */

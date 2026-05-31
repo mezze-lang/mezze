@@ -7,7 +7,7 @@ import java.io.File
 import java.security.MessageDigest
 
 /**
- * Cache lookup for `mez build`: if `.mz/cache.sqlite` has the app's IRs
+ * Cache lookup for `mez build`: if `.mez/store/src.sqlite` has the app's IRs
  * AND every project file content-matches the cache, return the cached
  * (functions, performerRecords); else null (caller recompiles).
  *

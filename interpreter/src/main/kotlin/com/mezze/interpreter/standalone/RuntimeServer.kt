@@ -132,7 +132,7 @@ object RuntimeServer {
         // Dev instrumentation flags arrive as command-line args from the
         // parent's WireRunner. Mirror EmbeddedExec's wiring so behavior
         // matches between `mez dev`/`mez exec` and a standalone-jar/native
-        // user-app binary. Outputs land under <project>/.mz/profile/ (the
+        // user-app binary. Outputs land under <project>/.mez/profile/ (the
         // wire path; EmbeddedExec uses <cwd>/mezze-*.txt for user-app
         // binaries since they may run from anywhere).
         val devFlags = DevFlags.parse(args, originalStderr)
@@ -826,7 +826,7 @@ private class WireFrameOutputStream(
  * so behavior matches between `mez dev` / `mez exec` (wire path) and
  * a standalone-jar / native user-app binary.
  *
- * Outputs land under <project>/.mz/profile/ — derived from the
+ * Outputs land under <project>/.mez/profile/ — derived from the
  * `mezze.project.root` system property the parent sets when spawning.
  * Falls back to cwd if for some reason that property isn't set.
  */
@@ -859,7 +859,7 @@ private data class DevFlags(
 
         private fun profileOut(name: String): File {
             val root = System.getProperty("mezze.project.root")?.let { File(it) } ?: File(".")
-            val dir = File(root, ".mz/profile")
+            val dir = com.mezze.language.store.ProjectLayout.profileDir(root)
             dir.mkdirs()
             return File(dir, name)
         }

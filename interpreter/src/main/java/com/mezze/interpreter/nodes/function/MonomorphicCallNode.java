@@ -130,7 +130,7 @@ public final class MonomorphicCallNode extends MezzeNode {
                 (contentHash != null ? contentHash.getHex() : "<null>") +
                 " but is not registered. This is a bug in mezze — please report it with the program that triggered this. " +
                 "(Likely cause: a code path emitted a CallByHash for a function the runtime never received. " +
-                "Try clearing .mz/cache.sqlite and re-running.)"
+                "Try clearing .mez/store/src.sqlite and re-running.)"
             );
         }
 

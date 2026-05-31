@@ -20,7 +20,7 @@ import java.security.MessageDigest
  *
  * Flow:
  * 1. Read Mezze.toml → find app entry file
- * 2. Open .mz/cache.sqlite, compile (same as mez dev)
+ * 2. Open .mez/store/src.sqlite, compile (same as mez dev)
  * 3. Scatter results into store
  * 4. Compute transitive closure from entry hash
  * 5. Create minimal blobs.sqlite with only reachable IR
@@ -109,7 +109,7 @@ class BuildCommand {
         com.mezze.language.typechecker.ModuleResolver.setStore(store)
 
         // Same cache-invalidation gate as mez dev — if this build is run
-        // against a project whose .mz/ was last typechecked by an older
+        // against a project whose .mez/ was last typechecked by an older
         // mez binary, the cached IR has stale hashes and would produce a
         // JAR that crashes at runtime. Nuke and rebuild.
         run {
@@ -127,7 +127,7 @@ class BuildCommand {
 
             // 1. Compile (or load from cache).
             //
-            // Cache fast-path: if .mz/cache.sqlite already has this app's
+            // Cache fast-path: if .mez/store/src.sqlite already has this app's
             // IRs AND every project file on disk content-matches the
             // cached source-hash, skip parse+typecheck+lower entirely.
             //

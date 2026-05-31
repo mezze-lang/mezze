@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * In the three-file world stdlib lives in its own attached SQLite at
- * `.mz/stdlib.sqlite`, materialised once per project from the bundled
+ * `.mez/store/stdlib.sqlite`, materialised once per project from the bundled
  * `stdlib.sqlite` JAR resource. There's no row-level copy any more —
  * the bundle IS the project's stdlib file.
  *
@@ -19,7 +19,7 @@ import java.io.File
 object StdlibSeed {
 
     /**
-     * Ensure `.mz/stdlib.sqlite` exists for the given project, copying
+     * Ensure `.mez/store/stdlib.sqlite` exists for the given project, copying
      * the bundle in if it's missing. Returns true if a copy ran, false
      * if the file already existed.
      */

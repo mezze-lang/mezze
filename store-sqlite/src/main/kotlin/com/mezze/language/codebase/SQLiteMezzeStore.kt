@@ -13,8 +13,8 @@ import java.sql.ResultSet
  * SQLite-backed implementation of [MezzeStore].
  *
  * Used for:
- * - Project mode: `.mz/cache.sqlite` (read-write, full schema)
- * - Dependencies: `.mz/deps.sqlite` (read-only)
+ * - Project mode: `.mez/store/src.sqlite` (read-write, full schema)
+ * - Dependencies: `.mez/store/deps.sqlite` (read-only)
  * - JAR embedded: `blobs.sqlite` (read-only, IR-only)
  * - Tests: `:memory:`
  *
@@ -92,40 +92,28 @@ class SQLiteMezzeStore private constructor(
          * `docs/architecture/17-three-file-cache.md`.
          */
         const val SCHEMA_VERSION = 4
-        const val PROJECT_DIR = ".mz"
-        const val CACHE_FILE = "cache.sqlite"
-        const val STDLIB_FILE = "stdlib.sqlite"
-        const val DEPS_FILE = "deps.sqlite"
-        const val CACHE_DIR_ENV = "MEZZE_CACHE_DIR"
 
-        /** SQLite ATTACH aliases. `main` is cache; stdlib + deps attach over it. */
+        // Paths and env override are owned by [com.mezze.language.store.ProjectLayout].
+        // SQLiteMezzeStore exposes only thin pass-throughs so the rest of
+        // the SQLite code can stay self-contained, and so any tooling
+        // that grabbed the constants off this object historically keeps
+        // working. New callers should depend on ProjectLayout directly.
+        const val SRC_FILE = com.mezze.language.store.ProjectLayout.SRC_FILE
+        const val STDLIB_FILE = com.mezze.language.store.ProjectLayout.STDLIB_FILE
+        const val DEPS_FILE = com.mezze.language.store.ProjectLayout.DEPS_FILE
+
+        /** SQLite ATTACH aliases. `main` is src; stdlib + deps attach over it. */
         const val DB_STDLIB = "stdlib"
         const val DB_DEPS = "deps"
 
-        /**
-         * Resolve where this project's `.mz/` directory lives.
-         *
-         * Priority:
-         *   1. `MEZZE_CACHE_DIR` env var (CI / shared mounts / Docker
-         *      volumes can override).
-         *   2. Default → `<projectRoot>/.mz/`.
-         *
-         * Single source of truth — every file lookup ([resolveCacheFile],
-         * [resolveStdlibFile], [resolveDepsFile]) routes through here.
-         */
-        fun resolveProjectDir(projectRoot: File): File {
-            val override = System.getenv(CACHE_DIR_ENV)?.takeIf { it.isNotBlank() }
-            return if (override != null) File(override) else File(projectRoot, PROJECT_DIR)
-        }
-
-        fun resolveCacheFile(projectRoot: File): File =
-            File(resolveProjectDir(projectRoot), CACHE_FILE)
+        fun resolveSrcFile(projectRoot: File): File =
+            com.mezze.language.store.ProjectLayout.srcFile(projectRoot)
 
         fun resolveStdlibFile(projectRoot: File): File =
-            File(resolveProjectDir(projectRoot), STDLIB_FILE)
+            com.mezze.language.store.ProjectLayout.stdlibFile(projectRoot)
 
         fun resolveDepsFile(projectRoot: File): File =
-            File(resolveProjectDir(projectRoot), DEPS_FILE)
+            com.mezze.language.store.ProjectLayout.depsFile(projectRoot)
 
         /**
          * Wipe all three sqlite files (and their `-wal`/`-shm` siblings)
@@ -133,13 +121,12 @@ class SQLiteMezzeStore private constructor(
          *
          * Used by `mezze.clearCache` in the LSP and as the user-facing
          * escape hatch when a cache file is corrupted. Next `openProject`
-         * recreates everything from scratch (and re-seeds stdlib from
-         * the JAR resource).
+         * recreates everything from scratch (and re-seeds stdlib).
          */
         fun wipeProjectFiles(projectRoot: File) {
-            val dir = resolveProjectDir(projectRoot)
+            val dir = com.mezze.language.store.ProjectLayout.storeDir(projectRoot)
             if (!dir.isDirectory) return
-            for (base in listOf(CACHE_FILE, STDLIB_FILE, DEPS_FILE)) {
+            for (base in listOf(SRC_FILE, STDLIB_FILE, DEPS_FILE)) {
                 for (suffix in listOf("", "-wal", "-shm", "-journal")) {
                     File(dir, base + suffix).delete()
                 }
@@ -154,7 +141,7 @@ class SQLiteMezzeStore private constructor(
          * file, the bundled JAR target stores its data in another).
          */
         fun forProject(projectRoot: File): SQLiteMezzeStore {
-            val dbFile = resolveCacheFile(projectRoot)
+            val dbFile = resolveSrcFile(projectRoot)
             dbFile.parentFile?.mkdirs()
             val conn = DriverManager.getConnection("jdbc:sqlite:${dbFile.absolutePath}")
             return SQLiteMezzeStore(conn, readOnly = false).also {
@@ -168,28 +155,28 @@ class SQLiteMezzeStore private constructor(
          * Single canonical entry point for opening a project store.
          *
          * Three-file design (see docs/architecture/17-three-file-cache.md):
-         *  1. Ensure the `.mz/` directory exists.
+         *  1. Ensure the `.mez/store/` directory exists.
          *  2. Materialise stdlib.sqlite by copying the bundled JAR resource
          *     if missing or version-mismatched. Read-only after.
          *  3. Materialise an empty deps.sqlite if missing (`mez sync` is
          *     the only writer; until then it's a placeholder so ATTACH
          *     and UNION ALL never fail).
-         *  4. Open cache.sqlite as the primary connection, apply baseline
+         *  4. Open src.sqlite as the primary connection, apply baseline
          *     schema if missing.
          *  5. ATTACH stdlib.sqlite AS stdlib, deps.sqlite AS deps.
          *  6. Install the parser-cache hook so ModuleResolver consults
          *     parsed_modules before invoking the parser (slice A).
          */
         fun openProject(projectRoot: File): SQLiteMezzeStore {
-            val cacheFile = resolveCacheFile(projectRoot)
+            val srcFile = resolveSrcFile(projectRoot)
             val stdlibFile = resolveStdlibFile(projectRoot)
             val depsFile = resolveDepsFile(projectRoot)
 
-            cacheFile.parentFile?.mkdirs()
+            srcFile.parentFile?.mkdirs()
             ensureStdlibFile(stdlibFile)
             ensureDepsFile(depsFile)
 
-            val conn = DriverManager.getConnection("jdbc:sqlite:${cacheFile.absolutePath}")
+            val conn = DriverManager.getConnection("jdbc:sqlite:${srcFile.absolutePath}")
             val store = SQLiteMezzeStore(conn, readOnly = false)
             store.configurePragmas()
             store.initSchema()
@@ -209,7 +196,7 @@ class SQLiteMezzeStore private constructor(
         }
 
         /**
-         * Copy the bundled stdlib seed into the project's `.mz/`
+         * Copy the bundled stdlib seed into the project's `.mez/store/`
          * directory if the file is missing. The bundle is shipped as a
          * JAR classpath resource; we extract it once per project.
          *
@@ -307,9 +294,9 @@ class SQLiteMezzeStore private constructor(
             }
         }
 
-        /** Check if project has an existing cache (location resolved via [resolveCacheFile]). */
+        /** Check if project has an existing src store (location resolved via [resolveSrcFile]). */
         fun hasCache(projectRoot: File): Boolean =
-            resolveCacheFile(projectRoot).exists()
+            resolveSrcFile(projectRoot).exists()
 
         /** Find project root by walking up from a path looking for Mezze.toml. */
         fun findProjectRoot(startPath: File): File? {

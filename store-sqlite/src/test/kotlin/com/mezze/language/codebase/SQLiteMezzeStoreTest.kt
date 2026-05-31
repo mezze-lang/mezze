@@ -560,7 +560,7 @@ class SQLiteMezzeStoreTest {
             projectStore.close()
 
             // Verify file exists
-            assertTrue(java.io.File(tempDir, ".mz/cache.sqlite").exists())
+            assertTrue(com.mezze.language.store.ProjectLayout.srcFile(tempDir).exists())
 
             // Reopen and verify data persists
             val reopened = SQLiteMezzeStore.forProject(tempDir)

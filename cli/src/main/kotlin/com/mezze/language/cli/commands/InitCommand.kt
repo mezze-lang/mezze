@@ -88,7 +88,7 @@ class InitCommand {
         val gitignore = File(projectDir, ".gitignore")
         if (!gitignore.exists()) createGitignore(gitignore)
 
-        // Materialise the project's `.mz/` store with stdlib seeded in.
+        // Materialise the project's `.mez/` store with stdlib seeded in.
         // openProject creates cache.sqlite + stdlib.sqlite + deps.sqlite,
         // attaches them, and installs the parser-cache hook. If
         // createApp, also pre-typecheck the entry so the first
@@ -218,7 +218,7 @@ class InitCommand {
 
     /**
      * Parse + typecheck the freshly-created template entry and populate
-     * the project's `.mz/cache.sqlite`. The first `mez dev` is then
+     * the project's `.mez/store/src.sqlite`. The first `mez dev` is then
      * warm: COLD_START's fast path matches because the cached typed
      * modules + IR are already there.
      *
@@ -282,7 +282,7 @@ class InitCommand {
             mezze_packages/
 
             # Mezze project cache (generated; safe to delete, will be rebuilt).
-            .mz/
+            .mez/
 
             # IDE
             .idea/

@@ -13,11 +13,11 @@ import java.security.MessageDigest
  * Handle `mez index` — build the full SQLite index for external tools.
  *
  * Parses, typechecks, and lowers all project files, then scatters everything
- * into .mz/cache.sqlite: blobs, names, edges, decls, usages, imports,
+ * into .mez/store/src.sqlite: blobs, names, edges, decls, usages, imports,
  * ability_impls, effect_performers.
  *
  * After `mez index`, external tools (linters, doc generators, visualizers)
- * can query .mz/cache.sqlite directly with SQL.
+ * can query .mez/store/src.sqlite directly with SQL.
  */
 class IndexCommand {
 
@@ -147,7 +147,7 @@ class IndexCommand {
             if (totalErrors > 0) println("  Errors: $totalErrors")
             println("  Time: ${totalTime}ms")
             println()
-            println("Query the index: sqlite3 .mz/cache.sqlite")
+            println("Query the index: sqlite3 .mez/store/src.sqlite")
             println("  SELECT * FROM decls;")
             println("  SELECT * FROM names WHERE module = 'mymodule';")
             println("  SELECT * FROM usages WHERE target_hash = '<hash>';")

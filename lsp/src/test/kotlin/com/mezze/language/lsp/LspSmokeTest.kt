@@ -198,7 +198,9 @@ class LspSmokeTest {
             // in cache.sqlite? Saves us another roundtrip when this fails.
             val recentLogs = client.logMessages.toList()
                 .joinToString("\n  ") { "[${it.type}] ${it.message}" }
-            val cacheContents = inspectCache(workspace.resolve(".mz/cache.sqlite").toFile())
+            val cacheContents = inspectCache(
+                com.mezze.language.store.ProjectLayout.srcFile(workspace.toFile())
+            )
             fail<Unit>("""
                 |workspace symbol search for 'greet' returned: $names
                 |

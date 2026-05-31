@@ -38,7 +38,7 @@ import java.io.OutputStream
  *
  * Flow:
  *   1. native mez parses + typechecks + lowers the user app.
- *   2. Serializes the closure + meta to CBOR files under `.mz/run/`.
+ *   2. Serializes the closure + meta to CBOR files under `.mez/run/`.
  *   3. Spawns a JVM child running [com.mezze.interpreter.standalone.RuntimeServer].
  *   4. HELLO/WELCOME handshake → caps negotiated.
  *   5. Sends LOAD (and EVICT for hot-reload); streams STDOUT_DATA /
@@ -334,7 +334,7 @@ object WireRunner {
 
     /**
      * Parse + typecheck + lower the user app. Writes CBOR files under
-     * `.mz/run/` (overwriting per run). Returns null on failure.
+     * `.mez/run/` (overwriting per run). Returns null on failure.
      */
     private fun compile(
         currentDir: File,
@@ -391,7 +391,7 @@ object WireRunner {
             entryName = entryName,
             performerRecords = result.performerRecords,
         )
-        val runDir = File(currentDir, ".mz/run").apply { mkdirs() }
+        val runDir = com.mezze.language.store.ProjectLayout.runDir(currentDir).apply { mkdirs() }
         val fnsFile = File(runDir, "fns.cbor").apply { writeBytes(fnBytes) }
         val metaFile = File(runDir, "meta.cbor").apply { writeBytes(metaBytes) }
         if (timing) System.err.println("[${ms()}ms] packed (${fnBytes.size} + ${metaBytes.size} bytes)")

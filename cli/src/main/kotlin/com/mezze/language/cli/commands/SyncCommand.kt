@@ -57,7 +57,7 @@ class SyncCommand {
 
         // Create directories
         val packagesDir = File(currentDir, "mezze_packages")
-        val cacheDir = File(System.getProperty("user.home"), ".mz/cache")
+        val cacheDir = File(System.getProperty("user.home"), ".mez/cache")
 
         if (isClean && packagesDir.exists()) {
             println("🧹 Cleaning mezze_packages/...")
