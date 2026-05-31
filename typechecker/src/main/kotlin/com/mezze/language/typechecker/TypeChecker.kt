@@ -536,6 +536,11 @@ class TypeChecker(
                         // Surface the inherent-impl carriers from the precompiled
                         // prelude so the message points at the fix.
                         val preludeMethodCarriers = findPreludeMethodCarriers(undefinedVar.name)
+                        // Only search free-function carriers for UNQUALIFIED names
+                        // (qualified names already get their own treatment above).
+                        val freeFunctionCarriers =
+                            if (!undefinedVar.isQualified) findStdlibFreeFunctionCarriers(undefinedVar.name)
+                            else emptyList()
                         buildString {
                             append("Undefined variable or function: ${undefinedVar.name}")
                             if (similarNames.isNotEmpty()) {
@@ -545,6 +550,14 @@ class TypeChecker(
                                 val carriers = preludeMethodCarriers.take(3).joinToString(", ")
                                 append(". '${undefinedVar.name}' is available as a method on $carriers")
                                 append(" — try `<receiver>.${undefinedVar.name} {…}` or import the function explicitly")
+                            }
+                            if (freeFunctionCarriers.isNotEmpty() && preludeMethodCarriers.isEmpty()) {
+                                val first = freeFunctionCarriers.first()
+                                append(". '${undefinedVar.name}' is exported from $first")
+                                if (freeFunctionCarriers.size > 1) {
+                                    append(" (also: ${freeFunctionCarriers.drop(1).joinToString(", ")})")
+                                }
+                                append(" — try `use $first::{${undefinedVar.name}}`")
                             }
                         }
                     }
@@ -1336,6 +1349,35 @@ class TypeChecker(
     }
 
     // Prelude cache is in the companion object below
+
+    /**
+     * For an unresolved bare name, find stdlib modules that export a
+     * top-level binding with the same name. Powers the "available in
+     * std::xxx — try `use std::xxx::{name}`" hint for typos and forgotten
+     * imports of free functions (e.g. `println` from std::effects::log).
+     *
+     * Walks ContentHashRegistry's hash → qualified-name map. Only returns
+     * matches where the qualified name's final segment equals the
+     * unresolved name AND the declaration kind is FUNCTION/CONSTANT (so we
+     * don't suggest importing types/abilities for an expression-position
+     * name). Returns up to 3 module paths.
+     */
+    private fun findStdlibFreeFunctionCarriers(name: String): List<String> {
+        val modules = LinkedHashSet<String>()
+        for ((hash, qualifiedName) in com.mezze.language.ast.debug.ContentHashRegistry.allMappings()) {
+            val sepIdx = qualifiedName.lastIndexOf("::")
+            if (sepIdx <= 0) continue
+            val simpleName = qualifiedName.substring(sepIdx + 2)
+            if (simpleName != name) continue
+            val kind = com.mezze.language.ast.debug.ContentHashRegistry.kindForHash(hash)
+            if (kind != com.mezze.language.ast.debug.ContentHashRegistry.DeclarationKind.FUNCTION &&
+                kind != com.mezze.language.ast.debug.ContentHashRegistry.DeclarationKind.CONSTANT) continue
+            val modulePath = qualifiedName.substring(0, sepIdx)
+            modules.add(modulePath)
+            if (modules.size >= 3) break
+        }
+        return modules.toList()
+    }
 
     /**
      * For an unresolved name, return the type-constructor names of any
