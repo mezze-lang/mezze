@@ -9,8 +9,6 @@ dependencies {
     implementation(project(":parser"))
     implementation(project(":stdlib"))
 
-    // TODO: remove once PrecompiledStdlib is refactored to use MezzeStore
-    implementation("org.xerial:sqlite-jdbc:3.51.2.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-cbor:1.6.2")
