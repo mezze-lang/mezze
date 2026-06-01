@@ -3,7 +3,7 @@ package com.mezze.interpreter.nodes.effect;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.continuation.EffectFiber;
 import com.mezze.interpreter.runtime.MezzeContext;
-import com.mezze.language.typechecker.scope.ScopedEffectConstants;
+import com.mezze.language.ast.ScopedEffectConstants;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;

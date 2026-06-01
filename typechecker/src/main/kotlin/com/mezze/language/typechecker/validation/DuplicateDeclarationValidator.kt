@@ -5,7 +5,7 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.parsedast.diagnostics.ErrorCode
-import com.mezze.language.typechecker.scope.ScopedEffectConstants
+import com.mezze.language.ast.ScopedEffectConstants
 
 /**
  * Validates that declarations are not duplicated within a parsed module.

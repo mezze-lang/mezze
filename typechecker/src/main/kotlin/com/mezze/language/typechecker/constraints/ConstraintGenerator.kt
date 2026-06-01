@@ -8,7 +8,7 @@ import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.context.TypeScheme
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
-import com.mezze.language.typechecker.scope.ScopedEffectConstants
+import com.mezze.language.ast.ScopedEffectConstants
 import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.ast.Keywords
 import com.mezze.language.parsedast.diagnostics.ErrorCode

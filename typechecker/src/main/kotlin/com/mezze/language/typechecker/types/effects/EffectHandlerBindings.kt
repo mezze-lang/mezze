@@ -3,7 +3,7 @@ package com.mezze.language.typechecker.types.effects
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.typechecker.context.TypingContext
-import com.mezze.language.typechecker.scope.ScopedEffectConstants
+import com.mezze.language.ast.ScopedEffectConstants
 
 /**
  * Runtime-bound names available inside an effect op handler body.

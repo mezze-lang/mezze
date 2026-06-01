@@ -54,8 +54,9 @@ object PipelineRunner {
         // ~35 per test instead of 1044. Each Language instance (=Context) compiles its own.
         val compiler = TruffleCompiler(language)
         mark("TruffleCompiler constructed")
-        val precompiled = com.mezze.language.typechecker.PrecompiledStdlib
-        mark("PrecompiledStdlib object referenced (class init triggered)")
+        // StdlibRuntimeData self-loads via its init block on first class
+        // reference (via FunctionIRReachability below). Compile paths that
+        // need full PrecompiledStdlib still set up via PrecompiledStdlib.setStore.
         val compiledFunctions = mutableMapOf<com.mezze.language.typedast.Hash, CallTarget>()
 
         val userHashes = functions.map { it.hash }.toSet()

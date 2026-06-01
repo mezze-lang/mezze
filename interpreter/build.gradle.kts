@@ -34,10 +34,8 @@ dependencies {
     // moving PrecompiledStdlib into :store or :stdlib. Tracked under
     // #187. Until then the deps stick.
     implementation(project(":ast"))
-    implementation(project(":parser"))
     implementation(project(":store"))
     implementation(project(":stdlib"))
-    implementation(project(":typechecker"))
     implementation(project(":datastructures"))
     // RuntimeServer (the JVM-side wire endpoint) speaks the v1 protocol
     // defined in :wire-protocol.
@@ -79,6 +77,7 @@ dependencies {
 
     // Test dependencies
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
+    testImplementation(project(":parser"))
     testImplementation(project(":typechecker"))
 }
 

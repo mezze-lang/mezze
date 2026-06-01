@@ -4,7 +4,7 @@ import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.ParsedEffectDecl
 import com.mezze.language.parsedast.ParsedPerformerDecl
 import com.mezze.language.typechecker.context.TypingContext
-import com.mezze.language.typechecker.scope.ScopedEffectConstants
+import com.mezze.language.ast.ScopedEffectConstants
 
 /**
  * Effect validator - checks that effects are properly handled.

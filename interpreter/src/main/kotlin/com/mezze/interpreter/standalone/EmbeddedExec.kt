@@ -39,7 +39,7 @@ object EmbeddedExec {
             it == "1" || it.equals("true", ignoreCase = true)
         } ?: false
         if (!nonStrict &&
-            !com.mezze.language.typechecker.StdlibSnapshotData.present) {
+            !com.mezze.language.stdlib.StdlibRuntimeData.present) {
             System.err.println(
                 "Error: built-in stdlib snapshot is missing or failed to decode.\n" +
                 "  This binary was built without a working stdlib-snapshot.cbor,\n" +

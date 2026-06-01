@@ -5,7 +5,7 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.Visibility as ParsedVisibility
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashes
-import com.mezze.language.typechecker.scope.ScopedEffectConstants
+import com.mezze.language.ast.ScopedEffectConstants
 import com.mezze.language.typechecker.validation.AbilityValidator
 import com.mezze.language.typechecker.validation.DuplicateDeclarationValidator
 import com.mezze.language.parsedast.diagnostics.ErrorCode

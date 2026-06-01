@@ -7,7 +7,7 @@ import com.mezze.language.ast.TypeVar
 import com.mezze.language.ast.VariantAliases
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.truffleir.*
-import com.mezze.language.typechecker.scope.ScopedEffectConstants
+import com.mezze.language.ast.ScopedEffectConstants
 import com.mezze.language.typedast.*
 
 /**

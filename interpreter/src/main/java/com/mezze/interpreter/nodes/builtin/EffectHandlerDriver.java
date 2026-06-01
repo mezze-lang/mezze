@@ -12,7 +12,7 @@ import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeSuspended;
 import com.mezze.interpreter.values.MezzeThunk;
-import com.mezze.language.typechecker.scope.ScopedEffectConstants;
+import com.mezze.language.ast.ScopedEffectConstants;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.RootCallTarget;
