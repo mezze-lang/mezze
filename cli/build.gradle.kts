@@ -42,6 +42,7 @@ kotlin {
 dependencies {
     implementation(project(":ast"))
     implementation(project(":parser"))
+    implementation(project(":stdlib"))
     implementation(project(":typechecker"))
     implementation(project(":datastructures"))
     implementation(project(":lsp"))

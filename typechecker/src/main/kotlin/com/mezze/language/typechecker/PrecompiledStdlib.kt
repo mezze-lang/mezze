@@ -308,6 +308,18 @@ object PrecompiledStdlib {
                 System.err.println("[PrecompiledStdlib] Compiled from source: ${preloweredFunctions.size} functions (${ms}ms)")
             }
         }
+
+        // Publish the runtime-only view so :interpreter can read it
+        // without depending on this object. Covers all populating
+        // branches (snapshot fast-path, store/sqlite preloaded, full
+        // compile). StdlibRuntimeData may already have loaded the same
+        // data from its own snapshot resource — install() overwrites
+        // either way, last-writer-wins; the data is the same.
+        com.mezze.language.stdlib.StdlibRuntimeData.install(
+            preloweredFunctions = preloweredFunctions,
+            preloweredPerformerRecords = preloweredPerformerRecords,
+            dependencyGraph = stdlibDependencyGraph,
+        )
     }
 
     /**

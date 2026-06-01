@@ -36,6 +36,7 @@ dependencies {
     implementation(project(":ast"))
     implementation(project(":parser"))
     implementation(project(":store"))
+    implementation(project(":stdlib"))
     implementation(project(":typechecker"))
     implementation(project(":datastructures"))
     // RuntimeServer (the JVM-side wire endpoint) speaks the v1 protocol

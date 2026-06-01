@@ -137,7 +137,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         }
 
         // 3. Compile from stdlib FunctionIR on demand (in-memory map)
-        var stdlibIR = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE.getPreloweredFunctions().get(hash);
+        var stdlibIR = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE.getPreloweredFunctions().get(hash);
         if (stdlibIR != null) {
             var compiler = new com.mezze.interpreter.compiler.TruffleCompiler(this);
             var rootNode = compiler.compile(stdlibIR);
@@ -179,8 +179,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             com.mezze.interpreter.compiler.TruffleCompiler compiler,
             java.util.Set<Hash> referencedHashes,
             java.util.Set<Hash> userHashes) {
-        var precompiled = com.mezze.language.typechecker.PrecompiledStdlib.INSTANCE;
-        var allFunctions = precompiled.getPreloweredFunctions();
+        var runtimeData = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE;
+        var allFunctions = runtimeData.getPreloweredFunctions();
 
         // Build name map + performer records on first call.
         if (stdlibHashToName == null) {
@@ -192,7 +192,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 }
             }
             stdlibHashToName = nameMap;
-            stdlibPerformerRecords = precompiled.getPreloweredPerformerRecords();
+            stdlibPerformerRecords = runtimeData.getPreloweredPerformerRecords();
         }
 
         // Compile only referenced stdlib functions not yet cached

@@ -361,7 +361,7 @@ object NativeBuildPath {
      * byte-identical CBOR for the same app.
      */
     fun computeReachableClosure(loweredFunctions: List<FunctionIR>): List<FunctionIR> {
-        val needed = com.mezze.language.typechecker.FunctionIRReachability
+        val needed = com.mezze.language.stdlib.FunctionIRReachability
             .collectReferencedHashes(loweredFunctions)
         val stdlibFns = com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions
         val closureMap = HashMap<com.mezze.language.typedast.Hash, FunctionIR>()

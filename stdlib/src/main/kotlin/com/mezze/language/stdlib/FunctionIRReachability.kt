@@ -1,4 +1,4 @@
-package com.mezze.language.typechecker
+package com.mezze.language.stdlib
 
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.truffleir.NodeIR
@@ -8,21 +8,21 @@ import com.mezze.language.typedast.Hash
  * Compute the transitive closure of FunctionIR hashes reachable from a
  * set of seed FunctionIRs.
  *
- * This is a pure IR walker — no Truffle types, no execution, no
- * runtime state. It lives in `:typechecker` (next to `PrecompiledStdlib`
- * whose dependency graph we walk) so `:cli` can call it without pulling
- * in `:interpreter`.
+ * Pure IR walker — no Truffle types, no execution, no compile state.
+ * Lives in `:stdlib` (next to [StdlibRuntimeData] whose dependency
+ * graph we walk) so the interpreter and `mez build` can call it
+ * without pulling in `:typechecker` or `:interpreter`.
  *
  * Single source of truth used by `mez build`'s reachable-closure
  * computation: user code + every stdlib function transitively
  * referenced. The output is what goes into the user-app jar's
  * `embedded-app.cbor`.
  *
- * Originally lived in [com.mezze.interpreter.compiler.PipelineRunner];
- * moved here in #216 to break `:cli`'s transitive `:interpreter`
- * dependency. The old `PipelineRunner.collectReferencedHashes`
- * trampoline forwards here for any in-tree callers that hadn't been
- * migrated.
+ * History: originally lived in
+ * [com.mezze.interpreter.compiler.PipelineRunner]; moved to
+ * `:typechecker` in #216 to break `:cli`'s transitive `:interpreter`
+ * dependency; moved to `:stdlib` in #222 to drop the runtime jar's
+ * `:typechecker` dependency.
  */
 object FunctionIRReachability {
 
@@ -48,7 +48,7 @@ object FunctionIRReachability {
         }
         mark("user fn IR walked (queue=${queue.size})")
 
-        val depGraph = PrecompiledStdlib.stdlibDependencyGraph
+        val depGraph = StdlibRuntimeData.dependencyGraph
         mark("stdlibDependencyGraph loaded (size=${depGraph.size})")
 
         while (queue.isNotEmpty()) {
@@ -207,7 +207,7 @@ object FunctionIRReachability {
         val known = mutableSetOf<Hash>()
         userFunctions.forEach { known.add(it.hash) }
         try {
-            known.addAll(PrecompiledStdlib.preloweredFunctions.keys)
+            known.addAll(StdlibRuntimeData.preloweredFunctions.keys)
         } catch (_: Throwable) { /* stdlib may be uninitialized in unusual contexts */ }
 
         val orphans = mutableListOf<OrphanHashRef>()

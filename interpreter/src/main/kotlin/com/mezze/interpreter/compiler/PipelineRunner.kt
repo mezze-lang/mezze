@@ -59,7 +59,7 @@ object PipelineRunner {
         val compiledFunctions = mutableMapOf<com.mezze.language.typedast.Hash, CallTarget>()
 
         val userHashes = functions.map { it.hash }.toSet()
-        val referencedHashes = com.mezze.language.typechecker.FunctionIRReachability.collectReferencedHashes(functions)
+        val referencedHashes = com.mezze.language.stdlib.FunctionIRReachability.collectReferencedHashes(functions)
         mark("referenced hashes collected (${referencedHashes.size})")
         language.compileReferencedStdlib(
             compiler,
