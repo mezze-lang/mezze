@@ -706,11 +706,45 @@ class ConstraintGenerator(
                             // returns) doesn't include the impl's lambda
                             // param TypeVars, which the solver populated
                             // when the body's usage sites constrained them.
+                            //
+                            // #180: also include the body's inferred effect
+                            // row. Without this, an impl method whose body
+                            // performs an effect (e.g.
+                            //   send = { it } -> Http.request { ... }
+                            // ) is registered as a pure FunctionType. The
+                            // call site `r.send {}` then looks effect-free
+                            // and any surrounding perform-block complains
+                            // "Expression is pure". The body's effects are
+                            // already computed at this point (bodyResult.
+                            // effects / effectInstances) — thread them in.
                             val implParamRecord = MezzeType.RecordType(fields = paramTypes, rowVar = null)
+                            val bodyEffectRow: MezzeType.EffectRow? =
+                                if (bodyResult.effects.isEmpty() && bodyResult.effectInstances.isEmpty()) {
+                                    null
+                                } else {
+                                    MezzeType.EffectRow.simple(
+                                        effects = bodyResult.effects,
+                                        rowVar = null,
+                                        performed = false
+                                    ).copy(effectInstances = bodyResult.effectInstances)
+                                }
                             val implFunctionType = MezzeType.FunctionType(
                                 paramType = implParamRecord,
-                                returnType = bodyResult.type
+                                returnType = bodyResult.type,
+                                effects = bodyEffectRow
                             )
+                            // #180: refresh the registered InherentMethodInfo
+                            // with the body-derived FunctionType. The original
+                            // entry registered by ContextBuilder.addAnonymousImpl
+                            // was built before the body was constraint-generated,
+                            // so its methodType lacks the body's inferred effect
+                            // row. Subsequent call sites read methodInfo.methodType
+                            // → wrapCallResultWithEffects, so the effects must be
+                            // present here for `r.send {}` to look effectful.
+                            if (methodInfo != null && bodyEffectRow != null) {
+                                val refreshedInfo = methodInfo.copy(methodType = implFunctionType)
+                                currentContext = currentContext.extendWithAnonymousMethod(refreshedInfo)
+                            }
                             results[opKey] = ConstraintResult(
                                 type = implFunctionType,
                                 constraints = constraints,
