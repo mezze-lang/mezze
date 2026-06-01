@@ -6,6 +6,10 @@ plugins {
 dependencies {
     implementation(project(":ast"))
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+    // CBOR for StdlibRuntimeSnapshot — the runtime-only slice of the
+    // precompiled stdlib that the interpreter consumes without
+    // depending on :typechecker.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-cbor:1.6.2")
 }
 
 kotlin {
