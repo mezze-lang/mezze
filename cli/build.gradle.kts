@@ -70,8 +70,10 @@ dependencies {
     // Package manager dependencies
     implementation("io.github.z4kn4fein:semver:2.0.0")           // Semantic versioning
     implementation("com.akuleshov7:ktoml-core:0.7.1")            // TOML parsing
-    implementation("io.ktor:ktor-client-core:2.3.12")            // HTTP client
-    implementation("io.ktor:ktor-client-cio:2.3.12")             // CIO engine for Ktor
+    // HTTP client (ktor-client-core + ktor-client-cio) dropped along
+    // with PackageDownloader's body — to be reinstated as Helidon
+    // WebClient (already on :interpreter's classpath) when mez sync is
+    // rewired.
     implementation("org.apache.commons:commons-compress:1.28.0") // tar.gz handling
 
     // Store module for content-addressed storage (SQLite implementation)
