@@ -423,6 +423,42 @@ object NativeBuildPath {
             "profiler-tool-",
             "coverage-tool-",
             "insight-tool-",
+            // Host-tool modules — `mez` uses these for parse / typecheck /
+            // lowering / project management. The user app's native binary
+            // executes pre-lowered FunctionIR and needs none of them.
+            "parser-",
+            "typechecker-",
+            "formatter-",
+            "lsp-",
+            "store-sqlite-",
+            "cli-",
+            // LSP4J + its transitives (gson, lsp4j-jsonrpc). Used only by
+            // `mez lsp`, never by user runtime.
+            "org.eclipse.lsp4j-",
+            "org.eclipse.lsp4j.jsonrpc-",
+            "gson-",
+            // Logback / SLF4J — `mez` uses these for its own logging.
+            // User-app logging goes through Mezze's Console effect, not
+            // SLF4J. Helidon's transitive slf4j use is shimmed elsewhere.
+            "logback-classic-",
+            "logback-core-",
+            "slf4j-api-",
+            // Coroutines — `:lsp` is the only consumer; user runtime
+            // doesn't need them.
+            "kotlinx-coroutines-core-jvm-",
+            "kotlinx-coroutines-core-",
+            "kotlinx-coroutines-slf4j-",
+            "kotlinx-coroutines-jdk8-",
+            // Mez-tool-only libs (TOML for Mezze.toml, semver for version
+            // compare, commons-compress for tar.gz in `mez sync`).
+            "ktoml-core-jvm-",
+            "ktoml-core-",
+            "semver-jvm-",
+            "semver-",
+            "commons-compress-",
+            "commons-codec-",
+            "commons-io-",
+            "commons-lang3-",
         )
         val kept = all.filterNot { jar -> drop.any { jar.name.startsWith(it) } }
         if (timing) System.err.println(
