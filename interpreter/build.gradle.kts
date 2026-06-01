@@ -68,9 +68,12 @@ dependencies {
     implementation("org.graalvm.tools:coverage-tool:24.2.2")
     implementation("org.graalvm.tools:insight-tool:24.2.2")
 
-    // HTTP client - Vert.x for async HTTP requests
-    implementation("io.vertx:vertx-core:4.5.1")
-    implementation("io.vertx:vertx-web-client:4.5.1")
+    // HTTP client — Helidon Níma WebClient. Loom-native (blocking API on
+    // virtual threads), built directly on JDK NIO + SSLEngine, no Netty.
+    // Replaces Vert.x: ~12 MB jar trim and proper Loom integration (the
+    // old Vert.x path did `future.get(timeout)` which pinned the calling
+    // fiber).
+    implementation("io.helidon.webclient:helidon-webclient:4.4.1")
 
     // DSL-JSON - high performance JSON library (byte-level, no reflection, GraalVM native-image compatible)
     implementation("com.dslplatform:dsl-json:2.0.2")
@@ -155,7 +158,7 @@ tasks.test {
 // jars bundle (and that `mez build --native` feeds to native-image).
 //
 // Contains: :interpreter + its runtime transitive deps (truffle, polyglot,
-// vertx, kotlin-stdlib, kotlinx-serialization-cbor). Crucially NOT:
+// helidon-webclient, kotlin-stdlib, kotlinx-serialization-cbor). Crucially NOT:
 // :parser, :typechecker, :formatter, :lsp, :store-sqlite, :cli, lsp4j,
 // logback, ktor, sqlite-jdbc.
 //

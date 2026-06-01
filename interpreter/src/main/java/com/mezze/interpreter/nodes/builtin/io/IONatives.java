@@ -6,23 +6,25 @@ import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
-import io.vertx.core.Vertx;
-import io.vertx.core.VertxOptions;
-import io.vertx.core.buffer.Buffer;
-import io.vertx.core.http.HttpMethod;
-import io.vertx.ext.web.client.HttpResponse;
-import io.vertx.ext.web.client.WebClient;
-import io.vertx.ext.web.client.WebClientOptions;
+import io.helidon.common.tls.Tls;
+import io.helidon.http.Method;
+import io.helidon.webclient.api.HttpClientRequest;
+import io.helidon.webclient.api.HttpClientResponse;
+import io.helidon.webclient.api.WebClient;
+import io.helidon.webclient.api.WebClientConfig;
 
 import javax.net.ssl.SSLException;
+import java.io.IOException;
+import java.net.ConnectException;
 import java.net.MalformedURLException;
-import java.net.URL;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.UnknownHostException;
 import java.nio.*;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -723,27 +725,18 @@ public final class IONatives {
     }
 
     // ==================== HTTP Client ====================
+    //
+    // Backed by Helidon Níma WebClient — Loom-native blocking I/O on JDK
+    // NIO + SSLEngine. `request.submit(...)` parks the calling virtual
+    // thread until the response is back, so the same call works under
+    // every Async impl: LoomAsync parks a VT, OSThreadAsync blocks a
+    // platform thread, CoopAsync blocks the carrier (see #114-#125 for
+    // the CoopAsync-blocking native pattern we use for file I/O too).
 
     /**
-     * Shared Vert.x instance for HTTP clients.
-     * Uses daemon threads so JVM can exit when main program completes.
-     */
-    private static volatile Vertx vertx;
-
-    private static Vertx getVertx() {
-        if (vertx == null) {
-            synchronized (IONatives.class) {
-                if (vertx == null) {
-                    VertxOptions options = new VertxOptions().setUseDaemonThread(true);
-                    vertx = Vertx.vertx(options);
-                }
-            }
-        }
-        return vertx;
-    }
-
-    /**
-     * HTTP client wrapper using Vert.x WebClient.
+     * HTTP client wrapper. Holds a configured Helidon WebClient. One
+     * WebClient is shared across many requests; Helidon's internal
+     * connection pool handles reuse.
      */
     public static class HttpClient {
         private final WebClient webClient;
@@ -762,32 +755,25 @@ public final class IONatives {
         }
 
         public void close() {
-            if (!closed) {
-                closed = true;
-                try {
-                    webClient.close();
-                } catch (Exception e) {
-                    // Ignore close errors
-                }
-            }
+            // Helidon WebClient has no explicit close — its connection
+            // pool is reclaimed when the client is GC'd. We just mark
+            // closed so subsequent requests return an error.
+            closed = true;
         }
     }
 
     @TruffleBoundary
     public static Object httpClientCreate(MezzeRecord args) {
-        // Create a new HTTP client with sensible defaults
-        WebClientOptions options = new WebClientOptions()
-            .setConnectTimeout(30000)
-            .setIdleTimeout(60)
-            .setFollowRedirects(true)
-            .setMaxRedirects(10)
-            .setTrustAll(false)
-            .setVerifyHost(true)
-            .setKeepAlive(true)
-            .setDecompressionSupported(true);
-
-        WebClient webClient = WebClient.create(getVertx(), options);
-        return new HttpClient(webClient);
+        // Sensible defaults at client level; per-request fields can
+        // override timeout. follow_redirects / max_redirects could also
+        // be made client-level but for now match the per-request style
+        // of the prior native.
+        WebClient client = WebClient.builder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(true)
+            .maxRedirects(10)
+            .build();
+        return new HttpClient(client);
     }
 
     @TruffleBoundary
@@ -801,7 +787,6 @@ public final class IONatives {
 
     @TruffleBoundary
     public static Object httpRequest(MezzeRecord args) {
-        // Extract arguments
         Object reqObj = getField(args, "req");
         Object configObj = getField(args, "config");
         Object clientObj = getField(args, "client");
@@ -809,34 +794,24 @@ public final class IONatives {
         if (!(reqObj instanceof MezzeRecord req)) {
             throw new RuntimeException("Expected 'req' to be a record");
         }
-
         if (!(clientObj instanceof HttpClient httpClient)) {
             throw new RuntimeException("Expected 'client' to be an HttpClient");
         }
 
+        String urlString = getString(req, "url");
+
         if (httpClient.isClosed()) {
-            // Client was closed - return error
-            String url = getString(req, "url");
-            return connectionFailed(url, "HTTP client has been closed");
+            return connectionFailed(urlString, "HTTP client has been closed");
         }
 
-        // Parse the request
         Object methodField = getField(req, "method");
-        String urlString = getString(req, "url");
         MezzeMap headersMap = getMap(req, "headers");
         Object body = getOptionalBody(req);
 
-        // Parse config
         MezzeRecord config = (configObj instanceof MezzeRecord c) ? c : MezzeRecord.empty();
         int timeoutMs = getIntOrDefault(config, "timeout_ms", 30000);
-        int connectTimeoutMs = getIntOrDefault(config, "connect_timeout_ms", 10000);
-        boolean followRedirects = getBoolOrDefault(config, "follow_redirects", true);
-        int maxRedirects = getIntOrDefault(config, "max_redirects", 10);
-        boolean verifySsl = getBoolOrDefault(config, "verify_ssl", true);
-        boolean autoDecompress = getBoolOrDefault(config, "auto_decompress", true);
-        boolean keepAlive = getBoolOrDefault(config, "keep_alive", true);
 
-        // Override timeout from request if specified
+        // Per-request timeout override.
         Object reqTimeoutObj = getField(req, "timeout_ms");
         if (reqTimeoutObj instanceof Long l) {
             timeoutMs = l.intValue();
@@ -850,151 +825,152 @@ public final class IONatives {
             }
         }
 
-        // Parse URL
-        ParsedUrl parsed = parseUrl(urlString);
-        if (parsed == null) {
-            return invalidUrl(urlString, "Invalid URL format");
+        URI uri;
+        try {
+            uri = URI.create(urlString);
+        } catch (IllegalArgumentException e) {
+            return invalidUrl(urlString, e.getMessage() != null ? e.getMessage() : "Invalid URL syntax");
+        }
+        if (uri.getHost() == null) {
+            return invalidUrl(urlString, "URL has no host");
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || !(scheme.equals("http") || scheme.equals("https"))) {
+            return invalidUrl(urlString, "URL scheme must be http or https");
         }
 
-        HttpMethod method = parseMethod(methodField);
+        Method method = parseMethod(methodField);
         Map<String, String> headers = parseHeaders(headersMap);
+        byte[] bodyBytes = (body != null) ? toByteArray(body) : null;
 
-        // Execute the request
-        return executeRequest(
-            httpClient.getWebClient(),
-            method,
-            parsed,
-            urlString,
-            body,
-            headers,
-            timeoutMs,
-            connectTimeoutMs,
-            followRedirects,
-            maxRedirects,
-            verifySsl,
-            autoDecompress,
-            keepAlive
-        );
+        return executeRequest(httpClient.getWebClient(), method, uri, urlString,
+                              bodyBytes, headers, timeoutMs);
     }
 
     /**
-     * Execute an HTTP request using the provided WebClient.
+     * Execute an HTTP request via Helidon WebClient. Blocks the calling
+     * thread (or VT) until the response or an error is observed.
      */
     private static Object executeRequest(
-        WebClient webClient,
-        HttpMethod method,
-        ParsedUrl parsed,
+        WebClient client,
+        Method method,
+        URI uri,
         String urlString,
-        Object body,
+        byte[] body,
         Map<String, String> headers,
-        int timeoutMs,
-        int connectTimeoutMs,
-        boolean followRedirects,
-        int maxRedirects,
-        boolean verifySsl,
-        boolean autoDecompress,
-        boolean keepAlive
+        int timeoutMs
     ) {
-        CompletableFuture<Object> future = new CompletableFuture<>();
-
         try {
-            // Create request
-            var request = parsed.ssl
-                ? webClient.request(method, parsed.port, parsed.host, parsed.path).ssl(true)
-                : webClient.request(method, parsed.port, parsed.host, parsed.path);
+            HttpClientRequest request = client.method(method).uri(uri);
 
-            // Add headers
-            headers.forEach(request::putHeader);
+            // Apply per-request timeout — Helidon exposes this on the
+            // request builder via readTimeout (waiting for the server to
+            // respond / write). Connect-timeout is configured client-wide.
+            request.readTimeout(Duration.ofMillis(timeoutMs));
 
-            // Set timeout
-            request.timeout(timeoutMs);
+            // Headers — Helidon's request.header(name, value) is the
+            // simple form. Multi-value headers can be added by calling
+            // it repeatedly; the Map<String,String> here is single-valued.
+            for (Map.Entry<String, String> e : headers.entrySet()) {
+                request.header(io.helidon.http.HeaderNames.create(e.getKey()), e.getValue());
+            }
 
-            // Send request
-            var sendFuture = (body != null)
-                ? request.sendBuffer(Buffer.buffer(toByteArray(body)))
-                : request.send();
+            // submit() / outputStream() pattern: for small bodies, just
+            // submit the bytes. For empty body, submit empty.
+            HttpClientResponse response;
+            if (body != null) {
+                response = request.submit(body);
+            } else {
+                response = request.request();
+            }
 
-            sendFuture
-                .onSuccess(response -> {
-                    future.complete(createOk(responseToMezze(response)));
-                })
-                .onFailure(throwable -> {
-                    Object error;
-                    String msg = throwable.getMessage();
-                    if (throwable instanceof TimeoutException ||
-                        (msg != null && msg.toLowerCase().contains("timeout"))) {
-                        error = timeout(urlString, timeoutMs);
-                    } else if (throwable instanceof SSLException ||
-                        (msg != null && (msg.toLowerCase().contains("ssl") ||
-                                         msg.toLowerCase().contains("tls") ||
-                                         msg.toLowerCase().contains("certificate")))) {
-                        error = tlsError(urlString, msg != null ? msg : "TLS error");
-                    } else if (msg != null && (msg.toLowerCase().contains("connection refused") ||
-                                               msg.toLowerCase().contains("no route to host") ||
-                                               msg.toLowerCase().contains("network unreachable"))) {
-                        error = connectionFailed(urlString, msg);
-                    } else {
-                        error = connectionFailed(urlString, msg != null ? msg : "Unknown error");
-                    }
-                    future.complete(error);
-                });
-
-            // Wait for result with timeout
-            return future.get(timeoutMs + 5000L, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
-            return timeout(urlString, timeoutMs);
-        } catch (InterruptedException e) {
-            return cancelled();
+            try {
+                return createOk(responseToMezze(response));
+            } finally {
+                response.close();
+            }
+        } catch (RuntimeException e) {
+            // Helidon raises unchecked exceptions for IO failures and
+            // wraps lower-level checked exceptions in the cause chain.
+            // Classify by walking the chain and then by message
+            // keywords — same pattern as the prior Vert.x path.
+            return classifyFailure(urlString, timeoutMs, e);
         } catch (Exception e) {
-            return connectionFailed(urlString, e.getMessage() != null ? e.getMessage() : "Unknown error");
+            return classifyFailure(urlString, timeoutMs, e);
         }
     }
 
-    /**
-     * Convert response to Mezze record.
-     */
-    private static MezzeRecord responseToMezze(HttpResponse<Buffer> response) {
-        // Convert headers to map
-        Map<Object, Object> headers = new HashMap<>();
-        response.headers().forEach(entry -> {
-            headers.put(entry.getKey().toLowerCase(), entry.getValue());
-        });
+    private static Object classifyFailure(String urlString, int timeoutMs, Throwable e) {
+        Throwable cause = e;
+        while (cause != null) {
+            if (cause instanceof SSLException) {
+                return tlsError(urlString, cause.getMessage() != null ? cause.getMessage() : "TLS error");
+            }
+            if (cause instanceof java.net.http.HttpTimeoutException
+                    || cause instanceof TimeoutException
+                    || cause instanceof java.net.SocketTimeoutException) {
+                return timeout(urlString, timeoutMs);
+            }
+            if (cause instanceof UnknownHostException) {
+                return connectionFailed(urlString,
+                    "Unknown host: " + (cause.getMessage() != null ? cause.getMessage() : ""));
+            }
+            if (cause instanceof ConnectException) {
+                return connectionFailed(urlString,
+                    cause.getMessage() != null ? cause.getMessage() : "Connection refused");
+            }
+            if (cause instanceof java.nio.channels.ClosedChannelException) {
+                return connectionFailed(urlString, "Connection closed");
+            }
+            cause = cause.getCause();
+        }
+        String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+        String lower = msg.toLowerCase();
+        if (lower.contains("timeout") || lower.contains("timed out")) {
+            return timeout(urlString, timeoutMs);
+        }
+        if (lower.contains("ssl") || lower.contains("tls") || lower.contains("certificate")) {
+            return tlsError(urlString, msg);
+        }
+        if (lower.contains("unknown host") || lower.contains("nodename nor servname")) {
+            return connectionFailed(urlString, msg);
+        }
+        return connectionFailed(urlString, msg);
+    }
 
-        // Get body bytes
-        byte[] bodyBytes = response.body() != null ? response.body().getBytes() : new byte[0];
+    /**
+     * Convert a Helidon response to a Mezze {status, headers, body} record.
+     * Header names are lowercased to match the prior contract (case-
+     * insensitive lookup via response.get_header is the stdlib pattern).
+     */
+    private static MezzeRecord responseToMezze(HttpClientResponse response) {
+        Map<Object, Object> headersOut = new HashMap<>();
+        response.headers().forEach(h ->
+            headersOut.put(h.name().toLowerCase(), h.get())
+        );
+
+        // Helidon: response.as(byte[].class) reads the entire body.
+        byte[] bodyBytes;
+        try {
+            bodyBytes = response.as(byte[].class);
+            if (bodyBytes == null) bodyBytes = new byte[0];
+        } catch (Exception e) {
+            bodyBytes = new byte[0];
+        }
 
         return MezzeRecord.fromFields(
             new String[]{"status", "headers", "body"},
-            new Object[]{(long) response.statusCode(), MezzeMap.fromJavaMap(headers), MezzeBytes.copyOf(bodyBytes)}
+            new Object[]{
+                (long) response.status().code(),
+                MezzeMap.fromJavaMap(headersOut),
+                MezzeBytes.copyOf(bodyBytes)
+            }
         );
     }
 
     // ==================== HTTP Helpers ====================
 
-    private static record ParsedUrl(boolean ssl, String host, int port, String path) {}
-
-    private static ParsedUrl parseUrl(String urlString) {
-        try {
-            URL url = new URL(urlString);
-            boolean ssl = "https".equalsIgnoreCase(url.getProtocol());
-            int port = url.getPort();
-            if (port == -1) {
-                port = ssl ? 443 : 80;
-            }
-            String path = url.getPath();
-            if (path == null || path.isEmpty()) {
-                path = "/";
-            }
-            if (url.getQuery() != null) {
-                path = path + "?" + url.getQuery();
-            }
-            return new ParsedUrl(ssl, url.getHost(), port, path);
-        } catch (MalformedURLException e) {
-            return null;
-        }
-    }
-
-    private static HttpMethod parseMethod(Object methodField) {
+    private static Method parseMethod(Object methodField) {
         String methodName;
         if (methodField instanceof MezzeVariant mv) {
             methodName = mv.getConstructorName();
@@ -1008,14 +984,14 @@ public final class IONatives {
         }
 
         return switch (methodName) {
-            case "Get" -> HttpMethod.GET;
-            case "Post" -> HttpMethod.POST;
-            case "Put" -> HttpMethod.PUT;
-            case "Delete" -> HttpMethod.DELETE;
-            case "Patch" -> HttpMethod.PATCH;
-            case "Head" -> HttpMethod.HEAD;
-            case "Options" -> HttpMethod.OPTIONS;
-            default -> HttpMethod.GET;
+            case "Get"     -> Method.GET;
+            case "Post"    -> Method.POST;
+            case "Put"     -> Method.PUT;
+            case "Delete"  -> Method.DELETE;
+            case "Patch"   -> Method.PATCH;
+            case "Head"    -> Method.HEAD;
+            case "Options" -> Method.OPTIONS;
+            default        -> Method.GET;
         };
     }
 
@@ -1122,25 +1098,6 @@ public final class IONatives {
         int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("TlsError");
         MezzeVariant errorVariant = MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
         return MezzeVariant.err(errorVariant);
-    }
-
-    private static MezzeVariant cancelled() {
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Cancelled");
-        MezzeVariant errorVariant = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
-        return MezzeVariant.err(errorVariant);
-    }
-
-    /**
-     * Shutdown the Vert.x instance (for clean shutdown).
-     */
-    public static void shutdown() {
-        if (vertx != null) {
-            try {
-                vertx.close();
-            } catch (Exception e) {
-                // Ignore shutdown errors
-            }
-        }
     }
 
 }
