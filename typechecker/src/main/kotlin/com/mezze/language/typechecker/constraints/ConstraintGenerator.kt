@@ -753,7 +753,18 @@ class ConstraintGenerator(
                                 abilityConstraints = bodyResult.abilityConstraints,
                                 associatedTypeConstraints = bodyResult.associatedTypeConstraints,
                                 undefinedVariables = emptyList(),
-                                usedVariables = bodyResult.usedVariables
+                                usedVariables = bodyResult.usedVariables,
+                                // #182: propagate the body's per-loc inferred
+                                // types so TypedAstBuilder can recover post-
+                                // solve types for variant constructions and
+                                // calls inside the impl method body. Without
+                                // this, sibling no-payload variants in the
+                                // body (e.g. `{ method = Get, body = None }`)
+                                // collapse onto the shared default
+                                // `TypeVar("unknown", 0)` and lose their
+                                // resolved types.
+                                callReturnTypes = bodyResult.callReturnTypes,
+                                methodCallResolutions = bodyResult.methodCallResolutions
                             )
                         }
                     }

@@ -88,4 +88,154 @@ class CrossModuleImplFieldItMismatchTest {
         // an unresolved type variable. Either way we want to surface it.
         assertNotNull(r2Type, "r2 should be type-checked")
     }
+
+    /**
+     * Pinning #182 — chainable HTTP `api.get { path }.send {}` should
+     * return `Result Resp Err`, but the typechecker types it as `Req`
+     * (the receiver of `.send`). Sub-pattern: imported impl method's
+     * return type binds to the receiver rather than the method's own
+     * declared/inferred return.
+     *
+     * Minimal shape mimicking Stage B chainable HTTP:
+     *   Client.get { path }       -> Req
+     *   Req.send {}               -> Result Resp Err
+     *
+     * Then `c.get { path }.send {}` should type as `Result Resp Err`,
+     * NOT `Req`.
+     */
+    @Test
+    fun `cross-module impl method chain - return type from method not receiver`(@TempDir tempDir: Path) {
+        // Closer mimicry of Stage B http.mz Client/Request/Response: an
+        // Http effect with a request op, MockHttpClient impl, plus
+        // impl Client where { get } and impl Request where { send }.
+        // The test imports the lib and chains `c.get { path }.send {}`
+        // inside a perform block then matches on the Result.
+        // Cross-module: lib defines impls, test imports.
+        //
+        // Critical detail: `pub let get` is ALSO exported as a free
+        // function with a different return type. Previously the harvest
+        // path preferred the export's return type for the impl op
+        // (silent conflation), corrupting the chain.
+        // Closer to http.mz: fields use TypeApplication types
+        // (Option, Map) which expand differently from plain records.
+        val libModule = tempDir.resolve("libmod2.mz")
+        libModule.writeText("""
+            use std::collections::map
+
+            pub type Method = | Get, Post |
+            pub type Req = {
+              method: Method,
+              url: Str,
+              headers: Map Str Str,
+              body: Option Bytes,
+              timeout_ms: Option Int,
+            }
+            pub type Resp = { status: Int }
+            pub type Err = | Failed { msg: Str } |
+            pub type Client = { base: Str, default_timeout: Int, default_headers: Map Str Str }
+
+            ## MyHttp effect with a `request` op that consumes Req and
+            ## returns Result Resp Err — mirrors http.mz's Http effect.
+            effect MyHttp where {
+              request: { req: Req } -> Result Resp Err <MyHttp>
+            }
+
+            impl MyHttp for MockMyHttp { canned: Resp } where {
+              request = { req } -> Ok { val = canned },
+            }
+
+            ## Same-named free function — different return type. The
+            ## harvest path used to prefer THIS as the source of truth,
+            ## which corrupted Client.get's chain.
+            pub let get : { url: Str } -> Result Resp Err <MyHttp> = { url } ->
+              MyHttp.request { req = {
+                method = Get, url = url, headers = map::empty {},
+                body = None, timeout_ms = None,
+              } }
+
+            ## Factory function — mirrors http.mz's `client` constructor.
+            pub let client : { base_url: Str } -> Client = { base_url } ->
+              { base = base_url, default_timeout = 30000, default_headers = map::empty {} }
+
+            impl Client where {
+              get = { it, path: Str } -> {
+                method = Get,
+                url = path,
+                headers = it.default_headers,
+                body = None,
+                timeout_ms = Some { val = it.default_timeout },
+              },
+            }
+            impl Req where {
+              send = { it } -> MyHttp.request { req = it },
+            }
+        """.trimIndent())
+
+        val userSource = """
+            use libmod2::{Client, Req, Resp, Err, Method, client, MyHttp, MockMyHttp}
+
+            let run : {} -> Int = {} ->
+              perform MockMyHttp { canned = { status = 200 } } in do
+                let c = client { base_url = "https://api.acme.com" }
+                let resp = c.get { path = "/x" }.send {}
+                match resp is
+                  Ok { val } -> val.status
+                  Err { error = _ } -> -1
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(userSource, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
+
+        val runType = typedProgram.getVariableType("run")
+        println("[#182] run type: ${runType?.let { prettyPrintType(it) } ?: "null"}")
+        assertNotNull(runType)
+        // run should be {} -> Int — confirms the chain typed successfully.
+        val rs = runType?.let { prettyPrintType(it) } ?: ""
+        assertTrue(rs.contains("Int"), "run should produce Int, got $rs")
+    }
+
+    /**
+     * Pinning #182 against real stdlib's std::effects::http — the actual
+     * failing surface from HttpChainTest. The synthetic test above
+     * passes after the four-part fix; this one currently fails because
+     * stdlib http.mz's `impl Client where { get }` body relies on
+     * `it.<field>` accesses to construct a Request record. The home-
+     * module solver pins `it`'s shape via HasField constraints, but
+     * the lambda's stored type loses the link from each field's
+     * TypeVar to the actual nominal types (Map Str Str, Option Bytes,
+     * Option Int, Method). On import, the lambda becomes
+     *   { it: 'a, path: Str } -> { method: 'd, url: Str, headers: 'c,
+     *                              body: 'b, timeout_ms: 'e }
+     * and the call site can't recover `it: Client` ⇒ the structural
+     * record can't be unified back to `Request` either. This is a
+     * deeper polymorphic-impl serialization issue — left here as a
+     * pinning test to drive the next fix.
+     */
+    @Test
+    fun `stdlib http chain - api dot get dot send`(@TempDir tempDir: Path) {
+        val userSource = """
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
+            use std::collections::map
+            use std::collections::bytes
+
+            let run : {} -> Int = {} ->
+              perform MockHttpClient { rules = [
+                { methods = [Get], url = Glob { pattern = "**" },
+                  response = Ok { val = {
+                    status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" }
+                  } } }
+              ] } in do
+                let api = client { base_url = "https://api.acme.com" }
+                let resp = api.get { path = "/users/42" }.send {}
+                match resp is
+                  Ok { val } -> val.status
+                  Err { error = _ } -> -1
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(userSource, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
+        val runType = typedProgram.getVariableType("run")
+        println("[#182-real] run type: ${runType?.let { prettyPrintType(it) } ?: "null"}")
+        assertNotNull(runType)
+    }
 }

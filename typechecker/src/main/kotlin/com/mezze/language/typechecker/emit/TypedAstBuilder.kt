@@ -581,8 +581,17 @@ class TypedAstBuilder(
                     TypedBoolLit(false, MezzeType.BoolType, loc)
                 } else {
                     val payload = expr.value?.let { buildExpr(it, file) }
-                    val type = substitution.apply(contextType)
-                    TypedVariantConstruct(expr.constructor, payload, type, loc)
+                    // #182: prefer the constraint generator's per-loc inferred
+                    // type for this construction site. Without this, sibling
+                    // no-payload variants in the same record literal (e.g.
+                    // `{ method = Get, body = None }`) collapse onto the
+                    // shared default `TypeVar("unknown", 0)` (data-class
+                    // equality), which the solver never pins — both fields
+                    // end up with the same unresolved alias and downstream
+                    // unification corrupts field-to-type alignment.
+                    val solvedType = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
+                        ?: substitution.apply(contextType)
+                    TypedVariantConstruct(expr.constructor, payload, solvedType, loc)
                 }
             }
 

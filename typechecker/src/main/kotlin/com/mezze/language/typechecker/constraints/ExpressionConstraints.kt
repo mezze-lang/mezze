@@ -2732,7 +2732,16 @@ class ExpressionConstraintGenerator {
 
             return ConstraintResult(
                 type = resultType,
-                constraints = constraints
+                constraints = constraints,
+                // #182: stash the loc → inferred-type entry so TypedAstBuilder
+                // can recover the post-solve variant type. Without this it
+                // falls back to its `contextType` default (a *shared*
+                // TypeVar("unknown", 0)), and two no-payload variants in the
+                // same record literal (e.g. `{ method = Get, body = None }`)
+                // end up with the same TyVar instance — the solver pins one
+                // but the other carries the unresolved alias and breaks
+                // downstream unifications.
+                callReturnTypes = mapOf(expr.loc to resultType)
             )
         } else {
             // With payload
@@ -2810,7 +2819,10 @@ class ExpressionConstraintGenerator {
                 abilityConstraints = payloadResult.abilityConstraints,
                 referencedBindings = payloadResult.referencedBindings,
                 methodCallResolutions = payloadResult.methodCallResolutions,
-                callReturnTypes = payloadResult.callReturnTypes
+                // #182: stash the loc → inferred-type entry so TypedAstBuilder
+                // can recover the post-solve variant type. See no-payload
+                // branch above for the full rationale.
+                callReturnTypes = payloadResult.callReturnTypes + (expr.loc to resultType)
             )
         }
     }

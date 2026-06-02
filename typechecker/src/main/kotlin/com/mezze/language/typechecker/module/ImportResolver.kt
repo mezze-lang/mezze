@@ -897,21 +897,17 @@ class ImportResolver(
             if (impl.abilityHash != com.mezze.language.typedast.Hash.ZERO) continue
             val opMap = mutableMapOf<String, com.mezze.language.ast.MezzeType>()
             for ((opName, opExpr) in impl.operations) {
-                // Stdlib impl operations are typically thin wrappers around a
-                // same-named top-level let (e.g. `length = { it } -> length {
-                // xs = it }`). The exported binding's MezzeType carries the
-                // full polymorphic signature (incl. TypeApplication args),
-                // while the impl body's stored type may have args stripped at
-                // TypedAstBuilder time (see issue #215). When the op name
-                // matches an exported function, prefer the export's return
-                // type as the source of truth.
-                val exportedFn = exports[opName]
-                val exportType = exportedFn?.mezzeType
-                val exportReturnType = if (exportType is com.mezze.language.ast.MezzeType.FunctionType) {
-                    exportType.returnType
-                } else null
-
-                // Otherwise fall back to the impl op's body type.
+                // Use the impl op's BODY type as the source of truth — it's
+                // the actual return type at the call site. Previously we
+                // preferred a same-named exported binding's signature
+                // (`length` op → `pub let length = ...` export), which
+                // helped for thin-wrapper impls that #215 strips, but
+                // silently corrupted Stage B's chainable HTTP: `Client.get`
+                // returns a Request record, while the exported `pub let get`
+                // returns `Result Response HttpError`. Conflating them
+                // typed `c.get { path }` as `Result …`, and the follow-up
+                // `.send {}` reported "Result vs Request". Effects have the
+                // same warning (#181); apply it to return types too.
                 val bodyReturnType: com.mezze.language.ast.MezzeType =
                     if (opExpr is com.mezze.language.typedast.TypedLambda) {
                         opExpr.body.type
@@ -920,7 +916,20 @@ class ImportResolver(
                         else -> t
                     }
 
-                val rawReturnType = exportReturnType ?: bodyReturnType
+                // Fall back to a same-named export's return type ONLY when
+                // the body type is itself a bare TypeVar — that's the
+                // #215 case where TypedAstBuilder dropped polymorphic args
+                // and the export is the only place the full signature
+                // survives. Concrete record / variant / nominal body types
+                // always win.
+                val exportedFn = exports[opName]
+                val exportReturnType = (exportedFn?.mezzeType as? com.mezze.language.ast.MezzeType.FunctionType)?.returnType
+
+                val rawReturnType = if (bodyReturnType is com.mezze.language.ast.MezzeType.VarType && exportReturnType != null) {
+                    exportReturnType
+                } else {
+                    bodyReturnType
+                }
 
                 // Skip placeholder TypeVars that are not informative (e.g. "ret",
                 // "op_*"). Only keep concrete types or quote-prefixed type vars
