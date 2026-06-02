@@ -129,6 +129,27 @@ object RuntimeServer {
 
         val jitEnabled = System.getenv("MEZZE_JIT")?.let { it == "1" || it.equals("true", ignoreCase = true) } ?: false
 
+        // Detect whether the optimizing Truffle runtime is on the classpath.
+        // DefaultTruffleRuntime is the pure-interpreter fallback that ships
+        // with truffle-api alone — it doesn't know about engine.Compilation
+        // or engine.TraceCompilation, so emitting those options crashes
+        // Engine.build() with IllegalArgumentException. The optimizing
+        // runtime (truffle-runtime jar) accepts them. Match EmbeddedExec
+        // (#195): only emit JIT-control options when the runtime is JIT-
+        // capable, so the same wire path works against either runtime on
+        // Linux/macOS installs.
+        val jitCapable = try {
+            val rt = com.oracle.truffle.api.Truffle.getRuntime()
+            !rt.javaClass.name.endsWith("DefaultTruffleRuntime")
+        } catch (_: Throwable) { true }
+        if (jitEnabled && !jitCapable) {
+            originalStderr.println(
+                "[mezze] MEZZE_JIT=1 ignored — this install has no optimizing " +
+                "Truffle runtime (truffle-runtime jar missing from classpath). " +
+                "Running interpreter-only."
+            )
+        }
+
         // Dev instrumentation flags arrive as command-line args from the
         // parent's WireRunner. Mirror EmbeddedExec's wiring so behavior
         // matches between `mez dev`/`mez exec` and a standalone-jar/native
@@ -140,8 +161,8 @@ object RuntimeServer {
         val engineBuilder = Engine.newBuilder()
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
-            .option("engine.Compilation", jitEnabled.toString())
-        if (devFlags.traceJit) engineBuilder.option("engine.TraceCompilation", "true")
+        if (jitCapable) engineBuilder.option("engine.Compilation", jitEnabled.toString())
+        if (devFlags.traceJit && jitCapable) engineBuilder.option("engine.TraceCompilation", "true")
         if (devFlags.profile != null) {
             engineBuilder.option("cpusampler", "true")
                 .option("cpusampler.OutputFile", devFlags.profile.absolutePath)

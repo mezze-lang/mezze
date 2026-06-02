@@ -59,10 +59,12 @@ class BuildCommand {
         // the image heap via --initialize-at-build-time).
         val nativeBuild = args.contains("--native") || args.contains("-n")
 
-        // `--optimized` / `-o` switches native-image from quick-build
-        // (-Ob, ~30-50s) to optimized (-O2, ~2m) and strips debug symbols.
-        // Default is quick-build with `-g` for fast iteration.
-        val optimizedBuild = args.contains("--optimized") || args.contains("-o")
+        // Native build defaults to optimized (-O2, ~2min, strips debug
+        // symbols) — we want the fastest user binary out of the box.
+        // Pass `--quick` for native-image's quick-build (-Ob, ~30-50s,
+        // ~20% slower binary, retains -g) when iterating during dev.
+        val quickBuild = args.contains("--quick") || args.contains("-q")
+        val optimizedBuild = !quickBuild
 
         // Output directory precedence (highest first):
         //   1. CLI flag:    --out=<path> or --out <path>
@@ -276,9 +278,9 @@ class BuildCommand {
             if (nativeBuild) {
                 println()
                 if (optimizedBuild) {
-                    println("Compiling native binary (optimized, ~2 min)...")
+                    println("Compiling native binary (optimized, ~2 min — pass --quick for ~30-50s build)...")
                 } else {
-                    println("Compiling native binary (quick mode, ~30-50s — pass -o for optimized)...")
+                    println("Compiling native binary (quick mode, ~30-50s)...")
                 }
                 nativeBinary = NativeBuildPath.build(
                     jarFile = jarFile,

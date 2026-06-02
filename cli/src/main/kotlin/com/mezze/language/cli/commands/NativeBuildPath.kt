@@ -511,14 +511,15 @@ object NativeBuildPath {
         // resolved against the builder JVM's cwd, which is outputDir.
         cmd.add("-J-Dlogback.configurationFile=${logbackConfig.absolutePath}")
 
-        // -Ob: native-image's "quick build" mode — ~30-50s, ~20% slower
-        // binary. Default for fast iteration.
-        // -O2: full optimization, ~2min, used when `--optimized` is set.
+        // -O2: full optimization (~2min). Default in mez — we want the
+        // fastest binary out of the box for `mez build --native`. Pass
+        // `--quick` to flip to -Ob (~30-50s build, ~20% slower binary)
+        // for fast iteration during dev.
         cmd.add(if (optimized) "-O2" else "-Ob")
-        // Debug info on for dev builds (Linux only — macOS native-image
+        // Debug info on for quick builds (Linux only — macOS native-image
         // doesn't implement the debug-info backend yet; passing -g there
         // just emits a "not supported" warning and a phantom `sources/`
-        // directory). Stripped on `--optimized` regardless of OS.
+        // directory). Stripped on optimized builds regardless of OS.
         if (!optimized && !System.getProperty("os.name").lowercase().contains("mac")) {
             cmd.add("-g")
         }
@@ -535,9 +536,44 @@ object NativeBuildPath {
 
         for (libDir in discoverLinkerLibPaths()) cmd.add("-H:CLibraryPath=$libDir")
 
-        if (System.getProperty("os.name").lowercase().contains("linux")) cmd.add("--gc=G1")
+        // Portable binary: target an x86-64-v2 / armv8-a baseline so the
+        // binary runs on any user machine, not just the build machine.
+        // Without this, native-image may bake in AVX-512 etc. from the
+        // build host's CPU. Universal across Oracle GraalVM and GraalVM CE.
+        cmd.add("-march=compatibility")
+        // Fail fast: if reachability registration is wrong, surface it at
+        // build, not at first runtime call. Avoids accidental fallback-jar
+        // builds that ship a JVM-launched binary instead of real native.
+        cmd.add("--no-fallback")
+
+        // --gc=G1 is an Oracle GraalVM-only feature. GraalVM CE rejects it
+        // with "Accepted values are 'epsilon', 'serial'". Probe the
+        // native-image binary's --version output (cached) so the same
+        // mez build works on both flavors. CE users get the serial GC
+        // default — slower for long-running processes but still correct.
+        if (isOracleGraalVm(nativeImage)) cmd.add("--gc=G1")
         return cmd
     }
+
+    /**
+     * Cached probe: is the native-image binary from Oracle GraalVM (vs.
+     * GraalVM Community Edition or another distribution)? Determined by
+     * grepping `native-image --version` output for "Oracle GraalVM". Any
+     * probe failure conservatively returns false — we'd rather take the
+     * portable-flags path on an unknown distribution than crash the
+     * build on an unsupported flag.
+     */
+    private val oracleGraalVmCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    private fun isOracleGraalVm(nativeImage: File): Boolean =
+        oracleGraalVmCache.computeIfAbsent(nativeImage.absolutePath) { _ ->
+            runCatching {
+                val out = ProcessBuilder(nativeImage.absolutePath, "--version")
+                    .redirectErrorStream(true)
+                    .start()
+                    .inputStream.bufferedReader().readText()
+                out.contains("Oracle GraalVM", ignoreCase = true)
+            }.getOrDefault(false)
+        }
 
     // ─── flag groups specific to the user-app build ──────────────────────────
 
