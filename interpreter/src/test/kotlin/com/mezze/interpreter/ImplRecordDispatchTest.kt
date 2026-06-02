@@ -230,4 +230,27 @@ class ImplRecordDispatchTest {
         """)
         assertEquals(42L, result)
     }
+
+    @Test
+    fun `Probe - two impls with method-name overlap on second-param shape`() {
+        // Mimics the Stage B http.mz case that's still failing: two
+        // distinct nominal record types, each with an impl method that
+        // shares a second-parameter name. Does the typechecker mix up
+        // the receiver types when resolving impl candidates?
+        val result = eval("""
+            pub type Req = { url: Str }
+            pub type Resp = { status: Int }
+
+            impl Req where {
+              with_x = { it, name: Str } -> { url = name },
+            }
+            impl Resp where {
+              with_x = { it, name: Str } -> { status = 1 },
+            }
+
+            let r : Resp = { status = 0 }
+            (r.with_x { name = "x" }).status
+        """)
+        assertEquals(1L, result)
+    }
 }
