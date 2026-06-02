@@ -83,13 +83,16 @@ data class CompiledModuleInterface(
             // See ModuleImportContext.inherentImplOpReturnTypes / issue #213.
             val opReturnTypes: Map<String, MezzeType> = emptyMap(),
             // Sibling for param-record types — issue #230.
-            val opParamTypes: Map<String, MezzeType> = emptyMap()
+            val opParamTypes: Map<String, MezzeType> = emptyMap(),
+            // Sibling for effect rows — #181.
+            val opEffects: Map<String, MezzeType.EffectRow> = emptyMap()
         ) : ContextExtension {
             override fun apply(context: TypingContext): TypingContext {
                 return ContextBuilder().registerImportedInherentImpl(
                     context, implDecl, implKey,
                     opReturnTypes = opReturnTypes,
-                    opParamTypes = opParamTypes
+                    opParamTypes = opParamTypes,
+                    opEffects = opEffects
                 )
             }
         }
@@ -177,8 +180,9 @@ data class CompiledModuleInterface(
                 if (implDecl.isInherent) {
                     val opReturnTypes = importContext.inherentImplOpReturnTypes[implKey].orEmpty()
                     val opParamTypes = importContext.inherentImplOpParamTypes[implKey].orEmpty()
+                    val opEffects = importContext.inherentImplOpEffects[implKey].orEmpty()
                     extensions.add(ContextExtension.InherentImplRegistration(
-                        implDecl, implKey, opReturnTypes, opParamTypes
+                        implDecl, implKey, opReturnTypes, opParamTypes, opEffects
                     ))
                 } else {
                     // Look up the ability's content hash from importContext, matching

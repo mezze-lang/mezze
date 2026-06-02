@@ -328,7 +328,14 @@ data class ModuleImportContext(
     // Without this, callers like `nums.all {p = 5}` typecheck because the impl
     // op registered a fresh TypeVar for `p` instead of the solver-discovered
     // `{x: 'a} -> Bool`. Harvested same way as return types.
-    val inherentImplOpParamTypes: Map<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>> = emptyMap()
+    val inherentImplOpParamTypes: Map<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>> = emptyMap(),
+    // #181: pre-inferred EFFECT rows for inherent impl operations. Keyed by
+    // impl content hash → op name → EffectRow. Without this, an impl method
+    // whose body performs an effect (e.g.
+    //   send = { it } -> Http.request { ... }
+    // ) is reconstructed as a pure FunctionType at the importer, and the
+    // call site `r.send {}` looks effect-free across the module boundary.
+    val inherentImplOpEffects: Map<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType.EffectRow>> = emptyMap()
 ) {
     companion object {
         /**
@@ -345,7 +352,8 @@ data class ModuleImportContext(
                 effectsByHash = emptyMap(),
                 abilitiesByHash = emptyMap(),
                 inherentImplOpReturnTypes = emptyMap(),
-                inherentImplOpParamTypes = emptyMap()
+                inherentImplOpParamTypes = emptyMap(),
+                inherentImplOpEffects = emptyMap()
             )
         }
     }
@@ -365,7 +373,8 @@ data class ModuleImportContext(
             effectsByHash = effectsByHash + other.effectsByHash,
             abilitiesByHash = abilitiesByHash + other.abilitiesByHash,
             inherentImplOpReturnTypes = inherentImplOpReturnTypes + other.inherentImplOpReturnTypes,
-            inherentImplOpParamTypes = inherentImplOpParamTypes + other.inherentImplOpParamTypes
+            inherentImplOpParamTypes = inherentImplOpParamTypes + other.inherentImplOpParamTypes,
+            inherentImplOpEffects = inherentImplOpEffects + other.inherentImplOpEffects
         )
     }
 

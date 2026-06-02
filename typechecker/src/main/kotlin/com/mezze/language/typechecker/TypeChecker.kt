@@ -1338,7 +1338,10 @@ class TypeChecker(
                     inherentImplOpReturnTypes = ctx.inherentImplOpReturnTypes,
                     // Carry the inferred PARAM types so callers can't pass a
                     // non-function where the impl op expects one (#230).
-                    inherentImplOpParamTypes = ctx.inherentImplOpParamTypes
+                    inherentImplOpParamTypes = ctx.inherentImplOpParamTypes,
+                    // #181: carry effect rows so impl methods that perform
+                    // effects in their bodies stay effectful at call sites.
+                    inherentImplOpEffects = ctx.inherentImplOpEffects
                 )
             }
             is ImportResolutionResult.Failure -> ModuleImportContext.empty()
@@ -1601,10 +1604,12 @@ class TypeChecker(
                 // Use registerImportedInherentImpl to bypass validation (already validated in home module).
                 val opReturnTypes = importContext.inherentImplOpReturnTypes[implKey].orEmpty()
                 val opParamTypes = importContext.inherentImplOpParamTypes[implKey].orEmpty()
+                val opEffects = importContext.inherentImplOpEffects[implKey].orEmpty()
                 context = contextBuilder.registerImportedInherentImpl(
                     context, implDecl, implKey,
                     opReturnTypes = opReturnTypes,
-                    opParamTypes = opParamTypes
+                    opParamTypes = opParamTypes,
+                    opEffects = opEffects
                 )
             } else {
                 // Named ability impls only need AbilityImplInfo. The shared

@@ -1006,7 +1006,13 @@ class ContextBuilder {
         // arg side (issue #230). When the operation's lambda has untyped
         // params, this map's record fields beat fresh TypeVars so callbacks
         // like `Seq.all`'s `p: { x: 'a } -> Bool` reject `nums.all {p = 5}`.
-        opParamTypes: Map<String, MezzeType> = emptyMap()
+        opParamTypes: Map<String, MezzeType> = emptyMap(),
+        // Pre-inferred effect rows — #181. Impl methods whose bodies
+        // perform effects (e.g. `send = { it } -> Http.request { ... }`)
+        // need the row to carry across the module boundary; without
+        // this, the FunctionType is reconstructed pure and the call
+        // site `r.send {}` is reported effect-free.
+        opEffects: Map<String, MezzeType.EffectRow> = emptyMap()
     ): TypingContext {
         var result = ctx
         val targetTypeNames = implDecl.targetTypes.map { getTypeName(it) }
@@ -1117,7 +1123,18 @@ class ContextBuilder {
                 } else byName
             } else paramType
 
-            val methodType = MezzeType.FunctionType(paramType = alignedParamType, returnType = returnType)
+            // #181: carry the harvested effect row through. The row was
+            // computed by ConstraintGenerator from the impl body and
+            // preserved on TypedLambda.type by TypedAstBuilder, then
+            // harvested at the module boundary. Without this, the
+            // reconstructed FunctionType is pure and call sites in the
+            // importer module wrap the result as if effect-free —
+            // surrounding `perform` blocks then reject the call.
+            val methodType = MezzeType.FunctionType(
+                paramType = alignedParamType,
+                returnType = returnType,
+                effects = opEffects[op.name]
+            )
 
             val methodInfo = TypingContext.InherentMethodInfo(
                 targetTypeName = targetTypeName,

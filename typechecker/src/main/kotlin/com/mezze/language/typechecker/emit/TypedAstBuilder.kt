@@ -636,12 +636,23 @@ class TypedAstBuilder(
                     else identifierContext.remove(name)
                 }
 
-                // Function type: param record type → body type
-                val paramRecordType = when (val ct = substitution.apply(contextType)) {
-                    is MezzeType.FunctionType -> ct.paramType
-                    else -> MezzeType.RecordType(params.associate { p -> p.name to p.type })
-                }
-                val funcType = MezzeType.FunctionType(paramRecordType, body.type)
+                // Function type: param record type → body type. When the
+                // context type is a FunctionType, also carry its effect row
+                // through. ConstraintGenerator stashes the post-solve impl
+                // op FunctionType (with bodyResult.effects baked in, #180)
+                // as the ctxType for inherent impl operations; without
+                // preserving the effect row here, TypedLambda.type would
+                // come out effectless and the import-side harvest would
+                // see no effects. Same reasoning applies to top-level lets
+                // with annotated effect arrows.
+                val ctxFnType = substitution.apply(contextType) as? MezzeType.FunctionType
+                val paramRecordType = ctxFnType?.paramType
+                    ?: MezzeType.RecordType(params.associate { p -> p.name to p.type })
+                val funcType = MezzeType.FunctionType(
+                    paramType = paramRecordType,
+                    returnType = body.type,
+                    effects = ctxFnType?.effects
+                )
 
                 // Compute captures: variables in the body that reference outer scopes
                 val captures = collectCaptures(body, params.map { it.name }.toSet())

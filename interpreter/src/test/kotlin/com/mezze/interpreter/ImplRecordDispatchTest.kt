@@ -204,4 +204,30 @@ class ImplRecordDispatchTest {
         """)
         assertEquals("hello", result)
     }
+
+    @Test
+    fun `Regression #181 - imported impl method body's effects propagate to call site`() {
+        // Cross-module variant of #180. `impl Promise 'a` is defined in
+        // std::effects::async.mz; its `await` method's body performs
+        // <Async>. Before #181, registerImportedInherentImpl
+        // reconstructed a pure FunctionType for the imported method,
+        // so `p.await {}` at the user's call site looked effect-free
+        // and the surrounding `perform LoomAsync` complained.
+        //
+        // Fix: harvest the impl op's effect row at the module boundary
+        // (TypedLambda.type.effects, populated by #180 in
+        // ConstraintGenerator and preserved by TypedAstBuilder), then
+        // apply it when rebuilding the FunctionType in
+        // registerImportedInherentImpl.
+        val result = eval("""
+            use std::effects::async::{ Async, LoomAsync }
+
+            perform LoomAsync in do
+              let p = Async.spawn { f = {} -> 42 }
+              match p.await {} is
+                Ok { val } -> val
+                Err { error = _ } -> -1
+        """)
+        assertEquals(42L, result)
+    }
 }

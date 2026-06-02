@@ -231,6 +231,13 @@ class ImportResolver(
                     if (opParamTypes.isNotEmpty()) {
                         context = context.copy(inherentImplOpParamTypes = opParamTypes)
                     }
+                    // #181: harvest effect rows so impl methods whose
+                    // bodies perform effects keep that effect-row across
+                    // the module boundary.
+                    val opEffects = harvestInherentImplOpEffects(v2Module)
+                    if (opEffects.isNotEmpty()) {
+                        context = context.copy(inherentImplOpEffects = opEffects)
+                    }
                 }
 
                 ProcessResult.Success(
@@ -319,6 +326,11 @@ class ImportResolver(
                     val opParamTypes = harvestInherentImplOpParamTypes(v2ModuleSel, exportsToUse)
                     if (opParamTypes.isNotEmpty()) {
                         context = context.copy(inherentImplOpParamTypes = opParamTypes)
+                    }
+                    // #181: harvest effect rows (selective-import path).
+                    val opEffects = harvestInherentImplOpEffects(v2ModuleSel)
+                    if (opEffects.isNotEmpty()) {
+                        context = context.copy(inherentImplOpEffects = opEffects)
                     }
                 }
 
@@ -918,6 +930,42 @@ class ImportResolver(
                 if (isPlaceholder) continue
 
                 opMap[opName] = rawReturnType
+            }
+            if (opMap.isNotEmpty()) {
+                result[impl.hash] = opMap
+            }
+        }
+        return result
+    }
+
+    /**
+     * #181: harvest the EFFECT ROW of each inherent impl op. Reads the
+     * lambda's FunctionType.effects directly — the body's effects were
+     * baked in by ConstraintGenerator (#180) and preserved on
+     * TypedLambda.type by TypedAstBuilder. Without this harvest, the
+     * importer reconstructs a pure FunctionType in
+     * registerImportedInherentImpl line 1120, and the call site
+     * `r.send {}` looks effect-free across the module boundary.
+     *
+     * NOTE: We do NOT consult `exports[opName]` here. The same-named
+     * free function may share a return-type shape with the impl op but
+     * may perform completely different effects — conflating them
+     * across two impls with shared op names (e.g. Request.with_auth
+     * and Client.with_auth) is a bug. Effects come ONLY from the
+     * impl's own TypedLambda.
+     */
+    private fun harvestInherentImplOpEffects(
+        v2Module: com.mezze.language.typedast.TypedModule
+    ): Map<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType.EffectRow>> {
+        val result = mutableMapOf<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType.EffectRow>>()
+        for (impl in v2Module.abilityImpls) {
+            if (impl.abilityHash != com.mezze.language.typedast.Hash.ZERO) continue
+            val opMap = mutableMapOf<String, com.mezze.language.ast.MezzeType.EffectRow>()
+            for ((opName, opExpr) in impl.operations) {
+                val effects = (opExpr.type as? com.mezze.language.ast.MezzeType.FunctionType)?.effects
+                if (effects != null) {
+                    opMap[opName] = effects
+                }
             }
             if (opMap.isNotEmpty()) {
                 result[impl.hash] = opMap
