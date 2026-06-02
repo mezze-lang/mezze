@@ -923,9 +923,34 @@ class ContextBuilder {
                 if (lambda != null) {
                     when (val params = lambda.params) {
                         is com.mezze.language.parsedast.ParsedLambdaParams.Typed -> {
+                            // #177: detect parser-synthesized type-variable
+                            // annotations for lambda params the user left
+                            // unannotated. When the user writes
+                            //   { it, name: Str }
+                            // the parser fills `it`'s annotation with a
+                            // synthetic ParsedNamedType whose name matches
+                            // the param's name (`'it`). Naively converting
+                            // that via convertParsedTypeAnnotation creates
+                            // TypeVar("it", 0, 0) — and `data class` equality
+                            // makes that the SAME variable across every
+                            // impl method that has an unannotated `it`.
+                            // The substitution map then can't bind it to
+                            // both Req (for impl Req) and Resp (for impl
+                            // Resp); the global solve fails with
+                            // "Field 'it' type mismatch". Substitute a
+                            // fresh TypeVar per occurrence here so each
+                            // method's `it` is its own variable.
                             MezzeType.RecordType(
                                 fields = params.fields.associate { entry ->
-                                    entry.name to convertParsedTypeAnnotation(entry.type)
+                                    val parsedType = entry.type
+                                    val isSyntheticTyvar = (parsedType as? com.mezze.language.parsedast.ParsedNamedType)
+                                        ?.let { it.name.removePrefix("'") == entry.name } ?: false
+                                    val converted = if (isSyntheticTyvar) {
+                                        MezzeType.VarType(TypeVar.fresh())
+                                    } else {
+                                        convertParsedTypeAnnotation(parsedType)
+                                    }
+                                    entry.name to converted
                                 },
                                 rowVar = null
                             )
