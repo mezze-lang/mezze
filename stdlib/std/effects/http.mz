@@ -630,6 +630,192 @@ pub let api_key_header : { key: Str, value: Str } -> Map Str Str = { key, value 
 pub let x_api_key : { key: Str } -> Map Str Str = { key } ->
   map::insert { m = map::empty {}, k = "X-API-Key", v = key }
 
+# ─── Chainable surface ────────────────────────────────────────────────
+#
+# The chainable API lets you build a request via dot-method composition:
+#
+#   request { url = "https://api.acme.com/users" }
+#     .with_method   { val = Post }
+#     .with_auth     { val = "Bearer xyz" }
+#     .with_json     { val = my_json }
+#     .with_timeout  { ms = 5000 }
+#     .send {}
+#
+# Underneath every impl method delegates to the corresponding free
+# function — they're not duplicate logic, just chain-friendly aliases.
+
+## Build a fresh GET Request for a URL. All fields zero-initialized
+## (no headers, no body, default timeout). Configure further with
+## `req.with_*` methods, then `req.send {}`.
+pub let request : { url: Str } -> Request = { url } ->
+  make_request { method = Get, url = url }
+
+## Body setter — wrap raw bytes (already encoded).
+pub let with_text : { req: Request, val: Str } -> Request = { req, val } ->
+  with_body { req = req, body = bytes::from_string { s = val } }
+
+## Body setter — encode JSON, set Content-Type: application/json.
+pub let with_json : { req: Request, val: Json } -> Request = { req, val } -> do
+  let body_str = to_str { json = val }
+  let body_bytes = bytes::from_string { s = body_str }
+  let r = with_body { req = req, body = body_bytes }
+  with_content_type { req = r, content_type = "application/json" }
+
+## Method setter — alias of with_method.
+pub let with_method : { req: Request, val: Method } -> Request = { req, val } ->
+  {
+    method = val,
+    url = req.url,
+    headers = req.headers,
+    body = req.body,
+    timeout_ms = req.timeout_ms,
+  }
+
+## Impl Request gives the chainable surface. Every method is a thin
+## delegator to a free function above — the impl block is just an
+## ergonomic wrapper. Method calls return new Requests (immutable
+## builder).
+impl Request where {
+  with_method      = { it, val: Method }  -> with_method      { req = it, val = val },
+  with_url         = { it, val: Str }     -> { method = it.method, url = val, headers = it.headers, body = it.body, timeout_ms = it.timeout_ms },
+  with_header      = { it, key: Str, value: Str } -> with_header      { req = it, key = key, value = value },
+  with_headers     = { it, headers: Map Str Str } -> with_headers     { req = it, headers = headers },
+  with_body        = { it, val: Bytes }   -> with_body        { req = it, body = val },
+  with_text        = { it, val: Str }     -> with_text        { req = it, val = val },
+  with_json        = { it, val: Json }    -> with_json        { req = it, val = val },
+  with_timeout     = { it, ms: Int }      -> with_timeout     { req = it, ms = ms },
+  with_auth        = { it, val: Str }     -> with_auth        { req = it, auth = val },
+  with_content_type = { it, val: Str }    -> with_content_type { req = it, content_type = val },
+  with_accept      = { it, val: Str }     -> with_accept      { req = it, accept = val },
+  ## Terminal — perform the request via the ambient Http handler.
+  send             = { it } -> Http.request { req = it, config = default_http_config },
+  ## Terminal with config override.
+  send_with        = { it, config: HttpConfig } -> Http.request { req = it, config = config },
+}
+
+## Impl Response gives chainable decoders + predicates + header lookup.
+## Direct field access (resp.status, resp.body, resp.headers) still
+## works for raw projection — the impl methods only add operations
+## that aren't just field reads.
+impl Response where {
+  ## Decode body as UTF-8 string.
+  text          = { it } -> body_string { resp = it },
+  ## Decode body as JSON.
+  json          = { it } -> body_json { resp = it },
+  ## 2xx status check.
+  is_ok         = { it } -> is_success { resp = it },
+  is_success    = { it } -> is_success { resp = it },
+  is_redirect   = { it } -> is_redirect { resp = it },
+  is_client_err = { it } -> is_client_error { resp = it },
+  is_server_err = { it } -> is_server_error { resp = it },
+  ## Case-insensitive header lookup.
+  header        = { it, name: Str } -> get_header { resp = it, name = name },
+  content_type  = { it } -> get_content_type { resp = it },
+  content_length = { it } -> get_content_length { resp = it },
+}
+
+## A reusable HTTP client value. Bind a service's base URL, default
+## headers (auth, accept, etc.), and default timeout once — derive
+## requests from it for each call.
+##
+##   let api = client { base_url = "https://api.acme.com" }
+##     .with_auth    { val = "Bearer " ++ token }
+##     .with_timeout { ms = 30000 }
+##   let user = api.get { path = "/users/42" }.send {}
+pub type Client = {
+  base_url: Str,
+  default_headers: Map Str Str,
+  default_timeout_ms: Int,
+}
+
+## Build a fresh Client. Empty base URL means use absolute URLs in
+## each request.
+pub let client : { base_url: Str } -> Client = { base_url } ->
+  {
+    base_url = base_url,
+    default_headers = map::empty {},
+    default_timeout_ms = 30000,
+  }
+
+## Build a Client with no base URL — every request uses an absolute URL.
+pub let no_base_client : {} -> Client = {} ->
+  client { base_url = "" }
+
+## Join base_url + path. If path is absolute (starts with http:// or
+## https://) it overrides base_url; otherwise base_url + path with
+## one slash between.
+let join_url : { base: Str, path: Str } -> Str = { base, path } ->
+  if str::starts_with { s = path, prefix = "http://" } || str::starts_with { s = path, prefix = "https://" }
+  then path
+  else if str::is_empty { s = base }
+  then path
+  else if str::ends_with { s = base, suffix = "/" } && str::starts_with { s = path, prefix = "/" }
+  then str::concat { l = base, r = str::substring { s = path, start = 1, end = str::size { s = path } } }
+  else if str::ends_with { s = base, suffix = "/" } || str::starts_with { s = path, prefix = "/" }
+  then str::concat { l = base, r = path }
+  else str::concat { l = str::concat { l = base, r = "/" }, r = path }
+
+## Impl Client gives configuration + verb shortcuts. Each verb method
+## produces a Request pre-filled with the client's defaults (headers,
+## timeout, base_url + path).
+impl Client where {
+  ## Configuration setters.
+  with_base_url        = { it, val: Str } -> { base_url = val, default_headers = it.default_headers, default_timeout_ms = it.default_timeout_ms },
+  with_default_header  = { it, key: Str, value: Str } -> { base_url = it.base_url, default_headers = map::insert { m = it.default_headers, k = key, v = value }, default_timeout_ms = it.default_timeout_ms },
+  with_default_headers = { it, headers: Map Str Str } -> { base_url = it.base_url, default_headers = map::merge { m1 = it.default_headers, m2 = headers }, default_timeout_ms = it.default_timeout_ms },
+  with_default_timeout = { it, ms: Int } -> { base_url = it.base_url, default_headers = it.default_headers, default_timeout_ms = ms },
+  ## Convenience: set Authorization in default_headers.
+  with_auth            = { it, val: Str } -> { base_url = it.base_url, default_headers = map::insert { m = it.default_headers, k = "Authorization", v = val }, default_timeout_ms = it.default_timeout_ms },
+  ## Verb shortcuts — return a Request pre-filled with the client's defaults.
+  ## Verb shortcuts — delegate to make_full_request so the impl op's
+  ## return type stays pinned to Request (a nominal TypeApplication)
+  ## instead of an open structural record. Without this, the lambda's
+  ## body type at the home module collapses field types to bare
+  ## TypeVars and the chain `c.get { path }.send {}` can't unify the
+  ## structural result against `Request` in the importer module.
+  get     = { it, path: Str } -> make_full_request {
+    method = Get, url = join_url { base = it.base_url, path = path },
+    headers = it.default_headers, body = None,
+    timeout_ms = Some { val = it.default_timeout_ms },
+  },
+  post    = { it, path: Str } -> make_full_request {
+    method = Post, url = join_url { base = it.base_url, path = path },
+    headers = it.default_headers, body = None,
+    timeout_ms = Some { val = it.default_timeout_ms },
+  },
+  put     = { it, path: Str } -> make_full_request {
+    method = Put, url = join_url { base = it.base_url, path = path },
+    headers = it.default_headers, body = None,
+    timeout_ms = Some { val = it.default_timeout_ms },
+  },
+  delete  = { it, path: Str } -> make_full_request {
+    method = Delete, url = join_url { base = it.base_url, path = path },
+    headers = it.default_headers, body = None,
+    timeout_ms = Some { val = it.default_timeout_ms },
+  },
+  patch   = { it, path: Str } -> make_full_request {
+    method = Patch, url = join_url { base = it.base_url, path = path },
+    headers = it.default_headers, body = None,
+    timeout_ms = Some { val = it.default_timeout_ms },
+  },
+  head    = { it, path: Str } -> make_full_request {
+    method = Head, url = join_url { base = it.base_url, path = path },
+    headers = it.default_headers, body = None,
+    timeout_ms = Some { val = it.default_timeout_ms },
+  },
+  options = { it, path: Str } -> make_full_request {
+    method = Options, url = join_url { base = it.base_url, path = path },
+    headers = it.default_headers, body = None,
+    timeout_ms = Some { val = it.default_timeout_ms },
+  },
+  ## Verb-free request builder — set method later via .with_method.
+  request = { it, path: Str } -> make_full_request {
+    method = Get, url = join_url { base = it.base_url, path = path },
+    headers = it.default_headers, body = None,
+    timeout_ms = Some { val = it.default_timeout_ms },
+  },
+}
+
 use std::effects::async::{ Async, AsyncError, par_map }
 
 ## Async HTTP helpers
