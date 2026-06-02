@@ -546,12 +546,15 @@ object NativeBuildPath {
         // builds that ship a JVM-launched binary instead of real native.
         cmd.add("--no-fallback")
 
-        // --gc=G1 is an Oracle GraalVM-only feature. GraalVM CE rejects it
-        // with "Accepted values are 'epsilon', 'serial'". Probe the
-        // native-image binary's --version output (cached) so the same
-        // mez build works on both flavors. CE users get the serial GC
-        // default — slower for long-running processes but still correct.
-        if (isOracleGraalVm(nativeImage)) cmd.add("--gc=G1")
+        // --gc=G1 is an Oracle GraalVM feature, and Substrate VM additionally
+        // restricts G1 to Linux AMD64/AArch64 — passing it on macOS Oracle
+        // GraalVM fails the build with "currently only supported on Linux
+        // AMD64 and AArch64". Gate on both: must be Oracle AND must be
+        // Linux. GraalVM CE on any OS, or any flavor on macOS/Windows,
+        // gets the serial GC default — slower for long-running processes
+        // but still correct.
+        val isLinux = System.getProperty("os.name").lowercase().contains("linux")
+        if (isLinux && isOracleGraalVm(nativeImage)) cmd.add("--gc=G1")
         return cmd
     }
 
