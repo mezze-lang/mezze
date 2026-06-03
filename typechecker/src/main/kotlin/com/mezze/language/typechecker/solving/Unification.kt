@@ -1568,6 +1568,7 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
         constructors = constructors,
         rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
         typeName = typeDecl.name,  // Preserve the type name for validation
+        typeArgs = typeApp.args,   // #194: carry the application's args so the printer can render `Tree Int`
         typeHash = typeDecl.contentHash  // Preserve content hash for rename-safe identity
     )
 }

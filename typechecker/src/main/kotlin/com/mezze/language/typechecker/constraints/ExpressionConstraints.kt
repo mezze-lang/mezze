@@ -2248,7 +2248,9 @@ class ExpressionConstraintGenerator {
                 },
                 rowVar = type.rowVar,
                 typeName = type.typeName,
-                typeHash = type.typeHash
+                typeArgs = type.typeArgs.map { substituteAssociatedTypesInType(it, associatedTypeBindings) },
+                typeHash = type.typeHash,
+                nominalWall = type.nominalWall
             )
             is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = substituteAssociatedTypesInType(type.elementType, associatedTypeBindings)
@@ -2418,7 +2420,8 @@ class ExpressionConstraintGenerator {
                 type.fields.values.flatMap { getFreeTypeVariables(it) }.toSet()
             }
             is MezzeType.VariantType -> {
-                type.constructors.values.filterNotNull().flatMap { getFreeTypeVariables(it) }.toSet()
+                type.constructors.values.filterNotNull().flatMap { getFreeTypeVariables(it) }.toSet() +
+                type.typeArgs.flatMap { getFreeTypeVariables(it) }.toSet()
             }
             is MezzeType.SeqType -> getFreeTypeVariables(type.elementType)
             is MezzeType.ListType -> getFreeTypeVariables(type.elementType)
@@ -2474,7 +2477,9 @@ class ExpressionConstraintGenerator {
                 },
                 rowVar = type.rowVar,
                 typeName = type.typeName,
-                typeHash = type.typeHash
+                typeArgs = type.typeArgs.map { applyTypeVarSubstitution(it, substitution) },
+                typeHash = type.typeHash,
+                nominalWall = type.nominalWall
             )
             is MezzeType.SeqType -> MezzeType.SeqType(
                 elementType = applyTypeVarSubstitution(type.elementType, substitution)
@@ -2533,7 +2538,8 @@ class ExpressionConstraintGenerator {
                 type.fields.values.flatMap { extractTypeVariables(it) }
             }
             is MezzeType.VariantType -> {
-                type.constructors.values.filterNotNull().flatMap { extractTypeVariables(it) }
+                type.constructors.values.filterNotNull().flatMap { extractTypeVariables(it) } +
+                type.typeArgs.flatMap { extractTypeVariables(it) }
             }
             is MezzeType.SeqType -> extractTypeVariables(type.elementType)
             is MezzeType.ListType -> extractTypeVariables(type.elementType)

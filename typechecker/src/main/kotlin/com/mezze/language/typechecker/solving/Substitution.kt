@@ -83,7 +83,8 @@ data class Substitution(
                 type.fields.values.any { needsSubstitution(it) }
 
             is MezzeType.VariantType ->
-                type.constructors.values.any { it != null && needsSubstitution(it) }
+                type.constructors.values.any { it != null && needsSubstitution(it) } ||
+                type.typeArgs.any { needsSubstitution(it) }
 
             is MezzeType.TypeApplication ->
                 type.args.any { needsSubstitution(it) }
@@ -184,6 +185,7 @@ data class Substitution(
                     constructors = appliedConstructors,
                     rowVar = type.rowVar, // Row variables handled separately
                     typeName = type.typeName, // Preserve type name for validation
+                    typeArgs = type.typeArgs.map { applyWithVisited(it, visitedVars) }, // #194: substitute into nominal-arg vector
                     typeHash = type.typeHash, // Preserve content hash for rename-safe identity
                     nominalWall = type.nominalWall // #148: preserve nominal-wall flag
                 )
@@ -417,6 +419,7 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
             },
             rowVar = closedRowVar,
             typeName = type.typeName,
+            typeArgs = type.typeArgs.map { closeGeneratedRowVars(it, mustBeOpenRowVars) },
             typeHash = type.typeHash,
             nominalWall = type.nominalWall // #148: preserve nominal-wall flag
         )
@@ -484,7 +487,7 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
         is MezzeType.VariantType ->
             type.constructors.values.any { dataType ->
                 dataType != null && occursCheck(typeVar, dataType)
-            }
+            } || type.typeArgs.any { occursCheck(typeVar, it) }
 
         is MezzeType.TypeApplication ->
             type.args.any { occursCheck(typeVar, it) }
@@ -545,9 +548,9 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
             type.fields.values.flatMap { collectFreeTypeVars(it) }.toSet()
 
         is MezzeType.VariantType ->
-            type.constructors.values.flatMap { dataType ->
+            (type.constructors.values.flatMap { dataType ->
                 dataType?.let { collectFreeTypeVars(it) } ?: emptySet()
-            }.toSet()
+            } + type.typeArgs.flatMap { collectFreeTypeVars(it) }).toSet()
 
         is MezzeType.TypeApplication ->
             type.args.flatMap { collectFreeTypeVars(it) }.toSet()

@@ -95,7 +95,9 @@ object TypeSubstitution {
                 type.constructors.mapValues { (_, dt) -> dt?.let { applyType(it, substitution) } },
                 type.rowVar,
                 typeName = type.typeName,
-                typeHash = type.typeHash
+                typeArgs = type.typeArgs.map { applyType(it, substitution) },
+                typeHash = type.typeHash,
+                nominalWall = type.nominalWall
             )
             is MezzeType.NewtypeType -> MezzeType.NewtypeType(
                 type.name,

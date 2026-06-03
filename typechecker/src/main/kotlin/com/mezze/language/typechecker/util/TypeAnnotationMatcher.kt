@@ -71,21 +71,13 @@ object TypeAnnotationMatcher {
                             typeMatchesAnnotation(a, b, typeDeclarations, typeVars, typeVarBindings)
                         }
                     }
-                    type is MezzeType.VariantType && type.typeName == null -> {
-                        val typeDecl = typeDeclarations[annotation.constructor]
-                        if (typeDecl != null && typeDecl.definition is ParsedVariantDef) {
-                            val definition = typeDecl.definition as ParsedVariantDef
-                            val declConstructors = definition.constructors.map { it.name }.toSet()
-                            if (!declConstructors.containsAll(type.constructors.keys)) false
-                            else {
-                                val inferredArgs = inferTypeArgsFromVariant(type, typeDecl, definition)
-                                if (inferredArgs != null && inferredArgs.size == annotation.args.size) {
-                                    inferredArgs.zip(annotation.args).all { (inf, argAnn) ->
-                                        typeMatchesAnnotation(inf, argAnn, typeDeclarations, typeVars, typeVarBindings)
-                                    }
-                                } else false
-                            }
-                        } else false
+                    // #194: VariantType carries (typeName, typeArgs) for polymorphic
+                    // uses, mirroring TypeApplication.
+                    type is MezzeType.VariantType && type.typeName == annotation.constructor &&
+                            type.typeArgs.size == annotation.args.size -> {
+                        type.typeArgs.zip(annotation.args).all { (a, b) ->
+                            typeMatchesAnnotation(a, b, typeDeclarations, typeVars, typeVarBindings)
+                        }
                     }
                     type is MezzeType.SeqType && annotation.constructor == BuiltinTypes.SEQ ->
                         annotation.args.size == 1 && typeMatchesAnnotation(type.elementType, annotation.args[0], typeDeclarations, typeVars, typeVarBindings)

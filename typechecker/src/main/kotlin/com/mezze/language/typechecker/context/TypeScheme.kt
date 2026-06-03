@@ -192,7 +192,9 @@ private fun applySubstitutionToType(
                 },
                 rowVar = type.rowVar,  // RowVar doesn't get substituted
                 typeName = type.typeName,  // Preserve type name for validation
-                typeHash = type.typeHash  // Preserve content hash for rename-safe identity
+                typeArgs = type.typeArgs.map { applySubstitutionToType(it, substitution) },
+                typeHash = type.typeHash,  // Preserve content hash for rename-safe identity
+                nominalWall = type.nominalWall
             )
         }
         is MezzeType.TypeApplication -> {
@@ -283,10 +285,11 @@ fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
         }
         is MezzeType.VariantType -> {
             // Row variables are not type variables, so we don't include them
-            type.constructors.values
+            (type.constructors.values
                 .filterNotNull()
-                .flatMap { collectFreeTypeVars(it) }
-                .toSet()
+                .flatMap { collectFreeTypeVars(it) } +
+             type.typeArgs.flatMap { collectFreeTypeVars(it) }
+            ).toSet()
         }
         is MezzeType.TypeApplication -> {
             type.args.flatMap { collectFreeTypeVars(it) }.toSet()

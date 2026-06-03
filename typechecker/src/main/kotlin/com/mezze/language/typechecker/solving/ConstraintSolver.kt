@@ -2978,12 +2978,18 @@ class ConstraintSolver(
                         ctor.name to payloadType
                     }
 
-                    // For polymorphic types (with type params), don't set typeName
-                    // because the actual type is a TypeApplication, not just the base variant.
+                    // Preserve nominal identity (typeName + typeArgs) even for polymorphic
+                    // types. Earlier code dropped typeName when `typeParams.nonEmpty`, which
+                    // lost the alias at outer scrutinee positions — visible as inlined
+                    // `| Leaf, Node {...} |` in printed types. typeArgs carries the fresh
+                    // tyvars/concrete args (in declaration order) so the printer can render
+                    // `Tree 'a` or `Tree Int` instead of expanding the body.
                     val declaredVariant = MezzeType.VariantType(
                         constructors = constructors,
                         rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
-                        typeName = if (declaringType.typeParams.isEmpty()) declaringType.name else null
+                        typeName = declaringType.name,
+                        typeArgs = typeParamMapping.values.toList(),
+                        typeHash = declaringType.contentHash
                     )
 
                     // CRITICAL: Validate payload presence/absence and unify types
@@ -3100,11 +3106,14 @@ class ConstraintSolver(
                         ctor.name to payloadType
                     }
 
-                    // For polymorphic types (with type params), don't set typeName
+                    // Preserve nominal identity (typeName + typeArgs) for polymorphic
+                    // Cons/Nil-bearing types — see notes at the pattern-context site above.
                     val declaredVariant = MezzeType.VariantType(
                         constructors = constructors,
                         rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
-                        typeName = if (declaringTypeExpr.typeParams.isEmpty()) declaringTypeExpr.name else null
+                        typeName = declaringTypeExpr.name,
+                        typeArgs = typeParamMapping.values.toList(),
+                        typeHash = declaringTypeExpr.contentHash
                     )
 
                     var resultSubst = Substitution.single(variantType.variable, declaredVariant)
@@ -3250,13 +3259,16 @@ class ConstraintSolver(
                             ctor.name to payloadType
                         }
 
-                        // For polymorphic types (with type params), don't set typeName
-                        // because the actual type is a TypeApplication, not just the base variant.
-                        // This allows ability lookups to work correctly with Maybe Int, etc.
+                        // Preserve nominal identity (typeName + typeArgs) regardless of
+                        // polymorphism. Ability lookups key off constructor identity /
+                        // typeHash, not the presence-or-absence of typeName, so this is
+                        // safe and keeps the nominal name available for printing.
                         val declaredVariant = MezzeType.VariantType(
                             constructors = constructors,
                             rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
-                            typeName = if (typeForConstructor.typeParams.isEmpty()) typeForConstructor.name else null
+                            typeName = typeForConstructor.name,
+                            typeArgs = typeParamMapping.values.toList(),
+                            typeHash = typeForConstructor.contentHash
                         )
 
                         var resultSubst = Substitution.single(variantType.variable, declaredVariant)

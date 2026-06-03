@@ -131,9 +131,9 @@ class VariantMergingTest {
     @Test
     fun `constructors from type alias all merge correctly`() {
         // When all constructors come from the same type alias (Color),
-        // they merge together. The actual alias name display depends on
-        // whether prettyPrintTypeWithAliases is used (CLI shows "Color",
-        // prettyPrintType shows the expanded form).
+        // they merge together. After #194, prettyPrintType honors the
+        // declared alias name on nominal variants, so the binding prints
+        // as `Color` rather than the inlined `| Red, Blue, Green |`.
         val source = """
             type Color = | Red, Blue, Green |
 
@@ -145,9 +145,8 @@ class VariantMergingTest {
         val result = parseAndTypeCheck(source)
         val typeStr = getBindingType(result, "x")
 
-        // The variants should all be present (merged from the type alias)
-        assertTrue(typeStr.contains("Red") && typeStr.contains("Blue") && typeStr.contains("Green"),
-            "Type should contain all Color constructors: $typeStr")
+        assertTrue(typeStr.contains("Color"),
+            "Type should print as the Color alias: $typeStr")
     }
 
     @Test
@@ -164,8 +163,8 @@ class VariantMergingTest {
         val result = parseAndTypeCheck(source)
         val typeStr = getBindingType(result, "x")
 
-        assertTrue(typeStr.contains("Red") && typeStr.contains("Blue") && typeStr.contains("Green"),
-            "Type should contain all Color constructors: $typeStr")
+        assertTrue(typeStr.contains("Color"),
+            "Type should print as the Color alias: $typeStr")
     }
 
     @Test

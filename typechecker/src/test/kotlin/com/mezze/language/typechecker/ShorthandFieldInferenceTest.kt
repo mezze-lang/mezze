@@ -89,9 +89,10 @@ class ShorthandFieldInferenceTest {
 
     @Test
     fun `test shorthand with Tree fold - sum function`() {
-        // THE KEY TEST: {tree} shorthand should infer Tree variant type from fold WITHOUT annotations
-        // Before the fix, this would infer { tree: 'a } -> Int (wrong!)
-        // After the fix, it infers { tree: | Leaf, Node {...} | } -> Int (correct!)
+        // THE KEY TEST: {tree} shorthand should infer Tree variant type from fold WITHOUT annotations.
+        // Before the original fix: inferred `{ tree: 'a } -> Int` (no nominal binding).
+        // After #194: prints as the alias `Tree Int` (was inlined `| Leaf, Node {...} |` previously,
+        // which is what the older assertion was checking for).
         assertTypeContains(
             """
             type Tree 'a = | Leaf, Node { value: 'a, left: Tree 'a, right: Tree 'a } |
@@ -107,13 +108,14 @@ class ShorthandFieldInferenceTest {
             sum
             """.trimIndent(),
             "sum",
-            "Leaf"  // Leaf is one of the Tree constructors
+            "Tree"  // nominal alias is preserved
         )
     }
 
     @Test
     fun `test shorthand with Tree fold - size function`() {
-        // THE KEY TEST: {tree} shorthand should infer Tree variant type from fold WITHOUT annotations
+        // THE KEY TEST: {tree} shorthand should infer Tree variant type from fold WITHOUT annotations.
+        // See `sum` test for the alias-printing rationale (#194).
         assertTypeContains(
             """
             type Tree 'a = | Leaf, Node { value: 'a, left: Tree 'a, right: Tree 'a } |
@@ -129,7 +131,7 @@ class ShorthandFieldInferenceTest {
             size
             """.trimIndent(),
             "size",
-            "Node"  // Node is the other Tree constructor
+            "Tree"
         )
     }
 
@@ -153,7 +155,7 @@ class ShorthandFieldInferenceTest {
             sum
             """.trimIndent(),
             "sum",
-            "Leaf"  // Should infer Tree variant type with Leaf constructor
+            "Tree"  // Should infer Tree variant type — printed as alias after #194
         )
     }
 

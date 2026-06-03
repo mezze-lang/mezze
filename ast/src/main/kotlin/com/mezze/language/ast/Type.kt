@@ -111,6 +111,14 @@ sealed interface MezzeType {
         val constructors: Map<String, MezzeType?>, // null = no data, MezzeType = constructor data
         val rowVar: RowVar? = null, // null = closed, non-null = open
         val typeName: String? = null, // Original type alias name (e.g., "Person" for `type Person = | ... |`)
+        // #194: The type-arg vector that completes the nominal identity for polymorphic
+        // variants. For `type Tree 'a = | Leaf, Node { value: 'a, ... } |`, a use at
+        // `Tree Int` is represented as VariantType(typeName="Tree", typeArgs=[IntType], ...)
+        // with constructor payloads ALREADY substituted (so the body remains usable for
+        // structural matching / ability lookups). Without this field the nominal name
+        // had to be dropped at substitution time, which collapsed printed types to
+        // their inlined variant bodies at outer positions (e.g. `match` scrutinees).
+        val typeArgs: List<MezzeType> = emptyList(),
         val typeHash: com.mezze.language.typedast.Hash? = null,  // Content hash of the type declaration (for rename-safe identity)
         // #148: marks the variant as a nominal wall that ALWAYS rejects foreign
         // constructors, regardless of whether `typeName` is in scope at the use

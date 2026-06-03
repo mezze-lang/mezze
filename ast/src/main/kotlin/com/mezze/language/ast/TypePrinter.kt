@@ -205,8 +205,19 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
         // Special case: Bool variant prints as "Bool" instead of "| True, False |"
         if (BuiltinTypes.isBoolVariant(type)) {
             "Bool"
+        } else if (type.typeName != null
+            && type.typeName != "<inline>"        // #148: placeholder for inline ascriptions — render structurally
+            && !type.typeName.startsWith("<")     // any other synthetic <…> placeholder
+            && !BuiltinTypes.isOptionVariant(type)
+            && BuiltinTypes.getResultTypes(type) == null) {
+            // The solver tagged this variant with its declared name (e.g. `Tree`) and,
+            // for polymorphic types, its type-arg vector. Print as `Tree <args>`.
+            val argsStr = if (type.typeArgs.isEmpty()) "" else " " + type.typeArgs.joinToString(" ") {
+                prettyPrintTypeWithMapping(it, typeVarMapping)
+            }
+            "${type.typeName}$argsStr"
         } else {
-            // Print as regular variant type (inline variant syntax)
+            // Anonymous / inline variant (no name) — print structurally.
             val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
                 when (dataType) {
                     null -> name
