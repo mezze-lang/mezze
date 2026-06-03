@@ -264,6 +264,27 @@ tasks.named("processResources") {
     dependsOn(bundleNativeClasspath)
 }
 
+// :cli:test reads StdlibSnapshotData via META-INF/mezze/stdlib-snapshot.cbor
+// on the test classpath. The snapshot is produced by compileStdlib, but
+// compileStdlib needs sourceSets.main.runtimeClasspath (which includes
+// processResources), so processResources must run BEFORE compileStdlib —
+// the snapshot misses processResources's copy step. After `gradle clean`,
+// the test then sees an empty classpath. Fix: depend on compileStdlib AND
+// copy its output into the test classpath at runtime.
+tasks.named<Test>("test") {
+    dependsOn("compileStdlib")
+    val snapshotFile = layout.buildDirectory.file("generated/resources/META-INF/mezze/stdlib-snapshot.cbor")
+    val classesOut = layout.buildDirectory.dir("resources/main/META-INF/mezze")
+    doFirst {
+        val src = snapshotFile.get().asFile
+        val destDir = classesOut.get().asFile
+        if (src.exists()) {
+            destDir.mkdirs()
+            src.copyTo(destDir.resolve("stdlib-snapshot.cbor"), overwrite = true)
+        }
+    }
+}
+
 // shadowJar depends on compileStdlib so stdlib.db is always fresh in the JAR
 tasks.shadowJar {
     dependsOn("compileStdlib")
