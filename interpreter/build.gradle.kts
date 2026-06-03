@@ -5,14 +5,14 @@ plugins {
     // bundle. Contains :interpreter + its runtime deps only — no parser,
     // typechecker, CLI, LSP, formatter, etc. See the runtimeShadowJar
     // task below.
-    id("com.github.johnrengelman.shadow") version "8.1.1"
+    id("com.gradleup.shadow") version "9.4.1"
 }
 
 // Pure Java module for Truffle DSL nodes
 // The converter will be in a separate Kotlin module or in the interpreter module
 java {
     toolchain {
-        languageVersion.set(JavaLanguageVersion.of(24))
+        languageVersion.set(JavaLanguageVersion.of(25))
     }
 }
 
@@ -42,31 +42,31 @@ dependencies {
     implementation(project(":wire-protocol"))
 
     // Truffle API - for language implementation
-    implementation("org.graalvm.truffle:truffle-api:24.2.2")
+    implementation("org.graalvm.truffle:truffle-api:25.0.3")
 
     // Truffle optimizing runtime (HotSpotTruffleRuntime). Without this,
     // Truffle falls back to DefaultTruffleRuntime — i.e. pure interpreter,
     // no PE, no JIT. On GraalVM JDK the compiler module
     // `org.graalvm.truffle.compiler` is already a jmod in the JDK, so this
     // single artifact is sufficient — no --upgrade-module-path needed.
-    implementation("org.graalvm.truffle:truffle-runtime:24.2.2")
+    implementation("org.graalvm.truffle:truffle-runtime:25.0.3")
 
     // Truffle DSL annotation processor - generates specialization code
-    annotationProcessor("org.graalvm.truffle:truffle-dsl-processor:24.2.2")
+    annotationProcessor("org.graalvm.truffle:truffle-dsl-processor:25.0.3")
 
     // GraalVM SDK - for polyglot interop
-    implementation("org.graalvm.sdk:graal-sdk:24.2.2")
-    implementation("org.graalvm.polyglot:polyglot:24.2.2")
+    implementation("org.graalvm.sdk:graal-sdk:25.0.3")
+    implementation("org.graalvm.polyglot:polyglot:25.0.3")
 
     // Truffle instrumentation tools — Chrome Inspector (CDP), DAP (VS Code
     // debug protocol), CPU sampler / tracer / memtracer, coverage, Insight.
     // Without these on the classpath, Truffle reports "Could not find option"
     // for cpusampler / coverage / inspect / etc.
-    implementation("org.graalvm.tools:profiler-tool:24.2.2")
-    implementation("org.graalvm.tools:chromeinspector-tool:24.2.2")
-    implementation("org.graalvm.tools:dap-tool:24.2.2")
-    implementation("org.graalvm.tools:coverage-tool:24.2.2")
-    implementation("org.graalvm.tools:insight-tool:24.2.2")
+    implementation("org.graalvm.tools:profiler-tool:25.0.3")
+    implementation("org.graalvm.tools:chromeinspector-tool:25.0.3")
+    implementation("org.graalvm.tools:dap-tool:25.0.3")
+    implementation("org.graalvm.tools:coverage-tool:25.0.3")
+    implementation("org.graalvm.tools:insight-tool:25.0.3")
 
     // HTTP client — Helidon Níma WebClient. Loom-native (blocking API on
     // virtual threads), built directly on JDK NIO + SSLEngine, no Netty.

@@ -18,16 +18,28 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-params:5.9.2")
 }
 
+// Resolvable classpath for the WellKnownHashGenerator main, declared in
+// this project (the consumer) rather than reaching across to :parser's /
+// :ast's runtimeClasspath. Gradle 9 forbids the old pattern as unsafe
+// configuration resolution (cross-project lock).
+val wellKnownHashGenClasspath: Configuration = configurations.create("wellKnownHashGenClasspath") {
+    isCanBeResolved = true
+    isCanBeConsumed = false
+}
+
+dependencies {
+    "wellKnownHashGenClasspath"(project(":parser"))
+    "wellKnownHashGenClasspath"(project(":ast"))
+}
+
 // Generate WellKnownHashConstants.kt at build time from stdlib source files.
 // Hashes are deterministic content hashes computed by ParsedDeclHasher.
 // No runtime filesystem access or lazy parsing needed.
 val generateWellKnownHashes by tasks.registering(JavaExec::class) {
-    dependsOn(":ast:classes", ":parser:classes")
     group = "build"
     description = "Generate well-known ability/effect hash constants from stdlib"
 
-    classpath = project(":parser").sourceSets.main.get().runtimeClasspath +
-        project(":ast").sourceSets.main.get().runtimeClasspath
+    classpath = wellKnownHashGenClasspath
 
     mainClass.set("com.mezze.language.parser.WellKnownHashGeneratorKt")
 

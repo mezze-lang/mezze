@@ -31,13 +31,13 @@ subprojects {
 
     // Kotlin toolchain (Kotlin 2.2.0 fully supports JDK 24 - verified bytecode major version 68)
     configure<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension> {
-        jvmToolchain(24)
+        jvmToolchain(25)
     }
 
     // Java toolchain (GraalVM JDK 24 with Truffle JIT compiler)
     java {
         toolchain {
-            languageVersion.set(JavaLanguageVersion.of(24))
+            languageVersion.set(JavaLanguageVersion.of(25))
         }
     }
 
@@ -87,7 +87,7 @@ subprojects {
         }
         // Detekt doesn't support JDK 24 yet, use 22 for analysis
         tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
-            jvmTarget = "22"
+            jvmTarget = "25"
         }
     }
 }

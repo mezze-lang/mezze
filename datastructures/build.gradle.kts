@@ -5,7 +5,7 @@ plugins {
 
 java {
     toolchain {
-        languageVersion.set(JavaLanguageVersion.of(24))
+        languageVersion.set(JavaLanguageVersion.of(25))
     }
 }
 
@@ -18,14 +18,14 @@ tasks.withType<JavaCompile> {
 
 dependencies {
     // Truffle API - for @CompilationFinal, @ExplodeLoop, etc.
-    implementation("org.graalvm.truffle:truffle-api:24.2.2")
+    implementation("org.graalvm.truffle:truffle-api:25.0.3")
 
     // Truffle DSL annotation processor
-    annotationProcessor("org.graalvm.truffle:truffle-dsl-processor:24.2.2")
+    annotationProcessor("org.graalvm.truffle:truffle-dsl-processor:25.0.3")
 
     // GraalVM SDK - for TruffleObject interop
-    implementation("org.graalvm.sdk:graal-sdk:24.2.2")
-    implementation("org.graalvm.polyglot:polyglot:24.2.2")
+    implementation("org.graalvm.sdk:graal-sdk:25.0.3")
+    implementation("org.graalvm.polyglot:polyglot:25.0.3")
 
     // Test dependencies
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")

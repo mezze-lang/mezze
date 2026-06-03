@@ -6,7 +6,7 @@ plugins {
     kotlin("plugin.serialization")
     kotlin("kapt") // Add for Truffle annotation processing
     application
-    id("com.github.johnrengelman.shadow") version "8.1.1"
+    id("com.gradleup.shadow") version "9.4.1"
     id("org.graalvm.buildtools.native") version "0.10.3"
 }
 
@@ -36,7 +36,7 @@ application {
 }
 
 kotlin {
-    jvmToolchain(24)
+    jvmToolchain(25)
 }
 
 dependencies {
@@ -57,11 +57,11 @@ dependencies {
     // against here.
 
     // Polyglot API (Context, Value, Source) - host API - match native-image version
-    implementation("org.graalvm.sdk:graal-sdk:24.2.2")
+    implementation("org.graalvm.sdk:graal-sdk:25.0.3")
 
     // Truffle API (Language, Node, etc.) - guest language API - match native-image version
-    implementation("org.graalvm.truffle:truffle-api:24.2.2")
-    kapt("org.graalvm.truffle:truffle-dsl-processor:24.2.2") // Add annotation processor
+    implementation("org.graalvm.truffle:truffle-api:25.0.3")
+    kapt("org.graalvm.truffle:truffle-dsl-processor:25.0.3") // Add annotation processor
 
     // Serialization for enhanced AST and stdlib pre-compilation
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
@@ -484,11 +484,11 @@ val devTools by configurations.creating {
     isCanBeConsumed = false
 }
 dependencies {
-    devTools("org.graalvm.tools:profiler-tool:24.2.2")
-    devTools("org.graalvm.tools:chromeinspector-tool:24.2.2")
-    devTools("org.graalvm.tools:dap-tool:24.2.2")
-    devTools("org.graalvm.tools:coverage-tool:24.2.2")
-    devTools("org.graalvm.tools:insight-tool:24.2.2")
+    devTools("org.graalvm.tools:profiler-tool:25.0.3")
+    devTools("org.graalvm.tools:chromeinspector-tool:25.0.3")
+    devTools("org.graalvm.tools:dap-tool:25.0.3")
+    devTools("org.graalvm.tools:coverage-tool:25.0.3")
+    devTools("org.graalvm.tools:insight-tool:25.0.3")
 }
 
 /**
