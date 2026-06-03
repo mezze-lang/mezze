@@ -195,6 +195,47 @@ class CrossModuleImplFieldItMismatchTest {
     }
 
     /**
+     * Pinning #184 — match-bound variable inherent dispatch with
+     * generic-vs-concrete ambiguity. `val.is_ok {}` where `val` is
+     * pattern-bound has type fresh-VarType at constraint-gen time.
+     * Two `is_ok` candidates exist: `impl Resp` (concrete) and
+     * `impl Result 'a 'e` (generic). The old bailout returned null
+     * (treating as field access), which then crashed at runtime
+     * with "Field not found in shape: is_ok". The fix prefers the
+     * concrete candidate when the receiver is unresolved — the
+     * generic catch-all is rarely what the user means.
+     */
+    @Test
+    fun `match-bound variable dispatches to concrete impl over generic`(@TempDir tempDir: Path) {
+        val libModule = tempDir.resolve("libmod4.mz")
+        libModule.writeText("""
+            pub type Resp = { status: Int }
+            pub type Err = | Failed { msg: Str } |
+
+            impl Resp where {
+              is_ok = { it } -> it.status == 200,
+            }
+        """.trimIndent())
+
+        val userSource = """
+            use libmod4::{Resp, Err}
+
+            let make_resp : {} -> Result Resp Err = {} -> Ok { val = { status = 200 } }
+            let r = make_resp {}
+            let out = match r is
+              Ok { val } -> if val.is_ok {} then 1 else 0
+              Err { error = _ } -> -1
+        """.trimIndent()
+
+        val parsedModule = parser.parseParsedModule(userSource, "test.mz")
+        val typedProgram = typeChecker.typeCheck(parsedModule, tempDir)
+        val outType = typedProgram.getVariableType("out")
+        println("[#184] out type: ${outType?.let { prettyPrintType(it) } ?: "null"}")
+        assertNotNull(outType)
+        assertTrue(prettyPrintType(outType!!).contains("Int"))
+    }
+
+    /**
      * Pinning #183 — 3-link chain `c.get { path }.with_json { val }.send {}`
      * fails with "Type constructor mismatch: Request vs Client". The
      * receiver of `.with_json` is the result of `c.get { path }` (a

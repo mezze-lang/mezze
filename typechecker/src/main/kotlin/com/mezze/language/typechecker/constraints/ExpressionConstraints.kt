@@ -1161,6 +1161,23 @@ class ExpressionConstraintGenerator {
                         return generateInherentMethodCall(expr, memberAccess, filtered, context)
                     }
                 }
+                // #184: when one candidate is concrete (its `it` slot has no
+                // free TyVars) and the others are generic (e.g.
+                // `impl Result 'a 'e where { is_ok }`), prefer the concrete
+                // one. The user almost certainly meant the impl that targets
+                // a specific type, not the polymorphic catch-all on the
+                // outer variant. If the receiver later turns out NOT to be
+                // that concrete type, unification will fail loudly — better
+                // than silently dispatching to a generic impl that always
+                // type-checks.
+                val concrete = inherentMethods.filter { mi ->
+                    val fnType = mi.methodType as? MezzeType.FunctionType
+                    val itType = (fnType?.paramType as? MezzeType.RecordType)?.fields?.get(Keywords.IT)
+                    itType != null && getFreeTypeVariables(itType).isEmpty()
+                }
+                if (concrete.size == 1) {
+                    return generateInherentMethodCall(expr, memberAccess, concrete, context)
+                }
                 return null
             }
             return generateInherentMethodCall(expr, memberAccess, inherentMethods, context)
