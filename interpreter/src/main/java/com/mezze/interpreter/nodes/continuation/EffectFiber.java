@@ -155,6 +155,14 @@ public final class EffectFiber {
      * actually running while its op handler executes on the driver's stack,
      * and nested op-calls inside that handler must fall through to chain
      * dispatch rather than attempt to yield.
+     *
+     * <p>Caveat: under nested performs (outer then inner), CURRENT during
+     * an Inner-op dispatch still points at the Outer fiber. Native handlers
+     * that <i>call back into Mezze code</i> (e.g. {@code __native_mutation_loop}
+     * invoking {@code cond}/{@code body}) must clear CURRENT around the
+     * callback themselves so the callback's op-calls route through chain
+     * dispatch instead of suspending the wrong fiber. See
+     * {@link #runDetached(java.util.function.Supplier)}.
      */
     public EffectFiber enterDispatch() {
         EffectFiber prev = DISPATCH.get();
@@ -165,6 +173,28 @@ public final class EffectFiber {
     /** Counterpart to {@link #enterDispatch()}. */
     public static void exitDispatch(EffectFiber previous) {
         DISPATCH.set(previous);
+    }
+
+    /**
+     * Run {@code body} with {@link #CURRENT} cleared on this thread and
+     * restored on return. Used by native handlers (e.g. the
+     * {@code __native_mutation_loop} while loop) that re-enter Mezze code
+     * which may perform effect ops: clearing CURRENT routes those ops
+     * through chain dispatch instead of suspending whichever fiber happens
+     * to be the thread's CURRENT at the time (often an outer perform's
+     * fiber, whose continuation is yielded several layers deep — suspending
+     * it strands the rest of the body and surfaces as a stray
+     * {@code MezzeSuspended} from the outer perform's driver).
+     * Root cause of #255.
+     */
+    public static <T> T runDetached(java.util.function.Supplier<T> body) {
+        EffectFiber prev = CURRENT.get();
+        CURRENT.set(null);
+        try {
+            return body.get();
+        } finally {
+            CURRENT.set(prev);
+        }
     }
 
     // ----------------------------------------------------------------

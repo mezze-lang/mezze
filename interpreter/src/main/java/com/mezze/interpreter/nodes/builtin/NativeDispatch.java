@@ -3998,13 +3998,21 @@ public final class NativeDispatch extends MezzeNode {
         System.arraycopy(bodyClosureValues, 0, bodyCallArgs, 0, bodyClosureLen);
         bodyCallArgs[bodyClosureLen] = MezzeRecord.empty();
 
-        while (true) {
-            Object condResult = callNode.call(cond.getCallTarget(), condCallArgs);
-            if (!(condResult instanceof Boolean b) || !b) {
-                break;
+        // Detach from CURRENT so ops inside cond/body route through the
+        // per-thread handler chain instead of suspending whichever fiber
+        // happens to be CURRENT (an outer perform's, under nested
+        // performs — strands the rest of the body). See #255 and
+        // EffectFiber.runDetached.
+        com.mezze.interpreter.nodes.continuation.EffectFiber.runDetached(() -> {
+            while (true) {
+                Object condResult = callNode.call(cond.getCallTarget(), condCallArgs);
+                if (!(condResult instanceof Boolean b) || !b) {
+                    break;
+                }
+                callNode.call(body.getCallTarget(), bodyCallArgs);
             }
-            callNode.call(body.getCallTarget(), bodyCallArgs);
-        }
+            return null;
+        });
     }
 
     @TruffleBoundary
@@ -4021,16 +4029,20 @@ public final class NativeDispatch extends MezzeNode {
         System.arraycopy(bodyClosureValues, 0, bodyCallArgs, 0, bodyClosureLen);
         bodyCallArgs[bodyClosureLen] = MezzeRecord.empty();
 
-        int iteration = 0;
-        while (true) {
-            debugMutationLoop(iteration);
-            Object condResult = callNode.call(cond.getCallTarget(), condCallArgs);
-            if (!(condResult instanceof Boolean b) || !b) {
-                break;
+        // Same detach reason as whileLoop — see #255.
+        com.mezze.interpreter.nodes.continuation.EffectFiber.runDetached(() -> {
+            int iteration = 0;
+            while (true) {
+                debugMutationLoop(iteration);
+                Object condResult = callNode.call(cond.getCallTarget(), condCallArgs);
+                if (!(condResult instanceof Boolean b) || !b) {
+                    break;
+                }
+                callNode.call(body.getCallTarget(), bodyCallArgs);
+                iteration++;
             }
-            callNode.call(body.getCallTarget(), bodyCallArgs);
-            iteration++;
-        }
+            return null;
+        });
     }
 
 

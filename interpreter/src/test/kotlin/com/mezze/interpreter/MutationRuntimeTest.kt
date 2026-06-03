@@ -1,6 +1,5 @@
 package com.mezze.interpreter
 
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -1742,7 +1741,6 @@ class MutationRuntimeTest {
     }
 
     @Test
-    @Disabled("Pins runtime bug #255 — for_range body calling a nested-perform helper under outer Console silently exits. Re-enable when #255 is fixed.")
     fun `test Console wrapping for_range that calls a helper using nested perform LocalMut`() {
         // Closest unit-level approximation of the benchmark shape that
         // silently exited under `mez build`. The bug repro: outer
@@ -1779,7 +1777,6 @@ class MutationRuntimeTest {
     }
 
     @Test
-    @Disabled("Pins runtime bug #255 — same shape as the for_range test above, exercised end-to-end with while + Collatz. Re-enable when #255 is fixed.")
     fun `test Console wrapping the full Mut Collatz iterative shape`() {
         // The exact shape that silently exited under `mez build`,
         // shrunk to a tractable size (n = 10 instead of 500000) so the
@@ -1825,4 +1822,42 @@ class MutationRuntimeTest {
         assertTrue(out.contains("Collatz sum 1..10 = 67"),
             "expected 'Collatz sum 1..10 = 67' in output, got: <$out>")
     }
+
+    @Test
+    fun `test Console wrapping for_range under DebugLocalMut with nested perform`() {
+        // Same #255 shape but with DebugLocalMut. Exercises
+        // __native_debug_mutation_loop + __native_debug_mutation_mutate,
+        // which call back into Mezze code (cond/body/act) from inside the
+        // driver's op-dispatch. Without the enterDispatch CURRENT-clear fix,
+        // nested ops in the callback suspend the outer Console fiber instead
+        // of routing through chain dispatch.
+        val code = """
+            use std::effects::log::{Console, println}
+            use std::effects::mutation::{DebugLocalMut, int_to_mut, read_int, incr, for_range}
+            use std::int
+
+            let one_step = { n_init } -> perform DebugLocalMut in do
+                let acc = int_to_mut { n = 0 }
+                incr { n = acc, delta = n_init }
+                read_int { n = acc }
+
+            let main = {} -> perform Console in do
+                println { msg = "start" }
+                let result = perform DebugLocalMut in do
+                    let total = int_to_mut { n = 0 }
+                    for_range { start = 1, end = 4, step = 1, body = {i} -> do
+                        let len = one_step { n_init = i }
+                        incr { n = total, delta = len }
+                    }
+                    read_int { n = total }
+                println { msg = "sum=$(int::to_str { n = result })" }
+
+            main {}
+        """.trimIndent()
+        // for_range body runs for i = 1, 2, 3; total = 1 + 2 + 3 = 6.
+        val out = MezzeTestHelper.runWithOutput(code).output()
+        assertTrue(out.contains("start"), "expected 'start' in output, got: <$out>")
+        assertTrue(out.contains("sum=6"), "expected 'sum=6' in output, got: <$out>")
+    }
+
 }
