@@ -470,6 +470,12 @@ public final class NativeDispatch extends MezzeNode {
             getString(r, "s").stripLeading());
         HANDLERS.put("__native_string_trim_end", (r, c) ->
             getString(r, "s").stripTrailing());
+        // Percent-encode a single URL component (path segment, query value, etc).
+        // Matches JS encodeURIComponent / RFC 3986 unreserved characters.
+        HANDLERS.put("__native_url_encode_component", (r, c) ->
+            urlEncodeComponent(getString(r, "s")));
+        HANDLERS.put("__native_url_decode_component", (r, c) ->
+            urlDecodeComponent(getString(r, "s")));
         // String comparisons
         HANDLERS.put("__native_string_eq", (r, c) ->
             PrimitiveNatives.strEq(getString(r, "l"), getString(r, "r")));
@@ -521,6 +527,37 @@ public final class NativeDispatch extends MezzeNode {
             sb.append((String) strings.get(i));
         }
         return sb.toString();
+    }
+
+    /**
+     * Percent-encode a single URL component. Matches `encodeURIComponent`
+     * (RFC 3986 unreserved set: A-Z a-z 0-9 - _ . ~). Spaces become "%20",
+     * NOT "+" — the latter is form-encoding, not URL component encoding.
+     */
+    @TruffleBoundary
+    private static String urlEncodeComponent(String s) {
+        // java.net.URLEncoder uses application/x-www-form-urlencoded which
+        // encodes spaces as "+" and uppercases hex digits — close to what we
+        // want but we need RFC 3986 component semantics: " " -> "%20" and
+        // unreserved characters (~_-.) left as-is.
+        try {
+            String formEncoded = java.net.URLEncoder.encode(s, java.nio.charset.StandardCharsets.UTF_8);
+            return formEncoded
+                .replace("+", "%20")
+                .replace("%7E", "~")
+                .replace("*", "%2A");  // URLEncoder leaves * alone; RFC says encode
+        } catch (Exception e) {
+            return s;
+        }
+    }
+
+    @TruffleBoundary
+    private static String urlDecodeComponent(String s) {
+        try {
+            return java.net.URLDecoder.decode(s, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return s;
+        }
     }
 
     // ==================== Bool Operations ====================

@@ -510,6 +510,16 @@ object BasicTypes {
             MezzeType.StringType
         )
 
+        context["__native_url_encode_component"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
+            MezzeType.StringType
+        )
+
+        context["__native_url_decode_component"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
+            MezzeType.StringType
+        )
+
         context["__native_string_trim"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
             MezzeType.StringType

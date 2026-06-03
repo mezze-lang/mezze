@@ -1,5 +1,6 @@
 use std::codec::json::{ Json, JsonFmt, json_fmt, to_str, parse_str }
 use std::codec::core::{ EncodeRepr, Decode, DecodeError, EncodeError, CodecConfig, FieldTransform, default_config, Format, DecodeFormat }
+use std::codec::url::{ UrlParamFmt, url_param_fmt, url_encode_component }
 use std::collections::map
 use std::collections::seq
 use std::collections::bytes
@@ -312,6 +313,65 @@ pub let with_method : { req: Request, val: Method } -> Request = { req, val } ->
     timeout_ms = req.timeout_ms,
   }
 
+## Append `?k1=v1&k2=v2&...` (or `&...` if the URL already has a query)
+## from a `Map Str Str`. Keys and values are percent-encoded per RFC 3986.
+##
+## Mixed-type values must be pre-converted to Str by the caller (e.g.
+## `int::to_str { n = 42 }`). A future revision may add a polymorphic
+## variant gated on `EncodeRepr 'a` once primitive types implement the
+## ability; today the codec only auto-derives for records and variants.
+##
+## Empty map is a no-op.
+pub let with_query : { req: Request, params: Map Str Str } -> Request = { req, params } -> do
+  let entries = map::to_seq { m = params }
+  if seq::is_empty { xs = entries }
+  then req
+  else do
+    let pairs = seq::map {
+      xs = entries,
+      f = { x } -> str::concat {
+        l = url_encode_component { s = x.k },
+        r = str::concat {
+          l = "=",
+          r = url_encode_component { s = x.v },
+        },
+      },
+    }
+    let qs = str::join { strings = pairs, separator = "&" }
+    let sep = if str::contains { s = req.url, substring = "?" } then "&" else "?"
+    let new_url = str::concat { l = req.url, r = str::concat { l = sep, r = qs } }
+    {
+      method = req.method,
+      url = new_url,
+      headers = req.headers,
+      body = req.body,
+      timeout_ms = req.timeout_ms,
+    }
+
+## Promote a non-2xx Response to an HttpError. Used to short-circuit
+## chains that want to treat any failure (transport OR status) as an
+## error in one shape.
+##
+##   request { url }.send {}.then { ... } -- needs uniform Err on 4xx/5xx
+##   ensure_ok { resp = req.send {} }
+pub let ensure_ok : { resp: Result Response HttpError } -> Result Response HttpError = { resp } ->
+  match resp is
+    Err { error = _ } -> resp
+    Ok { val } ->
+      if is_success { resp = val }
+      then resp
+      else do
+        let body_str = match body_string { resp = val } is
+          Ok { val = s } -> s
+          Err { error = _ } -> ""
+        Err {
+          error = RequestFailed {
+            url = "",
+            status = val.status,
+            body = body_str,
+          },
+        }
+
 ## Impl Request gives the chainable surface. Every method is a thin
 ## delegator to a free function above — the impl block is just an
 ## ergonomic wrapper. Method calls return new Requests (immutable
@@ -324,6 +384,7 @@ impl Request where {
   with_body        = { it, val: Bytes }   -> with_body        { req = it, body = val },
   with_text        = { it, val: Str }     -> with_text        { req = it, val = val },
   with_json        = { it, val: Json }    -> with_json        { req = it, val = val },
+  with_query       = { it, params: Map Str Str } -> with_query { req = it, params = params },
   with_timeout     = { it, ms: Int }      -> with_timeout     { req = it, ms = ms },
   with_auth        = { it, val: Str }     -> with_auth        { req = it, auth = val },
   with_content_type = { it, val: Str }    -> with_content_type { req = it, content_type = val },
@@ -349,6 +410,12 @@ impl Response where {
   is_redirect   = { it } -> is_redirect { resp = it },
   is_client_err = { it } -> is_client_error { resp = it },
   is_server_err = { it } -> is_server_error { resp = it },
+  ## Promote a non-2xx status to an Err on a bare Response. Most callers
+  ## want the `Result Response HttpError`-shaped variant — use the free
+  ## `ensure_ok` function for that. This method is useful when you
+  ## already have an unwrapped Response (e.g. from `match resp is Ok ...`)
+  ## and want a Result back without re-wrapping.
+  ensure_ok     = { it } -> ensure_ok { resp = Ok { val = it } },
   ## Case-insensitive header lookup.
   header        = { it, name: Str } -> get_header { resp = it, name = name },
   content_type  = { it } -> get_content_type { resp = it },
@@ -458,6 +525,35 @@ impl Client where {
 }
 
 use std::effects::async::{ Async, AsyncError, par_map }
+
+## Internal: retry loop. Self-recursive — kept top-level because Mezze
+## doesn't bind nested `let` names to themselves.
+let retry_loop : { req: Request, attempt: Int, max_attempts: Int, backoff_ms: Int } -> Result Response HttpError <Http, Async> = { req, attempt, max_attempts, backoff_ms } -> do
+  let resp = Http.request { req = req, config = default_http_config }
+  match resp is
+    Ok { val } -> resp
+    Err { error } ->
+      if attempt >= max_attempts || ! is_retryable { err = error }
+      then resp
+      else do
+        Async.sleep { ms = backoff_ms }
+        retry_loop { req = req, attempt = attempt + 1, max_attempts = max_attempts, backoff_ms = backoff_ms }
+
+## Send a Request with retry on transient failures. A failure is
+## considered retryable when `is_retryable { err }` returns True —
+## namely ConnectionFailed, Timeout, and 5xx RequestFailed (see the
+## predicate below). Sleeps `backoff_ms` between attempts.
+##
+##   request { url = "https://api.acme.com/users/42" }
+##     .with_auth { val = "Bearer xyz" }
+##     .send {}
+##     -- becomes:
+##   retry { req = request{...}.with_auth{...}, max_attempts = 3, backoff_ms = 250 }
+##
+## Returns the first Ok or the last Err. `max_attempts` includes the
+## initial attempt — `max_attempts = 1` is a single shot with no retry.
+pub let retry : { req: Request, max_attempts: Int, backoff_ms: Int } -> Result Response HttpError <Http, Async> = { req, max_attempts, backoff_ms } ->
+  retry_loop { req = req, attempt = 1, max_attempts = max_attempts, backoff_ms = backoff_ms }
 
 ## Fetch multiple URLs concurrently, returning a list of Results.
 ##
