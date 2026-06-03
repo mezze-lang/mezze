@@ -213,7 +213,14 @@ private fun showHelp() {
  */
 private fun showVersion() {
     println("Mezze Language ${displayVersion()} (${BuildInfo.GIT_SHA})")
-    println("Built with Oracle GraalVM 24.0.2")
+    // Probe runtime JDK + GraalVM info instead of hardcoding a version
+    // that drifts on every distribution bump. java.vm.vendor tends to be
+    // "GraalVM Community" / "Oracle GraalVM" / "OpenJDK" + "Inc.";
+    // java.vm.version carries the build string like "25.0.2+10-jvmci-b01".
+    val vmVendor = System.getProperty("java.vm.vendor") ?: "unknown JVM"
+    val vmVersion = System.getProperty("java.vm.version")
+        ?: System.getProperty("java.version") ?: "?"
+    println("Built with $vmVendor $vmVersion")
     println()
     println("Features:")
     println("  Bidirectional type inference")
