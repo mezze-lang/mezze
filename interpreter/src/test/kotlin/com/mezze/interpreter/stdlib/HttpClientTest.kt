@@ -11,7 +11,10 @@ import org.junit.jupiter.api.BeforeEach
  * - HttpClientWith (scoped, custom config)
  * - SimpleHttpClient (non-scoped, default config)
  * - SimpleHttpClientWith (non-scoped, custom config)
- * Migrated from V1 to V2 with unboxed values.
+ *
+ * Per-verb helpers (get/post/put/etc.) were removed in Stage C; the chain
+ * surface (HttpChainTest) covers their replacements. This file keeps the
+ * client/config tests that don't overlap with HttpChainTest.
  */
 class HttpClientTest {
 
@@ -30,7 +33,7 @@ class HttpClientTest {
     @Test
     fun `HttpClient is a valid implementation`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -45,7 +48,7 @@ class HttpClientTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://test.com/api" }
+                let resp = request { url = "http://test.com/api" }.send {}
                 match resp is
                     Ok { val } -> val.status
                     Err { error } -> -1
@@ -60,7 +63,7 @@ class HttpClientTest {
     @Test
     fun `HttpClientWith accepts custom config`() {
         val result = eval("""
-            use std::effects::http::{Http, HttpClientWith, MockHttpClient, MockRule, UrlPattern, Response, Method, default_http_config, get}
+            use std::effects::http::{Http, HttpClientWith, MockHttpClient, MockRule, UrlPattern, Response, Method, default_http_config, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -79,7 +82,7 @@ class HttpClientTest {
             let timeout = custom_config.timeout_ms
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://test.com/api" }
+                let resp = request { url = "http://test.com/api" }.send {}
                 match resp is
                     Ok { val } -> timeout
                     Err { error } -> -1
@@ -110,13 +113,15 @@ class HttpClientTest {
     }
 
     // =========================================================================
-    // SimpleHttpClient (non-scoped, default config)
+    // SimpleHttpClient (non-scoped, default config) — exercises Http.request
+    // directly with a raw Request + HttpConfig pair, which is what the chain's
+    // .send {} delegates to. Keep this one as the low-level smoke test.
     // =========================================================================
 
     @Test
     fun `SimpleHttpClient is a valid implementation`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, Request, HttpConfig, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, Request, HttpConfig}
             use std::collections::map
             use std::collections::bytes
 
@@ -222,167 +227,16 @@ class HttpClientTest {
     @Test
     fun `MockHttpClient with empty rules returns error`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, request}
 
             let rules: [MockRule] = []
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://test.com/api" }
+                let resp = request { url = "http://test.com/api" }.send {}
                 match resp is
                     Ok { val } -> 1
                     Err { error } -> -1
         """)
         assertEquals(-1L, result)
-    }
-
-    // =========================================================================
-    // Request helpers
-    // =========================================================================
-
-    @Test
-    fun `get helper works`() {
-        val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, get}
-            use std::collections::map
-            use std::collections::bytes
-
-            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_string { s = "" } }
-            let rules: [MockRule] = [
-                { methods = [Get], url = Glob { pattern = "**" }, response = Ok { val = response } }
-            ]
-
-            perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/test" }
-                match resp is
-                    Ok { val } -> val.status
-                    Err { error } -> -1
-        """)
-        assertEquals(200L, result)
-    }
-
-    @Test
-    fun `post helper works`() {
-        val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, post}
-            use std::collections::map
-            use std::collections::bytes
-
-            let response: Response = { status = 201, headers = map::empty {}, body = bytes::from_string { s = "" } }
-            let rules: [MockRule] = [
-                { methods = [Post], url = Glob { pattern = "**" }, response = Ok { val = response } }
-            ]
-
-            perform MockHttpClient { rules = rules } in do
-                let resp = post { url = "http://example.com/create", body = bytes::from_string { s = "{}" } }
-                match resp is
-                    Ok { val } -> val.status
-                    Err { error } -> -1
-        """)
-        assertEquals(201L, result)
-    }
-
-    @Test
-    fun `put helper works`() {
-        val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, put}
-            use std::collections::map
-            use std::collections::bytes
-
-            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_string { s = "" } }
-            let rules: [MockRule] = [
-                { methods = [Put], url = Glob { pattern = "**" }, response = Ok { val = response } }
-            ]
-
-            perform MockHttpClient { rules = rules } in do
-                let resp = put { url = "http://example.com/update", body = bytes::from_string { s = "{}" } }
-                match resp is
-                    Ok { val } -> val.status
-                    Err { error } -> -1
-        """)
-        assertEquals(200L, result)
-    }
-
-    @Test
-    fun `delete helper works`() {
-        val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, delete}
-            use std::collections::map
-            use std::collections::bytes
-
-            let response: Response = { status = 204, headers = map::empty {}, body = bytes::from_string { s = "" } }
-            let rules: [MockRule] = [
-                { methods = [Delete], url = Glob { pattern = "**" }, response = Ok { val = response } }
-            ]
-
-            perform MockHttpClient { rules = rules } in do
-                let resp = delete { url = "http://example.com/remove" }
-                match resp is
-                    Ok { val } -> val.status
-                    Err { error } -> -1
-        """)
-        assertEquals(204L, result)
-    }
-
-    @Test
-    fun `patch helper works`() {
-        val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, patch}
-            use std::collections::map
-            use std::collections::bytes
-
-            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_string { s = "" } }
-            let rules: [MockRule] = [
-                { methods = [Patch], url = Glob { pattern = "**" }, response = Ok { val = response } }
-            ]
-
-            perform MockHttpClient { rules = rules } in do
-                let resp = patch { url = "http://example.com/patch", body = bytes::from_string { s = "{}" } }
-                match resp is
-                    Ok { val } -> val.status
-                    Err { error } -> -1
-        """)
-        assertEquals(200L, result)
-    }
-
-    @Test
-    fun `head helper works`() {
-        val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, head}
-            use std::collections::map
-            use std::collections::bytes
-
-            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_string { s = "" } }
-            let rules: [MockRule] = [
-                { methods = [Head], url = Glob { pattern = "**" }, response = Ok { val = response } }
-            ]
-
-            perform MockHttpClient { rules = rules } in do
-                let resp = head { url = "http://example.com/check" }
-                match resp is
-                    Ok { val } -> val.status
-                    Err { error } -> -1
-        """)
-        assertEquals(200L, result)
-    }
-
-    @Test
-    fun `options helper works`() {
-        val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, options}
-            use std::collections::map
-            use std::collections::bytes
-
-            let response: Response = { status = 200, headers = map::empty {}, body = bytes::from_string { s = "" } }
-            let rules: [MockRule] = [
-                { methods = [Options], url = Glob { pattern = "**" }, response = Ok { val = response } }
-            ]
-
-            perform MockHttpClient { rules = rules } in do
-                let resp = options { url = "http://example.com/options" }
-                match resp is
-                    Ok { val } -> val.status
-                    Err { error } -> -1
-        """)
-        assertEquals(200L, result)
     }
 }

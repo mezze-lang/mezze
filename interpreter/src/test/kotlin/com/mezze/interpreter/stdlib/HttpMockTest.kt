@@ -26,7 +26,7 @@ class HttpMockTest {
     @Test
     fun `mock returns configured response for exact match`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -41,7 +41,7 @@ class HttpMockTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/test" }
+                let resp = request { url = "http://example.com/test" }.send {}
                 match resp is
                     Ok { val } -> val.status
                     Err { error } -> -1
@@ -52,14 +52,14 @@ class HttpMockTest {
     @Test
     fun `mock returns error response`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request}
 
             let rules: [MockRule] = [
                 { methods = [Get], url = Glob { pattern = "/error" }, response = Err { error = ConnectionFailed { url = "/error", reason = "mock error" } } }
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/error" }
+                let resp = request { url = "http://example.com/error" }.send {}
                 match resp is
                     Ok { val } -> "success"
                     Err { error } -> match error is
@@ -76,7 +76,7 @@ class HttpMockTest {
     @Test
     fun `mock matches specific GET method`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, get, post}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -89,7 +89,7 @@ class HttpMockTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/resource" }
+                let resp = request { url = "http://example.com/resource" }.send {}
                 match resp is
                     Ok { val } -> val.status
                     Err { error } -> -1
@@ -100,7 +100,7 @@ class HttpMockTest {
     @Test
     fun `mock matches specific POST method`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, post}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -113,7 +113,10 @@ class HttpMockTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = post { url = "http://example.com/resource", body = bytes::from_string { s = "" } }
+                let resp = request { url = "http://example.com/resource" }
+                    .with_method { val = Post }
+                    .with_body { val = bytes::from_string { s = "" } }
+                    .send {}
                 match resp is
                     Ok { val } -> val.status
                     Err { error } -> -1
@@ -124,7 +127,7 @@ class HttpMockTest {
     @Test
     fun `mock with empty methods array matches any method`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, get, post, delete}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -135,9 +138,14 @@ class HttpMockTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let r1 = get { url = "http://example.com/any-method" }
-                let r2 = post { url = "http://example.com/any-method", body = bytes::from_string { s = "" } }
-                let r3 = delete { url = "http://example.com/any-method" }
+                let r1 = request { url = "http://example.com/any-method" }.send {}
+                let r2 = request { url = "http://example.com/any-method" }
+                    .with_method { val = Post }
+                    .with_body { val = bytes::from_string { s = "" } }
+                    .send {}
+                let r3 = request { url = "http://example.com/any-method" }
+                    .with_method { val = Delete }
+                    .send {}
                 let c1 = match r1 is
                     Ok { val } -> 1
                     Err { error } -> 0
@@ -159,7 +167,7 @@ class HttpMockTest {
     @Test
     fun `mock matches star pattern for single segment`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -170,7 +178,7 @@ class HttpMockTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/users/123" }
+                let resp = request { url = "http://example.com/users/123" }.send {}
                 match resp is
                     Ok { val } -> val.status
                     Err { error } -> -1
@@ -181,7 +189,7 @@ class HttpMockTest {
     @Test
     fun `mock star pattern does not match nested paths`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -192,7 +200,7 @@ class HttpMockTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/users/123/posts" }
+                let resp = request { url = "http://example.com/users/123/posts" }.send {}
                 match resp is
                     Ok { val } -> "matched"
                     Err { error } -> "no match"
@@ -207,7 +215,7 @@ class HttpMockTest {
     @Test
     fun `mock matches doublestar for nested paths`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -218,7 +226,7 @@ class HttpMockTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/api/v1/internal/health" }
+                let resp = request { url = "http://example.com/api/v1/internal/health" }.send {}
                 match resp is
                     Ok { val } -> val.status
                     Err { error } -> -1
@@ -229,7 +237,7 @@ class HttpMockTest {
     @Test
     fun `mock doublestar catch-all`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -240,7 +248,7 @@ class HttpMockTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/any/path/at/all" }
+                let resp = request { url = "http://example.com/any/path/at/all" }.send {}
                 match resp is
                     Ok { val } -> val.status
                     Err { error } -> -1
@@ -255,7 +263,7 @@ class HttpMockTest {
     @Test
     fun `mock uses first matching rule`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -268,7 +276,7 @@ class HttpMockTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/users/123" }
+                let resp = request { url = "http://example.com/users/123" }.send {}
                 match resp is
                     Ok { val } -> val.status
                     Err { error } -> -1
@@ -283,7 +291,7 @@ class HttpMockTest {
     @Test
     fun `mock response body is preserved`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, get, body_string}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -298,9 +306,9 @@ class HttpMockTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/test" }
+                let resp = request { url = "http://example.com/test" }.send {}
                 match resp is
-                    Ok { val } -> match body_string { resp = val } is
+                    Ok { val } -> match val.text {} is
                         Ok { val = s } -> s
                         Err { error } -> "decode error"
                     Err { error } -> "request error"
@@ -315,7 +323,7 @@ class HttpMockTest {
     @Test
     fun `mock response headers are preserved`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, get, get_header}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -331,9 +339,9 @@ class HttpMockTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/test" }
+                let resp = request { url = "http://example.com/test" }.send {}
                 match resp is
-                    Ok { val } -> match get_header { resp = val, name = "content-type" } is
+                    Ok { val } -> match val.header { name = "content-type" } is
                         Some { val = h } -> h
                         None -> "not found"
                     Err { error } -> "request error"
@@ -348,14 +356,14 @@ class HttpMockTest {
     @Test
     fun `mock Timeout error`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Err { error = Timeout { url = "/slow", ms = 5000 } } }
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/slow" }
+                let resp = request { url = "http://example.com/slow" }.send {}
                 match resp is
                     Ok { val } -> -1
                     Err { error } -> match error is
@@ -368,14 +376,14 @@ class HttpMockTest {
     @Test
     fun `mock Cancelled error`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Err { error = Cancelled } }
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/test" }
+                let resp = request { url = "http://example.com/test" }.send {}
                 match resp is
                     Ok { val } -> "success"
                     Err { error } -> match error is
@@ -392,7 +400,7 @@ class HttpMockTest {
     @Test
     fun `mock returns error when no rule matches`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
             use std::collections::map
             use std::collections::bytes
 
@@ -403,7 +411,7 @@ class HttpMockTest {
             ]
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/users" }
+                let resp = request { url = "http://example.com/users" }.send {}
                 match resp is
                     Ok { val } -> "matched"
                     Err { error } -> "no match"
@@ -414,12 +422,12 @@ class HttpMockTest {
     @Test
     fun `mock with empty rules returns error`() {
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Method, get}
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Method, request}
 
             let rules: [MockRule] = []
 
             perform MockHttpClient { rules = rules } in do
-                let resp = get { url = "http://example.com/test" }
+                let resp = request { url = "http://example.com/test" }.send {}
                 match resp is
                     Ok { val } -> "matched"
                     Err { error } -> "no match"
