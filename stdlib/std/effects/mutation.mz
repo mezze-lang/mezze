@@ -391,8 +391,8 @@ pub let map_keys : { map: MutMap 'k 'v } -> ['k] <Mut> = { map } ->
 pub let map_values : { map: MutMap 'k 'v } -> ['v] <Mut> = { map } ->
   Mut.mutate { act = {} -> __native_mut_map_values { map = map } }
 
-## Get all entries from a MutMap as key-value records.
-pub let map_entries : { map: MutMap 'k 'v } -> [{ key: 'k, value: 'v }] <Mut> = { map } ->
+## Get all entries from a MutMap as {k, v} records.
+pub let map_entries : { map: MutMap 'k 'v } -> [{ k: 'k, v: 'v }] <Mut> = { map } ->
   Mut.mutate { act = {} -> __native_mut_map_entries { map = map } }
 
 ## Create an empty MutMap with pre-allocated capacity.

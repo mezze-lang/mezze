@@ -776,7 +776,7 @@ class DequeAndSortedCollectionsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::deque
             use std::collections::map
-            let d = deque::from_seq { xs = [{ key = "a", value = 1 }, { key = "b", value = 2 }] }
+            let d = deque::from_seq { xs = [{ k = "a", v = 1 }, { k = "b", v = 2 }] }
             let m = deque::to_map { d = d }
             map::size { m = m }
             """);
@@ -788,7 +788,7 @@ class DequeAndSortedCollectionsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::deque
             use std::collections::sorted_map
-            let d = deque::from_seq { xs = [{ key = 3, value = "c" }, { key = 1, value = "a" }, { key = 2, value = "b" }] }
+            let d = deque::from_seq { xs = [{ k = 3, v = "c" }, { k = 1, v = "a" }, { k = 2, v = "b" }] }
             let m = deque::to_sorted_map { d = d }
             sorted_map::size { m = m }
             """);
@@ -800,7 +800,7 @@ class DequeAndSortedCollectionsTest {
         Object result = MezzeTestHelper.run("""
             use std::collections::deque
             use std::collections::sorted_map
-            let d = deque::from_seq { xs = [{ key = 1, value = "first" }, { key = 1, value = "second" }] }
+            let d = deque::from_seq { xs = [{ k = 1, v = "first" }, { k = 1, v = "second" }] }
             let m = deque::to_sorted_map { d = d }
             match sorted_map::get { m = m, k = 1 } is
                 Some { val } -> val
@@ -888,7 +888,7 @@ class DequeAndSortedCollectionsTest {
             let m4 = sorted_map::insert { m = m3, k = 2, v = "b" }
             let d = deque::from_sorted_map { m = m4 }
             match deque::peek_front { d = d } is
-                Some { val } -> val.key
+                Some { val } -> val.k
                 None -> -1
             """);
         assertEquals(1L, result);  // First key is 1 (sorted)
@@ -902,7 +902,7 @@ class DequeAndSortedCollectionsTest {
             let m = sorted_map::singleton { k = 1, v = "hello" }
             let d = deque::from_sorted_map { m = m }
             match deque::peek_front { d = d } is
-                Some { val } -> val.value
+                Some { val } -> val.v
                 None -> "none"
             """);
         assertEquals("hello", result);

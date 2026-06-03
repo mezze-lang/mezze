@@ -127,13 +127,13 @@ object SortedMapTypes {
             )
         }
 
-        // __native_sorted_map_entries: {m: SortedMap 'k 'v} -> List {key: 'k, value: 'v}
+        // __native_sorted_map_entries: {m: SortedMap 'k 'v} -> List {k: 'k, v: 'v}
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
             context["__native_sorted_map_entries"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.ListType(MezzeType.RecordType(mapOf("key" to keyType, "value" to valueType)))
+                MezzeType.ListType(MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)))
             )
         }
 
@@ -157,23 +157,23 @@ object SortedMapTypes {
             )
         }
 
-        // __native_sorted_map_min_entry: {m: SortedMap 'k 'v} -> Option {key: 'k, value: 'v}
+        // __native_sorted_map_min_entry: {m: SortedMap 'k 'v} -> Option {k: 'k, v: 'v}
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
             context["__native_sorted_map_min_entry"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                optionType(MezzeType.RecordType(mapOf("key" to keyType, "value" to valueType)))
+                optionType(MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)))
             )
         }
 
-        // __native_sorted_map_max_entry: {m: SortedMap 'k 'v} -> Option {key: 'k, value: 'v}
+        // __native_sorted_map_max_entry: {m: SortedMap 'k 'v} -> Option {k: 'k, v: 'v}
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
             context["__native_sorted_map_max_entry"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                optionType(MezzeType.RecordType(mapOf("key" to keyType, "value" to valueType)))
+                optionType(MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)))
             )
         }
 

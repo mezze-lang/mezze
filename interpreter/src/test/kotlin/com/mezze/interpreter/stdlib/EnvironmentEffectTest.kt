@@ -55,7 +55,7 @@ class EnvironmentEffectTest {
         val result = eval("""
             use std::effects::env::{Env, MockEnv}
 
-            perform MockEnv { vars = [{ key = "FOO", value = "bar" }] } in do
+            perform MockEnv { vars = [{ k = "FOO", v = "bar" }] } in do
                 let v = Env.lookup { name = "FOO" }
                 match v is
                   Some { val = s } -> s == "bar"

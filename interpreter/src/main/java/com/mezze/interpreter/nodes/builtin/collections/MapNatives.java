@@ -25,7 +25,6 @@ public final class MapNatives {
     private static final String[] FIELD_X = {"x"};
     private static final String[] FIELD_VAL = {"val"};
     private static final String[] FIELD_K_V = {"k", "v"};
-    private static final String[] FIELD_KEY_VALUE = {"key", "value"};
     private static final String[] FIELD_ACC_X = {"acc", "x"};
     private static final String[] FIELD_ACC_K_V = {"acc", "k", "v"};
     private static final String[] FIELD_ACC_ENTRY = {"acc", "entry"};
@@ -125,7 +124,7 @@ public final class MapNatives {
         int i = 0;
         for (MezzeMap.Entry entry : delegate) {
             result[i++] = MezzeRecord.fromFields(
-                FIELD_KEY_VALUE,
+                FIELD_K_V,
                 new Object[]{entry.key(), entry.value()}
             );
         }
@@ -389,7 +388,7 @@ public final class MapNatives {
         int i = 0;
         for (MezzeMap.Entry entry : delegate) {
             result[i++] = MezzeRecord.fromFields(
-                FIELD_KEY_VALUE,
+                FIELD_K_V,
                 new Object[]{entry.key(), entry.value()}
             );
         }

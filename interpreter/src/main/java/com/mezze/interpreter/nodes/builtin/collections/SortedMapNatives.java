@@ -81,7 +81,7 @@ public final class SortedMapNatives {
         Object[] result = new Object[map.size()];
         for (int i = 0; i < keys.length; i++) {
             result[i] = MezzeRecord.fromFields(
-                new String[]{"key", "value"},
+                new String[]{"k", "v"},
                 new Object[]{keys[i], values[i]}
             );
         }
@@ -125,7 +125,7 @@ public final class SortedMapNatives {
             return MezzeVariant.none();
         }
         return MezzeVariant.some(MezzeRecord.fromFields(
-            new String[]{"key", "value"},
+            new String[]{"k", "v"},
             new Object[]{map.minKey(), map.minValue()}
         ));
     }
@@ -136,7 +136,7 @@ public final class SortedMapNatives {
             return MezzeVariant.none();
         }
         return MezzeVariant.some(MezzeRecord.fromFields(
-            new String[]{"key", "value"},
+            new String[]{"k", "v"},
             new Object[]{map.maxKey(), map.maxValue()}
         ));
     }
@@ -608,7 +608,7 @@ public final class SortedMapNatives {
         int i = 0;
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             entries[i++] = MezzeRecord.fromFields(
-                new String[]{"key", "value"},
+                new String[]{"k", "v"},
                 new Object[]{entry.key(), entry.value()}
             );
         }

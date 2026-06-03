@@ -82,7 +82,7 @@ public final class MutableMap {
     }
 
     /**
-     * Get all entries as an array of {key, value} records.
+     * Get all entries as an array of {k, v} records.
      */
     @TruffleBoundary
     public MezzeRecord[] entries() {
@@ -90,7 +90,7 @@ public final class MutableMap {
         int i = 0;
         for (Map.Entry<Object, Object> entry : data.entrySet()) {
             result[i++] = MezzeRecord.fromFields(
-                new String[]{"key", "value"},
+                new String[]{"k", "v"},
                 new Object[]{entry.getKey(), entry.getValue()}
             );
         }

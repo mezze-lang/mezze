@@ -861,11 +861,11 @@ object DequeTypes {
             )
         }
 
-        // __native_deque_to_map: {d: Deque {key: 'k, value: 'v}} -> Map 'k 'v
+        // __native_deque_to_map: {d: Deque {k: 'k, v: 'v}} -> Map 'k 'v
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valType = MezzeType.VarType(TypeVar("v"))
-            val recordType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valType))
+            val recordType = MezzeType.RecordType(mapOf("k" to keyType, "v" to valType))
             val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(recordType))
             val mapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Map", listOf(keyType, valType))
             context["__native_deque_to_map"] = MezzeType.FunctionType(
@@ -874,11 +874,11 @@ object DequeTypes {
             )
         }
 
-        // __native_deque_to_sorted_map: {d: Deque {key: 'k, value: 'v}} -> SortedMap 'k 'v
+        // __native_deque_to_sorted_map: {d: Deque {k: 'k, v: 'v}} -> SortedMap 'k 'v
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valType = MezzeType.VarType(TypeVar("v"))
-            val recordType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valType))
+            val recordType = MezzeType.RecordType(mapOf("k" to keyType, "v" to valType))
             val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(recordType))
             val sortedMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("SortedMap", listOf(keyType, valType))
             context["__native_deque_to_sorted_map"] = MezzeType.FunctionType(
@@ -909,12 +909,12 @@ object DequeTypes {
             )
         }
 
-        // __native_deque_from_map: {m: Map 'k 'v} -> Deque {key: 'k, value: 'v}
+        // __native_deque_from_map: {m: Map 'k 'v} -> Deque {k: 'k, v: 'v}
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valType = MezzeType.VarType(TypeVar("v"))
             val mapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Map", listOf(keyType, valType))
-            val recordType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valType))
+            val recordType = MezzeType.RecordType(mapOf("k" to keyType, "v" to valType))
             val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(recordType))
             context["__native_deque_from_map"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("m" to mapType)),
@@ -922,12 +922,12 @@ object DequeTypes {
             )
         }
 
-        // __native_deque_from_sorted_map: {m: SortedMap 'k 'v} -> Deque {key: 'k, value: 'v}
+        // __native_deque_from_sorted_map: {m: SortedMap 'k 'v} -> Deque {k: 'k, v: 'v}
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valType = MezzeType.VarType(TypeVar("v"))
             val sortedMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("SortedMap", listOf(keyType, valType))
-            val recordType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valType))
+            val recordType = MezzeType.RecordType(mapOf("k" to keyType, "v" to valType))
             val dequeType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Deque", listOf(recordType))
             context["__native_deque_from_sorted_map"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("m" to sortedMapType)),

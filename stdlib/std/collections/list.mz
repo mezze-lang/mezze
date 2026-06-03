@@ -329,12 +329,12 @@ pub let to_deque : { xs: List 'a } -> Deque 'a = { xs } -> __native_list_to_dequ
 pub let to_sorted_set : { xs: List 'a } -> SortedSet 'a = { xs } ->
   __native_list_to_sorted_set { xs = xs }
 
-## Converts a list of {key, value} records to a Map.
-pub let to_map : { xs: List { key: 'k, value: 'v } } -> Map 'k 'v = { xs } ->
+## Converts a list of {k, v} records to a Map.
+pub let to_map : { xs: List { k: 'k, v: 'v } } -> Map 'k 'v = { xs } ->
   __native_list_to_map { xs = xs }
 
-## Converts a list of {key, value} records to a SortedMap.
-pub let to_sorted_map : { xs: List { key: 'k, value: 'v } } -> SortedMap 'k 'v = { xs } ->
+## Converts a list of {k, v} records to a SortedMap.
+pub let to_sorted_map : { xs: List { k: 'k, v: 'v } } -> SortedMap 'k 'v = { xs } ->
   __native_list_to_sorted_map { xs = xs }
 
 ## Creates a list from a Set.
@@ -347,12 +347,12 @@ pub let from_deque : { xs: Deque 'a } -> List 'a = { xs } -> __native_list_from_
 pub let from_sorted_set : { xs: SortedSet 'a } -> List 'a = { xs } ->
   __native_list_from_sorted_set { xs = xs }
 
-## Creates a list of {key, value} records from a Map.
-pub let from_map : { m: Map 'k 'v } -> List { key: 'k, value: 'v } = { m } ->
+## Creates a list of {k, v} records from a Map.
+pub let from_map : { m: Map 'k 'v } -> List { k: 'k, v: 'v } = { m } ->
   __native_list_from_map { m = m }
 
-## Creates a list of {key, value} records from a SortedMap (in sorted key order).
-pub let from_sorted_map : { m: SortedMap 'k 'v } -> List { key: 'k, value: 'v } = { m } ->
+## Creates a list of {k, v} records from a SortedMap (in sorted key order).
+pub let from_sorted_map : { m: SortedMap 'k 'v } -> List { k: 'k, v: 'v } = { m } ->
   __native_list_from_sorted_map { m = m }
 
 ## Returns the arithmetic mean, or None if empty.

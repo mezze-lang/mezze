@@ -1150,15 +1150,13 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static MezzeMap toMap(MezzeList list) {
-        // Expects list of {key, value} records
+        // Expects list of {k, v} records.
         MezzeMap result = MapNatives.empty();
         for (int i = 0; i < list.size(); i++) {
             Object elem = list.get(i);
             if (elem instanceof MezzeRecord rec) {
-                int keyIdx = rec.getFieldIndex("key");
-                int valIdx = rec.getFieldIndex("value");
-                if (keyIdx < 0) keyIdx = rec.getFieldIndex("k");
-                if (valIdx < 0) valIdx = rec.getFieldIndex("v");
+                int keyIdx = rec.getFieldIndex("k");
+                int valIdx = rec.getFieldIndex("v");
                 if (keyIdx >= 0 && valIdx >= 0) {
                     result = MapNatives.insert(result, rec.getField(keyIdx), rec.getField(valIdx));
                 }
@@ -1169,15 +1167,13 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static MezzeSortedMap toSortedMap(MezzeList list) {
-        // Expects list of {key, value} records
+        // Expects list of {k, v} records.
         MezzeSortedMap result = SortedMapNatives.empty();
         for (int i = 0; i < list.size(); i++) {
             Object elem = list.get(i);
             if (elem instanceof MezzeRecord rec) {
-                int keyIdx = rec.getFieldIndex("key");
-                int valIdx = rec.getFieldIndex("value");
-                if (keyIdx < 0) keyIdx = rec.getFieldIndex("k");
-                if (valIdx < 0) valIdx = rec.getFieldIndex("v");
+                int keyIdx = rec.getFieldIndex("k");
+                int valIdx = rec.getFieldIndex("v");
                 if (keyIdx >= 0 && valIdx >= 0) {
                     result = SortedMapNatives.insert(result, rec.getField(keyIdx), rec.getField(valIdx));
                 }

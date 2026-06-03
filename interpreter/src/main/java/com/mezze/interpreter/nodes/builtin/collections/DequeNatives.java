@@ -838,14 +838,12 @@ public final class DequeNatives {
 
     @TruffleBoundary
     public static MezzeMap toMap(MezzeDeque deque) {
-        // Expects deque of {key, value} records
+        // Expects deque of {k, v} records.
         MezzeMap result = MezzeMap.empty();
         for (Object elem : deque) {
             if (elem instanceof MezzeRecord rec) {
-                int keyIdx = rec.getFieldIndex("key");
-                int valIdx = rec.getFieldIndex("value");
-                if (keyIdx < 0) keyIdx = rec.getFieldIndex("k");
-                if (valIdx < 0) valIdx = rec.getFieldIndex("v");
+                int keyIdx = rec.getFieldIndex("k");
+                int valIdx = rec.getFieldIndex("v");
                 if (keyIdx >= 0 && valIdx >= 0) {
                     result = result.put(rec.getField(keyIdx), rec.getField(valIdx));
                 }
@@ -856,14 +854,12 @@ public final class DequeNatives {
 
     @TruffleBoundary
     public static MezzeSortedMap toSortedMap(MezzeDeque deque) {
-        // Expects deque of {key, value} records
+        // Expects deque of {k, v} records.
         MezzeSortedMap result = MezzeSortedMap.empty();
         for (Object elem : deque) {
             if (elem instanceof MezzeRecord rec) {
-                int keyIdx = rec.getFieldIndex("key");
-                int valIdx = rec.getFieldIndex("value");
-                if (keyIdx < 0) keyIdx = rec.getFieldIndex("k");
-                if (valIdx < 0) valIdx = rec.getFieldIndex("v");
+                int keyIdx = rec.getFieldIndex("k");
+                int valIdx = rec.getFieldIndex("v");
                 if (keyIdx >= 0 && valIdx >= 0) {
                     result = result.putObject(rec.getField(keyIdx), rec.getField(valIdx));
                 }
@@ -892,11 +888,11 @@ public final class DequeNatives {
 
     @TruffleBoundary
     public static MezzeDeque fromMap(MezzeMap map) {
-        // Returns deque of {key, value} records
+        // Returns deque of {k, v} records
         MezzeDeque result = MezzeDeque.empty();
         for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
             MezzeRecord rec = MezzeRecord.fromFields(
-                new String[]{"key", "value"},
+                new String[]{"k", "v"},
                 new Object[]{entry.key(), entry.value()}
             );
             result = result.pushBack(rec);
@@ -906,12 +902,12 @@ public final class DequeNatives {
 
     @TruffleBoundary
     public static MezzeDeque fromSortedMap(MezzeSortedMap map) {
-        // Returns deque of {key, value} records (in sorted key order)
+        // Returns deque of {k, v} records (in sorted key order)
         MezzeDeque result = MezzeDeque.empty();
         for (Object entryObj : map.rawEntries()) {
             MezzeSortedMap.RawEntry entry = (MezzeSortedMap.RawEntry) entryObj;
             MezzeRecord rec = MezzeRecord.fromFields(
-                new String[]{"key", "value"},
+                new String[]{"k", "v"},
                 new Object[]{entry.key(), entry.value()}
             );
             result = result.pushBack(rec);

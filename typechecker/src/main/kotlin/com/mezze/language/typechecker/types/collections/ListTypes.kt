@@ -1106,11 +1106,11 @@ object ListTypes {
             )
         }
 
-        // __native_list_to_map: {xs: List {key: 'k, value: 'v}} -> Map 'k 'v
+        // __native_list_to_map: {xs: List {k: 'k, v: 'v}} -> Map 'k 'v
         run {
             val keyType = MezzeType.VarType(com.mezze.language.ast.TypeVar("k"))
             val valType = MezzeType.VarType(com.mezze.language.ast.TypeVar("v"))
-            val recordType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valType))
+            val recordType = MezzeType.RecordType(mapOf("k" to keyType, "v" to valType))
             val listType = MezzeType.ListType(recordType)
             val mapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Map", listOf(keyType, valType))
             context["__native_list_to_map"] = MezzeType.FunctionType(
@@ -1119,11 +1119,11 @@ object ListTypes {
             )
         }
 
-        // __native_list_to_sorted_map: {xs: List {key: 'k, value: 'v}} -> SortedMap 'k 'v
+        // __native_list_to_sorted_map: {xs: List {k: 'k, v: 'v}} -> SortedMap 'k 'v
         run {
             val keyType = MezzeType.VarType(com.mezze.language.ast.TypeVar("k"))
             val valType = MezzeType.VarType(com.mezze.language.ast.TypeVar("v"))
-            val recordType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valType))
+            val recordType = MezzeType.RecordType(mapOf("k" to keyType, "v" to valType))
             val listType = MezzeType.ListType(recordType)
             val sortedMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("SortedMap", listOf(keyType, valType))
             context["__native_list_to_sorted_map"] = MezzeType.FunctionType(
@@ -1176,12 +1176,12 @@ object ListTypes {
             )
         }
 
-        // __native_list_from_map: {m: Map 'k 'v} -> List {key: 'k, value: 'v}
+        // __native_list_from_map: {m: Map 'k 'v} -> List {k: 'k, v: 'v}
         run {
             val keyType = MezzeType.VarType(com.mezze.language.ast.TypeVar("k"))
             val valType = MezzeType.VarType(com.mezze.language.ast.TypeVar("v"))
             val mapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Map", listOf(keyType, valType))
-            val recordType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valType))
+            val recordType = MezzeType.RecordType(mapOf("k" to keyType, "v" to valType))
             val listType = MezzeType.ListType(recordType)
             context["__native_list_from_map"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("m" to mapType)),
@@ -1189,12 +1189,12 @@ object ListTypes {
             )
         }
 
-        // __native_list_from_sorted_map: {m: SortedMap 'k 'v} -> List {key: 'k, value: 'v}
+        // __native_list_from_sorted_map: {m: SortedMap 'k 'v} -> List {k: 'k, v: 'v}
         run {
             val keyType = MezzeType.VarType(com.mezze.language.ast.TypeVar("k"))
             val valType = MezzeType.VarType(com.mezze.language.ast.TypeVar("v"))
             val sortedMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("SortedMap", listOf(keyType, valType))
-            val recordType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valType))
+            val recordType = MezzeType.RecordType(mapOf("k" to keyType, "v" to valType))
             val listType = MezzeType.ListType(recordType)
             context["__native_list_from_sorted_map"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("m" to sortedMapType)),

@@ -64,8 +64,8 @@ public final class EnvironmentNatives {
             for (int i = 0; i < n; i++) {
                 Object entry = seq.get(i);
                 if (entry instanceof MezzeRecord rec) {
-                    int keyIdx = rec.getFieldIndex("key");
-                    int valIdx = rec.getFieldIndex("value");
+                    int keyIdx = rec.getFieldIndex("k");
+                    int valIdx = rec.getFieldIndex("v");
                     if (keyIdx >= 0 && valIdx >= 0) {
                         Object key = rec.getField(keyIdx);
                         if (name.equals(key)) {
@@ -85,9 +85,9 @@ public final class EnvironmentNatives {
         Object[] entries = new Object[env.size()];
         int i = 0;
         for (var entry : env.entrySet()) {
-            // Create tuple as a record with key/value fields
+            // Create tuple as a record with k/v fields
             entries[i++] = MezzeRecord.fromFields(
-                new String[]{"key", "value"},
+                new String[]{"k", "v"},
                 new Object[]{entry.getKey(), entry.getValue()}
             );
         }

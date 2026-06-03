@@ -222,12 +222,12 @@ object MutationTypes {
             )
         }
 
-        // __native_mut_map_entries: {map: MutMap 'k 'v} -> [{key: 'k, value: 'v}]
+        // __native_mut_map_entries: {map: MutMap 'k 'v} -> [{k: 'k, v: 'v}]
         run {
             val keyType = MezzeType.VarType(TypeVar("k"))
             val valueType = MezzeType.VarType(TypeVar("v"))
             val mutMapType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("MutMap", listOf(keyType, valueType))
-            val entryType = MezzeType.RecordType(mapOf("key" to keyType, "value" to valueType))
+            val entryType = MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType))
             context["__native_mut_map_entries"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("map" to mutMapType)),
                 MezzeType.SeqType(entryType)
