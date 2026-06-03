@@ -40,7 +40,8 @@ class HttpClientTest {
             let mock_response: Response = {
                 status = 200,
                 headers = map::empty {},
-                body = bytes::from_string { s = "ok" }
+                body = bytes::from_string { s = "ok" },
+                url = ""
             }
 
             let rules: [MockRule] = [
@@ -72,7 +73,8 @@ class HttpClientTest {
             let mock_response: Response = {
                 status = 200,
                 headers = map::empty {},
-                body = bytes::from_string { s = "ok" }
+                body = bytes::from_string { s = "ok" },
+                url = ""
             }
 
             let rules: [MockRule] = [
@@ -128,7 +130,8 @@ class HttpClientTest {
             let mock_response: Response = {
                 status = 201,
                 headers = map::empty {},
-                body = bytes::from_string { s = "created" }
+                body = bytes::from_string { s = "created" },
+                url = ""
             }
 
             let rules: [MockRule] = [

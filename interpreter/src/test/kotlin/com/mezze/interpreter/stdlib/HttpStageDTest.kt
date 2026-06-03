@@ -139,7 +139,8 @@ class HttpStageDTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" }
+                status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" },
+                url = ""
             }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
@@ -154,6 +155,32 @@ class HttpStageDTest {
     }
 
     @Test
+    fun `Response url field carries the request URL through the mock`() {
+        // Even though the mock fixture set `url = ""`, the runtime
+        // injects the request URL into the Ok-wrapped Response so
+        // downstream code can identify the source.
+        val result = eval("""
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::collections::map
+            use std::collections::bytes
+
+            let mock_response: Response = {
+                status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" },
+                url = ""
+            }
+            let rules: [MockRule] = [
+                { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
+            ]
+            perform MockHttpClient { rules = rules } in do
+              let resp = request { url = "http://test.com/users/42" }.send {}
+              match resp is
+                Ok { val } -> val.url
+                Err { error = _ } -> "ERR"
+        """)
+        assertEquals("http://test.com/users/42", result)
+    }
+
+    @Test
     fun `ensure_ok promotes 404 to RequestFailed`() {
         val result = eval("""
             use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request, ensure_ok}
@@ -161,7 +188,8 @@ class HttpStageDTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 404, headers = map::empty {}, body = bytes::from_string { s = "not found" }
+                status = 404, headers = map::empty {}, body = bytes::from_string { s = "not found" },
+                url = ""
             }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
@@ -175,6 +203,34 @@ class HttpStageDTest {
                   _ -> -2
         """)
         assertEquals(404L, result)
+    }
+
+    @Test
+    fun `ensure_ok propagates the request URL into RequestFailed`() {
+        // The mock layer injects the request URL into the Response so that
+        // ensure_ok can build a RequestFailed { url, ... } that identifies
+        // the source. Verifies #179-followup.
+        val result = eval("""
+            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request, ensure_ok}
+            use std::collections::map
+            use std::collections::bytes
+
+            let mock_response: Response = {
+                status = 500, headers = map::empty {}, body = bytes::from_string { s = "boom" },
+                url = ""
+            }
+            let rules: [MockRule] = [
+                { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
+            ]
+            perform MockHttpClient { rules = rules } in do
+              let resp = request { url = "http://test.com/api/v2/users/42" }.send {}
+              match ensure_ok { resp = resp } is
+                Ok { val = _ } -> "ok"
+                Err { error } -> match error is
+                  RequestFailed { url, status, body } -> url
+                  _ -> "other"
+        """)
+        assertEquals("http://test.com/api/v2/users/42", result)
     }
 
     @Test
@@ -204,7 +260,8 @@ class HttpStageDTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 500, headers = map::empty {}, body = bytes::from_string { s = "boom" }
+                status = 500, headers = map::empty {}, body = bytes::from_string { s = "boom" },
+                url = ""
             }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
@@ -235,7 +292,8 @@ class HttpStageDTest {
             use std::collections::bytes
 
             let mock_response: Response = {
-                status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" }
+                status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" },
+                url = ""
             }
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }

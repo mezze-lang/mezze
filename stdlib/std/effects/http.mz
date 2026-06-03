@@ -41,8 +41,11 @@ pub type Request = {
   timeout_ms: Option Int,
 }
 
-## HTTP response record.
-pub type Response = { status: Int, headers: Map Str Str, body: Bytes }
+## HTTP response record. `url` is the URL of the request that produced
+## this response — preserved so error promotion (e.g. `ensure_ok`'s
+## `RequestFailed { url, ... }`) can identify the source without an
+## out-of-band thread.
+pub type Response = { status: Int, headers: Map Str Str, body: Bytes, url: Str }
 
 ## HTTP error variants.
 pub type HttpError = |
@@ -366,7 +369,7 @@ pub let ensure_ok : { resp: Result Response HttpError } -> Result Response HttpE
           Err { error = _ } -> ""
         Err {
           error = RequestFailed {
-            url = "",
+            url = val.url,
             status = val.status,
             body = body_str,
           },

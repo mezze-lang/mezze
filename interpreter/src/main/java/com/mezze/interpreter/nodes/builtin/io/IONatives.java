@@ -463,7 +463,7 @@ public final class IONatives {
                 if (ruleObj instanceof MezzeRecord rule) {
                     Object response = matchMockRule(rule, method, url);
                     if (response != null) {
-                        return response;
+                        return injectUrlIntoMockResponse(response, url);
                     }
                 }
             }
@@ -486,9 +486,44 @@ public final class IONatives {
             return createOk(mockResponse);
         }
         return createOk(MezzeRecord.fromFields(
-            new String[]{"status", "body", "headers"},
-            new Object[]{200L, "{}", MezzeRecord.empty()}
+            new String[]{"status", "headers", "body", "url"},
+            new Object[]{200L, MezzeMap.empty(), MezzeBytes.copyOf(new byte[0]), url}
         ));
+    }
+
+    /**
+     * Inject the request URL into a mock rule's Ok-wrapped Response so
+     * the stdlib's `ensure_ok` can build a `RequestFailed { url, ... }`
+     * without callers having to hand-write `url = "..."` in every test
+     * fixture. Err responses pass through unchanged — they already carry
+     * a URL in their payload (`ConnectionFailed { url, ... }` etc.).
+     *
+     * If the response isn't a recognisable Ok-Response shape, return
+     * it verbatim — defensive against malformed test rules.
+     */
+    private static Object injectUrlIntoMockResponse(Object response, String url) {
+        if (!(response instanceof MezzeVariant variant)) return response;
+        if (!"Ok".equals(variant.getConstructorName())) return response;
+        if (!variant.hasPayload()) return response;
+        Object payload = variant.getPayloadValue();
+        if (!(payload instanceof MezzeRecord wrapped)) return response;
+        Object inner = wrapped.getField("val");
+        if (!(inner instanceof MezzeRecord respRec)) return response;
+
+        // Build a fresh Response with status/headers/body from the user's
+        // fixture + the request URL. Missing fields default to sensible
+        // empties so older fixtures (pre-url-field) keep working.
+        Object status = respRec.getField("status");
+        Object headers = respRec.getField("headers");
+        Object body = respRec.getField("body");
+        if (status == null) status = 200L;
+        if (headers == null) headers = MezzeMap.empty();
+        if (body == null) body = MezzeBytes.copyOf(new byte[0]);
+        MezzeRecord injected = MezzeRecord.fromFields(
+            new String[]{"status", "headers", "body", "url"},
+            new Object[]{status, headers, body, url}
+        );
+        return MezzeVariant.ok(injected);
     }
 
     /**
@@ -885,7 +920,7 @@ public final class IONatives {
             }
 
             try {
-                return createOk(responseToMezze(response));
+                return createOk(responseToMezze(response, urlString));
             } finally {
                 response.close();
             }
@@ -939,11 +974,13 @@ public final class IONatives {
     }
 
     /**
-     * Convert a Helidon response to a Mezze {status, headers, body} record.
-     * Header names are lowercased to match the prior contract (case-
-     * insensitive lookup via response.get_header is the stdlib pattern).
+     * Convert a Helidon response to a Mezze {status, headers, body, url}
+     * record. Header names are lowercased to match the prior contract
+     * (case-insensitive lookup via response.get_header is the stdlib
+     * pattern). The request URL is threaded in so the stdlib's
+     * `ensure_ok` can build a `RequestFailed { url, ... }` on non-2xx.
      */
-    private static MezzeRecord responseToMezze(HttpClientResponse response) {
+    private static MezzeRecord responseToMezze(HttpClientResponse response, String url) {
         Map<Object, Object> headersOut = new HashMap<>();
         response.headers().forEach(h ->
             headersOut.put(h.name().toLowerCase(), h.get())
@@ -959,11 +996,12 @@ public final class IONatives {
         }
 
         return MezzeRecord.fromFields(
-            new String[]{"status", "headers", "body"},
+            new String[]{"status", "headers", "body", "url"},
             new Object[]{
                 (long) response.status().code(),
                 MezzeMap.fromJavaMap(headersOut),
-                MezzeBytes.copyOf(bodyBytes)
+                MezzeBytes.copyOf(bodyBytes),
+                url
             }
         );
     }

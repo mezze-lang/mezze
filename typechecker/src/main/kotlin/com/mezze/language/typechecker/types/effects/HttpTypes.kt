@@ -21,11 +21,12 @@ object HttpTypes {
         return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
     }
 
-    // HTTP Response type: {status: Int, headers: Map String String, body: Bytes}
+    // HTTP Response type: {status: Int, headers: Map String String, body: Bytes, url: Str}
     private val responseType = MezzeType.RecordType(mapOf(
         "status" to MezzeType.IntType,
         "headers" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("Map", listOf(MezzeType.StringType, MezzeType.StringType)),
-        "body" to MezzeType.BytesType
+        "body" to MezzeType.BytesType,
+        "url" to MezzeType.StringType
     ))
 
     // HTTP Error variant type
