@@ -1,5 +1,6 @@
 package com.mezze.interpreter
 
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -1592,5 +1593,236 @@ class MutationRuntimeTest {
         """.trimIndent()
         // w1=true (space), w2=false (letter 'a') -> 1
         assertEquals(1L, eval(code))
+    }
+
+    // ==========================================================================
+    // Nested perform LocalMut inside for_range body
+    //
+    // Caught while writing a Mut version of the Collatz benchmark for
+    // perf comparison: a `for_range` whose body calls a helper that
+    // itself does `perform LocalMut in do ...` silently exits with no
+    // output (and exit code 0) under `mez build` / native-image. This
+    // unit test pins the expected behaviour at the runtime layer so
+    // we can reproduce and fix it without going through `mez build`.
+    // ==========================================================================
+
+    @Test
+    fun `test nested perform LocalMut — helper called once from outer scope`() {
+        // Sanity baseline: outer `perform LocalMut` calls a helper that
+        // does its own `perform LocalMut`. No for_range; the helper runs
+        // exactly once.
+        val code = """
+            use std::effects::mutation::{LocalMut, int_to_mut, read_int, incr}
+
+            let collatz_step = { n_init } -> perform LocalMut in do
+                let n = int_to_mut { n = n_init }
+                let acc = int_to_mut { n = 0 }
+                incr { n = acc, delta = 1 }
+                read_int { n = acc }
+
+            let main = {} ->
+                perform LocalMut in do
+                    let total = int_to_mut { n = 0 }
+                    let len = collatz_step { n_init = 5 }
+                    incr { n = total, delta = len }
+                    read_int { n = total }
+
+            main {}
+        """.trimIndent()
+        assertEquals(1L, eval(code))
+    }
+
+    @Test
+    fun `test nested perform LocalMut — helper called from for_range body`() {
+        // The actual repro: for_range body calls a helper that does its
+        // own `perform LocalMut`. Under `mez build`-produced jars this
+        // silently exits at the for_range call. Test runs the same code
+        // through the interpreter test harness.
+        val code = """
+            use std::effects::mutation::{LocalMut, int_to_mut, read_int, incr, for_range}
+
+            let one_step = { n_init } -> perform LocalMut in do
+                let acc = int_to_mut { n = 0 }
+                incr { n = acc, delta = n_init }
+                read_int { n = acc }
+
+            let main = {} ->
+                perform LocalMut in do
+                    let total = int_to_mut { n = 0 }
+                    for_range { start = 1, end = 4, step = 1, body = {i} -> do
+                        let len = one_step { n_init = i }
+                        incr { n = total, delta = len }
+                    }
+                    read_int { n = total }
+
+            main {}
+        """.trimIndent()
+        // for_range iterates i = 1, 2, 3 — total = 1 + 2 + 3 = 6.
+        assertEquals(6L, eval(code))
+    }
+
+    @Test
+    fun `test Mut Collatz iterative — small n`() {
+        // Full miniature of the benchmark shape that exposed the bug:
+        // `for_range` body calls `collatz_length_mut` which uses an
+        // inner `perform LocalMut` + `while`. Tests that the whole
+        // shape works end-to-end at small scale.
+        val code = """
+            use std::effects::mutation::{LocalMut, int_to_mut, read_int, write_int, incr, while, for_range}
+
+            let collatz_length_mut = { n_init } -> perform LocalMut in do
+                let n = int_to_mut { n = n_init }
+                let acc = int_to_mut { n = 0 }
+                while {
+                    cond = {} -> do
+                        let cur = read_int { n = n }
+                        cur > 1,
+                    body = {} -> do
+                        let cur = read_int { n = n }
+                        let next = if cur - 2 * (cur / 2) == 0 then cur / 2 else 3 * cur + 1
+                        write_int { n = n, v = next }
+                        incr { n = acc, delta = 1 },
+                }
+                read_int { n = acc }
+
+            let main = {} ->
+                perform LocalMut in do
+                    let total = int_to_mut { n = 0 }
+                    for_range { start = 1, end = 11, step = 1, body = {i} -> do
+                        let len = collatz_length_mut { n_init = i }
+                        incr { n = total, delta = len }
+                    }
+                    read_int { n = total }
+
+            main {}
+        """.trimIndent()
+        // Collatz lengths 1..10: 0, 1, 7, 2, 5, 8, 16, 3, 19, 6 → sum = 67
+        assertEquals(67L, eval(code))
+    }
+
+    // ==========================================================================
+    // Console + Mut interaction (matches what `mez build`-produced jars run)
+    //
+    // The benchmark that surfaced the silent-exit bug used the actual
+    // CLI shape:
+    //
+    //   let main = {} -> perform Console in do
+    //     println { msg = "..." }
+    //     let result = perform LocalMut in do ...
+    //     println { msg = "result = $(...)" }
+    //
+    // The tests above only exercise bare `LocalMut`. These exercise the
+    // Console wrapper plus a nested `perform LocalMut` inside the same
+    // do-block, with both println calls before AND after the nested
+    // perform. The runtime test verifies all println output reaches
+    // stdout in order; if the runtime is silent, the assertion fails
+    // with empty captured output.
+    // ==========================================================================
+
+    @Test
+    fun `test Console wrapping a nested perform LocalMut — println before and after`() {
+        val code = """
+            use std::effects::log::{Console, println}
+            use std::effects::mutation::{LocalMut, int_to_mut, read_int, incr}
+            use std::int
+
+            let main = {} -> perform Console in do
+                println { msg = "before" }
+                let result = perform LocalMut in do
+                    let acc = int_to_mut { n = 0 }
+                    incr { n = acc, delta = 42 }
+                    read_int { n = acc }
+                println { msg = "after r=$(int::to_str { n = result })" }
+
+            main {}
+        """.trimIndent()
+        val out = MezzeTestHelper.runWithOutput(code).output()
+        assertTrue(out.contains("before"), "expected 'before' in output, got: <$out>")
+        assertTrue(out.contains("after r=42"), "expected 'after r=42' in output, got: <$out>")
+    }
+
+    @Test
+    @Disabled("Pins runtime bug #255 — for_range body calling a nested-perform helper under outer Console silently exits. Re-enable when #255 is fixed.")
+    fun `test Console wrapping for_range that calls a helper using nested perform LocalMut`() {
+        // Closest unit-level approximation of the benchmark shape that
+        // silently exited under `mez build`. The bug repro: outer
+        // Console, inner LocalMut, for_range body calling a helper that
+        // does its own perform LocalMut, final println using the
+        // returned value.
+        val code = """
+            use std::effects::log::{Console, println}
+            use std::effects::mutation::{LocalMut, int_to_mut, read_int, incr, for_range}
+            use std::int
+
+            let one_step = { n_init } -> perform LocalMut in do
+                let acc = int_to_mut { n = 0 }
+                incr { n = acc, delta = n_init }
+                read_int { n = acc }
+
+            let main = {} -> perform Console in do
+                println { msg = "start" }
+                let result = perform LocalMut in do
+                    let total = int_to_mut { n = 0 }
+                    for_range { start = 1, end = 4, step = 1, body = {i} -> do
+                        let len = one_step { n_init = i }
+                        incr { n = total, delta = len }
+                    }
+                    read_int { n = total }
+                println { msg = "sum=$(int::to_str { n = result })" }
+
+            main {}
+        """.trimIndent()
+        // for_range body runs for i = 1, 2, 3; total = 1 + 2 + 3 = 6.
+        val out = MezzeTestHelper.runWithOutput(code).output()
+        assertTrue(out.contains("start"), "expected 'start' in output, got: <$out>")
+        assertTrue(out.contains("sum=6"), "expected 'sum=6' in output, got: <$out>")
+    }
+
+    @Test
+    @Disabled("Pins runtime bug #255 — same shape as the for_range test above, exercised end-to-end with while + Collatz. Re-enable when #255 is fixed.")
+    fun `test Console wrapping the full Mut Collatz iterative shape`() {
+        // The exact shape that silently exited under `mez build`,
+        // shrunk to a tractable size (n = 10 instead of 500000) so the
+        // unit test runs in milliseconds while still exercising the
+        // bug-triggering control-flow path.
+        val code = """
+            use std::effects::log::{Console, println}
+            use std::effects::mutation::{LocalMut, int_to_mut, read_int, write_int, incr, while, for_range}
+            use std::int
+
+            let collatz_length_mut = { n_init } -> perform LocalMut in do
+                let n = int_to_mut { n = n_init }
+                let acc = int_to_mut { n = 0 }
+                while {
+                    cond = {} -> do
+                        let cur = read_int { n = n }
+                        cur > 1,
+                    body = {} -> do
+                        let cur = read_int { n = n }
+                        let next = if cur - 2 * (cur / 2) == 0 then cur / 2 else 3 * cur + 1
+                        write_int { n = n, v = next }
+                        incr { n = acc, delta = 1 },
+                }
+                read_int { n = acc }
+
+            let main = {} -> perform Console in do
+                let n = 10
+                println { msg = "start n=$(int::to_str { n = n })" }
+                let result = perform LocalMut in do
+                    let total = int_to_mut { n = 0 }
+                    for_range { start = 1, end = n + 1, step = 1, body = {i} -> do
+                        let len = collatz_length_mut { n_init = i }
+                        incr { n = total, delta = len }
+                    }
+                    read_int { n = total }
+                println { msg = "Collatz sum 1..$(int::to_str { n = n }) = $(int::to_str { n = result })" }
+
+            main {}
+        """.trimIndent()
+        // Collatz lengths 1..10: 0, 1, 7, 2, 5, 8, 16, 3, 19, 6 → sum = 67
+        val out = MezzeTestHelper.runWithOutput(code).output()
+        assertTrue(out.contains("start n=10"), "expected 'start n=10' in output, got: <$out>")
+        assertTrue(out.contains("Collatz sum 1..10 = 67"),
+            "expected 'Collatz sum 1..10 = 67' in output, got: <$out>")
     }
 }
