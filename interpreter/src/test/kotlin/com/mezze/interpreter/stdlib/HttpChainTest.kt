@@ -62,7 +62,7 @@ class HttpChainTest {
     fun `request with_json sets body and Content-Type`() {
         val result = eval("""
             use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
-            use std::codec::json::Json
+            use std::codec::json::{Json}
             use std::collections::map
             use std::collections::bytes
 
@@ -274,28 +274,19 @@ class HttpChainTest {
 
     @Test
     fun `client with_auth applies Authorization to derived requests`() {
+        // No `.send` — this is a pure builder check. Inspect the
+        // Authorization header directly on the constructed request.
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
+            use std::effects::http::{Http, client}
             use std::collections::map
-            use std::collections::bytes
 
-            let mock_response: Response = {
-                status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" }
-            }
-            let rules: [MockRule] = [
-                { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
-
-            perform MockHttpClient { rules = rules } in do
-              let api = client { base_url = "https://api.acme.com" }
-                .with_auth { val = "Bearer xyz" }
-              let r = api.get { path = "/protected" }
-              # Verify the Authorization header is on the request.
-              # We do this by checking the request's headers field directly.
-              let auth_opt = map::get { m = r.headers, k = "Authorization" }
-              match auth_opt is
-                Some { val } -> val
-                None -> "no-auth"
+            let api = client { base_url = "https://api.acme.com" }
+              .with_auth { val = "Bearer xyz" }
+            let r = api.get { path = "/protected" }
+            let auth_opt = map::get { m = r.headers, k = "Authorization" }
+            match auth_opt is
+              Some { val } -> val
+              None -> "no-auth"
         """)
         assertEquals("Bearer xyz", result)
     }
@@ -329,45 +320,26 @@ class HttpChainTest {
 
     @Test
     fun `client base_url joins paths correctly`() {
-        // path with leading slash, base without trailing slash → expect single /
+        // No `.send` — pure URL-building check, no perform needed.
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
-            use std::collections::map
-            use std::collections::bytes
+            use std::effects::http::{Http, client}
 
-            let mock_response: Response = {
-                status = 200, headers = map::empty {}, body = bytes::from_string { s = "" }
-            }
-            let rules: [MockRule] = [
-                { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
-
-            perform MockHttpClient { rules = rules } in do
-              let api = client { base_url = "https://api.acme.com" }
-              let r = api.get { path = "/v1/users" }
-              r.url
+            let api = client { base_url = "https://api.acme.com" }
+            let r = api.get { path = "/v1/users" }
+            r.url
         """)
         assertEquals("https://api.acme.com/v1/users", result)
     }
 
     @Test
     fun `client base_url empty falls back to absolute path`() {
+        // No `.send` — pure URL-building check, no perform needed.
         val result = eval("""
-            use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
-            use std::collections::map
-            use std::collections::bytes
+            use std::effects::http::{Http, client}
 
-            let mock_response: Response = {
-                status = 200, headers = map::empty {}, body = bytes::from_string { s = "" }
-            }
-            let rules: [MockRule] = [
-                { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
-
-            perform MockHttpClient { rules = rules } in do
-              let api = client { base_url = "" }
-              let r = api.get { path = "https://other.com/foo" }
-              r.url
+            let api = client { base_url = "" }
+            let r = api.get { path = "https://other.com/foo" }
+            r.url
         """)
         assertEquals("https://other.com/foo", result)
     }
