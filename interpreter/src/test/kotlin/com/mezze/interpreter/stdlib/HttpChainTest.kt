@@ -304,7 +304,7 @@ class HttpChainTest {
     fun `client post chained with with_json`() {
         val result = eval("""
             use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
-            use std::codec::json::Json
+            use std::codec::json::{Json}
             use std::collections::map
             use std::collections::bytes
 
