@@ -523,10 +523,30 @@ class ImportResolver(
         // When a user imports `default_http_config` which has type `HttpConfig`, they need
         // the HttpConfig type declaration available for spread operations and type inference.
         // This extracts TypeApplication constructors from all imported binding types.
+        //
+        // #183 follow-up: also collect from inherent impl method types. When the
+        // user imports `client` from std::effects::http but doesn't explicitly
+        // import `Request`, a chain like `client {}.get { path }.headers` needs
+        // `Request` in scope so HasField can expand the TypeApplication.
+        // Without this, the solver reports "Cannot expand type application
+        // Request to check field 'headers'".
         if (module != null) {
             val referencedTypes = mutableSetOf<String>()
             for ((_, binding) in bindings) {
                 collectTypeApplicationConstructors(binding.type, referencedTypes)
+            }
+            // Also walk every impl op's annotated types AND the impl's
+            // target — names that may not be in the user's explicit
+            // imports. The harvest path picks impl methodTypes from
+            // these annotations / from the typed lambda's return.
+            for ((_, implDecl) in module.index.abilityImplsByHash) {
+                for (targetAnn in implDecl.targetTypes) {
+                    collectTypeAnnotationConstructors(targetAnn, referencedTypes)
+                }
+                for (op in implDecl.operations) {
+                    op.paramType?.let { collectTypeAnnotationConstructors(it, referencedTypes) }
+                    op.returnType?.let { collectTypeAnnotationConstructors(it, referencedTypes) }
+                }
             }
             for (typeName in referencedTypes) {
                 if (typeName !in types) {
@@ -730,9 +750,23 @@ class ImportResolver(
             // CRITICAL: Auto-import type declarations for types referenced by imported values.
             // When a user imports `default_http_config` which has type `HttpConfig`, they need
             // the HttpConfig type declaration available for spread operations and type inference.
+            //
+            // #183 follow-up: also collect from inherent impl op annotations
+            // (param + return + impl target) so chain expressions like
+            // `client {}.get { path }.headers` can expand `Request` even
+            // when the user didn't explicitly import it.
             val referencedTypes = mutableSetOf<String>()
             for ((_, binding) in bindings) {
                 collectTypeApplicationConstructors(binding.type, referencedTypes)
+            }
+            for ((_, implDecl) in index.abilityImplsByHash) {
+                for (targetAnn in implDecl.targetTypes) {
+                    collectTypeAnnotationConstructors(targetAnn, referencedTypes)
+                }
+                for (op in implDecl.operations) {
+                    op.paramType?.let { collectTypeAnnotationConstructors(it, referencedTypes) }
+                    op.returnType?.let { collectTypeAnnotationConstructors(it, referencedTypes) }
+                }
             }
             for (typeName in referencedTypes) {
                 if (typeName !in types) {
@@ -858,6 +892,48 @@ class ImportResolver(
             is MezzeType.ByteBufferType,
             is MezzeType.CharType,
             is MezzeType.OrderingType -> {}
+        }
+    }
+
+    /**
+     * Walk a ParsedTypeAnnotation and collect every named-type constructor.
+     * Used to surface type names referenced by impl op annotations so the
+     * importer can auto-import them. Without this, a chain like
+     * `client {}.get { path }.headers` fails with "Cannot expand type
+     * application Request" because Request isn't in the user's
+     * `typeDeclarations` at solve time.
+     */
+    private fun collectTypeAnnotationConstructors(
+        ann: com.mezze.language.parsedast.ParsedTypeAnnotation?,
+        result: MutableSet<String>
+    ) {
+        when (ann) {
+            null -> {}
+            is com.mezze.language.parsedast.ParsedNamedType -> {
+                // Skip lowercase (type variable) names.
+                if (ann.name.isNotEmpty() && ann.name[0].isUpperCase()) result.add(ann.name)
+            }
+            is com.mezze.language.parsedast.ParsedQualifiedType -> {
+                result.add(ann.typeName)
+                ann.args.forEach { collectTypeAnnotationConstructors(it, result) }
+            }
+            is com.mezze.language.parsedast.ParsedTypeApp -> {
+                if (ann.constructor.isNotEmpty() && ann.constructor[0].isUpperCase()) result.add(ann.constructor)
+                ann.args.forEach { collectTypeAnnotationConstructors(it, result) }
+            }
+            is com.mezze.language.parsedast.ParsedRecordType -> {
+                ann.entries.forEach { collectTypeAnnotationConstructors(it.type, result) }
+            }
+            is com.mezze.language.parsedast.ParsedVariantType -> {
+                ann.constructors.forEach { collectTypeAnnotationConstructors(it.dataType, result) }
+            }
+            is com.mezze.language.parsedast.ParsedFunctionType -> {
+                collectTypeAnnotationConstructors(ann.paramType, result)
+                collectTypeAnnotationConstructors(ann.returnType, result)
+            }
+            is com.mezze.language.parsedast.ParsedSeqType -> {
+                collectTypeAnnotationConstructors(ann.elementType, result)
+            }
         }
     }
 
