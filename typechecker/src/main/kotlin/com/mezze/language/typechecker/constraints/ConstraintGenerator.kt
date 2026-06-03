@@ -655,7 +655,18 @@ class ConstraintGenerator(
                                     is ParsedLambdaParams.Typed -> params.fields.associate { entry ->
                                         entry.name to convertTypeAnnotation(entry.type)
                                     }
-                                    else -> paramNames.associateWith { MezzeType.VarType(TypeVar.fresh()) }
+                                    else -> paramNames.associateWith { name ->
+                                        // The receiver param `it` must be bound to the impl's
+                                        // target type so `it.<field>` / `it.<method>` dispatch
+                                        // sees the nominal type — not a free TyVar that the
+                                        // body's HasField constraints would resolve to a row-
+                                        // open structural record. Without this, the home-module
+                                        // typecheck of `impl Resp where { is_ok = { it } -> ... }`
+                                        // registers `is_ok : { it: 'h } -> Bool` and importers
+                                        // can't tell which impl is "concrete" vs "generic".
+                                        if (name == Keywords.IT) targetType
+                                        else MezzeType.VarType(TypeVar.fresh())
+                                    }
                                 }
                             }
 
