@@ -259,7 +259,7 @@ class HttpChainTest {
                 status = 200, headers = map::empty {}, body = bytes::from_string { s = "ok" }
             }
             let rules: [MockRule] = [
-                { methods = [Get], url = Glob { pattern = "https://api.acme.com/**" }, response = Ok { val = mock_response } }
+                { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
 
             perform MockHttpClient { rules = rules } in do
