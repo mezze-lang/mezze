@@ -2282,11 +2282,19 @@ class ExpressionConstraintGenerator {
         }
 
         // CRITICAL: Preserve names for associated type variables (those starting with ')
-        // This allows them to be matched with performer bindings later
+        // This allows them to be matched with performer bindings later.
+        //
+        // #183: Use `freshWithName` (not bare `TypeVar(name)`) so each
+        // fresh-instantiation gets a unique id. Plain `TypeVar(name)`
+        // uses the default `id = 0`, and `data class` equality then
+        // collapses every `'it` across every imported impl onto the
+        // SAME instance — chains like `c.get { p }.with_json { v }.send {}`
+        // end up unifying the receivers of two different impls together
+        // ("Type constructor mismatch: Req vs Client").
         val substitution = freeVars.associateWith { oldVar ->
             if (oldVar.name.startsWith("'")) {
                 // Associated type variable - preserve the name but create new instance
-                TypeVar(oldVar.name)
+                TypeVar.freshWithName(oldVar.name)
             } else {
                 // Regular type variable - create fresh one
                 TypeVar.fresh()
