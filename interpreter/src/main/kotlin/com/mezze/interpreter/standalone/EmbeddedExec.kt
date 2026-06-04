@@ -126,11 +126,17 @@ object EmbeddedExec {
                 "interpreter-only (no compilation events to trace). No-op."
             )
         }
+        // MEZZE_TRACE_INLINING=1 → engine.TraceCompilationDetails (per-call-site
+        // inlining decisions). Useful for #256/#257 hot-loop PE debugging.
+        val traceInlining = System.getenv("MEZZE_TRACE_INLINING")?.let {
+            it == "1" || it.equals("true", ignoreCase = true)
+        } ?: false
         val engineBuilder = Engine.newBuilder()
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
             .apply { if (jitDisabled) option("engine.Compilation", "false") }
             .apply { if (traceCompilation && jitCapable) option("engine.TraceCompilation", "true") }
+            .apply { if (traceInlining && jitCapable) option("engine.TraceCompilationDetails", "true") }
 
         val profile = args.contains("--profile")
         val coverage = args.contains("--coverage")
