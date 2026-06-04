@@ -181,16 +181,6 @@ public final class HandleNode extends MezzeNode {
     }
 
     /**
-     * Hex of the Mut effect's content hash. Hardcoded here (rather than
-     * importing WellKnownHashConstants) because the interpreter module is
-     * Java + this class is a hot path; pulling in Kotlin generated code
-     * adds clinit cost we want to avoid. Kept in sync with the generator
-     * via the regression test (MutationRuntimeTest).
-     */
-    private static final String MUT_EFFECT_HASH_HEX =
-        "05d9e70c83972f84e21da6095c1c22600854cc8c081877a5f7f49c689da6fb7265fdfdacc76b16d0561ad9be50bd32ff300977d466fbb16e98f988b41fbb6dba";
-
-    /**
      * Feature flag for #257 — when set, Mut perform sites skip the fiber/
      * Continuation machinery and treat Mut as a marker effect (chain-only
      * dispatch). Off by default while the OpCallNode marker PIC settles;
@@ -235,9 +225,7 @@ public final class HandleNode extends MezzeNode {
         // fall through OpCallNode → chainDispatch (since current() is null)
         // and route to the handler record's field directly, no suspend/
         // resume round-trip per op.
-        if (MARKER_MUT_ENABLED
-                && effectHash != null
-                && effectHash.getHex().equals(MUT_EFFECT_HASH_HEX)) {
+        if (MARKER_MUT_ENABLED && MarkerEffects.isMutEffect(effectHash)) {
             return runMarker(handler, frame);
         }
 

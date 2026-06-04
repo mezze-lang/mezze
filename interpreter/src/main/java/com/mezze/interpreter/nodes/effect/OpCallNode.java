@@ -63,13 +63,6 @@ public final class OpCallNode extends MezzeNode {
     @Child
     private IndirectCallNode chainCallNode;
 
-    /**
-     * Hex of the Mut effect's content hash — see HandleNode for context.
-     * Used to decide whether to take the marker-effect fast path (#257).
-     */
-    private static final String MUT_EFFECT_HASH_HEX =
-        "05d9e70c83972f84e21da6095c1c22600854cc8c081877a5f7f49c689da6fb7265fdfdacc76b16d0561ad9be50bd32ff300977d466fbb16e98f988b41fbb6dba";
-
     private static final boolean MARKER_MUT_ENABLED =
         System.getenv("MEZZE_MARKER_MUT") != null
             && !System.getenv("MEZZE_MARKER_MUT").equals("0");
@@ -104,9 +97,7 @@ public final class OpCallNode extends MezzeNode {
         this.operationName = operationName;
         this.effectHash = effectHash;
         this.argumentNode = argumentNode;
-        this.isMutOp = MARKER_MUT_ENABLED
-            && effectHash != null
-            && effectHash.getHex().equals(MUT_EFFECT_HASH_HEX);
+        this.isMutOp = MARKER_MUT_ENABLED && MarkerEffects.isMutEffect(effectHash);
     }
 
     public static OpCallNode create(String operationName, Hash effectHash, MezzeNode argumentNode) {
