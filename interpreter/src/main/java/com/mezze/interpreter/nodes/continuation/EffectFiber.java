@@ -270,6 +270,29 @@ public final class EffectFiber {
     }
 
     /**
+     * Allocation-free lookup of the innermost handler whose effect-hash
+     * matches {@code effectHash}, or {@code null} if none in scope. Used by
+     * the marker-effect fast path in {@code OpCallNode}: hot Mut op-calls
+     * need to locate the surrounding LocalMut handler without allocating
+     * a fresh chain array per call. ArrayDeque.peekFirst is O(1); the
+     * iterator path (when we need to skip past non-matching entries) is
+     * still allocation-free because ArrayDeque's Iterator is an inner
+     * non-static class reused via cursor state. #257.
+     */
+    public static com.mezze.interpreter.values.MezzeRecord peekHandlerForEffect(
+            com.mezze.language.typedast.Hash effectHash) {
+        ArrayDeque<HandlerChainEntry> chain = HANDLER_CHAIN.get();
+        if (chain.isEmpty()) return null;
+        for (HandlerChainEntry entry : chain) {
+            com.mezze.language.typedast.Hash eh = entry.effectHash();
+            if (eh != null && eh.equals(effectHash)) {
+                return entry.handler();
+            }
+        }
+        return null;
+    }
+
+    /**
      * Install a captured (handler, effect-hash) chain on the current
      * thread. Caller is responsible for {@link #clearHandlerChain()} on
      * the same thread when done (typically in a finally block). For

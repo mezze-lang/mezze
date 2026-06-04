@@ -180,6 +180,45 @@ public final class HandleNode extends MezzeNode {
         this.effectHash = effectHash;
     }
 
+    /**
+     * Hex of the Mut effect's content hash. Hardcoded here (rather than
+     * importing WellKnownHashConstants) because the interpreter module is
+     * Java + this class is a hot path; pulling in Kotlin generated code
+     * adds clinit cost we want to avoid. Kept in sync with the generator
+     * via the regression test (MutationRuntimeTest).
+     */
+    private static final String MUT_EFFECT_HASH_HEX =
+        "05d9e70c83972f84e21da6095c1c22600854cc8c081877a5f7f49c689da6fb7265fdfdacc76b16d0561ad9be50bd32ff300977d466fbb16e98f988b41fbb6dba";
+
+    /**
+     * Feature flag for #257 — when set, Mut perform sites skip the fiber/
+     * Continuation machinery and treat Mut as a marker effect (chain-only
+     * dispatch). Off by default while the OpCallNode marker PIC settles;
+     * flip via env var to A/B against the regular path.
+     *
+     * <p>Status (as of branch perf/close-java-gap):
+     * <ul>
+     *   <li>Mut-heavy hot loops: ~5-34% speedup on Collatz N=100k
+     *       (the for_range + while + read_int/write_int/incr shape).
+     *       Variance is high — system load dominates the measurement
+     *       at this N. Larger workloads should show a cleaner gap.</li>
+     *   <li>All MutationRuntimeTest cases pass with the flag on.</li>
+     *   <li>Full :interpreter:test suite passes with the flag OFF
+     *       (5188/0/0). With the flag ON, runs are clean modulo a
+     *       pre-existing flake (CrossEffectCompositionTest LoomAsync
+     *       variants are ~20% flaky on both branches).</li>
+     * </ul>
+     *
+     * <p>Mut is a hermetic effect — its state can never leak across the
+     * LocalMut handler boundary, so the marker path never affects
+     * non-Mut effect interactions. Safe to ship the infrastructure;
+     * flipping the default just needs more bench evidence on real
+     * workloads.
+     */
+    private static final boolean MARKER_MUT_ENABLED =
+        System.getenv("MEZZE_MARKER_MUT") != null
+            && !System.getenv("MEZZE_MARKER_MUT").equals("0");
+
     @Override
     public Object execute(VirtualFrame frame) {
         Object handlerValue = handlerNode.execute(frame);
@@ -188,11 +227,57 @@ public final class HandleNode extends MezzeNode {
             throw new RuntimeException("Handler must be a record, got: "
                 + (handlerValue == null ? "null" : handlerValue.getClass().getSimpleName()));
         }
+
+        // #257 fast path: Mut is a marker effect — its handler impls never
+        // call resume/abort, so we don't need a fiber/Continuation at all.
+        // Push the handler on the per-thread chain, run body directly with
+        // CURRENT cleared, pop in finally. Inner `Mut.op {...}` calls then
+        // fall through OpCallNode → chainDispatch (since current() is null)
+        // and route to the handler record's field directly, no suspend/
+        // resume round-trip per op.
+        if (MARKER_MUT_ENABLED
+                && effectHash != null
+                && effectHash.getHex().equals(MUT_EFFECT_HASH_HEX)) {
+            return runMarker(handler, frame);
+        }
+
         // Body executes inside a Loom continuation, which may yield back to
         // the driver across the frame boundary. Materialize so body's frame
         // survives the suspend/resume cycles.
         return EffectHandlerDriver.run(
             handler, effectHash, bodyNode, frame.materialize(), callNode, this);
+    }
+
+    /**
+     * Marker-effect fast path (#257). Body runs on the caller's Java stack;
+     * no fiber/Continuation. Inner Mut op-calls dispatch via the per-thread
+     * handler chain — see {@link com.mezze.interpreter.nodes.effect.OpCallNode#execute}
+     * (when CURRENT is null and chain has entries, it walks the chain
+     * innermost-first and calls the matched op handler directly).
+     *
+     * <p>The {@code runDetached} clears CURRENT around body so any outer
+     * fiber (e.g. {@code perform Console in perform LocalMut in ...})
+     * doesn't get spuriously suspended by an inner Mut op-call. Same
+     * mechanism added in #255 for native loop callbacks.
+     *
+     * <p>Catches {@link com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException}
+     * even though Mut handlers shouldn't throw it — defense-in-depth in
+     * case a non-Mut handler shape gets accidentally tagged as marker.
+     */
+    private Object runMarker(MezzeRecord handler, VirtualFrame frame) {
+        int chainDepthBefore =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.handlerChainDepth();
+        com.mezze.interpreter.nodes.continuation.EffectFiber.pushHandlerOnChain(
+            handler, effectHash);
+        try {
+            return com.mezze.interpreter.nodes.continuation.EffectFiber.runDetached(
+                () -> bodyNode.execute(frame));
+        } catch (EffectHandlerDriver.AbortPerformException abort) {
+            return abort.value;
+        } finally {
+            com.mezze.interpreter.nodes.continuation.EffectFiber.truncateHandlerChainTo(
+                chainDepthBefore);
+        }
     }
 
     // ------------------------------------------------------------------

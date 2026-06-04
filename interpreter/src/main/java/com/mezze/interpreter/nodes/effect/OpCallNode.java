@@ -63,10 +63,50 @@ public final class OpCallNode extends MezzeNode {
     @Child
     private IndirectCallNode chainCallNode;
 
+    /**
+     * Hex of the Mut effect's content hash — see HandleNode for context.
+     * Used to decide whether to take the marker-effect fast path (#257).
+     */
+    private static final String MUT_EFFECT_HASH_HEX =
+        "05d9e70c83972f84e21da6095c1c22600854cc8c081877a5f7f49c689da6fb7265fdfdacc76b16d0561ad9be50bd32ff300977d466fbb16e98f988b41fbb6dba";
+
+    private static final boolean MARKER_MUT_ENABLED =
+        System.getenv("MEZZE_MARKER_MUT") != null
+            && !System.getenv("MEZZE_MARKER_MUT").equals("0");
+
+    /** True if this op-call's effectHash is the Mut effect. Cached at construction. */
+    @CompilationFinal
+    private final boolean isMutOp;
+
+    /**
+     * Inline cache for the marker fast path. Captured on first execution
+     * inside a Mut region: the handler record on the chain, the op field
+     * index inside that record, and a DirectCallNode pinned to the op
+     * implementation's CallTarget. Subsequent calls verify
+     * {@code cachedMarkerHandler == peekHandlerForEffect(Mut)} and dispatch
+     * via {@link #markerCallNode} — Truffle then folds the call through
+     * partial evaluation and the JIT inlines the callee. Mismatch
+     * (different LocalMut region with a different handler record) deopts
+     * and re-initializes; this is the standard PIC pattern. #257.
+     */
+    @CompilationFinal
+    private com.mezze.interpreter.values.MezzeRecord cachedMarkerHandler;
+    @CompilationFinal
+    private int cachedMarkerFieldIndex = -1;
+    @CompilationFinal
+    private int cachedMarkerClosureLen = -1;
+    @CompilationFinal(dimensions = 1)
+    private Object[] cachedMarkerClosure;
+    @Child
+    private com.oracle.truffle.api.nodes.DirectCallNode markerCallNode;
+
     public OpCallNode(String operationName, Hash effectHash, MezzeNode argumentNode) {
         this.operationName = operationName;
         this.effectHash = effectHash;
         this.argumentNode = argumentNode;
+        this.isMutOp = MARKER_MUT_ENABLED
+            && effectHash != null
+            && effectHash.getHex().equals(MUT_EFFECT_HASH_HEX);
     }
 
     public static OpCallNode create(String operationName, Hash effectHash, MezzeNode argumentNode) {
@@ -80,11 +120,75 @@ public final class OpCallNode extends MezzeNode {
         if (fiber != null) {
             return fiber.suspend(new OpCall(operationName, args, effectHash));
         }
+        // #257 marker fast path. Inside a marker-Mut region CURRENT is null
+        // (set up by HandleNode.runMarker), so we reach here. If our
+        // inline cache holds the same handler that's currently on the
+        // chain, dispatch direct through markerCallNode — no chain walk,
+        // no dispatch fiber, no resume/abort plumbing.
+        if (isMutOp && markerCallNode != null) {
+            com.mezze.interpreter.values.MezzeRecord top =
+                EffectFiber.peekHandlerForEffect(effectHash);
+            if (top == cachedMarkerHandler) {
+                return invokeMarker(args);
+            }
+            // Different region — deopt and re-cache.
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+        }
+        if (isMutOp) {
+            com.mezze.interpreter.values.MezzeRecord top =
+                EffectFiber.peekHandlerForEffect(effectHash);
+            if (top != null) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                if (initializeMarkerCache(top)) {
+                    return invokeMarker(args);
+                }
+            }
+        }
         HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         if (chain.length > 0) {
             return chainDispatch(chain, args);
         }
         return createSuspended(args);
+    }
+
+    /**
+     * One-time cache setup for the marker fast path. Caller has already
+     * deopted via {@link CompilerDirectives#transferToInterpreterAndInvalidate()}.
+     * Returns false if the handler record doesn't expose the expected op
+     * field as a {@link MezzeFunction} — the caller falls back to chain
+     * dispatch so correctness is preserved even if the handler shape is
+     * unexpected.
+     */
+    private boolean initializeMarkerCache(com.mezze.interpreter.values.MezzeRecord handler) {
+        int idx = handler.getFieldIndex(operationName);
+        if (idx < 0) return false;
+        Object f = handler.getField(idx);
+        if (!(f instanceof MezzeFunction op)) return false;
+        Object[] closure = op.getClosureValues();
+        com.oracle.truffle.api.nodes.DirectCallNode node =
+            com.oracle.truffle.api.nodes.DirectCallNode.create(op.getCallTarget());
+        node.forceInlining();
+        this.markerCallNode = insert(node);
+        this.cachedMarkerHandler = handler;
+        this.cachedMarkerFieldIndex = idx;
+        this.cachedMarkerClosureLen = closure.length;
+        this.cachedMarkerClosure = closure;
+        return true;
+    }
+
+    /**
+     * Hot-path invoke through the marker inline cache. The handler's op
+     * impl takes one record arg (the op's args) and returns its result.
+     * Closure values are prepended per the standard Mezze call ABI.
+     */
+    private Object invokeMarker(Object args) {
+        int closureLen = cachedMarkerClosureLen;
+        Object[] callArgs = new Object[closureLen + 1];
+        if (closureLen > 0) {
+            System.arraycopy(cachedMarkerClosure, 0, callArgs, 0, closureLen);
+        }
+        callArgs[closureLen] = args;
+        return markerCallNode.call(callArgs);
     }
 
     /**
