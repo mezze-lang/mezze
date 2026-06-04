@@ -793,50 +793,63 @@ class TypeChecker(
                     // Generate auto-derived codec impls (EncodeRepr/DecodeRepr) from constraint solver.
                     // The solver tracks which types need codec impls; CodecGenerator builds parsed ASTs;
                     // the builder converts them to TypedAbilityImpls that the compiler can emit as FunctionIRs.
+                    //
+                    // Additionally, eagerly seed `impl EncodeRepr/DecodeRepr for X` for every primitive
+                    // (#195 PR-A). The on-demand path only fires when `'a` is concrete at the
+                    // constraint site; polymorphic stdlib helpers (e.g. `Map Str 'a with EncodeRepr 'a`)
+                    // leave `'a` as a TyVar, so without seeding nothing dispatches to the primitive
+                    // impl at runtime — calls like `x.v.encode_repr {...}` crash on field access
+                    // against a raw `Str`. Seeding is content-addressed; the store layer dedups.
                     val codecImpls = solver.getGeneratedCodecImpls()
-                    if (codecImpls.isNotEmpty()) {
-                        val codecGen = com.mezze.language.typechecker.codec.CodecGenerator()
-                        val extraImpls = mutableListOf<com.mezze.language.typedast.TypedAbilityImpl>()
-                        for (ci in codecImpls) {
-                            try {
-                                val formatType: com.mezze.language.ast.MezzeType
-                                val dataType: com.mezze.language.ast.MezzeType
-                                if (ci.targetTypes.size == 2) {
-                                    // Two-parameter form: [formatType, dataType]
-                                    formatType = ci.targetTypes[0]
-                                    dataType = ci.targetTypes[1]
-                                } else if (ci.targetTypes.size == 1) {
-                                    // Single-parameter form (EncodeRepr/DecodeRepr method call):
-                                    // Only dataType is known. Use a dummy format type —
-                                    // the generated code references Format/DecodeFormat dynamically.
-                                    dataType = ci.targetTypes[0]
-                                    formatType = com.mezze.language.ast.MezzeType.RecordType(emptyMap())
-                                } else {
-                                    continue
-                                }
-                                // Pick encode-shaped vs decode-shaped impl body via
-                                // hash, not name — rename-safe.
-                                val abilityHash = WellKnownHashes.resolveHash(ci.abilityName)
-                                val parsedImpl = when {
-                                    WellKnownHashes.isEncodeFlavoredCodec(abilityHash) ->
-                                        codecGen.generateEncodeImpl(formatType, dataType)
-                                    WellKnownHashes.isDecodeFlavoredCodec(abilityHash) ->
-                                        codecGen.generateDecodeImpl(formatType, dataType)
-                                    else -> continue
-                                }
-                                builder.buildCodecImpl(parsedImpl, extraImpls)
-                            } catch (_: Exception) {
-                                // Codec generation errors are non-fatal; the impl will be missing at runtime.
+                    val codecGen = com.mezze.language.typechecker.codec.CodecGenerator()
+                    val extraImpls = mutableListOf<com.mezze.language.typedast.TypedAbilityImpl>()
+
+                    for (parsedImpl in codecGen.seedPrimitiveImpls()) {
+                        try {
+                            builder.buildCodecImpl(parsedImpl, extraImpls)
+                        } catch (_: Exception) {
+                            // Best-effort: if a primitive impl fails to build, on-demand
+                            // path remains as fallback for whichever site needs it.
+                        }
+                    }
+
+                    for (ci in codecImpls) {
+                        try {
+                            val formatType: com.mezze.language.ast.MezzeType
+                            val dataType: com.mezze.language.ast.MezzeType
+                            if (ci.targetTypes.size == 2) {
+                                // Two-parameter form: [formatType, dataType]
+                                formatType = ci.targetTypes[0]
+                                dataType = ci.targetTypes[1]
+                            } else if (ci.targetTypes.size == 1) {
+                                // Single-parameter form (EncodeRepr/DecodeRepr method call):
+                                // Only dataType is known. Use a dummy format type —
+                                // the generated code references Format/DecodeFormat dynamically.
+                                dataType = ci.targetTypes[0]
+                                formatType = com.mezze.language.ast.MezzeType.RecordType(emptyMap())
+                            } else {
+                                continue
                             }
+                            // Pick encode-shaped vs decode-shaped impl body via
+                            // hash, not name — rename-safe.
+                            val abilityHash = WellKnownHashes.resolveHash(ci.abilityName)
+                            val parsedImpl = when {
+                                WellKnownHashes.isEncodeFlavoredCodec(abilityHash) ->
+                                    codecGen.generateEncodeImpl(formatType, dataType)
+                                WellKnownHashes.isDecodeFlavoredCodec(abilityHash) ->
+                                    codecGen.generateDecodeImpl(formatType, dataType)
+                                else -> continue
+                            }
+                            builder.buildCodecImpl(parsedImpl, extraImpls)
+                        } catch (_: Exception) {
+                            // Codec generation errors are non-fatal; the impl will be missing at runtime.
                         }
-                        if (extraImpls.isNotEmpty()) {
-                            val updatedImpls = typed.abilityImpls + extraImpls
-                            emittedTypedModule = typed.copy(abilityImpls = updatedImpls)
-                        } else {
-                            emittedTypedModule = typed
-                        }
+                    }
+
+                    emittedTypedModule = if (extraImpls.isNotEmpty()) {
+                        typed.copy(abilityImpls = typed.abilityImpls + extraImpls)
                     } else {
-                        emittedTypedModule = typed
+                        typed
                     }
                 } catch (e: Exception) {
                     if (System.getenv("MEZZE_DEBUG") != null) {

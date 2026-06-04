@@ -35,8 +35,12 @@ class CodecGeneratorTest {
     }
 
     @Test
-    fun `binary types should not be serializable`() {
-        assertFalse(generator.isSerializable(MezzeType.BytesType))
+    fun `Bytes is serializable, ByteBuffer is not`() {
+        // #195 PR-A: Bytes now has a real `impl EncodeRepr` / `impl DecodeRepr` via
+        // Format.encode_bytes / decode_bytes — needed so polymorphic stdlib helpers
+        // (`'a with EncodeRepr 'a`) dispatch when `'a` instantiates to Bytes.
+        // ByteBuffer stays unserializable; it's a mutable I/O cursor, not a value.
+        assertTrue(generator.isSerializable(MezzeType.BytesType))
         assertFalse(generator.isSerializable(MezzeType.ByteBufferType))
     }
 

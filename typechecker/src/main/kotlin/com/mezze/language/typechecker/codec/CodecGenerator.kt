@@ -47,7 +47,7 @@ class CodecGenerator {
             is MezzeType.FracType -> true
             is MezzeType.CharType -> true
             is MezzeType.OrderingType -> true
-            is MezzeType.BytesType -> false
+            is MezzeType.BytesType -> true
             is MezzeType.ByteBufferType -> false
             is MezzeType.FunctionType -> false
             is MezzeType.SuspendedType -> false
@@ -119,6 +119,7 @@ class CodecGenerator {
             dataType is MezzeType.NatType -> generateNatEncode(formatType)
             dataType is MezzeType.FracType -> generatePrimitiveEncode(formatType, dataType, "encode_frac", "val")
             dataType is MezzeType.CharType -> generateCharEncode(formatType)
+            dataType is MezzeType.BytesType -> generatePrimitiveEncode(formatType, dataType, "encode_bytes", "val")
             isBoolVariant(dataType) -> generateBoolEncode(formatType)
             dataType is MezzeType.RecordType -> generateRecordEncode(formatType, dataType)
             dataType is MezzeType.VariantType -> generateVariantEncode(formatType, dataType)
@@ -167,6 +168,7 @@ class CodecGenerator {
             dataType is MezzeType.NatType -> generateNatDecode(formatType)
             dataType is MezzeType.FracType -> generatePrimitiveDecode(formatType, dataType, "decode_frac")
             dataType is MezzeType.CharType -> generateCharDecode(formatType)
+            dataType is MezzeType.BytesType -> generatePrimitiveDecode(formatType, dataType, "decode_bytes")
             isBoolVariant(dataType) -> generateBoolDecode(formatType)
             dataType is MezzeType.RecordType -> generateRecordDecode(formatType, dataType)
             dataType is MezzeType.VariantType -> generateVariantDecode(formatType, dataType)
@@ -1919,6 +1921,35 @@ class CodecGenerator {
             ),
             loc = GEN_LOC
         )
+    }
+
+    /**
+     * Eagerly emit `impl EncodeRepr for X` and `impl DecodeRepr for X` for every
+     * built-in primitive. The on-demand path in ConstraintSolver only seeds an
+     * impl when a constraint resolves to a concrete primitive at a call site —
+     * inside a polymorphic helper like `with_query : Map Str 'a with EncodeRepr 'a`
+     * the `'a` stays a TyVar and no impl ever gets generated, so the runtime
+     * crashes on `x.v.encode_repr {...}` against e.g. a `Str` payload. Seeding
+     * unconditionally closes that gap. Caller dedups by content hash.
+     */
+    fun seedPrimitiveImpls(): List<ParsedImplAbilityDecl> {
+        val dummyFormat = MezzeType.RecordType(emptyMap())
+        val primitives = listOf(
+            MezzeType.IntType,
+            MezzeType.FloatType,
+            MezzeType.StringType,
+            MezzeType.BoolType,
+            MezzeType.NatType,
+            MezzeType.FracType,
+            MezzeType.CharType,
+            MezzeType.BytesType,
+        )
+        val out = ArrayList<ParsedImplAbilityDecl>(primitives.size * 2)
+        for (prim in primitives) {
+            out.add(generateEncodeImpl(dummyFormat, prim))
+            out.add(generateDecodeImpl(dummyFormat, prim))
+        }
+        return out
     }
 
     /**
