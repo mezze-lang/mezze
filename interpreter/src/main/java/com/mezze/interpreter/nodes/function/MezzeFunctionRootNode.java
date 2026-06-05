@@ -7,6 +7,7 @@ import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.Truffle;
 import com.oracle.truffle.api.frame.Frame;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.frame.VirtualFrame;
@@ -14,7 +15,10 @@ import com.oracle.truffle.api.interop.NodeLibrary;
 import com.oracle.truffle.api.library.ExportLibrary;
 import com.oracle.truffle.api.library.ExportMessage;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
+import com.oracle.truffle.api.nodes.LoopNode;
+import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.nodes.RepeatingNode;
 import com.oracle.truffle.api.nodes.RootNode;
 import com.oracle.truffle.api.source.SourceSection;
 
@@ -40,7 +44,24 @@ public final class MezzeFunctionRootNode extends RootNode {
 
     private final String name;
 
-    @Child private MezzeNode bodyNode;
+    /**
+     * Trampoline driver — wraps the user body in a Truffle LoopNode so the
+     * trampoline iteration count is what triggers OSR compilation, not the
+     * (single-call) per-CallTarget function-call count. Without this wrap,
+     * tail-recursive driver functions like Collatz's {@code sum_lengths}
+     * never compile: they're invoked exactly once and spin forever inside
+     * the trampoline, never crossing the call-count threshold. JFR pre-fix
+     * showed zero {@code Compilation} events for {@code sum_lengths} despite
+     * 2M iterations; LoopNode's reported iteration count fixes this.
+     */
+    @Child private LoopNode bodyLoopNode;
+
+    /**
+     * The user body. Kept as a back-reference for {@link #getBodyNode()} so
+     * the debugger and other introspection paths still work — the actual
+     * {@code @Child} adoption lives inside {@link BodyRepeatingNode}.
+     */
+    private MezzeNode bodyNode;
 
     // Parameter names for record field extraction
     @CompilationFinal(dimensions = 1)
@@ -89,6 +110,9 @@ public final class MezzeFunctionRootNode extends RootNode {
         this.slotTypes = slotTypes != null ? slotTypes : EMPTY_INTS;
         this.closureCount = this.closureSlots.length;
         this.parameterCount = this.parameterNames.length;
+        // Wrap the body in a LoopNode-driven trampoline. See bodyLoopNode
+        // field comment for why.
+        this.bodyLoopNode = Truffle.getRuntime().createLoopNode(new BodyRepeatingNode(bodyNode));
     }
 
     /**
@@ -209,18 +233,58 @@ public final class MezzeFunctionRootNode extends RootNode {
     }
 
     /**
-     * Execute the body, catching tail-call exceptions and rebinding params,
-     * looping until the body returns. Shared between the entry paths so the
-     * fast-path typed-LONG entry can call into it without restructuring.
+     * Drive the body through the LoopNode trampoline. Truffle reports the
+     * iteration count to the runtime, enabling OSR compilation for hot
+     * tail-recursive driver functions. Catch logic for self-tail-calls
+     * lives in {@link BodyRepeatingNode#executeRepeatingWithValue}.
      */
     private Object runBodyLoop(VirtualFrame frame) {
-        while (true) {
+        return bodyLoopNode.execute(frame);
+    }
+
+    /**
+     * One trampoline step:
+     * <ul>
+     *   <li>Body returns normally → return that value; loop stops.</li>
+     *   <li>Body throws {@link TailCallScalarException} → rebind typed
+     *       payload (long[]/double[]/mixed) and return
+     *       {@link RepeatingNode#CONTINUE_LOOP_STATUS}.</li>
+     *   <li>Body throws {@link TailCallException} → rebind from the new
+     *       args array (scalar or record ABI) and continue.</li>
+     * </ul>
+     *
+     * <p>Status discipline: anything other than {@code CONTINUE_LOOP_STATUS}
+     * (including {@code null}) is treated as the final result. {@code null}
+     * is a legal Mezze value (it's how we represent {@code unit}), so we
+     * can't use it as the sentinel — Truffle's {@code CONTINUE_LOOP_STATUS}
+     * is a private sentinel object guaranteed not to collide.
+     */
+    private final class BodyRepeatingNode extends Node implements RepeatingNode {
+
+        @Child
+        private MezzeNode bodyNode;
+
+        BodyRepeatingNode(MezzeNode bodyNode) {
+            this.bodyNode = bodyNode;
+        }
+
+        @Override
+        public boolean executeRepeating(VirtualFrame frame) {
+            // We always produce values via executeRepeatingWithValue;
+            // executeRepeating is required by the interface but unused.
+            throw new IllegalStateException(
+                "executeRepeating should not be called; use executeRepeatingWithValue");
+        }
+
+        @Override
+        public Object executeRepeatingWithValue(VirtualFrame frame) {
             try {
                 return bodyNode.execute(frame);
             } catch (TailCallScalarException tse) {
-                // Typed-payload fast path. Mode chosen by caller via fill / fillMixed:
-                //   paramKinds != null → mixed: dispatch each param into its bucket.
-                //   else → single-bucket: all params from longArgs OR doubleArgs.
+                // Typed-payload tail call. fill() / fillMixed() picks mode:
+                //   paramKinds != null → mixed buckets
+                //   else longArgs != null → all-LONG payload
+                //   else doubleArgs != null → all-DOUBLE payload
                 if (tse.paramKinds != null) {
                     bindMixedPayload(frame, tse.paramKinds, tse.longArgs, tse.doubleArgs, tse.objArgs);
                 } else if (tse.longArgs != null) {
@@ -228,10 +292,11 @@ public final class MezzeFunctionRootNode extends RootNode {
                 } else if (tse.doubleArgs != null) {
                     bindDoublePayload(frame, tse.doubleArgs);
                 }
+                return CONTINUE_LOOP_STATUS;
             } catch (TailCallException e) {
-                // Object-payload tail call. The tail-caller's arg layout starts at
-                // index 0 (no closure prefix here, since the body already runs inside
-                // this function's frame — closures don't change).
+                // Object-payload tail call. The tail-caller's arg layout
+                // starts at index 0 (no closure prefix — closures are stable
+                // within a single function's frame).
                 Object[] newArgs = e.getArguments();
                 if (parameterCount > 0 && newArgs.length > 0) {
                     boolean tailScalarABI;
@@ -247,7 +312,18 @@ public final class MezzeFunctionRootNode extends RootNode {
                         unpackRecordFast(frame, record);
                     }
                 }
+                return CONTINUE_LOOP_STATUS;
             }
+        }
+
+        @Override
+        public Object initialLoopStatus() {
+            return CONTINUE_LOOP_STATUS;
+        }
+
+        @Override
+        public boolean shouldContinue(Object status) {
+            return status == CONTINUE_LOOP_STATUS;
         }
     }
 
