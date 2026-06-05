@@ -137,6 +137,10 @@ object EmbeddedExec {
             .apply { if (jitDisabled) option("engine.Compilation", "false") }
             .apply { if (traceCompilation && jitCapable) option("engine.TraceCompilation", "true") }
             .apply { if (traceInlining && jitCapable) option("engine.TraceCompilationDetails", "true") }
+            // Polyglot routes engine.Trace* output through its own logger. Pin
+            // it to stderr so users see the trace events without needing
+            // --log.file=...; safe always since options are off by default.
+            .apply { if ((traceCompilation || traceInlining) && jitCapable) err(System.err) }
 
         val profile = args.contains("--profile")
         val coverage = args.contains("--coverage")
