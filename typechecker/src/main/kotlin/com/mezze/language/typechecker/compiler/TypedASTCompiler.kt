@@ -262,7 +262,9 @@ class TypedASTCompiler(
                 scanExprForDictFunctionCalls(expr.arg, out)
             }
             is TypedLambda -> {
-                // Don't scan into nested lambdas — they get their own dict params
+                // #195 B2: descend into nested lambdas so transitive dict-passing
+                // sees calls inside HOF callbacks (e.g. seq::fold {f = {x} -> ...}).
+                scanExprForDictFunctionCalls(expr.body, out)
             }
             is TypedBlock -> {
                 for (s in expr.statements) {
@@ -360,7 +362,13 @@ class TypedASTCompiler(
                 scanExprForVarTypeMethods(expr.arg, out)
             }
             is TypedLambda -> {
-                // Don't scan into nested lambdas — they get their own dict params
+                // #195 B2: descend into nested lambdas. When the inner body calls
+                // `x.method` on a VarType receiver (e.g. inside a `seq::fold`
+                // callback), the OUTER function holds the constraint and must
+                // request `__dict_<method>` so the inner lambda can capture it
+                // from the outer's frame. Skipping here used to make the inner
+                // call fall through to plain field access at runtime → crash.
+                scanExprForVarTypeMethods(expr.body, out)
             }
             is TypedBlock -> {
                 for (s in expr.statements) {
@@ -1204,6 +1212,47 @@ class TypedASTCompiler(
                     if (fields.none { it.name == Keywords.IT }) {
                         fields.add(0, FieldIR(Keywords.IT, receiverIR))
                     }
+
+                    // Transitive dict injection: the impl we'll dispatch to via the
+                    // outer caller's __dict_<method> slot may itself need dict params
+                    // (e.g. `impl EncodeRepr for Str`'s body `fmt.encode_string {val=it}`
+                    // needs __dict_encode_string against whatever `fmt` resolves to).
+                    // We don't know the exact impl at this call site, but every impl
+                    // candidate's transitive dict requirements can be unioned, and
+                    // resolved against the concrete types of the user-visible record
+                    // fields (`fmt`, etc.). Mirrors the concrete-receiver path above.
+                    val transitiveDictMethods = HashSet<String>()
+                    for (candidate in opCandidates) {
+                        dictMethodsForHash[candidate.opHash]?.let { transitiveDictMethods.addAll(it) }
+                    }
+                    if (transitiveDictMethods.isNotEmpty()) {
+                        val concreteTypesForDict = mutableListOf<MezzeType>()
+                        if (expr.arg is TypedRecord) {
+                            for (entry in (expr.arg as TypedRecord).entries) {
+                                if (entry is TypedRecordEntry.Field) {
+                                    concreteTypesForDict.add(entry.value.type)
+                                }
+                            }
+                        }
+                        for (dictMethodName in transitiveDictMethods.sorted()) {
+                            val dictParamName = com.mezze.language.ast.MagicParams.dictParamName(dictMethodName)
+                            // Don't double-inject if the user already wrote this field.
+                            if (fields.any { it.name == dictParamName }) continue
+                            val resolvedHash = resolveOpHashFromConcreteTypes(dictMethodName, concreteTypesForDict)
+                            if (resolvedHash != null) {
+                                fields.add(FieldIR(dictParamName, ReadGlobalFnByHashIR(resolvedHash, src)))
+                            } else {
+                                // Forward from caller's own dict params (caller is itself polymorphic
+                                // on the same format type).
+                                val callerDictIdx = currentParamNames.indexOf(dictParamName)
+                                if (callerDictIdx >= 0) {
+                                    val slot = currentCaptureCount + callerDictIdx
+                                    fields.add(FieldIR(dictParamName, ReadLocalIR(slot, SlotKind.OBJECT, src)))
+                                }
+                            }
+                        }
+                    }
+
                     val recordIR = MakeRecordIR(fields, src)
 
                     // Dictionary passing: if the current function has a __dict_<method> param,
@@ -1215,6 +1264,15 @@ class TypedASTCompiler(
                         val dictSlot = currentCaptureCount + dictParamIdx
                         census.methodDictCallee++
                         return DictMethodCallIR(dictSlot, recordIR, src)
+                    }
+                    // #195 B3: also look in captures. A nested lambda may have
+                    // gained `__dict_<m>` via synthetic closure capture (see
+                    // compileLambda) when its parent function holds the dict.
+                    // Capture slots live at frame indices 0..captureCount-1.
+                    val dictCaptureIdx = currentCaptureNames[dictParamName]
+                    if (dictCaptureIdx != null) {
+                        census.methodDictCallee++
+                        return DictMethodCallIR(dictCaptureIdx, recordIR, src)
                     }
 
                     // VarType receiver, multi-candidate, no dict param —
@@ -1366,10 +1424,30 @@ class TypedASTCompiler(
      * Tries each concrete type against the ability op index to find a match.
      */
     private fun resolveOpHashFromConcreteTypes(methodName: String, concreteTypes: List<MezzeType>): Hash? {
+        // First pass: direct match.
         for (concreteType in concreteTypes) {
-            if (concreteType is VarType) continue // Skip unresolved types
+            if (concreteType is VarType) continue
             val opHash = tryResolveAbilityOp(methodName, concreteType)
             if (opHash != null) return opHash
+        }
+        // Second pass (#195 B3): descend into container types. When the caller
+        // passes `xs: [Str]` and the callee needs an `EncodeRepr` impl for the
+        // element type, the right impl is `EncodeRepr for Str` — extract it
+        // from the container's element/value type.
+        for (concreteType in concreteTypes) {
+            val elementType: MezzeType? = when (concreteType) {
+                is SeqType -> concreteType.elementType
+                is ListType -> concreteType.elementType
+                is SetType -> concreteType.elementType
+                is SortedSetType -> concreteType.elementType
+                is MapType -> concreteType.valueType
+                is SortedMapType -> concreteType.valueType
+                else -> null
+            }
+            if (elementType != null && elementType !is VarType) {
+                val opHash = tryResolveAbilityOp(methodName, elementType)
+                if (opHash != null) return opHash
+            }
         }
         return null
     }
@@ -1592,16 +1670,50 @@ class TypedASTCompiler(
         val parentCaptureCount = currentCaptureCount
         val parentParamNames = currentParamNames
 
+        // #195 B3: scan the lambda body for VarType ability method calls
+        // (e.g. `x.encode_repr {...}` inside a `seq::fold` callback). The
+        // lambda needs its own dict params for each method whose receiver is
+        // a TyVar. These dicts can't come through the indirect-call signature
+        // (it's `f : {acc, x} -> 'b`, no room for extra args), so we capture
+        // them from the PARENT's dict-param slots. The parent already gained
+        // those slots via the B2 scanner-descent fix.
+        val lambdaDictMethods = sortedSetOf<String>()
+        scanExprForVarTypeMethods(expr.body, lambdaDictMethods)
+        // Only keep dicts the parent actually has — otherwise we'd try to
+        // capture a slot that doesn't exist.
+        val dictsToCapture = lambdaDictMethods.mapNotNull { method ->
+            val dictName = com.mezze.language.ast.MagicParams.dictParamName(method)
+            val parentParamIdx = parentParamNames.indexOf(dictName)
+            if (parentParamIdx >= 0) {
+                dictName to (parentCaptureCount + parentParamIdx)
+            } else {
+                val parentCaptureIdx = parentCaptureNames[dictName]
+                if (parentCaptureIdx != null) dictName to parentCaptureIdx else null
+            }
+        }
+        // Register the lambda's dict needs so compileFunctionBody adds them as
+        // captures (not params — params are fixed by the indirect-call ABI).
+        // We DON'T put them in dictMethodsForHash here because that would make
+        // compileFunctionBody append dict PARAMS; instead we extend the lambda's
+        // capture list directly.
+
         // Build capture name → index map so compileVar can emit ReadCaptureIR
         val captureNameMap = mutableMapOf<String, Int>()
         for ((i, c) in expr.captures.withIndex()) {
             captureNameMap[c.name] = i
         }
+        // Append synthetic dict-name captures AFTER user-visible captures so
+        // the lambda body can resolve `__dict_<m>` via currentCaptureNames.
+        val dictCaptureStart = expr.captures.size
+        for ((i, dc) in dictsToCapture.withIndex()) {
+            captureNameMap[dc.first] = dictCaptureStart + i
+        }
         currentCaptureNames = captureNameMap
 
         // Extract lambda as a separate FunctionIR
         val lambdaHash = com.mezze.language.typedast.TypedASTHasher.hashExpr(expr)
-        val lambdaCaptureInfo = expr.captures.map { c -> c.name to typeToSlotKind(c.type) }
+        val lambdaCaptureInfo = expr.captures.map { c -> c.name to typeToSlotKind(c.type) } +
+            dictsToCapture.map { it.first to SlotKind.OBJECT }
         val fnIR = compileFunctionBody(
             hash = lambdaHash,
             name = "lambda",
@@ -1639,6 +1751,10 @@ class TypedASTCompiler(
                 } else null
             }
         }
+        // Append the synthetic dict captures, in the same order they were added
+        // to lambdaCaptureInfo above. Each points at a parent's dict-param (or
+        // already-captured dict) slot.
+        val allCaptures = captures + dictsToCapture.map { CaptureIR(it.second, SlotKind.OBJECT) }
 
         // Restore parent's capture info so sibling lambdas in the same function body
         // see the correct capture context. Without this, compiling lambda A inside a
@@ -1648,7 +1764,7 @@ class TypedASTCompiler(
         currentCaptureCount = parentCaptureCount
         currentParamNames = parentParamNames
 
-        return MakeLambdaIR(lambdaHash, captures, src)
+        return MakeLambdaIR(lambdaHash, allCaptures, src)
     }
 
     private fun compileBlock(expr: TypedBlock, src: SourceInfo): NodeIR {
