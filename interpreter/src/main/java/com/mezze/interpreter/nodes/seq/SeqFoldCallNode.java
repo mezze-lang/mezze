@@ -8,6 +8,7 @@ import com.mezze.datastructures.seq.ObjectSeqStorage;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -44,6 +45,16 @@ public final class SeqFoldCallNode extends MezzeNode {
 
     @Child
     private DirectCallNode callNode;
+
+    /**
+     * Lazy-initialized LoopNode-driven loop for the large-LONG path. Lives
+     * here as a {@code @Child} so PE adopts it into the SeqFoldCallNode
+     * tree. We use it for size > 8 LONG-storage sequences: removes the
+     * {@code @TruffleBoundary} that previously made the fold loop opaque
+     * to PE, and gives the loop body access to OSR.
+     */
+    @Child
+    private SeqFoldLongLoopNode longLoopNode;
 
     // Cached CallTarget — safe across threads (monomorphic by source position).
     // We deliberately do NOT cache the folder's MezzeFunction or its
@@ -167,14 +178,21 @@ public final class SeqFoldCallNode extends MezzeNode {
         return acc;
     }
 
-    @TruffleBoundary
     private Object foldLongLarge(long[] data, Object init, int size,
                                  Object[] closureValues, int closureLength, DirectCallNode callNode) {
-        Object acc = init;
-        for (int i = 0; i < size; i++) {
-            acc = callFolder(acc, data[i], closureValues, closureLength, callNode);
+        // Per-folder LoopNode instance so the inner DirectCallNode is a
+        // stable @Child of the same Truffle tree as the LoopNode that
+        // drives the loop. Truffle's inliner only inlines through
+        // @Child DirectCallNodes — passing one as an arg defeats it.
+        // For monomorphic call sites (the common case) size-1 PIC.
+        SeqFoldLongLoopNode loop = longLoopNode;
+        CallTarget target = callNode.getCallTarget();
+        if (loop == null || loop.getFolderTarget() != target) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            loop = new SeqFoldLongLoopNode(target);
+            longLoopNode = insert(loop);
         }
-        return acc;
+        return loop.execute(data, init, size, closureValues, closureLength);
     }
 
     /**
