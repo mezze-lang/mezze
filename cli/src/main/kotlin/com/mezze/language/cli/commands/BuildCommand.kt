@@ -443,7 +443,12 @@ class BuildCommand {
             # EffectFiber, which wraps jdk.internal.vm.Continuation for the
             # Loom-backed effect handler runtime. Without it the JVM refuses
             # to load the wrapping class.
-            DEFAULT_OPTS="-XX:+UseZGC -Xmx4g --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-opens=java.base/jdk.internal.vm=ALL-UNNAMED"
+            # --add-modules=jdk.incubator.vector: required by VectorOps,
+            # which SIMD-optimizes LongSeqStorage.sum/min/max/indexOf and
+            # is class-loaded eagerly. Without it, the first call to
+            # seq::sum / seq::min / seq::max / seq::contains crashes with
+            # NoClassDefFoundError: jdk/incubator/vector/Vector.
+            DEFAULT_OPTS="-XX:+UseZGC -Xmx4g --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-opens=java.base/jdk.internal.vm=ALL-UNNAMED --add-modules=jdk.incubator.vector"
             OPTS="${'$'}{MEZZE_JAVA_OPTS:-${'$'}DEFAULT_OPTS}"
 
             exec "${'$'}JAVA" ${'$'}OPTS -jar "${'$'}JAR" "${'$'}@"
@@ -468,7 +473,7 @@ class BuildCommand {
                 exit /b 1
             )
             if "%MEZZE_JAVA%"=="" set "MEZZE_JAVA=java"
-            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-XX:+UseZGC -Xmx4g --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-opens=java.base/jdk.internal.vm=ALL-UNNAMED"
+            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-XX:+UseZGC -Xmx4g --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-opens=java.base/jdk.internal.vm=ALL-UNNAMED --add-modules=jdk.incubator.vector"
             "%MEZZE_JAVA%" %MEZZE_JAVA_OPTS% -jar "%JAR%" %*
         """.trimIndent() + "\r\n"
         launcher.writeText(script)
