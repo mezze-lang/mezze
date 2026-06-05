@@ -712,6 +712,19 @@ class TruffleCompiler(
                 val xs = field("xs") ?: return null
                 com.mezze.interpreter.nodes.seq.SeqSumCallNode.create(compileNode(xs, source))
             }
+            // seq::min {xs} → SeqReduceLongCallNode(MIN). Same shape as sum:
+            // plain reduce over the backing long[], wraps result in Some.
+            "__native_seq_min" -> {
+                val xs = field("xs") ?: return null
+                com.mezze.interpreter.nodes.seq.SeqReduceLongCallNode.createMin(
+                    compileNode(xs, source))
+            }
+            // seq::max {xs} → SeqReduceLongCallNode(MAX). Mirror of min.
+            "__native_seq_max" -> {
+                val xs = field("xs") ?: return null
+                com.mezze.interpreter.nodes.seq.SeqReduceLongCallNode.createMax(
+                    compileNode(xs, source))
+            }
 
             // ===== Map ops =====
             // m → MapNatives.size(m)
