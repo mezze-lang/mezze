@@ -131,12 +131,18 @@ object EmbeddedExec {
         val traceInlining = System.getenv("MEZZE_TRACE_INLINING")?.let {
             it == "1" || it.equals("true", ignoreCase = true)
         } ?: false
+        // MEZZE_OSR_THRESHOLD=<int> → override engine.OSRCompilationThreshold.
+        // Default is 100,000. Lower to force OSR to fire earlier on
+        // tight loops (useful for benching small-N programs where
+        // 100k iterations would dwarf the loop body's natural size).
+        val osrThreshold = System.getenv("MEZZE_OSR_THRESHOLD")?.toIntOrNull()
         val engineBuilder = Engine.newBuilder()
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
             .apply { if (jitDisabled) option("engine.Compilation", "false") }
             .apply { if (traceCompilation && jitCapable) option("engine.TraceCompilation", "true") }
             .apply { if (traceInlining && jitCapable) option("engine.TraceCompilationDetails", "true") }
+            .apply { if (osrThreshold != null && jitCapable) option("engine.OSRCompilationThreshold", osrThreshold.toString()) }
             // Polyglot routes engine.Trace* output through its own logger. Pin
             // it to stderr so users see the trace events without needing
             // --log.file=...; safe always since options are off by default.
