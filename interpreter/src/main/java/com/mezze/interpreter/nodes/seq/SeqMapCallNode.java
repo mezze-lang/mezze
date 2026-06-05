@@ -8,6 +8,7 @@ import com.mezze.datastructures.seq.ObjectSeqStorage;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -41,6 +42,17 @@ public final class SeqMapCallNode extends MezzeNode {
 
     @Child
     private DirectCallNode callNode;
+
+    /**
+     * Per-mapper-CallTarget LoopNode-driven path for large LONG-storage
+     * maps. Size-1 PIC: one instance per distinct mapper. Lets Truffle's
+     * inliner inline the mapper into the OSR'd loop body (the
+     * {@link DirectCallNode} lives as {@code @Child} of the repeating
+     * node, not passed as a method argument). Mirrors the fix shipped
+     * for {@link SeqFoldCallNode}.
+     */
+    @Child
+    private SeqMapLongLoopNode longLoopNode;
 
     // Cached CallTarget for monomorphic call sites. Safe to share across
     // threads because the CallTarget is determined by the source position,
@@ -82,11 +94,20 @@ public final class SeqMapCallNode extends MezzeNode {
         if (callNode == null || mapper.getCallTarget() != cachedMapperTarget) {
             resolveCallNode(mapper);
         }
+        // Re-entrancy snapshot — see #174 part 2 / SeqFoldCallNode. When
+        // a user mapper transitively calls seq::map again on the same
+        // node instance, the inner call replaces this.callNode. Without
+        // a local snapshot the outer loop would resume with the wrong
+        // target. Captured here so executeMap's small @ExplodeLoop paths
+        // (which read this.callNode via callMapper) keep using the
+        // outer-call's target.
+        DirectCallNode localCallNode = this.callNode;
 
-        return executeMap(seq, closureValues, closureLength);
+        return executeMap(seq, closureValues, closureLength, localCallNode);
     }
 
-    private Object executeMap(MezzeSeq<?> seq, Object[] closureValues, int closureLength) {
+    private Object executeMap(MezzeSeq<?> seq, Object[] closureValues, int closureLength,
+                              DirectCallNode localCallNode) {
         int size = seq.size();
         if (size == 0) {
             return MezzeSeq.empty();
@@ -109,16 +130,16 @@ public final class SeqMapCallNode extends MezzeNode {
         // Type-directed dispatch: JIT can optimize based on storage type
         if (!seenMultipleTypes) {
             if (seenStorageType == LongSeqStorage.class) {
-                return mapLongSeq((LongSeqStorage) storage, size, closureValues, closureLength);
+                return mapLongSeq((LongSeqStorage) storage, size, closureValues, closureLength, localCallNode);
             } else if (seenStorageType == DoubleSeqStorage.class) {
-                return mapDoubleSeq((DoubleSeqStorage) storage, size, closureValues, closureLength);
+                return mapDoubleSeq((DoubleSeqStorage) storage, size, closureValues, closureLength, localCallNode);
             } else if (seenStorageType == ObjectSeqStorage.class) {
-                return mapObjectSeq((ObjectSeqStorage) storage, size, closureValues, closureLength);
+                return mapObjectSeq((ObjectSeqStorage) storage, size, closureValues, closureLength, localCallNode);
             }
         }
 
         // Megamorphic fallback
-        return mapGeneric(seq, size, closureValues, closureLength);
+        return mapGeneric(seq, size, closureValues, closureLength, localCallNode);
     }
 
     /**
@@ -126,14 +147,15 @@ public final class SeqMapCallNode extends MezzeNode {
      * JIT can optimize knowing elements are longs.
      */
     private MezzeSeq<?> mapLongSeq(LongSeqStorage storage, int size,
-                                   Object[] closureValues, int closureLength) {
+                                   Object[] closureValues, int closureLength,
+                                   DirectCallNode localCallNode) {
         Object[] results = new Object[size];
         long[] data = storage.getArray();
 
         if (size <= 8) {
-            mapLongSmall(results, data, size, closureValues, closureLength);
+            mapLongSmall(results, data, size, closureValues, closureLength, localCallNode);
         } else {
-            mapLongLarge(results, data, size, closureValues, closureLength);
+            mapLongLarge(results, data, size, closureValues, closureLength, localCallNode);
         }
 
         return MezzeSeq.fromArray(results);
@@ -141,18 +163,41 @@ public final class SeqMapCallNode extends MezzeNode {
 
     @ExplodeLoop
     private void mapLongSmall(Object[] results, long[] data, int size,
-                              Object[] closureValues, int closureLength) {
+                              Object[] closureValues, int closureLength,
+                              DirectCallNode localCallNode) {
         for (int i = 0; i < size; i++) {
-            results[i] = callMapper(data[i], closureValues, closureLength);
+            results[i] = callMapper(data[i], closureValues, closureLength, localCallNode);
         }
     }
 
-    @TruffleBoundary
+    /**
+     * Large LONG-storage map. Pre-fix this was {@code @TruffleBoundary} —
+     * opaque to PE; every iter paid an interpreter→JIT boundary into the
+     * (separately compiled) mapper, and the per-iter wrapX record +
+     * Object[] + Long-boxing allocs couldn't be escape-analyzed away.
+     *
+     * <p>Now driven by {@link SeqMapLongLoopNode}: a Truffle
+     * {@link com.oracle.truffle.api.nodes.LoopNode} holds an inner
+     * {@link DirectCallNode} as {@code @Child} so Truffle's inliner
+     * inlines the mapper into the OSR'd loop body
+     * ({@code <OSR>} compilation with {@code inlinedCalls=2}).
+     *
+     * <p>Re-entrancy: per-mapper-target PIC (size 1) — recursive maps
+     * with different mappers get separate {@link SeqMapLongLoopNode}
+     * instances, so the cached {@link DirectCallNode} never gets
+     * clobbered by an inner call (the #174 part 2 issue).
+     */
     private void mapLongLarge(Object[] results, long[] data, int size,
-                              Object[] closureValues, int closureLength) {
-        for (int i = 0; i < size; i++) {
-            results[i] = callMapper(data[i], closureValues, closureLength);
+                              Object[] closureValues, int closureLength,
+                              DirectCallNode localCallNode) {
+        CallTarget target = localCallNode.getCallTarget();
+        SeqMapLongLoopNode loop = longLoopNode;
+        if (loop == null || loop.getMapperTarget() != target) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            loop = new SeqMapLongLoopNode(target);
+            longLoopNode = insert(loop);
         }
+        loop.execute(data, results, size, closureValues, closureLength);
     }
 
     /**
@@ -160,14 +205,15 @@ public final class SeqMapCallNode extends MezzeNode {
      * JIT can optimize knowing elements are doubles.
      */
     private MezzeSeq<?> mapDoubleSeq(DoubleSeqStorage storage, int size,
-                                     Object[] closureValues, int closureLength) {
+                                     Object[] closureValues, int closureLength,
+                                     DirectCallNode localCallNode) {
         Object[] results = new Object[size];
         double[] data = storage.getArray();
 
         if (size <= 8) {
-            mapDoubleSmall(results, data, size, closureValues, closureLength);
+            mapDoubleSmall(results, data, size, closureValues, closureLength, localCallNode);
         } else {
-            mapDoubleLarge(results, data, size, closureValues, closureLength);
+            mapDoubleLarge(results, data, size, closureValues, closureLength, localCallNode);
         }
 
         return MezzeSeq.fromArray(results);
@@ -175,17 +221,19 @@ public final class SeqMapCallNode extends MezzeNode {
 
     @ExplodeLoop
     private void mapDoubleSmall(Object[] results, double[] data, int size,
-                                Object[] closureValues, int closureLength) {
+                                Object[] closureValues, int closureLength,
+                                DirectCallNode localCallNode) {
         for (int i = 0; i < size; i++) {
-            results[i] = callMapper(data[i], closureValues, closureLength);
+            results[i] = callMapper(data[i], closureValues, closureLength, localCallNode);
         }
     }
 
     @TruffleBoundary
     private void mapDoubleLarge(Object[] results, double[] data, int size,
-                                Object[] closureValues, int closureLength) {
+                                Object[] closureValues, int closureLength,
+                                DirectCallNode localCallNode) {
         for (int i = 0; i < size; i++) {
-            results[i] = callMapper(data[i], closureValues, closureLength);
+            results[i] = callMapper(data[i], closureValues, closureLength, localCallNode);
         }
     }
 
@@ -193,14 +241,15 @@ public final class SeqMapCallNode extends MezzeNode {
      * Specialized path for object sequences.
      */
     private MezzeSeq<?> mapObjectSeq(ObjectSeqStorage storage, int size,
-                                     Object[] closureValues, int closureLength) {
+                                     Object[] closureValues, int closureLength,
+                                     DirectCallNode localCallNode) {
         Object[] results = new Object[size];
         Object[] data = storage.getArray();
 
         if (size <= 8) {
-            mapObjectSmall(results, data, size, closureValues, closureLength);
+            mapObjectSmall(results, data, size, closureValues, closureLength, localCallNode);
         } else {
-            mapObjectLarge(results, data, size, closureValues, closureLength);
+            mapObjectLarge(results, data, size, closureValues, closureLength, localCallNode);
         }
 
         return MezzeSeq.fromArray(results);
@@ -208,17 +257,19 @@ public final class SeqMapCallNode extends MezzeNode {
 
     @ExplodeLoop
     private void mapObjectSmall(Object[] results, Object[] data, int size,
-                                Object[] closureValues, int closureLength) {
+                                Object[] closureValues, int closureLength,
+                                DirectCallNode localCallNode) {
         for (int i = 0; i < size; i++) {
-            results[i] = callMapper(data[i], closureValues, closureLength);
+            results[i] = callMapper(data[i], closureValues, closureLength, localCallNode);
         }
     }
 
     @TruffleBoundary
     private void mapObjectLarge(Object[] results, Object[] data, int size,
-                                Object[] closureValues, int closureLength) {
+                                Object[] closureValues, int closureLength,
+                                DirectCallNode localCallNode) {
         for (int i = 0; i < size; i++) {
-            results[i] = callMapper(data[i], closureValues, closureLength);
+            results[i] = callMapper(data[i], closureValues, closureLength, localCallNode);
         }
     }
 
@@ -226,13 +277,14 @@ public final class SeqMapCallNode extends MezzeNode {
      * Generic fallback for megamorphic sites.
      */
     private MezzeSeq<?> mapGeneric(MezzeSeq<?> seq, int size,
-                                   Object[] closureValues, int closureLength) {
+                                   Object[] closureValues, int closureLength,
+                                   DirectCallNode localCallNode) {
         Object[] results = new Object[size];
 
         if (size <= 8) {
-            mapGenericSmall(seq, results, size, closureValues, closureLength);
+            mapGenericSmall(seq, results, size, closureValues, closureLength, localCallNode);
         } else {
-            mapGenericLarge(seq, results, size, closureValues, closureLength);
+            mapGenericLarge(seq, results, size, closureValues, closureLength, localCallNode);
         }
 
         return MezzeSeq.fromArray(results);
@@ -240,27 +292,30 @@ public final class SeqMapCallNode extends MezzeNode {
 
     @ExplodeLoop
     private void mapGenericSmall(MezzeSeq<?> seq, Object[] results, int size,
-                                 Object[] closureValues, int closureLength) {
+                                 Object[] closureValues, int closureLength,
+                                 DirectCallNode localCallNode) {
         for (int i = 0; i < size; i++) {
-            results[i] = callMapper(seq.get(i), closureValues, closureLength);
+            results[i] = callMapper(seq.get(i), closureValues, closureLength, localCallNode);
         }
     }
 
     @TruffleBoundary
     private void mapGenericLarge(MezzeSeq<?> seq, Object[] results, int size,
-                                 Object[] closureValues, int closureLength) {
+                                 Object[] closureValues, int closureLength,
+                                 DirectCallNode localCallNode) {
         for (int i = 0; i < size; i++) {
-            results[i] = callMapper(seq.get(i), closureValues, closureLength);
+            results[i] = callMapper(seq.get(i), closureValues, closureLength, localCallNode);
         }
     }
 
     @ExplodeLoop
-    private Object callMapper(Object element, Object[] closureValues, int closureLength) {
+    private Object callMapper(Object element, Object[] closureValues, int closureLength,
+                              DirectCallNode localCallNode) {
         // Use fast wrapper - no @TruffleBoundary, pre-cached shape
         MezzeRecord arg = MezzeRecord.wrapX(element);
 
         if (closureLength == 0) {
-            return callNode.call(new Object[] { arg });
+            return localCallNode.call(new Object[] { arg });
         } else {
             Object[] args = new Object[closureLength + 1];
             // Closure copy loop - JIT can unroll for small closures
@@ -268,7 +323,7 @@ public final class SeqMapCallNode extends MezzeNode {
                 args[i] = closureValues[i];
             }
             args[closureLength] = arg;
-            return callNode.call(args);
+            return localCallNode.call(args);
         }
     }
 
