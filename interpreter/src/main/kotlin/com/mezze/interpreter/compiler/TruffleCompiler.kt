@@ -705,6 +705,13 @@ class TruffleCompiler(
                 com.mezze.interpreter.nodes.seq.SeqFoldCallNode.create(
                     compileNode(xs, source), compileNode(init, source), compileNode(f, source))
             }
+            // seq::sum {xs} → SeqSumCallNode. Plain reduce over the backing
+            // long[] — no folder dispatch, no record alloc, no boxing.
+            // Java-for-loop-shaped; PE/HotSpot vectorize the hot path.
+            "__native_seq_sum" -> {
+                val xs = field("xs") ?: return null
+                com.mezze.interpreter.nodes.seq.SeqSumCallNode.create(compileNode(xs, source))
+            }
 
             // ===== Map ops =====
             // m → MapNatives.size(m)
