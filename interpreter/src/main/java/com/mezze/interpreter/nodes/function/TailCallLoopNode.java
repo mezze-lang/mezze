@@ -8,101 +8,143 @@ import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
+import com.oracle.truffle.api.nodes.LoopNode;
 import com.oracle.truffle.api.nodes.NodeInfo;
-import com.oracle.truffle.api.profiles.LoopConditionProfile;
+import com.oracle.truffle.api.nodes.RepeatingNode;
 
 /**
- * Tail call loop node - MAXIMUM PERFORMANCE.
+ * Tail call loop node — wraps the trampoline body in a {@link LoopNode}
+ * so Truffle's compiler treats the iteration count as the "hotness"
+ * signal, not the (single) function-call count.
  *
- * Key optimizations:
- * 1. Field indices cached on first tail call - O(1) field access thereafter
- * 2. @ExplodeLoop for parameter rebinding - fully unrolled by JIT
- * 3. LoopConditionProfile for branch prediction
- * 4. NO @TruffleBoundary in hot path after warmup
+ * <p>Before #256: this node was a plain {@code while (true) { try body }}
+ * loop. For tail-recursive driver functions like {@code sum_lengths}
+ * (the Collatz outer loop) Truffle's OptimizedCallTarget only triggered
+ * compilation on call count — but the function is only called ONCE
+ * (and runs forever inside the trampoline), so it never crossed the
+ * threshold. JFR confirmed: {@code sum_lengths} was never compiled,
+ * its 5M iterations all ran in the interpreter, eating an
+ * interpreter→JIT boundary on every call to {@code collatz_length}.
  *
- * After JIT compilation, the tail call loop becomes:
- * - A tight loop with no method calls
- * - Direct field access via cached indices
- * - Zero allocation per iteration
+ * <p>After: {@link LoopNode} reports its iteration count to the engine
+ * via {@code LoopNode.reportLoopCount}, which feeds into the OSR
+ * (on-stack-replacement) compilation trigger. After ~10k iterations
+ * Truffle compiles the loop body in-place and the driver enters JIT
+ * code without unwinding.
  *
- * Slot layout: [closure0, ..., closureN-1, param0, ..., paramM-1]
- * Arguments from TailCallException: [closure0, ..., closureN-1, recordArg]
+ * <h2>Repeating semantics</h2>
+ *
+ * Per-iteration outcomes from the body:
+ * <ul>
+ *   <li><b>Normal return</b>: body computed a value. Use it as the
+ *       loop's return value and stop iterating.</li>
+ *   <li><b>{@link TailCallException} to self</b>: rebind params,
+ *       continue.</li>
+ *   <li><b>{@link TailCallException} to another function</b>: inner
+ *       cross-function trampoline (preserves the pre-#256 behavior of
+ *       this node — see {@code execute} below).</li>
+ * </ul>
+ *
+ * @see RepeatingNode
  */
 @NodeInfo(shortName = "tail-loop")
 public final class TailCallLoopNode extends MezzeNode {
 
     @Child
-    private MezzeNode bodyNode;
+    private LoopNode loopNode;
 
     @CompilationFinal
-    private final int parameterCount;
-
-    @CompilationFinal
-    private final int closureCount;
-
-    @CompilationFinal(dimensions = 1)
-    private final String[] parameterNames;
-
-    // Cached field indices - populated on first tail call, then constant-folded by JIT
-    @CompilationFinal(dimensions = 1)
-    private int[] cachedFieldIndices;
-
-    private final LoopConditionProfile loopProfile = LoopConditionProfile.create();
+    private final TailCallRepeatingNode repeatingNode;
 
     public TailCallLoopNode(MezzeNode bodyNode, int parameterCount, int closureCount) {
         this(bodyNode, parameterCount, closureCount, null);
     }
 
     public TailCallLoopNode(MezzeNode bodyNode, int parameterCount, int closureCount, String[] parameterNames) {
-        this.bodyNode = bodyNode;
-        this.parameterCount = parameterCount;
-        this.closureCount = closureCount;
-        this.parameterNames = parameterNames;
+        this.repeatingNode = new TailCallRepeatingNode(
+            bodyNode, parameterCount, closureCount, parameterNames);
+        this.loopNode = com.oracle.truffle.api.Truffle.getRuntime().createLoopNode(repeatingNode);
     }
-
-    // The CallTarget for the current function - used to detect self-recursive vs cross-function tail calls
-    // Lazily initialized on first tail call
-    @CompilationFinal
-    private com.oracle.truffle.api.CallTarget selfCallTarget;
 
     @Override
     public Object execute(VirtualFrame frame) {
-        // Lazily initialize self CallTarget from the root node
-        if (selfCallTarget == null) {
+        // Lazy-init the self CallTarget here so we have access to the
+        // enclosing RootNode (the body's RootNode == this node's RootNode).
+        if (repeatingNode.selfCallTarget == null) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
-            com.oracle.truffle.api.nodes.RootNode rootNode = getRootNode();
-            if (rootNode != null) {
-                selfCallTarget = rootNode.getCallTarget();
+            com.oracle.truffle.api.nodes.RootNode root = getRootNode();
+            if (root != null) {
+                repeatingNode.selfCallTarget = root.getCallTarget();
             }
         }
+        return loopNode.execute(frame);
+    }
 
-        // Trampoline for both self-recursive and cross-function tail
-        // calls. The key invariant: this method never grows the Java
-        // stack across iterations — when it catches a TailCallException,
-        // it either rebinds slots (self) or replaces the target/args
-        // and re-issues `target.call(args)` in the inner loop (cross).
-        //
-        // Cross-function works because the callee's TailCallLoopNode
-        // (a fresh Java frame for the duration of one call) catches
-        // its OWN body's exceptions: if it self-recurses it loops, if
-        // it cross-tail-calls a 3rd function it enters its OWN inner
-        // trampoline (one more frame), etc. The depth of Java frames
-        // is bounded by the number of distinct functions in the tail
-        // cycle, NOT by the recursion depth. For mutual recursion
-        // (even/odd ping-pong at depth N), Java stack stays at ~2
-        // frames regardless of N.
-        while (loopProfile.profile(true)) {
+    /**
+     * The body-once-and-decide node. Truffle's LoopNode calls
+     * {@code executeRepeatingWithValue} until we signal stop (via
+     * {@code shouldContinue}).
+     *
+     * <p>Status discipline (Truffle convention):
+     * <ul>
+     *   <li>{@link RepeatingNode#CONTINUE_LOOP_STATUS} → keep looping
+     *       (after a self-tail-call rebind).</li>
+     *   <li>Any other Object → stop, return that as the loop's value
+     *       (either body's normal return or a cross-fn trampoline result).</li>
+     * </ul>
+     */
+    static final class TailCallRepeatingNode extends com.oracle.truffle.api.nodes.Node
+            implements RepeatingNode {
+
+        @Child
+        private MezzeNode bodyNode;
+
+        @CompilationFinal
+        private final int parameterCount;
+
+        @CompilationFinal
+        private final int closureCount;
+
+        @CompilationFinal(dimensions = 1)
+        private final String[] parameterNames;
+
+        @CompilationFinal(dimensions = 1)
+        private int[] cachedFieldIndices;
+
+        @CompilationFinal
+        CallTarget selfCallTarget;
+
+        TailCallRepeatingNode(MezzeNode bodyNode, int parameterCount, int closureCount,
+                              String[] parameterNames) {
+            this.bodyNode = bodyNode;
+            this.parameterCount = parameterCount;
+            this.closureCount = closureCount;
+            this.parameterNames = parameterNames;
+        }
+
+        @Override
+        public boolean executeRepeating(VirtualFrame frame) {
+            // Not used — we always go through executeRepeatingWithValue
+            // because the body can produce arbitrary values, not just
+            // continue/break.
+            throw new IllegalStateException(
+                "executeRepeating should not be called; use executeRepeatingWithValue");
+        }
+
+        @Override
+        public Object executeRepeatingWithValue(VirtualFrame frame) {
             try {
+                // Body returned normally → final value; loop stops.
                 return bodyNode.execute(frame);
             } catch (TailCallException e) {
                 CallTarget target = e.getCallTarget();
                 if (target == selfCallTarget) {
                     rebindArguments(frame, e.getArguments());
-                    continue;
+                    return CONTINUE_LOOP_STATUS;
                 }
-                // Cross-function: trampoline. Inner loop avoids re-throwing
-                // the exception (which would unwind through bodyNode and
-                // re-enter the outer loop redundantly).
+                // Cross-function: dispatch through an inner trampoline so
+                // the loop's repeating-node count only includes self-iters.
+                // Bounded by the number of distinct fns in the tail cycle.
                 Object[] args = e.getArguments();
                 while (true) {
                     try {
@@ -110,7 +152,7 @@ public final class TailCallLoopNode extends MezzeNode {
                     } catch (TailCallException e2) {
                         if (e2.getCallTarget() == selfCallTarget) {
                             rebindArguments(frame, e2.getArguments());
-                            break;
+                            return CONTINUE_LOOP_STATUS;
                         }
                         target = e2.getCallTarget();
                         args = e2.getArguments();
@@ -118,119 +160,104 @@ public final class TailCallLoopNode extends MezzeNode {
                 }
             }
         }
-        throw new IllegalStateException("Unreachable");
-    }
 
-    /**
-     * Rebind parameter slots from the new arguments.
-     * First call computes and caches field indices.
-     * All subsequent calls use the fast path.
-     *
-     * ABI dispatch (mirrors MezzeFunctionRootNode.execute):
-     *   parameterCount == 1 + marker present  → scalar (values at closureCount+1..)
-     *   parameterCount != 1 + first arg !record → scalar (values at closureCount..)
-     *   first arg is a MezzeRecord            → record path
-     */
-    private void rebindArguments(VirtualFrame frame, Object[] newArgs) {
-        if (closureCount >= newArgs.length) return;
-
-        Object first = newArgs[closureCount];
-        boolean scalarABI;
-        int scalarValuesStart;
-        if (parameterCount == 1) {
-            // Arity collides — caller writes the marker.
-            scalarABI = first == ScalarABIMarker.INSTANCE;
-            scalarValuesStart = closureCount + 1;
-        } else {
-            // parameterCount >= 2: disambiguate by arity (no instanceof).
-            // Scalar arity == closureCount + parameterCount; record arity == closureCount + 1.
-            scalarABI = newArgs.length == closureCount + parameterCount;
-            scalarValuesStart = closureCount;
+        @Override
+        public Object initialLoopStatus() {
+            // Initial state — any value other than the final result means
+            // "still looping." We use CONTINUE_LOOP_STATUS as the sentinel
+            // to keep the loop running until executeRepeatingWithValue
+            // returns something else.
+            return CONTINUE_LOOP_STATUS;
         }
 
-        if (scalarABI) {
-            rebindScalar(frame, newArgs, scalarValuesStart);
-            return;
+        @Override
+        public boolean shouldContinue(Object status) {
+            return status == CONTINUE_LOOP_STATUS;
         }
-        if (!(first instanceof MezzeRecord record)) return;
 
-        if (cachedFieldIndices != null) {
-            // FAST PATH: Use cached indices - fully JIT-compilable
-            rebindFast(frame, record);
-        } else {
-            // SLOW PATH: First call - compute indices and cache
-            CompilerDirectives.transferToInterpreterAndInvalidate();
-            initializeCacheAndRebind(frame, record);
-        }
-    }
+        /**
+         * Rebind parameter slots from the new arguments.
+         * First call computes and caches field indices.
+         * All subsequent calls use the fast path.
+         *
+         * ABI dispatch (mirrors MezzeFunctionRootNode.execute):
+         *   parameterCount == 1 + marker present  → scalar (values at closureCount+1..)
+         *   parameterCount != 1 + first arg !record → scalar (values at closureCount..)
+         *   first arg is a MezzeRecord            → record path
+         */
+        private void rebindArguments(VirtualFrame frame, Object[] newArgs) {
+            if (closureCount >= newArgs.length) return;
 
-    /**
-     * Scalar ABI rebind — positional, no field-name lookup needed.
-     * After JIT: tight loop, no allocation, no record indirection.
-     */
-    @ExplodeLoop
-    private void rebindScalar(VirtualFrame frame, Object[] newArgs, int valuesStart) {
-        for (int i = 0; i < parameterCount; i++) {
-            int srcIndex = valuesStart + i;
-            if (srcIndex < newArgs.length) {
-                frame.setObject(closureCount + i, newArgs[srcIndex]);
+            Object first = newArgs[closureCount];
+            boolean scalarABI;
+            int scalarValuesStart;
+            if (parameterCount == 1) {
+                scalarABI = first == ScalarABIMarker.INSTANCE;
+                scalarValuesStart = closureCount + 1;
+            } else {
+                scalarABI = newArgs.length == closureCount + parameterCount;
+                scalarValuesStart = closureCount;
             }
-        }
-    }
 
-    /**
-     * Fast path: rebind using cached field indices.
-     * After JIT: direct array access, no method calls, fully unrolled.
-     */
-    @ExplodeLoop
-    private void rebindFast(VirtualFrame frame, MezzeRecord record) {
-        for (int i = 0; i < parameterCount; i++) {
-            int fieldIndex = cachedFieldIndices[i];
-            if (fieldIndex >= 0) {
-                Object value = record.getField(fieldIndex);
-                frame.setObject(closureCount + i, value);
+            if (scalarABI) {
+                rebindScalar(frame, newArgs, scalarValuesStart);
+                return;
             }
-        }
-    }
+            if (!(first instanceof MezzeRecord record)) return;
 
-    /**
-     * Initialize cache and perform first rebind.
-     * Called once, then never again for this node instance.
-     */
-    private void initializeCacheAndRebind(VirtualFrame frame, MezzeRecord record) {
-        int[] indices = computeFieldIndices(record);
-
-        // Bind values using the computed indices
-        for (int i = 0; i < parameterCount; i++) {
-            if (indices[i] >= 0) {
-                Object value = record.getField(indices[i]);
-                frame.setObject(closureCount + i, value);
+            if (cachedFieldIndices != null) {
+                rebindFast(frame, record);
+            } else {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                initializeCacheAndRebind(frame, record);
             }
         }
 
-        // Cache for future calls - this makes cachedFieldIndices @CompilationFinal effective
-        cachedFieldIndices = indices;
-    }
-
-    /**
-     * Compute field indices by name lookup.
-     * Only called once per node instance.
-     */
-    @TruffleBoundary
-    private int[] computeFieldIndices(MezzeRecord record) {
-        int[] indices = new int[parameterCount];
-
-        if (parameterNames != null) {
+        @ExplodeLoop
+        private void rebindScalar(VirtualFrame frame, Object[] newArgs, int valuesStart) {
             for (int i = 0; i < parameterCount; i++) {
-                indices[i] = record.getFieldIndex(parameterNames[i]);
-            }
-        } else {
-            // Fallback: assume same field order
-            for (int i = 0; i < parameterCount; i++) {
-                indices[i] = i < record.getFieldCount() ? i : -1;
+                int srcIndex = valuesStart + i;
+                if (srcIndex < newArgs.length) {
+                    frame.setObject(closureCount + i, newArgs[srcIndex]);
+                }
             }
         }
 
-        return indices;
+        @ExplodeLoop
+        private void rebindFast(VirtualFrame frame, MezzeRecord record) {
+            for (int i = 0; i < parameterCount; i++) {
+                int fieldIndex = cachedFieldIndices[i];
+                if (fieldIndex >= 0) {
+                    Object value = record.getField(fieldIndex);
+                    frame.setObject(closureCount + i, value);
+                }
+            }
+        }
+
+        private void initializeCacheAndRebind(VirtualFrame frame, MezzeRecord record) {
+            int[] indices = computeFieldIndices(record);
+            for (int i = 0; i < parameterCount; i++) {
+                if (indices[i] >= 0) {
+                    Object value = record.getField(indices[i]);
+                    frame.setObject(closureCount + i, value);
+                }
+            }
+            cachedFieldIndices = indices;
+        }
+
+        @TruffleBoundary
+        private int[] computeFieldIndices(MezzeRecord record) {
+            int[] indices = new int[parameterCount];
+            if (parameterNames != null) {
+                for (int i = 0; i < parameterCount; i++) {
+                    indices[i] = record.getFieldIndex(parameterNames[i]);
+                }
+            } else {
+                for (int i = 0; i < parameterCount; i++) {
+                    indices[i] = i < record.getFieldCount() ? i : -1;
+                }
+            }
+            return indices;
+        }
     }
 }
