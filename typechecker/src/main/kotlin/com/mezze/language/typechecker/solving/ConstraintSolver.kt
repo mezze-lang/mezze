@@ -36,8 +36,7 @@ import com.mezze.language.typechecker.util.TypeAnnotationMatcher
  */
 class ConstraintSolver(
     private val context: TypingContext,
-    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap(),
-    private val abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap()
+    private val registry: com.mezze.language.typechecker.context.DeclarationRegistry = com.mezze.language.typechecker.context.DeclarationRegistry.EMPTY
 ) {
     /**
      * CodecGenerator for auto-deriving Encode/Decode implementations.
@@ -160,7 +159,7 @@ class ConstraintSolver(
      */
     private fun buildConstructorIndex(): Map<String, List<Pair<com.mezze.language.parsedast.ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>> {
         val index = mutableMapOf<String, MutableList<Pair<com.mezze.language.parsedast.ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>>()
-        for ((_, typeDecl) in typeDeclarations) {
+        for (typeDecl in registry.allTypeDecls) {
             val definition = typeDecl.definition
             if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
                 for (constructor in definition.constructors) {
@@ -968,7 +967,7 @@ class ConstraintSolver(
             "solveEquality: $left = $right (${constraint.context})"
         }
 
-        val result = unify(left, right, typeDeclarations)
+        val result = unify(left, right, registry)
 
         DebugLogger.debug(Category.ConstraintSolver) { "  result: $result" }
 
@@ -1739,7 +1738,7 @@ class ConstraintSolver(
             if (annotations.size != 1) continue
             val typeVarBindings = mutableMapOf<String, MezzeType>()
             val matched = TypeAnnotationMatcher.typeMatchesAnnotation(
-                primaryType, annotations.first(), typeDeclarations, impl.typeVars, typeVarBindings
+                primaryType, annotations.first(), registry.typeDeclarations, impl.typeVars, typeVarBindings
             )
             if (matched) return impl to typeVarBindings
         }
@@ -1848,7 +1847,7 @@ class ConstraintSolver(
             val typeVarBindings = mutableMapOf<String, MezzeType>()
 
             val matches = unwrappedTypeArgs.zip(annotations).all { (actualType, annotation) ->
-                TypeAnnotationMatcher.typeMatchesAnnotation(actualType, annotation, typeDeclarations, implInfo.typeVars, typeVarBindings)
+                TypeAnnotationMatcher.typeMatchesAnnotation(actualType, annotation, registry.typeDeclarations, implInfo.typeVars, typeVarBindings)
             }
 
             if (!matches) return@any false
@@ -2133,19 +2132,19 @@ class ConstraintSolver(
 
         if (unwrappedType is MezzeType.TypeApplication) {
             // Check if this TypeApplication refers to a newtype declaration
-            val typeDecl = typeDeclarations[unwrappedType.constructor]
+            val typeDecl = registry.lookupType(unwrappedType.constructor)
                 ?: com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(unwrappedType.constructor)
             if (typeDecl?.definition is com.mezze.language.parsedast.ParsedNewtypeDef) {
                 isNewtype = true
             }
 
             // Try expanding to variant (type Color = | Red, Green |)
-            val expandedVariant = expandTypeApplicationToVariant(unwrappedType, typeDeclarations)
+            val expandedVariant = expandTypeApplicationToVariant(unwrappedType, registry)
             if (expandedVariant != null) {
                 unwrappedType = expandedVariant
             } else {
                 // Try expanding to record (type Point = { x: Int, y: Int })
-                val expandedRecord = expandTypeApplicationToRecord(unwrappedType, typeDeclarations)
+                val expandedRecord = expandTypeApplicationToRecord(unwrappedType, registry)
                 if (expandedRecord != null) {
                     unwrappedType = expandedRecord
                 }
@@ -2535,7 +2534,7 @@ class ConstraintSolver(
 
                 // If constraint has a concrete type, impl must match structurally
                 if (constraintType !is MezzeType.VarType) {
-                    if (!TypeAnnotationMatcher.typeMatchesAnnotation(constraintType, annotations[i], typeDeclarations)) {
+                    if (!TypeAnnotationMatcher.typeMatchesAnnotation(constraintType, annotations[i], registry.typeDeclarations)) {
                         matches = false
                         break
                     }
@@ -2626,7 +2625,7 @@ class ConstraintSolver(
     private fun solveSubsumes(constraint: Constraint.Subsumes): ConstraintResult {
         // For now, treat subsumption as equality
         // Full polymorphic subsumption will be added later
-        val result = unify(constraint.general, constraint.specific, typeDeclarations)
+        val result = unify(constraint.general, constraint.specific, registry)
 
         return when (result) {
             is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
@@ -2689,7 +2688,7 @@ class ConstraintSolver(
             is MezzeType.RecordType -> resolvedType
             is MezzeType.TypeApplication -> {
                 // Use principled expansion
-                when (val expansion = expandTypeApplication(resolvedType, typeDeclarations)) {
+                when (val expansion = expandTypeApplication(resolvedType, registry)) {
                     is TypeExpansionResult.Record -> expansion.recordType
                     is TypeExpansionResult.Newtype -> {
                         // For newtypes, check if payload is a record
@@ -2746,7 +2745,7 @@ class ConstraintSolver(
         // If record type is a TypeApplication (e.g., Person), expand it first
         if (recordType is MezzeType.TypeApplication) {
             // Use principled expansion based on definition type
-            when (val expansion = expandTypeApplication(recordType, typeDeclarations)) {
+            when (val expansion = expandTypeApplication(recordType, registry)) {
                 is TypeExpansionResult.Record -> {
                     return solveHasField(
                         constraint.copy(recordType = expansion.recordType),
@@ -2790,7 +2789,7 @@ class ConstraintSolver(
                 rowVar = RowVar.fresh() // Open record for extensibility
             )
             // Unify the type variable with this record
-            val result = unify(recordType, recordWithField, typeDeclarations)
+            val result = unify(recordType, recordWithField, registry)
             return when (result) {
                 is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
                 is UnificationResult.Failure -> ConstraintResult.Failure(result.message)
@@ -2862,7 +2861,7 @@ class ConstraintSolver(
             }
 
             // Field exists - unify actual field type with expected
-            val result = unify(actualFieldType, expectedFieldType, typeDeclarations)
+            val result = unify(actualFieldType, expectedFieldType, registry)
             return when (result) {
                 is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
                 is UnificationResult.Failure -> ConstraintResult.Failure(
@@ -2911,7 +2910,7 @@ class ConstraintSolver(
         // This handles non-parametric types like Color (TypeApplication("Color", []))
         // and parametric types like Option Int (TypeApplication("Option", [IntType]))
         if (variantType is MezzeType.TypeApplication) {
-            val expanded = expandTypeApplicationToVariant(variantType, typeDeclarations)
+            val expanded = expandTypeApplicationToVariant(variantType, registry)
             if (expanded != null) {
                 return solveHasConstructor(
                     constraint.copy(variantType = expanded),
@@ -3008,7 +3007,7 @@ class ConstraintSolver(
 
                     if (expectedPayloadType != null && declaredPayload != null) {
                         // Both pattern and constructor have payload - unify them
-                        val unifyResult = unify(expectedPayloadType, declaredPayload, typeDeclarations)
+                        val unifyResult = unify(expectedPayloadType, declaredPayload, registry)
                         when (unifyResult) {
                             is UnificationResult.Success -> {
                                 resultSubst = resultSubst.compose(unifyResult.substitution)
@@ -3052,7 +3051,7 @@ class ConstraintSolver(
                             "head" to elemTypeVar,
                             "tail" to listType
                         ))
-                        val unifyResult = unify(expectedPayloadType, expectedConsPayload, typeDeclarations)
+                        val unifyResult = unify(expectedPayloadType, expectedConsPayload, registry)
                         when (unifyResult) {
                             is UnificationResult.Success -> {
                                 resultSubst = resultSubst.compose(unifyResult.substitution)
@@ -3127,7 +3126,7 @@ class ConstraintSolver(
 
                     if (expectedPayloadType != null && declaredPayload != null) {
                         // Both pattern and constructor have payload - unify them
-                        val unifyResult = unify(expectedPayloadType, declaredPayload, typeDeclarations)
+                        val unifyResult = unify(expectedPayloadType, declaredPayload, registry)
                         when (unifyResult) {
                             is UnificationResult.Success -> {
                                 resultSubst = resultSubst.compose(unifyResult.substitution)
@@ -3167,7 +3166,7 @@ class ConstraintSolver(
                         "head" to elemTypeVar,
                         "tail" to listType
                     ))
-                    val unifyResult = unify(expectedPayloadType, expectedConsPayload, typeDeclarations)
+                    val unifyResult = unify(expectedPayloadType, expectedConsPayload, registry)
                     when (unifyResult) {
                         is UnificationResult.Success -> {
                             resultSubst = resultSubst.compose(unifyResult.substitution)
@@ -3281,7 +3280,7 @@ class ConstraintSolver(
                         // Unify payload types if present
                         val declaredCtorPayload = constructors[constructorName]
                         if (expectedPayloadType != null && declaredCtorPayload != null) {
-                            val unifyResult = unify(expectedPayloadType, declaredCtorPayload, typeDeclarations)
+                            val unifyResult = unify(expectedPayloadType, declaredCtorPayload, registry)
                             when (unifyResult) {
                                 is UnificationResult.Success -> {
                                     resultSubst = resultSubst.compose(unifyResult.substitution)
@@ -3512,7 +3511,7 @@ class ConstraintSolver(
                     instantiateWithFreshVars(actualPayloadType)
                 }
 
-                val result = unify(payloadTypeToUnify, expectedPayloadType, typeDeclarations)
+                val result = unify(payloadTypeToUnify, expectedPayloadType, registry)
                 return when (result) {
                     is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
                     is UnificationResult.Failure -> ConstraintResult.Failure(
@@ -3549,7 +3548,7 @@ class ConstraintSolver(
                         "head" to elemType,
                         "tail" to variantType  // ListType with same element type
                     ))
-                    val result = unify(expectedPayloadType, expectedConsPayload, typeDeclarations)
+                    val result = unify(expectedPayloadType, expectedConsPayload, registry)
                     return when (result) {
                         is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
                         is UnificationResult.Failure -> ConstraintResult.Failure(
@@ -3951,7 +3950,7 @@ class ConstraintSolver(
      * TypeDeclaration("Color", VariantDefinition([Red, Blue, Green]))
      */
     private fun findTypeDeclarationForConstructor(constructorName: String): com.mezze.language.parsedast.ParsedTypeDecl? {
-        for ((_, typeDecl) in typeDeclarations) {
+        for (typeDecl in registry.allTypeDecls) {
             val definition = typeDecl.definition
             if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
                 val hasConstructor = definition.constructors.any { it.name == constructorName }

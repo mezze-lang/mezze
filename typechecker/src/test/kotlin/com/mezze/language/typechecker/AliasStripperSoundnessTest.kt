@@ -4,6 +4,7 @@ import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.MezzeType.*
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.typechecker.solving.AliasStripper
+import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -59,7 +60,7 @@ class AliasStripperSoundnessTest {
             effects = effectRow
         )
 
-        val stripped = AliasStripper.strip(fnType, inScope, typeDecls)
+        val stripped = AliasStripper.strip(fnType, inScope, DeclarationRegistry.from(typeDecls, emptyMap(), emptyMap()))
 
         assertTrue(stripped is FunctionType)
         val strippedFn = stripped as FunctionType
@@ -91,7 +92,7 @@ class AliasStripperSoundnessTest {
             effects = effectRow
         )
 
-        val stripped = AliasStripper.strip(suspType, inScope, typeDecls)
+        val stripped = AliasStripper.strip(suspType, inScope, DeclarationRegistry.from(typeDecls, emptyMap(), emptyMap()))
 
         assertTrue(stripped is SuspendedType)
         val strippedSusp = stripped as SuspendedType
@@ -119,7 +120,7 @@ class AliasStripperSoundnessTest {
             abilityConstraints = listOf(constraint)
         )
 
-        val stripped = AliasStripper.strip(fnType, inScope, typeDecls)
+        val stripped = AliasStripper.strip(fnType, inScope, DeclarationRegistry.from(typeDecls, emptyMap(), emptyMap()))
 
         assertTrue(stripped is FunctionType)
         val strippedFn = stripped as FunctionType
@@ -155,7 +156,7 @@ class AliasStripperSoundnessTest {
             )
         )
 
-        val stripped = AliasStripper.strip(fnType, inScopeSet, typeDecls)
+        val stripped = AliasStripper.strip(fnType, inScopeSet, DeclarationRegistry.from(typeDecls, emptyMap(), emptyMap()))
 
         assertTrue(stripped is FunctionType)
         val strippedFn = stripped as FunctionType

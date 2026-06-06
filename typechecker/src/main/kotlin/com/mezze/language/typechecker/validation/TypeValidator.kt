@@ -46,6 +46,8 @@ class TypeValidator(
     private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),
     private val implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl> = emptyMap()
 ) {
+    /** DeclarationRegistry wrapping the raw type declarations for use with unification/expansion APIs. */
+    private val registry = com.mezze.language.typechecker.context.DeclarationRegistry.from(typeDeclarations, emptyMap(), emptyMap())
     private val abilityResolver = AbilityResolver(context, typeDeclarations)
     private val effectValidator = EffectValidator(context)
     private val codecGenerator = CodecGenerator()
@@ -259,7 +261,7 @@ class TypeValidator(
                     // Expand type applications to variant types
                     val expanded = when (finalType) {
                         is MezzeType.TypeApplication ->
-                            expandTypeApplicationToVariant(finalType, typeDeclarations) ?: finalType
+                            expandTypeApplicationToVariant(finalType, registry) ?: finalType
                         else -> finalType
                     }
                     if (expanded is MezzeType.VariantType) return expanded
@@ -797,7 +799,7 @@ class TypeValidator(
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
 
         if (unwrappedType is MezzeType.TypeApplication) {
-            val expanded = expandTypeApplicationToVariant(unwrappedType, typeDeclarations)
+            val expanded = expandTypeApplicationToVariant(unwrappedType, registry)
             if (expanded != null) {
                 unwrappedType = expanded
             }
@@ -1285,7 +1287,7 @@ class TypeValidator(
 
         val expandedType = when (scrutineeType) {
             is MezzeType.TypeApplication ->
-                expandTypeApplicationToVariant(scrutineeType, typeDeclarations) ?: scrutineeType
+                expandTypeApplicationToVariant(scrutineeType, registry) ?: scrutineeType
             is MezzeType.BoolType -> MezzeType.VariantType(
                 constructors = mapOf(com.mezze.language.ast.BuiltinTypes.TRUE to null, com.mezze.language.ast.BuiltinTypes.FALSE to null), rowVar = null
             )

@@ -399,22 +399,19 @@ class TypeChecker(
         }
         val allAbilityDeclarations = transitiveAbilities + buildResult.abilityDeclarations + importedAbilities
 
-        // Hash-keyed declaration maps — merge local + imported, keyed by content hash
-        val allTypeDeclsByHash = buildResult.typeDeclsByHash +
-            (importContext?.importedTypes?.values?.mapNotNull { d -> d.contentHash?.let { h -> h to d } }?.toMap() ?: emptyMap())
-        val allAbilityDeclsByHash = buildResult.abilityDeclsByHash +
-            allAbilityDeclarations.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap()
-        val allEffectDeclsByHash = buildResult.effectDeclsByHash +
-            allEffectDeclarations.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap()
+        // Build unified declaration registry from merged maps
+        val registry = com.mezze.language.typechecker.context.DeclarationRegistry.from(
+            allTypeDeclarations,
+            allAbilityDeclarations,
+            allEffectDeclarations,
+        )
 
         val constraintGenerator = ConstraintGenerator.create(
-            typeDeclarations = allTypeDeclarations,
+            registry = registry,
             performerToEffect = buildResult.performerToEffect,
             performerAddedEffects = buildResult.performerAddedEffects,
             abilityNames = abilityNames,
             effectNames = effectNames,
-            abilityDeclarations = allAbilityDeclarations,
-            effectDeclarations = allEffectDeclarations,
         )
 
         // #148: install the narrow in-scope alias name set for constraint generation
@@ -639,7 +636,7 @@ class TypeChecker(
               constraintResults.values.flatMap { it.associatedTypeConstraints }
 
         // PHASE 3: Solve Constraints
-        val solver = ConstraintSolver(context, allTypeDeclarations, allAbilityDeclarations)
+        val solver = ConstraintSolver(context, registry)
         // #148: keep the same narrow in-scope alias set in effect during the
         // global solve. inScopeAliasNames was computed above for constraint
         // generation; reuse it here.
@@ -707,7 +704,7 @@ class TypeChecker(
                 val mustBeOpenBindings = solveResult.mustBeOpenBindings
                 val mustBeOpenTypes = solveResult.mustBeOpenTypes
 
-                val tempGenerator = ConstraintGenerator.create(buildResult.typeDeclarations)
+                val tempGenerator = ConstraintGenerator.create(com.mezze.language.typechecker.context.DeclarationRegistry.from(buildResult.typeDeclarations, emptyMap(), emptyMap()))
 
                 val globallyResolvedConstraintResults = constraintResults.mapValues { (_, result) ->
                     val resolvedType = substitution.apply(result.type)
@@ -1605,7 +1602,7 @@ class TypeChecker(
             // captured by the constraint-generator-level override.
             val bindingType = if (inScopeAliasNames.isNotEmpty()) {
                 com.mezze.language.typechecker.solving.AliasStripper.strip(
-                    binding.type, inScopeAliasNames, typeDeclMap
+                    binding.type, inScopeAliasNames, com.mezze.language.typechecker.context.DeclarationRegistry.from(typeDeclMap, emptyMap(), emptyMap())
                 )
             } else binding.type
             val freeVars = collectFreeTypeVars(bindingType)

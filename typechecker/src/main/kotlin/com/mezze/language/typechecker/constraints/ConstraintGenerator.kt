@@ -47,13 +47,11 @@ class ConstraintGenerator(
     private val patternGenerator: PatternConstraintGenerator,
     private val abilityGenerator: AbilityConstraintGenerator,
     private val effectGenerator: EffectConstraintGenerator,
-    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap(),
+    private val registry: com.mezze.language.typechecker.context.DeclarationRegistry = com.mezze.language.typechecker.context.DeclarationRegistry.EMPTY,
     private val performerToEffect: Map<String, String> = emptyMap(),
     initialPerformerAddedEffects: Map<String, Set<String>> = emptyMap(),
     private val abilityNames: Set<String> = emptySet(),
     private val effectNames: Set<String> = emptySet(),
-    private val abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap(),
-    private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap()
 ) {
     // Mutable map for tracking effects that performers add
     // This is populated initially from explicit effect annotations, and updated
@@ -111,7 +109,7 @@ class ConstraintGenerator(
         var perBindingSubstitution = com.mezze.language.typechecker.solving.Substitution.empty
 
         // Import constraint solver for incremental solving
-        val solver = com.mezze.language.typechecker.solving.ConstraintSolver(context, typeDeclarations, abilityDeclarations)
+        val solver = com.mezze.language.typechecker.solving.ConstraintSolver(context, registry)
 
         // FIRST PASS: Add placeholders for function bindings to support mutual recursion
         // This allows functions to reference themselves and each other
@@ -131,7 +129,7 @@ class ConstraintGenerator(
                 if (annotation is ParsedFunctionType) {
                     for (constraint in annotation.abilityConstraints) {
                         val name = constraint.abilityName
-                        val isKnown = abilityDeclarations.containsKey(name) ||
+                        val isKnown = registry.abilityDeclarations.containsKey(name) ||
                             BuiltInAbilities.getAllAbilityNames().contains(name)
                         if (!isKnown) {
                             throw com.mezze.language.typechecker.TypeCheckError(
@@ -172,7 +170,7 @@ class ConstraintGenerator(
                     // Extend context with pattern bindings for subsequent items
                     // For simple variable bindings: extends with one binding
                     // For destructuring patterns: extends with multiple bindings
-                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, effectDeclarations = effectDeclarations, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
+                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, effectDeclarations = registry.effectDeclarations, abilityDeclarations = registry.abilityDeclarations, typeDeclarations = registry.typeDeclarations)
                     val patternResult = patternGenerator.generate(
                         item.pattern,
                         result.type,
@@ -246,7 +244,7 @@ class ConstraintGenerator(
                                 // This ensures "let x: Person = ..." has type "Person", not "{ name: String, ... }"
                                 if (preConvertedAnnotationType is MezzeType.TypeApplication) {
                                     // Check if this is a user-defined type alias (exists in typeDeclarations)
-                                    val isUserDefinedAlias = typeDeclarations.containsKey(preConvertedAnnotationType.constructor)
+                                    val isUserDefinedAlias = registry.typeDeclarations.containsKey(preConvertedAnnotationType.constructor)
 
                                     if (isUserDefinedAlias) {
                                         // User-defined type alias - preserve it, apply substitution to type arguments only
@@ -615,7 +613,7 @@ class ConstraintGenerator(
                                 else -> null
                             }
                         }
-                        val targetTypeHash = targetTypeName?.let { typeDeclarations[it]?.contentHash }
+                        val targetTypeHash = targetTypeName?.let { registry.typeDeclarations[it]?.contentHash }
 
                         for (op in item.operations) {
                             // Each operation gets a FRESH target type to prevent type variable leakage
@@ -683,9 +681,9 @@ class ConstraintGenerator(
                                 performerAddedEffects = performerAddedEffects,
                                 abilityNames = abilityNames,
                                 effectNames = effectNames,
-                                effectDeclarations = effectDeclarations,
-                                abilityDeclarations = abilityDeclarations,
-                                typeDeclarations = typeDeclarations
+                                effectDeclarations = registry.effectDeclarations,
+                                abilityDeclarations = registry.abilityDeclarations,
+                                typeDeclarations = registry.typeDeclarations
                             )
 
                             val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
@@ -784,7 +782,7 @@ class ConstraintGenerator(
                 }
                 is ParsedTopLevelExpr -> {
                     // Top-level expressions (for REPL)
-                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, effectDeclarations = effectDeclarations, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
+                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, effectDeclarations = registry.effectDeclarations, abilityDeclarations = registry.abilityDeclarations, typeDeclarations = registry.typeDeclarations)
                     val result = expressionGenerator.generate(
                         item.expression,
                         constraintContext
@@ -883,10 +881,10 @@ class ConstraintGenerator(
             performerAddedEffects = performerAddedEffects,
             abilityNames = abilityNames,
             effectNames = effectNames,
-            effectDeclarations = effectDeclarations,
-            abilityDeclarations = abilityDeclarations,
+            effectDeclarations = registry.effectDeclarations,
+            abilityDeclarations = registry.abilityDeclarations,
             recordLiteralBindings = recordLiteralBindings,
-            typeDeclarations = typeDeclarations,
+            typeDeclarations = registry.typeDeclarations,
             currentBindingName = bindingName,
             enclosingFunctionName = enclosingFunctionName,
             annotationAbilityNames = annotationAbilityNames
@@ -948,7 +946,7 @@ class ConstraintGenerator(
                             Constraint.AbilityRequired(
                                 typeVar = typeVarArg.variable,
                                 abilityName = constraint.abilityName,
-                                abilityHash = abilityDeclarations[constraint.abilityName]?.contentHash,
+                                abilityHash = registry.abilityDeclarations[constraint.abilityName]?.contentHash,
                                 typeArgs = constraint.typeArgs,
                                 context = "Type annotation on ${getBindingName(binding)}",
                                 loc = binding.loc,
@@ -966,7 +964,7 @@ class ConstraintGenerator(
                             Constraint.AbilityRequired(
                                 typeVar = typeVarArg.variable,
                                 abilityName = constraint.abilityName,
-                                abilityHash = abilityDeclarations[constraint.abilityName]?.contentHash,
+                                abilityHash = registry.abilityDeclarations[constraint.abilityName]?.contentHash,
                                 typeArgs = allTypeArgs,
                                 context = "Type annotation on ${getBindingName(binding)}",
                                 loc = binding.loc
@@ -1266,7 +1264,7 @@ class ConstraintGenerator(
                             }
                             MezzeType.VarType(typeVar)
                         } else {
-                            com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList(), typeDeclarations[annotation.name]?.contentHash)
+                            com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList(), registry.typeDeclarations[annotation.name]?.contentHash)
                         }
                     }
                 }
@@ -1280,7 +1278,7 @@ class ConstraintGenerator(
                         associatedTypeBindings = constraint.associatedTypeBindings.mapValues { (_, typeAnnotation) ->
                             convertTypeAnnotationInternal(typeAnnotation)
                         },
-                        abilityHash = abilityDeclarations[constraint.abilityName]?.contentHash
+                        abilityHash = registry.abilityDeclarations[constraint.abilityName]?.contentHash
                     )
                 }
 
@@ -1299,12 +1297,12 @@ class ConstraintGenerator(
                         // surface as a confusing "effect Log doesn't match
                         // FileSystem" error pointing at unrelated code.
                         val unknownEffects = (effectRow.effects + effectRow.effectAnnotations.map { it.name })
-                            .filter { it !in effectDeclarations }
+                            .filter { it !in registry.effectDeclarations }
                         if (unknownEffects.isNotEmpty()) {
                             val name = unknownEffects.first()
 
                             // First: did-you-mean within already-in-scope effects.
-                            val known = effectDeclarations.keys
+                            val known = registry.effectDeclarations.keys
                             val suggestion = com.mezze.language.parsedast.diagnostics
                                 .LevenshteinSuggest.closest(name, known)
                             val didYouMean = suggestion?.let { ". Did you mean `$it`?" } ?: ""
@@ -1407,7 +1405,7 @@ class ConstraintGenerator(
                 com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                     constructor = annotation.constructor,
                     args = annotation.args.map { convertTypeAnnotationInternal(it) },
-                    typeHash = typeDeclarations[annotation.constructor]?.contentHash
+                    typeHash = registry.typeDeclarations[annotation.constructor]?.contentHash
                 )
             }
             is ParsedSeqType -> {
@@ -1423,7 +1421,7 @@ class ConstraintGenerator(
                 com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                     constructor = qualifiedName,
                     args = annotation.args.map { convertTypeAnnotationInternal(it) },
-                    typeHash = typeDeclarations[qualifiedName]?.contentHash
+                    typeHash = registry.typeDeclarations[qualifiedName]?.contentHash
                 )
             }
         }
@@ -1450,8 +1448,8 @@ class ConstraintGenerator(
         val abilityName = abilityRef.localName
         val abilityQualifier = abilityRef.qualifier
         val qualifiedAbilityName = abilityQualifier?.let { "${it.segments.joinToString("::")}::$abilityName" } ?: abilityName
-        val abilityDeclaration = abilityDeclarations[abilityName]
-            ?: abilityDeclarations[qualifiedAbilityName]
+        val abilityDeclaration = registry.abilityDeclarations[abilityName]
+            ?: registry.abilityDeclarations[qualifiedAbilityName]
             ?: throw com.mezze.language.typechecker.TypeCheckError(
                 "Ability '$qualifiedAbilityName' is not defined or not imported. " +
                 "Did you forget to import it with 'use'?",
@@ -1597,9 +1595,9 @@ class ConstraintGenerator(
             performerAddedEffects = performerAddedEffects,
             abilityNames = abilityNames,
             effectNames = effectNames,
-            effectDeclarations = effectDeclarations,
-            abilityDeclarations = abilityDeclarations,
-            typeDeclarations = typeDeclarations,
+            effectDeclarations = registry.effectDeclarations,
+            abilityDeclarations = registry.abilityDeclarations,
+            typeDeclarations = registry.typeDeclarations,
             recordLiteralBindings = recordLiteralBindings
         )
 
@@ -1627,7 +1625,7 @@ class ConstraintGenerator(
         }
 
         // Solve constraints to get actual body type
-        val solver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
+        val solver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, registry)
         val solveResult = solver.solve(bodyResult.constraints)
 
         when (solveResult) {
@@ -1651,7 +1649,7 @@ class ConstraintGenerator(
                 val actualBodyType = if (rawBodyType is MezzeType.SuspendedType) rawBodyType.valueType else rawBodyType
 
                 // Check that actual body type matches expected return type using unification
-                val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
+                val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, registry)
                 val unificationResult = unificationSolver.solve(
                     listOf(Constraint.Equality(actualBodyType, expectedReturnType, validationReason, loc = opLoc))
                 )
@@ -1696,8 +1694,8 @@ class ConstraintGenerator(
         } else {
             effectRef.localName
         }
-        val effectDeclaration = effectDeclarations[effectLookupKey]
-            ?: effectDeclarations[effectRef.localName]  // Fallback to local name for selective imports
+        val effectDeclaration = registry.effectDeclarations[effectLookupKey]
+            ?: registry.effectDeclarations[effectRef.localName]  // Fallback to local name for selective imports
             ?: throw com.mezze.language.typechecker.TypeCheckError(
                 "Effect '${effectLookupKey}' is not defined or not imported. " +
                 "Did you forget to import it with 'use'?",
@@ -1810,9 +1808,9 @@ class ConstraintGenerator(
                     performerAddedEffects = performerAddedEffects,
                     abilityNames = abilityNames,
                     effectNames = effectNames,
-                    effectDeclarations = effectDeclarations,
-                    abilityDeclarations = abilityDeclarations,
-                    typeDeclarations = typeDeclarations
+                    effectDeclarations = registry.effectDeclarations,
+                    abilityDeclarations = registry.abilityDeclarations,
+                    typeDeclarations = registry.typeDeclarations
                 )
 
                 // Generate constraints for lambda body
@@ -1886,9 +1884,9 @@ class ConstraintGenerator(
                     performerAddedEffects = performerAddedEffects,
                     abilityNames = abilityNames,
                     effectNames = effectNames,
-                    effectDeclarations = effectDeclarations,
-                    abilityDeclarations = abilityDeclarations,
-                    typeDeclarations = typeDeclarations,
+                    effectDeclarations = registry.effectDeclarations,
+                    abilityDeclarations = registry.abilityDeclarations,
+                    typeDeclarations = registry.typeDeclarations,
                     recordLiteralBindings = scopeRecordBindings
                 )
 
@@ -1941,7 +1939,7 @@ class ConstraintGenerator(
                 val implParamType = convertTypeAnnotation(implParamTypeAnnotation)
                 // Parameter names AND types must match exactly
                 // Use full unification which checks both field names and types
-                val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(baseContext, typeDeclarations, abilityDeclarations)
+                val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(baseContext, registry)
                 val unificationResult = unificationSolver.solve(
                     listOf(Constraint.Equality(implParamType, expectedParamType, "Effect param type validation", loc = implOp.loc))
                 )
@@ -1967,7 +1965,7 @@ class ConstraintGenerator(
                 val implReturnType = convertTypeAnnotation(implReturnTypeAnnotation)
                 // For return types, the base type must match but we don't check effects here
                 // (impl can remove effects or transform them - this is handled elsewhere)
-                val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(baseContext, typeDeclarations, abilityDeclarations)
+                val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(baseContext, registry)
                 val unificationResult = unificationSolver.solve(
                     listOf(Constraint.Equality(implReturnType, expectedReturnType, "Effect return type validation", loc = implOp.loc))
                 )
@@ -2205,7 +2203,7 @@ class ConstraintGenerator(
             }
             is MezzeType.TypeApplication -> {
                 // Look up the type declaration to check if it's a record alias
-                val typeDecl = typeDeclarations[type.constructor] ?: return null
+                val typeDecl = registry.typeDeclarations[type.constructor] ?: return null
                 val definition = typeDecl.definition
                 if (definition is com.mezze.language.parsedast.ParsedRecordDef) {
                     val fieldNames = definition.fields.map { it.name }.toSet()
@@ -2776,13 +2774,11 @@ class ConstraintGenerator(
          * Create default constraint generator with all sub-generators.
          */
         fun create(
-            typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap(),
+            registry: com.mezze.language.typechecker.context.DeclarationRegistry = com.mezze.language.typechecker.context.DeclarationRegistry.EMPTY,
             performerToEffect: Map<String, String> = emptyMap(),
             performerAddedEffects: Map<String, Set<String>> = emptyMap(),
             abilityNames: Set<String> = emptySet(),
             effectNames: Set<String> = emptySet(),
-            abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap(),
-            effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),
         ): ConstraintGenerator {
             val expressionGen = ExpressionConstraintGenerator()
             val patternGen = PatternConstraintGenerator()
@@ -2794,13 +2790,11 @@ class ConstraintGenerator(
                 patternGen,
                 abilityGen,
                 effectGen,
-                typeDeclarations,
+                registry,
                 performerToEffect,
                 performerAddedEffects,
                 abilityNames,
                 effectNames,
-                abilityDeclarations,
-                effectDeclarations
             )
         }
     }

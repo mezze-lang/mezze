@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.solving
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.ParsedTypeDecl
 import com.mezze.language.parsedast.ParsedVariantDef
+import com.mezze.language.typechecker.context.DeclarationRegistry
 
 /**
  * Strip variant-alias labels from a type when the alias name isn't in scope
@@ -51,44 +52,44 @@ object AliasStripper {
 
     /**
      * Strip alias labels not in [inScope] from [type].
-     * [typeDecls] is consulted to look up declarations for stripping decisions.
+     * [registry] is consulted to look up declarations for stripping decisions.
      */
     fun strip(
         type: MezzeType,
         inScope: Set<String>,
-        typeDecls: Map<String, ParsedTypeDecl>
-    ): MezzeType = stripImpl(type, inScope, typeDecls, mutableSetOf())
+        registry: DeclarationRegistry
+    ): MezzeType = stripImpl(type, inScope, registry, mutableSetOf())
 
     private fun stripImpl(
         type: MezzeType,
         inScope: Set<String>,
-        typeDecls: Map<String, ParsedTypeDecl>,
+        registry: DeclarationRegistry,
         recursionGuard: MutableSet<String>
     ): MezzeType = when (type) {
-        is MezzeType.TypeApplication -> stripTypeApplication(type, inScope, typeDecls, recursionGuard)
-        is MezzeType.VariantType -> stripVariantType(type, inScope, typeDecls, recursionGuard)
-        is MezzeType.RecordType -> stripRecordType(type, inScope, typeDecls, recursionGuard)
+        is MezzeType.TypeApplication -> stripTypeApplication(type, inScope, registry, recursionGuard)
+        is MezzeType.VariantType -> stripVariantType(type, inScope, registry, recursionGuard)
+        is MezzeType.RecordType -> stripRecordType(type, inScope, registry, recursionGuard)
         is MezzeType.FunctionType -> MezzeType.FunctionType(
-            paramType = stripImpl(type.paramType, inScope, typeDecls, recursionGuard),
-            returnType = stripImpl(type.returnType, inScope, typeDecls, recursionGuard),
-            effects = type.effects?.let { stripEffectRow(it, inScope, typeDecls, recursionGuard) },
-            abilityConstraints = stripAbilityConstraints(type.abilityConstraints, inScope, typeDecls, recursionGuard)
+            paramType = stripImpl(type.paramType, inScope, registry, recursionGuard),
+            returnType = stripImpl(type.returnType, inScope, registry, recursionGuard),
+            effects = type.effects?.let { stripEffectRow(it, inScope, registry, recursionGuard) },
+            abilityConstraints = stripAbilityConstraints(type.abilityConstraints, inScope, registry, recursionGuard)
         )
-        is MezzeType.SeqType -> MezzeType.SeqType(stripImpl(type.elementType, inScope, typeDecls, recursionGuard))
+        is MezzeType.SeqType -> MezzeType.SeqType(stripImpl(type.elementType, inScope, registry, recursionGuard))
         is MezzeType.MapType -> MezzeType.MapType(
-            keyType = stripImpl(type.keyType, inScope, typeDecls, recursionGuard),
-            valueType = stripImpl(type.valueType, inScope, typeDecls, recursionGuard)
+            keyType = stripImpl(type.keyType, inScope, registry, recursionGuard),
+            valueType = stripImpl(type.valueType, inScope, registry, recursionGuard)
         )
         is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-            keyType = stripImpl(type.keyType, inScope, typeDecls, recursionGuard),
-            valueType = stripImpl(type.valueType, inScope, typeDecls, recursionGuard)
+            keyType = stripImpl(type.keyType, inScope, registry, recursionGuard),
+            valueType = stripImpl(type.valueType, inScope, registry, recursionGuard)
         )
         is MezzeType.SortedSetType -> MezzeType.SortedSetType(
-            stripImpl(type.elementType, inScope, typeDecls, recursionGuard)
+            stripImpl(type.elementType, inScope, registry, recursionGuard)
         )
         is MezzeType.SuspendedType -> MezzeType.SuspendedType(
-            valueType = stripImpl(type.valueType, inScope, typeDecls, recursionGuard),
-            effects = stripEffectRow(type.effects, inScope, typeDecls, recursionGuard)
+            valueType = stripImpl(type.valueType, inScope, registry, recursionGuard),
+            effects = stripEffectRow(type.effects, inScope, registry, recursionGuard)
         )
         // Leaves: nothing to strip
         else -> type
@@ -97,11 +98,11 @@ object AliasStripper {
     private fun stripTypeApplication(
         type: MezzeType.TypeApplication,
         inScope: Set<String>,
-        typeDecls: Map<String, ParsedTypeDecl>,
+        registry: DeclarationRegistry,
         recursionGuard: MutableSet<String>
     ): MezzeType {
         // Strip args first
-        val strippedArgs = type.args.map { stripImpl(it, inScope, typeDecls, recursionGuard) }
+        val strippedArgs = type.args.map { stripImpl(it, inScope, registry, recursionGuard) }
 
         // If the alias name is in scope, retain the nominal application.
         // Built-ins (Option/Result/Seq/etc.) are always in scope by virtue of
@@ -112,7 +113,7 @@ object AliasStripper {
         }
 
         // Look up the declaration. If unavailable (synthetic / type-var), leave alone.
-        val decl = typeDecls[type.constructor]
+        val decl = registry.lookupType(type.constructor)
             ?: com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(type.constructor)
             ?: return type.copy(args = strippedArgs)
 
@@ -126,12 +127,12 @@ object AliasStripper {
             return type.copy(args = strippedArgs)
         }
         try {
-            val expanded = expandTypeApplicationToVariant(type.copy(args = strippedArgs), typeDecls)
+            val expanded = expandTypeApplicationToVariant(type.copy(args = strippedArgs), registry)
                 ?: return type.copy(args = strippedArgs)
             // Drop the nominal label.
             return MezzeType.VariantType(
                 constructors = expanded.constructors.mapValues { (_, payload) ->
-                    payload?.let { stripImpl(it, inScope, typeDecls, recursionGuard) }
+                    payload?.let { stripImpl(it, inScope, registry, recursionGuard) }
                 },
                 rowVar = expanded.rowVar,
                 typeName = null,
@@ -145,11 +146,11 @@ object AliasStripper {
     private fun stripVariantType(
         type: MezzeType.VariantType,
         inScope: Set<String>,
-        typeDecls: Map<String, ParsedTypeDecl>,
+        registry: DeclarationRegistry,
         recursionGuard: MutableSet<String>
     ): MezzeType.VariantType {
         val newCtors = type.constructors.mapValues { (_, payload) ->
-            payload?.let { stripImpl(it, inScope, typeDecls, recursionGuard) }
+            payload?.let { stripImpl(it, inScope, registry, recursionGuard) }
         }
         val name = type.typeName
         // Walls always keep their label and structure — these are intentional
@@ -160,7 +161,7 @@ object AliasStripper {
             name in inScope ||
             // Records / newtypes can also share a name with a VariantType representation;
             // only strip when the actual decl is a variant alias.
-            (typeDecls[name]?.definition !is ParsedVariantDef &&
+            (registry.lookupType(name)?.definition !is ParsedVariantDef &&
                 com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(name)?.definition !is ParsedVariantDef)
         return if (keepName) {
             type.copy(constructors = newCtors)
@@ -172,7 +173,7 @@ object AliasStripper {
     private fun stripEffectRow(
         effectRow: MezzeType.EffectRow,
         inScope: Set<String>,
-        typeDecls: Map<String, ParsedTypeDecl>,
+        registry: DeclarationRegistry,
         recursionGuard: MutableSet<String>
     ): MezzeType.EffectRow {
         if (effectRow.effectInstances.isEmpty()) return effectRow
@@ -181,7 +182,7 @@ object AliasStripper {
             else MezzeType.EffectInstance(
                 name = instance.name,
                 associatedTypes = instance.associatedTypes.mapValues { (_, ty) ->
-                    stripImpl(ty, inScope, typeDecls, recursionGuard)
+                    stripImpl(ty, inScope, registry, recursionGuard)
                 }
             )
         }.toSet()
@@ -191,14 +192,14 @@ object AliasStripper {
     private fun stripAbilityConstraints(
         constraints: List<MezzeType.FunctionAbilityConstraint>,
         inScope: Set<String>,
-        typeDecls: Map<String, ParsedTypeDecl>,
+        registry: DeclarationRegistry,
         recursionGuard: MutableSet<String>
     ): List<MezzeType.FunctionAbilityConstraint> {
         if (constraints.isEmpty()) return constraints
         return constraints.map { constraint ->
-            val strippedArgs = constraint.typeArgs.map { stripImpl(it, inScope, typeDecls, recursionGuard) }
+            val strippedArgs = constraint.typeArgs.map { stripImpl(it, inScope, registry, recursionGuard) }
             val strippedBindings = constraint.associatedTypeBindings.mapValues { (_, ty) ->
-                stripImpl(ty, inScope, typeDecls, recursionGuard)
+                stripImpl(ty, inScope, registry, recursionGuard)
             }
             if (strippedArgs === constraint.typeArgs && strippedBindings === constraint.associatedTypeBindings) constraint
             else constraint.copy(typeArgs = strippedArgs, associatedTypeBindings = strippedBindings)
@@ -208,12 +209,12 @@ object AliasStripper {
     private fun stripRecordType(
         type: MezzeType.RecordType,
         inScope: Set<String>,
-        typeDecls: Map<String, ParsedTypeDecl>,
+        registry: DeclarationRegistry,
         recursionGuard: MutableSet<String>
     ): MezzeType.RecordType {
         // Records stay nominal — never strip the typeName.
         val newFields = type.fields.mapValues { (_, fieldType) ->
-            stripImpl(fieldType, inScope, typeDecls, recursionGuard)
+            stripImpl(fieldType, inScope, registry, recursionGuard)
         }
         return type.copy(fields = newFields)
     }

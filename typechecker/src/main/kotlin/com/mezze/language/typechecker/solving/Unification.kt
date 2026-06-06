@@ -103,13 +103,6 @@ fun unify(type1: MezzeType, type2: MezzeType, registry: DeclarationRegistry = De
     return result
 }
 
-/**
- * Backward-compatible overload: wraps a plain type-declarations map into a
- * [DeclarationRegistry] and delegates.
- */
-fun unify(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>): UnificationResult {
-    return unify(type1, type2, DeclarationRegistry.from(typeDeclarations, emptyMap(), emptyMap()))
-}
 
 /**
  * Internal implementation of unification (without caching).
@@ -1421,9 +1414,6 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, r
     )
 }
 
-/** Backward-compatible overload for callers that still pass a plain map. */
-internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>): MezzeType.RecordType? =
-    expandTypeApplicationToRecord(typeApp, DeclarationRegistry.from(typeDeclarations, emptyMap(), emptyMap()))
 
 /**
  * Expand a TypeApplication to a VariantType.
@@ -1596,9 +1586,6 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
     )
 }
 
-/** Backward-compatible overload for callers that still pass a plain map. */
-internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>): MezzeType.VariantType? =
-    expandTypeApplicationToVariant(typeApp, DeclarationRegistry.from(typeDeclarations, emptyMap(), emptyMap()))
 
 /**
  * Result of expanding a TypeApplication to its underlying type.
@@ -1671,11 +1658,6 @@ internal fun expandTypeApplication(
     }
 }
 
-/** Backward-compatible overload for callers that still pass a plain map. */
-internal fun expandTypeApplication(
-    typeApp: MezzeType.TypeApplication,
-    typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>
-): TypeExpansionResult = expandTypeApplication(typeApp, DeclarationRegistry.from(typeDeclarations, emptyMap(), emptyMap()))
 
 /**
  * Check if a TypeApplication matches a built-in collection type by name.

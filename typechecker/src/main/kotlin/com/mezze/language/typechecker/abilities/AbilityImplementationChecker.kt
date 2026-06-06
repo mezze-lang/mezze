@@ -3,6 +3,8 @@ package com.mezze.language.typechecker.abilities
 import com.mezze.language.ast.BuiltinAbilities as AstAbilities
 import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.typechecker.context.DeclarationRegistry
+import com.mezze.language.typechecker.solving.expandTypeApplicationToVariant
 
 /**
  * Shared utility for checking built-in ability implementations.
@@ -24,8 +26,7 @@ object AbilityImplementationChecker {
     fun hasBuiltInImplementation(
         abilityName: String,
         type: MezzeType,
-        typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
-        expandTypeApplication: (MezzeType.TypeApplication, Map<String, com.mezze.language.parsedast.ParsedTypeDecl>) -> MezzeType.VariantType?
+        registry: DeclarationRegistry
     ): Boolean {
         // Unwrap SuspendedType to check the inner value type
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
@@ -33,7 +34,7 @@ object AbilityImplementationChecker {
         // Expand TypeApplication to VariantType if possible
         // This allows deriving Eq/Ord for named variant types like Option, Result, etc.
         if (unwrappedType is MezzeType.TypeApplication) {
-            val expanded = expandTypeApplication(unwrappedType, typeDeclarations)
+            val expanded = expandTypeApplicationToVariant(unwrappedType, registry)
             if (expanded != null) {
                 unwrappedType = expanded
             }
@@ -56,10 +57,10 @@ object AbilityImplementationChecker {
             }
 
             // Equality - implemented for most primitive types and derivable for records/variants/lists
-            AstAbilities.EQ -> hasEqImplementation(unwrappedType, typeDeclarations, expandTypeApplication)
+            AstAbilities.EQ -> hasEqImplementation(unwrappedType, registry)
 
             // Ordering - implemented for comparable types and derivable for records/variants/lists
-            AstAbilities.ORD -> hasOrdImplementation(unwrappedType, typeDeclarations, expandTypeApplication)
+            AstAbilities.ORD -> hasOrdImplementation(unwrappedType, registry)
 
             // Inspect - built-in ability for displaying values (to_str)
             // CRITICAL: Inspect is universally available for ALL types
@@ -76,8 +77,7 @@ object AbilityImplementationChecker {
 
     private fun hasEqImplementation(
         type: MezzeType,
-        typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
-        expandTypeApplication: (MezzeType.TypeApplication, Map<String, com.mezze.language.parsedast.ParsedTypeDecl>) -> MezzeType.VariantType?
+        registry: DeclarationRegistry
     ): Boolean {
         return type is MezzeType.IntType ||
             type is MezzeType.FloatType ||
@@ -93,24 +93,23 @@ object AbilityImplementationChecker {
             BuiltinTypes.isBoolVariant(type) ||
             // Derive Eq for records if all fields have Eq
             (type is MezzeType.RecordType && type.fields.values.all {
-                hasBuiltInImplementation(AstAbilities.EQ, it, typeDeclarations, expandTypeApplication)
+                hasBuiltInImplementation(AstAbilities.EQ, it, registry)
             }) ||
             // Derive Eq for variants if all constructor payloads have Eq (or no payload)
             (type is MezzeType.VariantType && type.constructors.values.all {
-                it == null || hasBuiltInImplementation(AstAbilities.EQ, it, typeDeclarations, expandTypeApplication)
+                it == null || hasBuiltInImplementation(AstAbilities.EQ, it, registry)
             }) ||
             // Derive Eq for lists if element type has Eq
             (type is MezzeType.ListType &&
-                hasBuiltInImplementation(AstAbilities.EQ, type.elementType, typeDeclarations, expandTypeApplication)) ||
+                hasBuiltInImplementation(AstAbilities.EQ, type.elementType, registry)) ||
             // Derive Eq for arrays if element type has Eq
             (type is MezzeType.SeqType &&
-                hasBuiltInImplementation(AstAbilities.EQ, type.elementType, typeDeclarations, expandTypeApplication))
+                hasBuiltInImplementation(AstAbilities.EQ, type.elementType, registry))
     }
 
     private fun hasOrdImplementation(
         type: MezzeType,
-        typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
-        expandTypeApplication: (MezzeType.TypeApplication, Map<String, com.mezze.language.parsedast.ParsedTypeDecl>) -> MezzeType.VariantType?
+        registry: DeclarationRegistry
     ): Boolean {
         return type is MezzeType.IntType ||
             type is MezzeType.FloatType ||
@@ -121,17 +120,17 @@ object AbilityImplementationChecker {
             type is MezzeType.VarType ||
             // Derive Ord for records if all fields have Ord
             (type is MezzeType.RecordType && type.fields.values.all {
-                hasBuiltInImplementation(AstAbilities.ORD, it, typeDeclarations, expandTypeApplication)
+                hasBuiltInImplementation(AstAbilities.ORD, it, registry)
             }) ||
             // Derive Ord for variants if all constructor payloads have Ord (or no payload)
             (type is MezzeType.VariantType && type.constructors.values.all {
-                it == null || hasBuiltInImplementation(AstAbilities.ORD, it, typeDeclarations, expandTypeApplication)
+                it == null || hasBuiltInImplementation(AstAbilities.ORD, it, registry)
             }) ||
             // Derive Ord for lists if element type has Ord
             (type is MezzeType.ListType &&
-                hasBuiltInImplementation(AstAbilities.ORD, type.elementType, typeDeclarations, expandTypeApplication)) ||
+                hasBuiltInImplementation(AstAbilities.ORD, type.elementType, registry)) ||
             // Derive Ord for arrays if element type has Ord
             (type is MezzeType.SeqType &&
-                hasBuiltInImplementation(AstAbilities.ORD, type.elementType, typeDeclarations, expandTypeApplication))
+                hasBuiltInImplementation(AstAbilities.ORD, type.elementType, registry))
     }
 }
