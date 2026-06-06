@@ -56,6 +56,15 @@ public final class SeqFoldCallNode extends MezzeNode {
     @Child
     private SeqFoldLongLoopNode longLoopNode;
 
+    @Child
+    private SeqFoldDoubleLoopNode doubleLoopNode;
+
+    @Child
+    private SeqFoldObjectLoopNode objectLoopNode;
+
+    @Child
+    private SeqFoldGenericLoopNode genericLoopNode;
+
     // Cached CallTarget — safe across threads (monomorphic by source position).
     // We deliberately do NOT cache the folder's MezzeFunction or its
     // closureValues array on the node, because concurrent threads with
@@ -220,14 +229,21 @@ public final class SeqFoldCallNode extends MezzeNode {
         return acc;
     }
 
-    @TruffleBoundary
     private Object foldDoubleLarge(double[] data, Object init, int size,
                                    Object[] closureValues, int closureLength, DirectCallNode callNode) {
-        Object acc = init;
-        for (int i = 0; i < size; i++) {
-            acc = callFolder(acc, data[i], closureValues, closureLength, callNode);
+        // Per-folder LoopNode instance so the inner DirectCallNode is a
+        // stable @Child of the same Truffle tree as the LoopNode that
+        // drives the loop. Truffle's inliner only inlines through
+        // @Child DirectCallNodes — passing one as an arg defeats it.
+        // For monomorphic call sites (the common case) size-1 PIC.
+        SeqFoldDoubleLoopNode loop = doubleLoopNode;
+        CallTarget target = callNode.getCallTarget();
+        if (loop == null || loop.getFolderTarget() != target) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            loop = new SeqFoldDoubleLoopNode(target);
+            doubleLoopNode = insert(loop);
         }
-        return acc;
+        return loop.execute(data, init, size, closureValues, closureLength);
     }
 
     /**
@@ -254,14 +270,21 @@ public final class SeqFoldCallNode extends MezzeNode {
         return acc;
     }
 
-    @TruffleBoundary
     private Object foldObjectLarge(Object[] data, Object init, int size,
                                    Object[] closureValues, int closureLength, DirectCallNode callNode) {
-        Object acc = init;
-        for (int i = 0; i < size; i++) {
-            acc = callFolder(acc, data[i], closureValues, closureLength, callNode);
+        // Per-folder LoopNode instance so the inner DirectCallNode is a
+        // stable @Child of the same Truffle tree as the LoopNode that
+        // drives the loop. Truffle's inliner only inlines through
+        // @Child DirectCallNodes — passing one as an arg defeats it.
+        // For monomorphic call sites (the common case) size-1 PIC.
+        SeqFoldObjectLoopNode loop = objectLoopNode;
+        CallTarget target = callNode.getCallTarget();
+        if (loop == null || loop.getFolderTarget() != target) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            loop = new SeqFoldObjectLoopNode(target);
+            objectLoopNode = insert(loop);
         }
-        return acc;
+        return loop.execute(data, init, size, closureValues, closureLength);
     }
 
     /**
@@ -286,14 +309,21 @@ public final class SeqFoldCallNode extends MezzeNode {
         return acc;
     }
 
-    @TruffleBoundary
     private Object foldGenericLarge(MezzeSeq<?> seq, Object init, int size,
                                     Object[] closureValues, int closureLength, DirectCallNode callNode) {
-        Object acc = init;
-        for (int i = 0; i < size; i++) {
-            acc = callFolder(acc, seq.get(i), closureValues, closureLength, callNode);
+        // Per-folder LoopNode instance so the inner DirectCallNode is a
+        // stable @Child of the same Truffle tree as the LoopNode that
+        // drives the loop. Truffle's inliner only inlines through
+        // @Child DirectCallNodes — passing one as an arg defeats it.
+        // For monomorphic call sites (the common case) size-1 PIC.
+        SeqFoldGenericLoopNode loop = genericLoopNode;
+        CallTarget target = callNode.getCallTarget();
+        if (loop == null || loop.getFolderTarget() != target) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            loop = new SeqFoldGenericLoopNode(target);
+            genericLoopNode = insert(loop);
         }
-        return acc;
+        return loop.execute(seq, init, size, closureValues, closureLength);
     }
 
     @ExplodeLoop
