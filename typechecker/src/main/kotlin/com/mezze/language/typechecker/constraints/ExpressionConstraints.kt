@@ -297,6 +297,7 @@ class ExpressionConstraintGenerator {
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         val effects = mutableSetOf<String>()
+        val usedVars = mutableSetOf<String>()
         val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
         val callReturnTypes = mutableMapOf<Loc, MezzeType>()
 
@@ -310,6 +311,7 @@ class ExpressionConstraintGenerator {
                     abilityConstraints.addAll(result.abilityConstraints)
                     associatedTypeConstraints.addAll(result.associatedTypeConstraints)
                     effects.addAll(result.effects)
+                    usedVars.addAll(result.usedVariables)
                     methodCallResolutions.putAll(result.methodCallResolutions)
                     callReturnTypes.putAll(result.callReturnTypes)
                     // Unwrap SuspendedType from element types before unification —
@@ -339,6 +341,7 @@ class ExpressionConstraintGenerator {
                     abilityConstraints.addAll(result.abilityConstraints)
                     associatedTypeConstraints.addAll(result.associatedTypeConstraints)
                     effects.addAll(result.effects)
+                    usedVars.addAll(result.usedVariables)
                     methodCallResolutions.putAll(result.methodCallResolutions)
                     callReturnTypes.putAll(result.callReturnTypes)
                     // Unwrap SuspendedType from spread expr — same reason as
@@ -369,6 +372,7 @@ class ExpressionConstraintGenerator {
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = undefinedVars,
+            usedVariables = usedVars,
             methodCallResolutions = methodCallResolutions,
             callReturnTypes = callReturnTypes
         )
@@ -1671,7 +1675,6 @@ class ExpressionConstraintGenerator {
             inherentMethods.first()
         } else if (receiverTypeName != null) {
             inherentMethods.firstOrNull { it.targetTypeName == receiverTypeName }
-                ?: inherentMethods.firstOrNull()
         } else {
             inherentMethods.firstOrNull()
         }
@@ -3940,6 +3943,8 @@ class ExpressionConstraintGenerator {
         // Track referenced bindings for dependency graph
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
         referencedBindings.addAll(scrutineeResult.referencedBindings)
+        val usedVars = mutableSetOf<String>()
+        usedVars.addAll(scrutineeResult.usedVariables)
 
         // Step 2: Check for wildcards - if present, scrutinee must be open variant
         // IMPORTANT: Only check TOP-LEVEL patterns for wildcards/variables.
@@ -4114,6 +4119,7 @@ class ExpressionConstraintGenerator {
             duplicateBindings.addAll(caseBodyResult.duplicateBindings)
             tailCalls.addAll(caseBodyResult.tailCalls)
             referencedBindings.addAll(caseBodyResult.referencedBindings)
+            usedVars.addAll(caseBodyResult.usedVariables)
             methodCallResolutions.putAll(caseBodyResult.methodCallResolutions)
             callReturnTypes.putAll(caseBodyResult.callReturnTypes)
             matchCaseBindings.putAll(caseBodyResult.matchCaseBindings)
@@ -4178,6 +4184,7 @@ class ExpressionConstraintGenerator {
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = undefinedVars,
+            usedVariables = usedVars,
             duplicateBindings = duplicateBindings,
             tailCalls = tailCalls,
             unusedVariables = unusedVars,
