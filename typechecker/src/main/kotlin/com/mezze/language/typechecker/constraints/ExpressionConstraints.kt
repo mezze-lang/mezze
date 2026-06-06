@@ -3040,27 +3040,15 @@ class ExpressionConstraintGenerator {
                 }
             }
             expectedFunctionType?.abilityConstraints?.isNotEmpty() == true -> expectedFunctionType.abilityConstraints
-            else -> {
-                // #218: Only harvest body constraints whose TyVar reaches the
-                // function's surface (param or return type). This keeps the
-                // arrow type focused on constraints the caller can actually
-                // discharge, and avoids leaking transitively-bubbled constraints
-                // (e.g. inner-chain `is_empty` → Sized) that the body owned but
-                // the function's signature doesn't actually require.
-                val surfaceTyVarIds = HashSet<Int>()
-                com.mezze.language.ast.collectTypeVarsInOrder(paramType, sortFields = false).forEach { surfaceTyVarIds.add(it.id) }
-                com.mezze.language.ast.collectTypeVarsInOrder(returnType, sortFields = false).forEach { surfaceTyVarIds.add(it.id) }
-                bodyResult.abilityConstraints
-                    .filter { it.typeVar.id in surfaceTyVarIds }
-                    .distinctBy { it.abilityName to it.typeVar.id }
-                    .map { ab ->
-                        MezzeType.FunctionAbilityConstraint(
-                            abilityName = ab.abilityName,
-                            typeArgs = listOf<MezzeType>(MezzeType.VarType(ab.typeVar)) + ab.typeArgs,
-                            abilityHash = ab.abilityHash
-                        )
-                    }
-            }
+            else -> bodyResult.abilityConstraints
+                .distinctBy { it.abilityName to it.typeVar.id }
+                .map { ab ->
+                    MezzeType.FunctionAbilityConstraint(
+                        abilityName = ab.abilityName,
+                        typeArgs = listOf<MezzeType>(MezzeType.VarType(ab.typeVar)) + ab.typeArgs,
+                        abilityHash = ab.abilityHash
+                    )
+                }
         }
 
         // CRITICAL: Generate constraints for ability associated types from annotation

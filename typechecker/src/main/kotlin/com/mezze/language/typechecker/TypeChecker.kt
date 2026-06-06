@@ -963,31 +963,29 @@ class TypeChecker(
                         importedPerformers.addAll(stdlibModule.performerDecls)
                     }
 
-                    // Mono Phase 1 hybrid: opt-in via -Dmezze.mono=1 or
-                    // MEZZE_MONO=1. Off by default — the dict-passing path
-                    // is the canonical compilation strategy. When on, the
-                    // monomorphizer runs over concrete decls' bodies and
-                    // produces specializations + per-call-site rewrites.
+                    // Mono is the default compilation strategy. The driver
+                    // walks concrete decls' bodies, produces specializations,
+                    // and emits per-call-site rewrites. Sites mono can't
+                    // resolve (VarType receiver, no matching impl, etc.) keep
+                    // the dict-passing fallback the compiler emits anyway.
                     //
                     // The driver also gets `PrecompiledStdlib.stdlibTypedModules`
                     // as resolution-only context: prelude generics live
                     // there (lowered as FunctionIR blobs, but the
                     // TypedLetDecl source is preserved). Calls into the
                     // prelude are exactly where mono pays off most.
-                    val monoResult = if (com.mezze.language.typechecker.mono.MonoDriver.enabled) {
-                        val stdlibModulesForMono = PrecompiledStdlib.stdlibTypedModules.values.toList()
-                        com.mezze.language.typechecker.mono.MonoDriver.run(
-                            entry = wrapped,
-                            imported = importedModules,
-                            resolutionOnly = stdlibModulesForMono
-                        )
-                    } else null
+                    val stdlibModulesForMono = PrecompiledStdlib.stdlibTypedModules.values.toList()
+                    val monoResult = com.mezze.language.typechecker.mono.MonoDriver.run(
+                        entry = wrapped,
+                        imported = importedModules,
+                        resolutionOnly = stdlibModulesForMono
+                    )
 
                     // Compile with TypedASTCompiler — single pass, no Monomorphizer/Resolver/Lowerer
                     val compiler = com.mezze.language.typechecker.compiler.TypedASTCompiler(
                         abilityImpls = allAbilityImpls,
                         stdlibHashes = preludeHashes,
-                        monoCallSiteRewrites = monoResult?.bySiteLoc ?: emptyMap()
+                        monoCallSiteRewrites = monoResult.bySiteLoc
                     )
                     compiler.setDeclIndex(declIndex)
 
@@ -995,7 +993,7 @@ class TypeChecker(
                         module = wrapped,
                         additionalModules = importedModules,
                         additionalPerformers = importedPerformers,
-                        monoSpecializations = monoResult?.specializations?.values?.toList() ?: emptyList()
+                        monoSpecializations = monoResult.specializations.values.toList()
                     )
 
                     loweredFns = result.functions

@@ -106,8 +106,6 @@ fun org.gradle.api.tasks.testing.Test.applyCommonTestConfig() {
     // Pass through MEZZE_DEBUG env var into the test JVM so the deferred
     // catches in TypeChecker print exception traces.
     System.getenv("MEZZE_DEBUG")?.let { environment("MEZZE_DEBUG", it) }
-    // Pass through MEZZE_MONO so MonoDriver.enabled flips on inside tests.
-    System.getenv("MEZZE_MONO")?.let { environment("MEZZE_MONO", it) }
     System.getenv("MEZZE_MONO_STATS")?.let { environment("MEZZE_MONO_STATS", it) }
     System.getenv("MEZZE_MONO_TRACE")?.let { environment("MEZZE_MONO_TRACE", it) }
     System.getenv("MEZZE_DISPATCH_CENSUS")?.let { environment("MEZZE_DISPATCH_CENSUS", it) }

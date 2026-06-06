@@ -61,14 +61,6 @@ import com.mezze.language.typedast.TypedVariantConstruct
  */
 object MonoDriver {
 
-    /** Read once; subsequent reads cache the value. */
-    val enabled: Boolean by lazy {
-        val prop = System.getProperty("mezze.mono")
-        val env = System.getenv("MEZZE_MONO")
-        (prop?.lowercase() in setOf("1", "true", "yes")) ||
-        (env?.lowercase() in setOf("1", "true", "yes"))
-    }
-
     /**
      * @param entry the post-`wrapTopLevel` user module being compiled.
      * @param imported user-side imported modules. Their decls participate
