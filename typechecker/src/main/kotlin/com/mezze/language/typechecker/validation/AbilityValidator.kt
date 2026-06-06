@@ -6,6 +6,7 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.ast.PrimitiveTypes
 import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.typechecker.util.TypeAnnotationConverter
 
 
 /**
@@ -287,7 +288,7 @@ object AbilityValidator {
             }
 
             // Check parameter type matches
-            if (!typeAnnotationsMatch(actualParamType, expectedParamType)) {
+            if (!typeAnnotationsMatchPublic(actualParamType, expectedParamType)) {
                 throw TypeCheckError(
                     "Wrong parameter type for '${implOp.name}' in impl ${impl.abilityName}: " +
                     "expected ${parsedTypeAnnotationToString(expectedParamType)}, " +
@@ -298,7 +299,7 @@ object AbilityValidator {
             }
 
             // Check return type matches
-            if (!typeAnnotationsMatch(actualReturnType, expectedReturnType)) {
+            if (!typeAnnotationsMatchPublic(actualReturnType, expectedReturnType)) {
                 throw TypeCheckError(
                     "Wrong return type for '${implOp.name}' in impl ${impl.abilityName}: " +
                     "expected ${parsedTypeAnnotationToString(expectedReturnType)}, " +
@@ -408,74 +409,16 @@ object AbilityValidator {
         }
     }
 
-    fun typeAnnotationsMatchPublic(a: com.mezze.language.parsedast.ParsedTypeAnnotation, b: com.mezze.language.parsedast.ParsedTypeAnnotation): Boolean =
-        typeAnnotationsMatch(a, b)
-
-    private fun typeAnnotationsMatch(a: com.mezze.language.parsedast.ParsedTypeAnnotation, b: com.mezze.language.parsedast.ParsedTypeAnnotation): Boolean {
-        return when {
-            a is com.mezze.language.parsedast.ParsedNamedType && b is com.mezze.language.parsedast.ParsedNamedType -> {
-                a.name == b.name
-            }
-            a is com.mezze.language.parsedast.ParsedFunctionType && b is com.mezze.language.parsedast.ParsedFunctionType -> {
-                typeAnnotationsMatch(a.paramType, b.paramType) &&
-                typeAnnotationsMatch(a.returnType, b.returnType) &&
-                effectRowsMatch(a.effects, b.effects)
-            }
-            a is com.mezze.language.parsedast.ParsedRecordType && b is com.mezze.language.parsedast.ParsedRecordType -> {
-                a.isOpen == b.isOpen &&
-                a.entries.size == b.entries.size &&
-                a.entries.all { aEntry ->
-                    b.entries.any { bEntry ->
-                        aEntry.name == bEntry.name && typeAnnotationsMatch(aEntry.type, bEntry.type)
-                    }
-                }
-            }
-            a is com.mezze.language.parsedast.ParsedTypeApp && b is com.mezze.language.parsedast.ParsedTypeApp -> {
-                a.constructor == b.constructor &&
-                a.args.size == b.args.size &&
-                a.args.zip(b.args).all { (aArg, bArg) -> typeAnnotationsMatch(aArg, bArg) }
-            }
-            a is com.mezze.language.parsedast.ParsedSeqType && b is com.mezze.language.parsedast.ParsedSeqType -> {
-                typeAnnotationsMatch(a.elementType, b.elementType)
-            }
-            a is com.mezze.language.parsedast.ParsedVariantType && b is com.mezze.language.parsedast.ParsedVariantType -> {
-                a.isOpen == b.isOpen &&
-                a.constructors.size == b.constructors.size &&
-                a.constructors.all { aCtor ->
-                    b.constructors.any { bCtor ->
-                        aCtor.name == bCtor.name &&
-                        ((aCtor.dataType == null && bCtor.dataType == null) ||
-                         (aCtor.dataType != null && bCtor.dataType != null &&
-                          typeAnnotationsMatch(aCtor.dataType!!, bCtor.dataType!!)))
-                    }
-                }
-            }
-            a is com.mezze.language.parsedast.ParsedQualifiedType && b is com.mezze.language.parsedast.ParsedQualifiedType -> {
-                a.modulePath == b.modulePath &&
-                a.typeName == b.typeName &&
-                a.args.size == b.args.size &&
-                a.args.zip(b.args).all { (aArg, bArg) -> typeAnnotationsMatch(aArg, bArg) }
-            }
-            else -> false
-        }
-    }
-
-    private fun effectRowsMatch(a: com.mezze.language.parsedast.ParsedEffectRow?, b: com.mezze.language.parsedast.ParsedEffectRow?): Boolean {
-        if (a == null && b == null) return true
-        if (a == null || b == null) return false
-        if (a.isPolymorphic != b.isPolymorphic) return false
-        if (a.isPerformed != b.isPerformed) return false
-        if (a.effects.toSet() != b.effects.toSet()) return false
-        if (a.effectAnnotations.size != b.effectAnnotations.size) return false
-        return a.effectAnnotations.all { aAnnot ->
-            b.effectAnnotations.any { bAnnot ->
-                aAnnot.name == bAnnot.name &&
-                aAnnot.associatedTypes.size == bAnnot.associatedTypes.size &&
-                aAnnot.associatedTypes.all { (key, aType) ->
-                    bAnnot.associatedTypes[key]?.let { bType -> typeAnnotationsMatch(aType, bType) } ?: false
-                }
-            }
-        }
+    /**
+     * Check if two ParsedTypeAnnotations match structurally.
+     * Converts both to MezzeType using a shared type variable cache
+     * (so the same name maps to the same TypeVar), then unifies.
+     */
+    fun typeAnnotationsMatchPublic(a: com.mezze.language.parsedast.ParsedTypeAnnotation, b: com.mezze.language.parsedast.ParsedTypeAnnotation): Boolean {
+        val cache = mutableMapOf<String, TypeVar>()
+        val typeA = try { TypeAnnotationConverter.convert(a, typeVarCache = cache) } catch (_: Exception) { return false }
+        val typeB = try { TypeAnnotationConverter.convert(b, typeVarCache = cache) } catch (_: Exception) { return false }
+        return com.mezze.language.typechecker.solving.unify(typeA, typeB) is com.mezze.language.typechecker.solving.UnificationResult.Success
     }
 
     /**
