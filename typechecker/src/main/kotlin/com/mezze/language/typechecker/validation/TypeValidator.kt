@@ -712,8 +712,15 @@ class TypeValidator(
                 // Same field names?
                 if (aliasFields.keys != recordType.fields.keys) continue
 
-                // For now, just check field names match (not full type compatibility)
-                // Full type checking would require recursive unification
+                // Check field types match (convert parsed annotations to MezzeType for comparison)
+                val fieldsCompatible = aliasFields.all { (name, parsedType) ->
+                    val aliasFieldType = try { TypeAnnotationConverter.convert(parsedType) } catch (_: Exception) { null }
+                    val recordFieldType = recordType.fields[name]
+                    if (aliasFieldType == null || recordFieldType == null) false
+                    else alphaEquivalent(aliasFieldType, recordFieldType, mutableMapOf())
+                }
+                if (!fieldsCompatible) continue
+
                 matchingAliases.add(aliasName)
             }
         }
@@ -2251,9 +2258,7 @@ class TypeValidator(
                 } else MezzeType.VarType(TypeVar(annotation.name))
             }
             is com.mezze.language.parsedast.ParsedTypeApp -> {
-                val typeDecl = typeDeclarations[annotation.constructor]
-                if (typeDecl != null) expandParsedTypeAnnotation(com.mezze.language.parsedast.ParsedNamedType(annotation.constructor, annotation.loc))
-                else TypeAnnotationConverter.convert(annotation)
+                TypeAnnotationConverter.convert(annotation)
             }
             else -> TypeAnnotationConverter.convert(annotation)
         }
