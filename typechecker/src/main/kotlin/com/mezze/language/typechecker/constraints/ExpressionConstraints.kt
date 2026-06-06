@@ -3080,7 +3080,8 @@ class ExpressionConstraintGenerator {
             patternWarnings = bodyResult.patternWarnings,
             referencedBindings = bodyResult.referencedBindings,
             methodCallResolutions = bodyResult.methodCallResolutions,
-            callReturnTypes = bodyResult.callReturnTypes
+            callReturnTypes = bodyResult.callReturnTypes,
+            matchCaseBindings = bodyResult.matchCaseBindings,
         )
     }
 
