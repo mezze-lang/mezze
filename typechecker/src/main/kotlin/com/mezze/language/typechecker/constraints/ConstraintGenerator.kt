@@ -1482,69 +1482,19 @@ class ConstraintGenerator(
             val expectedReturnType = substituteTypeParams(convertTypeAnnotation(declOp.returnType), typeParamSubstitution)
 
             // Type-check the implementation body (must be a lambda)
+            // `it` is now an explicit param in ability impl bodies ({it, r} -> ...).
+            // No implicit injection needed — the lambda param handles it.
             if (implOp.implementation is ParsedLambda) {
-                val lambda = implOp.implementation as ParsedLambda
-
-                // Extract parameter names from lambda
-                val paramNames = when (val params = lambda.params) {
-                    is ParsedLambdaParams.Untyped -> params.names
-                    is ParsedLambdaParams.Typed -> params.fields.map { it.name }
-                }
-
-                // Build parameter type map for scoped context
-                val paramTypes = if (expectedParamType is MezzeType.RecordType) {
-                    paramNames.associateWith { name ->
-                        expectedParamType.fields[name] ?: MezzeType.VarType(TypeVar.fresh())
-                    }
-                } else {
-                    // Single parameter case - wrap in record
-                    paramNames.associateWith { expectedParamType }
-                }
-
-                // Type-check the lambda body with parameters in scope
-                // Create a new context with parameters bound
-                var bodyContext = context
-                for ((name, type) in paramTypes) {
-                    bodyContext = bodyContext.extendMono(name, type)
-                }
-
-                // `it` is now an explicit param in ability impl bodies ({it, r} -> ...).
-                // No implicit injection needed — the lambda param handles it.
-
-                val constraintContext = ConstraintContext(
-                    bodyContext,
-                    expectedType = null,  // Synthesize type, don't check against expected
-                    performerToEffect = performerToEffect,
-                    performerAddedEffects = performerAddedEffects,
-                    abilityNames = abilityNames,
-                    effectNames = effectNames,
-                    effectDeclarations = effectDeclarations,
-                    abilityDeclarations = abilityDeclarations,
-                    typeDeclarations = typeDeclarations
-                )
-
-                // Generate constraints for lambda body
-                val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
-
-                // Check for undefined variables in the body
-                // Allow __native_* identifiers — they're resolved at runtime by NativeDispatch
-                val realUndefined = bodyResult.undefinedVariables.filter { !it.name.startsWith("__native_") }
-                if (realUndefined.isNotEmpty()) {
-                    val undefinedVar = realUndefined.first()
-                    throw com.mezze.language.typechecker.TypeCheckError(
-                        "Type error in ability '${abilityName}' operation '${implOp.name}' implementation: " +
-                        "Undefined variable '${undefinedVar.name}'",
-                        undefinedVar.loc,
-                        code = ErrorCode.V0702_UNDEFINED_VARIABLE,
-                    )
-                }
-
-                // Solve constraints to get actual body type
-                val solver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
-                val solveResult = solver.solve(bodyResult.constraints)
-
-                when (solveResult) {
-                    is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
+                validateImplOperationBody(
+                    lambda = implOp.implementation as ParsedLambda,
+                    opName = implOp.name,
+                    opLoc = implOp.loc,
+                    expectedParamType = expectedParamType,
+                    expectedReturnType = expectedReturnType,
+                    baseContext = context,
+                    implLabel = "ability '$abilityName'",
+                    validationReason = "Ability body validation",
+                    onSolveFailure = { solveResult ->
                         // Skip "Cannot access field" errors — these occur when operator desugaring
                         // produces ability method calls (e.g., `x + y` → `x.add {r = y}`, `x - y` →
                         // `x.sub {r = y}`) but ability impls aren't in scope during early validation.
@@ -1559,30 +1509,163 @@ class ConstraintGenerator(
                                 code = ErrorCode.T0201_TYPE_MISMATCH,
                             )
                         }
-                    }
-                    is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
-                        val substitution = solveResult.substitution
-                        val rawBodyType = substitution.apply(bodyResult.type)
-                        val actualBodyType = if (rawBodyType is MezzeType.SuspendedType) rawBodyType.valueType else rawBodyType
+                        false  // Don't skip — continue to next operation normally
+                    },
+                )
+            }
+        }
+    }
 
-                        // Check that actual body type matches expected return type
-                        val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
-                        val unificationResult = unificationSolver.solve(
-                            listOf(Constraint.Equality(actualBodyType, expectedReturnType, "Ability body validation", loc = implOp.loc))
-                        )
+    /**
+     * Validate a single impl operation body against its declared return type.
+     *
+     * Shared core for both ability impl and effect impl body validation:
+     * 1. Extract lambda parameters and build param type map from expected param type
+     * 2. Extend context with parameters (and optional caller-provided context preparation)
+     * 3. Generate constraints for the lambda body
+     * 4. Invoke caller-provided callbacks for undefined variable handling and body post-processing
+     * 5. Solve constraints
+     * 6. On success: unwrap SuspendedType, unify actual body type with expected return type
+     * 7. Throw TypeCheckError on return type mismatch
+     *
+     * @param lambda The implementation lambda to validate
+     * @param opName Operation name (for error messages)
+     * @param opLoc Source location of the operation (for error messages)
+     * @param expectedParamType Expected parameter type from the declaration
+     * @param expectedReturnType Expected return type from the declaration
+     * @param baseContext Typing context to extend with lambda parameters
+     * @param implLabel Label for error messages (e.g., "ability 'Eq'" or "impl 'ConsoleLog'")
+     * @param validationReason Reason string for the unification constraint (e.g., "Ability body validation")
+     * @param recordLiteralBindings Optional record literal bindings for constraint context (e.g., scope bindings)
+     * @param prepareContext Optional hook to further prepare the body context after params are bound
+     *                       (e.g., adding resume/abort bindings for effect handlers)
+     * @param onBodyResult Optional callback invoked after constraint generation, before solving
+     *                     (e.g., to track body effects). Receives the body result and the body context.
+     * @param onUndefinedVars Optional callback for custom undefined variable handling. Returns true
+     *                       if the caller wants to skip the rest of validation for this operation (continue loop).
+     *                       If null, uses default behavior: filter __native_* and throw on remaining.
+     * @param onSolveFailure Optional callback for custom solve failure handling. Returns true
+     *                       if the caller wants to skip the rest of validation (continue loop).
+     *                       If null, uses default behavior: throw TypeCheckError.
+     */
+    private fun validateImplOperationBody(
+        lambda: ParsedLambda,
+        opName: String,
+        opLoc: Loc,
+        expectedParamType: MezzeType,
+        expectedReturnType: MezzeType,
+        baseContext: TypingContext,
+        implLabel: String,
+        validationReason: String,
+        recordLiteralBindings: Set<String> = emptySet(),
+        prepareContext: ((TypingContext) -> TypingContext)? = null,
+        onBodyResult: ((ConstraintResult, TypingContext) -> Unit)? = null,
+        onUndefinedVars: ((ConstraintResult) -> Boolean)? = null,
+        onSolveFailure: ((com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure) -> Boolean)? = null,
+    ) {
+        // Extract parameter names from lambda
+        val paramNames = when (val params = lambda.params) {
+            is ParsedLambdaParams.Untyped -> params.names
+            is ParsedLambdaParams.Typed -> params.fields.map { it.name }
+        }
 
-                        if (unificationResult is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure) {
-                            val actualTypeStr = com.mezze.language.ast.prettyPrintType(actualBodyType)
-                            val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
-                            throw com.mezze.language.typechecker.TypeCheckError(
-                                "Method '${implOp.name}' in impl ${abilityName} returns wrong type: " +
-                                "expected $expectedTypeStr, but body returns $actualTypeStr.",
-                                implOp.loc,
-                                code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
-                                hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
-                            )
-                        }
-                    }
+        // Build parameter type map for scoped context
+        val paramTypes = if (expectedParamType is MezzeType.RecordType) {
+            paramNames.associateWith { name ->
+                expectedParamType.fields[name] ?: MezzeType.VarType(TypeVar.fresh())
+            }
+        } else {
+            // Single parameter case - wrap in record
+            paramNames.associateWith { expectedParamType }
+        }
+
+        // Extend context with parameters
+        var bodyContext = baseContext
+        for ((name, type) in paramTypes) {
+            bodyContext = bodyContext.extendMono(name, type)
+        }
+
+        // Optional caller-provided context preparation (e.g., resume/abort for effects)
+        if (prepareContext != null) {
+            bodyContext = prepareContext(bodyContext)
+        }
+
+        val constraintContext = ConstraintContext(
+            bodyContext,
+            expectedType = null,  // Synthesize type, don't check against expected
+            performerToEffect = performerToEffect,
+            performerAddedEffects = performerAddedEffects,
+            abilityNames = abilityNames,
+            effectNames = effectNames,
+            effectDeclarations = effectDeclarations,
+            abilityDeclarations = abilityDeclarations,
+            typeDeclarations = typeDeclarations,
+            recordLiteralBindings = recordLiteralBindings
+        )
+
+        // Generate constraints for lambda body
+        val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
+
+        // Optional post-generation callback (e.g., track body effects)
+        onBodyResult?.invoke(bodyResult, bodyContext)
+
+        // Handle undefined variables
+        if (onUndefinedVars != null) {
+            if (onUndefinedVars(bodyResult)) return  // Caller says skip this operation
+        } else {
+            // Default: filter __native_* and throw on remaining
+            val realUndefined = bodyResult.undefinedVariables.filter { !it.name.startsWith("__native_") }
+            if (realUndefined.isNotEmpty()) {
+                val undefinedVar = realUndefined.first()
+                throw com.mezze.language.typechecker.TypeCheckError(
+                    "Type error in $implLabel operation '$opName' implementation: " +
+                    "Undefined variable '${undefinedVar.name}'",
+                    undefinedVar.loc,
+                    code = ErrorCode.V0702_UNDEFINED_VARIABLE,
+                )
+            }
+        }
+
+        // Solve constraints to get actual body type
+        val solver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
+        val solveResult = solver.solve(bodyResult.constraints)
+
+        when (solveResult) {
+            is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
+                if (onSolveFailure != null) {
+                    if (onSolveFailure(solveResult)) return  // Caller says skip this operation
+                } else {
+                    // Default: throw on first error
+                    throw com.mezze.language.typechecker.TypeCheckError(
+                        "Type error in $implLabel operation '$opName' implementation: ${solveResult.errors.firstOrNull()?.message ?: "Unknown error"}",
+                        opLoc,
+                        code = ErrorCode.T0201_TYPE_MISMATCH,
+                    )
+                }
+            }
+            is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
+                val substitution = solveResult.substitution
+                val rawBodyType = substitution.apply(bodyResult.type)
+                // Unwrap SuspendedType — effects from the body are tracked
+                // separately; the return type check is value-level only
+                val actualBodyType = if (rawBodyType is MezzeType.SuspendedType) rawBodyType.valueType else rawBodyType
+
+                // Check that actual body type matches expected return type using unification
+                val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
+                val unificationResult = unificationSolver.solve(
+                    listOf(Constraint.Equality(actualBodyType, expectedReturnType, validationReason, loc = opLoc))
+                )
+
+                if (unificationResult is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure) {
+                    val actualTypeStr = com.mezze.language.ast.prettyPrintType(actualBodyType)
+                    val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
+                    throw com.mezze.language.typechecker.TypeCheckError(
+                        "Operation '$opName' in $implLabel returns wrong type: " +
+                        "expected $expectedTypeStr, but body returns $actualTypeStr.",
+                        opLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                    )
                 }
             }
         }
@@ -1591,11 +1674,10 @@ class ConstraintGenerator(
     /**
      * Validate effect implementation bodies.
      *
-     * Similar to validateAbilityImplementation but for effects (ImplDeclaration).
      * For each operation:
      * - Get the expected return type from the effect declaration
      * - Substitute associated types with the performer's bindings
-     * - Type-check the lambda body
+     * - Type-check the lambda body via validateImplOperationBody
      * - Compare inferred body type with expected return type
      * - Throw TypeCheckError if types don't match
      */
@@ -1922,44 +2004,14 @@ class ConstraintGenerator(
 
             // Type-check the implementation body (must be a lambda)
             if (implOp.implementation is ParsedLambda) {
-                val lambda = implOp.implementation as ParsedLambda
-
-                // Extract parameter names from lambda
-                val paramNames = when (val params = lambda.params) {
-                    is ParsedLambdaParams.Untyped -> params.names
-                    is ParsedLambdaParams.Typed -> params.fields.map { it.name }
-                }
-
-                // Build parameter type map for scoped context
-                val paramTypes = if (expectedParamType is MezzeType.RecordType) {
-                    paramNames.associateWith { name ->
-                        expectedParamType.fields[name] ?: MezzeType.VarType(TypeVar.fresh())
-                    }
-                } else {
-                    // Single parameter case - wrap in record
-                    paramNames.associateWith { expectedParamType }
-                }
-
-                // Type-check the lambda body with parameters in scope (including performer params)
-                // SCOPED EFFECTS: Use contextWithScope for operations and finalize_scope,
-                // but NOT for initialize_scope (scope is being created, not yet available)
+                // SCOPED EFFECTS: Use contextWithScope for operations, baseContext for initialize_scope
                 val operationBaseContext = if (implOp.name == ScopedEffectConstants.INITIALIZE_SCOPE) {
-                    baseContext  // No scope access in initialize_scope
+                    baseContext
                 } else {
-                    contextWithScope  // Operations and finalize_scope have scope access
+                    contextWithScope
                 }
-                var bodyContext = operationBaseContext
-                for ((name, type) in paramTypes) {
-                    bodyContext = bodyContext.extendMono(name, type)
-                }
-
-                // Bind runtime-contributed `resume` and `abort` in op handler body scope.
-                // See EffectHandlerBindings for the type shape and rationale.
-                bodyContext = com.mezze.language.typechecker.types.effects.EffectHandlerBindings
-                    .extendWithAbortAndResume(bodyContext, expectedReturnType)
 
                 // SCOPED EFFECTS: Add 'scope' to recordLiteralBindings for field access validation
-                // This enables "field not found" errors with suggestions for scope.fieldName
                 // Only add if scope is available (scopeType is set and this is not initialize_scope)
                 val scopeRecordBindings = if (scopeType != null && implOp.name != ScopedEffectConstants.INITIALIZE_SCOPE) {
                     setOf("scope")
@@ -1967,75 +2019,69 @@ class ConstraintGenerator(
                     emptySet()
                 }
 
-                val constraintContext = ConstraintContext(
-                    bodyContext,
-                    expectedType = null,
-                    performerToEffect = performerToEffect,
-                    performerAddedEffects = performerAddedEffects,
-                    abilityNames = abilityNames,
-                    effectNames = effectNames,
-                    effectDeclarations = effectDeclarations,
-                    abilityDeclarations = abilityDeclarations,
-                    typeDeclarations = typeDeclarations,
-                    recordLiteralBindings = scopeRecordBindings
-                )
-
-                // Generate constraints for lambda body
-                val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
-
-                // CRITICAL: Track effects from the implementation body
-                // When an impl body uses effects (like FileSystem.write_file), those effects
-                // need to be propagated so that perform expressions know what additional
-                // effects are introduced by this performer.
-                // Exclude the effect being implemented (impl handles it, doesn't add it)
-                val bodyEffects = bodyResult.effects - effectRef.localName
-                if (bodyEffects.isNotEmpty()) {
-                    val existingEffects = performerAddedEffects[impl.performerName] ?: emptySet()
-                    performerAddedEffects[impl.performerName] = existingEffects + bodyEffects
-                }
-
-                // If there are undefined variables, check for 'scope' errors first
-                // The body may reference external performers or functions not yet in context
-                // Full validation will happen during the normal type-checking phase
-                if (bodyResult.undefinedVariables.isNotEmpty()) {
-                    // SCOPED EFFECTS: Check for 'scope' being undefined - this is a special error case
-                    // 'scope' is only available in operations and finalize_scope when initialize_scope exists
-                    val scopeUndefined = bodyResult.undefinedVariables.find { it.name == "scope" }
-                    if (scopeUndefined != null) {
-                        // Determine the error message based on context
-                        val errorMessage = if (implOp.name == ScopedEffectConstants.INITIALIZE_SCOPE) {
-                            "The 'scope' variable is not available in initialize_scope. " +
-                            "The scope is being created here and will only be available in operations and finalize_scope."
-                        } else if (!isScopedEffect) {
-                            "The 'scope' variable is not available because this impl does not define initialize_scope. " +
-                            "Add 'initialize_scope = {} -> { ... }' to create a scope."
-                        } else {
-                            // This shouldn't happen if our code is correct, but handle it anyway
-                            "Undefined variable 'scope' in operation '${implOp.name}'."
+                validateImplOperationBody(
+                    lambda = implOp.implementation as ParsedLambda,
+                    opName = implOp.name,
+                    opLoc = implOp.loc,
+                    expectedParamType = expectedParamType,
+                    expectedReturnType = expectedReturnType,
+                    baseContext = operationBaseContext,
+                    implLabel = "impl '${impl.performerName}'",
+                    validationReason = "Effect body validation",
+                    recordLiteralBindings = scopeRecordBindings,
+                    prepareContext = { ctx ->
+                        // Bind runtime-contributed `resume` and `abort` in op handler body scope.
+                        // See EffectHandlerBindings for the type shape and rationale.
+                        com.mezze.language.typechecker.types.effects.EffectHandlerBindings
+                            .extendWithAbortAndResume(ctx, expectedReturnType)
+                    },
+                    onBodyResult = { bodyResult, _ ->
+                        // CRITICAL: Track effects from the implementation body
+                        // When an impl body uses effects (like FileSystem.write_file), those effects
+                        // need to be propagated so that perform expressions know what additional
+                        // effects are introduced by this performer.
+                        // Exclude the effect being implemented (impl handles it, doesn't add it)
+                        val bodyEffects = bodyResult.effects - effectRef.localName
+                        if (bodyEffects.isNotEmpty()) {
+                            val existingEffects = performerAddedEffects[impl.performerName] ?: emptySet()
+                            performerAddedEffects[impl.performerName] = existingEffects + bodyEffects
                         }
-                        throw com.mezze.language.typechecker.TypeCheckError(
-                            errorMessage,
-                            scopeUndefined.loc,
-                            code = ErrorCode.V0702_UNDEFINED_VARIABLE,
-                        )
-                    }
-                    // Skip validation for other undefined variables - let the normal type-checking catch errors later
-                    continue
-                }
-
-                // Solve constraints to get actual body type
-                val solver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
-                val solveResult = solver.solve(bodyResult.constraints)
-
-                when (solveResult) {
-                    is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
+                    },
+                    onUndefinedVars = { bodyResult ->
+                        // If there are undefined variables, check for 'scope' errors first
+                        // The body may reference external performers or functions not yet in context
+                        // Full validation will happen during the normal type-checking phase
+                        if (bodyResult.undefinedVariables.isNotEmpty()) {
+                            // SCOPED EFFECTS: Check for 'scope' being undefined
+                            val scopeUndefined = bodyResult.undefinedVariables.find { it.name == "scope" }
+                            if (scopeUndefined != null) {
+                                val errorMessage = if (implOp.name == ScopedEffectConstants.INITIALIZE_SCOPE) {
+                                    "The 'scope' variable is not available in initialize_scope. " +
+                                    "The scope is being created here and will only be available in operations and finalize_scope."
+                                } else if (!isScopedEffect) {
+                                    "The 'scope' variable is not available because this impl does not define initialize_scope. " +
+                                    "Add 'initialize_scope = {} -> { ... }' to create a scope."
+                                } else {
+                                    "Undefined variable 'scope' in operation '${implOp.name}'."
+                                }
+                                throw com.mezze.language.typechecker.TypeCheckError(
+                                    errorMessage,
+                                    scopeUndefined.loc,
+                                    code = ErrorCode.V0702_UNDEFINED_VARIABLE,
+                                )
+                            }
+                            // Skip validation for other undefined variables
+                            true  // skip this operation
+                        } else {
+                            false  // proceed with solving
+                        }
+                    },
+                    onSolveFailure = { solveResult ->
                         val firstError = solveResult.errors.firstOrNull()
                         if (firstError != null) {
                             val constraint = firstError.constraint
 
                             // FIRST: Check if this is a "calling non-function as function" error
-                            // This happens when one side is FunctionType and the other is not
-                            // This is always a clear error and should be reported immediately
                             if (constraint is Constraint.Equality) {
                                 val left = constraint.left
                                 val right = constraint.right
@@ -2044,7 +2090,6 @@ class ConstraintGenerator(
                                     (right is MezzeType.FunctionType && !isFunctionLike(left))
 
                                 if (isCallingNonFunction) {
-                                    // This is a clear error: trying to call a non-function as a function
                                     val nonFunctionType = if (left is MezzeType.FunctionType) right else left
                                     throw com.mezze.language.typechecker.TypeCheckError(
                                         "Cannot call non-function type as function in impl '${impl.performerName}' " +
@@ -2057,11 +2102,7 @@ class ConstraintGenerator(
                             }
 
                             // SECOND: Check for other clear type mismatches
-                            // Only report mismatches between concrete scalar types (String vs Int, etc.)
-                            // Skip if message involves: effects, type variables ('a, 'b, etc.), generics, collections
-                            // These may be handled by native functions with different semantics
                             val msg = firstError.message
-                            // Type variables are 'letter patterns, not quoted field names like 'fieldName'
                             val hasTypeVar = Regex("'[a-z]\\b").containsMatchIn(msg)
                             val hasEffects = msg.contains("effectful") || msg.contains("<") && msg.contains(">")
                             val hasCollections = msg.contains("List") || msg.contains("Seq") ||
@@ -2077,39 +2118,9 @@ class ConstraintGenerator(
                                 )
                             }
                         }
-                        continue
-                    }
-                    is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
-                        val substitution = solveResult.substitution
-                        val rawBodyType = substitution.apply(bodyResult.type)
-                        // Unwrap SuspendedType — effects from the body are tracked
-                        // separately; the return type check is value-level only
-                        val actualBodyType = if (rawBodyType is MezzeType.SuspendedType) rawBodyType.valueType else rawBodyType
-
-                        // Check that actual body type matches expected return type using unification
-                        val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
-                        val unificationResult = unificationSolver.solve(
-                            listOf(Constraint.Equality(actualBodyType, expectedReturnType, "Effect body validation", loc = implOp.loc))
-                        )
-
-                        when (unificationResult) {
-                            is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
-                                val actualTypeStr = com.mezze.language.ast.prettyPrintType(actualBodyType)
-                                val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
-                                throw com.mezze.language.typechecker.TypeCheckError(
-                                    "Operation '${implOp.name}' in impl ${effectRef.localName} returns wrong type: " +
-                                    "expected $expectedTypeStr, but body returns $actualTypeStr.",
-                                    implOp.loc,
-                                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
-                                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
-                                )
-                            }
-                            is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
-                                // Unification succeeded - types are compatible
-                            }
-                        }
-                    }
-                }
+                        true  // skip — don't throw default error for ambiguous failures
+                    },
+                )
             }
         }
     }
