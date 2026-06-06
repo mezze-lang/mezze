@@ -200,10 +200,8 @@ class EffectValidator(
 
         for ((name, count) in duplicates) {
             errors.add(
-                ValidationError.TypeMismatch(
-                    expected = MezzeType.IntType,  // Placeholder
-                    actual = MezzeType.IntType,     // Placeholder
-                    context = "Operation '$name' is defined $count times in effect '${effectDecl.name}'. Each operation must have a unique name.",
+                ValidationError.StructuralError(
+                    reason = "Operation '$name' is defined $count times in effect '${effectDecl.name}'. Each operation must have a unique name.",
                     loc = effectDecl.loc,
                 )
             )
@@ -232,10 +230,8 @@ class EffectValidator(
         if (effectAssociatedTypes.isNotEmpty() && implAssociatedTypeBindings.isEmpty()) {
             val typesList = effectAssociatedTypes.joinToString(", ")
             errors.add(
-                ValidationError.TypeMismatch(
-                    expected = MezzeType.IntType,  // Placeholder
-                    actual = MezzeType.IntType,     // Placeholder
-                    context = "Effect '${implDecl.effect.localName}' declares associated types [$typesList] " +
+                ValidationError.StructuralError(
+                    reason = "Effect '${implDecl.effect.localName}' declares associated types [$typesList] " +
                             "but implementation '${implDecl.performerName}' does not provide bindings. " +
                             "Use: impl ${implDecl.effect.localName} for ${implDecl.performerName} having ${effectAssociatedTypes.joinToString(", ") { "$it = <Type>" }} where { ... }",
                     loc = implDecl.loc,
@@ -247,10 +243,8 @@ class EffectValidator(
         val missingBindings = effectAssociatedTypes.filter { it !in implAssociatedTypeBindings.keys }
         if (missingBindings.isNotEmpty()) {
             errors.add(
-                ValidationError.TypeMismatch(
-                    expected = MezzeType.IntType,  // Placeholder
-                    actual = MezzeType.IntType,     // Placeholder
-                    context = "Effect '${implDecl.effect.localName}' declares associated types ${effectAssociatedTypes.joinToString(", ")} " +
+                ValidationError.StructuralError(
+                    reason = "Effect '${implDecl.effect.localName}' declares associated types ${effectAssociatedTypes.joinToString(", ")} " +
                             "but implementation '${implDecl.performerName}' is missing bindings for: ${missingBindings.joinToString(", ")}. " +
                             "All associated types must be bound in the implementation.",
                     loc = implDecl.loc,
@@ -267,10 +261,8 @@ class EffectValidator(
                 "only declares: ${effectAssociatedTypes.joinToString(", ")}"
             }
             errors.add(
-                ValidationError.TypeMismatch(
-                    expected = MezzeType.IntType,  // Placeholder
-                    actual = MezzeType.IntType,     // Placeholder
-                    context = "Implementation '${implDecl.performerName}' provides bindings for ${extraBindings.joinToString(", ")} " +
+                ValidationError.StructuralError(
+                    reason = "Implementation '${implDecl.performerName}' provides bindings for ${extraBindings.joinToString(", ")} " +
                             "but effect '${implDecl.effect.localName}' $declaredPart. " +
                             "Remove the extra bindings or add them to the effect declaration.",
                     loc = implDecl.loc,
@@ -290,10 +282,8 @@ class EffectValidator(
             val missing = missingOps.joinToString(", ")
             val example = missingOps.first()
             errors.add(
-                ValidationError.TypeMismatch(
-                    expected = MezzeType.IntType,  // Placeholder
-                    actual = MezzeType.IntType,     // Placeholder
-                    context = "Implementation '${implDecl.performerName}' for effect '${implDecl.effect.localName}' " +
+                ValidationError.StructuralError(
+                    reason = "Implementation '${implDecl.performerName}' for effect '${implDecl.effect.localName}' " +
                             "is missing required ${if (missingOps.size == 1) "operation" else "operations"}: $missing. " +
                             "Add: $example = {args} -> ...",
                     loc = implDecl.loc,
@@ -308,10 +298,8 @@ class EffectValidator(
         if (extraOps.isNotEmpty()) {
             val extra = extraOps.joinToString(", ")
             errors.add(
-                ValidationError.TypeMismatch(
-                    expected = MezzeType.IntType,  // Placeholder
-                    actual = MezzeType.IntType,     // Placeholder
-                    context = "Implementation '${implDecl.performerName}' for effect '${implDecl.effect.localName}' " +
+                ValidationError.StructuralError(
+                    reason = "Implementation '${implDecl.performerName}' for effect '${implDecl.effect.localName}' " +
                             "has extra ${if (extraOps.size == 1) "operation" else "operations"} not in effect: $extra. " +
                             "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the effect declaration.",
                     loc = implDecl.loc,
@@ -326,10 +314,8 @@ class EffectValidator(
                 val expectedParam = substituteAssociatedTypes(declOp.paramType, implAssociatedTypeBindings)
                 if (!AbilityValidator.typeAnnotationsMatchPublic(implOp.paramType!!, expectedParam)) {
                     errors.add(
-                        ValidationError.TypeMismatch(
-                            expected = MezzeType.IntType,
-                            actual = MezzeType.IntType,
-                            context = "Wrong parameter type for operation '${implOp.name}' in performer '${implDecl.performerName}': " +
+                        ValidationError.StructuralError(
+                            reason = "Wrong parameter type for operation '${implOp.name}' in performer '${implDecl.performerName}': " +
                                     "expected ${formatAnnotation(expectedParam)}, but got ${formatAnnotation(implOp.paramType!!)}.",
                             loc = implOp.loc,
                         )
@@ -340,10 +326,8 @@ class EffectValidator(
                 val expectedReturn = substituteAssociatedTypes(declOp.returnType, implAssociatedTypeBindings)
                 if (!AbilityValidator.typeAnnotationsMatchPublic(implOp.returnType!!, expectedReturn)) {
                     errors.add(
-                        ValidationError.TypeMismatch(
-                            expected = MezzeType.IntType,
-                            actual = MezzeType.IntType,
-                            context = "Wrong return type for operation '${implOp.name}' in performer '${implDecl.performerName}': " +
+                        ValidationError.StructuralError(
+                            reason = "Wrong return type for operation '${implOp.name}' in performer '${implDecl.performerName}': " +
                                     "expected ${formatAnnotation(expectedReturn)}, but got ${formatAnnotation(implOp.returnType!!)}.",
                             loc = implOp.loc,
                         )

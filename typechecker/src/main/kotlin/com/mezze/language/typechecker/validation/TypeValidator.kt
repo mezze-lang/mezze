@@ -895,48 +895,6 @@ class TypeValidator(
     }
 
     /**
-     * Validate effect usage.
-     */
-    private fun validateEffectUsage(
-        usedEffects: Set<String>,
-        type: MezzeType,
-        context: String
-    ): List<ValidationError> {
-        val errors = mutableListOf<ValidationError>()
-
-        // Get allowed effects from type
-        val allowedEffects = when (type) {
-            is MezzeType.FunctionType -> type.effects?.effects ?: emptySet()
-            is MezzeType.SuspendedType -> type.effects.effects
-            else -> emptySet()
-        }
-
-        // Check if all used effects are allowed
-        for (effect in usedEffects) {
-            if (effect !in allowedEffects) {
-                val result = effectValidator.checkEffect(
-                    effect,
-                    allowedEffects,
-                    allowedEffects
-                )
-
-                if (result is EffectValidator.EffectCheckResult.Unhandled) {
-                    errors.add(
-                        ValidationError.EffectNotHandled(
-                            effectName = effect,
-                            usedBy = null,
-                            availableHandlers = allowedEffects.toList(),
-                            loc = null
-                        )
-                    )
-                }
-            }
-        }
-
-        return errors
-    }
-
-    /**
      * Validate type annotation for a v2 ParsedLetDecl.
      * Uses ParsedTypeAnnotation directly.
      */
@@ -1019,17 +977,6 @@ class TypeValidator(
      * Thin bridge for EffectValidator which still operates on v1 types.
      */
     // parsedPerformerDeclToV1 deleted — v1 bridge no longer needed
-
-/**
-     * Extract effect row from a type if present.
-     */
-    private fun extractEffectRowFromType(type: MezzeType): MezzeType.EffectRow? {
-        return when (type) {
-            is MezzeType.FunctionType -> type.effects
-            is MezzeType.SuspendedType -> type.effects
-            else -> null
-        }
-    }
 
     /**
      * Check if two types are compatible for annotation checking.
@@ -1490,11 +1437,14 @@ class TypeValidator(
     ): ValidationResult {
         val errors = mutableListOf<ValidationError>()
 
-        // Check for orphan instances (both ability and type are from different modules)
-        // This would require module information, skip for now
+        // Orphan checking is not needed here: the orphan rule is enforced by the
+        // module loader, which only allows impls in the module that defines either
+        // the ability or the type. See OrphanInstance error variant.
 
-        // Check for overlapping instances (same ability for same type multiple times)
-        // This would require tracking all impls in context, skip for now
+        // Overlap checking is not needed here: the DeclarationRegistry deduplicates
+        // impls by (ability, target-type) pair at registration time, and the
+        // ConstraintSolver picks the single matching impl during solving.
+        // See OverlappingInstance error variant for the diagnostic path.
 
         return if (errors.isEmpty()) {
             ValidationResult.Success()

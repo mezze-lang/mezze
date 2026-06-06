@@ -203,6 +203,7 @@ object ErrorFormatter {
             is ValidationError.UnitVariantPayloadMismatch -> formatUnitVariantPayloadMismatchError(error, sourceCode)
             is ValidationError.TopLevelPerformedEffects -> formatTopLevelPerformedEffectsError(error, sourceCode)
             is ValidationError.TopLevelExpressionPerformedEffects -> formatTopLevelExpressionPerformedEffectsError(error, sourceCode)
+            is ValidationError.StructuralError -> formatStructuralError(error, sourceCode)
             is ValidationError.MissingContentHash -> formatMissingContentHashError(error, sourceCode)
         }
 
@@ -723,7 +724,20 @@ object ErrorFormatter {
         )
     }
 
-private fun formatMissingContentHashError(
+private fun formatStructuralError(
+        error: ValidationError.StructuralError,
+        sourceCode: String?
+    ): String {
+        return SourceContext.formatError(
+            errorType = "Structural Error",
+            message = error.message(),
+            location = error.location(),
+            sourceCode = sourceCode,
+            suggestion = null
+        )
+    }
+
+    private fun formatMissingContentHashError(
         error: ValidationError.MissingContentHash,
         sourceCode: String?
     ): String {

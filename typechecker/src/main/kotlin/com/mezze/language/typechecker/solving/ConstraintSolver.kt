@@ -3526,21 +3526,6 @@ class ConstraintSolver(
     }
 
     /**
-     * Check if a type is a record type that has a field with the given name.
-     * Used to determine if a constructor payload matches the expected pattern
-     * for built-in types like Result (Ok {val}, Err {error}) and Option (Some {val}).
-     */
-    private fun hasFieldNamed(type: MezzeType, fieldName: String): Boolean {
-        return when (type) {
-            is MezzeType.RecordType -> type.fields.containsKey(fieldName)
-            // For VarType, assume the field might exist - actual structure
-            // will be verified during unification when we create the built-in type
-            is MezzeType.VarType -> true
-            else -> false
-        }
-    }
-
-    /**
      * Convert a type annotation to MezzeType for solver use.
      * Creates fresh type variables for declared type parameters.
      */

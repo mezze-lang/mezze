@@ -652,6 +652,24 @@ sealed interface ValidationError {
         override fun location() = loc
     }
 
+    /**
+     * Structural validation error (not a type mismatch).
+     *
+     * Used for errors like missing/extra/duplicate operations in effect implementations,
+     * missing associated type bindings, and other structural problems that are not
+     * about two types failing to match.
+     */
+    data class StructuralError(
+        val reason: String,
+        val loc: Loc? = null
+    ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0901_STRUCTURAL_VALIDATION
+
+        override fun message(): String = reason
+
+        override fun location() = loc
+    }
+
 /**
      * Missing content hash on identifier.
      *

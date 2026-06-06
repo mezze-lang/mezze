@@ -143,6 +143,10 @@ object SuggestionGenerator {
                 "Or move inside an existing function body"
             )
 
+is ValidationError.StructuralError -> listOf(
+                "Review the declaration structure and fix the issue described above"
+            )
+
 is ValidationError.MissingContentHash -> listOf(
                 "This is a compiler bug - please report it",
                 "Content hashes should be computed for all top-level declarations"

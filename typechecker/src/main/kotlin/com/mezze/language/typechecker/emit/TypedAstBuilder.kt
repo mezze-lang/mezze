@@ -98,27 +98,8 @@ class TypedAstBuilder(
         result
     }
 
-    /**
-     * Ability impl index — abilityName → list of (contentHash, targetTypes).
-     * Used for resolving builtin ability calls to real impl hashes.
-     */
-    private val abilityImplIndex: Map<String, List<AbilityImplIndexEntry>> by lazy {
-        val index = mutableMapOf<String, MutableList<AbilityImplIndexEntry>>()
-        for ((hash, info) in abilityImpls) {
-            val name = info.abilityName ?: continue
-            index.getOrPut(name) { mutableListOf() }
-                .add(AbilityImplIndexEntry(hash, info.targetTypes))
-        }
-        index
-    }
-
     /** Cache for ParsedTypeAnnotation → MezzeType conversion (type var cache) */
     private val typeVarCache = mutableMapOf<String, TypeVar>()
-
-    private data class AbilityImplIndexEntry(
-        val contentHash: Hash,
-        val targetTypes: List<String>
-    )
 
     /**
      * Pre-compute content hashes for all let declarations in the module.
@@ -1645,34 +1626,6 @@ class TypedAstBuilder(
         }
     }
 
-    /**
-     * Resolve which effect declaration owns a given operation name.
-     */
-    private fun resolveEffectForOperation(
-        opName: String,
-        qualifier: ParsedModulePath?
-    ): com.mezze.language.parsedast.ParsedEffectDecl? {
-        // If qualified, try to find by effect name
-        if (qualifier != null) {
-            val effectName = qualifier.shortName
-            registry.lookupEffect(effectName)?.let { decl ->
-                if (decl.operations.any { it.name == opName }) return decl
-            }
-            importContext?.importedEffects?.get(effectName)?.let { decl ->
-                if (decl.operations.any { it.name == opName }) return decl
-            }
-        }
-
-        // Unqualified: search all effect declarations for the operation
-        for (decl in registry.allEffectDecls) {
-            if (decl.operations.any { it.name == opName }) return decl
-        }
-        for ((_, decl) in (importContext?.importedEffects ?: emptyMap())) {
-            if (decl.operations.any { it.name == opName }) return decl
-        }
-        return null
-    }
-
     // TODO: Could eventually use TypeAnnotationConverter from util/, but this version has
     // special Unit handling ("Unit" -> empty RecordType), uppercase -> TypeApp logic,
     // instance-level typeVarCache, open row vars, and associatedTypeBindings on ability
@@ -1936,102 +1889,4 @@ class TypedAstBuilder(
         }
     }
 
-    /**
-     * Get the simple type name used for ability impl matching.
-     * Returns the type name string that matches against AbilityImplInfo.targetTypes.
-     */
-    private fun getTypeNameForImpl(type: MezzeType): String? = when (type) {
-        is MezzeType.IntType -> "Int"
-        is MezzeType.FloatType -> "Float"
-        is MezzeType.StringType -> "Str"
-        is MezzeType.BoolType -> "Bool"
-        is MezzeType.NatType -> "Nat"
-        is MezzeType.FracType -> "Frac"
-        is MezzeType.CharType -> "Char"
-        is MezzeType.BytesType -> "Bytes"
-        is MezzeType.OrderingType -> "Ordering"
-        is MezzeType.SeqType -> "[${getTypeNameForImpl(type.elementType) ?: "?"}]"
-        is MezzeType.ListType -> "List_${getTypeNameForImpl(type.elementType) ?: "?"}"
-        is MezzeType.SetType -> "Set_${getTypeNameForImpl(type.elementType) ?: "?"}"
-        is MezzeType.MapType -> "Map_${getTypeNameForImpl(type.keyType) ?: "?"}_${getTypeNameForImpl(type.valueType) ?: "?"}"
-        is MezzeType.TypeApplication -> type.constructor
-        is MezzeType.RecordType -> type.typeName
-        is MezzeType.VariantType -> type.typeName
-        else -> null
-    }
-
-    /**
-     * Resolve an ability method call to a BindingRef.
-     *
-     * Uses the ability impl index to find the impl matching the receiver type,
-     * then resolves the method binding within that impl.
-     *
-     * Returns null if no matching impl is found (falls back to existing logic).
-     */
-    private fun resolveAbilityMethodBinding(
-        abilityName: String,
-        methodName: String,
-        receiverType: MezzeType
-    ): BindingRef? {
-        val typeName = getTypeNameForImpl(receiverType) ?: return null
-        val impls = abilityImplIndex[abilityName] ?: return null
-
-        // Find the impl that matches the receiver type
-        val matchingImpl = impls.firstOrNull { entry ->
-            entry.targetTypes.any { it == typeName }
-        }
-
-        if (matchingImpl != null) {
-            // We found the impl. Now we need the method's content hash.
-            // The impl hash is matchingImpl.contentHash. The method binding
-            // within the impl should be in identifierContentHashes as a qualified binding.
-            // Try: BindingKey(abilityName, methodName) or the method name in the impl.
-            val qualKey = BindingKey(abilityName, methodName)
-            identifierContentHashes[qualKey]?.let {
-                return BindingRef.ByHash(it)
-            }
-
-            // Try unqualified method name
-            val unqualKey = BindingKey.unqualified(methodName)
-            identifierContentHashes[unqualKey]?.let {
-                return BindingRef.ByHash(it)
-            }
-
-            // Try import context
-            importContext?.importedBindings?.get(methodName)?.let { binding ->
-                return BindingRef.ByHash(binding.contentHash)
-            }
-
-            // Fall back to using the impl content hash itself as the method reference
-            return BindingRef.ByHash(matchingImpl.contentHash)
-        }
-
-        return null
-    }
-
-    /**
-     * Resolve an inherent method call to a BindingRef.
-     *
-     * Uses the impl content hash from MethodCallInfo to find the method binding.
-     */
-    private fun resolveInherentMethodBinding(
-        methodName: String,
-        implContentHash: Hash?
-    ): BindingRef? {
-        if (implContentHash != null) {
-            return BindingRef.ByHash(implContentHash)
-        }
-
-        // Fallback: try to find by method name
-        val unqualKey = BindingKey.unqualified(methodName)
-        identifierContentHashes[unqualKey]?.let {
-            return BindingRef.ByHash(it)
-        }
-
-        importContext?.importedBindings?.get(methodName)?.let { binding ->
-            return BindingRef.ByHash(binding.contentHash)
-        }
-
-        return null
-    }
 }

@@ -135,6 +135,9 @@ enum class ErrorCode {
     M0803_NOT_EXPORTED,
     M0804_MODULE_HAS_ERRORS,
 
+    // ─── Validator: structural (V09xx) ────────────────────────────────────
+    V0901_STRUCTURAL_VALIDATION,
+
     // ─── Internal compiler errors (I00xx) ────────────────────────────────
     I0001_UNKNOWN_TYPECHECK_FAILURE,
     I0002_PIPELINE_NO_TYPED_MODULE,
