@@ -679,10 +679,19 @@ class ExpressionConstraintGenerator {
                             }
                         }
                         spreadResult.type is MezzeType.VarType -> {
-                            // Spread type is not yet known - add a constraint that it must be a record
-                            // We'll use a fresh row variable to represent the unknown fields
-                            // This enables: let x = { ...someVar } where someVar's type isn't known yet
-                            // For now, we don't add fields (they'll be resolved during constraint solving)
+                            // Spread type is not yet known — constrain it to be a record (open)
+                            val spreadRecordType = MezzeType.RecordType(
+                                fields = emptyMap(),
+                                rowVar = RowVar.fresh()
+                            )
+                            constraints.add(
+                                Constraint.Equality(
+                                    left = spreadResult.type,
+                                    right = spreadRecordType,
+                                    context = "Spread expression must be a record type",
+                                    loc = entry.expr.loc
+                                )
+                            )
                         }
                         else -> {
                             // Spread expression is not a record - throw an error

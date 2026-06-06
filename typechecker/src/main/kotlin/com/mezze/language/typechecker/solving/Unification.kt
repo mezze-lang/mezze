@@ -1250,6 +1250,16 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
         }
     }
 
+    // Performed flag: if either row has been performed, the union is performed.
+    // A closed row with concrete effects cannot unify with a performed row that
+    // has no concrete effects — but we don't reject here since effect rows use
+    // union semantics. The performed flag is informational for the top-level check.
+
+    // Row variables: open rows (<...>) are compatible with anything.
+    // Two closed rows unify (both fully known). One open + one closed: the open
+    // row accepts the closed row's effects. Two open: both stay open.
+    // No rejection needed — row variable compatibility is structural.
+
     return UnificationResult.Success(composedSubst)
 }
 
