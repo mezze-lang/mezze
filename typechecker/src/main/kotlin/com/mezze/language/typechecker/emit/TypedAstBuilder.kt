@@ -806,10 +806,32 @@ class TypedAstBuilder(
 
                     val isTailCall = isTailCallLocation(expr.loc)
 
+                    // #195 mono-fix #2: stamp TypedCall.instantiation from the
+                    // resolved MethodCallInfo so the monomorphizer's transitive
+                    // worklist (TypeSubstitution.collectByHashRefs) can enqueue
+                    // this call's specialization. Without it, every method call
+                    // inside a generic body silently drops out of mono.
+                    val typeArgsResolved = methodInfo.typeArgs.map { substitution.apply(it) }
+                    val abilityImplsResolved = methodInfo.abilityImpls.map { ref ->
+                        com.mezze.language.typedast.AbilityImplRef(
+                            abilityHash = ref.abilityHash,
+                            implHash = ref.implHash,
+                            targetType = substitution.apply(ref.targetType),
+                        )
+                    }
+                    val instantiation = if (typeArgsResolved.isEmpty() && abilityImplsResolved.isEmpty()) {
+                        null
+                    } else {
+                        com.mezze.language.typedast.TypeInstantiation(
+                            typeArgs = typeArgsResolved,
+                            abilityImpls = abilityImplsResolved,
+                        )
+                    }
+
                     TypedCall(
                         function = fn,
                         arg = wrappedArg,
-                        instantiation = null,
+                        instantiation = instantiation,
                         isTailCall = isTailCall,
                         type = callReturnType,
                         loc = loc

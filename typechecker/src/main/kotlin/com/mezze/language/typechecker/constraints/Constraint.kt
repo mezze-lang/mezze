@@ -316,7 +316,20 @@ data class ConstraintResult(
         // the TypedCall (otherwise the call's `.type` falls back to the
         // surrounding contextType — `unknown` for chained method calls). LSP
         // chain-segment inlay hints rely on this being set.
-        val methodFunctionType: com.mezze.language.ast.MezzeType? = null
+        val methodFunctionType: com.mezze.language.ast.MezzeType? = null,
+        // #195 mono-fix #2: per-call-site resolved instantiation. When
+        // populated, TypedAstBuilder stamps `TypedCall.instantiation` so the
+        // monomorphizer's transitive worklist (TypeSubstitution.collectByHashRefs)
+        // can enqueue this call's specializations instead of silently
+        // dropping every nested generic. typeArgs is in callee's typeParam
+        // declaration order; abilityImpls is one entry per ability constraint
+        // on the callee's function type, in declaration order. Both default to
+        // empty — call sites that don't populate keep null instantiation
+        // downstream (no allocation, hash-stable). Field population is wired
+        // incrementally — the infrastructure can carry data even when the
+        // populating site hasn't been built yet.
+        val typeArgs: List<MezzeType> = emptyList(),
+        val abilityImpls: List<com.mezze.language.typedast.AbilityImplRef> = emptyList(),
     )
     /**
      * Information about an undefined variable.
