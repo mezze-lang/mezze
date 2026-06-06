@@ -722,10 +722,16 @@ class TypeChecker(
                         acc + r.callReturnTypes
                     }
 
-                // #195 mono-fix #1: aggregate per-match-case bindings.
+                // #195 mono-fix #1: aggregate per-match-case bindings, applying
+                // the final substitution at fold time so late-resolved TyVars
+                // (e.g. field bindings unified to Int via HasField+Equality
+                // chains) reach TypedAstBuilder as concrete types — not as
+                // free VarType wrappers that the downstream apply may miss.
                 val allMatchCaseBindings = constraintResults.values
                     .fold(emptyMap<com.mezze.language.parsedast.Loc, Map<String, com.mezze.language.ast.MezzeType>>()) { acc, r ->
-                        acc + r.matchCaseBindings
+                        acc + r.matchCaseBindings.mapValues { (_, bindings) ->
+                            bindings.mapValues { (_, ty) -> substitution.apply(ty) }
+                        }
                     }
 
                 // expectedTypeAt union — applied through the final
@@ -1233,9 +1239,19 @@ class TypeChecker(
             // #195 mono-fix #1: aggregate per-match-case pattern bindings so
             // TypedAstBuilder can recover the solver's TyVars when stamping
             // PatternBinding + identifierContext entries for guard/body emit.
+            // Apply the final substitution here at fold time — the solver has
+            // already bound the fresh field TyVars (e.g. 'e := Int from
+            // HasField+Equality propagation), but the bindings map still
+            // carries the original solver TyVars. Without this apply, the
+            // downstream TypedAstBuilder.substitution.apply at the read site
+            // becomes a no-op when the substitution snapshot it sees doesn't
+            // include the late-resolved binding, leaving `w: VarType` in the
+            // specialized mono blob and defeating inline-op dispatch.
             val matchCaseBindings = constraintResults.values
                 .fold(emptyMap<com.mezze.language.parsedast.Loc, Map<String, com.mezze.language.ast.MezzeType>>()) { acc, r ->
-                    acc + r.matchCaseBindings
+                    acc + r.matchCaseBindings.mapValues { (_, bindings) ->
+                        bindings.mapValues { (_, ty) -> substitution.apply(ty) }
+                    }
                 }
             val tailCallLocations = constraintResults.values
                 .flatMap { it.tailCalls }

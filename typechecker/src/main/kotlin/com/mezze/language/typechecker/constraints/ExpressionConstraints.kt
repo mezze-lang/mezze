@@ -1500,13 +1500,26 @@ class ExpressionConstraintGenerator {
         val (callType, methodDeclaredEffects, methodDeclaredEffectInstances) =
             wrapCallResultWithEffects(resultType, strippedMethodType.effects)
 
-        // Store method call resolution for the TypedAstBuilder
+        // Store method call resolution for the TypedAstBuilder.
+        //
+        // #218: stash the ability's instantiation TyVars into typeArgs so the
+        // monomorphizer can substitute them when specializing the enclosing
+        // function. Without this, an in-isolation lambda body checks `w.eq`
+        // with `'v` as the Eq instantiation; the call-site solver later binds
+        // `'v := Int` but mono never sees that because the typeArgs were
+        // empty. The receiverConstraintType IS the ability's primary TyVar
+        // (built-in path) or the receiver TyVar (user-defined path). When
+        // mono runs, it walks `TypedCall.instantiation.typeArgs` and
+        // substitutes each TyVar via the specialization's substitution map —
+        // the body must thread the same TyVar identity through.
+        val methodCallTypeArgs: List<MezzeType> = listOf(receiverConstraintType)
         val methodCallInfo = ConstraintResult.MethodCallInfo(
             abilityName = resolvedAbilityName,
             methodName = methodName,
             methodHash = null,  // Resolved at TypedAstBuilder time via ability impl index
             receiverFieldName = Keywords.IT,  // Language convention: receiver param is always `it`
-            isInherentMethod = false
+            isInherentMethod = false,
+            typeArgs = methodCallTypeArgs
         )
 
         return ConstraintResult(
@@ -3004,6 +3017,13 @@ class ExpressionConstraintGenerator {
         // CRITICAL: Include ability constraints from multiple sources:
         // 1. From the lambda's own abilityConstraints (parsed from `type with Ability = lambda`)
         // 2. From the expected type annotation (if present)
+        // 3. Inferred from body — harvest bodyResult.abilityConstraints so mono
+        //    (#218) can resolve them at the call site. Without this, an unannotated
+        //    lambda whose body uses an ability method (e.g. `w == h` desugaring
+        //    to `w.eq {r = h}`) loses the `<Eq 'v>` constraint at the arrow,
+        //    leaving MonoDriver.resolveAbilityConstraints with nothing to walk,
+        //    so the specialized blob's body keeps the unresolved `'v` and the
+        //    runtime crashes at __native_int_eq with l=null.
         // The lambda's own constraints take precedence since they're explicitly specified
         val abilityConstraints = when {
             expr.abilityConstraints.isNotEmpty() -> {
@@ -3020,7 +3040,27 @@ class ExpressionConstraintGenerator {
                 }
             }
             expectedFunctionType?.abilityConstraints?.isNotEmpty() == true -> expectedFunctionType.abilityConstraints
-            else -> emptyList()
+            else -> {
+                // #218: Only harvest body constraints whose TyVar reaches the
+                // function's surface (param or return type). This keeps the
+                // arrow type focused on constraints the caller can actually
+                // discharge, and avoids leaking transitively-bubbled constraints
+                // (e.g. inner-chain `is_empty` → Sized) that the body owned but
+                // the function's signature doesn't actually require.
+                val surfaceTyVarIds = HashSet<Int>()
+                com.mezze.language.ast.collectTypeVarsInOrder(paramType, sortFields = false).forEach { surfaceTyVarIds.add(it.id) }
+                com.mezze.language.ast.collectTypeVarsInOrder(returnType, sortFields = false).forEach { surfaceTyVarIds.add(it.id) }
+                bodyResult.abilityConstraints
+                    .filter { it.typeVar.id in surfaceTyVarIds }
+                    .distinctBy { it.abilityName to it.typeVar.id }
+                    .map { ab ->
+                        MezzeType.FunctionAbilityConstraint(
+                            abilityName = ab.abilityName,
+                            typeArgs = listOf<MezzeType>(MezzeType.VarType(ab.typeVar)) + ab.typeArgs,
+                            abilityHash = ab.abilityHash
+                        )
+                    }
+            }
         }
 
         // CRITICAL: Generate constraints for ability associated types from annotation
@@ -3908,6 +3948,14 @@ class ExpressionConstraintGenerator {
                 duplicateBindings.addAll(guardResult.duplicateBindings)
                 referencedBindings.addAll(guardResult.referencedBindings)
                 guardUsedVariables = guardResult.usedVariables  // Save for later use
+                // #218: guard's methodCallResolutions and callReturnTypes were
+                // being dropped on the floor — every `w.eq` inside a match guard
+                // never reached TypedAstBuilder, which fell back to a plain
+                // TypedFieldAccess emission with no `it` injection. The mono
+                // path then crashed because the impl body's `it` slot stayed
+                // null. Same propagation pattern as the case-body's path below.
+                methodCallResolutions.putAll(guardResult.methodCallResolutions)
+                callReturnTypes.putAll(guardResult.callReturnTypes)
 
                 // Guard must be Bool (variant type | True, False |)
                 constraints.add(
