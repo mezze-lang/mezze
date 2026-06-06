@@ -3583,15 +3583,34 @@ class ExpressionConstraintGenerator {
 
                     // Result is a new function: remainingParams -> returnType
                     // Preserve effects from original function
-                    // Filter ability constraints to only keep those on type variables still present
-                    // in the remaining parameters (not bound to concrete types via provided args)
+                    // Split ability constraints: keep polymorphic ones on the result function type,
+                    // emit concrete ones as AbilityRequired so the solver verifies them.
                     val remainingTypeVars = collectFreeTypeVars(remainingParamType) + collectFreeTypeVars(functionType.returnType)
-                    val filteredAbilityConstraints = functionType.abilityConstraints.filter { constraint ->
-                        // Keep constraint if its type args contain a type variable that's still polymorphic
-                        constraint.typeArgs.any { typeArg ->
-                            when (typeArg) {
-                                is MezzeType.VarType -> typeArg.variable in remainingTypeVars
-                                else -> false
+                    val filteredAbilityConstraints = mutableListOf<MezzeType.FunctionAbilityConstraint>()
+                    val concreteAbilityChecks = mutableListOf<Constraint.AbilityRequired>()
+
+                    for (constraint in functionType.abilityConstraints) {
+                        val hasPolymorphicArg = constraint.typeArgs.any { typeArg ->
+                            typeArg is MezzeType.VarType && typeArg.variable in remainingTypeVars
+                        }
+                        if (hasPolymorphicArg) {
+                            filteredAbilityConstraints.add(constraint)
+                        } else {
+                            // All type args are concrete — emit an AbilityRequired constraint
+                            // so the solver verifies the ability is satisfied
+                            for (typeArg in constraint.typeArgs) {
+                                if (typeArg is MezzeType.VarType) {
+                                    concreteAbilityChecks.add(
+                                        Constraint.AbilityRequired(
+                                            typeVar = typeArg.variable,
+                                            abilityName = constraint.abilityName,
+                                            abilityHash = constraint.abilityHash,
+                                            typeArgs = constraint.typeArgs,
+                                            context = "Partial application: ability constraint on fixed type variable",
+                                            loc = expr.loc
+                                        )
+                                    )
+                                }
                             }
                         }
                     }
@@ -3609,7 +3628,7 @@ class ExpressionConstraintGenerator {
                         effects = functionResult.effects + argumentResult.effects,
                         effectInstances = functionResult.effectInstances + argumentResult.effectInstances,
                         performed = functionResult.performed || argumentResult.performed,
-                        abilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints,
+                        abilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints + concreteAbilityChecks,
                         undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
                         usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
                         referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings,
@@ -5146,9 +5165,14 @@ class ExpressionConstraintGenerator {
         return ConstraintResult(
             type = resultType,
             constraints = argResult.constraints + additionalConstraints,
-            effects = setOf(effectName),
-            effectInstances = effectInstances + argResult.effectInstances,  // Include effect instances!
+            effects = setOf(effectName) + argResult.effects,
+            effectInstances = effectInstances + argResult.effectInstances,
+            performed = argResult.performed,
+            abilityConstraints = argResult.abilityConstraints,
+            associatedTypeConstraints = argResult.associatedTypeConstraints,
             undefinedVariables = argResult.undefinedVariables,
+            usedVariables = argResult.usedVariables,
+            referencedBindings = argResult.referencedBindings,
             methodCallResolutions = argResult.methodCallResolutions,
             callReturnTypes = argResult.callReturnTypes
         )
