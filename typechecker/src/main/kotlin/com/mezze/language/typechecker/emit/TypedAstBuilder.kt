@@ -39,9 +39,7 @@ class TypedAstBuilder(
     private val substitution: Substitution,
     private val constraintResults: Map<String, ConstraintResult>,
     private val abilityImpls: Map<Hash, TypingContext.AbilityImplInfo>,
-    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
-    private val abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
-    private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
+    private val registry: com.mezze.language.typechecker.context.DeclarationRegistry,
     private val performerToEffect: Map<String, String>,
     private val importContext: ModuleImportContext?,
     private val identifierContentHashes: Map<BindingKey, Hash>,
@@ -377,7 +375,7 @@ class TypedAstBuilder(
         val abilityHash = when (val target = decl.target) {
             is ParsedImplTarget.Named -> {
                 val abilityName = target.ability.localName
-                val abilityDecl = abilityDeclarations[abilityName]
+                val abilityDecl = registry.lookupAbility(abilityName)
                     ?: importContext?.importedAbilities?.get(abilityName)
                     ?: error("Ability '$abilityName' not found in declarations or imports")
                 abilityDecl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashAbilityDecl(abilityDecl)
@@ -698,7 +696,7 @@ class TypedAstBuilder(
                     }
                     if (receiverName != null) {
                         // Check if this is an effect declaration (local or imported)
-                        val isEffect = effectDeclarations.containsKey(receiverName)
+                        val isEffect = registry.lookupEffect(receiverName) != null
                             || importContext?.importedEffects?.containsKey(receiverName) == true
                         if (isEffect) {
                             // This matches TypedEffectDecl.hash and buildPerformerDecl's effectHash.
@@ -713,7 +711,7 @@ class TypedAstBuilder(
                             // from the effect decl gives us the concrete return type
                             // that downstream method calls (`os.size {}`) need to
                             // resolve their ability dicts.
-                            val effectDecl = effectDeclarations[receiverName]
+                            val effectDecl = registry.lookupEffect(receiverName)
                                 ?: importContext?.importedEffects?.get(receiverName)
                             val resolvedReturnType = effectDecl?.operations
                                 ?.firstOrNull { it.name == opName }
@@ -1516,7 +1514,7 @@ class TypedAstBuilder(
         val effectName = implDecl?.effect?.localName
             ?: importedImpl?.effect?.localName
             ?: performerToEffect[performerName]
-        val effectDecl = effectName?.let { effectDeclarations[it] ?: importContext?.importedEffects?.get(it) }
+        val effectDecl = effectName?.let { registry.lookupEffect(it) ?: importContext?.importedEffects?.get(it) }
         // Use canonical hash — matches TypedEffectDecl.hash and buildPerformOp.
         // No fallbacks needed — the name IS the canonical source of truth.
         val effectHash = if (effectName != null) {
@@ -1657,7 +1655,7 @@ class TypedAstBuilder(
         // If qualified, try to find by effect name
         if (qualifier != null) {
             val effectName = qualifier.shortName
-            effectDeclarations[effectName]?.let { decl ->
+            registry.lookupEffect(effectName)?.let { decl ->
                 if (decl.operations.any { it.name == opName }) return decl
             }
             importContext?.importedEffects?.get(effectName)?.let { decl ->
@@ -1666,7 +1664,7 @@ class TypedAstBuilder(
         }
 
         // Unqualified: search all effect declarations for the operation
-        for ((_, decl) in effectDeclarations) {
+        for (decl in registry.allEffectDecls) {
             if (decl.operations.any { it.name == opName }) return decl
         }
         for ((_, decl) in (importContext?.importedEffects ?: emptyMap())) {
@@ -1714,7 +1712,7 @@ class TypedAstBuilder(
                         associatedTypeBindings = constraint.associatedTypeBindings.mapValues { (_, ta) ->
                             convertParsedTypeAnnotation(ta)
                         },
-                        abilityHash = abilityDeclarations[constraint.abilityName]?.contentHash
+                        abilityHash = registry.lookupAbility(constraint.abilityName)?.contentHash
                             ?: WellKnownHashConstants.resolveAbilityHash(constraint.abilityName)
                     )
                 }
@@ -1907,7 +1905,7 @@ class TypedAstBuilder(
     }
 
     private fun resolveEffectHash(effectName: String): Hash {
-        val decl = effectDeclarations[effectName]
+        val decl = registry.lookupEffect(effectName)
             ?: importContext?.importedEffects?.get(effectName)
             ?: error("Effect '$effectName' not found in declarations or imports")
         return decl.contentHash ?: com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl)

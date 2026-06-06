@@ -30,8 +30,9 @@ import com.mezze.language.typechecker.util.TypeAnnotationMatcher
  */
 class AbilityResolver(
     private val context: TypingContext,
-    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()
+    private val registry: com.mezze.language.typechecker.context.DeclarationRegistry = com.mezze.language.typechecker.context.DeclarationRegistry.EMPTY
 ) {
+    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> get() = registry.typeDeclarations
     private val codecGenerator = CodecGenerator()
 
     // Cache for getTypeName() - avoids repeated ContentHashComputer calls

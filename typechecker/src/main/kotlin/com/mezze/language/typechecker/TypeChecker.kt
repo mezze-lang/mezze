@@ -351,10 +351,10 @@ class TypeChecker(
         cachedTypeAliases = buildTypeAliasesFromParsedModule(parsedModule, contextBuilder, importContext)
 
         // PHASE 2: Generate Constraints
-        val abilityNames = buildResult.abilityDeclarations.keys +
+        val abilityNames = buildResult.registry.abilityNames +
             (importContext?.importedAbilities?.keys ?: emptySet())
 
-        val effectNames = buildResult.effectDeclarations.keys +
+        val effectNames = buildResult.registry.effectNames +
             (importContext?.importedEffects?.keys ?: emptySet())
 
         DebugLogger.debugSection(Category.TypeChecker, "Abilities and Effects") {
@@ -379,10 +379,10 @@ class TypeChecker(
             }
         }
         val allEffectDeclarations = transitiveEffects +
-            buildResult.effectDeclarations +
+            buildResult.registry.effectDeclarations +
             (importContext?.importedEffects ?: emptyMap())
 
-        val allTypeDeclarations = buildResult.typeDeclarations +
+        val allTypeDeclarations = buildResult.registry.typeDeclarations +
             (importContext?.importedTypes ?: emptyMap())
 
         val importedAbilities = importContext?.importedAbilities ?: emptyMap()
@@ -397,7 +397,7 @@ class TypeChecker(
                 transitiveAbilities[it.name] = it
             }
         }
-        val allAbilityDeclarations = transitiveAbilities + buildResult.abilityDeclarations + importedAbilities
+        val allAbilityDeclarations = transitiveAbilities + buildResult.registry.abilityDeclarations + importedAbilities
 
         // Build unified declaration registry from merged maps
         val registry = com.mezze.language.typechecker.context.DeclarationRegistry.from(
@@ -423,7 +423,7 @@ class TypeChecker(
         //  - locally declared types (includes Bool/Option/Result via addBuiltInParsedTypes)
         //  - explicitly imported type names (`use foo::{Alias}`)
         //  - all built-ins (Seq/Map/List/etc. — always-in-scope via prelude)
-        val inScopeAliasNames = buildResult.typeDeclarations.keys +
+        val inScopeAliasNames = buildResult.registry.typeNames +
             (importContext?.explicitlyImportedTypeNames ?: emptySet()) +
             com.mezze.language.ast.BuiltinTypes.allBuiltinTypeNames
         val programConstraintResult = com.mezze.language.typechecker.solving.withInScopeAliasNames(inScopeAliasNames) {
@@ -481,8 +481,7 @@ class TypeChecker(
         if (undefinedVars.isNotEmpty()) {
             val validator = TypeValidator(
                 context,
-                allTypeDeclarations,
-                allEffectDeclarations,
+                registry,
                 buildResult.implDeclarations
             )
             val allVariables = context.getAllBindings()
@@ -500,14 +499,14 @@ class TypeChecker(
                 // FixHint at the bottom of the lambda can reference it.
                 var privateItemForFix: PrivateItemResult? = null
                 val isBuiltInAbility = com.mezze.language.typechecker.abilities.BuiltInAbilities.isBuiltInAbility(undefinedVar.name)
-                val isUserDefinedAbility = allAbilityDeclarations.containsKey(undefinedVar.name)
-                val isEffect = allEffectDeclarations.containsKey(undefinedVar.name)
+                val isUserDefinedAbility = registry.lookupAbility(undefinedVar.name) != null
+                val isEffect = registry.lookupEffect(undefinedVar.name) != null
 
-                val matchingAbilityOp = allAbilityDeclarations.entries.firstOrNull { (_, ability) ->
+                val matchingAbilityOp = registry.abilityDeclarations.entries.firstOrNull { (_, ability) ->
                     ability.operations.any { it.name == undefinedVar.name }
                 }
 
-                val matchingEffectOp = allEffectDeclarations.entries.firstOrNull { (_, effect) ->
+                val matchingEffectOp = registry.effectDeclarations.entries.firstOrNull { (_, effect) ->
                     effect.operations.any { it.name == undefinedVar.name }
                 }
 
@@ -670,9 +669,7 @@ class TypeChecker(
                     context = context,
                     buildResult = buildResult,
                     importContext = importContext,
-                    allTypeDeclarations = allTypeDeclarations,
-                    allAbilityDeclarations = allAbilityDeclarations,
-                    allEffectDeclarations = allEffectDeclarations,
+                    registry = registry,
                     bindLetLocs = bindLetLocs,
                 )
                 // expectedTypeAt resolved through whatever substitution we
@@ -704,7 +701,7 @@ class TypeChecker(
                 val mustBeOpenBindings = solveResult.mustBeOpenBindings
                 val mustBeOpenTypes = solveResult.mustBeOpenTypes
 
-                val tempGenerator = ConstraintGenerator.create(com.mezze.language.typechecker.context.DeclarationRegistry.from(buildResult.typeDeclarations, emptyMap(), emptyMap()))
+                val tempGenerator = ConstraintGenerator.create(com.mezze.language.typechecker.context.DeclarationRegistry.from(buildResult.registry.typeDeclarations, emptyMap(), emptyMap()))
 
                 val globallyResolvedConstraintResults = constraintResults.mapValues { (_, result) ->
                     val resolvedType = substitution.apply(result.type)
@@ -751,8 +748,7 @@ class TypeChecker(
                 // PHASE 4: Validate Constraints
                 val validator = TypeValidator(
                     context,
-                    allTypeDeclarations,
-                    allEffectDeclarations,
+                    registry,
                     buildResult.implDeclarations
                 )
 
@@ -792,9 +788,7 @@ class TypeChecker(
                         substitution = substitution,
                         constraintResults = globallyResolvedConstraintResults,
                         abilityImpls = context.getAllAbilityImpls(),
-                        typeDeclarations = allTypeDeclarations,
-                        abilityDeclarations = allAbilityDeclarations,
-                        effectDeclarations = allEffectDeclarations,
+                        registry = registry,
                         performerToEffect = buildResult.performerToEffect,
                         importContext = importContext,
                         identifierContentHashes = context.getContentHashes(),
@@ -1222,9 +1216,7 @@ class TypeChecker(
         context: com.mezze.language.typechecker.context.TypingContext,
         buildResult: com.mezze.language.typechecker.context.ContextBuilder.BuildResult,
         importContext: ModuleImportContext?,
-        allTypeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
-        allAbilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
-        allEffectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
+        registry: com.mezze.language.typechecker.context.DeclarationRegistry,
         bindLetLocs: Set<com.mezze.language.parsedast.Loc> = emptySet(),
     ): com.mezze.language.typedast.TypedModule? {
         return try {
@@ -1239,17 +1231,6 @@ class TypeChecker(
                 .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType>()) { acc, r ->
                     acc + r.callReturnTypes
                 }
-            // #195 mono-fix #1: aggregate per-match-case pattern bindings so
-            // TypedAstBuilder can recover the solver's TyVars when stamping
-            // PatternBinding + identifierContext entries for guard/body emit.
-            // Apply the final substitution here at fold time — the solver has
-            // already bound the fresh field TyVars (e.g. 'e := Int from
-            // HasField+Equality propagation), but the bindings map still
-            // carries the original solver TyVars. Without this apply, the
-            // downstream TypedAstBuilder.substitution.apply at the read site
-            // becomes a no-op when the substitution snapshot it sees doesn't
-            // include the late-resolved binding, leaving `w: VarType` in the
-            // specialized mono blob and defeating inline-op dispatch.
             val matchCaseBindings = constraintResults.values
                 .fold(emptyMap<com.mezze.language.parsedast.Loc, Map<String, com.mezze.language.ast.MezzeType>>()) { acc, r ->
                     acc + r.matchCaseBindings.mapValues { (_, bindings) ->
@@ -1264,9 +1245,7 @@ class TypeChecker(
                 substitution = substitution,
                 constraintResults = resolvedResults,
                 abilityImpls = context.getAllAbilityImpls(),
-                typeDeclarations = allTypeDeclarations,
-                abilityDeclarations = allAbilityDeclarations,
-                effectDeclarations = allEffectDeclarations,
+                registry = registry,
                 performerToEffect = buildResult.performerToEffect,
                 importContext = importContext,
                 identifierContentHashes = context.getContentHashes(),

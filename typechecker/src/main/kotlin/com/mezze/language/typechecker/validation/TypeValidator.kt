@@ -42,13 +42,12 @@ import com.mezze.language.typechecker.WellKnownHashConstants
  */
 class TypeValidator(
     private val context: TypingContext,
-    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap(),
-    private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),
+    private val registry: com.mezze.language.typechecker.context.DeclarationRegistry = com.mezze.language.typechecker.context.DeclarationRegistry.EMPTY,
     private val implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl> = emptyMap()
 ) {
-    /** DeclarationRegistry wrapping the raw type declarations for use with unification/expansion APIs. */
-    private val registry = com.mezze.language.typechecker.context.DeclarationRegistry.from(typeDeclarations, emptyMap(), emptyMap())
-    private val abilityResolver = AbilityResolver(context, typeDeclarations)
+    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> get() = registry.typeDeclarations
+    private val effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> get() = registry.effectDeclarations
+    private val abilityResolver = AbilityResolver(context, registry)
     private val effectValidator = EffectValidator(context)
     private val codecGenerator = CodecGenerator()
 

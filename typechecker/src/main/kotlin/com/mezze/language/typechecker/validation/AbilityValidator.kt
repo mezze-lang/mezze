@@ -83,9 +83,10 @@ object AbilityValidator {
      */
     fun validateAbilityImplementation(
         impl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
-        abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
-        typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()
+        registry: com.mezze.language.typechecker.context.DeclarationRegistry
     ) {
+        val abilityDeclarations = registry.abilityDeclarations
+        val typeDeclarations = registry.typeDeclarations
         val sourceLocation = impl.loc
 
         // Rule 0: Check impl method names don't conflict with target type's record fields.
@@ -531,10 +532,11 @@ object AbilityValidator {
      * @throws TypeCheckError if name collision detected
      */
     fun validateNameCollisions(
-        abilityDeclarations: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl>,
-        typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
-        effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>
+        registry: com.mezze.language.typechecker.context.DeclarationRegistry
     ) {
+        val abilityDeclarations = registry.abilityDeclarations
+        val typeDeclarations = registry.typeDeclarations
+        val effectDeclarations = registry.effectDeclarations
         for ((typeName, typeDecl) in typeDeclarations) {
             if (BuiltInAbilities.isBuiltInAbility(typeName)) {
                 throw TypeCheckError(

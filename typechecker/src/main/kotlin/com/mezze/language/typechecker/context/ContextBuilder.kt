@@ -70,10 +70,8 @@ class ContextBuilder {
      */
     data class BuildResult(
         val context: TypingContext,
-        val typeDeclarations: Map<String, ParsedTypeDecl>,
-        val abilityDeclarations: Map<String, ParsedAbilityDecl>,
-        val effectDeclarations: Map<String, ParsedEffectDecl>,
-        val performerToEffect: Map<String, String>,  // performer name → effect name
+        val registry: DeclarationRegistry,
+        val performerToEffect: Map<String, String>,  // performer name → effect name (for error messages)
         val performerToEffectHash: Map<com.mezze.language.typedast.Hash, com.mezze.language.typedast.Hash> = emptyMap(),  // performer contentHash → effect contentHash
         /** Maps performer names to the set of effects they ADD (not handle) */
         val performerAddedEffects: Map<String, Set<String>> = emptyMap(),
@@ -81,11 +79,6 @@ class ContextBuilder {
         val implDeclarations: Map<String, ParsedPerformerDecl> = emptyMap(),
         /** ParsedModule with impl declarations resolved (ParsedPerformerDecl for abilities → ParsedImplAbilityDecl) */
         val resolvedModule: ParsedModule? = null,
-        // Hash-keyed declaration maps — derived from string-keyed maps.
-        // Use these for cross-module-safe lookups; fall back to string-keyed for legacy callers.
-        val typeDeclsByHash: Map<com.mezze.language.typedast.Hash, ParsedTypeDecl> = emptyMap(),
-        val abilityDeclsByHash: Map<com.mezze.language.typedast.Hash, ParsedAbilityDecl> = emptyMap(),
-        val effectDeclsByHash: Map<com.mezze.language.typedast.Hash, ParsedEffectDecl> = emptyMap(),
     )
 
     /**
@@ -296,21 +289,20 @@ class ContextBuilder {
         val allParsedAbilityDecls = abilityDecls + importedAbilities
         val allParsedTypeDecls = typeDecls + importedTypes
 
-        AbilityValidator.validateNameCollisions(
-            abilityDeclarations = abilityDecls,
-            typeDeclarations = allParsedTypeDecls,
-            effectDeclarations = effectDecls
-        )
+        // Registry for local-only name collision checks (not including imports for abilities)
+        val localValidationRegistry = DeclarationRegistry.from(allParsedTypeDecls, abilityDecls, effectDecls)
+        AbilityValidator.validateNameCollisions(localValidationRegistry)
 
         for (abilityDecl in abilityDecls.values) {
             AbilityValidator.validateAbilityDeclaration(abilityDecl)
         }
 
+        // Registry for ability impl validation (includes imported abilities + types)
+        val implValidationRegistry = DeclarationRegistry.from(allParsedTypeDecls, allParsedAbilityDecls, effectDecls)
         for (abilityImplDecl in abilityImplDecls) {
             AbilityValidator.validateAbilityImplementation(
                 impl = abilityImplDecl,
-                abilityDeclarations = allParsedAbilityDecls,
-                typeDeclarations = allParsedTypeDecls
+                registry = implValidationRegistry
             )
         }
 
@@ -361,17 +353,12 @@ class ContextBuilder {
 
         return BuildResult(
             context = ctx,
-            typeDeclarations = typeDecls,
-            abilityDeclarations = abilityDecls,
-            effectDeclarations = effectDecls,
+            registry = DeclarationRegistry.from(typeDecls, abilityDecls, effectDecls),
             performerToEffect = performerToEffectMap,
             performerToEffectHash = performerToEffectHashMap,
             performerAddedEffects = performerAddedEffectsMap,
             implDeclarations = implDeclarationsMap,
             resolvedModule = resolvedMod,
-            typeDeclsByHash = typeDecls.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap(),
-            abilityDeclsByHash = abilityDecls.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap(),
-            effectDeclsByHash = effectDecls.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap(),
         )
     }
 
