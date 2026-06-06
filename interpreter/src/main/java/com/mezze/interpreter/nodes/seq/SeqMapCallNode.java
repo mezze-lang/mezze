@@ -54,6 +54,17 @@ public final class SeqMapCallNode extends MezzeNode {
     @Child
     private SeqMapLongLoopNode longLoopNode;
 
+    /**
+     * Body-adopted (real AST inlining) fast path for the canonical
+     * mapper shape: 1 param + 0 closures. The mapper's body AST is
+     * cloned and runs in-place per iter — no DirectCallNode boundary,
+     * no MezzeRecord alloc, no ABI dispatch. Selected over
+     * {@link #longLoopNode} when {@link SeqMapLongInlinedLoopNode#canHandle}
+     * is true.
+     */
+    @Child
+    private SeqMapLongInlinedLoopNode longInlinedLoopNode;
+
     @Child
     private SeqMapDoubleLoopNode doubleLoopNode;
 
@@ -200,6 +211,37 @@ public final class SeqMapCallNode extends MezzeNode {
                               Object[] closureValues, int closureLength,
                               DirectCallNode localCallNode) {
         CallTarget target = localCallNode.getCallTarget();
+
+        // FAST PATH: body adoption (real AST inlining). When the mapper
+        // is the canonical {x} -> ... shape with 1 param and 0 closures,
+        // we clone the mapper's body and run it directly in-place — no
+        // DirectCallNode boundary, no MezzeRecord alloc, no ABI dispatch.
+        // Single biggest closer of the user-lambda dispatch gap for
+        // functional-style maps (x * 2, etc).
+        if (closureLength == 0) {
+            SeqMapLongInlinedLoopNode inlined = longInlinedLoopNode;
+            if (inlined == null || inlined.getMapperTarget() != target) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                if (SeqMapLongInlinedLoopNode.canHandle(target)) {
+                    com.mezze.interpreter.nodes.function.MezzeFunctionRootNode mrn =
+                        (com.mezze.interpreter.nodes.function.MezzeFunctionRootNode)
+                            ((com.oracle.truffle.api.RootCallTarget) target).getRootNode();
+                    inlined = new SeqMapLongInlinedLoopNode(target, mrn);
+                    longInlinedLoopNode = insert(inlined);
+                } else {
+                    inlined = null;
+                }
+            }
+            if (inlined != null) {
+                inlined.execute(data, results, size);
+                return;
+            }
+        }
+
+        // FALLBACK: per-mapper LoopNode + DirectCallNode (no body
+        // adoption). Used when the mapper has closures or non-matching
+        // shape. The DirectCallNode is a stable @Child of the LoopNode
+        // so Truffle's inliner inlines through it.
         SeqMapLongLoopNode loop = longLoopNode;
         if (loop == null || loop.getMapperTarget() != target) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
