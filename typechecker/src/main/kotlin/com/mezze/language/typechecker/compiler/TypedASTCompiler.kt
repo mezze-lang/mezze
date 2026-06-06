@@ -1192,6 +1192,18 @@ class TypedASTCompiler(
                     }
                 }
                 val recordIR = MakeRecordIR(fields, src)
+                // #195 mono-fix3: when the monomorphizer specialized this
+                // method call, redirect to the specialized hash. The audit
+                // (a38ab6c0 / project_mono_blockers.md) flagged this path as
+                // "dead writes": MonoDriver.seedFromMethodCall produces specs
+                // for ability-method call sites, but the compiler never
+                // consulted monoCallSiteRewrites here — so every method-call
+                // spec went to waste. Mirror the ByHash branch's check.
+                val specialized = monoCallSiteRewrites[expr.loc]
+                if (specialized != null) {
+                    census.methodConcrete++
+                    return CallDirectIR(specialized, listOf(recordIR), expr.isTailCall, src)
+                }
                 return CallDirectIR(opHash, listOf(recordIR), expr.isTailCall, src)
             }
 
