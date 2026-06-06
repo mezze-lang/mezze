@@ -1180,6 +1180,28 @@ class ExpressionConstraintGenerator {
                 }
                 return null
             }
+            // #188: when the receiver IS concrete but anonymous (a record literal
+            // or unannotated let-binding to one), filter by structurally-matching
+            // type aliases in scope. Without this, multiple inherent candidates
+            // (e.g. Point.sum vs Seq.sum on an anonymous `{x:Int, y:Int}`) fall
+            // through to the all-candidates dispatch below, which unifies
+            // against the wrong impl's it slot ("[Int] vs {x:Int, y:Int}").
+            if (inherentMethods.size > 1) {
+                val concreteReceiver = getReceiverConcreteType(memberAccess.receiver, context)
+                val candidateAliases: Set<String> = when {
+                    concreteReceiver is MezzeType.RecordType && concreteReceiver.typeName == null ->
+                        findMatchingRecordTypeAliases(concreteReceiver, context).toSet()
+                    concreteReceiver is MezzeType.VariantType && concreteReceiver.typeName == null ->
+                        findMatchingVariantTypeAliases(concreteReceiver, context).toSet()
+                    else -> emptySet()
+                }
+                if (candidateAliases.isNotEmpty()) {
+                    val filtered = inherentMethods.filter { it.targetTypeName in candidateAliases }
+                    if (filtered.isNotEmpty()) {
+                        return generateInherentMethodCall(expr, memberAccess, filtered, context)
+                    }
+                }
+            }
             return generateInherentMethodCall(expr, memberAccess, inherentMethods, context)
         }
 
@@ -1203,8 +1225,23 @@ class ExpressionConstraintGenerator {
             (builtInMatches.isNotEmpty() || matchingAbilities.isNotEmpty())) {
             val concreteReceiver = getReceiverConcreteType(memberAccess.receiver, context)
             if (concreteReceiver != null) {
-                val receiverTypeName = getReceiverTypeName(concreteReceiver)
-                val matchingInherent = inherentMethods.filter { it.targetTypeName == receiverTypeName }
+                // #188: when the receiver is an anonymous record/variant with
+                // no typeName, fall back to a structural lookup against the
+                // in-scope type aliases. Without this, `let p = { x = 3, y =
+                // 4 }; p.method {}` can't disambiguate impl Point vs other
+                // same-name inherent impls (Seq.sum, etc.) — receiverTypeName
+                // is null, the matching filter drops to empty, and the
+                // wrong impl wins.
+                val receiverTypeNames: Set<String> = when {
+                    getReceiverTypeName(concreteReceiver) != null ->
+                        setOf(getReceiverTypeName(concreteReceiver)!!)
+                    concreteReceiver is MezzeType.RecordType && concreteReceiver.typeName == null ->
+                        findMatchingRecordTypeAliases(concreteReceiver, context).toSet()
+                    concreteReceiver is MezzeType.VariantType && concreteReceiver.typeName == null ->
+                        findMatchingVariantTypeAliases(concreteReceiver, context).toSet()
+                    else -> emptySet()
+                }
+                val matchingInherent = inherentMethods.filter { it.targetTypeName in receiverTypeNames }
                 // Compute call-site field names locally (the cached value is
                 // declared further down). Field-shape filter: keep only
                 // inherents whose param record matches the call-site argument
@@ -1851,6 +1888,50 @@ class ExpressionConstraintGenerator {
             else -> null
         } ?: return null
         return getReceiverTypeName(resultType)
+    }
+
+    /**
+     * #188: anonymous record → in-scope type aliases that share the field set.
+     * Mirror of `TypeValidator.findMatchingRecordTypeAliases` so dispatch
+     * preference can promote unannotated record literals to their nominal
+     * alias when picking impl candidates.
+     */
+    private fun findMatchingRecordTypeAliases(
+        recordType: MezzeType.RecordType,
+        context: ConstraintContext
+    ): List<String> {
+        val matches = mutableListOf<String>()
+        for ((aliasName, typeDecl) in context.typeDeclarations) {
+            val def = typeDecl.definition
+            if (def is com.mezze.language.parsedast.ParsedRecordDef) {
+                val aliasFieldNames = def.fields.map { it.name }.toSet()
+                if (aliasFieldNames == recordType.fields.keys) {
+                    matches.add(aliasName)
+                }
+            }
+        }
+        return matches
+    }
+
+    /**
+     * #188: anonymous variant → in-scope variant aliases whose constructor
+     * names overlap. Loosely matches the validator's variant-alias lookup.
+     */
+    private fun findMatchingVariantTypeAliases(
+        variantType: MezzeType.VariantType,
+        context: ConstraintContext
+    ): List<String> {
+        val matches = mutableListOf<String>()
+        for ((aliasName, typeDecl) in context.typeDeclarations) {
+            val def = typeDecl.definition
+            if (def is com.mezze.language.parsedast.ParsedVariantDef) {
+                val aliasCtorNames = def.constructors.map { it.name }.toSet()
+                if (aliasCtorNames.containsAll(variantType.constructors.keys)) {
+                    matches.add(aliasName)
+                }
+            }
+        }
+        return matches
     }
 
     private fun getReceiverTypeName(type: MezzeType): String? = when (type) {
