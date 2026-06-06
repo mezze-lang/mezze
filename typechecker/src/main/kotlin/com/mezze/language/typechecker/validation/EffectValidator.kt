@@ -319,6 +319,95 @@ class EffectValidator(
             )
         }
 
+        // Validate operation signatures match the declaration (when explicitly annotated)
+        for (implOp in implDecl.operations) {
+            val declOp = effectDecl.operations.find { it.name == implOp.name } ?: continue
+            if (implOp.paramType != null) {
+                val expectedParam = substituteAssociatedTypes(declOp.paramType, implAssociatedTypeBindings)
+                if (!AbilityValidator.typeAnnotationsMatchPublic(implOp.paramType!!, expectedParam)) {
+                    errors.add(
+                        ValidationError.TypeMismatch(
+                            expected = MezzeType.IntType,
+                            actual = MezzeType.IntType,
+                            context = "Wrong parameter type for operation '${implOp.name}' in performer '${implDecl.performerName}': " +
+                                    "expected ${formatAnnotation(expectedParam)}, but got ${formatAnnotation(implOp.paramType!!)}.",
+                            loc = implOp.loc,
+                        )
+                    )
+                }
+            }
+            if (implOp.returnType != null) {
+                val expectedReturn = substituteAssociatedTypes(declOp.returnType, implAssociatedTypeBindings)
+                if (!AbilityValidator.typeAnnotationsMatchPublic(implOp.returnType!!, expectedReturn)) {
+                    errors.add(
+                        ValidationError.TypeMismatch(
+                            expected = MezzeType.IntType,
+                            actual = MezzeType.IntType,
+                            context = "Wrong return type for operation '${implOp.name}' in performer '${implDecl.performerName}': " +
+                                    "expected ${formatAnnotation(expectedReturn)}, but got ${formatAnnotation(implOp.returnType!!)}.",
+                            loc = implOp.loc,
+                        )
+                    )
+                }
+            }
+        }
+
         return errors
+    }
+
+    private fun substituteAssociatedTypes(
+        annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        bindings: Map<String, com.mezze.language.parsedast.ParsedTypeAnnotation>
+    ): com.mezze.language.parsedast.ParsedTypeAnnotation {
+        return when (annotation) {
+            is com.mezze.language.parsedast.ParsedNamedType -> {
+                if (annotation.name.startsWith("'") && bindings.containsKey(annotation.name)) {
+                    bindings[annotation.name]!!
+                } else annotation
+            }
+            is com.mezze.language.parsedast.ParsedFunctionType -> com.mezze.language.parsedast.ParsedFunctionType(
+                paramType = substituteAssociatedTypes(annotation.paramType, bindings),
+                returnType = substituteAssociatedTypes(annotation.returnType, bindings),
+                effects = annotation.effects,
+                abilityConstraints = annotation.abilityConstraints,
+                loc = annotation.loc
+            )
+            is com.mezze.language.parsedast.ParsedRecordType -> com.mezze.language.parsedast.ParsedRecordType(
+                entries = annotation.entries.map { entry ->
+                    com.mezze.language.parsedast.ParsedRecordTypeEntry(
+                        name = entry.name,
+                        type = substituteAssociatedTypes(entry.type, bindings),
+                        loc = entry.loc
+                    )
+                },
+                isOpen = annotation.isOpen,
+                loc = annotation.loc
+            )
+            is com.mezze.language.parsedast.ParsedTypeApp -> com.mezze.language.parsedast.ParsedTypeApp(
+                constructor = annotation.constructor,
+                args = annotation.args.map { substituteAssociatedTypes(it, bindings) },
+                loc = annotation.loc
+            )
+            is com.mezze.language.parsedast.ParsedSeqType -> com.mezze.language.parsedast.ParsedSeqType(
+                elementType = substituteAssociatedTypes(annotation.elementType, bindings),
+                loc = annotation.loc
+            )
+            else -> annotation
+        }
+    }
+
+    private fun formatAnnotation(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): String {
+        return when (annotation) {
+            is com.mezze.language.parsedast.ParsedNamedType -> annotation.name
+            is com.mezze.language.parsedast.ParsedRecordType ->
+                "{ ${annotation.entries.joinToString(", ") { "${it.name}: ${formatAnnotation(it.type)}" }} }"
+            is com.mezze.language.parsedast.ParsedFunctionType ->
+                "${formatAnnotation(annotation.paramType)} -> ${formatAnnotation(annotation.returnType)}"
+            is com.mezze.language.parsedast.ParsedTypeApp ->
+                "${annotation.constructor} ${annotation.args.joinToString(" ") { formatAnnotation(it) }}"
+            is com.mezze.language.parsedast.ParsedSeqType ->
+                "[${formatAnnotation(annotation.elementType)}]"
+            else -> annotation.toString()
+        }
     }
 }

@@ -408,9 +408,9 @@ object AbilityValidator {
         }
     }
 
-    /**
-     * Check if two v2 ParsedTypeAnnotations match structurally.
-     */
+    fun typeAnnotationsMatchPublic(a: com.mezze.language.parsedast.ParsedTypeAnnotation, b: com.mezze.language.parsedast.ParsedTypeAnnotation): Boolean =
+        typeAnnotationsMatch(a, b)
+
     private fun typeAnnotationsMatch(a: com.mezze.language.parsedast.ParsedTypeAnnotation, b: com.mezze.language.parsedast.ParsedTypeAnnotation): Boolean {
         return when {
             a is com.mezze.language.parsedast.ParsedNamedType && b is com.mezze.language.parsedast.ParsedNamedType -> {
@@ -418,12 +418,16 @@ object AbilityValidator {
             }
             a is com.mezze.language.parsedast.ParsedFunctionType && b is com.mezze.language.parsedast.ParsedFunctionType -> {
                 typeAnnotationsMatch(a.paramType, b.paramType) &&
-                typeAnnotationsMatch(a.returnType, b.returnType)
+                typeAnnotationsMatch(a.returnType, b.returnType) &&
+                effectRowsMatch(a.effects, b.effects)
             }
             a is com.mezze.language.parsedast.ParsedRecordType && b is com.mezze.language.parsedast.ParsedRecordType -> {
+                a.isOpen == b.isOpen &&
                 a.entries.size == b.entries.size &&
-                a.entries.zip(b.entries).all { (aEntry, bEntry) ->
-                    aEntry.name == bEntry.name && typeAnnotationsMatch(aEntry.type, bEntry.type)
+                a.entries.all { aEntry ->
+                    b.entries.any { bEntry ->
+                        aEntry.name == bEntry.name && typeAnnotationsMatch(aEntry.type, bEntry.type)
+                    }
                 }
             }
             a is com.mezze.language.parsedast.ParsedTypeApp && b is com.mezze.language.parsedast.ParsedTypeApp -> {
@@ -435,12 +439,15 @@ object AbilityValidator {
                 typeAnnotationsMatch(a.elementType, b.elementType)
             }
             a is com.mezze.language.parsedast.ParsedVariantType && b is com.mezze.language.parsedast.ParsedVariantType -> {
+                a.isOpen == b.isOpen &&
                 a.constructors.size == b.constructors.size &&
-                a.constructors.zip(b.constructors).all { (aCtor, bCtor) ->
-                    aCtor.name == bCtor.name &&
-                    ((aCtor.dataType == null && bCtor.dataType == null) ||
-                     (aCtor.dataType != null && bCtor.dataType != null &&
-                      typeAnnotationsMatch(aCtor.dataType!!, bCtor.dataType!!)))
+                a.constructors.all { aCtor ->
+                    b.constructors.any { bCtor ->
+                        aCtor.name == bCtor.name &&
+                        ((aCtor.dataType == null && bCtor.dataType == null) ||
+                         (aCtor.dataType != null && bCtor.dataType != null &&
+                          typeAnnotationsMatch(aCtor.dataType!!, bCtor.dataType!!)))
+                    }
                 }
             }
             a is com.mezze.language.parsedast.ParsedQualifiedType && b is com.mezze.language.parsedast.ParsedQualifiedType -> {
@@ -450,6 +457,24 @@ object AbilityValidator {
                 a.args.zip(b.args).all { (aArg, bArg) -> typeAnnotationsMatch(aArg, bArg) }
             }
             else -> false
+        }
+    }
+
+    private fun effectRowsMatch(a: com.mezze.language.parsedast.ParsedEffectRow?, b: com.mezze.language.parsedast.ParsedEffectRow?): Boolean {
+        if (a == null && b == null) return true
+        if (a == null || b == null) return false
+        if (a.isPolymorphic != b.isPolymorphic) return false
+        if (a.isPerformed != b.isPerformed) return false
+        if (a.effects.toSet() != b.effects.toSet()) return false
+        if (a.effectAnnotations.size != b.effectAnnotations.size) return false
+        return a.effectAnnotations.all { aAnnot ->
+            b.effectAnnotations.any { bAnnot ->
+                aAnnot.name == bAnnot.name &&
+                aAnnot.associatedTypes.size == bAnnot.associatedTypes.size &&
+                aAnnot.associatedTypes.all { (key, aType) ->
+                    bAnnot.associatedTypes[key]?.let { bType -> typeAnnotationsMatch(aType, bType) } ?: false
+                }
+            }
         }
     }
 
