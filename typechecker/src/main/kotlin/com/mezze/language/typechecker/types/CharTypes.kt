@@ -2,134 +2,34 @@ package com.mezze.language.typechecker.types
 
 import com.mezze.language.ast.MezzeType
 
-/**
- * Helper function to create Option type (as TypeApplication)
- */
-private fun optionType(elementType: MezzeType): MezzeType {
-    return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
-}
-
-/**
- * Type signatures for Char operations.
- *
- * Char represents a single Unicode character.
- * Operations include construction, conversion, classification, and comparison.
- */
 object CharTypes {
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        registerConstructionTypes(context)
-        registerConversionTypes(context)
-        registerCaseConversionTypes(context)
-        registerClassificationTypes(context)
-        registerComparisonTypes(context)
-        registerDigitTypes(context)
-    }
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        // Construction
+        fn("__native_char_from_int") { param("code" to int); returns(option(char)) }
+        fn("__native_char_from_string") { param("s" to str); returns(option(char)) }
 
-    private fun registerConstructionTypes(context: MutableMap<String, MezzeType>) {
-        // __native_char_from_int: {code: Int} -> Option Char
-        context["__native_char_from_int"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("code" to MezzeType.IntType)),
-            optionType(MezzeType.CharType)
-        )
+        // Conversion
+        fn("__native_char_to_int") { param("c" to char); returns(int) }
+        fn("__native_char_to_str") { param("c" to char); returns(str) }
 
-        // __native_char_from_string: {s: String} -> Option Char
-        context["__native_char_from_string"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
-            optionType(MezzeType.CharType)
-        )
-    }
+        // Case conversion
+        fn("__native_char_to_upper") { param("c" to char); returns(char) }
+        fn("__native_char_to_lower") { param("c" to char); returns(char) }
 
-    private fun registerConversionTypes(context: MutableMap<String, MezzeType>) {
-        // __native_char_to_int: {c: Char} -> Int
-        context["__native_char_to_int"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.IntType
-        )
+        // Classification
+        fn("__native_char_is_digit") { param("c" to char); returns(bool) }
+        fn("__native_char_is_letter") { param("c" to char); returns(bool) }
+        fn("__native_char_is_alpha_numeric") { param("c" to char); returns(bool) }
+        fn("__native_char_is_whitespace") { param("c" to char); returns(bool) }
+        fn("__native_char_is_upper") { param("c" to char); returns(bool) }
+        fn("__native_char_is_lower") { param("c" to char); returns(bool) }
 
-        // __native_char_to_str: {c: Char} -> String
-        context["__native_char_to_str"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.StringType
-        )
-    }
+        // Comparison
+        fn("__native_char_eq") { param("a" to char, "b" to char); returns(bool) }
+        fn("__native_char_compare") { param("a" to char, "b" to char); returns(ordering) }
+        fn("__native_char_compare_int") { param("a" to char, "b" to char); returns(int) }
 
-    private fun registerCaseConversionTypes(context: MutableMap<String, MezzeType>) {
-        // __native_char_to_upper: {c: Char} -> Char
-        context["__native_char_to_upper"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.CharType
-        )
-
-        // __native_char_to_lower: {c: Char} -> Char
-        context["__native_char_to_lower"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.CharType
-        )
-    }
-
-    private fun registerClassificationTypes(context: MutableMap<String, MezzeType>) {
-        // __native_char_is_digit: {c: Char} -> Bool
-        context["__native_char_is_digit"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.BoolType
-        )
-
-        // __native_char_is_letter: {c: Char} -> Bool
-        context["__native_char_is_letter"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.BoolType
-        )
-
-        // __native_char_is_alpha_numeric: {c: Char} -> Bool
-        context["__native_char_is_alpha_numeric"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.BoolType
-        )
-
-        // __native_char_is_whitespace: {c: Char} -> Bool
-        context["__native_char_is_whitespace"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.BoolType
-        )
-
-        // __native_char_is_upper: {c: Char} -> Bool
-        context["__native_char_is_upper"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.BoolType
-        )
-
-        // __native_char_is_lower: {c: Char} -> Bool
-        context["__native_char_is_lower"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("c" to MezzeType.CharType)),
-            MezzeType.BoolType
-        )
-    }
-
-    private fun registerComparisonTypes(context: MutableMap<String, MezzeType>) {
-        // __native_char_eq: {a: Char, b: Char} -> Bool
-        context["__native_char_eq"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("a" to MezzeType.CharType, "b" to MezzeType.CharType)),
-            MezzeType.BoolType
-        )
-
-        // __native_char_compare: {a: Char, b: Char} -> Ordering
-        context["__native_char_compare"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("a" to MezzeType.CharType, "b" to MezzeType.CharType)),
-            MezzeType.OrderingType
-        )
-
-        // __native_char_compare_int: {a: Char, b: Char} -> Int
-        context["__native_char_compare_int"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("a" to MezzeType.CharType, "b" to MezzeType.CharType)),
-            MezzeType.IntType
-        )
-    }
-
-    private fun registerDigitTypes(context: MutableMap<String, MezzeType>) {
-        // __native_char_digit_to_int: {c: Char, radix: Int} -> Option Int
-        context["__native_char_digit_to_int"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("c" to MezzeType.CharType, "radix" to MezzeType.IntType)),
-            optionType(MezzeType.IntType)
-        )
+        // Digit
+        fn("__native_char_digit_to_int") { param("c" to char, "radix" to int); returns(option(int)) }
     }
 }
