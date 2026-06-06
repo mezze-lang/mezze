@@ -206,8 +206,7 @@ public final class HandleNode extends MezzeNode {
      * workloads.
      */
     private static final boolean MARKER_MUT_ENABLED =
-        System.getenv("MEZZE_MARKER_MUT") != null
-            && !System.getenv("MEZZE_MARKER_MUT").equals("0");
+        !"0".equals(System.getenv("MEZZE_MARKER_MUT"));
 
     @Override
     public Object execute(VirtualFrame frame) {

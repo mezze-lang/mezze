@@ -63,9 +63,16 @@ public final class OpCallNode extends MezzeNode {
     @Child
     private IndirectCallNode chainCallNode;
 
+    /**
+     * Marker-Mut fast path gate. ON by default; opt out with
+     * {@code MEZZE_MARKER_MUT=0}. Note: {@code com.mezze.interpreter} is in
+     * {@code --initialize-at-build-time} for native-image, so this static
+     * final field is resolved at image build time — the runtime env var
+     * doesn't change the value. The default-ON form is safe at build time
+     * (build env has no MEZZE_MARKER_MUT, so the condition evaluates true).
+     */
     private static final boolean MARKER_MUT_ENABLED =
-        System.getenv("MEZZE_MARKER_MUT") != null
-            && !System.getenv("MEZZE_MARKER_MUT").equals("0");
+        !"0".equals(System.getenv("MEZZE_MARKER_MUT"));
 
     /** True if this op-call's effectHash is the Mut effect. Cached at construction. */
     @CompilationFinal
@@ -93,20 +100,78 @@ public final class OpCallNode extends MezzeNode {
     @Child
     private com.oracle.truffle.api.nodes.DirectCallNode markerCallNode;
 
+    /**
+     * True when this op-call is the specialized `Mut.mutate { act = X }`
+     * shape produced by {@link #createMutMutateActFast}. In that mode
+     * {@link #argumentNode} evaluates to the `act` lambda directly (a
+     * {@link MezzeFunction}) — the {@code {act = ...}} wrapper record
+     * is NOT pre-built. The fast-path code builds a minimal one-field
+     * record per call so EA can scalarize it during PE.
+     */
+    @CompilationFinal
+    private final boolean isMutMutateActFast;
+
+    /**
+     * Compilation-final Shape for the `{act = MezzeFunction}` wrapper
+     * used by the fast path. Built once at construction so Truffle sees
+     * it as a constant during PE.
+     */
+    @CompilationFinal
+    private final MezzeRecord.Shape actWrapperShape;
+
     public OpCallNode(String operationName, Hash effectHash, MezzeNode argumentNode) {
+        this(operationName, effectHash, argumentNode, false);
+    }
+
+    private OpCallNode(String operationName, Hash effectHash, MezzeNode argumentNode,
+                       boolean isMutMutateActFast) {
         this.operationName = operationName;
         this.effectHash = effectHash;
         this.argumentNode = argumentNode;
         this.isMutOp = MARKER_MUT_ENABLED && MarkerEffects.isMutEffect(effectHash);
+        this.isMutMutateActFast = isMutMutateActFast;
+        if (isMutMutateActFast) {
+            MezzeRecord.FieldLocation[] locs = {
+                new MezzeRecord.FieldLocation(
+                    MezzeRecord.FieldLocation.StorageType.OBJECT, 0)
+            };
+            this.actWrapperShape = new MezzeRecord.Shape(
+                new String[] { "act" }, locs);
+        } else {
+            this.actWrapperShape = null;
+        }
     }
 
     public static OpCallNode create(String operationName, Hash effectHash, MezzeNode argumentNode) {
         return new OpCallNode(operationName, effectHash, argumentNode);
     }
 
+    /**
+     * Fast-path factory for `Mut.mutate { act = X }`: emitted by
+     * {@code TruffleCompiler} when the IR shape matches. The {@code actNode}
+     * evaluates to the `act` lambda directly (no wrapper record on the
+     * fast path). When PE folds the impl call through the marker PIC and
+     * EA scalarizes the per-call wrapper, the net cost is just calling
+     * `act` — same as Java.
+     */
+    public static OpCallNode createMutMutateActFast(Hash effectHash, MezzeNode actNode) {
+        return new OpCallNode("mutate", effectHash, actNode, true);
+    }
+
     @Override
     public Object execute(VirtualFrame frame) {
-        Object args = argumentNode.execute(frame);
+        // Fast path for `Mut.mutate { act = X }` (see createMutMutateActFast).
+        // argumentNode evaluates to the `act` lambda directly; we wrap it in
+        // a one-field record just-in-time so the standard mutate impl
+        // (`{ act } -> act{}`) can read it. The wrapper is allocated locally
+        // and consumed inside the inlined impl — EA scalarizes it during PE.
+        final Object args;
+        if (isMutMutateActFast) {
+            Object actFn = argumentNode.execute(frame);
+            args = MezzeRecord.withAllObjects(actWrapperShape, new Object[] { actFn });
+        } else {
+            args = argumentNode.execute(frame);
+        }
         EffectFiber fiber = EffectFiber.current();
         if (fiber != null) {
             return fiber.suspend(new OpCall(operationName, args, effectHash));

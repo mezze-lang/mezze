@@ -21,7 +21,7 @@ import com.mezze.language.typedast.Hash;
  * hex here and lock it down with a regression test in
  * {@code :typechecker} that asserts the two values are equal.
  */
-final class MarkerEffects {
+public final class MarkerEffects {
 
     private MarkerEffects() {}
 
@@ -32,7 +32,7 @@ final class MarkerEffects {
      * {@code MarkerEffectsHashConsistencyTest} in :typechecker asserts
      * this and breaks the build if they drift.
      */
-    static final String MUT_EFFECT_HASH_HEX =
+    public static final String MUT_EFFECT_HASH_HEX =
         "05d9e70c83972f84e21da6095c1c22600854cc8c081877a5f7f49c689da6fb7265fdfdacc76b16d0561ad9be50bd32ff300977d466fbb16e98f988b41fbb6dba";
 
     /**
@@ -40,7 +40,7 @@ final class MarkerEffects {
      * hex String is compile-time interned by the JVM, so the equality
      * check reduces to a reference compare on common paths.
      */
-    static boolean isMutEffect(Hash hash) {
+    public static boolean isMutEffect(Hash hash) {
         return hash != null && hash.getHex().equals(MUT_EFFECT_HASH_HEX);
     }
 }
