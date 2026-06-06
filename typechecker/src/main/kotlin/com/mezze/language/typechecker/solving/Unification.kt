@@ -1303,14 +1303,11 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, t
     // Only record definitions can be expanded to record types
     val recordDef = typeDecl.definition as? com.mezze.language.parsedast.ParsedRecordDef ?: return null
 
-    // Build substitution map for type parameters
+    // Build substitution map for type parameters.
+    // Preserve original type args to maintain the identity link between
+    // the type parameter and its usage sites (matching expandTypeApplicationToVariant).
     val typeParamSubst = typeDecl.typeParams.zip(typeApp.args).associate { (paramName, argType) ->
-        val substType = if (argType is MezzeType.VarType) {
-            MezzeType.VarType(TypeVar.fresh())
-        } else {
-            argType
-        }
-        paramName to substType
+        paramName to argType
     }
 
     // Helper to substitute type parameters in a MezzeType
