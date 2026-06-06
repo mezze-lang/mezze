@@ -3994,8 +3994,8 @@ class ExpressionConstraintGenerator {
                 // TypedFieldAccess emission with no `it` injection. The mono
                 // path then crashed because the impl body's `it` slot stayed
                 // null. Same propagation pattern as the case-body's path below.
-                methodCallResolutions.putAll(guardResult.methodCallResolutions)
-                callReturnTypes.putAll(guardResult.callReturnTypes)
+                collector.methodCallResolutions.putAll(guardResult.methodCallResolutions)
+                collector.callReturnTypes.putAll(guardResult.callReturnTypes)
 
                 // Guard must be Bool (variant type | True, False |)
                 collector.constraints.add(

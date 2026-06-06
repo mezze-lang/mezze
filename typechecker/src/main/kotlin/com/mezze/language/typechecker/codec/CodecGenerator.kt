@@ -578,9 +578,10 @@ class CodecGenerator {
     }
 
     /**
-     * Create a typed encode call using method-call syntax: value.encode_repr { fmt, config }.
+     * Create a typed codec call using method-call syntax: value.<methodName> { fmt, config }.
+     * Shared by both encode_repr and decode_repr generation.
      */
-    private fun typedEncodeCall(dataType: MezzeType, valueExpr: ParsedExpr): ParsedFunctionCall {
+    private fun typedCodecCall(valueExpr: ParsedExpr, methodName: String): ParsedFunctionCall {
         val argsRecord = record(
             "fmt" to id("fmt"),
             "config" to id("config")
@@ -588,13 +589,17 @@ class CodecGenerator {
         return ParsedFunctionCall(
             function = ParsedMemberAccess(
                 receiver = valueExpr,
-                member = "encode_repr",
+                member = methodName,
                 loc = GEN_LOC
             ),
             arguments = argsRecord,
             loc = GEN_LOC
         )
     }
+
+    /** Create a typed encode call using method-call syntax: value.encode_repr { fmt, config }. */
+    private fun typedEncodeCall(dataType: MezzeType, valueExpr: ParsedExpr): ParsedFunctionCall =
+        typedCodecCall(valueExpr, "encode_repr")
 
     /**
      * Generate a direct DecodeFormat impl record lookup and method call for a value of the given type.
@@ -657,24 +662,9 @@ class CodecGenerator {
         }
     }
 
-    /**
-     * Create a typed decode call using method-call syntax: value.decode_repr { fmt, config }.
-     */
-    private fun typedDecodeCall(targetType: MezzeType, valueExpr: ParsedExpr): ParsedFunctionCall {
-        val argsRecord = record(
-            "fmt" to id("fmt"),
-            "config" to id("config")
-        )
-        return ParsedFunctionCall(
-            function = ParsedMemberAccess(
-                receiver = valueExpr,
-                member = "decode_repr",
-                loc = GEN_LOC
-            ),
-            arguments = argsRecord,
-            loc = GEN_LOC
-        )
-    }
+    /** Create a typed decode call using method-call syntax: value.decode_repr { fmt, config }. */
+    private fun typedDecodeCall(targetType: MezzeType, valueExpr: ParsedExpr): ParsedFunctionCall =
+        typedCodecCall(valueExpr, "decode_repr")
 
     /**
      * Generate encode for variant types.
@@ -772,11 +762,17 @@ class CodecGenerator {
     }
 
     /**
-     * Generate encode for List types.
+     * Build a fold-encode-append body: fold over a list, encode each element, accumulate into a new list.
+     * Used by List, Set, and SortedSet encode generation.
      */
-    private fun generateListEncode(formatType: MezzeType, listType: MezzeType.ListType): ParsedImplAbilityDecl {
-        val elementType = listType.elementType
-        val elementEncodeCall = generateDirectEncodeCall(formatType, elementType, id("elem"), "__list_elem")
+    private fun buildFoldEncodeBody(
+        formatType: MezzeType,
+        elementType: MezzeType,
+        inputListExpr: ParsedExpr,
+        elemLabel: String,
+        wrapResult: (ParsedExpr) -> ParsedExpr
+    ): ParsedExpr {
+        val elementEncodeCall = generateDirectEncodeCall(formatType, elementType, id("elem"), elemLabel)
 
         val foldBody = match(
             id("acc"),
@@ -809,24 +805,31 @@ class CodecGenerator {
         val foldCall = call(
             id("__native_list_fold_left"),
             record(
-                "xs" to id("it"),
+                "xs" to inputListExpr,
                 "init" to ok(call(id("__native_list_empty"), record())),
                 "f" to lambda(listOf("acc", "elem"), foldBody)
             )
         )
 
-        val body = match(
+        return match(
             foldCall,
-            matchCase(
-                okPat("final_list"),
-                call(
-                    member(encodeFormatImpl(formatType), "encode_list"),
-                    record("elems" to id("final_list"), "path" to id("path"))
-                )
-            ),
+            matchCase(okPat("final_list"), wrapResult(id("final_list"))),
             matchCase(errPat("e"), err(id("e")))
         )
+    }
 
+    /**
+     * Generate encode for List types.
+     */
+    private fun generateListEncode(formatType: MezzeType, listType: MezzeType.ListType): ParsedImplAbilityDecl {
+        val body = buildFoldEncodeBody(
+            formatType, listType.elementType, id("it"), "__list_elem"
+        ) { finalList ->
+            call(
+                member(encodeFormatImpl(formatType), "encode_list"),
+                record("elems" to finalList, "path" to id("path"))
+            )
+        }
         return createEncodeImpl(formatType, listType, body)
     }
 
@@ -845,63 +848,17 @@ class CodecGenerator {
      */
     private fun generateSetEncode(formatType: MezzeType, setType: MezzeType.SetType): ParsedImplAbilityDecl {
         val toListCall = call(id("__native_set_to_list"), record("s" to id("it")))
-        val elementType = setType.elementType
-        val elementEncodeCall = generateDirectEncodeCall(formatType, elementType, id("elem"), "__set_elem")
-
-        val foldBody = match(
-            id("acc"),
-            matchCase(
-                okPat("encoded_list"),
-                match(
-                    elementEncodeCall,
-                    matchCase(
-                        okPat("encoded"),
-                        ok(call(
-                            id("__native_list_append"),
-                            record(
-                                "xs" to id("encoded_list"),
-                                "ys" to call(
-                                    id("__native_list_cons"),
-                                    record(
-                                        "head" to id("encoded"),
-                                        "tail" to call(id("__native_list_empty"), record())
-                                    )
-                                )
-                            )
-                        ))
-                    ),
-                    matchCase(errPat("e"), err(id("e")))
+        val body = buildFoldEncodeBody(
+            formatType, setType.elementType, toListCall, "__set_elem"
+        ) { finalList ->
+            call(
+                member(encodeFormatImpl(formatType), "encode_set"),
+                record(
+                    "elems" to call(id("__native_set_from_list"), record("xs" to finalList)),
+                    "path" to id("path")
                 )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-
-        val foldCall = call(
-            id("__native_list_fold_left"),
-            record(
-                "xs" to toListCall,
-                "init" to ok(call(id("__native_list_empty"), record())),
-                "f" to lambda(listOf("acc", "elem"), foldBody)
             )
-        )
-
-        val body = match(
-            foldCall,
-            matchCase(
-                okPat("final_list"),
-                call(
-                    member(encodeFormatImpl(formatType), "encode_set"),
-                    record(
-                        "elems" to call(
-                            id("__native_set_from_list"),
-                            record("xs" to id("final_list"))
-                        ),
-                        "path" to id("path")
-                    )
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
+        }
         return createEncodeImpl(formatType, setType, body)
     }
 
@@ -910,75 +867,34 @@ class CodecGenerator {
      */
     private fun generateSortedSetEncode(formatType: MezzeType, sortedSetType: MezzeType.SortedSetType): ParsedImplAbilityDecl {
         val toListCall = call(id("__native_sorted_set_to_list"), record("s" to id("it")))
-        val elementType = sortedSetType.elementType
-        val elementEncodeCall = generateDirectEncodeCall(formatType, elementType, id("elem"), "__sorted_set_elem")
-
-        val foldBody = match(
-            id("acc"),
-            matchCase(
-                okPat("encoded_list"),
-                match(
-                    elementEncodeCall,
-                    matchCase(
-                        okPat("encoded"),
-                        ok(call(
-                            id("__native_list_append"),
-                            record(
-                                "xs" to id("encoded_list"),
-                                "ys" to call(
-                                    id("__native_list_cons"),
-                                    record(
-                                        "head" to id("encoded"),
-                                        "tail" to call(id("__native_list_empty"), record())
-                                    )
-                                )
-                            )
-                        ))
-                    ),
-                    matchCase(errPat("e"), err(id("e")))
+        val body = buildFoldEncodeBody(
+            formatType, sortedSetType.elementType, toListCall, "__sorted_set_elem"
+        ) { finalList ->
+            call(
+                member(encodeFormatImpl(formatType), "encode_set"),
+                record(
+                    "elems" to call(id("__native_set_from_list"), record("xs" to finalList)),
+                    "path" to id("path")
                 )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-
-        val foldCall = call(
-            id("__native_list_fold_left"),
-            record(
-                "xs" to toListCall,
-                "init" to ok(call(id("__native_list_empty"), record())),
-                "f" to lambda(listOf("acc", "elem"), foldBody)
             )
-        )
-
-        val body = match(
-            foldCall,
-            matchCase(
-                okPat("final_list"),
-                call(
-                    member(encodeFormatImpl(formatType), "encode_set"),
-                    record(
-                        "elems" to call(
-                            id("__native_set_from_list"),
-                            record("xs" to id("final_list"))
-                        ),
-                        "path" to id("path")
-                    )
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
+        }
         return createEncodeImpl(formatType, sortedSetType, body)
     }
 
     /**
-     * Generate encode for Map types.
+     * Build the fold body for map-like encode: fold over entries, encode key+value, accumulate into a list of {key, value}.
+     * Used by both Map and SortedMap encode generation.
      */
-    private fun generateMapEncode(formatType: MezzeType, mapType: MezzeType.MapType): ParsedImplAbilityDecl {
-        val entriesCall = call(id("__native_map_entries"), record("m" to id("it")))
-        val keyType = mapType.keyType
-        val valueType = mapType.valueType
-        val keyEncodeCall = generateDirectEncodeCall(formatType, keyType, member(id("entry"), "key"), "__map_key")
-        val valueEncodeCall = generateDirectEncodeCall(formatType, valueType, member(id("entry"), "value"), "__map_value")
+    private fun buildMapFoldEncodeBody(
+        formatType: MezzeType,
+        keyType: MezzeType,
+        valueType: MezzeType,
+        entriesExpr: ParsedExpr,
+        keyLabel: String,
+        valueLabel: String
+    ): ParsedExpr {
+        val keyEncodeCall = generateDirectEncodeCall(formatType, keyType, member(id("entry"), "key"), keyLabel)
+        val valueEncodeCall = generateDirectEncodeCall(formatType, valueType, member(id("entry"), "value"), valueLabel)
 
         val foldBody = match(
             id("acc"),
@@ -1018,13 +934,13 @@ class CodecGenerator {
         val foldCall = call(
             id("__native_list_fold_left"),
             record(
-                "xs" to entriesCall,
+                "xs" to entriesExpr,
                 "init" to ok(call(id("__native_list_empty"), record())),
                 "f" to lambda(listOf("acc", "entry"), foldBody)
             )
         )
 
-        val body = match(
+        return match(
             foldCall,
             matchCase(
                 okPat("final_list"),
@@ -1034,6 +950,16 @@ class CodecGenerator {
                 )
             ),
             matchCase(errPat("e"), err(id("e")))
+        )
+    }
+
+    /**
+     * Generate encode for Map types.
+     */
+    private fun generateMapEncode(formatType: MezzeType, mapType: MezzeType.MapType): ParsedImplAbilityDecl {
+        val entriesCall = call(id("__native_map_entries"), record("m" to id("it")))
+        val body = buildMapFoldEncodeBody(
+            formatType, mapType.keyType, mapType.valueType, entriesCall, "__map_key", "__map_value"
         )
         return createEncodeImpl(formatType, mapType, body)
     }
@@ -1043,65 +969,8 @@ class CodecGenerator {
      */
     private fun generateSortedMapEncode(formatType: MezzeType, sortedMapType: MezzeType.SortedMapType): ParsedImplAbilityDecl {
         val entriesCall = call(id("__native_sorted_map_entries"), record("m" to id("it")))
-        val keyType = sortedMapType.keyType
-        val valueType = sortedMapType.valueType
-        val keyEncodeCall = generateDirectEncodeCall(formatType, keyType, member(id("entry"), "key"), "__sorted_map_key")
-        val valueEncodeCall = generateDirectEncodeCall(formatType, valueType, member(id("entry"), "value"), "__sorted_map_value")
-
-        val foldBody = match(
-            id("acc"),
-            matchCase(
-                okPat("encoded_list"),
-                match(
-                    keyEncodeCall,
-                    matchCase(
-                        okPat("encoded_key"),
-                        match(
-                            valueEncodeCall,
-                            matchCase(
-                                okPat("encoded_value"),
-                                ok(call(
-                                    id("__native_list_append"),
-                                    record(
-                                        "xs" to id("encoded_list"),
-                                        "ys" to call(
-                                            id("__native_list_cons"),
-                                            record(
-                                                "head" to record("key" to id("encoded_key"), "value" to id("encoded_value")),
-                                                "tail" to call(id("__native_list_empty"), record())
-                                            )
-                                        )
-                                    )
-                                ))
-                            ),
-                            matchCase(errPat("e"), err(id("e")))
-                        )
-                    ),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
-        )
-
-        val foldCall = call(
-            id("__native_list_fold_left"),
-            record(
-                "xs" to entriesCall,
-                "init" to ok(call(id("__native_list_empty"), record())),
-                "f" to lambda(listOf("acc", "entry"), foldBody)
-            )
-        )
-
-        val body = match(
-            foldCall,
-            matchCase(
-                okPat("final_list"),
-                call(
-                    member(encodeFormatImpl(formatType), "encode_map"),
-                    record("entries" to id("final_list"), "path" to id("path"))
-                )
-            ),
-            matchCase(errPat("e"), err(id("e")))
+        val body = buildMapFoldEncodeBody(
+            formatType, sortedMapType.keyType, sortedMapType.valueType, entriesCall, "__sorted_map_key", "__sorted_map_value"
         )
         return createEncodeImpl(formatType, sortedMapType, body)
     }
@@ -1351,7 +1220,7 @@ class CodecGenerator {
                 )
             )
 
-            val decodeCall = generateFieldDecodeCall(formatType, fieldType, id("${fieldName}_repr"), fieldName)
+            val decodeCall = generateDirectDecodeCall(formatType, fieldType, id("${fieldName}_repr"), fieldName)
 
             resultExpr = match(
                 getFieldCall,
@@ -1368,67 +1237,6 @@ class CodecGenerator {
         }
 
         return resultExpr
-    }
-
-    /**
-     * Generate decode call for a record field using DecodeFormat hooks directly.
-     */
-    private fun generateFieldDecodeCall(formatType: MezzeType, type: MezzeType, valueExpr: ParsedExpr, fieldName: String): ParsedExpr {
-        val pathExpr = appendPath(id("path"), fieldName)
-        val formatImpl = decodeFormatImpl(formatType)
-
-        if (isBoolVariant(type)) {
-            return call(
-                member(formatImpl, "decode_bool"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-        }
-
-        return when (type) {
-            is MezzeType.IntType -> call(
-                member(formatImpl, "decode_int"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.FloatType -> call(
-                member(formatImpl, "decode_float"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.StringType -> call(
-                member(formatImpl, "decode_string"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.BoolType -> call(
-                member(formatImpl, "decode_bool"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.FracType -> call(
-                member(formatImpl, "decode_frac"),
-                record("val" to valueExpr, "path" to pathExpr)
-            )
-            is MezzeType.NatType -> {
-                val decodeIntCall = call(member(formatImpl, "decode_int"), record("val" to valueExpr, "path" to pathExpr))
-                match(
-                    decodeIntCall,
-                    matchCase(okPat("int_val"), ok(call(id("__native_int_to_nat"), record("n" to id("int_val"))))),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            }
-            is MezzeType.CharType -> {
-                val decodeStrCall = call(member(formatImpl, "decode_string"), record("val" to valueExpr, "path" to pathExpr))
-                match(
-                    decodeStrCall,
-                    matchCase(okPat("str_val"), ok(call(id("__native_string_head"), record("s" to id("str_val"))))),
-                    matchCase(errPat("e"), err(id("e")))
-                )
-            }
-            is MezzeType.RecordType, is MezzeType.ListType, is MezzeType.SeqType, is MezzeType.SetType,
-            is MezzeType.MapType, is MezzeType.VariantType, is MezzeType.TypeApplication -> {
-                typedDecodeCall(type, valueExpr)
-            }
-            else -> {
-                typedDecodeCall(type, valueExpr)
-            }
-        }
     }
 
     /**
