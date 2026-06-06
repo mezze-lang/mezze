@@ -3532,16 +3532,16 @@ class ExpressionConstraintGenerator {
                 // Check for partial application (some fields missing)
                 if (missingFields.isNotEmpty()) {
                     // PARTIAL APPLICATION: Return function accepting remaining parameters
-                    val constraints = mutableListOf<Constraint>()
-                    constraints.addAll(functionResult.constraints)
-                    constraints.addAll(argumentResult.constraints)
+                    val collector = ConstraintCollector()
+                    collector.merge(functionResult)
+                    collector.merge(argumentResult)
 
                     // Add constraints for provided fields (must match expected types)
                     for (fieldName in providedFields) {
                         val expectedType = funcParamType.fields[fieldName]
                         val providedType = argumentType.fields[fieldName]
                         if (expectedType != null && providedType != null) {
-                            constraints.add(
+                            collector.constraints.add(
                                 Constraint.Equality(
                                     left = providedType,
                                     right = expectedType,
@@ -3600,19 +3600,9 @@ class ExpressionConstraintGenerator {
                         abilityConstraints = filteredAbilityConstraints
                     )
 
-                    return ConstraintResult(
-                        type = partialResult,
-                        constraints = constraints,
-                        effects = functionResult.effects + argumentResult.effects,
-                        effectInstances = functionResult.effectInstances + argumentResult.effectInstances,
-                        performed = functionResult.performed || argumentResult.performed,
-                        abilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints + concreteAbilityChecks,
-                        undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
-                        usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
-                        referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings,
-                        methodCallResolutions = functionResult.methodCallResolutions + argumentResult.methodCallResolutions,
-                        callReturnTypes = functionResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to partialResult)
-                    )
+                    collector.abilityConstraints.addAll(concreteAbilityChecks)
+                    collector.callReturnTypes[expr.loc] = partialResult
+                    return collector.toResult(partialResult)
                 }
             }
         }
@@ -3623,9 +3613,9 @@ class ExpressionConstraintGenerator {
             val effectRow = functionType.effects
             // Handle effects if: has concrete effects OR effect instances OR has a row variable (polymorphic <...>) OR is performed
             if (effectRow != null && (effectRow.effects.isNotEmpty() || effectRow.effectInstances.isNotEmpty() || effectRow.rowVar != null || effectRow.performed)) {
-                val constraints = mutableListOf<Constraint>()
-                constraints.addAll(functionResult.constraints)
-                constraints.addAll(argumentResult.constraints)
+                val collector = ConstraintCollector()
+                collector.merge(functionResult)
+                collector.merge(argumentResult)
 
                 // Argument must match parameter type
                 // Extract function name for better error messages
@@ -3633,7 +3623,7 @@ class ExpressionConstraintGenerator {
                     is ParsedIdentifier -> (expr.function as ParsedIdentifier).localName
                     else -> null
                 }
-                constraints.add(
+                collector.constraints.add(
                     Constraint.Equality(
                         left = argumentResult.type,
                         right = functionType.paramType,
@@ -3659,20 +3649,16 @@ class ExpressionConstraintGenerator {
                 val rowVarEffects: Set<String> = if (effectRow.rowVar != null) {
                     collectClosureArgEffects(argumentResult.type)
                 } else emptySet()
-                val propagatedEffects = effectRow.effects + functionResult.effects + argumentResult.effects + rowVarEffects
                 // CRITICAL FIX: Also propagate effectInstances from the function type!
                 // This is needed so that when a function calls another function with associated effect types
                 // (like Exception with 'error), those effect instances are properly propagated and merged.
-                val propagatedEffectInstances = effectRow.effectInstances + functionResult.effectInstances + argumentResult.effectInstances
-                // Propagate performed flag from function type and sub-results
-                val propagatedPerformed = effectRow.performed || functionResult.performed || argumentResult.performed
+                collector.effects.addAll(effectRow.effects + rowVarEffects)
+                collector.effectInstances.addAll(effectRow.effectInstances)
+                // Propagate performed flag from function type
+                collector.performed = collector.performed || effectRow.performed
 
                 // TCO: Include tail call if detected (note: effectful tail calls may need special handling)
-                val baseTailCalls = functionResult.tailCalls + argumentResult.tailCalls
-                val tailCalls = if (tailCallLocation != null) baseTailCalls + tailCallLocation else baseTailCalls
-
-                // CRITICAL: Propagate ability constraints from function and arguments
-                var effectfulAbilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints
+                if (tailCallLocation != null) collector.tailCalls.add(tailCallLocation)
 
                 // CRITICAL: If the function type has ability constraints (like `with Show 'b`),
                 // generate AbilityRequired constraints for them. These constraints will be unified
@@ -3692,7 +3678,7 @@ class ExpressionConstraintGenerator {
                             )
                         } else null
                     }
-                    effectfulAbilityConstraints = effectfulAbilityConstraints + methodLevelConstraints
+                    collector.abilityConstraints.addAll(methodLevelConstraints)
                 }
 
                 // Wrap the call's value type in SuspendedType when the callee
@@ -3700,21 +3686,8 @@ class ExpressionConstraintGenerator {
                 // validation can detect `<*>`.
                 val (resultType, _, _) = wrapCallResultWithEffects(functionType.returnType, effectRow)
 
-                return ConstraintResult(
-                    type = resultType,
-                    constraints = constraints,
-                    effects = propagatedEffects,  // Propagate effects from function type
-                    effectInstances = propagatedEffectInstances,  // Propagate effect instances from function type too!
-                    performed = propagatedPerformed,  // Propagate performed flag
-                    abilityConstraints = effectfulAbilityConstraints,  // Propagate ability constraints including method-level
-                    associatedTypeConstraints = functionResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
-                    undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
-                    usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
-                    tailCalls = tailCalls,
-                    referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings,
-                    methodCallResolutions = functionResult.methodCallResolutions + argumentResult.methodCallResolutions,
-                    callReturnTypes = functionResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to resultType)
-                )
+                collector.callReturnTypes[expr.loc] = resultType
+                return collector.toResult(resultType)
             }
         }
 
@@ -3743,9 +3716,9 @@ class ExpressionConstraintGenerator {
             } else MezzeType.VarType(TypeVar.fresh())
         }
 
-        val constraints = mutableListOf<Constraint>()
-        constraints.addAll(functionResult.constraints)
-        constraints.addAll(argumentResult.constraints)
+        val collector = ConstraintCollector()
+        collector.merge(functionResult)
+        collector.merge(argumentResult)
 
         // function must be a function type: argumentType -> returnType
         // Note: left = actual (what we got), right = expected (what we need)
@@ -3755,7 +3728,7 @@ class ExpressionConstraintGenerator {
             is ParsedIdentifier -> (expr.function as ParsedIdentifier).localName
             else -> null
         }
-        constraints.add(
+        collector.constraints.add(
             Constraint.Equality(
                 left = MezzeType.FunctionType(
                     paramType = argumentResult.type,
@@ -3801,23 +3774,12 @@ class ExpressionConstraintGenerator {
         // effect row; tryGenerateEffectOperationCall only fires on
         // direct `Effect.op` syntax). The known-broken case is in
         // EnvironmentEffectModuleTest::pub-let helper imported standalone.
-        val funcTypeEffects: Set<String>
-        val funcTypePerformed: Boolean
         if (functionResult.type is MezzeType.FunctionType) {
             val fnType = functionResult.type as MezzeType.FunctionType
-            funcTypeEffects = fnType.effects?.effects ?: emptySet()
-            funcTypePerformed = fnType.effects?.performed ?: false
-        } else {
-            funcTypeEffects = emptySet()
-            funcTypePerformed = false
+            collector.effects.addAll(fnType.effects?.effects ?: emptySet())
+            collector.performed = collector.performed || (fnType.effects?.performed ?: false)
         }
-        val collectedEffects = functionResult.effects + argumentResult.effects + rowVarEffects + funcTypeEffects
-        val collectedPerformed = functionResult.performed || argumentResult.performed || funcTypePerformed
-
-        // CRITICAL: Propagate ability constraints from function and arguments
-        var collectedAbilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints
-        // CRITICAL: Propagate associated type constraints from function and arguments
-        val collectedAssociatedTypeConstraints = functionResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints
+        collector.effects.addAll(rowVarEffects)
 
         // CRITICAL: If the function type has ability constraints (like `with Show 'b`),
         // generate AbilityRequired constraints for them.
@@ -3838,29 +3800,15 @@ class ExpressionConstraintGenerator {
                         )
                     } else null
                 }
-                collectedAbilityConstraints = collectedAbilityConstraints + methodLevelConstraints
+                collector.abilityConstraints.addAll(methodLevelConstraints)
             }
         }
 
         // TCO: Include tail call if detected
-        val baseTailCalls = functionResult.tailCalls + argumentResult.tailCalls
-        val tailCalls = if (tailCallLocation != null) baseTailCalls + tailCallLocation else baseTailCalls
+        if (tailCallLocation != null) collector.tailCalls.add(tailCallLocation)
 
-        return ConstraintResult(
-            type = returnType,
-            constraints = constraints,
-            effects = collectedEffects,  // Propagate effects from function and arguments
-            effectInstances = functionResult.effectInstances + argumentResult.effectInstances,
-            performed = collectedPerformed,  // Propagate performed flag
-            abilityConstraints = collectedAbilityConstraints,  // Propagate ability constraints
-            associatedTypeConstraints = collectedAssociatedTypeConstraints,  // Propagate associated type constraints
-            undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
-            usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
-            tailCalls = tailCalls,
-            referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings,
-            methodCallResolutions = functionResult.methodCallResolutions + argumentResult.methodCallResolutions,
-            callReturnTypes = functionResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to returnType)
-        )
+        collector.callReturnTypes[expr.loc] = returnType
+        return collector.toResult(returnType)
     }
 
     // ========================================================================
@@ -5000,22 +4948,13 @@ class ExpressionConstraintGenerator {
             null
         }
 
-        val effectInstances = if (effectInstance != null) setOf(effectInstance) else emptySet<MezzeType.EffectInstance>()
+        val collector = ConstraintCollector()
+        collector.merge(argResult)
+        collector.constraints.addAll(additionalConstraints)
+        collector.effects.add(effectName)
+        if (effectInstance != null) collector.effectInstances.add(effectInstance)
 
-        return ConstraintResult(
-            type = resultType,
-            constraints = argResult.constraints + additionalConstraints,
-            effects = setOf(effectName) + argResult.effects,
-            effectInstances = effectInstances + argResult.effectInstances,
-            performed = argResult.performed,
-            abilityConstraints = argResult.abilityConstraints,
-            associatedTypeConstraints = argResult.associatedTypeConstraints,
-            undefinedVariables = argResult.undefinedVariables,
-            usedVariables = argResult.usedVariables,
-            referencedBindings = argResult.referencedBindings,
-            methodCallResolutions = argResult.methodCallResolutions,
-            callReturnTypes = argResult.callReturnTypes
-        )
+        return collector.toResult(resultType)
     }
 
     // ========================================================================
