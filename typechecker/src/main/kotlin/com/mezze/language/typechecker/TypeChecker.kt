@@ -399,6 +399,14 @@ class TypeChecker(
         }
         val allAbilityDeclarations = transitiveAbilities + buildResult.abilityDeclarations + importedAbilities
 
+        // Hash-keyed declaration maps — merge local + imported, keyed by content hash
+        val allTypeDeclsByHash = buildResult.typeDeclsByHash +
+            (importContext?.importedTypes?.values?.mapNotNull { d -> d.contentHash?.let { h -> h to d } }?.toMap() ?: emptyMap())
+        val allAbilityDeclsByHash = buildResult.abilityDeclsByHash +
+            allAbilityDeclarations.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap()
+        val allEffectDeclsByHash = buildResult.effectDeclsByHash +
+            allEffectDeclarations.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap()
+
         val constraintGenerator = ConstraintGenerator.create(
             typeDeclarations = allTypeDeclarations,
             performerToEffect = buildResult.performerToEffect,

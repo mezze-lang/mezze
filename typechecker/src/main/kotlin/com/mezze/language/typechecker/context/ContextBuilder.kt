@@ -80,7 +80,12 @@ class ContextBuilder {
         /** Maps performer names to their ParsedPerformerDecl (for content hash lookup) */
         val implDeclarations: Map<String, ParsedPerformerDecl> = emptyMap(),
         /** ParsedModule with impl declarations resolved (ParsedPerformerDecl for abilities → ParsedImplAbilityDecl) */
-        val resolvedModule: ParsedModule? = null
+        val resolvedModule: ParsedModule? = null,
+        // Hash-keyed declaration maps — derived from string-keyed maps.
+        // Use these for cross-module-safe lookups; fall back to string-keyed for legacy callers.
+        val typeDeclsByHash: Map<com.mezze.language.typedast.Hash, ParsedTypeDecl> = emptyMap(),
+        val abilityDeclsByHash: Map<com.mezze.language.typedast.Hash, ParsedAbilityDecl> = emptyMap(),
+        val effectDeclsByHash: Map<com.mezze.language.typedast.Hash, ParsedEffectDecl> = emptyMap(),
     )
 
     /**
@@ -363,7 +368,10 @@ class ContextBuilder {
             performerToEffectHash = performerToEffectHashMap,
             performerAddedEffects = performerAddedEffectsMap,
             implDeclarations = implDeclarationsMap,
-            resolvedModule = resolvedMod
+            resolvedModule = resolvedMod,
+            typeDeclsByHash = typeDecls.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap(),
+            abilityDeclsByHash = abilityDecls.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap(),
+            effectDeclsByHash = effectDecls.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap(),
         )
     }
 
