@@ -157,7 +157,7 @@ class SortedMapModuleTest {
             let m2 = sorted_map::insert { m = m1, k = 2, v = "two" }
             let es = sorted_map::entries { m = m2 }
             match es is
-                Cons { head, tail } -> head.key
+                Cons { head, tail } -> head.k
                 Nil -> 0
         """)
         assertEquals(1L, result)
@@ -223,7 +223,7 @@ class SortedMapModuleTest {
             let m2 = sorted_map::insert { m = m1, k = 1, v = "one" }
             let m3 = sorted_map::insert { m = m2, k = 10, v = "ten" }
             match sorted_map::min_entry { m = m3 } is
-                Some { val } -> val.value
+                Some { val } -> val.v
                 None -> "not found"
         """)
         assertEquals("one", result)
@@ -237,7 +237,7 @@ class SortedMapModuleTest {
             let m2 = sorted_map::insert { m = m1, k = 1, v = "one" }
             let m3 = sorted_map::insert { m = m2, k = 10, v = "ten" }
             match sorted_map::max_entry { m = m3 } is
-                Some { val } -> val.value
+                Some { val } -> val.v
                 None -> "not found"
         """)
         assertEquals("ten", result)

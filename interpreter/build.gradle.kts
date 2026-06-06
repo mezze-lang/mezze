@@ -148,6 +148,10 @@ tasks.test {
     // Default `test` excludes benches so `./gradlew :interpreter:test`
     // stays a fast feedback loop. Benches live in :interpreter:bench.
     benchClassPatterns.forEach { exclude(it) }
+    // WireProtocolIntegrationTest spawns a JVM against the runtime shadow
+    // jar; without this dep, the test runs before the jar exists and fails
+    // its locateRuntimeJar precondition.
+    dependsOn("runtimeShadowJar")
 }
 
 // ─── Runtime shadowJar ──────────────────────────────────────────────────
