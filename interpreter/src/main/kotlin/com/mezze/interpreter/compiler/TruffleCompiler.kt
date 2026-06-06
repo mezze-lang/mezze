@@ -564,10 +564,28 @@ class TruffleCompiler(
                 // HandleNode's driver dispatches by op name. The effect hash is
                 // only used to build a MezzeSuspended thunk when there is no
                 // fiber in scope (the lazy-effects fallback).
-                val argNode = compileNode(node.arg, source)
-                com.mezze.interpreter.nodes.effect.OpCallNode.create(
-                    node.operationName, node.effectHash, argNode
-                )
+                //
+                // Fast path: `Mut.mutate { act = lambda }` is by far the
+                // hottest effect-op in the language (every stdlib mutable op
+                // — incr, write_int, push, etc. — wraps its body in
+                // `Mut.mutate { act = {} -> __native_... }`). Skip building
+                // the wrapper `{ act = ... }` record entirely: emit a
+                // specialized op-call that takes the `act` value directly.
+                // The marker fast path in OpCallNode recognises this and
+                // calls the impl with the raw lambda as args (the impl is
+                // `{ act } -> act {}`, which is the LocalMut shape).
+                if (isMutMutateWithActLambda(node)) {
+                    val argRecord = node.arg as MakeRecordIR
+                    val actNode = compileNode(argRecord.fields[0].value, source)
+                    com.mezze.interpreter.nodes.effect.OpCallNode.createMutMutateActFast(
+                        node.effectHash, actNode
+                    )
+                } else {
+                    val argNode = compileNode(node.arg, source)
+                    com.mezze.interpreter.nodes.effect.OpCallNode.create(
+                        node.operationName, node.effectHash, argNode
+                    )
+                }
             }
             is DictMethodCallIR -> {
                 // Pure dictionary call: read impl function from dict slot, call it directly.
@@ -584,6 +602,20 @@ class TruffleCompiler(
     // ========================================================================
     // Helpers
     // ========================================================================
+
+    /**
+     * True if {@code node} is a `Mut.mutate { act = (something) }` call.
+     * In that shape the wrapper record allocation can be elided — the
+     * impl is `{ act } -> act {}` so we can pass the `act` value
+     * straight to the impl instead of allocating a `{act = ...}` record.
+     */
+    private fun isMutMutateWithActLambda(node: PerformOpIR): Boolean {
+        if (node.operationName != "mutate") return false
+        if (!com.mezze.interpreter.nodes.effect.MarkerEffects.isMutEffect(node.effectHash)) return false
+        val arg = node.arg as? MakeRecordIR ?: return false
+        if (arg.fields.size != 1) return false
+        return arg.fields[0].name == "act"
+    }
 
     /**
      * Create a SourceSection from SourceInfo for debugger/profiler integration.
@@ -653,15 +685,16 @@ class TruffleCompiler(
         }
 
         // Wire a native op by name → typed Natives method. Returns the
-        // NativeBridgeNode that calls the lambda directly, or null if
+        // bridge node (1-arg, 2-arg, or N-arg specialization chosen by
+        // NativeBridgeNode.create based on argNodes.length), or null if
         // the arg shape doesn't match.
         fun bridge(args: Array<MezzeNode>?, h: com.mezze.interpreter.nodes.builtin.NativeBridgeNode.Handler):
-                com.mezze.interpreter.nodes.builtin.NativeBridgeNode? {
+                MezzeNode? {
             if (args == null) return null
             return com.mezze.interpreter.nodes.builtin.NativeBridgeNode.create(args, h)
         }
         fun bridgeWithCall(args: Array<MezzeNode>?, h: com.mezze.interpreter.nodes.builtin.NativeBridgeNode.Handler):
-                com.mezze.interpreter.nodes.builtin.NativeBridgeNode? {
+                MezzeNode? {
             if (args == null) return null
             return com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createWithCallNode(args, h)
         }
@@ -861,6 +894,492 @@ class TruffleCompiler(
             "__native_list_tail" -> bridge(fields("l")) { args, _ ->
                 com.mezze.interpreter.nodes.builtin.collections.ListNatives.tail(
                     args[0] as com.mezze.datastructures.list.MezzeList<*>)
+            }
+
+            // ==================== Mutation primitives ====================
+            // DS-Wire every __native_mut_* op: skips the NativeDispatch
+            // HashMap lookup + per-call MezzeRecord allocation, and lets
+            // the JIT inline straight through to the MutableX field ops.
+            // Combined with MutEraser (which removes the Mut.mutate
+            // wrapper), this makes Mut primitives behave like direct
+            // value-type access at the JIT level.
+
+            // --- MutInt ---
+            "__native_int_to_mut" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.values.MutableInt((args[0] as Long))
+            }
+            "__native_int_to_immut" -> bridge(fields("n")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableInt).get()
+            }
+            "__native_mut_int_read" -> bridge(fields("n")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableInt).get()
+            }
+            "__native_mut_int_write" -> bridge(fields("n", "v")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableInt).set(args[1] as Long)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_int_incr" -> bridge(fields("n", "delta")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableInt).add(args[1] as Long)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_int_decr" -> bridge(fields("n", "delta")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableInt).subtract(args[1] as Long)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_int_mul" -> bridge(fields("n", "factor")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableInt).multiply(args[1] as Long)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_int_div" -> bridge(fields("n", "divisor")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableInt).divide(args[1] as Long)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_int_mod" -> bridge(fields("n", "divisor")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableInt).mod(args[1] as Long)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_int_cas" -> bridge(fields("n", "expected", "new_val")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableInt)
+                    .compareAndSwap(args[1] as Long, args[2] as Long)
+            }
+
+            // --- MutFloat ---
+            "__native_float_to_mut" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.values.MutableFloat((args[0] as Double))
+            }
+            "__native_float_to_immut" -> bridge(fields("n")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableFloat).get()
+            }
+            "__native_mut_float_read" -> bridge(fields("n")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableFloat).get()
+            }
+            "__native_mut_float_write" -> bridge(fields("n", "v")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableFloat).set(args[1] as Double)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_float_add" -> bridge(fields("n", "delta")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableFloat).add(args[1] as Double)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_float_sub" -> bridge(fields("n", "delta")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableFloat).subtract(args[1] as Double)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_float_mul" -> bridge(fields("n", "factor")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableFloat).multiply(args[1] as Double)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_float_div" -> bridge(fields("n", "divisor")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableFloat).divide(args[1] as Double)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+
+            // --- MutBool ---
+            "__native_bool_to_mut" -> bridge(fields("b")) { args, _ ->
+                com.mezze.interpreter.values.MutableBool((args[0] as Boolean))
+            }
+            "__native_bool_to_immut" -> bridge(fields("b")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBool).get()
+            }
+            "__native_mut_bool_read" -> bridge(fields("b")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBool).get()
+            }
+            "__native_mut_bool_write" -> bridge(fields("b", "v")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBool).set(args[1] as Boolean)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_bool_toggle" -> bridge(fields("b")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBool).toggle()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_bool_set_true" -> bridge(fields("b")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBool).set(true)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_bool_set_false" -> bridge(fields("b")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBool).set(false)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+
+            // --- MutString ---
+            "__native_string_to_mut" -> bridge(fields("s")) { args, _ ->
+                com.mezze.interpreter.values.MutableString(args[0] as String)
+            }
+            "__native_string_to_immut" -> bridge(fields("s")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableString).get()
+            }
+            "__native_string_with_capacity" -> bridge(fields("capacity")) { args, _ ->
+                com.mezze.interpreter.values.MutableString((args[0] as Long).toInt())
+            }
+            "__native_mut_string_read" -> bridge(fields("s")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableString).get()
+            }
+            "__native_mut_string_write" -> bridge(fields("s", "v")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableString).set(args[1] as String)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_string_len" -> bridge(fields("s")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableString).length().toLong()
+            }
+            "__native_mut_string_is_empty" -> bridge(fields("s")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableString).isEmpty()
+            }
+            "__native_mut_string_append" -> bridge(fields("s", "suffix")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableString).append(args[1] as String)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_string_prepend" -> bridge(fields("s", "prefix")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableString).prepend(args[1] as String)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_string_clear" -> bridge(fields("s")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableString).clear()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_string_reverse" -> bridge(fields("s")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableString).reverse()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_string_insert" -> bridge(fields("s", "i", "text")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableString)
+                    .insert((args[1] as Long).toInt(), args[2] as String)
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_string_delete" -> bridge(fields("s", "start", "end")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableString)
+                    .delete((args[1] as Long).toInt(), (args[2] as Long).toInt())
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_string_char_at" -> bridge(fields("s", "i")) { args, _ ->
+                val ch = (args[0] as com.mezze.interpreter.values.MutableString)
+                    .charAt((args[1] as Long).toInt())
+                if (ch == ' ') com.mezze.interpreter.values.MezzeVariant.none()
+                else com.mezze.interpreter.values.MezzeVariant.some(java.lang.String.valueOf(ch))
+            }
+            "__native_mut_string_set_char_at" -> bridge(fields("s", "i", "c")) { args, _ ->
+                val charStr = args[2] as String
+                if (charStr.isEmpty()) {
+                    throw RuntimeException("__native_mut_string_set_char_at: empty string for char")
+                }
+                (args[0] as com.mezze.interpreter.values.MutableString)
+                    .setCharAt((args[1] as Long).toInt(), charStr[0])
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+
+            // --- MutChar ---
+            "__native_char_to_mut" -> bridge(fields("c")) { args, _ ->
+                val s = args[0] as String
+                if (s.isEmpty()) throw RuntimeException("__native_char_to_mut: empty string")
+                com.mezze.interpreter.values.MutableChar(s[0])
+            }
+            "__native_char_to_immut" -> bridge(fields("c")) { args, _ ->
+                java.lang.String.valueOf((args[0] as com.mezze.interpreter.values.MutableChar).get())
+            }
+            "__native_mut_char_read" -> bridge(fields("c")) { args, _ ->
+                java.lang.String.valueOf((args[0] as com.mezze.interpreter.values.MutableChar).get())
+            }
+            "__native_mut_char_write" -> bridge(fields("c", "v")) { args, _ ->
+                val s = args[1] as String
+                if (s.isEmpty()) throw RuntimeException("__native_mut_char_write: empty string")
+                (args[0] as com.mezze.interpreter.values.MutableChar).set(s[0])
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_char_to_upper" -> bridge(fields("c")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableChar).toUpper()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_char_to_lower" -> bridge(fields("c")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableChar).toLower()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_char_is_digit" -> bridge(fields("c")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableChar).isDigit
+            }
+            "__native_mut_char_is_letter" -> bridge(fields("c")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableChar).isLetter
+            }
+            "__native_mut_char_is_whitespace" -> bridge(fields("c")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableChar).isWhitespace
+            }
+
+            // --- MutSeq ---
+            "__native_seq_to_mut" -> bridge(fields("seq")) { args, _ ->
+                com.mezze.interpreter.values.MutableSeq.fromImmutable(
+                    args[0] as com.mezze.datastructures.seq.MezzeSeq<*>)
+            }
+            "__native_seq_to_immut" -> bridge(fields("seq")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSeq).toImmutable()
+            }
+            "__native_mut_seq_with_capacity" -> bridge(fields("capacity")) { args, _ ->
+                com.mezze.interpreter.values.MutableSeq.withCapacity((args[0] as Long).toInt())
+            }
+            "__native_mut_seq_sort" -> bridge(fields("seq")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSeq).sort()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_seq_reverse" -> bridge(fields("seq")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSeq).reverse()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_seq_fill" -> bridge(fields("seq", "v")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSeq).fill(args[1])
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_seq_fill_range" -> bridge(fields("seq", "start", "end", "v")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSeq)
+                    .fillRange((args[1] as Long).toInt(), (args[2] as Long).toInt(), args[3])
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_seq_push" -> bridge(fields("seq", "v")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSeq).push(args[1])
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_seq_pop" -> bridge(fields("seq")) { args, _ ->
+                val v = (args[0] as com.mezze.interpreter.values.MutableSeq).pop()
+                if (v == null) com.mezze.interpreter.values.MezzeVariant.none()
+                else com.mezze.interpreter.values.MezzeVariant.some(v)
+            }
+            "__native_mut_seq_get" -> bridge(fields("seq", "i")) { args, _ ->
+                val v = (args[0] as com.mezze.interpreter.values.MutableSeq)
+                    .getSafe((args[1] as Long).toInt())
+                if (v == null) com.mezze.interpreter.values.MezzeVariant.none()
+                else com.mezze.interpreter.values.MezzeVariant.some(v)
+            }
+            "__native_mut_seq_set" -> bridge(fields("seq", "i", "v")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSeq)
+                    .setSafe((args[1] as Long).toInt(), args[2])
+            }
+            "__native_mut_seq_len" -> bridge(fields("seq")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSeq).size().toLong()
+            }
+            "__native_mut_seq_clear" -> bridge(fields("seq")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSeq).clear()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_seq_insert" -> bridge(fields("seq", "i", "v")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSeq)
+                    .insert((args[1] as Long).toInt(), args[2])
+            }
+            "__native_mut_seq_remove" -> bridge(fields("seq", "i")) { args, _ ->
+                val v = (args[0] as com.mezze.interpreter.values.MutableSeq)
+                    .remove((args[1] as Long).toInt())
+                if (v == null) com.mezze.interpreter.values.MezzeVariant.none()
+                else com.mezze.interpreter.values.MezzeVariant.some(v)
+            }
+            "__native_mut_seq_swap" -> bridge(fields("seq", "i", "j")) { args, _ ->
+                try {
+                    (args[0] as com.mezze.interpreter.values.MutableSeq)
+                        .swap((args[1] as Long).toInt(), (args[2] as Long).toInt())
+                    true
+                } catch (e: IndexOutOfBoundsException) {
+                    false
+                }
+            }
+
+            // --- MutMap ---
+            "__native_map_to_mut" -> bridge(fields("map")) { args, _ ->
+                com.mezze.interpreter.values.MutableMap.fromImmutable(
+                    args[0] as com.mezze.datastructures.map.MezzeMap<*, *>)
+            }
+            "__native_map_to_immut" -> bridge(fields("map")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableMap).toImmutable()
+            }
+            "__native_mut_map_with_capacity" -> bridge(fields("capacity")) { args, _ ->
+                com.mezze.interpreter.values.MutableMap.withCapacity((args[0] as Long).toInt())
+            }
+            "__native_mut_map_get" -> bridge(fields("map", "key")) { args, _ ->
+                val v = (args[0] as com.mezze.interpreter.values.MutableMap).get(args[1])
+                if (v == null) com.mezze.interpreter.values.MezzeVariant.none()
+                else com.mezze.interpreter.values.MezzeVariant.some(v)
+            }
+            "__native_mut_map_put" -> bridge(fields("map", "key", "value")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableMap).put(args[1], args[2])
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_map_remove" -> bridge(fields("map", "key")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableMap).remove(args[1])
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_map_contains" -> bridge(fields("map", "key")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableMap).containsKey(args[1])
+            }
+            "__native_mut_map_size" -> bridge(fields("map")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableMap).size().toLong()
+            }
+            "__native_mut_map_clear" -> bridge(fields("map")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableMap).clear()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_map_keys" -> bridge(fields("map")) { args, _ ->
+                com.mezze.datastructures.seq.MezzeSeq.fromArray(
+                    (args[0] as com.mezze.interpreter.values.MutableMap).keys())
+            }
+            "__native_mut_map_values" -> bridge(fields("map")) { args, _ ->
+                com.mezze.datastructures.seq.MezzeSeq.fromArray(
+                    (args[0] as com.mezze.interpreter.values.MutableMap).values())
+            }
+            "__native_mut_map_entries" -> bridge(fields("map")) { args, _ ->
+                com.mezze.datastructures.seq.MezzeSeq.fromArray(
+                    (args[0] as com.mezze.interpreter.values.MutableMap).entries())
+            }
+
+            // --- MutSet ---
+            "__native_set_to_mut" -> bridge(fields("set")) { args, _ ->
+                com.mezze.interpreter.values.MutableSet.fromImmutable(
+                    args[0] as com.mezze.datastructures.set.MezzeSet<*>)
+            }
+            "__native_set_to_immut" -> bridge(fields("set")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSet).toImmutable()
+            }
+            "__native_mut_set_with_capacity" -> bridge(fields("capacity")) { args, _ ->
+                com.mezze.interpreter.values.MutableSet.withCapacity((args[0] as Long).toInt())
+            }
+            "__native_mut_set_add" -> bridge(fields("set", "elem")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSet).add(args[1])
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_set_remove" -> bridge(fields("set", "elem")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSet).remove(args[1])
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_set_contains" -> bridge(fields("set", "elem")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSet).contains(args[1])
+            }
+            "__native_mut_set_size" -> bridge(fields("set")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSet).size().toLong()
+            }
+            "__native_mut_set_clear" -> bridge(fields("set")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSet).clear()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_set_elements" -> bridge(fields("set")) { args, _ ->
+                com.mezze.datastructures.seq.MezzeSeq.fromArray(
+                    (args[0] as com.mezze.interpreter.values.MutableSet).elements())
+            }
+            "__native_mut_set_toggle" -> bridge(fields("set", "elem")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableSet).toggle(args[1])
+            }
+
+            // --- MutBytes ---
+            // NOTE: __native_bytes_to_mut accepts multiple input shapes
+            // (byte[] / MezzeBytes / BytesNatives.MezzeBytes); kept on the
+            // NativeDispatch slow path so the polymorphic acceptance logic
+            // doesn't need to be duplicated here.
+            "__native_bytes_to_immut" -> bridge(fields("bytes")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBytes).toImmutable()
+            }
+            "__native_mut_bytes_get" -> bridge(fields("bytes", "i")) { args, _ ->
+                val v = (args[0] as com.mezze.interpreter.values.MutableBytes)
+                    .getSafe((args[1] as Long).toInt())
+                if (v == -1) com.mezze.interpreter.values.MezzeVariant.none()
+                else com.mezze.interpreter.values.MezzeVariant.some(v.toLong())
+            }
+            "__native_mut_bytes_set" -> bridge(fields("bytes", "i", "v")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBytes)
+                    .setSafe((args[1] as Long).toInt(), (args[2] as Long).toInt())
+            }
+            "__native_mut_bytes_len" -> bridge(fields("bytes")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBytes).length().toLong()
+            }
+            "__native_mut_bytes_fill" -> bridge(fields("bytes", "v")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBytes).fill((args[1] as Long).toByte())
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_bytes_fill_range" -> bridge(fields("bytes", "start", "end", "v")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBytes)
+                    .fillRange(
+                        (args[1] as Long).toInt(),
+                        (args[2] as Long).toInt(),
+                        (args[3] as Long).toByte())
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_bytes_slice" -> bridge(fields("bytes", "start", "end")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBytes)
+                    .slice((args[1] as Long).toInt(), (args[2] as Long).toInt())
+            }
+            "__native_mut_bytes_resize" -> bridge(fields("bytes", "size")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBytes).resize((args[1] as Long).toInt())
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_bytes_swap" -> bridge(fields("bytes", "i", "j")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBytes)
+                    .swap((args[1] as Long).toInt(), (args[2] as Long).toInt())
+            }
+            "__native_mut_bytes_reverse" -> bridge(fields("bytes")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBytes).reverse()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_bytes_clear" -> bridge(fields("bytes")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBytes).clear()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_bytes_copy" -> bridge(
+                fields("dest", "src", "src_offset", "dest_offset", "length")
+            ) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableBytes).copyFromMutable(
+                    args[1] as com.mezze.interpreter.values.MutableBytes,
+                    (args[2] as Long).toInt(),
+                    (args[3] as Long).toInt(),
+                    (args[4] as Long).toInt())
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+
+            // --- MutDeque ---
+            "__native_deque_to_mut" -> bridge(fields("deque")) { args, _ ->
+                com.mezze.interpreter.values.MutableDeque.fromImmutable(
+                    args[0] as com.mezze.datastructures.deque.MezzeDeque<*>)
+            }
+            "__native_deque_to_immut" -> bridge(fields("deque")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableDeque).toImmutable()
+            }
+            "__native_mut_deque_with_capacity" -> bridge(fields("capacity")) { args, _ ->
+                com.mezze.interpreter.values.MutableDeque.withCapacity((args[0] as Long).toInt())
+            }
+            "__native_mut_deque_push_front" -> bridge(fields("deque", "elem")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableDeque).pushFront(args[1])
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_deque_push_back" -> bridge(fields("deque", "elem")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableDeque).pushBack(args[1])
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_deque_pop_front" -> bridge(fields("deque")) { args, _ ->
+                val v = (args[0] as com.mezze.interpreter.values.MutableDeque).popFront()
+                if (v == null) com.mezze.interpreter.values.MezzeVariant.none()
+                else com.mezze.interpreter.values.MezzeVariant.some(v)
+            }
+            "__native_mut_deque_pop_back" -> bridge(fields("deque")) { args, _ ->
+                val v = (args[0] as com.mezze.interpreter.values.MutableDeque).popBack()
+                if (v == null) com.mezze.interpreter.values.MezzeVariant.none()
+                else com.mezze.interpreter.values.MezzeVariant.some(v)
+            }
+            "__native_mut_deque_peek_front" -> bridge(fields("deque")) { args, _ ->
+                val v = (args[0] as com.mezze.interpreter.values.MutableDeque).peekFront()
+                if (v == null) com.mezze.interpreter.values.MezzeVariant.none()
+                else com.mezze.interpreter.values.MezzeVariant.some(v)
+            }
+            "__native_mut_deque_peek_back" -> bridge(fields("deque")) { args, _ ->
+                val v = (args[0] as com.mezze.interpreter.values.MutableDeque).peekBack()
+                if (v == null) com.mezze.interpreter.values.MezzeVariant.none()
+                else com.mezze.interpreter.values.MezzeVariant.some(v)
+            }
+            "__native_mut_deque_size" -> bridge(fields("deque")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableDeque).size().toLong()
+            }
+            "__native_mut_deque_is_empty" -> bridge(fields("deque")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableDeque).isEmpty
+            }
+            "__native_mut_deque_clear" -> bridge(fields("deque")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableDeque).clear()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_deque_reverse" -> bridge(fields("deque")) { args, _ ->
+                (args[0] as com.mezze.interpreter.values.MutableDeque).reverse()
+                com.mezze.interpreter.values.MezzeRecord.empty()
+            }
+            "__native_mut_deque_to_seq" -> bridge(fields("deque")) { args, _ ->
+                com.mezze.datastructures.seq.MezzeSeq.fromArray(
+                    (args[0] as com.mezze.interpreter.values.MutableDeque).toArray())
             }
 
             else -> null
