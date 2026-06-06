@@ -1,57 +1,13 @@
 package com.mezze.language.typechecker.types.math
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.typechecker.types.*
 
-/**
- * Type signatures for random number generation functions
- *
- * Corresponds to stdlib file: std/math/random.mz
- *
- * Provides types for:
- * - Seeded random number generation (float, int, nat)
- * - Seed management functions
- */
 object MathRandomTypes {
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        registerSeededRandomFunctions(context)
-        registerSeedManagement(context)
-    }
-
-    private fun registerSeededRandomFunctions(context: MutableMap<String, MezzeType>) {
-        // Generate random float from seed
-        context["__native_seeded_random_float"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("seed" to MezzeType.IntType)),
-            MezzeType.FloatType
-        )
-
-        // Generate random int in range from seed
-        context["__native_seeded_random_int"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "seed" to MezzeType.IntType,
-                "min" to MezzeType.IntType,
-                "max" to MezzeType.IntType
-            )),
-            MezzeType.IntType
-        )
-
-        // Generate random nat up to max from seed
-        context["__native_seeded_random_nat"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "seed" to MezzeType.IntType,
-                "max" to MezzeType.NatType
-            )),
-            MezzeType.NatType
-        )
-    }
-
-    private fun registerSeedManagement(context: MutableMap<String, MezzeType>) {
-        // Update random seed
-        context["__native_update_seed"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "old_seed" to MezzeType.IntType,
-                "new_seed" to MezzeType.IntType
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        fn("__native_seeded_random_float") { param("seed" to int); returns(float) }
+        fn("__native_seeded_random_int") { param("seed" to int, "min" to int, "max" to int); returns(int) }
+        fn("__native_seeded_random_nat") { param("seed" to int, "max" to nat); returns(nat) }
+        fn("__native_update_seed") { param("old_seed" to int, "new_seed" to int); returns(unit) }
     }
 }

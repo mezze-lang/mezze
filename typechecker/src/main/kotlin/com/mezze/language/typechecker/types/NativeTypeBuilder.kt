@@ -20,6 +20,10 @@ import com.mezze.language.ast.TypeVar
  */
 class NativeTypeBuilder(private val context: MutableMap<String, MezzeType>) {
 
+    fun const(name: String, type: MezzeType) {
+        context[name] = type
+    }
+
     fun fn(name: String, build: FnScope.() -> Unit) {
         val scope = FnScope()
         scope.build()
