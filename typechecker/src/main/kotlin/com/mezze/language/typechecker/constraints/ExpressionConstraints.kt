@@ -1704,7 +1704,16 @@ class ExpressionConstraintGenerator {
             }
         }
 
-        // Store inherent method call resolution for the TypedAstBuilder
+        // Store inherent method call resolution for the TypedAstBuilder.
+        //
+        // #217: stash the impl's `it`-slot TyVar (post fresh-instantiation for
+        // imports) into typeArgs so mono can substitute the concrete receiver
+        // type when specializing the enclosing function. Mirror the #218
+        // ability-method plumbing — without it, every inherent-method call
+        // inside a generic body's TypedCall.instantiation ends up empty and
+        // the specializer can't enqueue this call's spec.
+        val inherentItType = (freshMethodType as? MezzeType.FunctionType)
+            ?.let { (it.paramType as? MezzeType.RecordType)?.fields?.get(Keywords.IT) }
         val inherentMethodCallInfo = if (methodInfo != null) {
             ConstraintResult.MethodCallInfo(
                 abilityName = null,  // Inherent methods have no ability
@@ -1716,7 +1725,8 @@ class ExpressionConstraintGenerator {
                 implStartLine = methodInfo.implStartLine,
                 implStartCol = methodInfo.implStartCol,
                 implSourceFile = methodInfo.implSourceFile,
-                methodFunctionType = freshMethodType
+                methodFunctionType = freshMethodType,
+                typeArgs = if (inherentItType != null) listOf(inherentItType) else emptyList()
             )
         } else null
 
