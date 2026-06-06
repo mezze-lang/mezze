@@ -65,32 +65,27 @@ class ExpressionConstraintGenerator {
     val nestedBindingTypes = mutableMapOf<String, MezzeType>()
 
     /**
-     * Unwrap a SuspendedType, returning the value type and accumulating effects.
-     * If the type is not a SuspendedType, returns it unchanged with empty effects.
-     */
-    private data class Unwrapped(
-        val type: MezzeType,
-        val effects: Set<String>,
-        val effectInstances: Set<MezzeType.EffectInstance>,
-        val performed: Boolean
-    )
-
-    private fun unwrapSuspended(type: MezzeType): Unwrapped = when (type) {
-        is MezzeType.SuspendedType -> Unwrapped(
-            type = type.valueType,
-            effects = type.effects.effects,
-            effectInstances = type.effects.effectInstances,
-            performed = type.effects.performed
-        )
-        else -> Unwrapped(type = type, effects = emptySet(), effectInstances = emptySet(), performed = false)
-    }
-
-    /**
      * Generate constraints for an expression.
      *
-     * This is the main entry point - exhaustive when on all ParsedExpr types.
+     * Guarantees: the returned ConstraintResult.type is NEVER a SuspendedType.
+     * Any effects wrapped in a SuspendedType are extracted into the result's
+     * effects/effectInstances/performed fields. Downstream code (constraint
+     * solver, unifier) never sees SuspendedType.
      */
     fun generate(expr: ParsedExpr, context: ConstraintContext): ConstraintResult {
+        val raw = generateImpl(expr, context)
+        return when (val t = raw.type) {
+            is MezzeType.SuspendedType -> raw.copy(
+                type = t.valueType,
+                effects = raw.effects + t.effects.effects,
+                effectInstances = raw.effectInstances + t.effects.effectInstances,
+                performed = raw.performed || t.effects.performed
+            )
+            else -> raw
+        }
+    }
+
+    private fun generateImpl(expr: ParsedExpr, context: ConstraintContext): ConstraintResult {
         return when (expr) {
             // Literals - simple types, no constraints
             is ParsedIntLit -> generateIntLiteral(expr, context)
@@ -275,11 +270,9 @@ class ExpressionConstraintGenerator {
                     referencedBindings.addAll(exprResult.referencedBindings)
                     methodCallResolutions.putAll(exprResult.methodCallResolutions)
                     callReturnTypes.putAll(exprResult.callReturnTypes)
-                    val interpUnwrapped = unwrapSuspended(exprResult.type)
-                    effects.addAll(interpUnwrapped.effects)
                     constraints.add(
                         Constraint.Equality(
-                            left = interpUnwrapped.type,
+                            left = exprResult.type,
                             right = MezzeType.StringType,
                             context = "String interpolation requires String type",
                             loc = expr.loc,
@@ -337,18 +330,10 @@ class ExpressionConstraintGenerator {
                     usedVars.addAll(result.usedVariables)
                     methodCallResolutions.putAll(result.methodCallResolutions)
                     callReturnTypes.putAll(result.callReturnTypes)
-                    // Unwrap SuspendedType from element types before unification —
-                    // effects are already extracted into `effects` above. Without
-                    // this, the seq's elementType TypeVar gets bound to a
-                    // SuspendedType wrapper that the runtime can't reduce.
-                    val elementValueType = when (val t = result.type) {
-                        is MezzeType.SuspendedType -> t.valueType
-                        else -> t
-                    }
-                    // Regular element must match element type
+                    // generate() guarantees no SuspendedType — effects are in result.effects
                     constraints.add(
                         Constraint.Equality(
-                            left = elementValueType,
+                            left = result.type,
                             right = elementType,
                             context = "Seq elements must have same type",
                             loc = element.expr.loc,
@@ -367,16 +352,9 @@ class ExpressionConstraintGenerator {
                     usedVars.addAll(result.usedVariables)
                     methodCallResolutions.putAll(result.methodCallResolutions)
                     callReturnTypes.putAll(result.callReturnTypes)
-                    // Unwrap SuspendedType from spread expr — same reason as
-                    // regular element above.
-                    val spreadValueType = when (val t = result.type) {
-                        is MezzeType.SuspendedType -> t.valueType
-                        else -> t
-                    }
-                    // Spread element must be a seq with matching element type
                     constraints.add(
                         Constraint.Equality(
-                            left = spreadValueType,
+                            left = result.type,
                             right = MezzeType.SeqType(elementType),
                             context = "Spread element must be a seq",
                             loc = element.expr.loc,
@@ -3548,11 +3526,8 @@ class ExpressionConstraintGenerator {
         val tailCallLocation = if (isSelfTailCall) expr.loc else null
 
         // PARTIAL APPLICATION DETECTION
-        // Unwrap SuspendedType from function and argument before checking shapes
-        val unwrappedFn = unwrapSuspended(functionResult.type)
-        val unwrappedArg = unwrapSuspended(argumentResult.type)
-        val functionType = unwrappedFn.type
-        val argumentType = unwrappedArg.type
+        val functionType = functionResult.type
+        val argumentType = argumentResult.type
 
         // PARTIAL APPLICATION: Check if this is partial application
         if (functionType is MezzeType.FunctionType && argumentType is MezzeType.RecordType) {
@@ -3785,7 +3760,7 @@ class ExpressionConstraintGenerator {
         // producing its own labelable result so that distinct error types
         // from different branches accumulate instead of collapsing.
         val returnType: MezzeType = run {
-            val ft = unwrapSuspended(functionResult.type).type
+            val ft = functionResult.type
             if (ft is MezzeType.FunctionType) {
                 val freeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(ft.returnType)
                 if (freeVars.isEmpty()) ft.returnType
@@ -3853,10 +3828,10 @@ class ExpressionConstraintGenerator {
         // EnvironmentEffectModuleTest::pub-let helper imported standalone.
         val funcTypeEffects: Set<String>
         val funcTypePerformed: Boolean
-        val unwrappedFnForEffects = unwrapSuspended(functionResult.type).type
-        if (unwrappedFnForEffects is MezzeType.FunctionType) {
-            funcTypeEffects = unwrappedFnForEffects.effects?.effects ?: emptySet()
-            funcTypePerformed = unwrappedFnForEffects.effects?.performed ?: false
+        if (functionResult.type is MezzeType.FunctionType) {
+            val fnType = functionResult.type as MezzeType.FunctionType
+            funcTypeEffects = fnType.effects?.effects ?: emptySet()
+            funcTypePerformed = fnType.effects?.performed ?: false
         } else {
             funcTypeEffects = emptySet()
             funcTypePerformed = false
@@ -3871,8 +3846,8 @@ class ExpressionConstraintGenerator {
 
         // CRITICAL: If the function type has ability constraints (like `with Show 'b`),
         // generate AbilityRequired constraints for them.
-        if (unwrappedFnForEffects is MezzeType.FunctionType) {
-            val funcType = unwrappedFnForEffects
+        if (functionResult.type is MezzeType.FunctionType) {
+            val funcType = functionResult.type as MezzeType.FunctionType
             if (funcType.abilityConstraints.isNotEmpty()) {
                 val methodLevelConstraints = funcType.abilityConstraints.mapNotNull { constraint ->
                     // Extract the type variable from typeArgs (first VarType is the constrained type)
@@ -4169,16 +4144,8 @@ class ExpressionConstraintGenerator {
             }
 
             // Unwrap SuspendedType from the case body's result. Effects from
-            // the body are already extracted into `effects` (above), so we
-            // only need the inner value type for arm-shape unification.
-            // Without this, the fresh `resultType` TypeVar gets bound to a
-            // SuspendedType wrapper which downstream `perform` discharges
-            // can't peel — even after all effects are handled.
-            val caseBodyValueType = when (val t = caseBodyResult.type) {
-                is MezzeType.SuspendedType -> t.valueType
-                else -> t
-            }
-            caseResultTypes.add(caseBodyValueType)
+            // generate() guarantees no SuspendedType — effects are in caseBodyResult.effects
+            caseResultTypes.add(caseBodyResult.type)
         }
 
         // Step 4: All case bodies must have the same type
@@ -4296,14 +4263,11 @@ class ExpressionConstraintGenerator {
                     val exprResult = generate(stmt.value, exprContext)
 
                     // RECURSIVE LET: unify pre-bind type with inferred lambda type
-                    // Use unwrapped type since effects are tracked separately
                     if (preBindType != null && annotatedType == null) {
-                        val preBindExprType = if (exprResult.type is MezzeType.SuspendedType)
-                            (exprResult.type as MezzeType.SuspendedType).valueType else exprResult.type
                         constraints.add(
                             Constraint.Equality(
                                 left = preBindType,
-                                right = preBindExprType,
+                                right = exprResult.type,
                                 context = "Recursive let binding in do block",
                                 loc = stmt.value.loc
                             )
@@ -4322,15 +4286,9 @@ class ExpressionConstraintGenerator {
                     methodCallResolutions.putAll(exprResult.methodCallResolutions)
                     callReturnTypes.putAll(exprResult.callReturnTypes)
 
-                    // Unwrap SuspendedType for let bindings in do blocks.
-                    // Effects are tracked separately; the binding gets the value type.
-                    val unwrappedExpr = unwrapSuspended(exprResult.type)
-                    effects.addAll(unwrappedExpr.effects)
-                    effectInstances.addAll(unwrappedExpr.effectInstances)
-                    performed = performed || unwrappedExpr.performed
-                    val bindingType = unwrappedExpr.type
+                    // generate() already unwrapped SuspendedType — use type directly
+                    val bindingType = exprResult.type
 
-                    // If there's a type annotation, constrain against the unwrapped type
                     if (annotatedType != null) {
                         constraints.add(
                             Constraint.Equality(
@@ -4706,8 +4664,7 @@ class ExpressionConstraintGenerator {
         // This implements cross-module type inference for continuation-based effect handlers.
 
         val continuationConstraints = mutableListOf<Constraint>()
-        val unwrappedPerformBody = unwrapSuspended(exprResult.type)
-        var performResultType: MezzeType = unwrappedPerformBody.type
+        var performResultType: MezzeType = exprResult.type
 
         for (handler in expr.handlers) {
             // Look up the performer's type info
@@ -4720,7 +4677,7 @@ class ExpressionConstraintGenerator {
                 val performerFields = performerInfo.performerFields
                 if (performerFields is MezzeType.RecordType) {
                     val actualParamsResult = generate(handlerParams, context)
-                    val actualParamsType = unwrapSuspended(actualParamsResult.type).type
+                    val actualParamsType = actualParamsResult.type
 
                     continuationConstraints.add(
                         Constraint.Equality(
