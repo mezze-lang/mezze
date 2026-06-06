@@ -71,8 +71,8 @@ object AliasStripper {
         is MezzeType.FunctionType -> MezzeType.FunctionType(
             paramType = stripImpl(type.paramType, inScope, typeDecls, recursionGuard),
             returnType = stripImpl(type.returnType, inScope, typeDecls, recursionGuard),
-            effects = type.effects,
-            abilityConstraints = type.abilityConstraints
+            effects = type.effects?.let { stripEffectRow(it, inScope, typeDecls, recursionGuard) },
+            abilityConstraints = stripAbilityConstraints(type.abilityConstraints, inScope, typeDecls, recursionGuard)
         )
         is MezzeType.SeqType -> MezzeType.SeqType(stripImpl(type.elementType, inScope, typeDecls, recursionGuard))
         is MezzeType.MapType -> MezzeType.MapType(
@@ -88,7 +88,7 @@ object AliasStripper {
         )
         is MezzeType.SuspendedType -> MezzeType.SuspendedType(
             valueType = stripImpl(type.valueType, inScope, typeDecls, recursionGuard),
-            effects = type.effects
+            effects = stripEffectRow(type.effects, inScope, typeDecls, recursionGuard)
         )
         // Leaves: nothing to strip
         else -> type
@@ -166,6 +166,42 @@ object AliasStripper {
             type.copy(constructors = newCtors)
         } else {
             type.copy(constructors = newCtors, typeName = null, typeHash = null)
+        }
+    }
+
+    private fun stripEffectRow(
+        effectRow: MezzeType.EffectRow,
+        inScope: Set<String>,
+        typeDecls: Map<String, ParsedTypeDecl>,
+        recursionGuard: MutableSet<String>
+    ): MezzeType.EffectRow {
+        if (effectRow.effectInstances.isEmpty()) return effectRow
+        val strippedInstances = effectRow.effectInstances.map { instance ->
+            if (instance.associatedTypes.isEmpty()) instance
+            else MezzeType.EffectInstance(
+                name = instance.name,
+                associatedTypes = instance.associatedTypes.mapValues { (_, ty) ->
+                    stripImpl(ty, inScope, typeDecls, recursionGuard)
+                }
+            )
+        }.toSet()
+        return effectRow.copy(effectInstances = strippedInstances)
+    }
+
+    private fun stripAbilityConstraints(
+        constraints: List<MezzeType.FunctionAbilityConstraint>,
+        inScope: Set<String>,
+        typeDecls: Map<String, ParsedTypeDecl>,
+        recursionGuard: MutableSet<String>
+    ): List<MezzeType.FunctionAbilityConstraint> {
+        if (constraints.isEmpty()) return constraints
+        return constraints.map { constraint ->
+            val strippedArgs = constraint.typeArgs.map { stripImpl(it, inScope, typeDecls, recursionGuard) }
+            val strippedBindings = constraint.associatedTypeBindings.mapValues { (_, ty) ->
+                stripImpl(ty, inScope, typeDecls, recursionGuard)
+            }
+            if (strippedArgs === constraint.typeArgs && strippedBindings === constraint.associatedTypeBindings) constraint
+            else constraint.copy(typeArgs = strippedArgs, associatedTypeBindings = strippedBindings)
         }
     }
 
