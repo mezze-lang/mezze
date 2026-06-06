@@ -751,8 +751,8 @@ class TypeValidator(
                 // Get constructors from the type declaration
                 val aliasConstructors = definition.constructors.map { it.name }.toSet()
 
-                // Check if ALL variant constructors are present in the type declaration
-                if (aliasConstructors.containsAll(variantConstructors.keys)) {
+                // Check if the variant's constructors exactly match the declaration's constructors
+                if (aliasConstructors == variantConstructors.keys) {
                     // If the type has type parameters, we need to infer them from the payload types
                     if (typeDecl.typeParams.isNotEmpty()) {
                         val inferredTypeArgs = inferTypeArgsFromVariant(variantType, typeDecl, definition)
