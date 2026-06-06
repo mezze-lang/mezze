@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.solving
 import com.mezze.language.ast.*
 import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
+import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.util.StringDistance
@@ -78,9 +79,9 @@ sealed class UnificationResult {
  * Finds a substitution that makes the two types equal.
  * Returns Success with substitution, or Failure with error message.
  *
- * @param typeDeclarations Map of type declarations for expanding type applications
+ * @param registry Declaration registry for expanding type applications
  */
-fun unify(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
+fun unify(type1: MezzeType, type2: MezzeType, registry: DeclarationRegistry = DeclarationRegistry.EMPTY): UnificationResult {
     // Shortcut: if types are identical, no substitution needed
     if (type1 == type2) {
         return UnificationResult.Success(Substitution.empty)
@@ -88,8 +89,8 @@ fun unify(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, com.
 
     // Check memoization cache
     // Note: The cache is cleared between type-checking invocations (in TypeChecker.typeCheck()),
-    // and typeDeclarations is constant within a single invocation, so we can safely cache
-    // results regardless of whether typeDeclarations is empty.
+    // and the registry is constant within a single invocation, so we can safely cache
+    // results regardless of whether the registry is empty.
     val cacheKey = Pair(type1, type2)
     val cachedResult = unificationCache.get()[cacheKey]
     if (cachedResult != null) {
@@ -97,15 +98,23 @@ fun unify(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, com.
     }
 
     // Perform unification and cache the result
-    val result = unifyImpl(type1, type2, typeDeclarations)
+    val result = unifyImpl(type1, type2, registry)
     unificationCache.get()[cacheKey] = result
     return result
 }
 
 /**
+ * Backward-compatible overload: wraps a plain type-declarations map into a
+ * [DeclarationRegistry] and delegates.
+ */
+fun unify(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>): UnificationResult {
+    return unify(type1, type2, DeclarationRegistry.from(typeDeclarations, emptyMap(), emptyMap()))
+}
+
+/**
  * Internal implementation of unification (without caching).
  */
-private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>): UnificationResult {
+private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationRegistry): UnificationResult {
     // SPECIAL CASE: Bool primitive unifies with Bool variant
     // BoolType (primitive) can unify with VariantType([True, False])
     // This allows pattern matching on True/False while keeping Bool as a primitive
@@ -124,9 +133,9 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
     // Handle cross-type unification: VariantType with TypeApplication
     when {
         type1 is MezzeType.VariantType && type2 is MezzeType.TypeApplication -> {
-            val expanded = expandTypeApplicationToVariant(type2, typeDeclarations)
+            val expanded = expandTypeApplicationToVariant(type2, registry)
             return if (expanded != null) {
-                unify(type1, expanded, typeDeclarations)
+                unify(type1, expanded, registry)
             } else {
                 // Can't expand - fall through to error
                 UnificationResult.Failure(
@@ -137,9 +146,9 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
             }
         }
         type1 is MezzeType.TypeApplication && type2 is MezzeType.VariantType -> {
-            val expanded = expandTypeApplicationToVariant(type1, typeDeclarations)
+            val expanded = expandTypeApplicationToVariant(type1, registry)
             return if (expanded != null) {
-                unify(expanded, type2, typeDeclarations)
+                unify(expanded, type2, registry)
             } else {
                 // Can't expand - fall through to error
                 UnificationResult.Failure(
@@ -152,14 +161,14 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         // Handle cross-type unification: RecordType with TypeApplication
         type1 is MezzeType.RecordType && type2 is MezzeType.TypeApplication -> {
             // Use principled expansion based on definition type
-            when (val expansion = expandTypeApplication(type2, typeDeclarations)) {
+            when (val expansion = expandTypeApplication(type2, registry)) {
                 is TypeExpansionResult.Record -> {
-                    return unify(type1, expansion.recordType, typeDeclarations)
+                    return unify(type1, expansion.recordType, registry)
                 }
                 is TypeExpansionResult.Newtype -> {
                     // Newtype pattern: {age: Int} unifies with User (| User { name: String, age: Int } |)
                     if (expansion.payloadType != null && expansion.variantType.rowVar == null) {
-                        return unify(type1, expansion.payloadType, typeDeclarations)
+                        return unify(type1, expansion.payloadType, registry)
                     }
                 }
                 is TypeExpansionResult.Variant, is TypeExpansionResult.NotFound -> {
@@ -174,14 +183,14 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         }
         type1 is MezzeType.TypeApplication && type2 is MezzeType.RecordType -> {
             // Use principled expansion based on definition type
-            when (val expansion = expandTypeApplication(type1, typeDeclarations)) {
+            when (val expansion = expandTypeApplication(type1, registry)) {
                 is TypeExpansionResult.Record -> {
-                    return unify(expansion.recordType, type2, typeDeclarations)
+                    return unify(expansion.recordType, type2, registry)
                 }
                 is TypeExpansionResult.Newtype -> {
                     // Newtype pattern
                     if (expansion.payloadType != null && expansion.variantType.rowVar == null) {
-                        return unify(expansion.payloadType, type2, typeDeclarations)
+                        return unify(expansion.payloadType, type2, registry)
                     }
                 }
                 is TypeExpansionResult.Variant, is TypeExpansionResult.NotFound -> {
@@ -200,10 +209,10 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         type1 is MezzeType.RecordType && type2 is MezzeType.VariantType -> {
             // Single-constructor variant unwrap: only if the variant is NOT nominal
             if (type2.constructors.size == 1 && type2.rowVar == null &&
-                !type2.nominalWall && !isVariantNameInScope(type2, typeDeclarations)) {
+                !type2.nominalWall && !isVariantNameInScope(type2, registry)) {
                 val (_, payloadType) = type2.constructors.entries.first()
                 if (payloadType != null) {
-                    return unify(type1, payloadType, typeDeclarations)
+                    return unify(type1, payloadType, registry)
                 }
             }
             return UnificationResult.Failure(
@@ -215,10 +224,10 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         type1 is MezzeType.VariantType && type2 is MezzeType.RecordType -> {
             // Single-constructor variant unwrap: only if the variant is NOT nominal
             if (type1.constructors.size == 1 && type1.rowVar == null &&
-                !type1.nominalWall && !isVariantNameInScope(type1, typeDeclarations)) {
+                !type1.nominalWall && !isVariantNameInScope(type1, registry)) {
                 val (_, payloadType) = type1.constructors.entries.first()
                 if (payloadType != null) {
-                    return unify(payloadType, type2, typeDeclarations)
+                    return unify(payloadType, type2, registry)
                 }
             }
             return UnificationResult.Failure(
@@ -248,7 +257,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
                     type2 = type2
                 )
             }
-            unify(type1.valueType, type2, typeDeclarations)
+            unify(type1.valueType, type2, registry)
         }
         type1 !is MezzeType.SuspendedType && type2 is MezzeType.SuspendedType -> {
             val hasConcreteEffects = type2.effects.effects.isNotEmpty() || type2.effects.effectInstances.isNotEmpty()
@@ -260,66 +269,66 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
                     type2 = type2
                 )
             }
-            unify(type1, type2.valueType, typeDeclarations)
+            unify(type1, type2.valueType, registry)
         }
 
         // CASE 3: Function type unification
         type1 is MezzeType.FunctionType && type2 is MezzeType.FunctionType ->
-            unifyFunctions(type1, type2, typeDeclarations)
+            unifyFunctions(type1, type2, registry)
 
         // CASE 4: Record type unification
         type1 is MezzeType.RecordType && type2 is MezzeType.RecordType ->
-            unifyRecords(type1, type2, typeDeclarations)
+            unifyRecords(type1, type2, registry)
 
         // CASE 5: Variant type unification
         type1 is MezzeType.VariantType && type2 is MezzeType.VariantType ->
-            unifyVariants(type1, type2, typeDeclarations)
+            unifyVariants(type1, type2, registry)
 
         // CASE 6: Type application unification
         type1 is MezzeType.TypeApplication && type2 is MezzeType.TypeApplication ->
-            unifyTypeApplications(type1, type2, typeDeclarations)
+            unifyTypeApplications(type1, type2, registry)
 
         // CASE 7: Seq type unification
         type1 is MezzeType.SeqType && type2 is MezzeType.SeqType ->
-            unify(type1.elementType, type2.elementType, typeDeclarations)
+            unify(type1.elementType, type2.elementType, registry)
 
         // CASE 7a: Cross-unification between SeqType and TypeApplication(Seq, ...)
         // Uses BuiltinTypes.SEQ constant instead of hardcoded "Seq" string
         type1 is MezzeType.SeqType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SEQ) && type2.args.size == 1 ->
-            unify(type1.elementType, type2.args[0], typeDeclarations)
+            unify(type1.elementType, type2.args[0], registry)
         type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SEQ) && type1.args.size == 1 && type2 is MezzeType.SeqType ->
-            unify(type1.args[0], type2.elementType, typeDeclarations)
+            unify(type1.args[0], type2.elementType, registry)
 
         // CASE 8: List type unification
         type1 is MezzeType.ListType && type2 is MezzeType.ListType ->
-            unify(type1.elementType, type2.elementType, typeDeclarations)
+            unify(type1.elementType, type2.elementType, registry)
 
         // CASE 8a: Cross-unification between ListType and TypeApplication(List, ...)
         type1 is MezzeType.ListType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.LIST) && type2.args.size == 1 ->
-            unify(type1.elementType, type2.args[0], typeDeclarations)
+            unify(type1.elementType, type2.args[0], registry)
         type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.LIST) && type1.args.size == 1 && type2 is MezzeType.ListType ->
-            unify(type1.args[0], type2.elementType, typeDeclarations)
+            unify(type1.args[0], type2.elementType, registry)
 
         // CASE 9: Set type unification
         type1 is MezzeType.SetType && type2 is MezzeType.SetType ->
-            unify(type1.elementType, type2.elementType, typeDeclarations)
+            unify(type1.elementType, type2.elementType, registry)
 
         // CASE 9a: Cross-unification between SetType and TypeApplication(Set, ...)
         type1 is MezzeType.SetType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SET) && type2.args.size == 1 ->
-            unify(type1.elementType, type2.args[0], typeDeclarations)
+            unify(type1.elementType, type2.args[0], registry)
         type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SET) && type1.args.size == 1 && type2 is MezzeType.SetType ->
-            unify(type1.args[0], type2.elementType, typeDeclarations)
+            unify(type1.args[0], type2.elementType, registry)
 
         // CASE 9b: SortedMap type unification
         type1 is MezzeType.SortedMapType && type2 is MezzeType.SortedMapType ->
-            unifySortedMaps(type1, type2, typeDeclarations)
+            unifySortedMaps(type1, type2, registry)
 
         // CASE 9c: Cross-unification between SortedMapType and TypeApplication(SortedMap, ...)
         type1 is MezzeType.SortedMapType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SORTED_MAP) && type2.args.size == 2 -> {
-            val keyResult = unify(type1.keyType, type2.args[0], typeDeclarations)
+            val keyResult = unify(type1.keyType, type2.args[0], registry)
             when (keyResult) {
                 is UnificationResult.Success -> {
-                    val valueResult = unify(keyResult.substitution.apply(type1.valueType), keyResult.substitution.apply(type2.args[1]), typeDeclarations)
+                    val valueResult = unify(keyResult.substitution.apply(type1.valueType), keyResult.substitution.apply(type2.args[1]), registry)
                     when (valueResult) {
                         is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
                         is UnificationResult.Failure -> valueResult
@@ -329,10 +338,10 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
             }
         }
         type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SORTED_MAP) && type1.args.size == 2 && type2 is MezzeType.SortedMapType -> {
-            val keyResult = unify(type1.args[0], type2.keyType, typeDeclarations)
+            val keyResult = unify(type1.args[0], type2.keyType, registry)
             when (keyResult) {
                 is UnificationResult.Success -> {
-                    val valueResult = unify(keyResult.substitution.apply(type1.args[1]), keyResult.substitution.apply(type2.valueType), typeDeclarations)
+                    val valueResult = unify(keyResult.substitution.apply(type1.args[1]), keyResult.substitution.apply(type2.valueType), registry)
                     when (valueResult) {
                         is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
                         is UnificationResult.Failure -> valueResult
@@ -344,24 +353,24 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
 
         // CASE 9d: SortedSet type unification
         type1 is MezzeType.SortedSetType && type2 is MezzeType.SortedSetType ->
-            unify(type1.elementType, type2.elementType, typeDeclarations)
+            unify(type1.elementType, type2.elementType, registry)
 
         // CASE 9e: Cross-unification between SortedSetType and TypeApplication(SortedSet, ...)
         type1 is MezzeType.SortedSetType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SORTED_SET) && type2.args.size == 1 ->
-            unify(type1.elementType, type2.args[0], typeDeclarations)
+            unify(type1.elementType, type2.args[0], registry)
         type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SORTED_SET) && type1.args.size == 1 && type2 is MezzeType.SortedSetType ->
-            unify(type1.args[0], type2.elementType, typeDeclarations)
+            unify(type1.args[0], type2.elementType, registry)
 
         // CASE 10: Map type unification
         type1 is MezzeType.MapType && type2 is MezzeType.MapType ->
-            unifyMaps(type1, type2, typeDeclarations)
+            unifyMaps(type1, type2, registry)
 
         // CASE 10a: Cross-unification between MapType and TypeApplication(Map, ...)
         type1 is MezzeType.MapType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.MAP) && type2.args.size == 2 -> {
-            val keyResult = unify(type1.keyType, type2.args[0], typeDeclarations)
+            val keyResult = unify(type1.keyType, type2.args[0], registry)
             when (keyResult) {
                 is UnificationResult.Success -> {
-                    val valueResult = unify(keyResult.substitution.apply(type1.valueType), keyResult.substitution.apply(type2.args[1]), typeDeclarations)
+                    val valueResult = unify(keyResult.substitution.apply(type1.valueType), keyResult.substitution.apply(type2.args[1]), registry)
                     when (valueResult) {
                         is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
                         is UnificationResult.Failure -> valueResult
@@ -371,10 +380,10 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
             }
         }
         type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.MAP) && type1.args.size == 2 && type2 is MezzeType.MapType -> {
-            val keyResult = unify(type1.args[0], type2.keyType, typeDeclarations)
+            val keyResult = unify(type1.args[0], type2.keyType, registry)
             when (keyResult) {
                 is UnificationResult.Success -> {
-                    val valueResult = unify(keyResult.substitution.apply(type1.args[1]), keyResult.substitution.apply(type2.valueType), typeDeclarations)
+                    val valueResult = unify(keyResult.substitution.apply(type1.args[1]), keyResult.substitution.apply(type2.valueType), registry)
                     when (valueResult) {
                         is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
                         is UnificationResult.Failure -> valueResult
@@ -386,7 +395,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
 
         // CASE 11: Suspended type unification (both suspended)
         type1 is MezzeType.SuspendedType && type2 is MezzeType.SuspendedType ->
-            unifySuspended(type1, type2, typeDeclarations)
+            unifySuspended(type1, type2, registry)
 
         // CASE 12: Effect row unification
         type1 is MezzeType.EffectRow && type2 is MezzeType.EffectRow ->
@@ -404,7 +413,7 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         // CASE 14: Newtype unification — same name = same type, unify wrapped types
         type1 is MezzeType.NewtypeType && type2 is MezzeType.NewtypeType -> {
             if (type1.name == type2.name) {
-                unify(type1.wrappedType, type2.wrappedType, typeDeclarations)
+                unify(type1.wrappedType, type2.wrappedType, registry)
             } else {
                 UnificationResult.Failure(
                     message = "Type mismatch: ${type1.name} is not the same type as ${type2.name}",
@@ -509,9 +518,9 @@ private fun unifyVar(typeVar: TypeVar, type: MezzeType): UnificationResult {
 /**
  * Unify two function types.
  */
-private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
+private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionType, registry: DeclarationRegistry): UnificationResult {
     // Unify parameter types
-    val paramResult = unify(fn1.paramType, fn2.paramType, typeDeclarations)
+    val paramResult = unify(fn1.paramType, fn2.paramType, registry)
     if (paramResult is UnificationResult.Failure) {
         return paramResult
     }
@@ -520,7 +529,7 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
     // Apply parameter substitution and unify return types
     val return1 = paramSubst.apply(fn1.returnType)
     val return2 = paramSubst.apply(fn2.returnType)
-    val returnResult = unify(return1, return2, typeDeclarations)
+    val returnResult = unify(return1, return2, registry)
     if (returnResult is UnificationResult.Failure) {
         return returnResult
     }
@@ -613,7 +622,7 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
  * Examples:
  * - multiply {x, y} -> x * y  with  multiply {y = 5}  gives  {x} -> x * 5
  */
-private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
+private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType, registry: DeclarationRegistry): UnificationResult {
     val fields1 = rec1.fields.keys
     val fields2 = rec2.fields.keys
 
@@ -634,7 +643,7 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
                     val appliedType1 = substitution.apply(fieldType1)
                     val appliedType2 = substitution.apply(fieldType2)
 
-                    val fieldResult = unify(appliedType1, appliedType2, typeDeclarations)
+                    val fieldResult = unify(appliedType1, appliedType2, registry)
                     if (fieldResult is UnificationResult.Failure) {
                         return UnificationResult.Failure(
                             // type2 is the "expected" side (callee's param shape)
@@ -690,7 +699,7 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
         val fieldType1 = substitution.apply(rec1.fields[fieldName]!!)
         val fieldType2 = substitution.apply(rec2.fields[fieldName]!!)
 
-        val fieldResult = unify(fieldType1, fieldType2, typeDeclarations)
+        val fieldResult = unify(fieldType1, fieldType2, registry)
         if (fieldResult is UnificationResult.Failure) {
             return UnificationResult.Failure(
                 message = formatFieldMismatch(fieldName, fieldType2, fieldType1, fieldResult.message),
@@ -710,7 +719,7 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
  * Variant alias scope check (#148).
  *
  * An alias name is "in scope" at the current unification site if it appears in
- * the caller's `typeDeclarations` map — which contains locally-declared types
+ * the caller's `registry` map — which contains locally-declared types
  * plus those explicitly imported by name (`use foo::{Alias}`).
  *
  * Anonymous variants (typeName = null OR placeholders like "<inline>" /
@@ -734,18 +743,18 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
  *
  * Uses the thread-local in-scope set established by the caller via
  * [withInScopeAliasNames]. Falls back to a conservative "everything in
- * typeDeclarations is in scope" if no override is active (preserves
+ * registry is in scope" if no override is active (preserves
  * pre-#148 behavior at call sites that haven't been migrated).
  */
 private fun isVariantNameInScope(
     v: MezzeType.VariantType,
-    typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>
+    registry: DeclarationRegistry
 ): Boolean {
     if (v.nominalWall) return true
     val name = v.typeName ?: return false
     val override = inScopeAliasNamesOverride.get()
     return if (override != null) override.contains(name)
-           else typeDeclarations.containsKey(name)
+           else registry.typeNames.contains(name)
 }
 
 /**
@@ -754,9 +763,9 @@ private fun isVariantNameInScope(
  * When the top-level constraint solver knows the narrower in-scope set
  * (local declarations + explicit `use` imports), it sets this before calling
  * unify, restoring afterward. While set, [isVariantNameInScope] uses it
- * instead of the full typeDeclarations map.
+ * instead of the full registry map.
  *
- * Null means "no override; conservative fallback to typeDeclarations.keys."
+ * Null means "no override; conservative fallback to registry.keys."
  */
 private val inScopeAliasNamesOverride: ThreadLocal<Set<String>?> = ThreadLocal.withInitial { null }
 
@@ -784,7 +793,7 @@ fun inScopeAliasNamesForSolverOrNull(): Set<String>? = inScopeAliasNamesOverride
 /**
  * Unify two variant types.
  */
-internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
+internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantType, registry: DeclarationRegistry): UnificationResult {
     val constructors1 = var1.constructors.keys
     val constructors2 = var2.constructors.keys
 
@@ -802,7 +811,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
                 val appliedType1 = substitution.apply(dataType1)
                 val appliedType2 = substitution.apply(dataType2)
 
-                val constructorResult = unify(appliedType1, appliedType2, typeDeclarations)
+                val constructorResult = unify(appliedType1, appliedType2, registry)
                 if (constructorResult is UnificationResult.Failure) {
                     return UnificationResult.Failure(
                         message = "Constructor '$constructorName' type mismatch: ${constructorResult.message}",
@@ -841,7 +850,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         // constructors in the open variant exist in the closed variant. This is what
         // prevents `Yellow` from unifying with `Color = | Red, Green, Blue |` when
         // Color is declared/imported here.
-        if (isVariantNameInScope(closedVar, typeDeclarations)) {
+        if (isVariantNameInScope(closedVar, registry)) {
             val invalidConstructors = openCtors - closedCtors
             if (invalidConstructors.isNotEmpty()) {
                 val available = closedCtors.sorted().joinToString(", ")
@@ -874,7 +883,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
                 val appliedType1 = substitution.apply(dataType1)
                 val appliedType2 = substitution.apply(dataType2)
 
-                val constructorResult = unify(appliedType1, appliedType2, typeDeclarations)
+                val constructorResult = unify(appliedType1, appliedType2, registry)
                 if (constructorResult is UnificationResult.Failure) {
                     return UnificationResult.Failure(
                         message = "Constructor '$constructorName' type mismatch: ${constructorResult.message}",
@@ -916,8 +925,8 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
         var1.typeName == var2.typeName
     }
     if (bothNamed && !namesMatch) {
-        val var1NameInScope = isVariantNameInScope(var1, typeDeclarations)
-        val var2NameInScope = isVariantNameInScope(var2, typeDeclarations)
+        val var1NameInScope = isVariantNameInScope(var1, registry)
+        val var2NameInScope = isVariantNameInScope(var2, registry)
         if (var1NameInScope || var2NameInScope) {
             // #149: when both walls happen to constrain to the SAME arm set,
             // unify successfully (their nominal identities are interchangeable
@@ -954,7 +963,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
 
     if (declaredVar != null && anonymousVar != null) {
         val invalidConstructors = anonymousVar.constructors.keys - declaredVar.constructors.keys
-        if (invalidConstructors.isNotEmpty() && isVariantNameInScope(declaredVar, typeDeclarations)) {
+        if (invalidConstructors.isNotEmpty() && isVariantNameInScope(declaredVar, registry)) {
             val available = declaredVar.constructors.keys.sorted().joinToString(", ")
             val invalid = invalidConstructors.sorted().joinToString(", ")
             // Use friendly message for inline annotations and inferred variants
@@ -994,7 +1003,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
                 val appliedType1 = substitution.apply(dataType1)
                 val appliedType2 = substitution.apply(dataType2)
 
-                val constructorResult = unify(appliedType1, appliedType2, typeDeclarations)
+                val constructorResult = unify(appliedType1, appliedType2, registry)
                 if (constructorResult is UnificationResult.Failure) {
                     return UnificationResult.Failure(
                         message = "Constructor '$constructorName' type mismatch: ${constructorResult.message}",
@@ -1016,7 +1025,7 @@ internal fun unifyVariants(var1: MezzeType.VariantType, var2: MezzeType.VariantT
 /**
  * Unify two type applications.
  */
-private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeType.TypeApplication, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
+private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeType.TypeApplication, registry: DeclarationRegistry): UnificationResult {
     // Type constructors must match — check by hash first (stable across renames/aliases),
     // then by name, then fall back to open variant expansion.
     val constructorsMatch = app1.constructor == app2.constructor ||
@@ -1024,18 +1033,18 @@ private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeTy
 
     if (!constructorsMatch) {
         // Try to expand both sides into their underlying variant shape. Expansion
-        // consults the in-scope typeDeclarations map first, then falls back to a
+        // consults the in-scope registry map first, then falls back to a
         // global ModuleResolver lookup — so it succeeds for aliases that exist in
         // some loaded module even if the user didn't `use` them by name.
-        val expanded1 = expandTypeApplicationToVariant(app1, typeDeclarations)
-        val expanded2 = expandTypeApplicationToVariant(app2, typeDeclarations)
+        val expanded1 = expandTypeApplicationToVariant(app1, registry)
+        val expanded2 = expandTypeApplicationToVariant(app2, registry)
 
         if (expanded1 != null && expanded2 != null) {
             // OPEN VARIANT HANDLING (existing): if either side carries a row var,
             // structural unification proceeds — this is how anonymous variants
             // merge during inference.
             if (expanded1.rowVar != null || expanded2.rowVar != null) {
-                return unifyVariants(expanded1, expanded2, typeDeclarations)
+                return unifyVariants(expanded1, expanded2, registry)
             }
 
             // STRUCTURAL ALIAS HANDLING (#148): two distinct closed aliases. An
@@ -1051,11 +1060,11 @@ private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeTy
             // module C (also unimported) succeeds iff arm names compose.
             val override = inScopeAliasNamesOverride.get()
             val app1InScope = if (override != null) override.contains(app1.constructor)
-                              else typeDeclarations.containsKey(app1.constructor)
+                              else registry.typeNames.contains(app1.constructor)
             val app2InScope = if (override != null) override.contains(app2.constructor)
-                              else typeDeclarations.containsKey(app2.constructor)
+                              else registry.typeNames.contains(app2.constructor)
             if (!app1InScope && !app2InScope) {
-                return unifyVariants(expanded1, expanded2, typeDeclarations)
+                return unifyVariants(expanded1, expanded2, registry)
             }
             // Exactly one or both in scope — the in-scope alias's identity wins.
             // Fall through to the existing failure path.
@@ -1083,7 +1092,7 @@ private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeTy
         val arg1 = substitution.apply(app1.args[i])
         val arg2 = substitution.apply(app2.args[i])
 
-        val argResult = unify(arg1, arg2, typeDeclarations)
+        val argResult = unify(arg1, arg2, registry)
         if (argResult is UnificationResult.Failure) {
             return UnificationResult.Failure(
                 message = "Type argument $i mismatch: ${argResult.message}",
@@ -1102,9 +1111,9 @@ private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeTy
 /**
  * Unify two map types.
  */
-private fun unifyMaps(map1: MezzeType.MapType, map2: MezzeType.MapType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
+private fun unifyMaps(map1: MezzeType.MapType, map2: MezzeType.MapType, registry: DeclarationRegistry): UnificationResult {
     // Unify key types
-    val keyResult = unify(map1.keyType, map2.keyType, typeDeclarations)
+    val keyResult = unify(map1.keyType, map2.keyType, registry)
     if (keyResult is UnificationResult.Failure) {
         return keyResult
     }
@@ -1113,7 +1122,7 @@ private fun unifyMaps(map1: MezzeType.MapType, map2: MezzeType.MapType, typeDecl
     // Apply key substitution and unify value types
     val value1 = keySubst.apply(map1.valueType)
     val value2 = keySubst.apply(map2.valueType)
-    val valueResult = unify(value1, value2, typeDeclarations)
+    val valueResult = unify(value1, value2, registry)
     if (valueResult is UnificationResult.Failure) {
         return valueResult
     }
@@ -1125,9 +1134,9 @@ private fun unifyMaps(map1: MezzeType.MapType, map2: MezzeType.MapType, typeDecl
 /**
  * Unify two sorted map types.
  */
-private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.SortedMapType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
+private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.SortedMapType, registry: DeclarationRegistry): UnificationResult {
     // Unify key types
-    val keyResult = unify(map1.keyType, map2.keyType, typeDeclarations)
+    val keyResult = unify(map1.keyType, map2.keyType, registry)
     if (keyResult is UnificationResult.Failure) {
         return keyResult
     }
@@ -1136,7 +1145,7 @@ private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.Sorte
     // Apply key substitution and unify value types
     val value1 = keySubst.apply(map1.valueType)
     val value2 = keySubst.apply(map2.valueType)
-    val valueResult = unify(value1, value2, typeDeclarations)
+    val valueResult = unify(value1, value2, registry)
     if (valueResult is UnificationResult.Failure) {
         return valueResult
     }
@@ -1152,8 +1161,8 @@ private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.Sorte
  * Suspended<T, <E2>>, the result is Suspended<T, <E1, E2>>. This allows match
  * expressions with branches having different effects to type-check correctly.
  */
-private fun unifySuspended(susp1: MezzeType.SuspendedType, susp2: MezzeType.SuspendedType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
-    val valueResult = unify(susp1.valueType, susp2.valueType, typeDeclarations)
+private fun unifySuspended(susp1: MezzeType.SuspendedType, susp2: MezzeType.SuspendedType, registry: DeclarationRegistry): UnificationResult {
+    val valueResult = unify(susp1.valueType, susp2.valueType, registry)
     if (valueResult is UnificationResult.Failure) {
         return valueResult
     }
@@ -1308,12 +1317,12 @@ private fun formatFieldMismatch(
  * This allows unifying concrete record types with type application aliases.
  *
  * @param typeApp The type application to expand
- * @param typeDeclarations Map of type declarations
+ * @param registry Declaration registry for type lookups
  * @return The expanded record type, or null if expansion failed
  */
-internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>): MezzeType.RecordType? {
+internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, registry: DeclarationRegistry): MezzeType.RecordType? {
     // Look up the type declaration
-    val typeDecl = typeDeclarations[typeApp.constructor] ?: return null
+    val typeDecl = registry.lookupType(typeApp.constructor, typeApp.typeHash) ?: return null
 
     // Only record definitions can be expanded to record types
     val recordDef = typeDecl.definition as? com.mezze.language.parsedast.ParsedRecordDef ?: return null
@@ -1412,6 +1421,10 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, t
     )
 }
 
+/** Backward-compatible overload for callers that still pass a plain map. */
+internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>): MezzeType.RecordType? =
+    expandTypeApplicationToRecord(typeApp, DeclarationRegistry.from(typeDeclarations, emptyMap(), emptyMap()))
+
 /**
  * Expand a TypeApplication to a VariantType.
  *
@@ -1422,12 +1435,12 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, t
  * This allows unifying concrete variant types like `[Some]` with type applications like `Option Int`.
  *
  * @param typeApp The type application to expand
- * @param typeDeclarations Map of type declarations
+ * @param registry Declaration registry for type lookups
  * @return The expanded variant type, or null if expansion failed
  */
-internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>): MezzeType.VariantType? {
-    // Look up the type declaration - first in local declarations, then in all cached modules
-    val typeDecl = typeDeclarations[typeApp.constructor]
+internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, registry: DeclarationRegistry): MezzeType.VariantType? {
+    // Look up the type declaration - first in registry (hash then name), then in all cached modules
+    val typeDecl = registry.lookupType(typeApp.constructor, typeApp.typeHash)
         ?: com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(typeApp.constructor)
         ?: return null
 
@@ -1583,6 +1596,10 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
     )
 }
 
+/** Backward-compatible overload for callers that still pass a plain map. */
+internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>): MezzeType.VariantType? =
+    expandTypeApplicationToVariant(typeApp, DeclarationRegistry.from(typeDeclarations, emptyMap(), emptyMap()))
+
 /**
  * Result of expanding a TypeApplication to its underlying type.
  *
@@ -1616,18 +1633,18 @@ sealed class TypeExpansionResult {
  * first and then falling back to VariantType.
  *
  * @param typeApp The type application to expand
- * @param typeDeclarations Map of type declarations
+ * @param registry Declaration registry for type lookups
  * @return A TypeExpansionResult indicating the expanded type
  */
 internal fun expandTypeApplication(
     typeApp: MezzeType.TypeApplication,
-    typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>
+    registry: DeclarationRegistry
 ): TypeExpansionResult {
-    val typeDecl = typeDeclarations[typeApp.constructor] ?: return TypeExpansionResult.NotFound
+    val typeDecl = registry.lookupType(typeApp.constructor, typeApp.typeHash) ?: return TypeExpansionResult.NotFound
 
     return when (val definition = typeDecl.definition) {
         is com.mezze.language.parsedast.ParsedRecordDef -> {
-            val expanded = expandTypeApplicationToRecord(typeApp, typeDeclarations)
+            val expanded = expandTypeApplicationToRecord(typeApp, registry)
             if (expanded != null) {
                 TypeExpansionResult.Record(expanded)
             } else {
@@ -1635,7 +1652,7 @@ internal fun expandTypeApplication(
             }
         }
         is com.mezze.language.parsedast.ParsedVariantDef -> {
-            val expanded = expandTypeApplicationToVariant(typeApp, typeDeclarations)
+            val expanded = expandTypeApplicationToVariant(typeApp, registry)
             if (expanded != null) {
                 TypeExpansionResult.Variant(expanded)
             } else {
@@ -1643,7 +1660,7 @@ internal fun expandTypeApplication(
             }
         }
         is com.mezze.language.parsedast.ParsedNewtypeDef -> {
-            val expanded = expandTypeApplicationToVariant(typeApp, typeDeclarations)
+            val expanded = expandTypeApplicationToVariant(typeApp, registry)
             if (expanded != null && expanded.constructors.size == 1) {
                 val (constructorName, payloadType) = expanded.constructors.entries.first()
                 TypeExpansionResult.Newtype(expanded, constructorName, payloadType)
@@ -1653,6 +1670,12 @@ internal fun expandTypeApplication(
         }
     }
 }
+
+/** Backward-compatible overload for callers that still pass a plain map. */
+internal fun expandTypeApplication(
+    typeApp: MezzeType.TypeApplication,
+    typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>
+): TypeExpansionResult = expandTypeApplication(typeApp, DeclarationRegistry.from(typeDeclarations, emptyMap(), emptyMap()))
 
 /**
  * Check if a TypeApplication matches a built-in collection type by name.
