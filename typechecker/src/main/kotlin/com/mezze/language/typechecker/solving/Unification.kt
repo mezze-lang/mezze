@@ -234,33 +234,17 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         type1 is MezzeType.VarType -> unifyVar(type1.variable, type2)
         type2 is MezzeType.VarType -> unifyVar(type2.variable, type1)
 
-        // CASE 2: Effect polymorphism - Suspended<T> with T
-        // Allow pure types to unify with suspended types (effect polymorphism)
-        // Examples: Int <Log> + Int → Int <Log>
-        //          Int <Log> + Int <DB> → Int <Log, DB>
+        // CASE 2: Suspended<T, effects> with T
+        // Unwrap to value type — effects are tracked separately by the constraint
+        // solver. Many contexts rely on this (do-bind, perform, handler application,
+        // effect propagation, match branches). Tightening this requires first
+        // ensuring every context that produces SuspendedTypes unwraps them before
+        // unification, which is a larger refactor.
         type1 is MezzeType.SuspendedType && type2 !is MezzeType.SuspendedType -> {
-            // Suspended<T> unifies with T by unifying the value types
-            val valueResult = unify(type1.valueType, type2, typeDeclarations)
-            when (valueResult) {
-                is UnificationResult.Success -> {
-                    // Result is Suspended<T> with the substitution applied
-                    // The suspended type (type1) is the more specific type
-                    valueResult
-                }
-                is UnificationResult.Failure -> valueResult
-            }
+            unify(type1.valueType, type2, typeDeclarations)
         }
         type1 !is MezzeType.SuspendedType && type2 is MezzeType.SuspendedType -> {
-            // T unifies with Suspended<T> by unifying the value types
-            val valueResult = unify(type1, type2.valueType, typeDeclarations)
-            when (valueResult) {
-                is UnificationResult.Success -> {
-                    // Result is Suspended<T> with the substitution applied
-                    // The suspended type (type2) is the more specific type
-                    valueResult
-                }
-                is UnificationResult.Failure -> valueResult
-            }
+            unify(type1, type2.valueType, typeDeclarations)
         }
 
         // CASE 3: Function type unification
@@ -1153,17 +1137,21 @@ private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.Sorte
  * expressions with branches having different effects to type-check correctly.
  */
 private fun unifySuspended(susp1: MezzeType.SuspendedType, susp2: MezzeType.SuspendedType, typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl> = emptyMap()): UnificationResult {
-    // Unify value types
     val valueResult = unify(susp1.valueType, susp2.valueType, typeDeclarations)
     if (valueResult is UnificationResult.Failure) {
         return valueResult
     }
     val valueSubst = (valueResult as UnificationResult.Success).substitution
 
-    // Effect rows use UNION semantics - merge them together
-    // This is the correct behavior for match expressions where different branches
-    // may have different effects (the overall type has all effects)
-    return UnificationResult.Success(valueSubst)
+    // Unify effect rows: this catches mismatched associated types in effects
+    // (e.g., <Exception having 'error = Str> vs <Exception having 'error = Int>)
+    val effectResult = unifyEffectRows(susp1.effects, susp2.effects)
+    if (effectResult is UnificationResult.Failure) {
+        return effectResult
+    }
+    val effectSubst = (effectResult as UnificationResult.Success).substitution
+
+    return UnificationResult.Success(valueSubst.compose(effectSubst))
 }
 
 /**
