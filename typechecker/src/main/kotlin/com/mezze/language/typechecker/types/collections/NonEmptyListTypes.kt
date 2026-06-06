@@ -1,425 +1,93 @@
 package com.mezze.language.typechecker.types.collections
 
 import com.mezze.language.ast.MezzeType
-import com.mezze.language.ast.TypeVar
+import com.mezze.language.typechecker.types.*
 
-/**
- * Type signatures for NonEmptyList operations
- *
- * NonEmptyList is a list guaranteed to have at least one element.
- * This provides type-safe operations like head/tail that cannot fail.
- *
- * Corresponds to stdlib file:
- * - std/collections/nonemptylist.mz
- */
+private fun nel(elem: MezzeType): MezzeType =
+    com.mezze.language.typechecker.util.WellKnownTypeApp.of("NonEmptyList", listOf(elem))
+
 object NonEmptyListTypes {
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        // Basic Operations
+        fn("__native_nel_equals") { val a = tvar("a"); param("xs" to nel(a), "ys" to nel(a)); returns(bool) }
+        fn("__native_nel_compare") { val a = tvar("a"); param("xs" to nel(a), "ys" to nel(a)); returns(int) }
+        fn("__native_nel_singleton") { val a = tvar("a"); param("x" to a); returns(nel(a)) }
+        fn("__native_nel_from_head_tail") { val a = tvar("a"); param("head" to a, "tail" to list(a)); returns(nel(a)) }
+        fn("__native_nel_head") { val a = tvar("a"); param("xs" to nel(a)); returns(a) }
+        fn("__native_nel_tail") { val a = tvar("a"); param("xs" to nel(a)); returns(list(a)) }
+        fn("__native_nel_size") { val a = tvar("a"); param("xs" to nel(a)); returns(int) }
 
-    /**
-     * Helper to create Option type
-     */
-    private fun optionType(elementType: MezzeType): MezzeType {
-        return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
-    }
+        // Construction
+        fn("__native_nel_cons") { val a = tvar("a"); param("x" to a, "xs" to nel(a)); returns(nel(a)) }
+        fn("__native_nel_append") { val a = tvar("a"); param("xs" to nel(a), "ys" to nel(a)); returns(nel(a)) }
+        fn("__native_nel_prepend_list") { val a = tvar("a"); param("xs" to list(a), "y" to a); returns(nel(a)) }
+        fn("__native_nel_append_list") { val a = tvar("a"); param("xs" to nel(a), "ys" to list(a)); returns(nel(a)) }
 
-    /**
-     * Helper to create NonEmptyList type
-     */
-    private fun nelType(elementType: MezzeType): MezzeType {
-        return com.mezze.language.typechecker.util.WellKnownTypeApp.of("NonEmptyList", listOf(elementType))
-    }
+        // Access
+        fn("__native_nel_get") { val a = tvar("a"); param("xs" to nel(a), "index" to int); returns(a) }
+        fn("__native_nel_last") { val a = tvar("a"); param("xs" to nel(a)); returns(a) }
 
-    /**
-     * Helper to create List type
-     */
-    private fun listType(elementType: MezzeType): MezzeType {
-        return MezzeType.ListType(elementType)
-    }
-
-    /**
-     * Helper to create Array type
-     */
-    private fun arrayType(elementType: MezzeType): MezzeType {
-        return MezzeType.SeqType(elementType)
-    }
-
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        registerBasicOperations(context)
-        registerConstruction(context)
-        registerAccess(context)
-        registerHigherOrderFunctions(context)
-        registerPredicates(context)
-        registerTransformations(context)
-        registerConversions(context)
-        registerSorting(context)
-    }
-
-    private fun registerBasicOperations(context: MutableMap<String, MezzeType>) {
-        // __native_nel_equals: {xs: NonEmptyList 'a, ys: NonEmptyList 'a} -> Bool
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_equals"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("xs" to nelType(a), "ys" to nelType(a))),
-                MezzeType.BoolType
-            )
+        // Higher-Order Functions
+        fn("__native_nel_map") {
+            val a = tvar("a"); val b = tvar("b")
+            param("xs" to nel(a), "f" to MezzeType.FunctionType(rec("x" to a), b))
+            returns(nel(b))
+        }
+        fn("__native_nel_flat_map") {
+            val a = tvar("a"); val b = tvar("b")
+            param("xs" to nel(a), "f" to MezzeType.FunctionType(rec("x" to a), nel(b)))
+            returns(nel(b))
+        }
+        fn("__native_nel_fold_left") {
+            val a = tvar("a"); val acc = tvar("acc")
+            param("xs" to nel(a), "init" to acc, "f" to MezzeType.FunctionType(rec("acc" to acc, "x" to a), acc))
+            returns(acc)
+        }
+        fn("__native_nel_fold_right") {
+            val a = tvar("a"); val acc = tvar("acc")
+            param("xs" to nel(a), "init" to acc, "f" to MezzeType.FunctionType(rec("x" to a, "acc" to acc), acc))
+            returns(acc)
+        }
+        fn("__native_nel_reduce") {
+            val a = tvar("a")
+            param("xs" to nel(a), "f" to MezzeType.FunctionType(rec("acc" to a, "x" to a), a))
+            returns(a)
         }
 
-        // __native_nel_compare: {xs: NonEmptyList 'a, ys: NonEmptyList 'a} -> Int
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_compare"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("xs" to nelType(a), "ys" to nelType(a))),
-                MezzeType.IntType
-            )
+        // Predicates
+        fn("__native_nel_any") {
+            val a = tvar("a")
+            param("xs" to nel(a), "p" to MezzeType.FunctionType(rec("x" to a), bool))
+            returns(bool)
         }
-
-        // __native_nel_singleton: {x: 'a} -> NonEmptyList 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_singleton"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("x" to a)),
-                nelType(a)
-            )
+        fn("__native_nel_all") {
+            val a = tvar("a")
+            param("xs" to nel(a), "p" to MezzeType.FunctionType(rec("x" to a), bool))
+            returns(bool)
         }
+        fn("__native_nel_contains") { val a = tvar("a"); param("xs" to nel(a), "x" to a); returns(bool) }
 
-        // __native_nel_from_head_tail: {head: 'a, tail: List 'a} -> NonEmptyList 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_from_head_tail"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "head" to a,
-                    "tail" to listType(a)
-                )),
-                nelType(a)
-            )
+        // Transformations
+        fn("__native_nel_reverse") { val a = tvar("a"); param("xs" to nel(a)); returns(nel(a)) }
+        fn("__native_nel_zip") {
+            val a = tvar("a"); val b = tvar("b")
+            param("xs" to nel(a), "ys" to nel(b))
+            returns(nel(rec("fst" to a, "snd" to b)))
         }
+        fn("__native_nel_intersperse") { val a = tvar("a"); param("xs" to nel(a), "sep" to a); returns(nel(a)) }
 
-        // __native_nel_head: {xs: NonEmptyList 'a} -> 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_head"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("xs" to nelType(a))),
-                a
-            )
-        }
+        // Conversions
+        fn("__native_nel_to_list") { val a = tvar("a"); param("xs" to nel(a)); returns(list(a)) }
+        fn("__native_nel_from_list") { val a = tvar("a"); param("xs" to list(a)); returns(nel(a)) }
+        fn("__native_nel_to_seq") { val a = tvar("a"); param("xs" to nel(a)); returns(seq(a)) }
+        fn("__native_nel_from_seq") { val a = tvar("a"); param("xs" to seq(a)); returns(nel(a)) }
 
-        // __native_nel_tail: {xs: NonEmptyList 'a} -> List 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_tail"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("xs" to nelType(a))),
-                listType(a)
-            )
-        }
-
-        // __native_nel_size: {xs: NonEmptyList 'a} -> Int
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_size"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("xs" to nelType(a))),
-                MezzeType.IntType
-            )
-        }
-    }
-
-    private fun registerConstruction(context: MutableMap<String, MezzeType>) {
-        // __native_nel_cons: {x: 'a, xs: NonEmptyList 'a} -> NonEmptyList 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_cons"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "x" to a,
-                    "xs" to nelType(a)
-                )),
-                nelType(a)
-            )
-        }
-
-        // __native_nel_append: {xs: NonEmptyList 'a, ys: NonEmptyList 'a} -> NonEmptyList 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_append"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "ys" to nelType(a)
-                )),
-                nelType(a)
-            )
-        }
-
-        // __native_nel_prepend_list: {xs: List 'a, y: 'a} -> NonEmptyList 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_prepend_list"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to listType(a),
-                    "y" to a
-                )),
-                nelType(a)
-            )
-        }
-
-        // __native_nel_append_list: {xs: NonEmptyList 'a, ys: List 'a} -> NonEmptyList 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_append_list"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "ys" to listType(a)
-                )),
-                nelType(a)
-            )
-        }
-    }
-
-    private fun registerAccess(context: MutableMap<String, MezzeType>) {
-        // __native_nel_get: {xs: NonEmptyList 'a, index: Int} -> 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_get"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "index" to MezzeType.IntType
-                )),
-                a
-            )
-        }
-
-        // __native_nel_last: {xs: NonEmptyList 'a} -> 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_last"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("xs" to nelType(a))),
-                a
-            )
-        }
-    }
-
-    private fun registerHigherOrderFunctions(context: MutableMap<String, MezzeType>) {
-        // __native_nel_map: {xs: NonEmptyList 'a, f: {x: 'a} -> 'b} -> NonEmptyList 'b
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            val b = MezzeType.VarType(TypeVar("b"))
-            context["__native_nel_map"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("x" to a)),
-                        b
-                    )
-                )),
-                nelType(b)
-            )
-        }
-
-        // __native_nel_flat_map: {xs: NonEmptyList 'a, f: {x: 'a} -> NonEmptyList 'b} -> NonEmptyList 'b
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            val b = MezzeType.VarType(TypeVar("b"))
-            context["__native_nel_flat_map"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("x" to a)),
-                        nelType(b)
-                    )
-                )),
-                nelType(b)
-            )
-        }
-
-        // __native_nel_fold_left: {xs: NonEmptyList 'a, init: 'acc, f: {acc: 'acc, x: 'a} -> 'acc} -> 'acc
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            val acc = MezzeType.VarType(TypeVar("acc"))
-            context["__native_nel_fold_left"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "init" to acc,
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("acc" to acc, "x" to a)),
-                        acc
-                    )
-                )),
-                acc
-            )
-        }
-
-        // __native_nel_fold_right: {xs: NonEmptyList 'a, init: 'acc, f: {x: 'a, acc: 'acc} -> 'acc} -> 'acc
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            val acc = MezzeType.VarType(TypeVar("acc"))
-            context["__native_nel_fold_right"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "init" to acc,
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("x" to a, "acc" to acc)),
-                        acc
-                    )
-                )),
-                acc
-            )
-        }
-
-        // __native_nel_reduce: {xs: NonEmptyList 'a, f: {acc: 'a, x: 'a} -> 'a} -> 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_reduce"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("acc" to a, "x" to a)),
-                        a
-                    )
-                )),
-                a
-            )
-        }
-    }
-
-    private fun registerPredicates(context: MutableMap<String, MezzeType>) {
-        // __native_nel_any: {xs: NonEmptyList 'a, p: {x: 'a} -> Bool} -> Bool
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_any"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "p" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("x" to a)),
-                        MezzeType.BoolType
-                    )
-                )),
-                MezzeType.BoolType
-            )
-        }
-
-        // __native_nel_all: {xs: NonEmptyList 'a, p: {x: 'a} -> Bool} -> Bool
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_all"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "p" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("x" to a)),
-                        MezzeType.BoolType
-                    )
-                )),
-                MezzeType.BoolType
-            )
-        }
-
-        // __native_nel_contains: {xs: NonEmptyList 'a, x: 'a} -> Bool
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_contains"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "x" to a
-                )),
-                MezzeType.BoolType
-            )
-        }
-    }
-
-    private fun registerTransformations(context: MutableMap<String, MezzeType>) {
-        // __native_nel_reverse: {xs: NonEmptyList 'a} -> NonEmptyList 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_reverse"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("xs" to nelType(a))),
-                nelType(a)
-            )
-        }
-
-        // __native_nel_zip: {xs: NonEmptyList 'a, ys: NonEmptyList 'b} -> NonEmptyList {fst: 'a, snd: 'b}
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            val b = MezzeType.VarType(TypeVar("b"))
-            context["__native_nel_zip"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "ys" to nelType(b)
-                )),
-                nelType(MezzeType.RecordType(mapOf("fst" to a, "snd" to b)))
-            )
-        }
-
-        // __native_nel_intersperse: {xs: NonEmptyList 'a, sep: 'a} -> NonEmptyList 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_intersperse"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "sep" to a
-                )),
-                nelType(a)
-            )
-        }
-    }
-
-    private fun registerConversions(context: MutableMap<String, MezzeType>) {
-        // __native_nel_to_list: {xs: NonEmptyList 'a} -> List 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_to_list"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("xs" to nelType(a))),
-                listType(a)
-            )
-        }
-
-        // __native_nel_from_list: {xs: List 'a} -> NonEmptyList 'a
-        // Note: This throws at runtime if list is empty
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_from_list"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("xs" to listType(a))),
-                nelType(a)
-            )
-        }
-
-        // __native_nel_to_seq: {xs: NonEmptyList 'a} -> ['a]
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_to_seq"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("xs" to nelType(a))),
-                arrayType(a)
-            )
-        }
-
-        // __native_nel_from_seq: {xs: ['a]} -> NonEmptyList 'a
-        // Note: This throws at runtime if seq is empty
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_from_seq"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("xs" to arrayType(a))),
-                nelType(a)
-            )
-        }
-    }
-
-    private fun registerSorting(context: MutableMap<String, MezzeType>) {
-        // __native_nel_sort: {xs: NonEmptyList 'a} -> NonEmptyList 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_sort"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("xs" to nelType(a))),
-                nelType(a)
-            )
-        }
-
-        // __native_nel_sort_by: {xs: NonEmptyList 'a, cmp: {l: 'a, r: 'a} -> Int} -> NonEmptyList 'a
-        run {
-            val a = MezzeType.VarType(TypeVar("a"))
-            context["__native_nel_sort_by"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to nelType(a),
-                    "cmp" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("l" to a, "r" to a)),
-                        MezzeType.IntType
-                    )
-                )),
-                nelType(a)
-            )
+        // Sorting
+        fn("__native_nel_sort") { val a = tvar("a"); param("xs" to nel(a)); returns(nel(a)) }
+        fn("__native_nel_sort_by") {
+            val a = tvar("a")
+            param("xs" to nel(a), "cmp" to MezzeType.FunctionType(rec("l" to a, "r" to a), int))
+            returns(nel(a))
         }
     }
 }

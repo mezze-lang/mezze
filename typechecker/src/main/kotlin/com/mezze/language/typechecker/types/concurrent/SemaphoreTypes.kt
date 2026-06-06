@@ -2,7 +2,8 @@ package com.mezze.language.typechecker.types.concurrent
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.RowVar
-import com.mezze.language.ast.TypeVar
+import com.mezze.language.typechecker.types.*
+import com.mezze.language.typechecker.util.WellKnownTypeApp
 
 /**
  * Type definitions for Semaphore operations.
@@ -14,92 +15,76 @@ import com.mezze.language.ast.TypeVar
  */
 object SemaphoreTypes {
 
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        val semType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Semaphore", emptyList())
-        val unitType = MezzeType.RecordType(emptyMap())
-        val asyncEffect = MezzeType.EffectRow(effects = setOf("Async"))
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        val semType = WellKnownTypeApp.of("Semaphore", emptyList())
 
         // __native_semaphore_new: {permits: Int} -> Semaphore <Async>
-        context["__native_semaphore_new"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("permits" to MezzeType.IntType)),
-            semType,
-            effects = asyncEffect
-        )
+        fn("__native_semaphore_new") {
+            param("permits" to int)
+            returns(semType)
+            effects("Async")
+        }
 
         // __native_semaphore_acquire: {sem: Semaphore} -> {} <Async>
-        context["__native_semaphore_acquire"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("sem" to semType)),
-            unitType,
-            effects = asyncEffect
-        )
+        fn("__native_semaphore_acquire") {
+            param("sem" to semType)
+            returns(unit)
+            effects("Async")
+        }
 
         // __native_semaphore_acquire_n: {sem: Semaphore, permits: Int} -> {} <Async>
-        context["__native_semaphore_acquire_n"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "sem" to semType,
-                "permits" to MezzeType.IntType
-            )),
-            unitType,
-            effects = asyncEffect
-        )
+        fn("__native_semaphore_acquire_n") {
+            param("sem" to semType, "permits" to int)
+            returns(unit)
+            effects("Async")
+        }
 
         // __native_semaphore_release: {sem: Semaphore} -> {} <Async>
-        context["__native_semaphore_release"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("sem" to semType)),
-            unitType,
-            effects = asyncEffect
-        )
+        fn("__native_semaphore_release") {
+            param("sem" to semType)
+            returns(unit)
+            effects("Async")
+        }
 
         // __native_semaphore_release_n: {sem: Semaphore, permits: Int} -> {} <Async>
-        context["__native_semaphore_release_n"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "sem" to semType,
-                "permits" to MezzeType.IntType
-            )),
-            unitType,
-            effects = asyncEffect
-        )
+        fn("__native_semaphore_release_n") {
+            param("sem" to semType, "permits" to int)
+            returns(unit)
+            effects("Async")
+        }
 
         // __native_semaphore_try_acquire: {sem: Semaphore} -> Bool <Async>
-        context["__native_semaphore_try_acquire"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("sem" to semType)),
-            MezzeType.BoolType,
-            effects = asyncEffect
-        )
+        fn("__native_semaphore_try_acquire") {
+            param("sem" to semType)
+            returns(bool)
+            effects("Async")
+        }
 
         // __native_semaphore_try_acquire_n: {sem: Semaphore, permits: Int} -> Bool <Async>
-        context["__native_semaphore_try_acquire_n"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "sem" to semType,
-                "permits" to MezzeType.IntType
-            )),
-            MezzeType.BoolType,
-            effects = asyncEffect
-        )
+        fn("__native_semaphore_try_acquire_n") {
+            param("sem" to semType, "permits" to int)
+            returns(bool)
+            effects("Async")
+        }
 
         // __native_semaphore_available: {sem: Semaphore} -> Int <Async>
-        context["__native_semaphore_available"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("sem" to semType)),
-            MezzeType.IntType,
-            effects = asyncEffect
-        )
+        fn("__native_semaphore_available") {
+            param("sem" to semType)
+            returns(int)
+            effects("Async")
+        }
 
         // __native_semaphore_with_permit: {sem: Semaphore, f: {} -> 'a <...>} -> 'a <Async, ...>
-        run {
-            val resultType = MezzeType.VarType(TypeVar("a"))
+        fn("__native_semaphore_with_permit") {
+            val a = tvar("a")
             val funcType = MezzeType.FunctionType(
-                unitType,
-                resultType,
+                unit,
+                a,
                 effects = MezzeType.EffectRow.simple(emptySet(), RowVar.fresh(), performed = false)
             )
-            context["__native_semaphore_with_permit"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "sem" to semType,
-                    "f" to funcType
-                )),
-                resultType,
-                effects = asyncEffect
-            )
+            param("sem" to semType, "f" to funcType)
+            returns(a)
+            effects("Async")
         }
     }
 }

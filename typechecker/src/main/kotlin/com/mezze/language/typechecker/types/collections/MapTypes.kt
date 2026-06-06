@@ -1,525 +1,156 @@
 package com.mezze.language.typechecker.types.collections
 
-import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.typechecker.types.*
 
-/**
- * Helper function to create Option type (as TypeApplication)
- */
-private fun optionType(elementType: MezzeType): MezzeType {
-    return com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(elementType))
-}
-
-/**
- * Type signatures for Map (key-value dictionary) operations
- *
- * Corresponds to stdlib file:
- * - std/collections/map.mz
- */
 object MapTypes {
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        registerMapNatives(context)
-    }
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        fn("__native_map_empty") { val k = tvar("k"); val v = tvar("v"); returns(map(k, v)) }
+        fn("__native_map_insert") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v), "k" to k, "v" to v); returns(map(k, v)) }
+        fn("__native_map_get") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v), "k" to k); returns(option(v)) }
+        fn("__native_map_remove") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v), "k" to k); returns(map(k, v)) }
+        fn("__native_map_contains_key") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v), "k" to k); returns(bool) }
+        fn("__native_map_size") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(int) }
+        fn("__native_map_keys") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(list(k)) }
+        fn("__native_map_values") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(list(v)) }
+        fn("__native_map_entries") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to map(k, v))
+            returns(seq(rec("key" to k, "value" to v)))
+        }
+        fn("__native_map_map_values") {
+            val k = tvar("k"); val v = tvar("v"); val w = tvar("w")
+            param("m" to map(k, v), "f" to MezzeType.FunctionType(rec("val" to v), w))
+            returns(map(k, w))
+        }
+        fn("__native_map_filter") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to map(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(map(k, v))
+        }
+        fn("__native_map_fold") {
+            val k = tvar("k"); val v = tvar("v"); val acc = tvar("acc")
+            param("m" to map(k, v), "init" to acc, "f" to MezzeType.FunctionType(rec("acc" to acc, "k" to k, "v" to v), acc))
+            returns(acc)
+        }
+        fn("__native_map_from_keys") {
+            val k = tvar("k"); val v = tvar("v")
+            param("ks" to list(k), "f" to MezzeType.FunctionType(rec("val" to k), v))
+            returns(map(k, v))
+        }
+        fn("__native_map_merge") { val k = tvar("k"); val v = tvar("v"); param("m1" to map(k, v), "m2" to map(k, v)); returns(map(k, v)) }
+        fn("__native_map_merge_with") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m1" to map(k, v), "m2" to map(k, v), "f" to MezzeType.FunctionType(rec("l" to v, "r" to v), v))
+            returns(map(k, v))
+        }
+        fn("__native_map_remove_all") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v), "ks" to list(k)); returns(map(k, v)) }
+        fn("__native_map_equals") { val k = tvar("k"); val v = tvar("v"); param("m1" to map(k, v), "m2" to map(k, v)); returns(bool) }
 
-    private fun registerMapNatives(context: MutableMap<String, MezzeType>) {
-        val mapKeyTypeVar = com.mezze.language.ast.TypeVar("k")
-        val mapValTypeVar = com.mezze.language.ast.TypeVar("v")
-        val mapValTypeVarW = com.mezze.language.ast.TypeVar("w")
-        val mapAccTypeVar = com.mezze.language.ast.TypeVar("acc")
-
-        val mapType = MezzeType.MapType(MezzeType.VarType(mapKeyTypeVar), MezzeType.VarType(mapValTypeVar))
-        val mapTypeKW = MezzeType.MapType(MezzeType.VarType(mapKeyTypeVar), MezzeType.VarType(mapValTypeVarW))
-
-        context["__native_map_empty"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            mapType
-        )
-
-        context["__native_map_insert"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "k" to MezzeType.VarType(mapKeyTypeVar),
-                "v" to MezzeType.VarType(mapValTypeVar)
-            )),
-            mapType
-        )
-
-        context["__native_map_get"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "k" to MezzeType.VarType(mapKeyTypeVar)
-            )),
-            optionType(MezzeType.VarType(mapValTypeVar))
-        )
-
-        context["__native_map_remove"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "k" to MezzeType.VarType(mapKeyTypeVar)
-            )),
-            mapType
-        )
-
-        context["__native_map_contains_key"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "k" to MezzeType.VarType(mapKeyTypeVar)
-            )),
-            MezzeType.BoolType
-        )
-
-        context["__native_map_size"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.IntType
-        )
-
-        context["__native_map_keys"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.ListType(MezzeType.VarType(mapKeyTypeVar))
-        )
-
-        context["__native_map_values"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.ListType(MezzeType.VarType(mapValTypeVar))
-        )
-
-        context["__native_map_entries"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.SeqType(MezzeType.RecordType(mapOf(
-                "key" to MezzeType.VarType(mapKeyTypeVar),
-                "value" to MezzeType.VarType(mapValTypeVar)
-            )))
-        )
-
-        context["__native_map_map_values"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(mapValTypeVar))),
-                    MezzeType.VarType(mapValTypeVarW)
-                )
-            )),
-            mapTypeKW
-        )
-
-        context["__native_map_filter"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "p" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf(
-                        "k" to MezzeType.VarType(mapKeyTypeVar),
-                        "v" to MezzeType.VarType(mapValTypeVar)
-                    )),
-                    MezzeType.BoolType
-                )
-            )),
-            mapType
-        )
-
-        context["__native_map_fold"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "init" to MezzeType.VarType(mapAccTypeVar),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf(
-                        "acc" to MezzeType.VarType(mapAccTypeVar),
-                        "k" to MezzeType.VarType(mapKeyTypeVar),
-                        "v" to MezzeType.VarType(mapValTypeVar)
-                    )),
-                    MezzeType.VarType(mapAccTypeVar)
-                )
-            )),
-            MezzeType.VarType(mapAccTypeVar)
-        )
-
-        context["__native_map_from_keys"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "ks" to MezzeType.ListType(MezzeType.VarType(mapKeyTypeVar)),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(mapKeyTypeVar))),
-                    MezzeType.VarType(mapValTypeVar)
-                )
-            )),
-            mapType
-        )
-
-        context["__native_map_merge"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m1" to mapType,
-                "m2" to mapType
-            )),
-            mapType
-        )
-
-        context["__native_map_merge_with"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m1" to mapType,
-                "m2" to mapType,
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf(
-                        "l" to MezzeType.VarType(mapValTypeVar),
-                        "r" to MezzeType.VarType(mapValTypeVar)
-                    )),
-                    MezzeType.VarType(mapValTypeVar)
-                )
-            )),
-            mapType
-        )
-
-        context["__native_map_remove_all"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "ks" to MezzeType.ListType(MezzeType.VarType(mapKeyTypeVar))
-            )),
-            mapType
-        )
-
-        // __native_map_equals: {m1: Map 'k 'v, m2: Map 'k 'v} -> Bool
-        context["__native_map_equals"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m1" to mapType,
-                "m2" to mapType
-            )),
-            MezzeType.BoolType
-        )
-
-        // ==================== Predicate Operations ====================
-
-        val kvPredicateType = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "k" to MezzeType.VarType(mapKeyTypeVar),
-                "v" to MezzeType.VarType(mapValTypeVar)
-            )),
-            MezzeType.BoolType
-        )
-
-        // __native_map_any: {m: Map 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> Bool
-        context["__native_map_any"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "p" to kvPredicateType
-            )),
-            MezzeType.BoolType
-        )
-
-        // __native_map_all: {m: Map 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> Bool
-        context["__native_map_all"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "p" to kvPredicateType
-            )),
-            MezzeType.BoolType
-        )
-
-        // __native_map_none: {m: Map 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> Bool
-        context["__native_map_none"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "p" to kvPredicateType
-            )),
-            MezzeType.BoolType
-        )
-
-        // __native_map_find: {m: Map 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> Option {k: 'k, v: 'v}
-        context["__native_map_find"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "p" to kvPredicateType
-            )),
-            optionType(MezzeType.RecordType(mapOf(
-                "k" to MezzeType.VarType(mapKeyTypeVar),
-                "v" to MezzeType.VarType(mapValTypeVar)
-            )))
-        )
-
-        // __native_map_count: {m: Map 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> Int
-        context["__native_map_count"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "p" to kvPredicateType
-            )),
-            MezzeType.IntType
-        )
-
-        // ==================== Additional Operations ====================
-
-        // __native_map_contains_value: {m: Map 'k 'v, v: 'v} -> Bool
-        context["__native_map_contains_value"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "v" to MezzeType.VarType(mapValTypeVar)
-            )),
-            MezzeType.BoolType
-        )
-
-        // __native_map_update: {m: Map 'k 'v, k: 'k, f: {val: Option 'v} -> 'v} -> Map 'k 'v
-        context["__native_map_update"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "k" to MezzeType.VarType(mapKeyTypeVar),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to optionType(MezzeType.VarType(mapValTypeVar)))),
-                    MezzeType.VarType(mapValTypeVar)
-                )
-            )),
-            mapType
-        )
-
-        // __native_map_get_or_default: {m: Map 'k 'v, k: 'k, default: 'v} -> 'v
-        context["__native_map_get_or_default"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "k" to MezzeType.VarType(mapKeyTypeVar),
-                "default" to MezzeType.VarType(mapValTypeVar)
-            )),
-            MezzeType.VarType(mapValTypeVar)
-        )
-
-        // __native_map_singleton: {k: 'k, v: 'v} -> Map 'k 'v
-        context["__native_map_singleton"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "k" to MezzeType.VarType(mapKeyTypeVar),
-                "v" to MezzeType.VarType(mapValTypeVar)
-            )),
-            mapType
-        )
-
-        // ==================== Conversion to Seq ====================
-
-        // __native_map_to_seq: {m: Map 'k 'v} -> [{k: 'k, v: 'v}]
-        context["__native_map_to_seq"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.SeqType(MezzeType.RecordType(mapOf(
-                "k" to MezzeType.VarType(mapKeyTypeVar),
-                "v" to MezzeType.VarType(mapValTypeVar)
-            )))
-        )
-
-        // __native_map_keys_seq: {m: Map 'k 'v} -> ['k]
-        context["__native_map_keys_seq"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.SeqType(MezzeType.VarType(mapKeyTypeVar))
-        )
-
-        // __native_map_values_seq: {m: Map 'k 'v} -> ['v]
-        context["__native_map_values_seq"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.SeqType(MezzeType.VarType(mapValTypeVar))
-        )
-
-        // __native_map_partition: {m: Map 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> {pass: Map 'k 'v, fail: Map 'k 'v}
-        context["__native_map_partition"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "p" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf(
-                        "k" to MezzeType.VarType(mapKeyTypeVar),
-                        "v" to MezzeType.VarType(mapValTypeVar)
-                    )),
-                    MezzeType.BoolType
-                )
-            )),
-            MezzeType.RecordType(mapOf("pass" to mapType, "fail" to mapType))
-        )
-
-        // ==================== Task #21: Min/Max Operations ====================
-
-        // __native_map_min_key: {m: Map 'k 'v} -> Option 'k
-        context["__native_map_min_key"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            optionType(MezzeType.VarType(mapKeyTypeVar))
-        )
-
-        // __native_map_max_key: {m: Map 'k 'v} -> Option 'k
-        context["__native_map_max_key"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            optionType(MezzeType.VarType(mapKeyTypeVar))
-        )
-
-        // __native_map_min_value: {m: Map 'k 'v} -> Option 'v
-        context["__native_map_min_value"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            optionType(MezzeType.VarType(mapValTypeVar))
-        )
-
-        // __native_map_max_value: {m: Map 'k 'v} -> Option 'v
-        context["__native_map_max_value"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            optionType(MezzeType.VarType(mapValTypeVar))
-        )
-
-        // __native_map_invert: {m: Map 'k 'v} -> Map 'v 'k
-        context["__native_map_invert"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.MapType(MezzeType.VarType(mapValTypeVar), MezzeType.VarType(mapKeyTypeVar))
-        )
-
-        // ==================== Task #22: Key/Value Operations ====================
-
-        // __native_map_select_keys: {m: Map 'k 'v, ks: ['k]} -> Map 'k 'v
-        context["__native_map_select_keys"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "ks" to MezzeType.SeqType(MezzeType.VarType(mapKeyTypeVar))
-            )),
-            mapType
-        )
-
-        // __native_map_reject_keys: {m: Map 'k 'v, ks: ['k]} -> Map 'k 'v
-        context["__native_map_reject_keys"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "ks" to MezzeType.SeqType(MezzeType.VarType(mapKeyTypeVar))
-            )),
-            mapType
-        )
-
-        // __native_map_reduce: {m: Map 'k 'v, f: {acc: {k: 'k, v: 'v}, entry: {k: 'k, v: 'v}} -> {k: 'k, v: 'v}} -> Option {k: 'k, v: 'v}
-        run {
-            val entryType = MezzeType.RecordType(mapOf(
-                "k" to MezzeType.VarType(mapKeyTypeVar),
-                "v" to MezzeType.VarType(mapValTypeVar)
-            ))
-            context["__native_map_reduce"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to mapType,
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("acc" to entryType, "entry" to entryType)),
-                        entryType
-                    )
-                )),
-                optionType(entryType)
-            )
+        // Predicate Operations
+        fn("__native_map_any") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to map(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(bool)
+        }
+        fn("__native_map_all") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to map(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(bool)
+        }
+        fn("__native_map_none") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to map(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(bool)
+        }
+        fn("__native_map_find") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to map(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(option(rec("k" to k, "v" to v)))
+        }
+        fn("__native_map_count") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to map(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(int)
         }
 
-        // __native_map_group_by_value: {m: Map 'k 'v} -> Map 'v (List 'k)
-        context["__native_map_group_by_value"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.MapType(MezzeType.VarType(mapValTypeVar), MezzeType.ListType(MezzeType.VarType(mapKeyTypeVar)))
-        )
+        // Additional Operations
+        fn("__native_map_contains_value") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v), "v" to v); returns(bool) }
+        fn("__native_map_update") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to map(k, v), "k" to k, "f" to MezzeType.FunctionType(rec("val" to option(v)), v))
+            returns(map(k, v))
+        }
+        fn("__native_map_get_or_default") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v), "k" to k, "default" to v); returns(v) }
+        fn("__native_map_singleton") { val k = tvar("k"); val v = tvar("v"); param("k" to k, "v" to v); returns(map(k, v)) }
 
-        // ==================== Task #29: Key Operations ====================
-
-        // __native_map_map_keys: {m: Map 'k 'v, f: {val: 'k} -> 'k2} -> Map 'k2 'v
-        run {
-            val newKeyTypeVar = com.mezze.language.ast.TypeVar("k2")
-            context["__native_map_map_keys"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to mapType,
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("val" to MezzeType.VarType(mapKeyTypeVar))),
-                        MezzeType.VarType(newKeyTypeVar)
-                    )
-                )),
-                MezzeType.MapType(MezzeType.VarType(newKeyTypeVar), MezzeType.VarType(mapValTypeVar))
-            )
+        // Conversion to Seq
+        fn("__native_map_to_seq") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(seq(rec("k" to k, "v" to v))) }
+        fn("__native_map_keys_seq") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(seq(k)) }
+        fn("__native_map_values_seq") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(seq(v)) }
+        fn("__native_map_partition") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to map(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(rec("pass" to map(k, v), "fail" to map(k, v)))
         }
 
-        // __native_map_filter_keys: {m: Map 'k 'v, p: {val: 'k} -> Bool} -> Map 'k 'v
-        context["__native_map_filter_keys"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "p" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(mapKeyTypeVar))),
-                    MezzeType.BoolType
-                )
-            )),
-            mapType
-        )
+        // Min/Max Operations
+        fn("__native_map_min_key") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(option(k)) }
+        fn("__native_map_max_key") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(option(k)) }
+        fn("__native_map_min_value") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(option(v)) }
+        fn("__native_map_max_value") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(option(v)) }
+        fn("__native_map_invert") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(map(v, k)) }
 
-        // __native_map_filter_values: {m: Map 'k 'v, p: {val: 'v} -> Bool} -> Map 'k 'v
-        context["__native_map_filter_values"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "m" to mapType,
-                "p" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(mapValTypeVar))),
-                    MezzeType.BoolType
-                )
-            )),
-            mapType
-        )
-
-        // ==================== Task #37: Multi-Map Operations ====================
-
-        // __native_map_zip_maps: {m1: Map 'k 'v1, m2: Map 'k 'v2} -> Map 'k {first: 'v1, second: 'v2}
-        run {
-            val v1Type = MezzeType.VarType(com.mezze.language.ast.TypeVar("v1"))
-            val v2Type = MezzeType.VarType(com.mezze.language.ast.TypeVar("v2"))
-            context["__native_map_zip_maps"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m1" to MezzeType.MapType(MezzeType.VarType(mapKeyTypeVar), v1Type),
-                    "m2" to MezzeType.MapType(MezzeType.VarType(mapKeyTypeVar), v2Type)
-                )),
-                MezzeType.MapType(
-                    MezzeType.VarType(mapKeyTypeVar),
-                    MezzeType.RecordType(mapOf("fst" to v1Type, "snd" to v2Type))
-                )
-            )
+        // Key/Value Operations
+        fn("__native_map_select_keys") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v), "ks" to seq(k)); returns(map(k, v)) }
+        fn("__native_map_reject_keys") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v), "ks" to seq(k)); returns(map(k, v)) }
+        fn("__native_map_reduce") {
+            val k = tvar("k"); val v = tvar("v")
+            val entryType = rec("k" to k, "v" to v)
+            param("m" to map(k, v), "f" to MezzeType.FunctionType(rec("acc" to entryType, "entry" to entryType), entryType))
+            returns(option(entryType))
+        }
+        fn("__native_map_group_by_value") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to map(k, v))
+            returns(map(v, list(k)))
         }
 
-        // __native_map_diff_maps: {m1: Map 'k 'v, m2: Map 'k 'v} -> Map 'k 'v
-        context["__native_map_diff_maps"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m1" to mapType, "m2" to mapType)),
-            mapType
-        )
-
-        // __native_map_intersect_maps: {m1: Map 'k 'v, m2: Map 'k 'v} -> Map 'k 'v
-        context["__native_map_intersect_maps"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m1" to mapType, "m2" to mapType)),
-            mapType
-        )
-
-        // __native_map_symmetric_diff_maps: {m1: Map 'k 'v, m2: Map 'k 'v} -> Map 'k 'v
-        context["__native_map_symmetric_diff_maps"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m1" to mapType, "m2" to mapType)),
-            mapType
-        )
-
-        // ==================== List and SortedMap Conversions ====================
-
-        // __native_map_to_list: {m: Map 'k 'v} -> List {k: 'k, v: 'v}
-        context["__native_map_to_list"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.ListType(MezzeType.RecordType(mapOf(
-                "k" to MezzeType.VarType(mapKeyTypeVar),
-                "v" to MezzeType.VarType(mapValTypeVar)
-            )))
-        )
-
-        // __native_map_from_list: {xs: List {k: 'k, v: 'v}} -> Map 'k 'v
-        context["__native_map_from_list"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.ListType(MezzeType.RecordType(mapOf(
-                    "k" to MezzeType.VarType(mapKeyTypeVar),
-                    "v" to MezzeType.VarType(mapValTypeVar)
-                )))
-            )),
-            mapType
-        )
-
-        // __native_map_flat_map: {m: Map 'k 'v, f: {k: 'k, v: 'v} -> Map 'k2 'v2} -> Map 'k2 'v2
-        run {
-            val k2TypeVar = com.mezze.language.ast.TypeVar("k2")
-            val v2TypeVar = com.mezze.language.ast.TypeVar("v2")
-            context["__native_map_flat_map"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to mapType,
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf(
-                            "k" to MezzeType.VarType(mapKeyTypeVar),
-                            "v" to MezzeType.VarType(mapValTypeVar)
-                        )),
-                        MezzeType.MapType(MezzeType.VarType(k2TypeVar), MezzeType.VarType(v2TypeVar))
-                    )
-                )),
-                MezzeType.MapType(MezzeType.VarType(k2TypeVar), MezzeType.VarType(v2TypeVar))
-            )
+        // Key Operations
+        fn("__native_map_map_keys") {
+            val k = tvar("k"); val v = tvar("v"); val k2 = tvar("k2")
+            param("m" to map(k, v), "f" to MezzeType.FunctionType(rec("val" to k), k2))
+            returns(map(k2, v))
+        }
+        fn("__native_map_filter_keys") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to map(k, v), "p" to MezzeType.FunctionType(rec("val" to k), bool))
+            returns(map(k, v))
+        }
+        fn("__native_map_filter_values") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to map(k, v), "p" to MezzeType.FunctionType(rec("val" to v), bool))
+            returns(map(k, v))
         }
 
-        // __native_map_to_sorted_map: {m: Map 'k 'v} -> SortedMap 'k 'v
-        context["__native_map_to_sorted_map"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.SortedMapType(MezzeType.VarType(mapKeyTypeVar), MezzeType.VarType(mapValTypeVar))
-        )
+        // Multi-Map Operations
+        fn("__native_map_zip_maps") {
+            val k = tvar("k"); val v1 = tvar("v1"); val v2 = tvar("v2")
+            param("m1" to map(k, v1), "m2" to map(k, v2))
+            returns(map(k, rec("fst" to v1, "snd" to v2)))
+        }
+        fn("__native_map_diff_maps") { val k = tvar("k"); val v = tvar("v"); param("m1" to map(k, v), "m2" to map(k, v)); returns(map(k, v)) }
+        fn("__native_map_intersect_maps") { val k = tvar("k"); val v = tvar("v"); param("m1" to map(k, v), "m2" to map(k, v)); returns(map(k, v)) }
+        fn("__native_map_symmetric_diff_maps") { val k = tvar("k"); val v = tvar("v"); param("m1" to map(k, v), "m2" to map(k, v)); returns(map(k, v)) }
+
+        // List and SortedMap Conversions
+        fn("__native_map_to_list") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(list(rec("k" to k, "v" to v))) }
+        fn("__native_map_from_list") { val k = tvar("k"); val v = tvar("v"); param("xs" to list(rec("k" to k, "v" to v))); returns(map(k, v)) }
+        fn("__native_map_flat_map") {
+            val k = tvar("k"); val v = tvar("v"); val k2 = tvar("k2"); val v2 = tvar("v2")
+            param("m" to map(k, v), "f" to MezzeType.FunctionType(rec("k" to k, "v" to v), map(k2, v2)))
+            returns(map(k2, v2))
+        }
+        fn("__native_map_to_sorted_map") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(sortedMap(k, v)) }
     }
 }

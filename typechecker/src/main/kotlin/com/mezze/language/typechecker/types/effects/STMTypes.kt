@@ -3,6 +3,8 @@ package com.mezze.language.typechecker.types.effects
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.RowVar
 import com.mezze.language.ast.TypeVar
+import com.mezze.language.typechecker.types.*
+import com.mezze.language.typechecker.util.WellKnownTypeApp
 
 /**
  * Type definitions for STM (Software Transactional Memory) native functions.
@@ -15,6 +17,8 @@ import com.mezze.language.ast.TypeVar
  */
 object STMTypes {
 
+    private fun tvarOf(elem: MezzeType) = WellKnownTypeApp.of("TVar", listOf(elem))
+
     fun registerAll(context: MutableMap<String, MezzeType>) {
         registerTVarOperations(context)
         registerCoreSTMOperations(context)
@@ -23,213 +27,86 @@ object STMTypes {
         registerBulkOperations(context)
     }
 
-    private fun registerTVarOperations(context: MutableMap<String, MezzeType>) {
-        // __native_tvar_new: {init: 'a} -> TVar 'a
-        context["__native_tvar_new"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "init" to MezzeType.VarType(TypeVar("a"))
-            )),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
-        )
-
-        // __native_tvar_deref: {var: TVar 'a} -> 'a
-        context["__native_tvar_deref"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
-            )),
-            MezzeType.VarType(TypeVar("a"))
-        )
+    private fun registerTVarOperations(context: MutableMap<String, MezzeType>) = natives(context) {
+        fn("__native_tvar_new") { val a = tvar("a"); param("init" to a); returns(tvarOf(a)) }
+        fn("__native_tvar_deref") { val a = tvar("a"); param("var" to tvarOf(a)); returns(a) }
     }
 
-    private fun registerCoreSTMOperations(context: MutableMap<String, MezzeType>) {
-        // __native_stm_read: {var: TVar 'a} -> 'a
-        context["__native_stm_read"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
-            )),
-            MezzeType.VarType(TypeVar("a"))
-        )
-
-        // __native_stm_write: {var: TVar 'a, val: 'a} -> {}
-        context["__native_stm_write"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
-                "val" to MezzeType.VarType(TypeVar("a"))
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
-
-        // __native_stm_modify: {var: TVar 'a, f: {val: 'a} -> 'a} -> {}
-        context["__native_stm_modify"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.VarType(TypeVar("a"))
-                )
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
-
-        // __native_stm_swap: {var: TVar 'a, val: 'a} -> 'a
-        context["__native_stm_swap"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
-                "val" to MezzeType.VarType(TypeVar("a"))
-            )),
-            MezzeType.VarType(TypeVar("a"))
-        )
-
-        // __native_stm_ensure: {var: TVar 'a} -> 'a
-        context["__native_stm_ensure"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
-            )),
-            MezzeType.VarType(TypeVar("a"))
-        )
-
-        // __native_stm_retry: {} -> 'a
-        context["__native_stm_retry"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.VarType(TypeVar("a"))
-        )
-
-        // __native_stm_or_else: {primary: {} -> 'a, fallback: {} -> 'a} -> 'a
-        context["__native_stm_or_else"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "primary" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("a"))
-                ),
-                "fallback" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("a"))
-                )
-            )),
-            MezzeType.VarType(TypeVar("a"))
-        )
-
-        // __native_stm_check: {cond: Bool} -> {}
-        context["__native_stm_check"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "cond" to MezzeType.BoolType
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
-
-        // __native_stm_check_and_clear_retry_flag: {} -> Bool
-        context["__native_stm_check_and_clear_retry_flag"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.BoolType
-        )
-
-        // __native_stm_park_for_retry: {} -> {}
-        context["__native_stm_park_for_retry"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.RecordType(emptyMap())
-        )
-
-        // __native_stm_read_set_changed: {} -> Bool
-        context["__native_stm_read_set_changed"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.BoolType
-        )
+    private fun registerCoreSTMOperations(context: MutableMap<String, MezzeType>) = natives(context) {
+        fn("__native_stm_read") { val a = tvar("a"); param("var" to tvarOf(a)); returns(a) }
+        fn("__native_stm_write") { val a = tvar("a"); param("var" to tvarOf(a), "val" to a); returns(unit) }
+        fn("__native_stm_modify") {
+            val a = tvar("a")
+            param("var" to tvarOf(a), "f" to MezzeType.FunctionType(rec("val" to a), a))
+            returns(unit)
+        }
+        fn("__native_stm_swap") { val a = tvar("a"); param("var" to tvarOf(a), "val" to a); returns(a) }
+        fn("__native_stm_ensure") { val a = tvar("a"); param("var" to tvarOf(a)); returns(a) }
+        fn("__native_stm_retry") { val a = tvar("a"); returns(a) }
+        fn("__native_stm_or_else") {
+            val a = tvar("a")
+            param(
+                "primary" to MezzeType.FunctionType(unit, a),
+                "fallback" to MezzeType.FunctionType(unit, a)
+            )
+            returns(a)
+        }
+        fn("__native_stm_check") { param("cond" to bool); returns(unit) }
+        fn("__native_stm_check_and_clear_retry_flag") { returns(bool) }
+        fn("__native_stm_park_for_retry") { returns(unit) }
+        fn("__native_stm_read_set_changed") { returns(bool) }
     }
 
-    private fun registerConfigurableSTMOperations(context: MutableMap<String, MezzeType>) {
-        // Configurable versions with max_retries and spin_count parameters
-
-        // __native_stm_read_cfg: {var: TVar 'a, max_retries: Int, spin_count: Int} -> 'a
-        context["__native_stm_read_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
-                "max_retries" to MezzeType.IntType,
-                "spin_count" to MezzeType.IntType
-            )),
-            MezzeType.VarType(TypeVar("a"))
-        )
-
-        // __native_stm_write_cfg: {var: TVar 'a, val: 'a, max_retries: Int, spin_count: Int} -> {}
-        context["__native_stm_write_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
-                "val" to MezzeType.VarType(TypeVar("a")),
-                "max_retries" to MezzeType.IntType,
-                "spin_count" to MezzeType.IntType
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
-
-        // __native_stm_modify_cfg
-        context["__native_stm_modify_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.VarType(TypeVar("a"))
-                ),
-                "max_retries" to MezzeType.IntType,
-                "spin_count" to MezzeType.IntType
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
-
-        // __native_stm_swap_cfg
-        context["__native_stm_swap_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
-                "val" to MezzeType.VarType(TypeVar("a")),
-                "max_retries" to MezzeType.IntType,
-                "spin_count" to MezzeType.IntType
-            )),
-            MezzeType.VarType(TypeVar("a"))
-        )
-
-        // __native_stm_ensure_cfg
-        context["__native_stm_ensure_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
-                "max_retries" to MezzeType.IntType,
-                "spin_count" to MezzeType.IntType
-            )),
-            MezzeType.VarType(TypeVar("a"))
-        )
-
-        // __native_stm_retry_cfg: {max_retries: Int, spin_count: Int} -> 'a
-        context["__native_stm_retry_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "max_retries" to MezzeType.IntType,
-                "spin_count" to MezzeType.IntType
-            )),
-            MezzeType.VarType(TypeVar("a"))
-        )
-
-        // __native_stm_or_else_cfg
-        context["__native_stm_or_else_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "primary" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("a"))
-                ),
-                "fallback" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("a"))
-                ),
-                "max_retries" to MezzeType.IntType,
-                "spin_count" to MezzeType.IntType
-            )),
-            MezzeType.VarType(TypeVar("a"))
-        )
-
-        // __native_stm_check_cfg
-        context["__native_stm_check_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "cond" to MezzeType.BoolType,
-                "max_retries" to MezzeType.IntType,
-                "spin_count" to MezzeType.IntType
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
+    private fun registerConfigurableSTMOperations(context: MutableMap<String, MezzeType>) = natives(context) {
+        fn("__native_stm_read_cfg") {
+            val a = tvar("a")
+            param("var" to tvarOf(a), "max_retries" to int, "spin_count" to int)
+            returns(a)
+        }
+        fn("__native_stm_write_cfg") {
+            val a = tvar("a")
+            param("var" to tvarOf(a), "val" to a, "max_retries" to int, "spin_count" to int)
+            returns(unit)
+        }
+        fn("__native_stm_modify_cfg") {
+            val a = tvar("a")
+            param(
+                "var" to tvarOf(a),
+                "f" to MezzeType.FunctionType(rec("val" to a), a),
+                "max_retries" to int,
+                "spin_count" to int
+            )
+            returns(unit)
+        }
+        fn("__native_stm_swap_cfg") {
+            val a = tvar("a")
+            param("var" to tvarOf(a), "val" to a, "max_retries" to int, "spin_count" to int)
+            returns(a)
+        }
+        fn("__native_stm_ensure_cfg") {
+            val a = tvar("a")
+            param("var" to tvarOf(a), "max_retries" to int, "spin_count" to int)
+            returns(a)
+        }
+        fn("__native_stm_retry_cfg") {
+            val a = tvar("a")
+            param("max_retries" to int, "spin_count" to int)
+            returns(a)
+        }
+        fn("__native_stm_or_else_cfg") {
+            val a = tvar("a")
+            param(
+                "primary" to MezzeType.FunctionType(unit, a),
+                "fallback" to MezzeType.FunctionType(unit, a),
+                "max_retries" to int,
+                "spin_count" to int
+            )
+            returns(a)
+        }
+        fn("__native_stm_check_cfg") {
+            param("cond" to bool, "max_retries" to int, "spin_count" to int)
+            returns(unit)
+        }
     }
 
     private fun registerSequentialSTMOperations(context: MutableMap<String, MezzeType>) {
@@ -245,59 +122,47 @@ object STMTypes {
     }
 
     private fun registerBulkOperations(context: MutableMap<String, MezzeType>) {
-        // __native_stm_read_all and __native_stm_write_all are the only STM
-        // natives that appear as a BARE call in a wrapper that declares <STM>
-        // (see std/effects/stm.mz read_all / write_all). Every other STM native
-        // sits inside an `impl STM for X where {…}` handler body, where the
-        // handler itself can't self-refer to <STM>, so those stay pure.
         // __native_stm_read_all: {vars: [TVar 'a]} -> ['a] <STM>
+        val readA = MezzeType.VarType(TypeVar("a"))
         context["__native_stm_read_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "vars" to MezzeType.SeqType(
-                    com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a"))))
-                )
+                "vars" to MezzeType.SeqType(tvarOf(readA))
             )),
-            MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
+            MezzeType.SeqType(readA),
             MezzeType.EffectRow(effects = setOf("STM"))
         )
 
         // __native_stm_write_all: {pairs: [{var: TVar 'a, val: 'a}]} -> {} <STM>
+        val writeA = MezzeType.VarType(TypeVar("a"))
         context["__native_stm_write_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "pairs" to MezzeType.SeqType(
                     MezzeType.RecordType(mapOf(
-                        "var" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("TVar", listOf(MezzeType.VarType(TypeVar("a")))),
-                        "val" to MezzeType.VarType(TypeVar("a"))
+                        "var" to tvarOf(writeA),
+                        "val" to writeA
                     ))
                 )
             )),
-            MezzeType.RecordType(emptyMap()),
+            unit,
             MezzeType.EffectRow(effects = setOf("STM"))
         )
 
         // __native_stm_atomic: {f: {} -> 'a <e>} -> 'a <e>
-        // Executes a function atomically with automatic retry on conflict
-        // Effect-polymorphic: the effect row variable 'e' is shared between input and output,
-        // so whatever effects 'f' has, the result has the same effects.
-        // The STM constraint is enforced by the stdlib effect declaration.
         val stmRowVar = RowVar.fresh()
+        val atomicA = MezzeType.VarType(TypeVar("a"))
         context["__native_stm_atomic"] = MezzeType.FunctionType(
             paramType = MezzeType.RecordType(mapOf(
                 "f" to MezzeType.FunctionType(
-                    paramType = MezzeType.RecordType(emptyMap()),
-                    returnType = MezzeType.VarType(TypeVar("a")),
+                    paramType = unit,
+                    returnType = atomicA,
                     effects = MezzeType.EffectRow.simple(emptySet(), stmRowVar, performed = false)
                 )
             )),
-            returnType = MezzeType.VarType(TypeVar("a")),
+            returnType = atomicA,
             effects = MezzeType.EffectRow.simple(emptySet(), stmRowVar, performed = false)
         )
 
         // __native_stm_commit: {} -> Bool
-        // Explicitly commit the current transaction
-        context["__native_stm_commit"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.BoolType
-        )
+        context["__native_stm_commit"] = MezzeType.FunctionType(unit, MezzeType.BoolType)
     }
 }

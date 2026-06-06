@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.types.effects
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.typechecker.types.*
 
 /**
  * Type definitions for OS platform thread concurrency primitives.
@@ -18,7 +19,7 @@ import com.mezze.language.ast.MezzeType
  */
 object OSThreadTypes {
 
-    fun registerAll(context: MutableMap<String, MezzeType>) {
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
         // No OS-specific natives have explicit type signatures here.
     }
 }

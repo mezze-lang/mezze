@@ -1,14 +1,7 @@
 package com.mezze.language.typechecker.types.effects
 
 import com.mezze.language.ast.MezzeType
-
-/**
- * Helper function to create Result type (as TypeApplication)
- * Note: Result takes value type first, then error type
- */
-private fun resultType(valueType: MezzeType, errorType: MezzeType): MezzeType {
-    return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(valueType, errorType))
-}
+import com.mezze.language.typechecker.types.*
 
 /**
  * Type signatures for filesystem effect operations
@@ -24,176 +17,66 @@ private fun resultType(valueType: MezzeType, errorType: MezzeType): MezzeType {
  */
 object FilesystemTypes {
     fun registerAll(context: MutableMap<String, MezzeType>) {
-        registerLocalDiskOperations(context)
-        registerMemoryFSOperations(context)
+        val errors = filesystemErrors()
+        registerFsOps(context, "__native_fs_", errors)
+        registerFsOps(context, "__native_memfs_", errors)
     }
 
-    /**
-     * Common filesystem error variants used by both LocalDisk and MemoryFS
-     */
-    private fun getFilesystemErrors(): Map<String, Map<String, MezzeType>> {
-        return mapOf(
-            "fileNotFound" to mapOf("FileNotFound" to MezzeType.RecordType(mapOf("path" to MezzeType.StringType))),
-            "permissionDenied" to mapOf("PermissionDenied" to MezzeType.RecordType(mapOf(
-                "path" to MezzeType.StringType,
-                "operation" to MezzeType.StringType
-            ))),
-            "ioError" to mapOf("IOError" to MezzeType.RecordType(mapOf(
-                "path" to MezzeType.StringType,
-                "message" to MezzeType.StringType
-            ))),
-            "diskFull" to mapOf("DiskFull" to MezzeType.RecordType(mapOf(
-                "path" to MezzeType.StringType,
-                "bytes_needed" to MezzeType.IntType
-            ))),
-            "directoryNotEmpty" to mapOf("DirectoryNotEmpty" to MezzeType.RecordType(mapOf("path" to MezzeType.StringType))),
-            "alreadyExists" to mapOf("AlreadyExists" to MezzeType.RecordType(mapOf("path" to MezzeType.StringType))),
-            "invalidPath" to mapOf("InvalidPath" to MezzeType.RecordType(mapOf("path" to MezzeType.StringType))),
-            "notADirectory" to mapOf("NotADirectory" to MezzeType.RecordType(mapOf("path" to MezzeType.StringType)))
-        )
+    private data class FsErrors(
+        val fileNotFound: Map<String, MezzeType.RecordType>,
+        val permissionDenied: Map<String, MezzeType.RecordType>,
+        val ioError: Map<String, MezzeType.RecordType>,
+        val diskFull: Map<String, MezzeType.RecordType>,
+        val directoryNotEmpty: Map<String, MezzeType.RecordType>,
+        val alreadyExists: Map<String, MezzeType.RecordType>,
+        val invalidPath: Map<String, MezzeType.RecordType>,
+        val notADirectory: Map<String, MezzeType.RecordType>,
+    )
+
+    private fun filesystemErrors() = FsErrors(
+        fileNotFound = mapOf("FileNotFound" to rec("path" to str)),
+        permissionDenied = mapOf("PermissionDenied" to rec("path" to str, "operation" to str)),
+        ioError = mapOf("IOError" to rec("path" to str, "message" to str)),
+        diskFull = mapOf("DiskFull" to rec("path" to str, "bytes_needed" to int)),
+        directoryNotEmpty = mapOf("DirectoryNotEmpty" to rec("path" to str)),
+        alreadyExists = mapOf("AlreadyExists" to rec("path" to str)),
+        invalidPath = mapOf("InvalidPath" to rec("path" to str)),
+        notADirectory = mapOf("NotADirectory" to rec("path" to str)),
+    )
+
+    private fun fsResult(ok: MezzeType, vararg errorMaps: Map<String, MezzeType.RecordType>): MezzeType {
+        val combined = errorMaps.fold(emptyMap<String, MezzeType>()) { acc, m -> acc + m }
+        return result(ok, MezzeType.VariantType(combined))
     }
 
-    private fun registerLocalDiskOperations(context: MutableMap<String, MezzeType>) {
-        val unitType = MezzeType.RecordType(emptyMap())
-        val errors = getFilesystemErrors()
-        val fileNotFoundError = errors["fileNotFound"]!!
-        val permissionDeniedError = errors["permissionDenied"]!!
-        val ioError = errors["ioError"]!!
-        val diskFullError = errors["diskFull"]!!
-        val directoryNotEmptyError = errors["directoryNotEmpty"]!!
-        val alreadyExistsError = errors["alreadyExists"]!!
-        val invalidPathError = errors["invalidPath"]!!
-        val notADirectoryError = errors["notADirectory"]!!
-
-        context["__native_fs_read_file"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            resultType(
-                MezzeType.StringType,
-                MezzeType.VariantType(fileNotFoundError + permissionDeniedError + ioError)
-            )
-        )
-
-        context["__native_fs_write_file"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "path" to MezzeType.StringType,
-                "content" to MezzeType.StringType
-            )),
-            resultType(
-                unitType,
-                MezzeType.VariantType(permissionDeniedError + ioError + diskFullError)
-            )
-        )
-
-        context["__native_fs_exists"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            resultType(
-                MezzeType.BoolType,
-                MezzeType.VariantType(permissionDeniedError + ioError)
-            )
-        )
-
-        context["__native_fs_delete"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            resultType(
-                unitType,
-                MezzeType.VariantType(fileNotFoundError + permissionDeniedError + directoryNotEmptyError + ioError)
-            )
-        )
-
-        context["__native_fs_list_directory"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            resultType(
-                MezzeType.SeqType(MezzeType.StringType),
-                MezzeType.VariantType(fileNotFoundError + permissionDeniedError + notADirectoryError + ioError)
-            )
-        )
-
-        context["__native_fs_create_directory"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            resultType(
-                unitType,
-                MezzeType.VariantType(alreadyExistsError + permissionDeniedError + invalidPathError + ioError)
-            )
-        )
-
-        context["__native_fs_file_size"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            resultType(
-                MezzeType.IntType,
-                MezzeType.VariantType(fileNotFoundError + permissionDeniedError + ioError)
-            )
-        )
-    }
-
-    private fun registerMemoryFSOperations(context: MutableMap<String, MezzeType>) {
-        val unitType = MezzeType.RecordType(emptyMap())
-        val errors = getFilesystemErrors()
-        val fileNotFoundError = errors["fileNotFound"]!!
-        val permissionDeniedError = errors["permissionDenied"]!!
-        val ioError = errors["ioError"]!!
-        val diskFullError = errors["diskFull"]!!
-        val directoryNotEmptyError = errors["directoryNotEmpty"]!!
-        val alreadyExistsError = errors["alreadyExists"]!!
-        val invalidPathError = errors["invalidPath"]!!
-        val notADirectoryError = errors["notADirectory"]!!
-
-        context["__native_memfs_read_file"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            resultType(
-                MezzeType.StringType,
-                MezzeType.VariantType(fileNotFoundError + permissionDeniedError + ioError)
-            )
-        )
-
-        context["__native_memfs_write_file"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "path" to MezzeType.StringType,
-                "content" to MezzeType.StringType
-            )),
-            resultType(
-                unitType,
-                MezzeType.VariantType(permissionDeniedError + ioError + diskFullError)
-            )
-        )
-
-        context["__native_memfs_exists"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            resultType(
-                MezzeType.BoolType,
-                MezzeType.VariantType(permissionDeniedError + ioError)
-            )
-        )
-
-        context["__native_memfs_delete"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            resultType(
-                unitType,
-                MezzeType.VariantType(fileNotFoundError + permissionDeniedError + directoryNotEmptyError + ioError)
-            )
-        )
-
-        context["__native_memfs_list_directory"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            resultType(
-                MezzeType.SeqType(MezzeType.StringType),
-                MezzeType.VariantType(fileNotFoundError + permissionDeniedError + notADirectoryError + ioError)
-            )
-        )
-
-        context["__native_memfs_create_directory"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            resultType(
-                unitType,
-                MezzeType.VariantType(alreadyExistsError + permissionDeniedError + invalidPathError + ioError)
-            )
-        )
-
-        context["__native_memfs_file_size"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            resultType(
-                MezzeType.IntType,
-                MezzeType.VariantType(fileNotFoundError + permissionDeniedError + ioError)
-            )
-        )
+    private fun registerFsOps(context: MutableMap<String, MezzeType>, prefix: String, e: FsErrors) = natives(context) {
+        fn("${prefix}read_file") {
+            param("path" to str)
+            returns(fsResult(str, e.fileNotFound, e.permissionDenied, e.ioError))
+        }
+        fn("${prefix}write_file") {
+            param("path" to str, "content" to str)
+            returns(fsResult(unit, e.permissionDenied, e.ioError, e.diskFull))
+        }
+        fn("${prefix}exists") {
+            param("path" to str)
+            returns(fsResult(bool, e.permissionDenied, e.ioError))
+        }
+        fn("${prefix}delete") {
+            param("path" to str)
+            returns(fsResult(unit, e.fileNotFound, e.permissionDenied, e.directoryNotEmpty, e.ioError))
+        }
+        fn("${prefix}list_directory") {
+            param("path" to str)
+            returns(fsResult(seq(str), e.fileNotFound, e.permissionDenied, e.notADirectory, e.ioError))
+        }
+        fn("${prefix}create_directory") {
+            param("path" to str)
+            returns(fsResult(unit, e.alreadyExists, e.permissionDenied, e.invalidPath, e.ioError))
+        }
+        fn("${prefix}file_size") {
+            param("path" to str)
+            returns(fsResult(int, e.fileNotFound, e.permissionDenied, e.ioError))
+        }
     }
 }

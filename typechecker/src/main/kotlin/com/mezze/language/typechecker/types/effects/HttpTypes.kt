@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker.types.effects
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.typechecker.types.*
+import com.mezze.language.typechecker.util.WellKnownTypeApp
 
 /**
  * Type signatures for HTTP effect operations
@@ -11,117 +13,65 @@ import com.mezze.language.ast.MezzeType
  */
 object HttpTypes {
 
-    // Helper to create Result type
-    private fun resultType(valueType: MezzeType, errorType: MezzeType): MezzeType {
-        return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Result", listOf(valueType, errorType))
-    }
-
-    // Helper to create Option type
-    private fun optionType(elementType: MezzeType): MezzeType {
-        return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
-    }
-
     // HTTP Response type: {status: Int, headers: Map String String, body: Bytes, url: Str}
-    private val responseType = MezzeType.RecordType(mapOf(
-        "status" to MezzeType.IntType,
-        "headers" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("Map", listOf(MezzeType.StringType, MezzeType.StringType)),
-        "body" to MezzeType.BytesType,
-        "url" to MezzeType.StringType
-    ))
+    private val responseType = rec(
+        "status" to int,
+        "headers" to WellKnownTypeApp.of("Map", listOf(str, str)),
+        "body" to bytes,
+        "url" to str
+    )
 
     // HTTP Error variant type
-    private val httpErrorType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("HttpError", emptyList())
+    private val httpErrorType = WellKnownTypeApp.of("HttpError", emptyList())
 
     // Result Response HttpError
-    private val httpResultType = resultType(responseType, httpErrorType)
+    private val httpResultType = result(responseType, httpErrorType)
 
     // Request type
-    private val requestType = MezzeType.RecordType(mapOf(
-        "method" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("Method", emptyList()),
-        "url" to MezzeType.StringType,
-        "headers" to com.mezze.language.typechecker.util.WellKnownTypeApp.of("Map", listOf(MezzeType.StringType, MezzeType.StringType)),
-        "body" to optionType(MezzeType.BytesType),
-        "timeout_ms" to optionType(MezzeType.IntType)
-    ))
+    private val requestType = rec(
+        "method" to WellKnownTypeApp.of("Method", emptyList()),
+        "url" to str,
+        "headers" to WellKnownTypeApp.of("Map", listOf(str, str)),
+        "body" to option(bytes),
+        "timeout_ms" to option(int)
+    )
 
-    // HttpConfig type (comprehensive configuration)
-    private val httpConfigType = MezzeType.RecordType(mapOf(
-        "timeout_ms" to MezzeType.IntType,
-        "connect_timeout_ms" to MezzeType.IntType,
-        "follow_redirects" to MezzeType.BoolType,
-        "max_redirects" to MezzeType.IntType,
-        "verify_ssl" to MezzeType.BoolType,
-        "auto_decompress" to MezzeType.BoolType,
-        "keep_alive" to MezzeType.BoolType
-    ))
+    // HttpConfig type
+    private val httpConfigType = rec(
+        "timeout_ms" to int,
+        "connect_timeout_ms" to int,
+        "follow_redirects" to bool,
+        "max_redirects" to int,
+        "verify_ssl" to bool,
+        "auto_decompress" to bool,
+        "keep_alive" to bool
+    )
 
-    // UrlPattern variant type: | Glob { pattern: String } |
-    private val urlPatternType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("UrlPattern", emptyList())
+    // UrlPattern variant type
+    private val urlPatternType = WellKnownTypeApp.of("UrlPattern", emptyList())
 
-    // MockRule type: { methods: [Method], url: UrlPattern, response: Result Response HttpError }
-    private val mockRuleType = MezzeType.RecordType(mapOf(
-        "methods" to MezzeType.SeqType(com.mezze.language.typechecker.util.WellKnownTypeApp.of("Method", emptyList())),
+    // MockRule type
+    private val mockRuleType = rec(
+        "methods" to MezzeType.SeqType(WellKnownTypeApp.of("Method", emptyList())),
         "url" to urlPatternType,
         "response" to httpResultType
-    ))
+    )
 
-    // HttpClient handle type (opaque type for the client handle)
-    // Using a TypeApplication with no args to represent an opaque external type
-    private val httpClientHandleType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("HttpClientHandle", emptyList())
+    // HttpClient handle type (opaque)
+    private val httpClientHandleType = WellKnownTypeApp.of("HttpClientHandle", emptyList())
 
-    // Unit type is represented as empty record
-    private val unitType = MezzeType.RecordType(emptyMap())
-
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        // __native_http_client_create: {} -> HttpClientHandle
-        // Creates a new HTTP client instance (WebClient wrapper)
-        context["__native_http_client_create"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            httpClientHandleType
-        )
-
-        // __native_http_client_close: {client: HttpClientHandle} -> {}
-        // Closes an HTTP client instance
-        context["__native_http_client_close"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("client" to httpClientHandleType)),
-            unitType
-        )
-
-        // __native_http_request: {req: Request, config: HttpConfig, client: HttpClientHandle} -> Result Response HttpError
-        // Used by HttpClient implementation with scoped effects
-        context["__native_http_request"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "req" to requestType,
-                "config" to httpConfigType,
-                "client" to httpClientHandleType
-            )),
-            httpResultType
-        )
-
-        // MockRule array type for MockHttpClient
-        val mockRulesType = MezzeType.SeqType(mockRuleType)
-
-        // __native_http_mock_request: {req: Request, rules: [MockRule]} -> Result Response HttpError
-        // Used by MockHttpClient implementation
-        context["__native_http_mock_request"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "req" to requestType,
-                "rules" to mockRulesType
-            )),
-            httpResultType
-        )
-
-        // Utility functions
-        // __native_base64_encode: {s: String} -> String
-        context["__native_base64_encode"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
-            MezzeType.StringType
-        )
-
-        // __native_base64_decode: {s: String} -> Result String String
-        context["__native_base64_decode"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
-            resultType(MezzeType.StringType, MezzeType.StringType)
-        )
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        fn("__native_http_client_create") { returns(httpClientHandleType) }
+        fn("__native_http_client_close") { param("client" to httpClientHandleType); returns(unit) }
+        fn("__native_http_request") {
+            param("req" to requestType, "config" to httpConfigType, "client" to httpClientHandleType)
+            returns(httpResultType)
+        }
+        fn("__native_http_mock_request") {
+            param("req" to requestType, "rules" to seq(mockRuleType))
+            returns(httpResultType)
+        }
+        fn("__native_base64_encode") { param("s" to str); returns(str) }
+        fn("__native_base64_decode") { param("s" to str); returns(result(str, str)) }
     }
 }

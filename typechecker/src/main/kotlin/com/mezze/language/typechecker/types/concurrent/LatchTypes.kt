@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker.types.concurrent
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.typechecker.types.*
+import com.mezze.language.typechecker.util.WellKnownTypeApp
 
 /**
  * Type definitions for CountDownLatch operations.
@@ -11,47 +13,42 @@ import com.mezze.language.ast.MezzeType
  */
 object LatchTypes {
 
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        val latchType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Latch", emptyList())
-        val unitType = MezzeType.RecordType(emptyMap())
-        val asyncEffect = MezzeType.EffectRow(effects = setOf("Async"))
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        val latchType = WellKnownTypeApp.of("Latch", emptyList())
 
         // __native_latch_new: {count: Int} -> Latch <Async>
-        context["__native_latch_new"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("count" to MezzeType.IntType)),
-            latchType,
-            effects = asyncEffect
-        )
+        fn("__native_latch_new") {
+            param("count" to int)
+            returns(latchType)
+            effects("Async")
+        }
 
         // __native_latch_count_down: {latch: Latch} -> {} <Async>
-        context["__native_latch_count_down"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("latch" to latchType)),
-            unitType,
-            effects = asyncEffect
-        )
+        fn("__native_latch_count_down") {
+            param("latch" to latchType)
+            returns(unit)
+            effects("Async")
+        }
 
         // __native_latch_await: {latch: Latch} -> {} <Async>
-        context["__native_latch_await"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("latch" to latchType)),
-            unitType,
-            effects = asyncEffect
-        )
+        fn("__native_latch_await") {
+            param("latch" to latchType)
+            returns(unit)
+            effects("Async")
+        }
 
         // __native_latch_await_timeout: {latch: Latch, ms: Int} -> Bool <Async>
-        context["__native_latch_await_timeout"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "latch" to latchType,
-                "ms" to MezzeType.IntType
-            )),
-            MezzeType.BoolType,
-            effects = asyncEffect
-        )
+        fn("__native_latch_await_timeout") {
+            param("latch" to latchType, "ms" to int)
+            returns(bool)
+            effects("Async")
+        }
 
         // __native_latch_get_count: {latch: Latch} -> Int <Async>
-        context["__native_latch_get_count"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("latch" to latchType)),
-            MezzeType.IntType,
-            effects = asyncEffect
-        )
+        fn("__native_latch_get_count") {
+            param("latch" to latchType)
+            returns(int)
+            effects("Async")
+        }
     }
 }

@@ -2,7 +2,8 @@ package com.mezze.language.typechecker.types.concurrent
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.RowVar
-import com.mezze.language.ast.TypeVar
+import com.mezze.language.typechecker.types.*
+import com.mezze.language.typechecker.util.WellKnownTypeApp
 
 /**
  * Type definitions for Mutex operations.
@@ -15,84 +16,54 @@ import com.mezze.language.ast.TypeVar
  */
 object MutexTypes {
 
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        val asyncEffect = MezzeType.EffectRow(effects = setOf("Async"))
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        val mutexType = WellKnownTypeApp.of("Mutex", emptyList())
 
         // __native_mutex_new: {} -> Mutex <Async>
-        run {
-            val mutexType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Mutex", emptyList())
-            context["__native_mutex_new"] = MezzeType.FunctionType(
-                MezzeType.RecordType(emptyMap()),
-                mutexType,
-                effects = asyncEffect
-            )
+        fn("__native_mutex_new") {
+            returns(mutexType)
+            effects("Async")
         }
 
         // __native_mutex_with_lock: {mutex: Mutex, f: {} -> 'a <...>} -> 'a <Async, ...>
-        run {
-            val mutexType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Mutex", emptyList())
-            val resultType = MezzeType.VarType(TypeVar("a"))
+        fn("__native_mutex_with_lock") {
+            val a = tvar("a")
             val funcType = MezzeType.FunctionType(
-                MezzeType.RecordType(emptyMap()),
-                resultType,
+                unit,
+                a,
                 effects = MezzeType.EffectRow.simple(emptySet(), RowVar.fresh(), performed = false)
             )
-            context["__native_mutex_with_lock"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "mutex" to mutexType,
-                    "f" to funcType
-                )),
-                resultType,
-                effects = asyncEffect
-            )
+            param("mutex" to mutexType, "f" to funcType)
+            returns(a)
+            effects("Async")
         }
 
         // __native_mutex_lock: {mutex: Mutex} -> {} <Async>
-        run {
-            val mutexType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Mutex", emptyList())
-            context["__native_mutex_lock"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "mutex" to mutexType
-                )),
-                MezzeType.RecordType(emptyMap()),
-                effects = asyncEffect
-            )
+        fn("__native_mutex_lock") {
+            param("mutex" to mutexType)
+            returns(unit)
+            effects("Async")
         }
 
         // __native_mutex_unlock: {mutex: Mutex} -> {} <Async>
-        run {
-            val mutexType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Mutex", emptyList())
-            context["__native_mutex_unlock"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "mutex" to mutexType
-                )),
-                MezzeType.RecordType(emptyMap()),
-                effects = asyncEffect
-            )
+        fn("__native_mutex_unlock") {
+            param("mutex" to mutexType)
+            returns(unit)
+            effects("Async")
         }
 
         // __native_mutex_try_lock: {mutex: Mutex} -> Bool <Async>
-        run {
-            val mutexType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Mutex", emptyList())
-            context["__native_mutex_try_lock"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "mutex" to mutexType
-                )),
-                MezzeType.BoolType,
-                effects = asyncEffect
-            )
+        fn("__native_mutex_try_lock") {
+            param("mutex" to mutexType)
+            returns(bool)
+            effects("Async")
         }
 
         // __native_mutex_is_held_by_current_thread: {mutex: Mutex} -> Bool <Async>
-        run {
-            val mutexType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Mutex", emptyList())
-            context["__native_mutex_is_held_by_current_thread"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "mutex" to mutexType
-                )),
-                MezzeType.BoolType,
-                effects = asyncEffect
-            )
+        fn("__native_mutex_is_held_by_current_thread") {
+            param("mutex" to mutexType)
+            returns(bool)
+            effects("Async")
         }
     }
 }

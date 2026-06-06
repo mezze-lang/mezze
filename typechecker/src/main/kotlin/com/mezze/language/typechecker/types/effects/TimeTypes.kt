@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.types.effects
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.typechecker.types.*
 
 /**
  * Type signatures for time effect operations
@@ -15,120 +16,33 @@ import com.mezze.language.ast.MezzeType
  * - Helper functions for timestamp manipulation
  */
 object TimeTypes {
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        registerTimeRetrievalOperations(context)
-        registerSleepOperations(context)
-        registerDateTimeComponentOperations(context)
-        registerTimeFormattingOperations(context)
-        registerTimestampHelperOperations(context)
-    }
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        // Time retrieval
+        fn("__native_time_now") { returns(int) }
+        fn("__native_time_now_nanos") { returns(int) }
 
-    private fun registerTimeRetrievalOperations(context: MutableMap<String, MezzeType>) {
-        context["__native_time_now"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.IntType
-        )
+        // Sleep operations
+        fn("__native_time_sleep") { param("millis" to int); returns(unit) }
+        fn("__native_time_sleep_nanos") { param("nanos" to int); returns(unit) }
 
-        context["__native_time_now_nanos"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.IntType
-        )
-    }
+        // Date/time components
+        fn("__native_time_current_year") { returns(int) }
+        fn("__native_time_current_month") { returns(int) }
+        fn("__native_time_current_day") { returns(int) }
+        fn("__native_time_current_hour") { returns(int) }
+        fn("__native_time_current_minute") { returns(int) }
+        fn("__native_time_current_second") { returns(int) }
 
-    private fun registerSleepOperations(context: MutableMap<String, MezzeType>) {
-        val unitType = MezzeType.RecordType(emptyMap())
+        // Formatting and parsing
+        fn("__native_time_format") { param("timestamp" to int, "format" to str); returns(str) }
+        fn("__native_time_parse") { param("date_string" to str, "format" to str); returns(int) }
 
-        context["__native_time_sleep"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("millis" to MezzeType.IntType)),
-            unitType
-        )
-
-        context["__native_time_sleep_nanos"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("nanos" to MezzeType.IntType)),
-            unitType
-        )
-    }
-
-    private fun registerDateTimeComponentOperations(context: MutableMap<String, MezzeType>) {
-        context["__native_time_current_year"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.IntType
-        )
-
-        context["__native_time_current_month"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.IntType
-        )
-
-        context["__native_time_current_day"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.IntType
-        )
-
-        context["__native_time_current_hour"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.IntType
-        )
-
-        context["__native_time_current_minute"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.IntType
-        )
-
-        context["__native_time_current_second"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.IntType
-        )
-    }
-
-    private fun registerTimeFormattingOperations(context: MutableMap<String, MezzeType>) {
-        context["__native_time_format"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "timestamp" to MezzeType.IntType,
-                "format" to MezzeType.StringType
-            )),
-            MezzeType.StringType
-        )
-
-        context["__native_time_parse"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "date_string" to MezzeType.StringType,
-                "format" to MezzeType.StringType
-            )),
-            MezzeType.IntType
-        )
-    }
-
-    private fun registerTimestampHelperOperations(context: MutableMap<String, MezzeType>) {
-        // Mock time helper functions for extracting components from timestamps
-        context["__native_time_year_from_timestamp"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("timestamp" to MezzeType.IntType)),
-            MezzeType.IntType
-        )
-
-        context["__native_time_month_from_timestamp"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("timestamp" to MezzeType.IntType)),
-            MezzeType.IntType
-        )
-
-        context["__native_time_day_from_timestamp"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("timestamp" to MezzeType.IntType)),
-            MezzeType.IntType
-        )
-
-        context["__native_time_hour_from_timestamp"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("timestamp" to MezzeType.IntType)),
-            MezzeType.IntType
-        )
-
-        context["__native_time_minute_from_timestamp"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("timestamp" to MezzeType.IntType)),
-            MezzeType.IntType
-        )
-
-        context["__native_time_second_from_timestamp"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("timestamp" to MezzeType.IntType)),
-            MezzeType.IntType
-        )
+        // Timestamp helpers
+        fn("__native_time_year_from_timestamp") { param("timestamp" to int); returns(int) }
+        fn("__native_time_month_from_timestamp") { param("timestamp" to int); returns(int) }
+        fn("__native_time_day_from_timestamp") { param("timestamp" to int); returns(int) }
+        fn("__native_time_hour_from_timestamp") { param("timestamp" to int); returns(int) }
+        fn("__native_time_minute_from_timestamp") { param("timestamp" to int); returns(int) }
+        fn("__native_time_second_from_timestamp") { param("timestamp" to int); returns(int) }
     }
 }

@@ -1,741 +1,165 @@
 package com.mezze.language.typechecker.types.collections
 
 import com.mezze.language.ast.MezzeType
-import com.mezze.language.ast.TypeVar
+import com.mezze.language.typechecker.types.*
 
-/**
- * Helper function to create Option type (as TypeApplication)
- */
-private fun optionType(elementType: MezzeType): MezzeType {
-    return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
-}
-
-/**
- * Type signatures for SortedMap operations.
- *
- * Corresponds to stdlib file:
- * - std/collections/sorted_map.mz
- *
- * SortedMap is backed by sorted-array storage (binary search lookup, O(log n)) with keys in sorted order.
- */
 object SortedMapTypes {
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        registerSortedMapNatives(context)
-    }
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        fn("__native_sorted_map_empty") { val k = tvar("k"); val v = tvar("v"); returns(sortedMap(k, v)) }
+        fn("__native_sorted_map_insert") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "k" to k, "v" to v); returns(sortedMap(k, v)) }
+        fn("__native_sorted_map_get") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "k" to k); returns(option(v)) }
+        fn("__native_sorted_map_remove") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "k" to k); returns(sortedMap(k, v)) }
+        fn("__native_sorted_map_contains_key") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "k" to k); returns(bool) }
+        fn("__native_sorted_map_size") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v)); returns(int) }
+        fn("__native_sorted_map_is_empty") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v)); returns(bool) }
+        fn("__native_sorted_map_keys") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v)); returns(list(k)) }
+        fn("__native_sorted_map_values") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v)); returns(list(v)) }
+        fn("__native_sorted_map_entries") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v))
+            returns(list(rec("k" to k, "v" to v)))
+        }
+        fn("__native_sorted_map_min_key") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v)); returns(option(k)) }
+        fn("__native_sorted_map_max_key") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v)); returns(option(k)) }
+        fn("__native_sorted_map_min_entry") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v))
+            returns(option(rec("k" to k, "v" to v)))
+        }
+        fn("__native_sorted_map_max_entry") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v))
+            returns(option(rec("k" to k, "v" to v)))
+        }
+        fn("__native_sorted_map_from_map") { val k = tvar("k"); val v = tvar("v"); param("m" to map(k, v)); returns(sortedMap(k, v)) }
+        fn("__native_sorted_map_to_map") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v)); returns(map(k, v)) }
+        fn("__native_sorted_map_equals") { val k = tvar("k"); val v = tvar("v"); param("m1" to sortedMap(k, v), "m2" to sortedMap(k, v)); returns(bool) }
+        fn("__native_sorted_map_compare") { val k = tvar("k"); val v = tvar("v"); param("m1" to sortedMap(k, v), "m2" to sortedMap(k, v)); returns(int) }
+        fn("__native_sorted_map_singleton") { val k = tvar("k"); val v = tvar("v"); param("k" to k, "v" to v); returns(sortedMap(k, v)) }
 
-    private fun registerSortedMapNatives(context: MutableMap<String, MezzeType>) {
-        // __native_sorted_map_empty: {} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_empty"] = MezzeType.FunctionType(
-                MezzeType.RecordType(emptyMap()),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
+        // Higher-Order Functions
+        fn("__native_sorted_map_filter") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(sortedMap(k, v))
+        }
+        fn("__native_sorted_map_fold") {
+            val k = tvar("k"); val v = tvar("v"); val acc = tvar("acc")
+            param("m" to sortedMap(k, v), "init" to acc, "f" to MezzeType.FunctionType(rec("acc" to acc, "k" to k, "v" to v), acc))
+            returns(acc)
+        }
+        fn("__native_sorted_map_map_values") {
+            val k = tvar("k"); val v = tvar("v"); val w = tvar("w")
+            param("m" to sortedMap(k, v), "f" to MezzeType.FunctionType(rec("val" to v), w))
+            returns(sortedMap(k, w))
+        }
+        fn("__native_sorted_map_any") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(bool)
+        }
+        fn("__native_sorted_map_all") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(bool)
+        }
+        fn("__native_sorted_map_none") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(bool)
+        }
+        fn("__native_sorted_map_find") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(option(rec("k" to k, "v" to v)))
+        }
+        fn("__native_sorted_map_count") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(int)
         }
 
-        // __native_sorted_map_insert: {m: SortedMap 'k 'v, k: 'k, v: 'v} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_insert"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "k" to keyType,
-                    "v" to valueType
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
+        // Additional Operations
+        fn("__native_sorted_map_contains_value") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "v" to v); returns(bool) }
+        fn("__native_sorted_map_get_or_default") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "k" to k, "default" to v); returns(v) }
+        fn("__native_sorted_map_update") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v), "k" to k, "f" to MezzeType.FunctionType(rec("val" to option(v)), v))
+            returns(sortedMap(k, v))
+        }
+        fn("__native_sorted_map_merge") { val k = tvar("k"); val v = tvar("v"); param("m1" to sortedMap(k, v), "m2" to sortedMap(k, v)); returns(sortedMap(k, v)) }
+        fn("__native_sorted_map_merge_with") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m1" to sortedMap(k, v), "m2" to sortedMap(k, v), "f" to MezzeType.FunctionType(rec("l" to v, "r" to v), v))
+            returns(sortedMap(k, v))
         }
 
-        // __native_sorted_map_get: {m: SortedMap 'k 'v, k: 'k} -> Option 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_get"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "k" to keyType
-                )),
-                optionType(valueType)
-            )
+        // Conversion
+        fn("__native_sorted_map_to_seq") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v))
+            returns(seq(rec("k" to k, "v" to v)))
+        }
+        fn("__native_sorted_map_keys_seq") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v)); returns(seq(k)) }
+        fn("__native_sorted_map_values_seq") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v)); returns(seq(v)) }
+
+        // Navigation Operations
+        fn("__native_sorted_map_partition") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v), "p" to MezzeType.FunctionType(rec("k" to k, "v" to v), bool))
+            returns(rec("pass" to sortedMap(k, v), "fail" to sortedMap(k, v)))
+        }
+        fn("__native_sorted_map_range") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "lo" to k, "hi" to k); returns(sortedMap(k, v)) }
+        fn("__native_sorted_map_floor_key") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "k" to k); returns(option(k)) }
+        fn("__native_sorted_map_ceiling_key") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "k" to k); returns(option(k)) }
+        fn("__native_sorted_map_lower_key") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "k" to k); returns(option(k)) }
+        fn("__native_sorted_map_higher_key") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "k" to k); returns(option(k)) }
+        fn("__native_sorted_map_floor_entry") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v), "k" to k)
+            returns(option(rec("k" to k, "v" to v)))
+        }
+        fn("__native_sorted_map_ceiling_entry") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v), "k" to k)
+            returns(option(rec("k" to k, "v" to v)))
         }
 
-        // __native_sorted_map_remove: {m: SortedMap 'k 'v, k: 'k} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_remove"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "k" to keyType
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
+        // View Operations
+        fn("__native_sorted_map_head_map") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "to" to k); returns(sortedMap(k, v)) }
+        fn("__native_sorted_map_tail_map") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "from" to k); returns(sortedMap(k, v)) }
+        fn("__native_sorted_map_sub_map") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "lo" to k, "hi" to k); returns(sortedMap(k, v)) }
+        fn("__native_sorted_map_take") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "n" to int); returns(sortedMap(k, v)) }
+        fn("__native_sorted_map_drop") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v), "n" to int); returns(sortedMap(k, v)) }
+
+        // Additional HOF Operations
+        fn("__native_sorted_map_map_keys") {
+            val k = tvar("k"); val v = tvar("v"); val k2 = tvar("k2")
+            param("m" to sortedMap(k, v), "f" to MezzeType.FunctionType(rec("val" to k), k2))
+            returns(sortedMap(k2, v))
         }
-
-        // __native_sorted_map_contains_key: {m: SortedMap 'k 'v, k: 'k} -> Bool
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_contains_key"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "k" to keyType
-                )),
-                MezzeType.BoolType
-            )
+        fn("__native_sorted_map_filter_keys") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v), "p" to MezzeType.FunctionType(rec("val" to k), bool))
+            returns(sortedMap(k, v))
         }
-
-        // __native_sorted_map_size: {m: SortedMap 'k 'v} -> Int
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_size"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.IntType
-            )
+        fn("__native_sorted_map_filter_values") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v), "p" to MezzeType.FunctionType(rec("val" to v), bool))
+            returns(sortedMap(k, v))
         }
+        fn("__native_sorted_map_invert") { val k = tvar("k"); val v = tvar("v"); param("m" to sortedMap(k, v)); returns(sortedMap(v, k)) }
 
-        // __native_sorted_map_is_empty: {m: SortedMap 'k 'v} -> Bool
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_is_empty"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.BoolType
-            )
+        // List Conversions
+        fn("__native_sorted_map_to_list") {
+            val k = tvar("k"); val v = tvar("v")
+            param("m" to sortedMap(k, v))
+            returns(list(rec("k" to k, "v" to v)))
         }
-
-        // __native_sorted_map_keys: {m: SortedMap 'k 'v} -> List 'k
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_keys"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.ListType(keyType)
-            )
-        }
-
-        // __native_sorted_map_values: {m: SortedMap 'k 'v} -> List 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_values"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.ListType(valueType)
-            )
-        }
-
-        // __native_sorted_map_entries: {m: SortedMap 'k 'v} -> List {k: 'k, v: 'v}
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_entries"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.ListType(MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)))
-            )
-        }
-
-        // __native_sorted_map_min_key: {m: SortedMap 'k 'v} -> Option 'k
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_min_key"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                optionType(keyType)
-            )
-        }
-
-        // __native_sorted_map_max_key: {m: SortedMap 'k 'v} -> Option 'k
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_max_key"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                optionType(keyType)
-            )
-        }
-
-        // __native_sorted_map_min_entry: {m: SortedMap 'k 'v} -> Option {k: 'k, v: 'v}
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_min_entry"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                optionType(MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)))
-            )
-        }
-
-        // __native_sorted_map_max_entry: {m: SortedMap 'k 'v} -> Option {k: 'k, v: 'v}
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_max_entry"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                optionType(MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)))
-            )
-        }
-
-        // __native_sorted_map_from_map: {m: Map 'k 'v} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_from_map"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.MapType(keyType, valueType))),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_to_map: {m: SortedMap 'k 'v} -> Map 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_to_map"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.MapType(keyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_equals: {m1: SortedMap 'k 'v, m2: SortedMap 'k 'v} -> Bool
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_equals"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m1" to MezzeType.SortedMapType(keyType, valueType),
-                    "m2" to MezzeType.SortedMapType(keyType, valueType)
-                )),
-                MezzeType.BoolType
-            )
-        }
-
-        // __native_sorted_map_compare: {m1: SortedMap 'k 'v, m2: SortedMap 'k 'v} -> Int
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_compare"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m1" to MezzeType.SortedMapType(keyType, valueType),
-                    "m2" to MezzeType.SortedMapType(keyType, valueType)
-                )),
-                MezzeType.IntType
-            )
-        }
-
-        // __native_sorted_map_singleton: {k: 'k, v: 'v} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_singleton"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // ==================== Higher-Order Functions ====================
-
-        // __native_sorted_map_filter: {m: SortedMap 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_filter"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "p" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)),
-                        MezzeType.BoolType
-                    )
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_fold: {m: SortedMap 'k 'v, init: 'acc, f: {acc: 'acc, k: 'k, v: 'v} -> 'acc} -> 'acc
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            val accType = MezzeType.VarType(TypeVar("acc"))
-            context["__native_sorted_map_fold"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "init" to accType,
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("acc" to accType, "k" to keyType, "v" to valueType)),
-                        accType
-                    )
-                )),
-                accType
-            )
-        }
-
-        // __native_sorted_map_map_values: {m: SortedMap 'k 'v, f: {val: 'v} -> 'w} -> SortedMap 'k 'w
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            val resultType = MezzeType.VarType(TypeVar("w"))
-            context["__native_sorted_map_map_values"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("val" to valueType)),
-                        resultType
-                    )
-                )),
-                MezzeType.SortedMapType(keyType, resultType)
-            )
-        }
-
-        // __native_sorted_map_any: {m: SortedMap 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> Bool
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_any"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "p" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)),
-                        MezzeType.BoolType
-                    )
-                )),
-                MezzeType.BoolType
-            )
-        }
-
-        // __native_sorted_map_all: {m: SortedMap 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> Bool
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_all"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "p" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)),
-                        MezzeType.BoolType
-                    )
-                )),
-                MezzeType.BoolType
-            )
-        }
-
-        // __native_sorted_map_none: {m: SortedMap 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> Bool
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_none"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "p" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)),
-                        MezzeType.BoolType
-                    )
-                )),
-                MezzeType.BoolType
-            )
-        }
-
-        // __native_sorted_map_find: {m: SortedMap 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> Option {k: 'k, v: 'v}
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_find"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "p" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)),
-                        MezzeType.BoolType
-                    )
-                )),
-                optionType(MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)))
-            )
-        }
-
-        // __native_sorted_map_count: {m: SortedMap 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> Int
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_count"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "p" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)),
-                        MezzeType.BoolType
-                    )
-                )),
-                MezzeType.IntType
-            )
-        }
-
-        // ==================== Additional Operations ====================
-
-        // __native_sorted_map_contains_value: {m: SortedMap 'k 'v, v: 'v} -> Bool
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_contains_value"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "v" to valueType
-                )),
-                MezzeType.BoolType
-            )
-        }
-
-        // __native_sorted_map_get_or_default: {m: SortedMap 'k 'v, k: 'k, default: 'v} -> 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_get_or_default"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "k" to keyType,
-                    "default" to valueType
-                )),
-                valueType
-            )
-        }
-
-        // __native_sorted_map_update: {m: SortedMap 'k 'v, k: 'k, f: {val: Option 'v} -> 'v} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_update"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "k" to keyType,
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("val" to optionType(valueType))),
-                        valueType
-                    )
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_merge: {m1: SortedMap 'k 'v, m2: SortedMap 'k 'v} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_merge"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m1" to MezzeType.SortedMapType(keyType, valueType),
-                    "m2" to MezzeType.SortedMapType(keyType, valueType)
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_merge_with: {m1: SortedMap 'k 'v, m2: SortedMap 'k 'v, f: {l: 'v, r: 'v} -> 'v} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_merge_with"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m1" to MezzeType.SortedMapType(keyType, valueType),
-                    "m2" to MezzeType.SortedMapType(keyType, valueType),
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("l" to valueType, "r" to valueType)),
-                        valueType
-                    )
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // ==================== Conversion ====================
-
-        // __native_sorted_map_to_seq: {m: SortedMap 'k 'v} -> [{k: 'k, v: 'v}]
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_to_seq"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.SeqType(MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)))
-            )
-        }
-
-        // __native_sorted_map_keys_seq: {m: SortedMap 'k 'v} -> ['k]
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_keys_seq"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.SeqType(keyType)
-            )
-        }
-
-        // __native_sorted_map_values_seq: {m: SortedMap 'k 'v} -> ['v]
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_values_seq"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.SeqType(valueType)
-            )
-        }
-
-        // ==================== Task #15: Navigation Operations ====================
-
-        // __native_sorted_map_partition: {m: SortedMap 'k 'v, p: {k: 'k, v: 'v} -> Bool} -> {pass: SortedMap 'k 'v, fail: SortedMap 'k 'v}
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            val mapType = MezzeType.SortedMapType(keyType, valueType)
-            context["__native_sorted_map_partition"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to mapType,
-                    "p" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)),
-                        MezzeType.BoolType
-                    )
-                )),
-                MezzeType.RecordType(mapOf("pass" to mapType, "fail" to mapType))
-            )
-        }
-
-        // __native_sorted_map_range: {m: SortedMap 'k 'v, lo: 'k, hi: 'k} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_range"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "lo" to keyType,
-                    "hi" to keyType
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_floor_key: {m: SortedMap 'k 'v, k: 'k} -> Option 'k
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_floor_key"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "k" to keyType
-                )),
-                optionType(keyType)
-            )
-        }
-
-        // __native_sorted_map_ceiling_key: {m: SortedMap 'k 'v, k: 'k} -> Option 'k
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_ceiling_key"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "k" to keyType
-                )),
-                optionType(keyType)
-            )
-        }
-
-        // __native_sorted_map_lower_key: {m: SortedMap 'k 'v, k: 'k} -> Option 'k
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_lower_key"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "k" to keyType
-                )),
-                optionType(keyType)
-            )
-        }
-
-        // __native_sorted_map_higher_key: {m: SortedMap 'k 'v, k: 'k} -> Option 'k
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_higher_key"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "k" to keyType
-                )),
-                optionType(keyType)
-            )
-        }
-
-        // __native_sorted_map_floor_entry: {m: SortedMap 'k 'v, k: 'k} -> Option {k: 'k, v: 'v}
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_floor_entry"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "k" to keyType
-                )),
-                optionType(MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)))
-            )
-        }
-
-        // __native_sorted_map_ceiling_entry: {m: SortedMap 'k 'v, k: 'k} -> Option {k: 'k, v: 'v}
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_ceiling_entry"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "k" to keyType
-                )),
-                optionType(MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)))
-            )
-        }
-
-        // ==================== Task #16: View Operations ====================
-
-        // __native_sorted_map_head_map: {m: SortedMap 'k 'v, to: 'k} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_head_map"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "to" to keyType
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_tail_map: {m: SortedMap 'k 'v, from: 'k} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_tail_map"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "from" to keyType
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_sub_map: {m: SortedMap 'k 'v, lo: 'k, hi: 'k} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_sub_map"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "lo" to keyType,
-                    "hi" to keyType
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_take: {m: SortedMap 'k 'v, n: Int} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_take"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "n" to MezzeType.IntType
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_drop: {m: SortedMap 'k 'v, n: Int} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_drop"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "n" to MezzeType.IntType
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // ==================== Additional HOF Operations ====================
-
-        // __native_sorted_map_map_keys: {m: SortedMap 'k 'v, f: {val: 'k} -> 'k2} -> SortedMap 'k2 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            val newKeyType = MezzeType.VarType(TypeVar("k2"))
-            context["__native_sorted_map_map_keys"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("val" to keyType)),
-                        newKeyType
-                    )
-                )),
-                MezzeType.SortedMapType(newKeyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_filter_keys: {m: SortedMap 'k 'v, p: {val: 'k} -> Bool} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_filter_keys"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "p" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("val" to keyType)),
-                        MezzeType.BoolType
-                    )
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_filter_values: {m: SortedMap 'k 'v, p: {val: 'v} -> Bool} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_filter_values"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "m" to MezzeType.SortedMapType(keyType, valueType),
-                    "p" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("val" to valueType)),
-                        MezzeType.BoolType
-                    )
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
-        }
-
-        // __native_sorted_map_invert: {m: SortedMap 'k 'v} -> SortedMap 'v 'k
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_invert"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.SortedMapType(valueType, keyType)
-            )
-        }
-
-        // ==================== List Conversions ====================
-
-        // __native_sorted_map_to_list: {m: SortedMap 'k 'v} -> List {k: 'k, v: 'v}
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_to_list"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("m" to MezzeType.SortedMapType(keyType, valueType))),
-                MezzeType.ListType(MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)))
-            )
-        }
-
-        // __native_sorted_map_from_list: {xs: List {k: 'k, v: 'v}} -> SortedMap 'k 'v
-        run {
-            val keyType = MezzeType.VarType(TypeVar("k"))
-            val valueType = MezzeType.VarType(TypeVar("v"))
-            context["__native_sorted_map_from_list"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "xs" to MezzeType.ListType(MezzeType.RecordType(mapOf("k" to keyType, "v" to valueType)))
-                )),
-                MezzeType.SortedMapType(keyType, valueType)
-            )
+        fn("__native_sorted_map_from_list") {
+            val k = tvar("k"); val v = tvar("v")
+            param("xs" to list(rec("k" to k, "v" to v)))
+            returns(sortedMap(k, v))
         }
     }
 }

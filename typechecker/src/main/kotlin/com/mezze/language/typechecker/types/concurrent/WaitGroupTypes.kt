@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker.types.concurrent
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.typechecker.types.*
+import com.mezze.language.typechecker.util.WellKnownTypeApp
 
 /**
  * Type definitions for WaitGroup operations.
@@ -12,57 +14,48 @@ import com.mezze.language.ast.MezzeType
  */
 object WaitGroupTypes {
 
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        val wgType = com.mezze.language.typechecker.util.WellKnownTypeApp.of("WaitGroup", emptyList())
-        val unitType = MezzeType.RecordType(emptyMap())
-        val asyncEffect = MezzeType.EffectRow(effects = setOf("Async"))
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        val wgType = WellKnownTypeApp.of("WaitGroup", emptyList())
 
         // __native_waitgroup_new: {} -> WaitGroup <Async>
-        context["__native_waitgroup_new"] = MezzeType.FunctionType(
-            unitType,
-            wgType,
-            effects = asyncEffect
-        )
+        fn("__native_waitgroup_new") {
+            returns(wgType)
+            effects("Async")
+        }
 
         // __native_waitgroup_add: {wg: WaitGroup, delta: Int} -> {} <Async>
-        context["__native_waitgroup_add"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "wg" to wgType,
-                "delta" to MezzeType.IntType
-            )),
-            unitType,
-            effects = asyncEffect
-        )
+        fn("__native_waitgroup_add") {
+            param("wg" to wgType, "delta" to int)
+            returns(unit)
+            effects("Async")
+        }
 
         // __native_waitgroup_done: {wg: WaitGroup} -> {} <Async>
-        context["__native_waitgroup_done"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("wg" to wgType)),
-            unitType,
-            effects = asyncEffect
-        )
+        fn("__native_waitgroup_done") {
+            param("wg" to wgType)
+            returns(unit)
+            effects("Async")
+        }
 
         // __native_waitgroup_wait: {wg: WaitGroup} -> {} <Async>
-        context["__native_waitgroup_wait"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("wg" to wgType)),
-            unitType,
-            effects = asyncEffect
-        )
+        fn("__native_waitgroup_wait") {
+            param("wg" to wgType)
+            returns(unit)
+            effects("Async")
+        }
 
         // __native_waitgroup_wait_timeout: {wg: WaitGroup, ms: Int} -> Bool <Async>
-        context["__native_waitgroup_wait_timeout"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "wg" to wgType,
-                "ms" to MezzeType.IntType
-            )),
-            MezzeType.BoolType,
-            effects = asyncEffect
-        )
+        fn("__native_waitgroup_wait_timeout") {
+            param("wg" to wgType, "ms" to int)
+            returns(bool)
+            effects("Async")
+        }
 
         // __native_waitgroup_get_count: {wg: WaitGroup} -> Int <Async>
-        context["__native_waitgroup_get_count"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("wg" to wgType)),
-            MezzeType.IntType,
-            effects = asyncEffect
-        )
+        fn("__native_waitgroup_get_count") {
+            param("wg" to wgType)
+            returns(int)
+            effects("Async")
+        }
     }
 }

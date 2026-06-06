@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.types.effects
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
+import com.mezze.language.typechecker.types.*
 
 /**
  * Type definitions for Parallel (data parallelism) native functions.
@@ -21,335 +22,159 @@ object ParallelTypes {
         registerForkJoinOperations(context)
     }
 
-    private fun registerCoreOperations(context: MutableMap<String, MezzeType>) {
-        // __native_parallel_map: {xs: ['a], f: {x: 'a} -> 'b} -> ['b]
-        context["__native_parallel_map"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.VarType(TypeVar("b"))
-                )
-            )),
-            MezzeType.SeqType(MezzeType.VarType(TypeVar("b")))
-        )
+    private fun registerCoreOperations(context: MutableMap<String, MezzeType>) = natives(context) {
+        fn("__native_parallel_map") {
+            val a = tvar("a"); val b = tvar("b")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), b))
+            returns(seq(b))
+        }
 
-        // __native_parallel_for_each: {xs: ['a], f: {x: 'a} -> {}} -> {}
-        context["__native_parallel_for_each"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.RecordType(emptyMap())
-                )
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
+        fn("__native_parallel_for_each") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), unit))
+            returns(unit)
+        }
 
-        // __native_parallel_filter: {xs: ['a], f: {x: 'a} -> Bool} -> ['a]
-        context["__native_parallel_filter"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                )
-            )),
-            MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
-        )
+        fn("__native_parallel_filter") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool))
+            returns(seq(a))
+        }
 
-        // __native_parallel_reduce: {xs: ['a], f: {l: 'a, r: 'a} -> 'a} -> Option 'a
-        context["__native_parallel_reduce"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf(
-                        "l" to MezzeType.VarType(TypeVar("a")),
-                        "r" to MezzeType.VarType(TypeVar("a"))
-                    )),
-                    MezzeType.VarType(TypeVar("a"))
-                )
-            )),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(TypeVar("a"))))
-        )
+        fn("__native_parallel_reduce") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("l" to a, "r" to a), a))
+            returns(option(a))
+        }
 
-        // __native_parallel_fold: {xs: ['a], zero: 'b, map_fn: {x: 'a} -> 'b, combine: {l: 'b, r: 'b} -> 'b} -> 'b
-        context["__native_parallel_fold"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "zero" to MezzeType.VarType(TypeVar("b")),
-                "map_fn" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.VarType(TypeVar("b"))
-                ),
-                "combine" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf(
-                        "l" to MezzeType.VarType(TypeVar("b")),
-                        "r" to MezzeType.VarType(TypeVar("b"))
-                    )),
-                    MezzeType.VarType(TypeVar("b"))
-                )
-            )),
-            MezzeType.VarType(TypeVar("b"))
-        )
+        fn("__native_parallel_fold") {
+            val a = tvar("a"); val b = tvar("b")
+            param(
+                "xs" to seq(a),
+                "zero" to b,
+                "map_fn" to MezzeType.FunctionType(rec("x" to a), b),
+                "combine" to MezzeType.FunctionType(rec("l" to b, "r" to b), b)
+            )
+            returns(b)
+        }
 
-        // __native_parallel_both: {l: {} -> 'a, r: {} -> 'b} -> {l: 'a, r: 'b}
-        context["__native_parallel_both"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "l" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("a"))
-                ),
-                "r" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("b"))
-                )
-            )),
-            MezzeType.RecordType(mapOf(
-                "l" to MezzeType.VarType(TypeVar("a")),
-                "r" to MezzeType.VarType(TypeVar("b"))
-            ))
-        )
+        fn("__native_parallel_both") {
+            val a = tvar("a"); val b = tvar("b")
+            param(
+                "l" to MezzeType.FunctionType(unit, a),
+                "r" to MezzeType.FunctionType(unit, b)
+            )
+            returns(rec("l" to a, "r" to b))
+        }
 
-        // __native_parallel_both3: {a: {} -> 'a, b: {} -> 'b, c: {} -> 'c} -> {a: 'a, b: 'b, c: 'c}
-        context["__native_parallel_both3"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "a" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("a"))
-                ),
-                "b" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("b"))
-                ),
-                "c" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("c"))
-                )
-            )),
-            MezzeType.RecordType(mapOf(
-                "a" to MezzeType.VarType(TypeVar("a")),
-                "b" to MezzeType.VarType(TypeVar("b")),
-                "c" to MezzeType.VarType(TypeVar("c"))
-            ))
-        )
+        fn("__native_parallel_both3") {
+            val a = tvar("a"); val b = tvar("b"); val c = tvar("c")
+            param(
+                "a" to MezzeType.FunctionType(unit, a),
+                "b" to MezzeType.FunctionType(unit, b),
+                "c" to MezzeType.FunctionType(unit, c)
+            )
+            returns(rec("a" to a, "b" to b, "c" to c))
+        }
 
-        // __native_parallel_find: {xs: ['a], f: {x: 'a} -> Bool} -> Option 'a
-        context["__native_parallel_find"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                )
-            )),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(TypeVar("a"))))
-        )
+        fn("__native_parallel_find") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool))
+            returns(option(a))
+        }
 
-        // __native_parallel_any: {xs: ['a], f: {x: 'a} -> Bool} -> Bool
-        context["__native_parallel_any"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                )
-            )),
-            MezzeType.BoolType
-        )
+        fn("__native_parallel_any") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool))
+            returns(bool)
+        }
 
-        // __native_parallel_all: {xs: ['a], f: {x: 'a} -> Bool} -> Bool
-        context["__native_parallel_all"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                )
-            )),
-            MezzeType.BoolType
-        )
+        fn("__native_parallel_all") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool))
+            returns(bool)
+        }
 
-        // __native_parallel_partition: {xs: ['a], f: {x: 'a} -> Bool} -> {matching: ['a], not_matching: ['a]}
-        context["__native_parallel_partition"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                )
-            )),
-            MezzeType.RecordType(mapOf(
-                "pass" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "fail" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
-            ))
-        )
+        fn("__native_parallel_partition") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool))
+            returns(rec("pass" to seq(a), "fail" to seq(a)))
+        }
 
-        // __native_parallel_group_by: {xs: ['a], f: {x: 'a} -> 'k} -> [{'k, ['a]}]
-        context["__native_parallel_group_by"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.VarType(TypeVar("k"))
-                )
-            )),
-            MezzeType.SeqType(MezzeType.RecordType(mapOf(
-                "key" to MezzeType.VarType(TypeVar("k")),
-                "values" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
-            )))
-        )
+        fn("__native_parallel_group_by") {
+            val a = tvar("a"); val k = tvar("k")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), k))
+            returns(seq(rec("key" to k, "values" to seq(a))))
+        }
     }
 
-    private fun registerConfigurableOperations(context: MutableMap<String, MezzeType>) {
-        // Configurable versions with parallelism and threshold parameters
-        // __native_parallel_map_cfg: {xs: ['a], f: {x: 'a} -> 'b, parallelism: Int, threshold: Int} -> ['b]
-        context["__native_parallel_map_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.VarType(TypeVar("b"))
-                ),
-                "parallelism" to MezzeType.IntType,
-                "chunk_size" to MezzeType.IntType
-            )),
-            MezzeType.SeqType(MezzeType.VarType(TypeVar("b")))
-        )
+    private fun registerConfigurableOperations(context: MutableMap<String, MezzeType>) = natives(context) {
+        fn("__native_parallel_map_cfg") {
+            val a = tvar("a"); val b = tvar("b")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), b), "parallelism" to int, "chunk_size" to int)
+            returns(seq(b))
+        }
 
-        context["__native_parallel_for_each_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.RecordType(emptyMap())
-                ),
-                "parallelism" to MezzeType.IntType,
-                "chunk_size" to MezzeType.IntType
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
+        fn("__native_parallel_for_each_cfg") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), unit), "parallelism" to int, "chunk_size" to int)
+            returns(unit)
+        }
 
-        context["__native_parallel_filter_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                ),
-                "parallelism" to MezzeType.IntType,
-                "chunk_size" to MezzeType.IntType
-            )),
-            MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
-        )
+        fn("__native_parallel_filter_cfg") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool), "parallelism" to int, "chunk_size" to int)
+            returns(seq(a))
+        }
 
-        context["__native_parallel_reduce_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf(
-                        "l" to MezzeType.VarType(TypeVar("a")),
-                        "r" to MezzeType.VarType(TypeVar("a"))
-                    )),
-                    MezzeType.VarType(TypeVar("a"))
-                ),
-                "parallelism" to MezzeType.IntType,
-                "chunk_size" to MezzeType.IntType
-            )),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(TypeVar("a"))))
-        )
+        fn("__native_parallel_reduce_cfg") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("l" to a, "r" to a), a), "parallelism" to int, "chunk_size" to int)
+            returns(option(a))
+        }
 
-        context["__native_parallel_fold_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "zero" to MezzeType.VarType(TypeVar("b")),
-                "map_fn" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.VarType(TypeVar("b"))
-                ),
-                "combine" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf(
-                        "l" to MezzeType.VarType(TypeVar("b")),
-                        "r" to MezzeType.VarType(TypeVar("b"))
-                    )),
-                    MezzeType.VarType(TypeVar("b"))
-                ),
-                "parallelism" to MezzeType.IntType,
-                "chunk_size" to MezzeType.IntType
-            )),
-            MezzeType.VarType(TypeVar("b"))
-        )
+        fn("__native_parallel_fold_cfg") {
+            val a = tvar("a"); val b = tvar("b")
+            param(
+                "xs" to seq(a),
+                "zero" to b,
+                "map_fn" to MezzeType.FunctionType(rec("x" to a), b),
+                "combine" to MezzeType.FunctionType(rec("l" to b, "r" to b), b),
+                "parallelism" to int,
+                "chunk_size" to int
+            )
+            returns(b)
+        }
 
-        context["__native_parallel_find_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                ),
-                "parallelism" to MezzeType.IntType,
-                "chunk_size" to MezzeType.IntType
-            )),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(TypeVar("a"))))
-        )
+        fn("__native_parallel_find_cfg") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool), "parallelism" to int, "chunk_size" to int)
+            returns(option(a))
+        }
 
-        context["__native_parallel_any_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                ),
-                "parallelism" to MezzeType.IntType,
-                "chunk_size" to MezzeType.IntType
-            )),
-            MezzeType.BoolType
-        )
+        fn("__native_parallel_any_cfg") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool), "parallelism" to int, "chunk_size" to int)
+            returns(bool)
+        }
 
-        context["__native_parallel_all_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                ),
-                "parallelism" to MezzeType.IntType,
-                "chunk_size" to MezzeType.IntType
-            )),
-            MezzeType.BoolType
-        )
+        fn("__native_parallel_all_cfg") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool), "parallelism" to int, "chunk_size" to int)
+            returns(bool)
+        }
 
-        context["__native_parallel_partition_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                ),
-                "parallelism" to MezzeType.IntType,
-                "chunk_size" to MezzeType.IntType
-            )),
-            MezzeType.RecordType(mapOf(
-                "pass" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "fail" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
-            ))
-        )
+        fn("__native_parallel_partition_cfg") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool), "parallelism" to int, "chunk_size" to int)
+            returns(rec("pass" to seq(a), "fail" to seq(a)))
+        }
 
-        context["__native_parallel_group_by_cfg"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.VarType(TypeVar("k"))
-                ),
-                "parallelism" to MezzeType.IntType,
-                "chunk_size" to MezzeType.IntType
-            )),
-            MezzeType.SeqType(MezzeType.RecordType(mapOf(
-                "key" to MezzeType.VarType(TypeVar("k")),
-                "values" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
-            )))
-        )
+        fn("__native_parallel_group_by_cfg") {
+            val a = tvar("a"); val k = tvar("k")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), k), "parallelism" to int, "chunk_size" to int)
+            returns(seq(rec("key" to k, "values" to seq(a))))
+        }
     }
 
     private fun registerSequentialOperations(context: MutableMap<String, MezzeType>) {
@@ -368,195 +193,93 @@ object ParallelTypes {
         context["__native_sequential_group_by"] = context["__native_parallel_group_by"]!!
     }
 
-    private fun registerForkJoinOperations(context: MutableMap<String, MezzeType>) {
-        // ForkJoin operations with threshold and parallelism parameters
-        // __native_forkjoin_map: {xs: ['a], f: {x: 'a} -> 'b, threshold: Int, parallelism: Int} -> ['b]
-        context["__native_forkjoin_map"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.VarType(TypeVar("b"))
-                ),
-                "threshold" to MezzeType.IntType,
-                "parallelism" to MezzeType.IntType
-            )),
-            MezzeType.SeqType(MezzeType.VarType(TypeVar("b")))
-        )
+    private fun registerForkJoinOperations(context: MutableMap<String, MezzeType>) = natives(context) {
+        fn("__native_forkjoin_map") {
+            val a = tvar("a"); val b = tvar("b")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), b), "threshold" to int, "parallelism" to int)
+            returns(seq(b))
+        }
 
-        context["__native_forkjoin_for_each"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.RecordType(emptyMap())
-                ),
-                "threshold" to MezzeType.IntType,
-                "parallelism" to MezzeType.IntType
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
+        fn("__native_forkjoin_for_each") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), unit), "threshold" to int, "parallelism" to int)
+            returns(unit)
+        }
 
-        context["__native_forkjoin_filter"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                ),
-                "threshold" to MezzeType.IntType,
-                "parallelism" to MezzeType.IntType
-            )),
-            MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
-        )
+        fn("__native_forkjoin_filter") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool), "threshold" to int, "parallelism" to int)
+            returns(seq(a))
+        }
 
-        context["__native_forkjoin_reduce"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf(
-                        "l" to MezzeType.VarType(TypeVar("a")),
-                        "r" to MezzeType.VarType(TypeVar("a"))
-                    )),
-                    MezzeType.VarType(TypeVar("a"))
-                ),
-                "threshold" to MezzeType.IntType,
-                "parallelism" to MezzeType.IntType
-            )),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(TypeVar("a"))))
-        )
+        fn("__native_forkjoin_reduce") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("l" to a, "r" to a), a), "threshold" to int, "parallelism" to int)
+            returns(option(a))
+        }
 
-        context["__native_forkjoin_fold"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "zero" to MezzeType.VarType(TypeVar("b")),
-                "map_fn" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.VarType(TypeVar("b"))
-                ),
-                "combine" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf(
-                        "l" to MezzeType.VarType(TypeVar("b")),
-                        "r" to MezzeType.VarType(TypeVar("b"))
-                    )),
-                    MezzeType.VarType(TypeVar("b"))
-                ),
-                "threshold" to MezzeType.IntType,
-                "parallelism" to MezzeType.IntType
-            )),
-            MezzeType.VarType(TypeVar("b"))
-        )
+        fn("__native_forkjoin_fold") {
+            val a = tvar("a"); val b = tvar("b")
+            param(
+                "xs" to seq(a),
+                "zero" to b,
+                "map_fn" to MezzeType.FunctionType(rec("x" to a), b),
+                "combine" to MezzeType.FunctionType(rec("l" to b, "r" to b), b),
+                "threshold" to int,
+                "parallelism" to int
+            )
+            returns(b)
+        }
 
-        context["__native_forkjoin_both"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "l" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("a"))
-                ),
-                "r" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("b"))
-                ),
-                "parallelism" to MezzeType.IntType
-            )),
-            MezzeType.RecordType(mapOf(
-                "l" to MezzeType.VarType(TypeVar("a")),
-                "r" to MezzeType.VarType(TypeVar("b"))
-            ))
-        )
+        fn("__native_forkjoin_both") {
+            val a = tvar("a"); val b = tvar("b")
+            param(
+                "l" to MezzeType.FunctionType(unit, a),
+                "r" to MezzeType.FunctionType(unit, b),
+                "parallelism" to int
+            )
+            returns(rec("l" to a, "r" to b))
+        }
 
-        context["__native_forkjoin_both3"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "a" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("a"))
-                ),
-                "b" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("b"))
-                ),
-                "c" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("c"))
-                ),
-                "parallelism" to MezzeType.IntType
-            )),
-            MezzeType.RecordType(mapOf(
-                "a" to MezzeType.VarType(TypeVar("a")),
-                "b" to MezzeType.VarType(TypeVar("b")),
-                "c" to MezzeType.VarType(TypeVar("c"))
-            ))
-        )
+        fn("__native_forkjoin_both3") {
+            val a = tvar("a"); val b = tvar("b"); val c = tvar("c")
+            param(
+                "a" to MezzeType.FunctionType(unit, a),
+                "b" to MezzeType.FunctionType(unit, b),
+                "c" to MezzeType.FunctionType(unit, c),
+                "parallelism" to int
+            )
+            returns(rec("a" to a, "b" to b, "c" to c))
+        }
 
-        context["__native_forkjoin_find"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                ),
-                "threshold" to MezzeType.IntType,
-                "parallelism" to MezzeType.IntType
-            )),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(MezzeType.VarType(TypeVar("a"))))
-        )
+        fn("__native_forkjoin_find") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool), "threshold" to int, "parallelism" to int)
+            returns(option(a))
+        }
 
-        context["__native_forkjoin_any"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                ),
-                "threshold" to MezzeType.IntType,
-                "parallelism" to MezzeType.IntType
-            )),
-            MezzeType.BoolType
-        )
+        fn("__native_forkjoin_any") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool), "threshold" to int, "parallelism" to int)
+            returns(bool)
+        }
 
-        context["__native_forkjoin_all"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                ),
-                "threshold" to MezzeType.IntType,
-                "parallelism" to MezzeType.IntType
-            )),
-            MezzeType.BoolType
-        )
+        fn("__native_forkjoin_all") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool), "threshold" to int, "parallelism" to int)
+            returns(bool)
+        }
 
-        context["__native_forkjoin_partition"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.BoolType
-                ),
-                "threshold" to MezzeType.IntType,
-                "parallelism" to MezzeType.IntType
-            )),
-            MezzeType.RecordType(mapOf(
-                "pass" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "fail" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
-            ))
-        )
+        fn("__native_forkjoin_partition") {
+            val a = tvar("a")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), bool), "threshold" to int, "parallelism" to int)
+            returns(rec("pass" to seq(a), "fail" to seq(a)))
+        }
 
-        context["__native_forkjoin_group_by"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "xs" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(TypeVar("a")))),
-                    MezzeType.VarType(TypeVar("k"))
-                ),
-                "threshold" to MezzeType.IntType,
-                "parallelism" to MezzeType.IntType
-            )),
-            MezzeType.SeqType(MezzeType.RecordType(mapOf(
-                "key" to MezzeType.VarType(TypeVar("k")),
-                "values" to MezzeType.SeqType(MezzeType.VarType(TypeVar("a")))
-            )))
-        )
+        fn("__native_forkjoin_group_by") {
+            val a = tvar("a"); val k = tvar("k")
+            param("xs" to seq(a), "f" to MezzeType.FunctionType(rec("x" to a), k), "threshold" to int, "parallelism" to int)
+            returns(seq(rec("key" to k, "values" to seq(a))))
+        }
     }
 }

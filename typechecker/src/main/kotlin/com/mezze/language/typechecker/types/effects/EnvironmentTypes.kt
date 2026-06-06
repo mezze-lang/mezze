@@ -1,13 +1,7 @@
 package com.mezze.language.typechecker.types.effects
 
 import com.mezze.language.ast.MezzeType
-
-/**
- * Helper function to create Option type (as TypeApplication)
- */
-private fun optionType(elementType: MezzeType): MezzeType {
-    return com.mezze.language.typechecker.util.WellKnownTypeApp.of("Option", listOf(elementType))
-}
+import com.mezze.language.typechecker.types.*
 
 /**
  * Type signatures for the five OS-surface native functions that back the
@@ -25,96 +19,37 @@ private fun optionType(elementType: MezzeType): MezzeType {
  *   __native_env_exit
  */
 object EnvironmentTypes {
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        registerEnvironmentVariableOperations(context)
-        registerDirectoryOperations(context)
-        registerSystemInformationOperations(context)
-        registerProcessInformationOperations(context)
-        registerProcessControlOperations(context)
-        registerMockEnvironmentOperations(context)
-    }
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        // Environment variable operations
+        fn("__native_env_get") { param("name" to str); returns(option(str)) }
+        fn("__native_env_set") { param("name" to str, "value" to str); returns(unit) }
+        fn("__native_env_get_all") {
+            returns(seq(rec("k" to str, "v" to str)))
+        }
 
-    private fun registerEnvironmentVariableOperations(context: MutableMap<String, MezzeType>) {
-        val unitType = MezzeType.RecordType(emptyMap())
+        // Directory operations
+        fn("__native_env_current_dir") { returns(str) }
+        fn("__native_env_change_dir") { param("path" to str); returns(unit) }
 
-        context["__native_env_get"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("name" to MezzeType.StringType)),
-            optionType(MezzeType.StringType)
-        )
+        // System information
+        fn("__native_env_os_name") { returns(str) }
+        fn("__native_env_os_version") { returns(str) }
+        fn("__native_env_arch") { returns(str) }
 
-        context["__native_env_set"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "name" to MezzeType.StringType,
-                "value" to MezzeType.StringType
-            )),
-            unitType
-        )
+        // Process information
+        fn("__native_env_process_id") { returns(int) }
+        fn("__native_env_process_args") { returns(seq(str)) }
 
-        context["__native_env_get_all"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.SeqType(MezzeType.RecordType(mapOf("k" to MezzeType.StringType, "v" to MezzeType.StringType)))
-        )
-    }
+        // Process control
+        fn("__native_env_exit") { param("code" to int); returns(unit) }
 
-    private fun registerDirectoryOperations(context: MutableMap<String, MezzeType>) {
-        val unitType = MezzeType.RecordType(emptyMap())
-
-        context["__native_env_current_dir"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.StringType
-        )
-
-        context["__native_env_change_dir"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("path" to MezzeType.StringType)),
-            unitType
-        )
-    }
-
-    private fun registerSystemInformationOperations(context: MutableMap<String, MezzeType>) {
-        context["__native_env_os_name"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.StringType
-        )
-
-        context["__native_env_os_version"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.StringType
-        )
-
-        context["__native_env_arch"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.StringType
-        )
-    }
-
-    private fun registerProcessInformationOperations(context: MutableMap<String, MezzeType>) {
-        context["__native_env_process_id"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.IntType
-        )
-
-        context["__native_env_process_args"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.SeqType(MezzeType.StringType)
-        )
-    }
-
-    private fun registerProcessControlOperations(context: MutableMap<String, MezzeType>) {
-        val unitType = MezzeType.RecordType(emptyMap())
-
-        context["__native_env_exit"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("code" to MezzeType.IntType)),
-            unitType
-        )
-    }
-
-    private fun registerMockEnvironmentOperations(context: MutableMap<String, MezzeType>) {
-        context["__native_mock_env_get"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "env_vars" to MezzeType.SeqType(MezzeType.RecordType(mapOf("k" to MezzeType.StringType, "v" to MezzeType.StringType))),
-                "name" to MezzeType.StringType
-            )),
-            optionType(MezzeType.StringType)
-        )
+        // Mock environment
+        fn("__native_mock_env_get") {
+            param(
+                "env_vars" to seq(rec("k" to str, "v" to str)),
+                "name" to str
+            )
+            returns(option(str))
+        }
     }
 }

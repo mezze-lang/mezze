@@ -2,450 +2,140 @@ package com.mezze.language.typechecker.types.collections
 
 import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.typechecker.types.*
 
-/**
- * Type signatures for Set (unique collection) operations
- *
- * Corresponds to stdlib file:
- * - std/collections/set.mz
- */
 object SetTypes {
-    fun registerAll(context: MutableMap<String, MezzeType>) {
-        registerSetNatives(context)
-    }
+    fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
+        fn("__native_set_empty") { val a = tvar("a"); returns(set(a)) }
+        fn("__native_set_insert") { val a = tvar("a"); param("s" to set(a), "x" to a); returns(set(a)) }
+        fn("__native_set_remove") { val a = tvar("a"); param("s" to set(a), "x" to a); returns(set(a)) }
+        fn("__native_set_contains") { val a = tvar("a"); param("s" to set(a), "x" to a); returns(bool) }
+        fn("__native_set_size") { val a = tvar("a"); param("s" to set(a)); returns(int) }
+        fn("__native_set_union") { val a = tvar("a"); param("s1" to set(a), "s2" to set(a)); returns(set(a)) }
+        fn("__native_set_intersection") { val a = tvar("a"); param("s1" to set(a), "s2" to set(a)); returns(set(a)) }
+        fn("__native_set_difference") { val a = tvar("a"); param("s1" to set(a), "s2" to set(a)); returns(set(a)) }
+        fn("__native_set_is_subset") { val a = tvar("a"); param("s1" to set(a), "s2" to set(a)); returns(bool) }
+        fn("__native_set_to_seq") { val a = tvar("a"); param("s" to set(a)); returns(seq(a)) }
+        fn("__native_set_from_seq") { val a = tvar("a"); param("xs" to seq(a)); returns(set(a)) }
+        fn("__native_set_to_list") { val a = tvar("a"); param("s" to set(a)); returns(list(a)) }
+        fn("__native_set_from_list") { val a = tvar("a"); param("xs" to list(a)); returns(set(a)) }
+        fn("__native_set_filter") {
+            val a = tvar("a")
+            param("s" to set(a), "p" to MezzeType.FunctionType(rec("val" to a), bool))
+            returns(set(a))
+        }
+        fn("__native_set_map") {
+            val a = tvar("a"); val b = tvar("b")
+            param("s" to set(a), "f" to MezzeType.FunctionType(rec("val" to a), b))
+            returns(set(b))
+        }
+        fn("__native_set_fold") {
+            val a = tvar("a"); val acc = tvar("acc")
+            param("s" to set(a), "init" to acc, "f" to MezzeType.FunctionType(rec("acc" to acc, "x" to a), acc))
+            returns(acc)
+        }
+        fn("__native_set_insert_all") { val a = tvar("a"); param("s" to set(a), "xs" to seq(a)); returns(set(a)) }
+        fn("__native_set_remove_all") { val a = tvar("a"); param("s" to set(a), "xs" to seq(a)); returns(set(a)) }
+        fn("__native_set_equals") { val a = tvar("a"); param("s1" to set(a), "s2" to set(a)); returns(bool) }
 
-    private fun registerSetNatives(context: MutableMap<String, MezzeType>) {
-        val setElemTypeVar = com.mezze.language.ast.TypeVar("a")
-        val setElemTypeVarB = com.mezze.language.ast.TypeVar("b")
-        val setAccTypeVar = com.mezze.language.ast.TypeVar("acc")
-
-        val setType = MezzeType.SetType(MezzeType.VarType(setElemTypeVar))
-        val setTypeB = MezzeType.SetType(MezzeType.VarType(setElemTypeVarB))
-
-        context["__native_set_empty"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            setType
-        )
-
-        context["__native_set_insert"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "x" to MezzeType.VarType(setElemTypeVar)
-            )),
-            setType
-        )
-
-        context["__native_set_remove"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "x" to MezzeType.VarType(setElemTypeVar)
-            )),
-            setType
-        )
-
-        context["__native_set_contains"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "x" to MezzeType.VarType(setElemTypeVar)
-            )),
-            MezzeType.BoolType
-        )
-
-        context["__native_set_size"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to setType)),
-            MezzeType.IntType
-        )
-
-        context["__native_set_union"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s1" to setType,
-                "s2" to setType
-            )),
-            setType
-        )
-
-        context["__native_set_intersection"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s1" to setType,
-                "s2" to setType
-            )),
-            setType
-        )
-
-        context["__native_set_difference"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s1" to setType,
-                "s2" to setType
-            )),
-            setType
-        )
-
-        context["__native_set_is_subset"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s1" to setType,
-                "s2" to setType
-            )),
-            MezzeType.BoolType
-        )
-
-        context["__native_set_to_seq"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to setType)),
-            MezzeType.SeqType(MezzeType.VarType(setElemTypeVar))
-        )
-
-        context["__native_set_from_seq"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("xs" to MezzeType.SeqType(MezzeType.VarType(setElemTypeVar)))),
-            setType
-        )
-
-        context["__native_set_to_list"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to setType)),
-            MezzeType.ListType(MezzeType.VarType(setElemTypeVar))
-        )
-
-        context["__native_set_from_list"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("xs" to MezzeType.ListType(MezzeType.VarType(setElemTypeVar)))),
-            setType
-        )
-
-        context["__native_set_filter"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "p" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
-                    MezzeType.BoolType
-                )
-            )),
-            setType
-        )
-
-        context["__native_set_map"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
-                    MezzeType.VarType(setElemTypeVarB)
-                )
-            )),
-            setTypeB
-        )
-
-        context["__native_set_fold"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "init" to MezzeType.VarType(setAccTypeVar),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf(
-                        "acc" to MezzeType.VarType(setAccTypeVar),
-                        "x" to MezzeType.VarType(setElemTypeVar)
-                    )),
-                    MezzeType.VarType(setAccTypeVar)
-                )
-            )),
-            MezzeType.VarType(setAccTypeVar)
-        )
-
-        context["__native_set_insert_all"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "xs" to MezzeType.SeqType(MezzeType.VarType(setElemTypeVar))
-            )),
-            setType
-        )
-
-        context["__native_set_remove_all"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "xs" to MezzeType.SeqType(MezzeType.VarType(setElemTypeVar))
-            )),
-            setType
-        )
-
-        // __native_set_equals: {s1: Set 'a, s2: Set 'a} -> Bool
-        context["__native_set_equals"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s1" to setType,
-                "s2" to setType
-            )),
-            MezzeType.BoolType
-        )
-
-        // ==================== Predicate Operations ====================
-
-        // __native_set_any: {s: Set 'a, p: {val: 'a} -> Bool} -> Bool
-        context["__native_set_any"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "p" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
-                    MezzeType.BoolType
-                )
-            )),
-            MezzeType.BoolType
-        )
-
-        // __native_set_all: {s: Set 'a, p: {val: 'a} -> Bool} -> Bool
-        context["__native_set_all"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "p" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
-                    MezzeType.BoolType
-                )
-            )),
-            MezzeType.BoolType
-        )
-
-        // __native_set_none: {s: Set 'a, p: {val: 'a} -> Bool} -> Bool
-        context["__native_set_none"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "p" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
-                    MezzeType.BoolType
-                )
-            )),
-            MezzeType.BoolType
-        )
-
-        // __native_set_find: {s: Set 'a, p: {val: 'a} -> Bool} -> Option 'a
-        context["__native_set_find"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "p" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
-                    MezzeType.BoolType
-                )
-            )),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(MezzeType.VarType(setElemTypeVar)))
-        )
-
-        // __native_set_count: {s: Set 'a, p: {val: 'a} -> Bool} -> Int
-        context["__native_set_count"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "p" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
-                    MezzeType.BoolType
-                )
-            )),
-            MezzeType.IntType
-        )
-
-        // ==================== Min/Max/Sum/Product ====================
-
-        // __native_set_min: {s: Set 'a} -> Option 'a
-        context["__native_set_min"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to setType)),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(MezzeType.VarType(setElemTypeVar)))
-        )
-
-        // __native_set_max: {s: Set 'a} -> Option 'a
-        context["__native_set_max"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to setType)),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(MezzeType.VarType(setElemTypeVar)))
-        )
-
-        // __native_set_sum: {s: Set Int} -> Int
-        context["__native_set_sum"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to MezzeType.SetType(MezzeType.IntType))),
-            MezzeType.IntType
-        )
-
-        // __native_set_product: {s: Set Int} -> Int
-        context["__native_set_product"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to MezzeType.SetType(MezzeType.IntType))),
-            MezzeType.IntType
-        )
-
-        // ==================== Conversion ====================
-
-        // __native_set_to_seq: {s: Set 'a} -> ['a]
-        context["__native_set_to_seq"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to setType)),
-            MezzeType.SeqType(MezzeType.VarType(setElemTypeVar))
-        )
-
-        // __native_set_singleton: {x: 'a} -> Set 'a
-        context["__native_set_singleton"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("x" to MezzeType.VarType(setElemTypeVar))),
-            setType
-        )
-
-        // ==================== Additional Operations ====================
-
-        // __native_set_reduce: {s: Set 'a, f: {acc: 'a, x: 'a} -> 'a} -> Option 'a
-        context["__native_set_reduce"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("acc" to MezzeType.VarType(setElemTypeVar), "x" to MezzeType.VarType(setElemTypeVar))),
-                    MezzeType.VarType(setElemTypeVar)
-                )
-            )),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(MezzeType.VarType(setElemTypeVar)))
-        )
-
-        // __native_set_min_by: {s: Set 'a, f: {val: 'a} -> 'b} -> Option 'a
-        val setElemTypeVarB2 = com.mezze.language.ast.TypeVar("b")
-        context["__native_set_min_by"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
-                    MezzeType.VarType(setElemTypeVarB2)
-                )
-            )),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(MezzeType.VarType(setElemTypeVar)))
-        )
-
-        // __native_set_max_by: {s: Set 'a, f: {val: 'a} -> 'b} -> Option 'a
-        context["__native_set_max_by"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
-                    MezzeType.VarType(setElemTypeVarB2)
-                )
-            )),
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(MezzeType.VarType(setElemTypeVar)))
-        )
-
-        // __native_set_partition: {s: Set 'a, p: {val: 'a} -> Bool} -> {pass: Set 'a, fail: Set 'a}
-        context["__native_set_partition"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "s" to setType,
-                "p" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
-                    MezzeType.BoolType
-                )
-            )),
-            MezzeType.RecordType(mapOf("pass" to setType, "fail" to setType))
-        )
-
-        // __native_set_sum_float: {s: Set Float} -> Float
-        context["__native_set_sum_float"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to MezzeType.SetType(MezzeType.FloatType))),
-            MezzeType.FloatType
-        )
-
-        // __native_set_product_float: {s: Set Float} -> Float
-        context["__native_set_product_float"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to MezzeType.SetType(MezzeType.FloatType))),
-            MezzeType.FloatType
-        )
-
-        // ==================== Task #20: Additional Operations ====================
-
-        // __native_set_flat_map: {s: Set 'a, f: {val: 'a} -> Set 'b} -> Set 'b
-        run {
-            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-            val resultType = MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
-            context["__native_set_flat_map"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "s" to MezzeType.SetType(elemType),
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("val" to elemType)),
-                        MezzeType.SetType(resultType)
-                    )
-                )),
-                MezzeType.SetType(resultType)
-            )
+        // Predicate Operations
+        fn("__native_set_any") {
+            val a = tvar("a")
+            param("s" to set(a), "p" to MezzeType.FunctionType(rec("val" to a), bool))
+            returns(bool)
+        }
+        fn("__native_set_all") {
+            val a = tvar("a")
+            param("s" to set(a), "p" to MezzeType.FunctionType(rec("val" to a), bool))
+            returns(bool)
+        }
+        fn("__native_set_none") {
+            val a = tvar("a")
+            param("s" to set(a), "p" to MezzeType.FunctionType(rec("val" to a), bool))
+            returns(bool)
+        }
+        fn("__native_set_find") {
+            val a = tvar("a")
+            param("s" to set(a), "p" to MezzeType.FunctionType(rec("val" to a), bool))
+            returns(com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(a)))
+        }
+        fn("__native_set_count") {
+            val a = tvar("a")
+            param("s" to set(a), "p" to MezzeType.FunctionType(rec("val" to a), bool))
+            returns(int)
         }
 
-        // __native_set_group_by: {s: Set 'a, f: {val: 'a} -> 'b} -> List {key: 'b, values: Set 'a}
-        run {
-            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-            val keyType = MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
-            context["__native_set_group_by"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "s" to MezzeType.SetType(elemType),
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("val" to elemType)),
-                        keyType
-                    )
-                )),
-                MezzeType.ListType(MezzeType.RecordType(mapOf(
-                    "key" to keyType,
-                    "values" to MezzeType.SetType(elemType)
-                )))
-            )
+        // Min/Max/Sum/Product
+        fn("__native_set_min") {
+            val a = tvar("a"); param("s" to set(a))
+            returns(com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(a)))
+        }
+        fn("__native_set_max") {
+            val a = tvar("a"); param("s" to set(a))
+            returns(com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(a)))
+        }
+        fn("__native_set_sum") { param("s" to set(int)); returns(int) }
+        fn("__native_set_product") { param("s" to set(int)); returns(int) }
+
+        // Conversion
+        fn("__native_set_singleton") { val a = tvar("a"); param("x" to a); returns(set(a)) }
+
+        // Additional Operations
+        fn("__native_set_reduce") {
+            val a = tvar("a")
+            param("s" to set(a), "f" to MezzeType.FunctionType(rec("acc" to a, "x" to a), a))
+            returns(com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(a)))
+        }
+        fn("__native_set_min_by") {
+            val a = tvar("a"); val b = tvar("b")
+            param("s" to set(a), "f" to MezzeType.FunctionType(rec("val" to a), b))
+            returns(com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(a)))
+        }
+        fn("__native_set_max_by") {
+            val a = tvar("a"); val b = tvar("b")
+            param("s" to set(a), "f" to MezzeType.FunctionType(rec("val" to a), b))
+            returns(com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(a)))
+        }
+        fn("__native_set_partition") {
+            val a = tvar("a")
+            param("s" to set(a), "p" to MezzeType.FunctionType(rec("val" to a), bool))
+            returns(rec("pass" to set(a), "fail" to set(a)))
+        }
+        fn("__native_set_sum_float") { param("s" to set(float)); returns(float) }
+        fn("__native_set_product_float") { param("s" to set(float)); returns(float) }
+
+        // Task #20: Additional Operations
+        fn("__native_set_flat_map") {
+            val a = tvar("a"); val b = tvar("b")
+            param("s" to set(a), "f" to MezzeType.FunctionType(rec("val" to a), set(b)))
+            returns(set(b))
+        }
+        fn("__native_set_group_by") {
+            val a = tvar("a"); val b = tvar("b")
+            param("s" to set(a), "f" to MezzeType.FunctionType(rec("val" to a), b))
+            returns(list(rec("key" to b, "values" to set(a))))
+        }
+        fn("__native_set_symmetric_difference") { val a = tvar("a"); param("s1" to set(a), "s2" to set(a)); returns(set(a)) }
+
+        // Task #30: Collect Operations
+        fn("__native_set_filter_map") {
+            val a = tvar("a"); val b = tvar("b")
+            param("set" to set(a), "f" to MezzeType.FunctionType(rec("val" to a), com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(b))))
+            returns(set(b))
+        }
+        fn("__native_set_collect_seq") {
+            val a = tvar("a"); val b = tvar("b")
+            param("set" to set(a), "f" to MezzeType.FunctionType(rec("val" to a), com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(b))))
+            returns(seq(b))
+        }
+        fn("__native_set_collect_list") {
+            val a = tvar("a"); val b = tvar("b")
+            param("set" to set(a), "f" to MezzeType.FunctionType(rec("val" to a), com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(b))))
+            returns(list(b))
         }
 
-        // __native_set_symmetric_difference: {s1: Set 'a, s2: Set 'a} -> Set 'a
-        run {
-            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-            context["__native_set_symmetric_difference"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "s1" to MezzeType.SetType(elemType),
-                    "s2" to MezzeType.SetType(elemType)
-                )),
-                MezzeType.SetType(elemType)
-            )
-        }
-
-        // ==================== Task #30: Collect Operations ====================
-
-        // __native_set_filter_map: {set: Set 'a, f: {val: 'a} -> Option 'b} -> Set 'b
-        run {
-            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-            val resultType = MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
-            context["__native_set_filter_map"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "set" to MezzeType.SetType(elemType),
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("val" to elemType)),
-                        com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(resultType))
-                    )
-                )),
-                MezzeType.SetType(resultType)
-            )
-        }
-
-        // __native_set_collect_seq: {set: Set 'a, f: {val: 'a} -> Option 'b} -> ['b]
-        run {
-            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-            val resultType = MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
-            context["__native_set_collect_seq"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "set" to MezzeType.SetType(elemType),
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("val" to elemType)),
-                        com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(resultType))
-                    )
-                )),
-                MezzeType.SeqType(resultType)
-            )
-        }
-
-        // __native_set_collect_list: {set: Set 'a, f: {val: 'a} -> Option 'b} -> List 'b
-        run {
-            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-            val resultType = MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
-            context["__native_set_collect_list"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf(
-                    "set" to MezzeType.SetType(elemType),
-                    "f" to MezzeType.FunctionType(
-                        MezzeType.RecordType(mapOf("val" to elemType)),
-                        com.mezze.language.typechecker.util.WellKnownTypeApp.of(BuiltinTypes.OPTION, listOf(resultType))
-                    )
-                )),
-                MezzeType.ListType(resultType)
-            )
-        }
-
-        // ==================== SortedSet Conversions ====================
-
-        // __native_set_to_sorted_set: {s: Set 'a} -> SortedSet 'a
-        context["__native_set_to_sorted_set"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to setType)),
-            MezzeType.SortedSetType(MezzeType.VarType(setElemTypeVar))
-        )
-
-        // __native_set_from_sorted_set: {s: SortedSet 'a} -> Set 'a
-        context["__native_set_from_sorted_set"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("s" to MezzeType.SortedSetType(MezzeType.VarType(setElemTypeVar)))),
-            setType
-        )
+        // SortedSet Conversions
+        fn("__native_set_to_sorted_set") { val a = tvar("a"); param("s" to set(a)); returns(sortedSet(a)) }
+        fn("__native_set_from_sorted_set") { val a = tvar("a"); param("s" to sortedSet(a)); returns(set(a)) }
     }
 }
