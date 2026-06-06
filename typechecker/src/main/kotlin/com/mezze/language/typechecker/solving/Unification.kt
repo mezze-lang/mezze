@@ -235,15 +235,31 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         type2 is MezzeType.VarType -> unifyVar(type2.variable, type1)
 
         // CASE 2: Suspended<T, effects> with T
-        // Unwrap to value type — effects are tracked separately by the constraint
-        // solver. Many contexts rely on this (do-bind, perform, handler application,
-        // effect propagation, match branches). Tightening this requires first
-        // ensuring every context that produces SuspendedTypes unwraps them before
-        // unification, which is a larger refactor.
+        // Only unwrap when effects are pure. Non-pure effects must be handled
+        // before unification — the constraint generator unwraps SuspendedType
+        // and accumulates effects at each expression site.
         type1 is MezzeType.SuspendedType && type2 !is MezzeType.SuspendedType -> {
+            val hasConcreteEffects = type1.effects.effects.isNotEmpty() || type1.effects.effectInstances.isNotEmpty()
+            if (hasConcreteEffects) {
+                return UnificationResult.Failure(
+                    message = "Cannot unify effectful type ${formatType(type1)} with pure type ${formatType(type2)}. " +
+                            "Effects <${type1.effects.allEffectNames.joinToString(", ")}> must be handled first.",
+                    type1 = type1,
+                    type2 = type2
+                )
+            }
             unify(type1.valueType, type2, typeDeclarations)
         }
         type1 !is MezzeType.SuspendedType && type2 is MezzeType.SuspendedType -> {
+            val hasConcreteEffects = type2.effects.effects.isNotEmpty() || type2.effects.effectInstances.isNotEmpty()
+            if (hasConcreteEffects) {
+                return UnificationResult.Failure(
+                    message = "Cannot unify pure type ${formatType(type1)} with effectful type ${formatType(type2)}. " +
+                            "Effects <${type2.effects.allEffectNames.joinToString(", ")}> must be handled first.",
+                    type1 = type1,
+                    type2 = type2
+                )
+            }
             unify(type1, type2.valueType, typeDeclarations)
         }
 

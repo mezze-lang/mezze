@@ -959,11 +959,17 @@ class ConstraintSolver(
      * so we have access to the full accumulated substitution.
      */
     private fun solveEquality(constraint: Constraint.Equality): ConstraintResult {
+        // Unwrap SuspendedType before unification — effects are tracked
+        // separately by the constraint generator. The solver should only
+        // see the value types for structural comparison.
+        val left = if (constraint.left is MezzeType.SuspendedType) (constraint.left as MezzeType.SuspendedType).valueType else constraint.left
+        val right = if (constraint.right is MezzeType.SuspendedType) (constraint.right as MezzeType.SuspendedType).valueType else constraint.right
+
         DebugLogger.debug(Category.ConstraintSolver) {
-            "solveEquality: ${constraint.left} = ${constraint.right} (${constraint.context})"
+            "solveEquality: $left = $right (${constraint.context})"
         }
 
-        val result = unify(constraint.left, constraint.right, typeDeclarations)
+        val result = unify(left, right, typeDeclarations)
 
         DebugLogger.debug(Category.ConstraintSolver) { "  result: $result" }
 

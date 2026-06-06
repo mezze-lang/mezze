@@ -1562,7 +1562,8 @@ class ConstraintGenerator(
                     }
                     is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
                         val substitution = solveResult.substitution
-                        val actualBodyType = substitution.apply(bodyResult.type)
+                        val rawBodyType = substitution.apply(bodyResult.type)
+                        val actualBodyType = if (rawBodyType is MezzeType.SuspendedType) rawBodyType.valueType else rawBodyType
 
                         // Check that actual body type matches expected return type
                         val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
@@ -2080,10 +2081,12 @@ class ConstraintGenerator(
                     }
                     is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
                         val substitution = solveResult.substitution
-                        val actualBodyType = substitution.apply(bodyResult.type)
+                        val rawBodyType = substitution.apply(bodyResult.type)
+                        // Unwrap SuspendedType — effects from the body are tracked
+                        // separately; the return type check is value-level only
+                        val actualBodyType = if (rawBodyType is MezzeType.SuspendedType) rawBodyType.valueType else rawBodyType
 
                         // Check that actual body type matches expected return type using unification
-                        // This is more permissive than string comparison - it allows [] to unify with List String
                         val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
                         val unificationResult = unificationSolver.solve(
                             listOf(Constraint.Equality(actualBodyType, expectedReturnType, "Effect body validation", loc = implOp.loc))
