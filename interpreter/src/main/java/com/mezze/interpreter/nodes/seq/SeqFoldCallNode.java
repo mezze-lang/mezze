@@ -56,6 +56,17 @@ public final class SeqFoldCallNode extends MezzeNode {
     @Child
     private SeqFoldLongLoopNode longLoopNode;
 
+    /**
+     * Body-adopted (real AST inlining) fast path for the canonical
+     * shape: 2 LONG params + 0 closures + Long init. The folder's
+     * body AST is cloned and runs in-place per iter — no DirectCallNode
+     * boundary, no MezzeRecord alloc, no ABI dispatch. Selected over
+     * {@link #longLoopNode} when {@link SeqFoldLongInlinedLoopNode#canHandle}
+     * is true.
+     */
+    @Child
+    private SeqFoldLongInlinedLoopNode longInlinedLoopNode;
+
     @Child
     private SeqFoldDoubleLoopNode doubleLoopNode;
 
@@ -189,13 +200,43 @@ public final class SeqFoldCallNode extends MezzeNode {
 
     private Object foldLongLarge(long[] data, Object init, int size,
                                  Object[] closureValues, int closureLength, DirectCallNode callNode) {
-        // Per-folder LoopNode instance so the inner DirectCallNode is a
-        // stable @Child of the same Truffle tree as the LoopNode that
-        // drives the loop. Truffle's inliner only inlines through
-        // @Child DirectCallNodes — passing one as an arg defeats it.
-        // For monomorphic call sites (the common case) size-1 PIC.
-        SeqFoldLongLoopNode loop = longLoopNode;
         CallTarget target = callNode.getCallTarget();
+
+        // FAST PATH: body adoption (real AST inlining). When the folder
+        // is the canonical {acc, x} -> ... shape with 2 LONG params and
+        // 0 closures, AND the init is a Long, we clone the folder's
+        // body and run it directly in-place — no DirectCallNode
+        // boundary, no MezzeRecord alloc, no ABI dispatch. This is the
+        // single biggest closer of the user-lambda dispatch gap for
+        // functional-style folds (sum, count-style, arithmetic
+        // reductions, etc).
+        if (init instanceof Long initLong) {
+            SeqFoldLongInlinedLoopNode inlined = longInlinedLoopNode;
+            if (inlined == null || inlined.getFolderTarget() != target) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                if (SeqFoldLongInlinedLoopNode.canHandle(target)) {
+                    com.mezze.interpreter.nodes.function.MezzeFunctionRootNode mrn =
+                        (com.mezze.interpreter.nodes.function.MezzeFunctionRootNode)
+                            ((com.oracle.truffle.api.RootCallTarget) target).getRootNode();
+                    inlined = new SeqFoldLongInlinedLoopNode(target, mrn);
+                    longInlinedLoopNode = insert(inlined);
+                } else {
+                    // Folder shape doesn't match — fall through to the
+                    // DirectCallNode path below.
+                    inlined = null;
+                }
+            }
+            if (inlined != null) {
+                return inlined.execute(data, initLong, size);
+            }
+        }
+
+        // FALLBACK: per-folder LoopNode + DirectCallNode (no body
+        // adoption). Used when the folder has closures, non-LONG
+        // params, or init isn't a Long. The DirectCallNode is a stable
+        // @Child of the LoopNode so Truffle's inliner inlines through
+        // it (better than passing it as an arg).
+        SeqFoldLongLoopNode loop = longLoopNode;
         if (loop == null || loop.getFolderTarget() != target) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
             loop = new SeqFoldLongLoopNode(target);
