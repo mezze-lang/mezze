@@ -21,7 +21,7 @@ class TestSimpleResultFunction {
     @Test
     fun `test simple polymorphic function with arrow syntax`() {
         val source = """
-            pub let simple_map: { result: (Result 'a 'e), f: 'a -> 'b } -> (Result 'b 'e) = { result, f } ->
+            pub let simple_map: { result: (Result 'a 'e), f: { val: 'a } -> 'b } -> (Result 'b 'e) = { result, f } ->
                 match result is
                     Ok { val } -> Ok { val = f { val } }
                     Err { error } -> Err { error = error }

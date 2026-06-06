@@ -25,7 +25,7 @@ class TestMinimalResult {
             # Minimal result functions
 
             # Map a function over the success value
-            pub let map: { result: (Result 'a 'e), f: 'a -> 'b } -> (Result 'b 'e) = { result, f } ->
+            pub let map: { result: (Result 'a 'e), f: { val: 'a } -> 'b } -> (Result 'b 'e) = { result, f } ->
                 match result is
                     Ok { val } -> Ok { val = f { val } }
                     Err { error } -> Err { error = error }
@@ -48,7 +48,7 @@ class TestMinimalResult {
     fun `test minimal result with flat_map`() {
         val source = """
             # Chain operations that return Results
-            pub let flat_map: { result: (Result 'a 'e), f: 'a -> (Result 'b 'e) } -> (Result 'b 'e) = { result, f } ->
+            pub let flat_map: { result: (Result 'a 'e), f: { val: 'a } -> (Result 'b 'e) } -> (Result 'b 'e) = { result, f } ->
                 match result is
                     Ok { val } -> f { val }
                     Err { error } -> Err { error = error }

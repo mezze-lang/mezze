@@ -478,8 +478,10 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
             occursCheck(typeVar, type.paramType) ||
             occursCheck(typeVar, type.returnType) ||
             type.abilityConstraints.any { constraint ->
-                constraint.typeArgs.any { occursCheck(typeVar, it) }
-            }
+                constraint.typeArgs.any { occursCheck(typeVar, it) } ||
+                constraint.associatedTypeBindings.values.any { occursCheck(typeVar, it) }
+            } ||
+            (type.effects != null && occursCheckEffectRow(typeVar, type.effects!!))
 
         is MezzeType.RecordType ->
             type.fields.values.any { occursCheck(typeVar, it) }
@@ -505,11 +507,12 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
             occursCheck(typeVar, type.keyType) ||
             occursCheck(typeVar, type.valueType)
 
-        is MezzeType.SuspendedType -> occursCheck(typeVar, type.valueType)
+        is MezzeType.SuspendedType ->
+            occursCheck(typeVar, type.valueType)
 
         is MezzeType.NewtypeType -> occursCheck(typeVar, type.wrappedType)
 
-        is MezzeType.EffectRow -> false // Effect rows don't contain type variables
+        is MezzeType.EffectRow -> occursCheckEffectRow(typeVar, type)
 
         // Concrete types can't contain type variables
         is MezzeType.IntType,
@@ -522,6 +525,12 @@ fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {
         is MezzeType.BytesType,
         is MezzeType.ByteBufferType,
         is MezzeType.CharType -> false
+    }
+}
+
+private fun occursCheckEffectRow(typeVar: TypeVar, effectRow: MezzeType.EffectRow): Boolean {
+    return effectRow.effectInstances.any { instance ->
+        instance.associatedTypes.values.any { occursCheck(typeVar, it) }
     }
 }
 

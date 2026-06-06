@@ -481,26 +481,24 @@ private fun unifyVar(typeVar: TypeVar, type: MezzeType): UnificationResult {
     }
 
     // SPECIAL CASE: SuspendedType containing the same type variable
-    // When unifying 'a with Suspended<'a, effects>, this is NOT an infinite type error.
-    // Instead, we unify the type variable with the underlying value type (unwrap).
-    // This handles cases like match branches where one branch is pure ('a = Int)
-    // and another is effectful (Suspended<'a, <Log>>).
+    // SuspendedType wrapping: when 'a unifies with Suspended<'a, effects>,
+    // the variable stays unconstrained — the effect wrapping is tracked at a higher level.
+    // This handles match branches where one branch is pure and another is effectful.
     if (type is MezzeType.SuspendedType) {
         val valueType = type.valueType
         if (valueType is MezzeType.VarType && valueType.variable == typeVar) {
-            // 'a unifies with Suspended<'a> - this means 'a stays as 'a (no substitution needed,
-            // the effect wrapping is handled at a higher level)
             return UnificationResult.Success(Substitution.empty)
         }
     }
 
-    // Occurs check: prevent infinite types
-    // NOTE: Like the OldTypeChecker, we IGNORE occurs check failures instead of throwing errors.
-    // This allows advanced patterns like the Choice effect to type-check correctly.
-    // The occurs check failure means we can't create a substitution (would be infinite),
-    // so we just return an empty substitution and let the constraint solver continue.
+    // Occurs check: prevent infinite types (e.g., 'a = List 'a)
     if (occursCheck(typeVar, type)) {
-        return UnificationResult.Success(Substitution.empty)
+        return UnificationResult.Failure(
+            message = "Infinite type: type variable '${typeVar}' occurs inside '${formatType(type)}'. " +
+                    "This would create an infinite type.",
+            type1 = MezzeType.VarType(typeVar),
+            type2 = type
+        )
     }
 
     // Create substitution

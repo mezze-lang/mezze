@@ -22,12 +22,12 @@ class DebugIncrementalResultTest {
     @Test
     fun `test incremental parsing like TestFullResultStep`() {
         val functions = listOf(
-            """pub let map: { result: (Result 'a 'e), f: 'a -> 'b } -> (Result 'b 'e) = { result, f } ->
+            """pub let map: { result: (Result 'a 'e), f: { val: 'a } -> 'b } -> (Result 'b 'e) = { result, f } ->
     match result is
         Ok { val } -> Ok { val = f { val } }
         Err { error } -> Err { error = error }""",
 
-            """pub let map_err: { result: (Result 'a 'e), f: 'e -> 'f } -> (Result 'a 'f) = { result, f } ->
+            """pub let map_err: { result: (Result 'a 'e), f: { error: 'e } -> 'f } -> (Result 'a 'f) = { result, f } ->
     match result is
         Ok { val } -> Ok { val = val }
         Err { error } -> Err { error = f { error } }""",
