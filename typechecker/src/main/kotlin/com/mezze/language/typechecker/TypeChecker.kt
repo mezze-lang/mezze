@@ -1911,7 +1911,7 @@ class TypeChecker(
 
         // Add imported types - use TypeApplication for type representation
         for ((name, typeDecl) in importContext.importedTypes) {
-            val typeParams = typeDecl.typeParams.map { MezzeType.VarType(TypeVar(it)) }
+            val typeParams = typeDecl.typeParams.map { MezzeType.VarType(TypeVar.freshWithName(it)) }
             imports.add(com.mezze.language.typechecker.ResolvedImport(
                 localName = name,
                 originalName = name,

@@ -123,7 +123,7 @@ object STMTypes {
 
     private fun registerBulkOperations(context: MutableMap<String, MezzeType>) {
         // __native_stm_read_all: {vars: [TVar 'a]} -> ['a] <STM>
-        val readA = MezzeType.VarType(TypeVar("a"))
+        val readA = MezzeType.VarType(TypeVar.freshWithName("a"))
         context["__native_stm_read_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "vars" to MezzeType.SeqType(tvarOf(readA))
@@ -133,7 +133,7 @@ object STMTypes {
         )
 
         // __native_stm_write_all: {pairs: [{var: TVar 'a, val: 'a}]} -> {} <STM>
-        val writeA = MezzeType.VarType(TypeVar("a"))
+        val writeA = MezzeType.VarType(TypeVar.freshWithName("a"))
         context["__native_stm_write_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "pairs" to MezzeType.SeqType(
@@ -149,7 +149,7 @@ object STMTypes {
 
         // __native_stm_atomic: {f: {} -> 'a <e>} -> 'a <e>
         val stmRowVar = RowVar.fresh()
-        val atomicA = MezzeType.VarType(TypeVar("a"))
+        val atomicA = MezzeType.VarType(TypeVar.freshWithName("a"))
         context["__native_stm_atomic"] = MezzeType.FunctionType(
             paramType = MezzeType.RecordType(mapOf(
                 "f" to MezzeType.FunctionType(

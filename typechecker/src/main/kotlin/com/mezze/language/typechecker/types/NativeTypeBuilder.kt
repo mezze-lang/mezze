@@ -70,7 +70,7 @@ val byteBuffer = MezzeType.ByteBufferType
 val ordering = MezzeType.OrderingType
 val unit = MezzeType.RecordType(emptyMap())
 
-fun tvar(name: String) = MezzeType.VarType(TypeVar(name))
+fun tvar(name: String) = MezzeType.VarType(TypeVar.freshWithName(name))
 fun seq(elem: MezzeType) = MezzeType.SeqType(elem)
 fun list(elem: MezzeType) = MezzeType.ListType(elem)
 fun set(elem: MezzeType) = MezzeType.SetType(elem)

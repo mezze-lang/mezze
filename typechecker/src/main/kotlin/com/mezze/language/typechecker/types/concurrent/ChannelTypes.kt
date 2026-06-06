@@ -23,8 +23,8 @@ import com.mezze.language.typechecker.util.WellKnownTypeApp
 object ChannelTypes {
 
     fun registerAll(context: MutableMap<String, MezzeType>) {
-        val chanType = MezzeType.VarType(TypeVar("Chan"))
-        val elementType = MezzeType.VarType(TypeVar("a"))
+        val chanType = MezzeType.VarType(TypeVar.freshWithName("Chan"))
+        val elementType = MezzeType.VarType(TypeVar.freshWithName("a"))
 
         natives(context) {
             // __native_channel_make: {} -> Chan 'a <Async>

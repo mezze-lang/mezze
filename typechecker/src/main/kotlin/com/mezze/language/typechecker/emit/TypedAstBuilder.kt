@@ -233,7 +233,7 @@ class TypedAstBuilder(
             val loc = decl.loc
             val rawType = constraintResults[destrName]?.let { substitution.apply(it.type) }
                 ?: constraintResults["__destructured__"]?.let { substitution.apply(it.type) }
-                ?: MezzeType.VarType(TypeVar("unknown"))
+                ?: MezzeType.VarType(TypeVar.freshWithName("unknown"))
             val type = closeGeneratedRowVars(rawType)
             val value = buildExpr(decl.value, file, type)
 
@@ -253,7 +253,7 @@ class TypedAstBuilder(
 
         // Look up type from constraintResults, apply substitution, and close generated row vars
         val rawType = constraintResults[name]?.let { substitution.apply(it.type) }
-            ?: MezzeType.VarType(TypeVar("unknown"))
+            ?: MezzeType.VarType(TypeVar.freshWithName("unknown"))
         val type = closeGeneratedRowVars(rawType, mustBeOpenRowVars)
 
         // Build the expression
@@ -320,7 +320,7 @@ class TypedAstBuilder(
         val isPublic = decl.visibility == ParsedVisibility.PUBLIC
         decls.add(TypedTypeDecl(hash, decl.name, emptyList(), def, isPublic, loc))
         if (isPublic) {
-            exports[decl.name] = ExportEntry(decl.name, hash, MezzeType.VarType(TypeVar(decl.name)), ExportKind.TYPE)
+            exports[decl.name] = ExportEntry(decl.name, hash, MezzeType.VarType(TypeVar.freshWithName(decl.name)), ExportKind.TYPE)
         }
     }
 
@@ -352,7 +352,7 @@ class TypedAstBuilder(
             loc = loc
         ))
 
-        exports[decl.name] = ExportEntry(decl.name, hash, MezzeType.VarType(TypeVar(decl.name)), ExportKind.ABILITY)
+        exports[decl.name] = ExportEntry(decl.name, hash, MezzeType.VarType(TypeVar.freshWithName(decl.name)), ExportKind.ABILITY)
     }
 
 
@@ -429,7 +429,7 @@ class TypedAstBuilder(
                         paramType = MezzeType.RecordType(mapOf("it" to targetTypeForOp)),
                         returnType = solvedReturn
                     )
-                else -> MezzeType.VarType(TypeVar("op_${op.name}"))
+                else -> MezzeType.VarType(TypeVar.freshWithName("op_${op.name}"))
             }
             val opExpr = buildExpr(op.implementation, file, ctxType)
             op.name to opExpr
@@ -468,7 +468,7 @@ class TypedAstBuilder(
         }
 
         decls.add(TypedEffectDecl(hash, decl.name, ops, decl.associatedTypes, loc))
-        exports[decl.name] = ExportEntry(decl.name, hash, MezzeType.VarType(TypeVar(decl.name)), ExportKind.EFFECT)
+        exports[decl.name] = ExportEntry(decl.name, hash, MezzeType.VarType(TypeVar.freshWithName(decl.name)), ExportKind.EFFECT)
     }
 
     private fun buildPerformerDecl(
@@ -502,7 +502,7 @@ class TypedAstBuilder(
 
         // Build operation expressions
         val ops = decl.operations.associate { op ->
-            val opExpr = buildExpr(op.implementation, file, MezzeType.VarType(TypeVar("op_${op.name}")))
+            val opExpr = buildExpr(op.implementation, file, MezzeType.VarType(TypeVar.freshWithName("op_${op.name}")))
             op.name to opExpr
         }
 
@@ -521,7 +521,7 @@ class TypedAstBuilder(
 
         decls.add(TypedPerformerDecl(hash, effectHash, decl.performerName, params, assocTypeBindings, ops, opHashes, loc))
         exports[decl.performerName] = ExportEntry(
-            decl.performerName, hash, MezzeType.VarType(TypeVar(decl.performerName)), ExportKind.PERFORMER
+            decl.performerName, hash, MezzeType.VarType(TypeVar.freshWithName(decl.performerName)), ExportKind.PERFORMER
         )
     }
 
@@ -532,7 +532,7 @@ class TypedAstBuilder(
     ) {
         val loc = decl.loc
         val hash = com.mezze.language.parsedast.ParsedDeclHasher.hashExpr(decl.expression)
-        val type = MezzeType.VarType(TypeVar("unknown"))
+        val type = MezzeType.VarType(TypeVar.freshWithName("unknown"))
         val value = buildExpr(decl.expression, file, type)
         decls.add(TypedLetDecl(
             hash = hash,
@@ -552,7 +552,7 @@ class TypedAstBuilder(
      * type information is available). For most expressions the type is derived
      * by recursion.
      */
-    fun buildExpr(expr: ParsedExpr, file: String, contextType: MezzeType = MezzeType.VarType(TypeVar("unknown"))): TypedExpr {
+    fun buildExpr(expr: ParsedExpr, file: String, contextType: MezzeType = MezzeType.VarType(TypeVar.freshWithName("unknown"))): TypedExpr {
         val loc = expr.loc
         return when (expr) {
 
@@ -640,7 +640,7 @@ class TypedAstBuilder(
                 // Infer return type from context if available
                 val returnType = when (val ct = substitution.apply(contextType)) {
                     is MezzeType.FunctionType -> substitution.apply(ct.returnType)
-                    else -> MezzeType.VarType(TypeVar("ret"))
+                    else -> MezzeType.VarType(TypeVar.freshWithName("ret"))
                 }
 
                 val body = buildExpr(expr.body, file, returnType)
@@ -1004,7 +1004,7 @@ class TypedAstBuilder(
                                 val destrName = "__destr_${stmts.size}"
                                 val valueType = stmt.typeAnnotation
                                     ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
-                                    ?: MezzeType.VarType(TypeVar("let_destr"))
+                                    ?: MezzeType.VarType(TypeVar.freshWithName("let_destr"))
                                 val value = buildExpr(stmt.value, file, valueType)
                                 val resolvedType = substitution.apply(value.type)
                                 identifierContext[destrName] = resolvedType
@@ -1024,7 +1024,7 @@ class TypedAstBuilder(
                                 }
                                 val valueType = stmt.typeAnnotation
                                     ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
-                                    ?: MezzeType.VarType(TypeVar("let_$name"))
+                                    ?: MezzeType.VarType(TypeVar.freshWithName("let_$name"))
 
                                 // RECURSIVE LET: For `let name = lambda { ... }` in do blocks,
                                 // pre-register the binding so the lambda body can resolve `name`
@@ -1097,7 +1097,7 @@ class TypedAstBuilder(
                 // Determine element type from context or first element
                 val elementContextType = when (val ct = substitution.apply(contextType)) {
                     is MezzeType.SeqType -> ct.elementType
-                    else -> MezzeType.VarType(TypeVar("elem"))
+                    else -> MezzeType.VarType(TypeVar.freshWithName("elem"))
                 }
                 val elements = expr.elements.map { elem ->
                     when (elem) {
@@ -1229,7 +1229,7 @@ class TypedAstBuilder(
         val resolvedTypes = bindingNames.associateWith { name ->
             val solverTy = solverBindings[name]
             if (solverTy != null) substitution.apply(solverTy)
-            else MezzeType.VarType(TypeVar(name))
+            else MezzeType.VarType(TypeVar.freshWithName(name))
         }
 
         val bindings = bindingNames.map { name ->
@@ -1269,7 +1269,7 @@ class TypedAstBuilder(
     }
 
     private fun buildPattern(pattern: ParsedPattern, file: String): TypedPattern {
-        val unknownType = MezzeType.VarType(TypeVar("pat"))
+        val unknownType = MezzeType.VarType(TypeVar.freshWithName("pat"))
         val loc = pattern.loc
         return when (pattern) {
             is ParsedVariablePattern -> TypedVarPattern(pattern.name, unknownType, loc)
@@ -1485,8 +1485,8 @@ class TypedAstBuilder(
                 params.names.mapIndexed { idx, name ->
                     val type = when (contextParamType) {
                         is MezzeType.RecordType -> contextParamType.fields[name]
-                            ?: MezzeType.VarType(TypeVar(name))
-                        else -> MezzeType.VarType(TypeVar(name))
+                            ?: MezzeType.VarType(TypeVar.freshWithName(name))
+                        else -> MezzeType.VarType(TypeVar.freshWithName(name))
                     }
                     val paramLoc = perNameLocs.getOrNull(idx) ?: loc
                     TypedParam(name, type, paramLoc)
@@ -1566,7 +1566,7 @@ class TypedAstBuilder(
             importContext?.importedBindings?.get(name)?.type?.let {
                 return substitution.apply(it)
             }
-            return MezzeType.VarType(TypeVar("unknown"))
+            return MezzeType.VarType(TypeVar.freshWithName("unknown"))
         }
 
         // 1. Local context (apply substitution to resolve type variables)
@@ -1583,7 +1583,7 @@ class TypedAstBuilder(
         }
 
         // 4. Unknown
-        return MezzeType.VarType(TypeVar("unknown"))
+        return MezzeType.VarType(TypeVar.freshWithName("unknown"))
     }
 
     /**
@@ -1790,8 +1790,8 @@ class TypedAstBuilder(
         for (field in entries) {
             val fieldName = field.name  // The record field name
             val fieldType = when (parentType) {
-                is MezzeType.RecordType -> parentType.fields[fieldName] ?: MezzeType.VarType(TypeVar("field_$fieldName"))
-                else -> MezzeType.VarType(TypeVar("field_$fieldName"))
+                is MezzeType.RecordType -> parentType.fields[fieldName] ?: MezzeType.VarType(TypeVar.freshWithName("field_$fieldName"))
+                else -> MezzeType.VarType(TypeVar.freshWithName("field_$fieldName"))
             }
             val parentBinding = resolveBinding(parentVarName, null)
             val parentVar = TypedVar(parentVarName, parentBinding, parentType, loc)
@@ -1845,8 +1845,8 @@ class TypedAstBuilder(
         for (entry in entries) {
             val fieldName = entry.name
             val fieldType = when (parentType) {
-                is MezzeType.RecordType -> parentType.fields[fieldName] ?: MezzeType.VarType(TypeVar("field_$fieldName"))
-                else -> MezzeType.VarType(TypeVar("field_$fieldName"))
+                is MezzeType.RecordType -> parentType.fields[fieldName] ?: MezzeType.VarType(TypeVar.freshWithName("field_$fieldName"))
+                else -> MezzeType.VarType(TypeVar.freshWithName("field_$fieldName"))
             }
             val destrBinding = resolveBinding(parentVarName, null)
             val destrVar = TypedVar(parentVarName, destrBinding, parentType, loc)

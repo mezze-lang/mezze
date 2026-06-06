@@ -205,7 +205,7 @@ class CodecGeneratorTest {
 
     @Test
     fun `type variable should be assumed serializable`() {
-        val varType = MezzeType.VarType(TypeVar("a"))
+        val varType = MezzeType.VarType(TypeVar.freshWithName("a"))
         assertTrue(generator.isSerializable(varType))
     }
 

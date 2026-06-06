@@ -79,13 +79,13 @@ object LoomTypes {
             fn("__native_promise_inspect") {
                 val a = tvar("a")
                 param("p" to WellKnownTypeApp.of("Promise", listOf(a)))
-                returns(MezzeType.VarType(TypeVar("PromiseState")))
+                returns(MezzeType.VarType(TypeVar.freshWithName("PromiseState")))
             }
 
             fn("__native_promise_cancel") {
                 val a = tvar("a")
                 param("p" to WellKnownTypeApp.of("Promise", listOf(a)))
-                returns(MezzeType.VarType(TypeVar("CancelOutcome")))
+                returns(MezzeType.VarType(TypeVar.freshWithName("CancelOutcome")))
             }
 
             fn("__native_promise_succeed") {
@@ -96,25 +96,25 @@ object LoomTypes {
 
             fn("__native_promise_fail") {
                 val a = tvar("a")
-                val asyncError = MezzeType.VarType(TypeVar("AsyncError"))
+                val asyncError = MezzeType.VarType(TypeVar.freshWithName("AsyncError"))
                 param("err" to asyncError)
                 returns(WellKnownTypeApp.of("Promise", listOf(a)))
             }
 
             fn("__native_promise_await_result") {
                 val a = tvar("a")
-                val asyncError = MezzeType.VarType(TypeVar("AsyncError"))
+                val asyncError = MezzeType.VarType(TypeVar.freshWithName("AsyncError"))
                 param("p" to WellKnownTypeApp.of("Promise", listOf(a)))
                 returns(result(a, asyncError))
             }
 
             // Scope lifecycle
             fn("__native_async_init_scope") {
-                returns(MezzeType.VarType(TypeVar("tracker")))
+                returns(MezzeType.VarType(TypeVar.freshWithName("tracker")))
             }
 
             fn("__native_async_finalize_scope") {
-                param("tracker" to MezzeType.VarType(TypeVar("tracker")))
+                param("tracker" to MezzeType.VarType(TypeVar.freshWithName("tracker")))
                 returns(unit)
             }
 
@@ -137,7 +137,7 @@ object LoomTypes {
         )
 
         // __native_async_scoped: {f: {sc: Scope 'a} -> 'a <...>} -> 'a
-        val scopedA = MezzeType.VarType(TypeVar("a"))
+        val scopedA = MezzeType.VarType(TypeVar.freshWithName("a"))
         val scopeType = WellKnownTypeApp.of("Scope", listOf(scopedA))
         context["__native_async_scoped"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
@@ -147,8 +147,8 @@ object LoomTypes {
         )
 
         // __native_async_scope_spawn: {sc: Scope 'a, f: {} -> 'b <...>} -> Promise 'b
-        val scopeSpawnA = MezzeType.VarType(TypeVar("a"))
-        val scopeSpawnB = MezzeType.VarType(TypeVar("b"))
+        val scopeSpawnA = MezzeType.VarType(TypeVar.freshWithName("a"))
+        val scopeSpawnB = MezzeType.VarType(TypeVar.freshWithName("b"))
         context["__native_async_scope_spawn"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "sc" to WellKnownTypeApp.of("Scope", listOf(scopeSpawnA)),
@@ -158,7 +158,7 @@ object LoomTypes {
         )
 
         // __native_async_scope_cancel_all: {sc: Scope 'a} -> {}
-        val scopeCancelA = MezzeType.VarType(TypeVar("a"))
+        val scopeCancelA = MezzeType.VarType(TypeVar.freshWithName("a"))
         context["__native_async_scope_cancel_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "sc" to WellKnownTypeApp.of("Scope", listOf(scopeCancelA))
@@ -167,7 +167,7 @@ object LoomTypes {
         )
 
         // __native_async_scope_get_token: {sc: Scope 'a} -> CancellationToken
-        val scopeTokenA = MezzeType.VarType(TypeVar("a"))
+        val scopeTokenA = MezzeType.VarType(TypeVar.freshWithName("a"))
         context["__native_async_scope_get_token"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "sc" to WellKnownTypeApp.of("Scope", listOf(scopeTokenA))
@@ -176,8 +176,8 @@ object LoomTypes {
         )
 
         // __native_async_spawn_tracked: {f: {} -> 'a <...>, max_concurrent: Int, tracker: 't} -> Promise 'a
-        val spawnTrackedA = MezzeType.VarType(TypeVar("a"))
-        val spawnTrackedTracker = MezzeType.VarType(TypeVar("tracker"))
+        val spawnTrackedA = MezzeType.VarType(TypeVar.freshWithName("a"))
+        val spawnTrackedTracker = MezzeType.VarType(TypeVar.freshWithName("tracker"))
         context["__native_async_spawn_tracked"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "f" to effectPolymorphicThunk(spawnTrackedA),

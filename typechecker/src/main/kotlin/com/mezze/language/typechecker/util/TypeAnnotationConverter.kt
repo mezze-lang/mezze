@@ -40,9 +40,9 @@ object TypeAnnotationConverter {
                     // Named type var: use cache if provided, else create a named TypeVar
                     MezzeType.VarType(
                         if (typeVarCache != null) {
-                            typeVarCache.getOrPut(annotation.name) { TypeVar(annotation.name) }
+                            typeVarCache.getOrPut(annotation.name) { TypeVar.freshWithName(annotation.name) }
                         } else {
-                            TypeVar(annotation.name)
+                            TypeVar.freshWithName(annotation.name)
                         }
                     )
                 } else {

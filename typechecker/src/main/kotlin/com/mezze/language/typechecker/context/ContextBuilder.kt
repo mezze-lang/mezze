@@ -389,7 +389,7 @@ class ContextBuilder {
                 typeVarCache.clear()
                 val wrappedMezzeType = convertParsedTypeAnnotationInternal(definition.wrappedType)
                 val typeArgs = typeDecl.typeParams.map { param ->
-                    MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar(param) })
+                    MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar.freshWithName(param) })
                 }
                 val newtypeResult = com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeDecl.name, typeArgs)
                 val constructorType = MezzeType.FunctionType(paramType = wrappedMezzeType, returnType = newtypeResult)
@@ -424,7 +424,7 @@ class ContextBuilder {
             com.mezze.language.typechecker.util.WellKnownTypeApp.of(
                 constructor = typeDecl.name,
                 args = typeDecl.typeParams.map { param ->
-                    MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar(param) })
+                    MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar.freshWithName(param) })
                 }
             )
         }
@@ -1234,7 +1234,7 @@ class ContextBuilder {
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
                 if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
                     val varName = annotation.name.removePrefix("'")
-                    val typeVar = typeVarCache.getOrPut(varName) { TypeVar(varName) }
+                    val typeVar = typeVarCache.getOrPut(varName) { TypeVar.freshWithName(varName) }
                     MezzeType.VarType(typeVar)
                 } else {
                     com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList(), currentTypeDecls[annotation.name]?.contentHash)

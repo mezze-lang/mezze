@@ -15,10 +15,10 @@ object SchedulerTypes {
 
     fun registerAll(context: MutableMap<String, MezzeType>) {
         // Opaque scheduler type (native object)
-        val schedulerType = MezzeType.VarType(TypeVar("__NativeScheduler"))
+        val schedulerType = MezzeType.VarType(TypeVar.freshWithName("__NativeScheduler"))
 
         // Opaque promise type (native object)
-        val nativePromiseType = MezzeType.VarType(TypeVar("__NativePromise"))
+        val nativePromiseType = MezzeType.VarType(TypeVar.freshWithName("__NativePromise"))
 
         natives(context) {
             fn("__native_scheduler_new") { returns(schedulerType) }
@@ -37,7 +37,7 @@ object SchedulerTypes {
 
             fn("__native_scheduler_await_result") {
                 val a = tvar("a")
-                val asyncError = MezzeType.VarType(TypeVar("AsyncError"))
+                val asyncError = MezzeType.VarType(TypeVar.freshWithName("AsyncError"))
                 param("sched" to schedulerType, "p" to nativePromiseType)
                 returns(result(a, asyncError))
             }
@@ -59,7 +59,7 @@ object SchedulerTypes {
 
             fn("__native_scheduler_race") {
                 val a = tvar("a")
-                val asyncError = MezzeType.VarType(TypeVar("AsyncError"))
+                val asyncError = MezzeType.VarType(TypeVar.freshWithName("AsyncError"))
                 param("sched" to schedulerType, "ps" to seq(nativePromiseType))
                 returns(result(a, asyncError))
             }

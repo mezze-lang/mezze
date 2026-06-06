@@ -150,7 +150,7 @@ fun normalizeTypeVariables(type: MezzeType): MezzeType {
 
     uniqueTypeVars.forEachIndexed { index, typeVar ->
         val normalizedName = "'${('a' + index)}"
-        val newTypeVar = TypeVar(normalizedName, typeVar.level)
+        val newTypeVar = TypeVar.freshWithName(normalizedName, typeVar.level)
         identityToNewVar[System.identityHashCode(typeVar)] = newTypeVar
     }
 

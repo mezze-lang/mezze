@@ -41,7 +41,7 @@ object EntryFunctionBuilder {
         // Build statements from let declarations
         // __toplevel_expr_N decls are top-level expressions (not real let bindings)
         val statements = mutableListOf<TypedStatement>()
-        var lastType: MezzeType = MezzeType.VarType(TypeVar("unit"))
+        var lastType: MezzeType = MezzeType.VarType(TypeVar.freshWithName("unit"))
         var lastExprValue: TypedExpr? = null
 
         for (i in decls.indices) {
@@ -127,7 +127,7 @@ object EntryFunctionBuilder {
                   else Loc("<unknown>", 1, 1, 1, 1)
 
         val statements = mutableListOf<TypedStatement>()
-        var lastType: MezzeType = MezzeType.VarType(TypeVar("unit"))
+        var lastType: MezzeType = MezzeType.VarType(TypeVar.freshWithName("unit"))
 
         // Add let declarations as statements
         for (decl in decls) {

@@ -990,7 +990,7 @@ class CodecGenerator {
      * Generate encode for Option type.
      */
     private fun generateOptionEncode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ParsedImplAbilityDecl {
-        val innerType = typeApp.args.firstOrNull() ?: MezzeType.VarType(TypeVar("a", 0))
+        val innerType = typeApp.args.firstOrNull() ?: MezzeType.VarType(TypeVar.freshWithName("a"))
         val innerEncodeCall = generateDirectEncodeCall(formatType, innerType, id("inner"), "__option_inner")
 
         val body = match(
@@ -1024,8 +1024,8 @@ class CodecGenerator {
      * Generate encode for Result type.
      */
     private fun generateResultEncode(formatType: MezzeType, typeApp: MezzeType.TypeApplication): ParsedImplAbilityDecl {
-        val okType = typeApp.args.getOrNull(0) ?: MezzeType.VarType(TypeVar("ok", 0))
-        val errType = typeApp.args.getOrNull(1) ?: MezzeType.VarType(TypeVar("err", 0))
+        val okType = typeApp.args.getOrNull(0) ?: MezzeType.VarType(TypeVar.freshWithName("ok"))
+        val errType = typeApp.args.getOrNull(1) ?: MezzeType.VarType(TypeVar.freshWithName("err"))
 
         val okEncodeCall = generateDirectEncodeCall(formatType, okType, id("ok_val"), "__result_ok")
         val errEncodeCall = generateDirectEncodeCall(formatType, errType, id("err_val"), "__result_err")

@@ -34,7 +34,7 @@ data class TypeScheme(
             val monoConstraints = constraints.map { constraint ->
                 FreshAbilityConstraint(
                     abilityName = constraint.abilityName,
-                    typeVar = TypeVar(constraint.typeParam),
+                    typeVar = TypeVar.freshWithName(constraint.typeParam),
                     typeArgs = constraint.typeArgs  // Preserve type args
                 )
             }
@@ -81,7 +81,7 @@ data class TypeScheme(
                 // Not quantified - create a TypeVar from the name for now
                 FreshAbilityConstraint(
                     abilityName = constraint.abilityName,
-                    typeVar = TypeVar(constraint.typeParam),
+                    typeVar = TypeVar.freshWithName(constraint.typeParam),
                     typeArgs = instantiatedTypeArgs
                 )
             }

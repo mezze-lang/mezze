@@ -28,7 +28,7 @@ import kotlinx.serialization.json.JsonClassDiscriminator
  * The id provides unique identity for each fresh type variable.
  */
 @Serializable
-data class TypeVar(val name: String, val level: Int = 0, val id: Int = 0) {
+data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
     companion object {
         private var globalCounter = 0
         private var currentLevel = 0

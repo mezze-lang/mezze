@@ -3995,7 +3995,7 @@ class ConstraintSolver(
                 if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
                     typeParamSubst[annotation.name]
                         ?: typeParamSubst["'" + annotation.name.trimStart('\'')]
-                        ?: MezzeType.VarType(TypeVar(annotation.name))
+                        ?: MezzeType.VarType(TypeVar.freshWithName(annotation.name))
                 } else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
             }
             is com.mezze.language.parsedast.ParsedFunctionType -> MezzeType.FunctionType(

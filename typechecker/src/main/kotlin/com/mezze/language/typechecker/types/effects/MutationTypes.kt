@@ -248,7 +248,7 @@ object MutationTypes {
 
     private fun registerDebugMutationNatives(context: MutableMap<String, MezzeType>) {
         // __native_debug_mutation_mutate: {act: {} -> 'a} -> 'a
-        val resultType = MezzeType.VarType(TypeVar("a"))
+        val resultType = MezzeType.VarType(TypeVar.freshWithName("a"))
         val actType = MezzeType.FunctionType(unit, resultType)
         context["__native_debug_mutation_mutate"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("act" to actType)),

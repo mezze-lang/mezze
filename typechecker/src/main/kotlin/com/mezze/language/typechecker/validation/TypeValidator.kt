@@ -2250,7 +2250,7 @@ class TypeValidator(
                         rowVar = if (def.isOpen) RowVar.fresh() else null)
                     is com.mezze.language.parsedast.ParsedRecordDef -> MezzeType.RecordType(fields = def.fields.associate { it.name to TypeAnnotationConverter.convert(it.type) })
                     is com.mezze.language.parsedast.ParsedNewtypeDef -> TypeAnnotationConverter.convert(def.wrappedType)
-                } else MezzeType.VarType(TypeVar(annotation.name))
+                } else MezzeType.VarType(TypeVar.freshWithName(annotation.name))
             }
             is com.mezze.language.parsedast.ParsedTypeApp -> {
                 TypeAnnotationConverter.convert(annotation)
