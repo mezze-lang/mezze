@@ -504,7 +504,17 @@ class TypeValidator(
         for (constraint in constraints) {
             // Apply substitution to get the concrete type
             val typeVarType = MezzeType.VarType(constraint.typeVar)
-            val concreteType = substitution.apply(typeVarType)
+            // #231: an effectful method call (e.g. `xs.filter {p=...}.is_empty {}`,
+            // where filter's result is `SuspendedType(SeqType(Int), <Async>)` per
+            // the effect row on the impl op) feeds a Suspended into the next
+            // ability-constraint slot. The impl table is keyed on the inner
+            // value type — unwrap before structural matching, otherwise the
+            // matcher trivially rejects `SuspendedType` vs `[Int]` and falls
+            // through to the "no impl" error.
+            val concreteType = when (val applied = substitution.apply(typeVarType)) {
+                is MezzeType.SuspendedType -> applied.valueType
+                else -> applied
+            }
 
             // If the type is still a type variable (polymorphic), skip validation
             // It will be checked when instantiated with a concrete type
