@@ -725,6 +725,31 @@ class TruffleCompiler(
                 com.mezze.interpreter.nodes.seq.SeqReduceLongCallNode.createMax(
                     compileNode(xs, source))
             }
+            // seq::count {xs, p} → SeqCountCallNode. Per-predicate PIC,
+            // Truffle LoopNode wraps the hot loop with the predicate's
+            // DirectCallNode as @Child so the inliner inlines the
+            // predicate into the OSR'd body. Skips the @TruffleBoundary +
+            // IndirectCallNode generic-dispatch path through SeqNatives.count.
+            "__native_seq_count" -> {
+                val xs = field("xs") ?: return null
+                val p = field("p") ?: return null
+                com.mezze.interpreter.nodes.seq.SeqCountCallNode.create(
+                    compileNode(xs, source), compileNode(p, source))
+            }
+            // seq::any {xs, p} → SeqAnyCallNode. Short-circuit on first match.
+            "__native_seq_any" -> {
+                val xs = field("xs") ?: return null
+                val p = field("p") ?: return null
+                com.mezze.interpreter.nodes.seq.SeqAnyCallNode.create(
+                    compileNode(xs, source), compileNode(p, source))
+            }
+            // seq::all {xs, p} → SeqAllCallNode. Short-circuit on first !match.
+            "__native_seq_all" -> {
+                val xs = field("xs") ?: return null
+                val p = field("p") ?: return null
+                com.mezze.interpreter.nodes.seq.SeqAllCallNode.create(
+                    compileNode(xs, source), compileNode(p, source))
+            }
 
             // ===== Map ops =====
             // m → MapNatives.size(m)
