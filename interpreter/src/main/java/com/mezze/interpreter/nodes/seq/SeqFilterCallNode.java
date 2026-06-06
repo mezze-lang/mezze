@@ -8,6 +8,7 @@ import com.mezze.datastructures.seq.ObjectSeqStorage;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -42,6 +43,18 @@ public final class SeqFilterCallNode extends MezzeNode {
     @Child
     private DirectCallNode callNode;
 
+    /**
+     * Per-predicate-CallTarget LoopNode-driven path for large LONG-storage
+     * filters. Size-1 PIC: one instance per distinct predicate. Lets
+     * Truffle's inliner inline the predicate into the OSR'd loop body
+     * (the {@link DirectCallNode} lives as {@code @Child} of the
+     * repeating node, not passed as a method argument). Same pattern as
+     * {@link SeqFoldCallNode#longLoopNode} and
+     * {@link SeqMapCallNode#longLoopNode}.
+     */
+    @Child
+    private SeqFilterLongLoopNode longLoopNode;
+
     // Cached CallTarget — safe across threads (monomorphic by source position).
     // We deliberately do NOT cache the predicate's MezzeFunction or its
     // closureValues array on the node, because concurrent threads with
@@ -74,12 +87,20 @@ public final class SeqFilterCallNode extends MezzeNode {
         if (callNode == null || predicate.getCallTarget() != cachedPredicateTarget) {
             resolveCallNode(predicate);
         }
+        // Re-entrancy snapshot — see #174 part 2. A predicate that
+        // transitively calls seq::filter again on the same shared node
+        // instance would clobber this.callNode; the local snapshot keeps
+        // the outer loop pinned to its own target. LONG-large path is
+        // safe via the per-predicate longLoopNode PIC; small/double/
+        // object/generic paths now take localCallNode as a parameter.
+        DirectCallNode localCallNode = this.callNode;
 
-        return executeFilter(seq, closureValues, closureLength);
+        return executeFilter(seq, closureValues, closureLength, localCallNode);
     }
 
     private Object executeFilter(MezzeSeq<?> seq,
-                                 Object[] closureValues, int closureLength) {
+                                 Object[] closureValues, int closureLength,
+                                 DirectCallNode localCallNode) {
         int size = seq.size();
         if (size == 0) {
             return seq;
@@ -102,16 +123,16 @@ public final class SeqFilterCallNode extends MezzeNode {
         // Type-directed dispatch: JIT can optimize based on storage type
         if (!seenMultipleTypes) {
             if (seenStorageType == LongSeqStorage.class) {
-                return filterLongSeq((LongSeqStorage) storage, size, closureValues, closureLength);
+                return filterLongSeq((LongSeqStorage) storage, size, closureValues, closureLength, localCallNode);
             } else if (seenStorageType == DoubleSeqStorage.class) {
-                return filterDoubleSeq((DoubleSeqStorage) storage, size, closureValues, closureLength);
+                return filterDoubleSeq((DoubleSeqStorage) storage, size, closureValues, closureLength, localCallNode);
             } else if (seenStorageType == ObjectSeqStorage.class) {
-                return filterObjectSeq((ObjectSeqStorage) storage, size, closureValues, closureLength);
+                return filterObjectSeq((ObjectSeqStorage) storage, size, closureValues, closureLength, localCallNode);
             }
         }
 
         // Megamorphic fallback
-        return filterGeneric(seq, size, closureValues, closureLength);
+        return filterGeneric(seq, size, closureValues, closureLength, localCallNode);
     }
 
     /**
@@ -119,15 +140,16 @@ public final class SeqFilterCallNode extends MezzeNode {
      * JIT can optimize knowing elements are longs.
      */
     private MezzeSeq<?> filterLongSeq(LongSeqStorage storage, int size,
-                                      Object[] closureValues, int closureLength) {
+                                      Object[] closureValues, int closureLength,
+                                      DirectCallNode localCallNode) {
         long[] data = storage.getArray();
         long[] results = new long[size];
         int count = 0;
 
         if (size <= 8) {
-            count = filterLongSmall(data, results, size, closureValues, closureLength);
+            count = filterLongSmall(data, results, size, closureValues, closureLength, localCallNode);
         } else {
-            count = filterLongLarge(data, results, size, closureValues, closureLength);
+            count = filterLongLarge(data, results, size, closureValues, closureLength, localCallNode);
         }
 
         if (count == 0) {
@@ -141,28 +163,36 @@ public final class SeqFilterCallNode extends MezzeNode {
 
     @ExplodeLoop
     private int filterLongSmall(long[] data, long[] results, int size,
-                                Object[] closureValues, int closureLength) {
+                                Object[] closureValues, int closureLength,
+                                DirectCallNode localCallNode) {
         int count = 0;
         for (int i = 0; i < size; i++) {
             long elem = data[i];
-            if (testPredicate(elem, closureValues, closureLength)) {
+            if (testPredicate(elem, closureValues, closureLength, localCallNode)) {
                 results[count++] = elem;
             }
         }
         return count;
     }
 
-    @TruffleBoundary
+    /**
+     * Large LONG-storage filter. Pre-fix this was {@code @TruffleBoundary}.
+     * Now driven by {@link SeqFilterLongLoopNode}: a Truffle LoopNode
+     * with the predicate's {@link DirectCallNode} as {@code @Child} of
+     * the repeating node, so Truffle's inliner inlines the predicate
+     * into the OSR'd loop body. Re-entrancy-safe via per-predicate PIC.
+     */
     private int filterLongLarge(long[] data, long[] results, int size,
-                                Object[] closureValues, int closureLength) {
-        int count = 0;
-        for (int i = 0; i < size; i++) {
-            long elem = data[i];
-            if (testPredicate(elem, closureValues, closureLength)) {
-                results[count++] = elem;
-            }
+                                Object[] closureValues, int closureLength,
+                                DirectCallNode localCallNode) {
+        CallTarget target = localCallNode.getCallTarget();
+        SeqFilterLongLoopNode loop = longLoopNode;
+        if (loop == null || loop.getPredicateTarget() != target) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            loop = new SeqFilterLongLoopNode(target);
+            longLoopNode = insert(loop);
         }
-        return count;
+        return loop.execute(data, results, size, closureValues, closureLength);
     }
 
     @TruffleBoundary
@@ -177,15 +207,16 @@ public final class SeqFilterCallNode extends MezzeNode {
      * JIT can optimize knowing elements are doubles.
      */
     private MezzeSeq<?> filterDoubleSeq(DoubleSeqStorage storage, int size,
-                                        Object[] closureValues, int closureLength) {
+                                        Object[] closureValues, int closureLength,
+                                        DirectCallNode localCallNode) {
         double[] data = storage.getArray();
         double[] results = new double[size];
         int count = 0;
 
         if (size <= 8) {
-            count = filterDoubleSmall(data, results, size, closureValues, closureLength);
+            count = filterDoubleSmall(data, results, size, closureValues, closureLength, localCallNode);
         } else {
-            count = filterDoubleLarge(data, results, size, closureValues, closureLength);
+            count = filterDoubleLarge(data, results, size, closureValues, closureLength, localCallNode);
         }
 
         if (count == 0) {
@@ -199,11 +230,12 @@ public final class SeqFilterCallNode extends MezzeNode {
 
     @ExplodeLoop
     private int filterDoubleSmall(double[] data, double[] results, int size,
-                                  Object[] closureValues, int closureLength) {
+                                  Object[] closureValues, int closureLength,
+                                  DirectCallNode localCallNode) {
         int count = 0;
         for (int i = 0; i < size; i++) {
             double elem = data[i];
-            if (testPredicate(elem, closureValues, closureLength)) {
+            if (testPredicate(elem, closureValues, closureLength, localCallNode)) {
                 results[count++] = elem;
             }
         }
@@ -212,11 +244,12 @@ public final class SeqFilterCallNode extends MezzeNode {
 
     @TruffleBoundary
     private int filterDoubleLarge(double[] data, double[] results, int size,
-                                  Object[] closureValues, int closureLength) {
+                                  Object[] closureValues, int closureLength,
+                                  DirectCallNode localCallNode) {
         int count = 0;
         for (int i = 0; i < size; i++) {
             double elem = data[i];
-            if (testPredicate(elem, closureValues, closureLength)) {
+            if (testPredicate(elem, closureValues, closureLength, localCallNode)) {
                 results[count++] = elem;
             }
         }
@@ -234,15 +267,16 @@ public final class SeqFilterCallNode extends MezzeNode {
      * Specialized path for object sequences.
      */
     private MezzeSeq<?> filterObjectSeq(ObjectSeqStorage storage, int size,
-                                        Object[] closureValues, int closureLength) {
+                                        Object[] closureValues, int closureLength,
+                                        DirectCallNode localCallNode) {
         Object[] data = storage.getArray();
         Object[] results = new Object[size];
         int count = 0;
 
         if (size <= 8) {
-            count = filterObjectSmall(data, results, size, closureValues, closureLength);
+            count = filterObjectSmall(data, results, size, closureValues, closureLength, localCallNode);
         } else {
-            count = filterObjectLarge(data, results, size, closureValues, closureLength);
+            count = filterObjectLarge(data, results, size, closureValues, closureLength, localCallNode);
         }
 
         if (count == 0) {
@@ -256,11 +290,12 @@ public final class SeqFilterCallNode extends MezzeNode {
 
     @ExplodeLoop
     private int filterObjectSmall(Object[] data, Object[] results, int size,
-                                  Object[] closureValues, int closureLength) {
+                                  Object[] closureValues, int closureLength,
+                                  DirectCallNode localCallNode) {
         int count = 0;
         for (int i = 0; i < size; i++) {
             Object elem = data[i];
-            if (testPredicate(elem, closureValues, closureLength)) {
+            if (testPredicate(elem, closureValues, closureLength, localCallNode)) {
                 results[count++] = elem;
             }
         }
@@ -269,11 +304,12 @@ public final class SeqFilterCallNode extends MezzeNode {
 
     @TruffleBoundary
     private int filterObjectLarge(Object[] data, Object[] results, int size,
-                                  Object[] closureValues, int closureLength) {
+                                  Object[] closureValues, int closureLength,
+                                  DirectCallNode localCallNode) {
         int count = 0;
         for (int i = 0; i < size; i++) {
             Object elem = data[i];
-            if (testPredicate(elem, closureValues, closureLength)) {
+            if (testPredicate(elem, closureValues, closureLength, localCallNode)) {
                 results[count++] = elem;
             }
         }
@@ -284,14 +320,15 @@ public final class SeqFilterCallNode extends MezzeNode {
      * Generic fallback for megamorphic sites.
      */
     private MezzeSeq<?> filterGeneric(MezzeSeq<?> seq, int size,
-                                      Object[] closureValues, int closureLength) {
+                                      Object[] closureValues, int closureLength,
+                                      DirectCallNode localCallNode) {
         Object[] results = new Object[size];
         int count = 0;
 
         if (size <= 8) {
-            count = filterGenericSmall(seq, results, size, closureValues, closureLength);
+            count = filterGenericSmall(seq, results, size, closureValues, closureLength, localCallNode);
         } else {
-            count = filterGenericLarge(seq, results, size, closureValues, closureLength);
+            count = filterGenericLarge(seq, results, size, closureValues, closureLength, localCallNode);
         }
 
         if (count == 0) {
@@ -305,11 +342,12 @@ public final class SeqFilterCallNode extends MezzeNode {
 
     @ExplodeLoop
     private int filterGenericSmall(MezzeSeq<?> seq, Object[] results, int size,
-                                   Object[] closureValues, int closureLength) {
+                                   Object[] closureValues, int closureLength,
+                                   DirectCallNode localCallNode) {
         int count = 0;
         for (int i = 0; i < size; i++) {
             Object elem = seq.get(i);
-            if (testPredicate(elem, closureValues, closureLength)) {
+            if (testPredicate(elem, closureValues, closureLength, localCallNode)) {
                 results[count++] = elem;
             }
         }
@@ -318,11 +356,12 @@ public final class SeqFilterCallNode extends MezzeNode {
 
     @TruffleBoundary
     private int filterGenericLarge(MezzeSeq<?> seq, Object[] results, int size,
-                                   Object[] closureValues, int closureLength) {
+                                   Object[] closureValues, int closureLength,
+                                   DirectCallNode localCallNode) {
         int count = 0;
         for (int i = 0; i < size; i++) {
             Object elem = seq.get(i);
-            if (testPredicate(elem, closureValues, closureLength)) {
+            if (testPredicate(elem, closureValues, closureLength, localCallNode)) {
                 results[count++] = elem;
             }
         }
@@ -331,13 +370,14 @@ public final class SeqFilterCallNode extends MezzeNode {
 
     @ExplodeLoop
     private boolean testPredicate(Object element,
-                                  Object[] closureValues, int closureLength) {
+                                  Object[] closureValues, int closureLength,
+                                  DirectCallNode localCallNode) {
         // Use fast wrapper - no @TruffleBoundary, pre-cached shape
         MezzeRecord arg = MezzeRecord.wrapX(element);
 
         Object result;
         if (closureLength == 0) {
-            result = callNode.call(new Object[] { arg });
+            result = localCallNode.call(new Object[] { arg });
         } else {
             Object[] args = new Object[closureLength + 1];
             // Unrolled closure copy for small closures (JIT can unroll this)
@@ -345,7 +385,7 @@ public final class SeqFilterCallNode extends MezzeNode {
                 args[i] = closureValues[i];
             }
             args[closureLength] = arg;
-            result = callNode.call(args);
+            result = localCallNode.call(args);
         }
 
         return result instanceof Boolean && (Boolean) result;
