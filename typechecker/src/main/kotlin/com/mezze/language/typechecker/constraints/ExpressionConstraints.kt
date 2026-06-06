@@ -140,6 +140,67 @@ class ExpressionConstraintGenerator {
         }
     }
 
+    // ========================================================================
+    // CONSTRAINT COLLECTOR — eliminates repeated merge boilerplate
+    // ========================================================================
+
+    /**
+     * Mutable accumulator for sub-expression constraint results.
+     *
+     * Many generator functions create 8-11 mutable collections, then call
+     * `addAll`/`putAll` on each one for every sub-expression result. This
+     * class centralises that pattern: call [merge] for each sub-result,
+     * then [toResult] to build the final [ConstraintResult].
+     */
+    private inner class ConstraintCollector {
+        val constraints = mutableListOf<Constraint>()
+        val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
+        val effects = mutableSetOf<String>()
+        val effectInstances = mutableSetOf<MezzeType.EffectInstance>()
+        var performed = false
+        val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
+        val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
+        val usedVars = mutableSetOf<String>()
+        val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
+        val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
+        val callReturnTypes = mutableMapOf<Loc, MezzeType>()
+        val duplicateBindings = mutableListOf<ConstraintResult.DuplicateBinding>()
+        val tailCalls = mutableSetOf<Loc>()
+
+        fun merge(result: ConstraintResult) {
+            constraints.addAll(result.constraints)
+            undefinedVars.addAll(result.undefinedVariables)
+            effects.addAll(result.effects)
+            effectInstances.addAll(result.effectInstances)
+            performed = performed || result.performed
+            abilityConstraints.addAll(result.abilityConstraints)
+            associatedTypeConstraints.addAll(result.associatedTypeConstraints)
+            usedVars.addAll(result.usedVariables)
+            referencedBindings.addAll(result.referencedBindings)
+            methodCallResolutions.putAll(result.methodCallResolutions)
+            callReturnTypes.putAll(result.callReturnTypes)
+            duplicateBindings.addAll(result.duplicateBindings)
+            tailCalls.addAll(result.tailCalls)
+        }
+
+        fun toResult(type: MezzeType): ConstraintResult = ConstraintResult(
+            type = type,
+            constraints = constraints,
+            effects = effects,
+            effectInstances = effectInstances,
+            performed = performed,
+            abilityConstraints = abilityConstraints,
+            associatedTypeConstraints = associatedTypeConstraints,
+            undefinedVariables = undefinedVars,
+            usedVariables = usedVars,
+            referencedBindings = referencedBindings,
+            methodCallResolutions = methodCallResolutions,
+            callReturnTypes = callReturnTypes,
+            duplicateBindings = duplicateBindings,
+            tailCalls = tailCalls,
+        )
+    }
+
     /**
      * Generate constraints for a binary operator by desugaring to method call.
      * `x + y` → `x.add {r = y}` — but with better error messages that reference the operator.
@@ -240,15 +301,7 @@ class ExpressionConstraintGenerator {
         }
 
         // Interpolated string: each Interpolation part's expression must have type String
-        val constraints = mutableListOf<Constraint>()
-        val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
-        val effects = mutableSetOf<String>()
-        val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
-        val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
-        val usedVars = mutableSetOf<String>()
-        val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
-        val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
-        val callReturnTypes = mutableMapOf<Loc, MezzeType>()
+        val collector = ConstraintCollector()
 
         var interpolationIndex = 0
         for (part in expr.parts) {
@@ -259,18 +312,8 @@ class ExpressionConstraintGenerator {
                 is ParsedStringPart.Interpolation -> {
                     // Expression must have type String
                     val exprResult = generate(part.expr, context)
-                    constraints.addAll(exprResult.constraints)
-                    undefinedVars.addAll(exprResult.undefinedVariables)
-                    // Propagate effects and ability constraints from interpolated expressions
-                    effects.addAll(exprResult.effects)
-                    abilityConstraints.addAll(exprResult.abilityConstraints)
-                    associatedTypeConstraints.addAll(exprResult.associatedTypeConstraints)
-                    // Track used variables from interpolated expressions
-                    usedVars.addAll(exprResult.usedVariables)
-                    referencedBindings.addAll(exprResult.referencedBindings)
-                    methodCallResolutions.putAll(exprResult.methodCallResolutions)
-                    callReturnTypes.putAll(exprResult.callReturnTypes)
-                    constraints.add(
+                    collector.merge(exprResult)
+                    collector.constraints.add(
                         Constraint.Equality(
                             left = exprResult.type,
                             right = MezzeType.StringType,
@@ -284,18 +327,7 @@ class ExpressionConstraintGenerator {
             }
         }
 
-        return ConstraintResult(
-            type = MezzeType.StringType,
-            constraints = constraints,
-            effects = effects,
-            abilityConstraints = abilityConstraints,
-            associatedTypeConstraints = associatedTypeConstraints,
-            undefinedVariables = undefinedVars,
-            usedVariables = usedVars,
-            referencedBindings = referencedBindings,
-            methodCallResolutions = methodCallResolutions,
-            callReturnTypes = callReturnTypes
-        )
+        return collector.toResult(MezzeType.StringType)
     }
 
     private fun generateSeqLiteral(expr: ParsedSeqLit, context: ConstraintContext): ConstraintResult {
@@ -308,30 +340,16 @@ class ExpressionConstraintGenerator {
         // Non-empty seq: all elements must have same type
         // Handle both regular elements and spread elements
         val elementType = MezzeType.VarType(TypeVar.fresh())
-        val constraints = mutableListOf<Constraint>()
-        val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
-        val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
-        val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
-        val effects = mutableSetOf<String>()
-        val usedVars = mutableSetOf<String>()
-        val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
-        val callReturnTypes = mutableMapOf<Loc, MezzeType>()
+        val collector = ConstraintCollector()
 
         var elementIndex = 0
         for (element in expr.elements) {
             when (element) {
                 is ParsedSeqElement.Regular -> {
                     val result = generate(element.expr, context)
-                    constraints.addAll(result.constraints)
-                    undefinedVars.addAll(result.undefinedVariables)
-                    abilityConstraints.addAll(result.abilityConstraints)
-                    associatedTypeConstraints.addAll(result.associatedTypeConstraints)
-                    effects.addAll(result.effects)
-                    usedVars.addAll(result.usedVariables)
-                    methodCallResolutions.putAll(result.methodCallResolutions)
-                    callReturnTypes.putAll(result.callReturnTypes)
+                    collector.merge(result)
                     // generate() guarantees no SuspendedType — effects are in result.effects
-                    constraints.add(
+                    collector.constraints.add(
                         Constraint.Equality(
                             left = result.type,
                             right = elementType,
@@ -344,15 +362,8 @@ class ExpressionConstraintGenerator {
                 }
                 is ParsedSeqElement.Spread -> {
                     val result = generate(element.expr, context)
-                    constraints.addAll(result.constraints)
-                    undefinedVars.addAll(result.undefinedVariables)
-                    abilityConstraints.addAll(result.abilityConstraints)
-                    associatedTypeConstraints.addAll(result.associatedTypeConstraints)
-                    effects.addAll(result.effects)
-                    usedVars.addAll(result.usedVariables)
-                    methodCallResolutions.putAll(result.methodCallResolutions)
-                    callReturnTypes.putAll(result.callReturnTypes)
-                    constraints.add(
+                    collector.merge(result)
+                    collector.constraints.add(
                         Constraint.Equality(
                             left = result.type,
                             right = MezzeType.SeqType(elementType),
@@ -366,17 +377,7 @@ class ExpressionConstraintGenerator {
             }
         }
 
-        return ConstraintResult(
-            type = MezzeType.SeqType(elementType),
-            constraints = constraints,
-            effects = effects,
-            abilityConstraints = abilityConstraints,
-            associatedTypeConstraints = associatedTypeConstraints,
-            undefinedVariables = undefinedVars,
-            usedVariables = usedVars,
-            methodCallResolutions = methodCallResolutions,
-            callReturnTypes = callReturnTypes
-        )
+        return collector.toResult(MezzeType.SeqType(elementType))
     }
 
     // ========================================================================
@@ -564,15 +565,7 @@ class ExpressionConstraintGenerator {
         // or {...spread, field1 = expr1, ...}
 
         val fields = linkedMapOf<String, MezzeType>()  // Preserve insertion order
-        val constraints = mutableListOf<Constraint>()
-        val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
-        val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
-        val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
-        val usedVars = mutableSetOf<String>()
-        val effects = mutableSetOf<String>()  // Collect effects from field expressions
-        val effectInstances = mutableSetOf<MezzeType.EffectInstance>()  // Collect effect instances
-        val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
-        val callReturnTypes = mutableMapOf<Loc, MezzeType>()
+        val collector = ConstraintCollector()
 
         // Pre-pass: collect ALL explicit field names upfront
         // This is needed because spread validation needs to know all field names,
@@ -603,37 +596,21 @@ class ExpressionConstraintGenerator {
                     // IMPORTANT: Propagate BOTH effects AND effectInstances from the SuspendedType
                     val fieldType = when (val t = fieldResult.type) {
                         is MezzeType.SuspendedType -> {
-                            effects.addAll(t.effects.effects)  // Propagate simple effects from SuspendedType
-                            effectInstances.addAll(t.effects.effectInstances)  // Propagate effect instances (with associated types)
+                            collector.effects.addAll(t.effects.effects)  // Propagate simple effects from SuspendedType
+                            collector.effectInstances.addAll(t.effects.effectInstances)  // Propagate effect instances (with associated types)
                             t.valueType  // Use the unwrapped value type
                         }
                         else -> t
                     }
 
                     explicitFieldTypes[entry.name] = fieldType
-                    constraints.addAll(fieldResult.constraints)
-                    undefinedVars.addAll(fieldResult.undefinedVariables)
-                    abilityConstraints.addAll(fieldResult.abilityConstraints)
-                    associatedTypeConstraints.addAll(fieldResult.associatedTypeConstraints)
-                    usedVars.addAll(fieldResult.usedVariables)
-                    effects.addAll(fieldResult.effects)  // Propagate effects from field expressions
-                    effectInstances.addAll(fieldResult.effectInstances)  // Propagate effect instances
-                    methodCallResolutions.putAll(fieldResult.methodCallResolutions)
-                    callReturnTypes.putAll(fieldResult.callReturnTypes)
+                    collector.merge(fieldResult)
                 }
                 is ParsedRecordEntry.Spread -> {
                     // Spread: {...baseRecord}
                     // Process the spread expression and extract its fields
                     val spreadResult = generate(entry.expr, fieldContext)
-                    constraints.addAll(spreadResult.constraints)
-                    undefinedVars.addAll(spreadResult.undefinedVariables)
-                    abilityConstraints.addAll(spreadResult.abilityConstraints)
-                    associatedTypeConstraints.addAll(spreadResult.associatedTypeConstraints)
-                    usedVars.addAll(spreadResult.usedVariables)
-                    effects.addAll(spreadResult.effects)  // Propagate effects from spread expressions
-                    effectInstances.addAll(spreadResult.effectInstances)  // Propagate effect instances
-                    methodCallResolutions.putAll(spreadResult.methodCallResolutions)
-                    callReturnTypes.putAll(spreadResult.callReturnTypes)
+                    collector.merge(spreadResult)
 
                     // Extract fields from the spread type and merge into our record
                     // The spread expression must be a record type (or unify with one via constraints)
@@ -684,7 +661,7 @@ class ExpressionConstraintGenerator {
                                 fields = emptyMap(),
                                 rowVar = RowVar.fresh()
                             )
-                            constraints.add(
+                            collector.constraints.add(
                                 Constraint.Equality(
                                     left = spreadResult.type,
                                     right = spreadRecordType,
@@ -779,18 +756,7 @@ class ExpressionConstraintGenerator {
             rowVar = null
         )
 
-        return ConstraintResult(
-            type = recordType,
-            constraints = constraints,
-            effects = effects,  // Include effects from field expressions
-            effectInstances = effectInstances,  // Include effect instances
-            undefinedVariables = undefinedVars,
-            abilityConstraints = abilityConstraints,
-            associatedTypeConstraints = associatedTypeConstraints,
-            usedVariables = usedVars,
-            methodCallResolutions = methodCallResolutions,
-            callReturnTypes = callReturnTypes
-        )
+        return collector.toResult(recordType)
     }
 
     /**
@@ -3915,44 +3881,15 @@ class ExpressionConstraintGenerator {
         // TCO: Scrutinee is NOT in tail position
         val scrutineeResult = generate(expr.scrutinee, context.notInTailPosition())
 
-        val constraints = mutableListOf<Constraint>()
-        constraints.addAll(scrutineeResult.constraints)
-        val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
-        undefinedVars.addAll(scrutineeResult.undefinedVariables)
-        val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
-        abilityConstraints.addAll(scrutineeResult.abilityConstraints)
-        val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
-        associatedTypeConstraints.addAll(scrutineeResult.associatedTypeConstraints)
-        val effects = mutableSetOf<String>()
-        effects.addAll(scrutineeResult.effects)
-        val effectInstances = mutableSetOf<MezzeType.EffectInstance>()
-        effectInstances.addAll(scrutineeResult.effectInstances)
-        var performed = scrutineeResult.performed  // Track performed flag
-        val duplicateBindings = mutableListOf<ConstraintResult.DuplicateBinding>()
-        duplicateBindings.addAll(scrutineeResult.duplicateBindings)
-        // TCO: Track tail calls from case bodies
-        val tailCalls = mutableSetOf<Loc>()
-        tailCalls.addAll(scrutineeResult.tailCalls)
+        val collector = ConstraintCollector()
+        collector.merge(scrutineeResult)
         // Track unused pattern bindings (warnings)
         val unusedVars = mutableListOf<ConstraintResult.UnusedVariable>()
         // Track pattern-related warnings (e.g., float literal patterns)
         val patternWarnings = mutableListOf<String>()
-        // Track method call resolutions from sub-expressions (scrutinee + case bodies)
-        val methodCallResolutions = mutableMapOf<Pair<com.mezze.language.parsedast.Loc, String>, ConstraintResult.MethodCallInfo>()
-        methodCallResolutions.putAll(scrutineeResult.methodCallResolutions)
-        val callReturnTypes = mutableMapOf<com.mezze.language.parsedast.Loc, MezzeType>()
-        callReturnTypes.putAll(scrutineeResult.callReturnTypes)
-        // #195 mono-fix #1: per-match-case binding types (the solver's TyVars
-        // from PatternConstraintResult) so TypedAstBuilder can stamp them on
-        // PatternBinding + identifierContext instead of constructing fresh
-        // disconnected placeholders.
+        // #195 mono-fix #1: per-match-case binding types
         val matchCaseBindings = mutableMapOf<com.mezze.language.parsedast.Loc, Map<String, MezzeType>>()
         matchCaseBindings.putAll(scrutineeResult.matchCaseBindings)
-        // Track referenced bindings for dependency graph
-        val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
-        referencedBindings.addAll(scrutineeResult.referencedBindings)
-        val usedVars = mutableSetOf<String>()
-        usedVars.addAll(scrutineeResult.usedVariables)
 
         // Step 2: Check for wildcards - if present, scrutinee must be open variant
         // IMPORTANT: Only check TOP-LEVEL patterns for wildcards/variables.
@@ -3966,7 +3903,7 @@ class ExpressionConstraintGenerator {
         }
         if (hasWildcard) {
             // Mark the scrutinee type as must-be-open
-            constraints.add(
+            collector.constraints.add(
                 Constraint.MustBeOpen(
                     type = scrutineeResult.type,
                     bindingName = context.currentBindingName,
@@ -3987,7 +3924,7 @@ class ExpressionConstraintGenerator {
             // Process first pattern to get bindings
             val firstPattern = matchCase.patterns.first()
             val patternResult = patternGenerator.generate(firstPattern, scrutineeResult.type, context, expr.loc)
-            constraints.addAll(patternResult.constraints)
+            collector.constraints.addAll(patternResult.constraints)
             patternWarnings.addAll(patternResult.warnings)
 
             // For additional patterns in or-pattern, verify they bind the same variables
@@ -3995,7 +3932,7 @@ class ExpressionConstraintGenerator {
             val firstPatternBindings = patternResult.bindings.keys
             for (pattern in matchCase.patterns.drop(1)) {
                 val orPatternResult = patternGenerator.generate(pattern, scrutineeResult.type, context, expr.loc)
-                constraints.addAll(orPatternResult.constraints)
+                collector.constraints.addAll(orPatternResult.constraints)
                 patternWarnings.addAll(orPatternResult.warnings)
 
                 // Verify that or-pattern binds exactly the same variables
@@ -4021,7 +3958,7 @@ class ExpressionConstraintGenerator {
                 // Also unify the binding types between patterns to ensure consistency
                 for ((varName, varType) in orPatternResult.bindings) {
                     val firstType = patternResult.bindings[varName]!!
-                    constraints.add(
+                    collector.constraints.add(
                         Constraint.Equality(
                             left = varType,
                             right = firstType,
@@ -4049,15 +3986,7 @@ class ExpressionConstraintGenerator {
             var guardUsedVariables: Set<String> = emptySet()  // Track for unused variable checking
             if (guard != null) {
                 val guardResult = generate(guard, caseContext.notInTailPosition())
-                constraints.addAll(guardResult.constraints)
-                undefinedVars.addAll(guardResult.undefinedVariables)
-                abilityConstraints.addAll(guardResult.abilityConstraints)
-                associatedTypeConstraints.addAll(guardResult.associatedTypeConstraints)
-                effects.addAll(guardResult.effects)
-                effectInstances.addAll(guardResult.effectInstances)
-                performed = performed || guardResult.performed  // Propagate performed
-                duplicateBindings.addAll(guardResult.duplicateBindings)
-                referencedBindings.addAll(guardResult.referencedBindings)
+                collector.merge(guardResult)
                 guardUsedVariables = guardResult.usedVariables  // Save for later use
                 // #218: guard's methodCallResolutions and callReturnTypes were
                 // being dropped on the floor — every `w.eq` inside a match guard
@@ -4069,7 +3998,7 @@ class ExpressionConstraintGenerator {
                 callReturnTypes.putAll(guardResult.callReturnTypes)
 
                 // Guard must be Bool (variant type | True, False |)
-                constraints.add(
+                collector.constraints.add(
                     Constraint.Equality(
                         left = guardResult.type,
                         right = MezzeType.VariantType(
@@ -4088,15 +4017,7 @@ class ExpressionConstraintGenerator {
                 // Generate constraints for the binding expression
                 // TCO: If-let expression is NOT in tail position
                 val bindingExprResult = generate(ifLetBinding.expr, caseContext.notInTailPosition())
-                constraints.addAll(bindingExprResult.constraints)
-                undefinedVars.addAll(bindingExprResult.undefinedVariables)
-                abilityConstraints.addAll(bindingExprResult.abilityConstraints)
-                associatedTypeConstraints.addAll(bindingExprResult.associatedTypeConstraints)
-                effects.addAll(bindingExprResult.effects)
-                effectInstances.addAll(bindingExprResult.effectInstances)  // Bug fix: was missing
-                performed = performed || bindingExprResult.performed
-                duplicateBindings.addAll(bindingExprResult.duplicateBindings)
-                referencedBindings.addAll(bindingExprResult.referencedBindings)  // Bug fix: was missing
+                collector.merge(bindingExprResult)
 
                 // Generate pattern constraints for the if-let pattern against the expression type
                 val ifLetPatternResult = patternGenerator.generate(
@@ -4105,7 +4026,7 @@ class ExpressionConstraintGenerator {
                     caseContext,
                     ifLetBinding.loc
                 )
-                constraints.addAll(ifLetPatternResult.constraints)
+                collector.constraints.addAll(ifLetPatternResult.constraints)
                 patternWarnings.addAll(ifLetPatternResult.warnings)
 
                 // Extend context with bindings from the if-let pattern
@@ -4117,19 +4038,7 @@ class ExpressionConstraintGenerator {
             // Generate constraints for case body with extended context
             // TCO: Case body inherits tail position from context
             val caseBodyResult = generate(matchCase.body, caseContext)
-            constraints.addAll(caseBodyResult.constraints)
-            undefinedVars.addAll(caseBodyResult.undefinedVariables)
-            abilityConstraints.addAll(caseBodyResult.abilityConstraints)
-            associatedTypeConstraints.addAll(caseBodyResult.associatedTypeConstraints)
-            effects.addAll(caseBodyResult.effects)
-            effectInstances.addAll(caseBodyResult.effectInstances)
-            performed = performed || caseBodyResult.performed  // Propagate performed
-            duplicateBindings.addAll(caseBodyResult.duplicateBindings)
-            tailCalls.addAll(caseBodyResult.tailCalls)
-            referencedBindings.addAll(caseBodyResult.referencedBindings)
-            usedVars.addAll(caseBodyResult.usedVariables)
-            methodCallResolutions.putAll(caseBodyResult.methodCallResolutions)
-            callReturnTypes.putAll(caseBodyResult.callReturnTypes)
+            collector.merge(caseBodyResult)
             matchCaseBindings.putAll(caseBodyResult.matchCaseBindings)
 
             // Check for unused pattern bindings
@@ -4164,7 +4073,7 @@ class ExpressionConstraintGenerator {
         val resultType = MezzeType.VarType(TypeVar.fresh())
 
         for (caseType in caseResultTypes) {
-            constraints.add(
+            collector.constraints.add(
                 Constraint.Equality(
                     left = caseType,
                     right = resultType,
@@ -4175,23 +4084,9 @@ class ExpressionConstraintGenerator {
             )
         }
 
-        return ConstraintResult(
-            type = resultType,
-            constraints = constraints,
-            effects = effects,
-            effectInstances = effectInstances,
-            performed = performed,  // Include performed flag
-            abilityConstraints = abilityConstraints,
-            associatedTypeConstraints = associatedTypeConstraints,
-            undefinedVariables = undefinedVars,
-            usedVariables = usedVars,
-            duplicateBindings = duplicateBindings,
-            tailCalls = tailCalls,
+        return collector.toResult(resultType).copy(
             unusedVariables = unusedVars,
             patternWarnings = patternWarnings,
-            referencedBindings = referencedBindings,
-            methodCallResolutions = methodCallResolutions,
-            callReturnTypes = callReturnTypes,
             matchCaseBindings = matchCaseBindings,
         )
     }
@@ -4212,22 +4107,7 @@ class ExpressionConstraintGenerator {
         // annotation like `{} -> Continuation` would propagate to all sub-expressions.
         // TCO: Statements are NOT in tail position
         var currentContext = context.clearExpectedType().notInTailPosition()
-        val constraints = mutableListOf<Constraint>()
-        val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
-        val effects = mutableSetOf<String>()
-        val effectInstances = mutableSetOf<MezzeType.EffectInstance>()
-        var performed = false  // Track performed flag
-        val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
-        val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
-        // TCO: Track tail calls from result expression (statements are not in tail position)
-        val tailCalls = mutableSetOf<Loc>()
-        // Track referenced bindings for dependency graph
-        val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
-        // Track used variables for unused variable warnings
-        val usedVars = mutableSetOf<String>()
-        // Track method call resolutions from sub-expressions
-        val methodCallResolutions = mutableMapOf<Pair<com.mezze.language.parsedast.Loc, String>, ConstraintResult.MethodCallInfo>()
-        val callReturnTypes = mutableMapOf<com.mezze.language.parsedast.Loc, MezzeType>()
+        val collector = ConstraintCollector()
 
         // Create pattern generator for handling destructuring in let statements
         val patternGenerator = PatternConstraintGenerator()
@@ -4273,7 +4153,7 @@ class ExpressionConstraintGenerator {
 
                     // RECURSIVE LET: unify pre-bind type with inferred lambda type
                     if (preBindType != null && annotatedType == null) {
-                        constraints.add(
+                        collector.constraints.add(
                             Constraint.Equality(
                                 left = preBindType,
                                 right = exprResult.type,
@@ -4283,23 +4163,13 @@ class ExpressionConstraintGenerator {
                         )
                     }
 
-                    constraints.addAll(exprResult.constraints)
-                    undefinedVars.addAll(exprResult.undefinedVariables)
-                    effects.addAll(exprResult.effects)
-                    effectInstances.addAll(exprResult.effectInstances)
-                    performed = performed || exprResult.performed  // Propagate performed
-                    abilityConstraints.addAll(exprResult.abilityConstraints)
-                    associatedTypeConstraints.addAll(exprResult.associatedTypeConstraints)
-                    referencedBindings.addAll(exprResult.referencedBindings)
-                    usedVars.addAll(exprResult.usedVariables)
-                    methodCallResolutions.putAll(exprResult.methodCallResolutions)
-                    callReturnTypes.putAll(exprResult.callReturnTypes)
+                    collector.merge(exprResult)
 
                     // generate() already unwrapped SuspendedType — use type directly
                     val bindingType = exprResult.type
 
                     if (annotatedType != null) {
-                        constraints.add(
+                        collector.constraints.add(
                             Constraint.Equality(
                                 left = bindingType,
                                 right = annotatedType,
@@ -4323,7 +4193,7 @@ class ExpressionConstraintGenerator {
                         currentContext,
                         stmt.value.loc
                     )
-                    constraints.addAll(patternResult.constraints)
+                    collector.constraints.addAll(patternResult.constraints)
 
                     // Extend context with all pattern bindings
                     // For simple variable bindings: extends with one binding
@@ -4399,17 +4269,7 @@ class ExpressionConstraintGenerator {
                 }
                 is ParsedStatement.Expr -> {
                     val exprResult = generate(stmt.expr, currentContext)
-                    constraints.addAll(exprResult.constraints)
-                    undefinedVars.addAll(exprResult.undefinedVariables)
-                    effects.addAll(exprResult.effects)
-                    effectInstances.addAll(exprResult.effectInstances)
-                    performed = performed || exprResult.performed  // Propagate performed
-                    abilityConstraints.addAll(exprResult.abilityConstraints)
-                    associatedTypeConstraints.addAll(exprResult.associatedTypeConstraints)
-                    referencedBindings.addAll(exprResult.referencedBindings)
-                    usedVars.addAll(exprResult.usedVariables)
-                    methodCallResolutions.putAll(exprResult.methodCallResolutions)
-                    callReturnTypes.putAll(exprResult.callReturnTypes)
+                    collector.merge(exprResult)
                 }
                 is ParsedStatement.Bind -> {
                     // ParsedStatement.Bind must be eliminated by DoBindDesugar before
@@ -4432,55 +4292,29 @@ class ExpressionConstraintGenerator {
             currentContext.copy(inTailPosition = context.inTailPosition)
         }
         val resultResult = generate(expr.result, resultContext)
-        constraints.addAll(resultResult.constraints)
-        undefinedVars.addAll(resultResult.undefinedVariables)
-        effects.addAll(resultResult.effects)
-        effectInstances.addAll(resultResult.effectInstances)
-        performed = performed || resultResult.performed  // Propagate performed
-        abilityConstraints.addAll(resultResult.abilityConstraints)
-        associatedTypeConstraints.addAll(resultResult.associatedTypeConstraints)
-        // TCO: Only the result expression can have tail calls
-        tailCalls.addAll(resultResult.tailCalls)
-        referencedBindings.addAll(resultResult.referencedBindings)
-        usedVars.addAll(resultResult.usedVariables)
-        methodCallResolutions.putAll(resultResult.methodCallResolutions)
-        callReturnTypes.putAll(resultResult.callReturnTypes)
+        collector.merge(resultResult)
 
         // CRITICAL: If do block has effects or performed effects, wrap the result in SuspendedType
         // This allows perform expressions to properly detect and handle effects
         // BUT: Don't double-wrap if the result is already a SuspendedType!
         // Data types (like Result) are orthogonal to effects - we should not nest Suspended types.
-        val resultType = if (effects.isNotEmpty() || performed) {
+        val resultType = if (collector.effects.isNotEmpty() || collector.performed) {
             when (val innerType = resultResult.type) {
                 is MezzeType.SuspendedType -> {
                     // Result is already suspended - merge effects and performed flag
-                    val mergedEffects = innerType.effects.effects + effects
-                    val mergedPerformed = innerType.effects.performed || performed
+                    val mergedEffects = innerType.effects.effects + collector.effects
+                    val mergedPerformed = innerType.effects.performed || collector.performed
                     MezzeType.SuspendedType(innerType.valueType, MezzeType.EffectRow.simple(mergedEffects, innerType.effects.rowVar, mergedPerformed))
                 }
                 else -> {
-                    MezzeType.SuspendedType(resultResult.type, MezzeType.EffectRow.simple(effects, null, performed))
+                    MezzeType.SuspendedType(resultResult.type, MezzeType.EffectRow.simple(collector.effects, null, collector.performed))
                 }
             }
         } else {
             resultResult.type
         }
 
-        return ConstraintResult(
-            type = resultType,
-            constraints = constraints,
-            effects = effects,  // Still track effects for propagation
-            effectInstances = effectInstances,
-            performed = performed,  // Include performed flag
-            abilityConstraints = abilityConstraints,
-            associatedTypeConstraints = associatedTypeConstraints,
-            undefinedVariables = undefinedVars,
-            tailCalls = tailCalls,
-            usedVariables = usedVars,
-            referencedBindings = referencedBindings,
-            methodCallResolutions = methodCallResolutions,
-            callReturnTypes = callReturnTypes
-        )
+        return collector.toResult(resultType)
     }
 
     // ========================================================================
