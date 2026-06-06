@@ -198,15 +198,14 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         // Example: {age: Int} unifies with User (| User { name: String, age: Int } |)
         // This allows field access on single-constructor variants to work via constraint generation
         type1 is MezzeType.RecordType && type2 is MezzeType.VariantType -> {
-            // Check if variant is a single-constructor variant (newtype pattern)
-            if (type2.constructors.size == 1 && type2.rowVar == null) {
+            // Single-constructor variant unwrap: only if the variant is NOT nominal
+            if (type2.constructors.size == 1 && type2.rowVar == null &&
+                !type2.nominalWall && !isVariantNameInScope(type2, typeDeclarations)) {
                 val (_, payloadType) = type2.constructors.entries.first()
                 if (payloadType != null) {
-                    // Unify the record with the payload type
                     return unify(type1, payloadType, typeDeclarations)
                 }
             }
-            // Multi-constructor variants or no payload - can't unify with record
             return UnificationResult.Failure(
                 message = "Type mismatch: expected ${formatType(type2)}, but got ${formatType(type1)}",
                 type1 = type1,
@@ -214,15 +213,14 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
             )
         }
         type1 is MezzeType.VariantType && type2 is MezzeType.RecordType -> {
-            // Check if variant is a single-constructor variant (newtype pattern)
-            if (type1.constructors.size == 1 && type1.rowVar == null) {
+            // Single-constructor variant unwrap: only if the variant is NOT nominal
+            if (type1.constructors.size == 1 && type1.rowVar == null &&
+                !type1.nominalWall && !isVariantNameInScope(type1, typeDeclarations)) {
                 val (_, payloadType) = type1.constructors.entries.first()
                 if (payloadType != null) {
-                    // Unify the payload type with the record
                     return unify(payloadType, type2, typeDeclarations)
                 }
             }
-            // Multi-constructor variants or no payload - can't unify with record
             return UnificationResult.Failure(
                 message = "Type mismatch: expected ${formatType(type2)}, but got ${formatType(type1)}",
                 type1 = type1,
@@ -419,14 +417,15 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         // OrderingType can unify with VariantType([LT, EQ, GT]) and vice versa
         // This supports pattern matching where the scrutinee is OrderingType but patterns create a VariantType
         type1 is MezzeType.OrderingType && type2 is MezzeType.VariantType -> {
-            // Check if the variant contains exactly LT, EQ, GT with no payloads and is closed
             val expectedConstructors = setOf("LT", "EQ", "GT")
             val actualConstructors = type2.constructors.keys
-            val allMatch = actualConstructors == expectedConstructors &&
+            val exactMatch = actualConstructors == expectedConstructors &&
                            type2.constructors.all { (_, payload) -> payload == null } &&
                            type2.rowVar == null
-            if (allMatch || (actualConstructors.all { it in expectedConstructors } && type2.rowVar == null)) {
-                // Compatible - OrderingType matches the Ordering variant
+            val subsetWithOpenRow = actualConstructors.all { it in expectedConstructors } &&
+                           type2.constructors.all { (_, payload) -> payload == null } &&
+                           type2.rowVar != null
+            if (exactMatch || subsetWithOpenRow) {
                 UnificationResult.Success(Substitution.empty)
             } else {
                 UnificationResult.Failure(
@@ -437,13 +436,15 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
             }
         }
         type1 is MezzeType.VariantType && type2 is MezzeType.OrderingType -> {
-            // Symmetric case
             val expectedConstructors = setOf("LT", "EQ", "GT")
             val actualConstructors = type1.constructors.keys
-            val allMatch = actualConstructors == expectedConstructors &&
+            val exactMatch = actualConstructors == expectedConstructors &&
                            type1.constructors.all { (_, payload) -> payload == null } &&
                            type1.rowVar == null
-            if (allMatch || (actualConstructors.all { it in expectedConstructors } && type1.rowVar == null)) {
+            val subsetWithOpenRow = actualConstructors.all { it in expectedConstructors } &&
+                           type1.constructors.all { (_, payload) -> payload == null } &&
+                           type1.rowVar != null
+            if (exactMatch || subsetWithOpenRow) {
                 UnificationResult.Success(Substitution.empty)
             } else {
                 UnificationResult.Failure(
