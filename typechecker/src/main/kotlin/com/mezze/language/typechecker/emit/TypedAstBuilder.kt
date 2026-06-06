@@ -58,6 +58,13 @@ class TypedAstBuilder(
     // their generic scheme, and the call's `.type` falls back to `unknown`,
     // breaking LSP per-segment chain inlay hints.
     private val callReturnTypes: Map<Loc, MezzeType> = emptyMap(),
+    // #195 mono-fix #1: per-match-case binding name → solver TyVar. The
+    // constraint generator records the SAME fresh TyVars that PatternConstraints
+    // allocated and HasField unified with concrete types; applying `substitution`
+    // here gives the resolved type for each binding. Used in buildMatchCase to
+    // populate PatternBinding.type + identifierContext for guard/body emit
+    // instead of constructing fresh disconnected placeholders.
+    private val matchCaseBindings: Map<Loc, Map<String, MezzeType>> = emptyMap(),
     // Locs of `ParsedStatement.Let` nodes synthesized by the do-bind desugar
     // from a `pat <- expr` source. Used to set `TypedStatement.Let.isBind = true`
     // — LSP consults it for hover position-lookup on the bind pattern name.
@@ -1212,12 +1219,35 @@ class TypedAstBuilder(
             typedIfLetBindings.add(TypedIfLetBinding(typedPattern, typedExpr, ifLetBindingNames, ifLet.loc))
         }
 
+        // #195 mono-fix #1: use the solver's TyVars from PatternConstraintResult
+        // (threaded through ConstraintResult.matchCaseBindings) instead of
+        // constructing fresh `TypeVar(name)` placeholders. Applying substitution
+        // here resolves to concrete types when HasField fired. Without this,
+        // the placeholder's `(name, id=0)` identity never matches the solver's
+        // `(<fresh-name>, id=N)`, so substitution.apply returns it unchanged.
+        val solverBindings = matchCaseBindings[case.loc] ?: emptyMap()
+        val resolvedTypes = bindingNames.associateWith { name ->
+            val solverTy = solverBindings[name]
+            if (solverTy != null) substitution.apply(solverTy)
+            else MezzeType.VarType(TypeVar(name))
+        }
+
         val bindings = bindingNames.map { name ->
-            PatternBinding(name, MezzeType.VarType(TypeVar(name)), case.loc)
+            PatternBinding(name, resolvedTypes[name]!!, case.loc)
         }
 
         // Push pattern bindings so case body sees them as locals, not globals
         lambdaParamScopes.addLast(bindingNames.toMutableList())
+        // Register binding types in identifierContext so resolveIdentifierType
+        // returns the concrete type when guard/body references the binding —
+        // without this, `w == h` in the guard sees `w: VarType("unknown")` and
+        // method-call dispatch can't pick the inline op. Save prior context
+        // entries (for shadowing) and restore after the case.
+        val savedContext = HashMap<String, MezzeType?>()
+        for (name in bindingNames) {
+            savedContext[name] = identifierContext[name]
+            identifierContext[name] = resolvedTypes[name]!!
+        }
 
         val caseGuard = case.guard
         val guard = if (caseGuard != null) {
@@ -1229,6 +1259,10 @@ class TypedAstBuilder(
         }
         val body = buildExpr(case.body, file, contextType)
 
+        // Restore prior identifierContext entries.
+        for ((name, prev) in savedContext) {
+            if (prev != null) identifierContext[name] = prev else identifierContext.remove(name)
+        }
         lambdaParamScopes.removeLast()
 
         return TypedCase(patterns, bindings, guard, body, case.loc, typedIfLetBindings)

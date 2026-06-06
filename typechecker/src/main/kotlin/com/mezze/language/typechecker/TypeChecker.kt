@@ -722,6 +722,12 @@ class TypeChecker(
                         acc + r.callReturnTypes
                     }
 
+                // #195 mono-fix #1: aggregate per-match-case bindings.
+                val allMatchCaseBindings = constraintResults.values
+                    .fold(emptyMap<com.mezze.language.parsedast.Loc, Map<String, com.mezze.language.ast.MezzeType>>()) { acc, r ->
+                        acc + r.matchCaseBindings
+                    }
+
                 // expectedTypeAt union — applied through the final
                 // substitution so the LSP ranker sees concrete types,
                 // not raw TypeVars from the constraint generator.
@@ -786,6 +792,7 @@ class TypeChecker(
                         mustBeOpenRowVars = mustBeOpenRowVars,
                         methodCallResolutions = allMethodCallResolutions,
                         callReturnTypes = allCallReturnTypes,
+                        matchCaseBindings = allMatchCaseBindings,
                         bindLetLocs = bindLetLocs,
                     )
                     val typed = builder.build(parsedModule)
@@ -1223,6 +1230,13 @@ class TypeChecker(
                 .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType>()) { acc, r ->
                     acc + r.callReturnTypes
                 }
+            // #195 mono-fix #1: aggregate per-match-case pattern bindings so
+            // TypedAstBuilder can recover the solver's TyVars when stamping
+            // PatternBinding + identifierContext entries for guard/body emit.
+            val matchCaseBindings = constraintResults.values
+                .fold(emptyMap<com.mezze.language.parsedast.Loc, Map<String, com.mezze.language.ast.MezzeType>>()) { acc, r ->
+                    acc + r.matchCaseBindings
+                }
             val tailCallLocations = constraintResults.values
                 .flatMap { it.tailCalls }
                 .filterNotNull()
@@ -1242,6 +1256,7 @@ class TypeChecker(
                 mustBeOpenRowVars = emptySet(),
                 methodCallResolutions = methodCallResolutions,
                 callReturnTypes = callReturnTypes,
+                matchCaseBindings = matchCaseBindings,
                 bindLetLocs = bindLetLocs,
             )
             builder.build(parsedModule)

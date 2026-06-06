@@ -295,6 +295,18 @@ data class ConstraintResult(
     // cleanly, this map is still populated so completion ranking works
     // in the happy path, not just when something already went wrong.
     val expectedTypeAt: Map<Loc, MezzeType> = emptyMap(),
+    // #195 mono-fix #1: per-match-case pattern bindings, keyed by the case's
+    // Loc. The values are the constraint generator's fresh TyVars from
+    // PatternConstraintResult — the SAME TyVars that HasField etc. unified
+    // with concrete types. TypedAstBuilder applies the final substitution
+    // and uses these as PatternBinding.type + identifierContext entries for
+    // guard/body emission. Without this, TypedAstBuilder constructed fresh
+    // placeholder TyVars (e.g. `TypeVar(name="w", id=0)`) that had no
+    // identity relationship to the solver's TyVars (id=N) — substitution
+    // silently passed through, and the body kept `w: VarType` in the
+    // specialized mono blob, defeating inline op dispatch on the renamed
+    // bindings.
+    val matchCaseBindings: Map<Loc, Map<String, MezzeType>> = emptyMap(),
 ) {
     /**
      * Information about a resolved method call (ability method or inherent method).

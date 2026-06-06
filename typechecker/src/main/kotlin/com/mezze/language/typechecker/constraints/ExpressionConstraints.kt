@@ -3792,6 +3792,12 @@ class ExpressionConstraintGenerator {
         methodCallResolutions.putAll(scrutineeResult.methodCallResolutions)
         val callReturnTypes = mutableMapOf<com.mezze.language.parsedast.Loc, MezzeType>()
         callReturnTypes.putAll(scrutineeResult.callReturnTypes)
+        // #195 mono-fix #1: per-match-case binding types (the solver's TyVars
+        // from PatternConstraintResult) so TypedAstBuilder can stamp them on
+        // PatternBinding + identifierContext instead of constructing fresh
+        // disconnected placeholders.
+        val matchCaseBindings = mutableMapOf<com.mezze.language.parsedast.Loc, Map<String, MezzeType>>()
+        matchCaseBindings.putAll(scrutineeResult.matchCaseBindings)
         // Track referenced bindings for dependency graph
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
         referencedBindings.addAll(scrutineeResult.referencedBindings)
@@ -3879,6 +3885,11 @@ class ExpressionConstraintGenerator {
             for ((varName, varType) in patternResult.bindings) {
                 caseContext = caseContext.extend(varName, varType)
             }
+            // #195 mono-fix #1: stash this case's bindings keyed by the case
+            // Loc so TypedAstBuilder can recover the solver's TyVars (not
+            // disconnected placeholders) when emitting PatternBinding + the
+            // guard/body identifier context.
+            matchCaseBindings[matchCase.loc] = patternResult.bindings
 
             // If there's a guard, check it (must be Bool)
             // TCO: Guard is NOT in tail position
@@ -3958,6 +3969,7 @@ class ExpressionConstraintGenerator {
             referencedBindings.addAll(caseBodyResult.referencedBindings)
             methodCallResolutions.putAll(caseBodyResult.methodCallResolutions)
             callReturnTypes.putAll(caseBodyResult.callReturnTypes)
+            matchCaseBindings.putAll(caseBodyResult.matchCaseBindings)
 
             // Check for unused pattern bindings
             // Variables starting with _ are intentionally unused (convention)
@@ -4025,7 +4037,8 @@ class ExpressionConstraintGenerator {
             patternWarnings = patternWarnings,
             referencedBindings = referencedBindings,
             methodCallResolutions = methodCallResolutions,
-            callReturnTypes = callReturnTypes
+            callReturnTypes = callReturnTypes,
+            matchCaseBindings = matchCaseBindings,
         )
     }
 
