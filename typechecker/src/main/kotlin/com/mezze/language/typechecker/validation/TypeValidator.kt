@@ -956,7 +956,7 @@ class TypeValidator(
 
         val finalType = substitution.apply(inferredType)
 
-        if (!typesCompatible(annotatedType, finalType)) {
+        if (!alphaEquivalent(annotatedType, finalType, mutableMapOf())) {
             val bindingName = if (decl.isSimpleBinding) decl.variableName else "_pattern"
             return listOf(
                 ValidationError.AnnotationMismatch(
@@ -1037,11 +1037,6 @@ class TypeValidator(
      * - Ignores type variable names (alpha equivalence)
      * - Allows annotated types to be more specific than inferred
      */
-    private fun typesCompatible(annotated: MezzeType, inferred: MezzeType): Boolean {
-        // Use alpha equivalence check with empty mapping
-        return alphaEquivalent(annotated, inferred, mutableMapOf())
-    }
-
     /**
      * Check if two types are alpha-equivalent (same up to renaming of type variables).
      *
