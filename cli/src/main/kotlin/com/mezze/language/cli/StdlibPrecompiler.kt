@@ -50,8 +50,17 @@ fun main(args: Array<String>) {
 
     // Trigger full PrecompiledStdlib init (parse + typecheck + lower)
     val precompiled = PrecompiledStdlib
-    val functions = precompiled.preloweredFunctions
+    val rawFunctions = precompiled.preloweredFunctions
     val performers = precompiled.preloweredPerformerRecords
+
+    // β-reduce `Mut.mutate { act = λ }` in every stdlib wrapper.
+    // Mut is hermetic — the type system already proves no Mut value
+    // escapes its handler region — so the effect-dispatch dance is
+    // statically unobservable when LocalMut is on top of the chain.
+    // After this pass, e.g. `incr1` directly calls `__native_mut_int_incr`
+    // with no OpCallNode, no fiber, no marker. Same function hash; only
+    // the body changes. See `MutEraser` for the rewrite rules.
+    val functions = com.mezze.language.truffleir.MutEraser.erase(rawFunctions)
 
     val initTime = (System.nanoTime() - startTime) / 1_000_000
     println("Stdlib compiled: ${functions.size} functions, ${performers.size} performers (${initTime}ms)")

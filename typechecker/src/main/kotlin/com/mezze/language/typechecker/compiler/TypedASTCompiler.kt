@@ -598,7 +598,29 @@ class TypedASTCompiler(
         for (fn in functions) {
             if (seenHashes.add(fn.hash)) deduped.add(fn)
         }
-        return CompileResult(deduped, performerRecords.toList())
+
+        // β-reduce `Mut.mutate { act = λ }` in every compiled function.
+        // Mut is hermetic — the type system already proves no Mut value
+        // escapes its handler region — so the effect-dispatch dance is
+        // statically unobservable when LocalMut is on top of the chain.
+        // After this pass, e.g. `incr1` directly calls `__native_mut_int_incr`
+        // with no OpCallNode, no fiber, no marker. Same function hash; only
+        // the body changes. The lookup map seeds from PrecompiledStdlib so
+        // act-lambdas in already-precompiled stdlib functions resolve.
+        val erasureMap = HashMap<Hash, FunctionIR>(deduped.size + 1200)
+        // Seed with already-precompiled stdlib functions so act-lambdas
+        // declared there can be looked up. Robust against init re-entry
+        // (during stdlib precompile itself the map is null/empty).
+        try {
+            val stdlibFns = com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions
+            if (stdlibFns != null) {
+                for ((h, fnIR) in stdlibFns) erasureMap[h] = fnIR
+            }
+        } catch (_: Throwable) { /* stdlib not ready — fine */ }
+        for (fn in deduped) erasureMap[fn.hash] = fn
+        val erasedMap = com.mezze.language.truffleir.MutEraser.erase(erasureMap)
+        val erased = deduped.map { erasedMap[it.hash] ?: it }
+        return CompileResult(erased, performerRecords.toList())
     }
 
     private fun compileLetDecl(decl: TypedLetDecl): FunctionIR {
