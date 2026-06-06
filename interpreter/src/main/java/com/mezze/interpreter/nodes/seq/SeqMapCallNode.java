@@ -54,6 +54,15 @@ public final class SeqMapCallNode extends MezzeNode {
     @Child
     private SeqMapLongLoopNode longLoopNode;
 
+    @Child
+    private SeqMapDoubleLoopNode doubleLoopNode;
+
+    @Child
+    private SeqMapObjectLoopNode objectLoopNode;
+
+    @Child
+    private SeqMapGenericLoopNode genericLoopNode;
+
     // Cached CallTarget for monomorphic call sites. Safe to share across
     // threads because the CallTarget is determined by the source position,
     // not by the per-call closureValues. The mapper's closureValues are
@@ -228,13 +237,17 @@ public final class SeqMapCallNode extends MezzeNode {
         }
     }
 
-    @TruffleBoundary
     private void mapDoubleLarge(Object[] results, double[] data, int size,
                                 Object[] closureValues, int closureLength,
                                 DirectCallNode localCallNode) {
-        for (int i = 0; i < size; i++) {
-            results[i] = callMapper(data[i], closureValues, closureLength, localCallNode);
+        CallTarget target = localCallNode.getCallTarget();
+        SeqMapDoubleLoopNode loop = doubleLoopNode;
+        if (loop == null || loop.getMapperTarget() != target) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            loop = new SeqMapDoubleLoopNode(target);
+            doubleLoopNode = insert(loop);
         }
+        loop.execute(data, results, size, closureValues, closureLength);
     }
 
     /**
@@ -264,13 +277,17 @@ public final class SeqMapCallNode extends MezzeNode {
         }
     }
 
-    @TruffleBoundary
     private void mapObjectLarge(Object[] results, Object[] data, int size,
                                 Object[] closureValues, int closureLength,
                                 DirectCallNode localCallNode) {
-        for (int i = 0; i < size; i++) {
-            results[i] = callMapper(data[i], closureValues, closureLength, localCallNode);
+        CallTarget target = localCallNode.getCallTarget();
+        SeqMapObjectLoopNode loop = objectLoopNode;
+        if (loop == null || loop.getMapperTarget() != target) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            loop = new SeqMapObjectLoopNode(target);
+            objectLoopNode = insert(loop);
         }
+        loop.execute(data, results, size, closureValues, closureLength);
     }
 
     /**
@@ -299,13 +316,17 @@ public final class SeqMapCallNode extends MezzeNode {
         }
     }
 
-    @TruffleBoundary
     private void mapGenericLarge(MezzeSeq<?> seq, Object[] results, int size,
                                  Object[] closureValues, int closureLength,
                                  DirectCallNode localCallNode) {
-        for (int i = 0; i < size; i++) {
-            results[i] = callMapper(seq.get(i), closureValues, closureLength, localCallNode);
+        CallTarget target = localCallNode.getCallTarget();
+        SeqMapGenericLoopNode loop = genericLoopNode;
+        if (loop == null || loop.getMapperTarget() != target) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            loop = new SeqMapGenericLoopNode(target);
+            genericLoopNode = insert(loop);
         }
+        loop.execute(seq, results, size, closureValues, closureLength);
     }
 
     @ExplodeLoop
