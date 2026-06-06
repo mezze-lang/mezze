@@ -55,6 +55,17 @@ public final class SeqFilterCallNode extends MezzeNode {
     @Child
     private SeqFilterLongLoopNode longLoopNode;
 
+    /**
+     * Body-adoption (real AST inlining) fast path for the canonical
+     * single-param closure-free predicate shape. Same idea as
+     * {@link SeqFoldCallNode#longInlinedLoopNode}: clone the predicate's
+     * body into a repeating node so PE sees a straight-line graph with
+     * no call boundary. Falls back to {@link #longLoopNode} when the
+     * predicate has closures or doesn't match the shape.
+     */
+    @Child
+    private SeqFilterLongInlinedLoopNode longInlinedLoopNode;
+
     @Child
     private SeqFilterDoubleLoopNode doubleLoopNode;
 
@@ -195,6 +206,34 @@ public final class SeqFilterCallNode extends MezzeNode {
                                 Object[] closureValues, int closureLength,
                                 DirectCallNode localCallNode) {
         CallTarget target = localCallNode.getCallTarget();
+
+        // FAST PATH: body adoption (real AST inlining). When the
+        // predicate is the canonical {x} -> bool shape with 1 LONG/OBJECT
+        // param and 0 closures, clone the predicate body and execute it
+        // in-place per iter — no DirectCallNode boundary, no MezzeRecord
+        // alloc, no ABI dispatch.
+        if (closureLength == 0) {
+            SeqFilterLongInlinedLoopNode inlined = longInlinedLoopNode;
+            if (inlined == null || inlined.getPredicateTarget() != target) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                if (SeqFilterLongInlinedLoopNode.canHandle(target)) {
+                    com.mezze.interpreter.nodes.function.MezzeFunctionRootNode mrn =
+                        (com.mezze.interpreter.nodes.function.MezzeFunctionRootNode)
+                            ((com.oracle.truffle.api.RootCallTarget) target).getRootNode();
+                    inlined = new SeqFilterLongInlinedLoopNode(target, mrn);
+                    longInlinedLoopNode = insert(inlined);
+                } else {
+                    inlined = null;
+                }
+            }
+            if (inlined != null) {
+                return inlined.execute(data, results, size);
+            }
+        }
+
+        // FALLBACK: per-predicate LoopNode + DirectCallNode. Used when
+        // the predicate has closures or doesn't match the body-adoption
+        // shape.
         SeqFilterLongLoopNode loop = longLoopNode;
         if (loop == null || loop.getPredicateTarget() != target) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
