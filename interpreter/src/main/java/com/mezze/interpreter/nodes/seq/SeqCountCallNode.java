@@ -50,6 +50,17 @@ public final class SeqCountCallNode extends MezzeNode {
     @Child
     private LongCountLoopNode longLoopNode;
 
+    /**
+     * Body-adopted (real AST inlining) fast path for the canonical
+     * shape: 1-param predicate + 0 closures over long storage. The
+     * predicate's body AST is cloned and runs in-place per iter — no
+     * DirectCallNode boundary, no MezzeRecord alloc, no ABI dispatch.
+     * Selected over {@link #longLoopNode} when
+     * {@link SeqCountLongInlinedLoopNode#canHandle} is true.
+     */
+    @Child
+    private SeqCountLongInlinedLoopNode longInlinedLoopNode;
+
     @Child
     private ObjectCountLoopNode objectLoopNode;
 
@@ -94,6 +105,27 @@ public final class SeqCountCallNode extends MezzeNode {
 
         if (!seenMultipleTypes) {
             if (seenStorageType == LongSeqStorage.class) {
+                // FAST PATH: body adoption when predicate has no closures
+                // and matches the 1-param canonical shape.
+                if (closureLength == 0) {
+                    SeqCountLongInlinedLoopNode inlined = longInlinedLoopNode;
+                    if (inlined == null || inlined.getPredicateTarget() != target) {
+                        CompilerDirectives.transferToInterpreterAndInvalidate();
+                        if (SeqCountLongInlinedLoopNode.canHandle(target)) {
+                            com.mezze.interpreter.nodes.function.MezzeFunctionRootNode mrn =
+                                (com.mezze.interpreter.nodes.function.MezzeFunctionRootNode)
+                                    ((com.oracle.truffle.api.RootCallTarget) target).getRootNode();
+                            inlined = new SeqCountLongInlinedLoopNode(target, mrn);
+                            longInlinedLoopNode = insert(inlined);
+                        } else {
+                            inlined = null;
+                        }
+                    }
+                    if (inlined != null) {
+                        return inlined.execute(((LongSeqStorage) storage).getArray(), size);
+                    }
+                }
+                // FALLBACK: per-predicate LoopNode + DirectCallNode.
                 LongCountLoopNode loop = longLoopNode;
                 if (loop == null || loop.getPredicateTarget() != target) {
                     CompilerDirectives.transferToInterpreterAndInvalidate();

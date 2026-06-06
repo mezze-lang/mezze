@@ -45,6 +45,13 @@ public final class SeqAnyCallNode extends MezzeNode {
     @Child
     private LongAnyLoopNode longLoopNode;
 
+    /**
+     * Body-adopted fast path for the canonical 1-param + 0-closure
+     * predicate shape over long storage. Mirrors the count/fold pattern.
+     */
+    @Child
+    private SeqAnyLongInlinedLoopNode longInlinedLoopNode;
+
     @Child
     private ObjectAnyLoopNode objectLoopNode;
 
@@ -89,6 +96,27 @@ public final class SeqAnyCallNode extends MezzeNode {
 
         if (!seenMultipleTypes) {
             if (seenStorageType == LongSeqStorage.class) {
+                // FAST PATH: body adoption when predicate has no closures
+                // and matches the 1-param canonical shape.
+                if (closureLength == 0) {
+                    SeqAnyLongInlinedLoopNode inlined = longInlinedLoopNode;
+                    if (inlined == null || inlined.getPredicateTarget() != target) {
+                        CompilerDirectives.transferToInterpreterAndInvalidate();
+                        if (SeqAnyLongInlinedLoopNode.canHandle(target)) {
+                            com.mezze.interpreter.nodes.function.MezzeFunctionRootNode mrn =
+                                (com.mezze.interpreter.nodes.function.MezzeFunctionRootNode)
+                                    ((com.oracle.truffle.api.RootCallTarget) target).getRootNode();
+                            inlined = new SeqAnyLongInlinedLoopNode(target, mrn);
+                            longInlinedLoopNode = insert(inlined);
+                        } else {
+                            inlined = null;
+                        }
+                    }
+                    if (inlined != null) {
+                        return inlined.execute(((LongSeqStorage) storage).getArray(), size);
+                    }
+                }
+                // FALLBACK: per-predicate LoopNode + DirectCallNode.
                 LongAnyLoopNode loop = longLoopNode;
                 if (loop == null || loop.getPredicateTarget() != target) {
                     CompilerDirectives.transferToInterpreterAndInvalidate();

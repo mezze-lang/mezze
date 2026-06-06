@@ -40,6 +40,13 @@ public final class SeqAllCallNode extends MezzeNode {
     @Child
     private LongAllLoopNode longLoopNode;
 
+    /**
+     * Body-adopted fast path for the canonical 1-param + 0-closure
+     * predicate shape over long storage.
+     */
+    @Child
+    private SeqAllLongInlinedLoopNode longInlinedLoopNode;
+
     @Child
     private ObjectAllLoopNode objectLoopNode;
 
@@ -84,6 +91,27 @@ public final class SeqAllCallNode extends MezzeNode {
 
         if (!seenMultipleTypes) {
             if (seenStorageType == LongSeqStorage.class) {
+                // FAST PATH: body adoption when predicate has no closures
+                // and matches the 1-param canonical shape.
+                if (closureLength == 0) {
+                    SeqAllLongInlinedLoopNode inlined = longInlinedLoopNode;
+                    if (inlined == null || inlined.getPredicateTarget() != target) {
+                        CompilerDirectives.transferToInterpreterAndInvalidate();
+                        if (SeqAllLongInlinedLoopNode.canHandle(target)) {
+                            com.mezze.interpreter.nodes.function.MezzeFunctionRootNode mrn =
+                                (com.mezze.interpreter.nodes.function.MezzeFunctionRootNode)
+                                    ((com.oracle.truffle.api.RootCallTarget) target).getRootNode();
+                            inlined = new SeqAllLongInlinedLoopNode(target, mrn);
+                            longInlinedLoopNode = insert(inlined);
+                        } else {
+                            inlined = null;
+                        }
+                    }
+                    if (inlined != null) {
+                        return inlined.execute(((LongSeqStorage) storage).getArray(), size);
+                    }
+                }
+                // FALLBACK: per-predicate LoopNode + DirectCallNode.
                 LongAllLoopNode loop = longLoopNode;
                 if (loop == null || loop.getPredicateTarget() != target) {
                     CompilerDirectives.transferToInterpreterAndInvalidate();
