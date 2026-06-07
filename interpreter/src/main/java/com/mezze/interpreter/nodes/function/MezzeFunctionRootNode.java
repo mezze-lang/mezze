@@ -4,6 +4,7 @@ import com.mezze.interpreter.instrumentation.MezzeDebugScope;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -264,6 +265,9 @@ public final class MezzeFunctionRootNode extends RootNode {
         @Child
         private MezzeNode bodyNode;
 
+        @Child
+        private com.oracle.truffle.api.nodes.IndirectCallNode crossFnTailCallNode;
+
         BodyRepeatingNode(MezzeNode bodyNode) {
             this.bodyNode = bodyNode;
         }
@@ -281,6 +285,17 @@ public final class MezzeFunctionRootNode extends RootNode {
             try {
                 return bodyNode.execute(frame);
             } catch (TailCallScalarException tse) {
+                // Tail call to SELF: rebind frame args, continue the loop.
+                // Tail call to ANOTHER function (e.g. lambda body whose only
+                // expr is a call to a different function — common when the
+                // call is wrapped as TailCallNode by the IR but the callee
+                // CallTarget differs from this RootNode's): the SELF-loop
+                // trampoline can't absorb that — re-running our body would
+                // execute the wrong code. Fall back to a real call so the
+                // loop terminates with the callee's result. #285+
+                if (tse.callTarget != getCallTarget()) {
+                    return invokeCrossFn(tse.callTarget, scalarPayloadToArgs(tse));
+                }
                 // Typed-payload tail call. fill() / fillMixed() picks mode:
                 //   paramKinds != null → mixed buckets
                 //   else longArgs != null → all-LONG payload
@@ -294,6 +309,15 @@ public final class MezzeFunctionRootNode extends RootNode {
                 }
                 return CONTINUE_LOOP_STATUS;
             } catch (TailCallException e) {
+                // Tail call to SELF: rebind, continue. Tail call to ANOTHER
+                // function: invoke it for real so the loop terminates.
+                // Without this guard, BodyRepeatingNode would re-execute the
+                // wrong body forever (e.g. spawn closure `{} -> f {n}` calls
+                // top-level `f` — without the check, we'd re-execute `{} -> f`
+                // with f's new args, infinite loop).
+                if (e.getCallTarget() != getCallTarget()) {
+                    return invokeCrossFn(e.getCallTarget(), e.getArguments());
+                }
                 // Object-payload tail call. The tail-caller's arg layout
                 // starts at index 0 (no closure prefix — closures are stable
                 // within a single function's frame).
@@ -314,6 +338,49 @@ public final class MezzeFunctionRootNode extends RootNode {
                 }
                 return CONTINUE_LOOP_STATUS;
             }
+        }
+
+        private Object invokeCrossFn(CallTarget target, Object[] args) {
+            if (crossFnTailCallNode == null) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                crossFnTailCallNode = insert(
+                    com.oracle.truffle.api.nodes.IndirectCallNode.create());
+            }
+            return crossFnTailCallNode.call(target, args);
+        }
+
+        /**
+         * Unpack a TailCallScalarException's typed buckets into a single
+         * Object[] suitable for IndirectCallNode.call. Only used on the
+         * cross-function fallback path where we don't know the callee's
+         * exact ABI; boxing is acceptable because this path is rare.
+         */
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+        private Object[] scalarPayloadToArgs(TailCallScalarException tse) {
+            if (tse.paramKinds != null) {
+                int n = tse.paramKinds.length;
+                Object[] out = new Object[n];
+                int li = 0, di = 0, oi = 0;
+                for (int i = 0; i < n; i++) {
+                    switch (tse.paramKinds[i]) {
+                        case 0:  out[i] = tse.longArgs[li++]; break;
+                        case 1:  out[i] = tse.doubleArgs[di++]; break;
+                        default: out[i] = tse.objArgs[oi++]; break;
+                    }
+                }
+                return out;
+            }
+            if (tse.longArgs != null) {
+                Object[] out = new Object[tse.longArgs.length];
+                for (int i = 0; i < tse.longArgs.length; i++) out[i] = tse.longArgs[i];
+                return out;
+            }
+            if (tse.doubleArgs != null) {
+                Object[] out = new Object[tse.doubleArgs.length];
+                for (int i = 0; i < tse.doubleArgs.length; i++) out[i] = tse.doubleArgs[i];
+                return out;
+            }
+            return tse.objArgs != null ? tse.objArgs : new Object[0];
         }
 
         @Override
