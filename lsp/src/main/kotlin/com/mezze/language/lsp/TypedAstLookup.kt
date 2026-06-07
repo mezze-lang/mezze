@@ -63,7 +63,7 @@ object TypedAstLookup {
                 }
                 is TypedTypeDecl -> {
                     if (containsPosition(decl.loc, line, col)) {
-                        return LookupResult.Binding(decl.name, com.mezze.language.ast.MezzeType.VarType(com.mezze.language.ast.TypeVar(decl.name)), decl.loc)
+                        return LookupResult.Binding(decl.name, com.mezze.language.ast.MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName(decl.name)), decl.loc)
                     }
                 }
             }
@@ -72,14 +72,14 @@ object TypedAstLookup {
         // Search ability declarations
         for (decl in module.abilityDecls) {
             if (containsPosition(decl.loc, line, col)) {
-                return LookupResult.Binding(decl.name, com.mezze.language.ast.MezzeType.VarType(com.mezze.language.ast.TypeVar(decl.name)), decl.loc)
+                return LookupResult.Binding(decl.name, com.mezze.language.ast.MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName(decl.name)), decl.loc)
             }
         }
 
         // Search effect declarations
         for (decl in module.effectDecls) {
             if (containsPosition(decl.loc, line, col)) {
-                return LookupResult.Binding(decl.name, com.mezze.language.ast.MezzeType.VarType(com.mezze.language.ast.TypeVar(decl.name)), decl.loc)
+                return LookupResult.Binding(decl.name, com.mezze.language.ast.MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName(decl.name)), decl.loc)
             }
         }
 

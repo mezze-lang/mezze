@@ -127,7 +127,7 @@ object TypedAstScopeWalker {
                         // miss the precise type but knows the name.
                         for (name in ilb.bindingNames) {
                             out.add(ScopeBinding(
-                                name, MezzeType.VarType(com.mezze.language.ast.TypeVar(name)),
+                                name, MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName(name)),
                                 ilb.loc, ScopeBinding.Kind.IF_LET_BINDING
                             ))
                         }

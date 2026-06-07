@@ -602,7 +602,7 @@ class MezzeTextDocumentService(
 
         // Add imported types
         for ((name, typeDecl) in importContext.importedTypes) {
-            val typeParams = typeDecl.typeParams.map { MezzeType.VarType(TypeVar(it)) }
+            val typeParams = typeDecl.typeParams.map { MezzeType.VarType(TypeVar.freshWithName(it)) }
             imports.add(ResolvedImport(
                 localName = name,
                 originalName = name,
@@ -3077,7 +3077,7 @@ class MezzeTextDocumentService(
             .map { item ->
                 val candType = candidateReturnTypes[item.label]
                 val rank = if (candType == null) "5"
-                else when (com.mezze.language.typechecker.solving.unify(candType, expected, emptyMap())) {
+                else when (com.mezze.language.typechecker.solving.unify(candType, expected)) {
                     is com.mezze.language.typechecker.solving.UnificationResult.Success -> "0"
                     is com.mezze.language.typechecker.solving.UnificationResult.Failure -> "5"
                 }
