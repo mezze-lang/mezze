@@ -30,6 +30,24 @@ import java.io.File
  * - Dependency graph edges
  */
 fun main(args: Array<String>) {
+    // Populate the NativeOp DSL registry before triggering PrecompiledStdlib
+    // init. Without this, native calls in stdlib lower as record-ABI; once
+    // the precompiled snapshot is baked into the native binary, every
+    // stdlib call site is locked on the slow path. Use reflection because
+    // the :cli module deliberately keeps :interpreter off its compile
+    // classpath (#220) — touching the class by name forces its static-init
+    // to install the bootstrap into NativeSignatures.
+    try {
+        Class.forName("com.mezze.interpreter.nodes.builtin.dsl.NativeBootstrap")
+            .getDeclaredField("INSTANCE").get(null)
+            .let { boot -> boot.javaClass.getMethod("ensureLoaded").invoke(boot) }
+    } catch (e: Throwable) {
+        // Interpreter classes not on classpath — only acceptable from
+        // typechecker-only flows. StdlibPrecompiler always has them in
+        // its runtime classpath, so a failure here is genuinely broken.
+        System.err.println("WARNING: NativeBootstrap not reachable: ${e.message}")
+    }
+
     val outputPath = args[0]
     val projectRoot = args.getOrElse(1) { "." }
     // Optional 3rd arg: where to write the SQLite-free CBOR snapshot.

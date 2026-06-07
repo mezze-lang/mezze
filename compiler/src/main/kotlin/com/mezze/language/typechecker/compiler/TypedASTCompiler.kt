@@ -1381,7 +1381,43 @@ class TypedASTCompiler(
                         emitCallDirect(binding.hash, argIR, expr.isTailCall, src)
                     }
                 }
-                is BindingRef.Native -> { census.native++; CallNativeIR(binding.name, argIR, src) }
+                is BindingRef.Native -> {
+                    census.native++
+                    // Scalar-ABI emission: if the native is declared in the
+                    // NativeOp DSL, transpose the user record into positional
+                    // args in the registry's declared order. The interpreter
+                    // then routes through NativeDispatchScalarNode — no
+                    // MezzeRecord alloc, no field-name lookup, typed handler
+                    // call. See docs/perf/scalar-native-abi-2026-06.md.
+                    val sig = com.mezze.language.truffleir.NativeSignatures
+                        .signatureOf(binding.name)
+                    if (sig != null && argIR is MakeRecordIR &&
+                        argIR.fields.none { it.name == "__spread__" }
+                    ) {
+                        // Build positional args[] by looking up each declared
+                        // param in the user's MakeRecordIR. Bail to the
+                        // legacy record path if any param is missing —
+                        // could be a partial application or a buggy call,
+                        // either way the slow path handles it cleanly.
+                        val positional = ArrayList<NodeIR>(sig.params.size)
+                        var ok = true
+                        for (p in sig.params) {
+                            val f = argIR.fields.firstOrNull { it.name == p.name }
+                            if (f == null) { ok = false; break }
+                            positional.add(f.value)
+                        }
+                        if (ok && positional.size == sig.params.size) {
+                            return CallNativeIR(
+                                name = binding.name,
+                                arg = UnitLitIR(src),
+                                src = src,
+                                args = positional,
+                                argKinds = sig.argKinds,
+                            )
+                        }
+                    }
+                    CallNativeIR(binding.name, argIR, src)
+                }
                 is BindingRef.Local -> {
                     // Resolve using the same scope logic as compileVar
                     val resolvedSlot = resolveLocalSlot(fn.name, binding.depth)

@@ -57,6 +57,15 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     public static final String ID = "mezze";
     public static final String MIME_TYPE = "application/x-mezze";
 
+    // Populate the NativeOp DSL registry on first class load. Tests and
+    // embedded callers that bypass the CLI entrypoint still trigger this
+    // because they touch MezzeLanguage to register the Truffle language.
+    // Idempotent — NativeBootstrap guards itself with an AtomicBoolean.
+    // See docs/perf/scalar-native-abi-2026-06.md.
+    static {
+        com.mezze.interpreter.nodes.builtin.dsl.NativeBootstrap.INSTANCE.ensureLoaded();
+    }
+
     // Store last execution result for test access
     private static final AtomicReference<Object> lastResultStore = new AtomicReference<>();
 

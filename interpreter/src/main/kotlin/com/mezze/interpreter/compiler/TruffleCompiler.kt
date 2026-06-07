@@ -31,6 +31,18 @@ import com.oracle.truffle.api.source.SourceSection
 class TruffleCompiler(
     private val language: MezzeLanguage
 ) {
+    init {
+        // Force the NativeOp DSL registry to load before any IR is
+        // compiled. Without this, a CallNativeIR that's already in
+        // scalar-ABI shape (because the precompiled stdlib was emitted
+        // with the registry loaded) would land here with no handler
+        // registered and silently fall through to the legacy record
+        // path — which then crashes with "expects record argument, got
+        // MezzeUnit" because the scalar IR carries a dummy UnitLitIR in
+        // the legacy `arg` field. See docs/perf/scalar-native-abi-2026-06.md.
+        com.mezze.interpreter.nodes.builtin.dsl.NativeBootstrap.ensureLoaded()
+    }
+
     private val sourceCache = mutableMapOf<String, Source>()
 
     /**
@@ -274,6 +286,29 @@ class TruffleCompiler(
                 }
             }
             is CallNativeIR -> {
+                // Scalar-ABI fast path (NativeOp DSL): args are positional,
+                // already in the registry's declared order. Skip the
+                // MezzeRecord allocation entirely; the handler reads
+                // positional typed args directly. See
+                // docs/perf/scalar-native-abi-2026-06.md.
+                if (node.isScalarABI) {
+                    val handler = com.mezze.interpreter.nodes.builtin.dsl
+                        .NativeHandlers.handlerOf(node.name)
+                    if (handler != null) {
+                        val argNodes = Array(node.args.size) { i ->
+                            compileNode(node.args[i], source)
+                        }
+                        return com.mezze.interpreter.nodes.builtin.dsl
+                            .NativeDispatchScalarNode.create(
+                                node.name, argNodes, node.argKinds, handler
+                            )
+                    }
+                    // Registered IR but no handler: signature drift between
+                    // the ast-side registry and the interpreter-side one.
+                    // Fall through to legacy path so we don't crash; the
+                    // bootstrap-skew check below will surface this loudly.
+                }
+
                 // DS-Wire fast paths: many stdlib ops compile to a single
                 // CallNativeIR("__native_xxx", record). When the matching
                 // specialized Truffle node exists, lower directly to it

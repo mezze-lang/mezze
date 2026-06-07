@@ -39,6 +39,14 @@ kotlin {
     jvmToolchain(25)
 }
 
+// Used by the compileStdlib task to load NativeOp DSL classes from
+// :interpreter without polluting :cli's normal compile/runtime classpath.
+// See compileStdlib for the rationale.
+val precompileOnly: Configuration by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+
 dependencies {
     implementation(project(":ast"))
     implementation(project(":parser"))
@@ -55,6 +63,12 @@ dependencies {
     // or assembling native-image's main class (MezzeAppMain). The
     // classes live in mezze-runtime.jar at run time, never linked
     // against here.
+
+    // Precompile task needs :interpreter on its JavaExec classpath so
+    // the NativeOp DSL fires and populates NativeSignatures before the
+    // typechecker emits CallNativeIR. Runtime-only — not propagated to
+    // shadowJar or processResources.
+    precompileOnly(project(":interpreter"))
 
     // Polyglot API (Context, Value, Source) - host API - match native-image version
     implementation("org.graalvm.sdk:graal-sdk:25.0.3")
@@ -184,11 +198,20 @@ tasks.named<ProcessResources>("processResources") {
 // Parses + typechecks + lowers all stdlib modules once, stores FunctionIRs in stdlib.sqlite.
 // Embedded in the JAR — PrecompiledStdlib loads from it instead of re-parsing on every JVM start.
 val compileStdlib by tasks.registering(JavaExec::class) {
-    dependsOn(":typechecker:classes", ":store-sqlite:classes", ":parser:classes", ":ast:classes", ":stdlib:classes", ":store:classes")
+    dependsOn(":typechecker:classes", ":store-sqlite:classes", ":parser:classes", ":ast:classes", ":stdlib:classes", ":store:classes", ":interpreter:classes")
     group = "build"
     description = "Pre-compile stdlib to SQLite (FunctionIRs + performer records)"
 
-    classpath = sourceSets.main.get().runtimeClasspath
+    // :cli's main runtime classpath deliberately excludes :interpreter
+    // (#220 wire-protocol slimming). But the precompile task needs the
+    // interpreter's NativeOp DSL classes loaded so NativeSignatures is
+    // populated *before* the typechecker emits CallNativeIR — without it
+    // every native call in stdlib lowers as record-ABI and the
+    // precompiled snapshot is permanently stuck on the slow path.
+    // The `precompileOnly` configuration carries :interpreter's runtime
+    // jars for just this task — no effect on shadowJar or processResources.
+    // See docs/perf/scalar-native-abi-2026-06.md.
+    classpath = sourceSets.main.get().runtimeClasspath + precompileOnly
 
     mainClass.set("com.mezze.language.cli.StdlibPrecompilerKt")
 
