@@ -94,7 +94,10 @@ object PrecompiledStdlib {
                 collectHashRefs(node.result, refs)
             }
             is CallLocalIR -> collectHashRefs(node.arg, refs)
-            is CallNativeIR -> collectHashRefs(node.arg, refs)
+            is CallNativeIR -> {
+                collectHashRefs(node.arg, refs)
+                node.args.forEach { collectHashRefs(it, refs) }
+            }
             is CallIndirectIR -> { collectHashRefs(node.function, refs); collectHashRefs(node.arg, refs) }
             is CallIndirectScalarIR -> { collectHashRefs(node.function, refs); node.args.forEach { collectHashRefs(it, refs) } }
             is MakeRecordIR -> node.fields.forEach { collectHashRefs(it.value, refs) }

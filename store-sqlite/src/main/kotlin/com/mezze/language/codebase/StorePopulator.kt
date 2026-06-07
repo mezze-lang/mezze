@@ -700,7 +700,10 @@ object StorePopulator {
                 collectEdgesFromNode(node.result, report)
             }
             is com.mezze.language.truffleir.CallLocalIR -> collectEdgesFromNode(node.arg, report)
-            is com.mezze.language.truffleir.CallNativeIR -> collectEdgesFromNode(node.arg, report)
+            is com.mezze.language.truffleir.CallNativeIR -> {
+                collectEdgesFromNode(node.arg, report)
+                node.args.forEach { collectEdgesFromNode(it, report) }
+            }
             is com.mezze.language.truffleir.CallIndirectIR -> {
                 collectEdgesFromNode(node.function, report)
                 collectEdgesFromNode(node.arg, report)

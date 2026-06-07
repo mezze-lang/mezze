@@ -246,7 +246,17 @@ object MutEraser {
 
             is CallNativeIR -> {
                 val na = f(node.arg)
-                if (na !== node.arg) node.copy(arg = na) else node
+                // Scalar-ABI path: also rewrite each positional arg in `args`.
+                // Legacy record-ABI path: `args` is empty, the map is a no-op.
+                var changed = na !== node.arg
+                val newArgs = if (node.args.isNotEmpty()) {
+                    node.args.map { child ->
+                        val c = f(child)
+                        if (c !== child) changed = true
+                        c
+                    }
+                } else node.args
+                if (changed) node.copy(arg = na, args = newArgs) else node
             }
 
             is CallIndirectIR -> {

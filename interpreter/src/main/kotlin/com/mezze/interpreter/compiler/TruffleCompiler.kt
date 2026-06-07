@@ -1439,6 +1439,323 @@ class TruffleCompiler(
                     (args[0] as com.mezze.interpreter.values.MutableDeque).toArray())
             }
 
+            // ==================== Float ====================
+            // Skip __native_float_to_str / __native_float_from_string —
+            // they go through Double.toString / parsing helpers that benefit
+            // less from the DS-Wire and are colder.
+            "__native_float_abs" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatAbs(args[0] as Double)
+            }
+            "__native_float_sqrt" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatSqrt(args[0] as Double)
+            }
+            "__native_float_floor" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatFloor(args[0] as Double)
+            }
+            "__native_float_ceil" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatCeil(args[0] as Double)
+            }
+            "__native_float_round" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatRound(args[0] as Double).toDouble()
+            }
+            "__native_float_sign" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatSignum(args[0] as Double)
+            }
+            "__native_float_neg" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatNegate(args[0] as Double)
+            }
+            "__native_float_exp" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatExp(args[0] as Double)
+            }
+            "__native_float_ln" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatLog(args[0] as Double)
+            }
+            "__native_float_log10" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatLog10(args[0] as Double)
+            }
+            "__native_float_sin" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatSin(args[0] as Double)
+            }
+            "__native_float_cos" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatCos(args[0] as Double)
+            }
+            "__native_float_tan" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatTan(args[0] as Double)
+            }
+            "__native_float_asin" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatAsin(args[0] as Double)
+            }
+            "__native_float_acos" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatAcos(args[0] as Double)
+            }
+            "__native_float_atan" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatAtan(args[0] as Double)
+            }
+            "__native_float_atan2" -> bridge(fields("y", "x")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatAtan2(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_is_nan" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatIsNaN(args[0] as Double)
+            }
+            "__native_float_is_infinite" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatIsInfinite(args[0] as Double)
+            }
+            "__native_float_is_finite" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatIsFinite(args[0] as Double)
+            }
+            "__native_float_add" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatAdd(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_subtract" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatSubtract(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_multiply" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatMultiply(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_divide" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatDivide(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_mod" -> bridge(fields("l", "r")) { args, _ ->
+                (args[0] as Double) % (args[1] as Double)
+            }
+            "__native_float_min" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatMin(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_max" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatMax(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_pow" -> bridge(fields("base", "exp")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatPow(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_clamp" -> bridge(fields("n", "min", "max")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatClamp(args[0] as Double, args[1] as Double, args[2] as Double)
+            }
+            "__native_float_eq" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatEq(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_neq" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatNeq(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_lt" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatLt(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_le" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatLte(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_gt" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatGt(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_ge" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .floatGte(args[0] as Double, args[1] as Double)
+            }
+            "__native_float_from_int" -> bridge(fields("n")) { args, _ ->
+                (args[0] as Long).toDouble()
+            }
+            "__native_float_from_nat" -> bridge(fields("n")) { args, _ ->
+                (args[0] as Long).toDouble()
+            }
+
+            // ==================== Bool ====================
+            "__native_bool_and" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .boolAnd(args[0] as Boolean, args[1] as Boolean)
+            }
+            "__native_bool_or" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .boolOr(args[0] as Boolean, args[1] as Boolean)
+            }
+            "__native_bool_xor" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .boolXor(args[0] as Boolean, args[1] as Boolean)
+            }
+            "__native_bool_not" -> bridge(fields("b")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .boolNot(args[0] as Boolean)
+            }
+            "__native_bool_eq" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .boolEq(args[0] as Boolean, args[1] as Boolean)
+            }
+            "__native_bool_neq" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .boolNeq(args[0] as Boolean, args[1] as Boolean)
+            }
+            "__native_bool_to_str" -> bridge(fields("b")) { args, _ ->
+                (args[0] as Boolean).toString()
+            }
+
+            // ==================== Char ====================
+            // Mezze char is a 1-char String at runtime — CharNatives takes String.
+            "__native_char_is_letter" -> bridge(fields("c")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .isLetter(args[0] as String)
+            }
+            "__native_char_is_digit" -> bridge(fields("c")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .isDigit(args[0] as String)
+            }
+            "__native_char_is_alpha_numeric" -> bridge(fields("c")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .isAlphaNumeric(args[0] as String)
+            }
+            "__native_char_is_whitespace" -> bridge(fields("c")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .isWhitespace(args[0] as String)
+            }
+            "__native_char_is_upper" -> bridge(fields("c")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .isUpper(args[0] as String)
+            }
+            "__native_char_is_lower" -> bridge(fields("c")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .isLower(args[0] as String)
+            }
+            "__native_char_to_upper" -> bridge(fields("c")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .toUpper(args[0] as String)
+            }
+            "__native_char_to_lower" -> bridge(fields("c")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .toLower(args[0] as String)
+            }
+            "__native_char_to_int" -> bridge(fields("c")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .toInt(args[0] as String)
+            }
+            "__native_char_from_int" -> bridge(fields("code")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .fromInt(args[0] as Long)
+            }
+            "__native_char_to_str" -> bridge(fields("c")) { args, _ ->
+                args[0] as String
+            }
+            "__native_char_eq" -> bridge(fields("a", "b")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .eq(args[0] as String, args[1] as String)
+            }
+            "__native_char_compare" -> bridge(fields("a", "b")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .compare(args[0] as String, args[1] as String)
+            }
+            "__native_char_compare_int" -> bridge(fields("a", "b")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.CharNatives
+                    .compareInt(args[0] as String, args[1] as String)
+            }
+
+            // ==================== String (hot ones) ====================
+            "__native_string_size" -> bridge(fields("s")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .stringLength(args[0] as String).toLong()
+            }
+            "__native_string_concat" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .stringConcat(args[0] as String, args[1] as String)
+            }
+            "__native_string_eq" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .strEq(args[0] as String, args[1] as String)
+            }
+            "__native_string_neq" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .strNeq(args[0] as String, args[1] as String)
+            }
+            "__native_string_lt" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .strLt(args[0] as String, args[1] as String)
+            }
+            "__native_string_le" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .strLte(args[0] as String, args[1] as String)
+            }
+            "__native_string_gt" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .strGt(args[0] as String, args[1] as String)
+            }
+            "__native_string_ge" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .strGte(args[0] as String, args[1] as String)
+            }
+            "__native_string_starts_with" -> bridge(fields("s", "prefix")) { args, _ ->
+                (args[0] as String).startsWith(args[1] as String)
+            }
+            "__native_string_ends_with" -> bridge(fields("s", "suffix")) { args, _ ->
+                (args[0] as String).endsWith(args[1] as String)
+            }
+            "__native_string_contains" -> bridge(fields("s", "substring")) { args, _ ->
+                (args[0] as String).contains(args[1] as String)
+            }
+
+            // ==================== Int (hot ones) ====================
+            // Most int ops are already lowered to InlineBinaryOpIR (+, -, *, /, ==, <, >, etc),
+            // but a few stdlib utilities still go through the native call path.
+            "__native_int_abs" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .intAbs(args[0] as Long)
+            }
+            "__native_int_min" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .intMin(args[0] as Long, args[1] as Long)
+            }
+            "__native_int_max" -> bridge(fields("l", "r")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .intMax(args[0] as Long, args[1] as Long)
+            }
+            "__native_int_clamp" -> bridge(fields("n", "min", "max")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .intClamp(args[0] as Long, args[1] as Long, args[2] as Long)
+            }
+            "__native_int_sign" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .intSign(args[0] as Long)
+            }
+            "__native_int_is_even" -> bridge(fields("n")) { args, _ ->
+                (args[0] as Long) % 2L == 0L
+            }
+            "__native_int_is_odd" -> bridge(fields("n")) { args, _ ->
+                (args[0] as Long) % 2L != 0L
+            }
+            "__native_int_to_float" -> bridge(fields("n")) { args, _ ->
+                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
+                    .intToFloat(args[0] as Long)
+            }
+            "__native_int_from_nat" -> bridge(fields("n")) { args, _ ->
+                args[0] as Long
+            }
+
             else -> null
         }
     }

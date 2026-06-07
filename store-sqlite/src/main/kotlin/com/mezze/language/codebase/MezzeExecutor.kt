@@ -164,7 +164,10 @@ class MezzeExecutor(
                 collectDirectCallTargets(node.result, ownHashes, visited, resolves, out)
             }
             is com.mezze.language.truffleir.CallLocalIR -> collectDirectCallTargets(node.arg, ownHashes, visited, resolves, out)
-            is com.mezze.language.truffleir.CallNativeIR -> collectDirectCallTargets(node.arg, ownHashes, visited, resolves, out)
+            is com.mezze.language.truffleir.CallNativeIR -> {
+                collectDirectCallTargets(node.arg, ownHashes, visited, resolves, out)
+                node.args.forEach { collectDirectCallTargets(it, ownHashes, visited, resolves, out) }
+            }
             is com.mezze.language.truffleir.CallIndirectIR -> {
                 collectDirectCallTargets(node.function, ownHashes, visited, resolves, out)
                 collectDirectCallTargets(node.arg, ownHashes, visited, resolves, out)
@@ -276,7 +279,10 @@ class MezzeExecutor(
                 collectReferencedHashes(node.result, queue)
             }
             is com.mezze.language.truffleir.CallLocalIR -> collectReferencedHashes(node.arg, queue)
-            is com.mezze.language.truffleir.CallNativeIR -> collectReferencedHashes(node.arg, queue)
+            is com.mezze.language.truffleir.CallNativeIR -> {
+                collectReferencedHashes(node.arg, queue)
+                node.args.forEach { collectReferencedHashes(it, queue) }
+            }
             is com.mezze.language.truffleir.CallIndirectIR -> {
                 collectReferencedHashes(node.function, queue)
                 collectReferencedHashes(node.arg, queue)

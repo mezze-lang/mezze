@@ -640,7 +640,9 @@ class BuildCommand {
                     walk(node.result)
                 }
                 is com.mezze.language.truffleir.CallLocalIR -> walk(node.arg)
-                is com.mezze.language.truffleir.CallNativeIR -> walk(node.arg)
+                is com.mezze.language.truffleir.CallNativeIR -> {
+                    walk(node.arg); node.args.forEach { walk(it) }
+                }
                 is com.mezze.language.truffleir.CallIndirectIR -> { walk(node.function); walk(node.arg) }
                 is com.mezze.language.truffleir.CallIndirectScalarIR -> { walk(node.function); node.args.forEach { walk(it) } }
                 is com.mezze.language.truffleir.MakeRecordIR -> node.fields.forEach { walk(it.value) }

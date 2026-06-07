@@ -110,7 +110,35 @@ sealed interface StringPartIR {
  *  remaining params. Field names matter — runtime matches them against callee paramNames. */
 @Serializable data class PartialApplyDirectIR(val targetHash: Hash, val partialFields: List<FieldIR>, val isTailCall: Boolean, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
 @Serializable data class CallLocalIR(val slot: Int, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
-@Serializable data class CallNativeIR(val name: String, val arg: NodeIR, override val src: SourceInfo) : NodeIR
+/**
+ * Call into a built-in native operation.
+ *
+ * Two coexisting shapes during DSL migration:
+ *
+ *  - **Legacy record ABI** (default): `arg` is a single `MakeRecordIR` (or
+ *    similar) and `args`/`argKinds` are empty. The interpreter routes to
+ *    `NativeDispatch` (HashMap-keyed handler) or the DS-Wire peephole.
+ *    Field names matter and are decoded at runtime by `getDouble(r, "l")`-
+ *    style accessors.
+ *
+ *  - **Scalar ABI** (new, via `NativeRegistry`): `args` is non-empty,
+ *    one entry per declared `Param`, in the registry's canonical order.
+ *    `argKinds[i]` is the static kind for `args[i]`. `arg` is a dummy
+ *    `UnitLitIR` slot that is never executed — kept only because the
+ *    NodeIR shape is currently embedded in many places that assume one
+ *    arg-tree. After full migration we'll remove `arg`.
+ *
+ * Use `isScalarABI`/`argKinds.isNotEmpty()` to discriminate.
+ */
+@Serializable data class CallNativeIR(
+    val name: String,
+    val arg: NodeIR,
+    override val src: SourceInfo,
+    val args: List<NodeIR> = emptyList(),
+    val argKinds: List<SlotKind> = emptyList(),
+) : NodeIR {
+    val isScalarABI: Boolean get() = argKinds.isNotEmpty()
+}
 /** Indirect call — evaluate function expression, then invoke */
 @Serializable data class CallIndirectIR(val function: NodeIR, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
 /** Indirect call with positional scalar args — eliminates per-call MezzeRecord

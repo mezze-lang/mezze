@@ -101,7 +101,10 @@ object FunctionIRReachability {
                 collectHashesFromNode(node.result, queue)
             }
             is com.mezze.language.truffleir.CallLocalIR -> collectHashesFromNode(node.arg, queue)
-            is com.mezze.language.truffleir.CallNativeIR -> collectHashesFromNode(node.arg, queue)
+            is com.mezze.language.truffleir.CallNativeIR -> {
+                collectHashesFromNode(node.arg, queue)
+                node.args.forEach { collectHashesFromNode(it, queue) }
+            }
             is com.mezze.language.truffleir.CallIndirectIR -> {
                 collectHashesFromNode(node.function, queue)
                 collectHashesFromNode(node.arg, queue)
@@ -272,7 +275,10 @@ object FunctionIRReachability {
             }
             is com.mezze.language.truffleir.PerformOpIR -> scanForOrphans(node.arg, callerHash, callerName, known, out)
             is com.mezze.language.truffleir.CallLocalIR -> scanForOrphans(node.arg, callerHash, callerName, known, out)
-            is com.mezze.language.truffleir.CallNativeIR -> scanForOrphans(node.arg, callerHash, callerName, known, out)
+            is com.mezze.language.truffleir.CallNativeIR -> {
+                scanForOrphans(node.arg, callerHash, callerName, known, out)
+                node.args.forEach { scanForOrphans(it, callerHash, callerName, known, out) }
+            }
             is com.mezze.language.truffleir.CallIndirectIR -> {
                 scanForOrphans(node.function, callerHash, callerName, known, out)
                 scanForOrphans(node.arg, callerHash, callerName, known, out)
