@@ -96,7 +96,7 @@ class HandlerValidationTest {
         val error = assertThrows<TypeCheckError> {
             typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
-        assertContains(error.message, "Expression is pure")
+        assertContains(error.message, "has no unhandled")
     }
 
     // ========== RULE 4: No matching handler ==========
@@ -286,8 +286,8 @@ class HandlerValidationTest {
         val error = assertThrows<TypeCheckError> {
             typeChecker.typeCheck(parser.parseParsedModule(source, "test.mz"), Paths.get("."))
         }
-        // Expression is pure (with <*>) but handler provided
-        assertContains(error.message, "Expression is pure")
+        // Inner perform handles all effects, leaving body with no unhandled effect for outer perform.
+        assertContains(error.message, "has no unhandled")
     }
 
     @Test

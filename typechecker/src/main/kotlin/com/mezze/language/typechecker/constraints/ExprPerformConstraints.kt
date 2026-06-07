@@ -116,17 +116,27 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     val hasUndefinedVariables = exprResult.undefinedVariables.isNotEmpty()
     val shouldValidate = (!isNestedPerform || canValidateNestedPerform) && !hasPolymorphicEffects && !hasUndefinedVariables
     if (shouldValidate) {
-        // If the expression has no effects (neither tracked nor in type), providing handlers is meaningless
+        // If the expression has no unhandled effects matching the handlers
+        // provided, providing those handlers is meaningless. This happens
+        // either because the body is genuinely pure, or because the effect
+        // was already handled by an inner `perform` (Mezze allows only one
+        // handler per effect in scope at a time — nest using records or
+        // separate effects if you need multiple carriers).
         if (handlerEffects.isNotEmpty() && allEffects.isEmpty()) {
-            // Expression is pure but handlers provided
-            val handlerNames = handlerEffects.map { it.first }.joinToString(", ")
+            val pairs = handlerEffects.joinToString(", ") { (handler, effect) ->
+                "`$handler` (handles `$effect`)"
+            }
+            val effectList = handlerEffects.map { it.second }.distinct().joinToString(", ") { "`$it`" }
             throw TypeCheckError(
-                message = "Expression is pure (has no effects), but handlers were provided: $handlerNames. " +
-                    "Remove the perform block or use an expression that actually uses effects.",
+                message = "This `perform` provides $pairs, but the body has no unhandled $effectList effect. " +
+                    "Either the body is pure, or that effect was already handled by an inner `perform`.",
                 loc = expr.loc,
                 errorType = ErrorType.CONSTRAINT_VIOLATION,
                 code = com.mezze.language.parsedast.diagnostics.ErrorCode.V0508_HANDLER_ON_PURE_EXPR,
-                hints = listOf("drop the `perform` wrapper — there are no effects to handle"),
+                hints = listOf(
+                    "drop this `perform` wrapper if the body really has no effect to handle",
+                    "if you intended to override an inner handler, restructure so only one `perform` handles the effect — Mezze only allows one handler per effect in scope at a time",
+                ),
             )
         }
 
