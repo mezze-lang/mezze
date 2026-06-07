@@ -298,9 +298,11 @@ class TruffleCompiler(
                         val argNodes = Array(node.args.size) { i ->
                             compileNode(node.args[i], source)
                         }
+                        val needsNode = com.mezze.interpreter.nodes.builtin.dsl
+                            .NativeHandlers.needsNode(node.name)
                         return com.mezze.interpreter.nodes.builtin.dsl
                             .NativeDispatchScalarNode.create(
-                                node.name, argNodes, node.argKinds, handler
+                                node.name, argNodes, node.argKinds, handler, needsNode
                             )
                     }
                     // Registered IR but no handler: signature drift between

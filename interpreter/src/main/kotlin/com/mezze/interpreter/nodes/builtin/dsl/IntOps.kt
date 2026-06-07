@@ -63,15 +63,15 @@ object IntOps {
 
     private val POW = NativeOp("__native_int_pow",
         listOf(Param("base", SlotKind.LONG), Param("exp", SlotKind.LONG)), SlotKind.LONG
-    ) { args -> intPow(args.long(0), args.long(1)) }
+    ) { args -> NativeHelpers.intPow(args.long(0), args.long(1)) }
 
     private val GCD = NativeOp("__native_int_gcd",
         listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG
-    ) { args -> intGcd(args.long(0), args.long(1)) }
+    ) { args -> NativeHelpers.intGcd(args.long(0), args.long(1)) }
 
     private val LCM = NativeOp("__native_int_lcm",
         listOf(Param("l", SlotKind.LONG), Param("r", SlotKind.LONG)), SlotKind.LONG
-    ) { args -> intLcm(args.long(0), args.long(1)) }
+    ) { args -> NativeHelpers.intLcm(args.long(0), args.long(1)) }
 
     // ==================== ternary clamp ====================
     private val CLAMP = NativeOp("__native_int_clamp",
@@ -134,36 +134,4 @@ object IntOps {
         listOf(Param("n", SlotKind.LONG)), SlotKind.OBJECT
     ) { args -> PrimitiveNatives.intToString(args.long(0)) }
 
-    // ==================== helpers (copy of NativeDispatch's private impls) ====================
-    // These mirror NativeDispatch.intPow/intGcd/intLcm bit-for-bit. If
-    // those change in NativeDispatch, this file must change in lockstep.
-
-    private fun intPow(base0: Long, exp0: Long): Long {
-        if (exp0 < 0) return 0
-        var result = 1L
-        var b = base0
-        var e = exp0
-        while (e > 0) {
-            if ((e and 1L) == 1L) result = Math.multiplyExact(result, b)
-            b = Math.multiplyExact(b, b)
-            e = e shr 1
-        }
-        return result
-    }
-
-    private fun intGcd(a0: Long, b0: Long): Long {
-        var a = Math.abs(a0)
-        var b = Math.abs(b0)
-        while (b != 0L) {
-            val t = b
-            b = a % b
-            a = t
-        }
-        return a
-    }
-
-    private fun intLcm(a: Long, b: Long): Long {
-        if (a == 0L || b == 0L) return 0L
-        return Math.abs(a / intGcd(a, b) * b)
-    }
 }

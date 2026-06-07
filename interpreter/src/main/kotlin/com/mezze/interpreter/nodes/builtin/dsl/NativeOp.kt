@@ -45,6 +45,14 @@ interface NativeArgs {
     fun obj(i: Int): Any
     /** Optional IndirectCallNode for HOF callbacks. Null when not needed. */
     val callNode: IndirectCallNode?
+    /**
+     * The calling node, set for ops registered as [NativeOpWithNode]
+     * (mostly Async / effect-runtime ops that need `Node.getLanguage()`,
+     * `Node.getEncapsulatingSourceSection()`, or a CompilationFinal owner
+     * for `IndirectCallNode.create()`). Null on regular [NativeOp] calls
+     * so the registry can't accidentally hand out a stale parent.
+     */
+    val callerNode: com.mezze.interpreter.nodes.MezzeNode?
 }
 
 /**
@@ -55,6 +63,7 @@ interface NativeArgs {
 class PositionalArgs(
     @JvmField val values: Array<Any?>,
     override val callNode: IndirectCallNode? = null,
+    override val callerNode: com.mezze.interpreter.nodes.MezzeNode? = null,
 ) : NativeArgs {
     override fun long(i: Int): Long = values[i] as Long
     override fun double(i: Int): Double = values[i] as Double
@@ -99,29 +108,67 @@ class NativeOp(
     init {
         // Publish to both registries from a single declaration site.
         NativeSignatures.register(signature)
-        NativeHandlers.register(signature.name, handler)
+        NativeHandlers.register(signature.name, handler, needsNode = false)
+    }
+}
+
+/**
+ * Declare a native op whose handler needs access to the calling
+ * [com.mezze.interpreter.nodes.MezzeNode] — used by ops that:
+ *
+ *  - spawn fibers / threads (`Async.*`, scheduler internals) and call
+ *    `TruffleLanguage.getCurrentContext(node.class)` or
+ *    `Node.getEncapsulatingSourceSection()`.
+ *  - create child Truffle nodes lazily (`IndirectCallNode.create()` for
+ *    HOFs that don't know their callee shape ahead of time).
+ *  - attach to the Truffle profiling / instrumentation stack.
+ *
+ * The handler reads the node via `args.callerNode!!` — non-null inside a
+ * `NativeOpWithNode`'s body. For ordinary ops use plain [NativeOp]; the
+ * field will be null there to make accidental misuse loud.
+ */
+class NativeOpWithNode(
+    name: String,
+    params: List<NativeParam>,
+    returns: SlotKind,
+    private val handler: NativeHandler,
+) {
+    val signature: NativeSignature = NativeSignature(name, params, returns)
+
+    init {
+        NativeSignatures.register(signature)
+        NativeHandlers.register(signature.name, handler, needsNode = true)
     }
 }
 
 /**
  * Interpreter-side registry of native handlers. The signature side lives
  * in [NativeSignatures] (in the `ast` module, queried by the IR-builder).
+ *
+ * The `needsNode` flag determines whether the dispatch node passes itself
+ * into `PositionalArgs.callerNode`; reading it on a regular [NativeOp]
+ * handler always yields null, by design.
  */
 object NativeHandlers {
     private val handlers = HashMap<String, NativeHandler>()
+    private val needsNodeFlags = HashSet<String>()
 
     @CompilerDirectives.TruffleBoundary
-    internal fun register(name: String, handler: NativeHandler) {
+    internal fun register(name: String, handler: NativeHandler, needsNode: Boolean) {
         val prior = handlers.put(name, handler)
         if (prior != null) {
             throw IllegalStateException(
                 "duplicate NativeOp handler registration for $name"
             )
         }
+        if (needsNode) needsNodeFlags.add(name)
     }
 
     /** Returns the registered handler, or null when not registered. */
     fun handlerOf(name: String): NativeHandler? = handlers[name]
+
+    /** True when the registered handler requires `PositionalArgs.callerNode`. */
+    fun needsNode(name: String): Boolean = name in needsNodeFlags
 
     fun size(): Int = handlers.size
 }

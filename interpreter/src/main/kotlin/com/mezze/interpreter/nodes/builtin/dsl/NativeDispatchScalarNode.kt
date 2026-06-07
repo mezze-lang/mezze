@@ -5,6 +5,7 @@ import com.mezze.language.truffleir.SlotKind
 import com.oracle.truffle.api.CompilerDirectives
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.nodes.ExplodeLoop
+import com.oracle.truffle.api.nodes.IndirectCallNode
 import com.oracle.truffle.api.nodes.NodeInfo
 
 /**
@@ -32,7 +33,15 @@ class NativeDispatchScalarNode(
     @Children private val argNodes: Array<MezzeNode>,
     @CompilerDirectives.CompilationFinal(dimensions = 1) private val argKinds: IntArray,
     @CompilerDirectives.CompilationFinal private val handler: NativeHandler,
+    @CompilerDirectives.CompilationFinal private val needsNode: Boolean,
 ) : MezzeNode() {
+
+    /**
+     * Adopted at construction when the handler needs an
+     * IndirectCallNode (HOF callbacks). Null otherwise so we don't
+     * pay the @Child slot for ops that never use it.
+     */
+    @Child private var callNode: IndirectCallNode? = null
 
     @ExplodeLoop
     override fun execute(frame: VirtualFrame): Any {
@@ -41,7 +50,19 @@ class NativeDispatchScalarNode(
         for (i in 0 until n) {
             values[i] = argNodes[i].execute(frame)
         }
-        return handler.invoke(PositionalArgs(values))
+        val args = if (needsNode) {
+            // First call lazily creates and adopts the IndirectCallNode.
+            // CompilerDirectives.transferToInterpreterAndInvalidate keeps
+            // this off the hot path after warmup.
+            if (callNode == null) {
+                CompilerDirectives.transferToInterpreterAndInvalidate()
+                callNode = insert(IndirectCallNode.create())
+            }
+            PositionalArgs(values, callNode = callNode, callerNode = this)
+        } else {
+            PositionalArgs(values)
+        }
+        return handler.invoke(args)
     }
 
     companion object {
@@ -53,6 +74,9 @@ class NativeDispatchScalarNode(
          * via `NativeHandlers.handlerOf(name)`. The kinds are encoded as
          * a primitive IntArray (not a List<SlotKind>) so Truffle PE
          * inspects a compilation-final primitive when unrolling.
+         *
+         * Set `needsNode = true` for ops registered via `NativeOpWithNode`
+         * (Async / effect-runtime ops that read `args.callerNode`).
          */
         @JvmStatic
         fun create(
@@ -60,9 +84,10 @@ class NativeDispatchScalarNode(
             argNodes: Array<MezzeNode>,
             argKinds: List<SlotKind>,
             handler: NativeHandler,
+            needsNode: Boolean = false,
         ): NativeDispatchScalarNode {
             val asInts = IntArray(argKinds.size) { argKinds[it].ordinal }
-            return NativeDispatchScalarNode(name, argNodes, asInts, handler)
+            return NativeDispatchScalarNode(name, argNodes, asInts, handler, needsNode)
         }
     }
 }
