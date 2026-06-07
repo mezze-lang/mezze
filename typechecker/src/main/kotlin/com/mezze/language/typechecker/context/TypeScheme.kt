@@ -4,6 +4,7 @@ import com.mezze.language.ast.AbilityConstraint
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.RowVar
 import com.mezze.language.ast.TypeVar
+import com.mezze.language.typechecker.solving.Substitution
 
 /**
  * Type scheme for polymorphic types.
@@ -150,121 +151,47 @@ data class TypeScheme(
 }
 
 /**
- * Apply substitution to a type.
- * Helper function for instantiation.
+ * Apply substitution to a type for TypeScheme instantiation.
+ *
+ * Delegates to [Substitution.apply] for the main type-walking logic, then
+ * clears abilityConstraints on every FunctionType in the result. The
+ * constraints are already captured in [TypeScheme.constraints] and will be
+ * instantiated as freshConstraints; keeping them on the FunctionType would
+ * double-count them when the function is called.
  */
 private fun applySubstitutionToType(
     type: MezzeType,
     substitution: Map<TypeVar, MezzeType>
 ): MezzeType {
-    return when (type) {
-        is MezzeType.VarType -> {
-            substitution[type.variable] ?: type
-        }
-        is MezzeType.FunctionType -> {
-            MezzeType.FunctionType(
-                paramType = applySubstitutionToType(type.paramType, substitution),
-                returnType = applySubstitutionToType(type.returnType, substitution),
-                effects = type.effects,
-                // IMPORTANT: Clear abilityConstraints when instantiating from TypeScheme
-                // The constraints are already captured in the TypeScheme.constraints and will
-                // be instantiated as freshConstraints. If we also keep them on the FunctionType,
-                // they would be double-counted when the function is called.
-                // For ability methods (which don't use TypeScheme), abilityConstraints are
-                // preserved on the FunctionType and processed in generateFunctionCall.
-                abilityConstraints = emptyList()
-            )
-        }
-        is MezzeType.RecordType -> {
-            MezzeType.RecordType(
-                fields = type.fields.mapValues { (_, fieldType) ->
-                    applySubstitutionToType(fieldType, substitution)
-                },
-                rowVar = type.rowVar,  // RowVar doesn't get substituted
-                typeName = type.typeName,
-                typeHash = type.typeHash
-            )
-        }
-        is MezzeType.VariantType -> {
-            MezzeType.VariantType(
-                constructors = type.constructors.mapValues { (_, payloadType) ->
-                    payloadType?.let { applySubstitutionToType(it, substitution) }
-                },
-                rowVar = type.rowVar,  // RowVar doesn't get substituted
-                typeName = type.typeName,  // Preserve type name for validation
-                typeArgs = type.typeArgs.map { applySubstitutionToType(it, substitution) },
-                typeHash = type.typeHash,  // Preserve content hash for rename-safe identity
-                nominalWall = type.nominalWall
-            )
-        }
-        is MezzeType.TypeApplication -> {
-            MezzeType.TypeApplication(
-                constructor = type.constructor,
-                args = type.args.map { applySubstitutionToType(it, substitution) },
-                typeHash = type.typeHash
-            )
-        }
-        is MezzeType.SeqType -> {
-            MezzeType.SeqType(
-                elementType = applySubstitutionToType(type.elementType, substitution)
-            )
-        }
-        is MezzeType.ListType -> {
-            MezzeType.ListType(
-                elementType = applySubstitutionToType(type.elementType, substitution)
-            )
-        }
-        is MezzeType.SetType -> {
-            MezzeType.SetType(
-                elementType = applySubstitutionToType(type.elementType, substitution)
-            )
-        }
-        is MezzeType.SortedMapType -> {
-            MezzeType.SortedMapType(
-                keyType = applySubstitutionToType(type.keyType, substitution),
-                valueType = applySubstitutionToType(type.valueType, substitution)
-            )
-        }
-        is MezzeType.SortedSetType -> {
-            MezzeType.SortedSetType(
-                elementType = applySubstitutionToType(type.elementType, substitution)
-            )
-        }
-        is MezzeType.MapType -> {
-            MezzeType.MapType(
-                keyType = applySubstitutionToType(type.keyType, substitution),
-                valueType = applySubstitutionToType(type.valueType, substitution)
-            )
-        }
-        is MezzeType.SuspendedType -> {
-            MezzeType.SuspendedType(
-                valueType = applySubstitutionToType(type.valueType, substitution),
-                effects = type.effects
-            )
-        }
-        is MezzeType.NewtypeType -> {
-            MezzeType.NewtypeType(
-                type.name,
-                type.constructor,
-                applySubstitutionToType(type.wrappedType, substitution)
-            )
-        }
-        is MezzeType.EffectRow -> {
-            // Effect rows don't contain substitutable type variables
-            type
-        }
-        // Concrete types don't change
-        is MezzeType.IntType,
-        is MezzeType.FloatType,
-        is MezzeType.StringType,
-        is MezzeType.BoolType,
-        is MezzeType.NatType,
-        is MezzeType.FracType,
-        is MezzeType.OrderingType,
-        is MezzeType.BytesType,
-        is MezzeType.ByteBufferType,
-        is MezzeType.CharType -> type
-    }
+    val applied = Substitution(substitution).apply(type)
+    return clearAbilityConstraints(applied)
+}
+
+/**
+ * Recursively clear abilityConstraints from FunctionTypes.
+ * Used during TypeScheme instantiation to avoid double-counting.
+ */
+private fun clearAbilityConstraints(type: MezzeType): MezzeType = when (type) {
+    is MezzeType.FunctionType -> MezzeType.FunctionType(
+        paramType = clearAbilityConstraints(type.paramType),
+        returnType = clearAbilityConstraints(type.returnType),
+        effects = type.effects,
+        abilityConstraints = emptyList()
+    )
+    is MezzeType.RecordType -> if (type.fields.values.any { it is MezzeType.FunctionType }) {
+        MezzeType.RecordType(
+            fields = type.fields.mapValues { (_, ft) -> clearAbilityConstraints(ft) },
+            rowVar = type.rowVar, typeName = type.typeName, typeHash = type.typeHash
+        )
+    } else type
+    is MezzeType.VariantType -> if (type.constructors.values.any { it is MezzeType.FunctionType }) {
+        MezzeType.VariantType(
+            constructors = type.constructors.mapValues { (_, dt) -> dt?.let { clearAbilityConstraints(it) } },
+            rowVar = type.rowVar, typeName = type.typeName,
+            typeArgs = type.typeArgs, typeHash = type.typeHash, nominalWall = type.nominalWall
+        )
+    } else type
+    else -> type
 }
 
 /**

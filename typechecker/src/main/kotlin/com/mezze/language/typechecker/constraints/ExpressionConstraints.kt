@@ -703,40 +703,11 @@ class ExpressionConstraintGenerator {
 
     // ========================================================================
 
-    /** Convert ParsedTypeAnnotation to MezzeType for field type resolution. */
-    internal fun convertParsedFieldType(annotation: ParsedTypeAnnotation): MezzeType {
-        return when (annotation) {
-            is com.mezze.language.parsedast.ParsedNamedType -> {
-                PrimitiveTypes.fromName(annotation.name)?.let { return it }
-                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) MezzeType.VarType(TypeVar.freshWithName(annotation.name))
-                else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
-            }
-            is com.mezze.language.parsedast.ParsedRecordType -> MezzeType.RecordType(
-                fields = annotation.entries.associate { it.name to convertParsedFieldType(it.type) },
-                rowVar = if (annotation.isOpen) RowVar.userOpen() else null
-            )
-            is com.mezze.language.parsedast.ParsedFunctionType -> MezzeType.FunctionType(
-                paramType = convertParsedFieldType(annotation.paramType),
-                returnType = convertParsedFieldType(annotation.returnType),
-                effects = annotation.effects?.let {
-                    ContextBuilder.validateHermeticEffects(it.allEffectNames)
-                    MezzeType.EffectRow.simple(it.effects.toSet(), null, it.isPerformed)
-                }
-            )
-            is com.mezze.language.parsedast.ParsedTypeApp -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedFieldType(it) })
-            is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(
-                constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertParsedFieldType(dt) } },
-                rowVar = if (annotation.isOpen) RowVar.userOpen() else null,
-                typeName = if (!annotation.isOpen) "<inline>" else null,
-                nominalWall = !annotation.isOpen // #148: closed inline annotations are always walls
-            )
-            is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(convertParsedFieldType(annotation.elementType))
-            is com.mezze.language.parsedast.ParsedQualifiedType -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
-                (annotation.modulePath + annotation.typeName).joinToString("::"),
-                annotation.args.map { convertParsedFieldType(it) }
-            )
-        }
-    }
+    /** Convert ParsedTypeAnnotation to MezzeType for field type resolution.
+     *  Delegates to [convertParsedTypeAnnotation] — the two paths were identical
+     *  except for collection-type sugar, which is semantically equivalent. */
+    internal fun convertParsedFieldType(annotation: ParsedTypeAnnotation): MezzeType =
+        convertParsedTypeAnnotation(annotation)
 
     /**
      * Check if an expression is an access chain on a record literal binding.

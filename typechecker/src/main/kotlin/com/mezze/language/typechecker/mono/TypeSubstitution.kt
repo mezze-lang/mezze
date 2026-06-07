@@ -74,67 +74,13 @@ import com.mezze.language.typedast.TypedWildcardPattern
 object TypeSubstitution {
 
     /** Apply the substitution to a single MezzeType. Public so the worklist
-     *  can rewrite TypeInstantiation entries and specialization keys. */
+     *  can rewrite TypeInstantiation entries and specialization keys.
+     *
+     *  Delegates to [com.mezze.language.typechecker.solving.Substitution.apply]
+     *  which handles cycle detection and effect-row substitution. */
     fun applyType(type: MezzeType, substitution: Map<TypeVar, MezzeType>): MezzeType {
         if (substitution.isEmpty()) return type
-        return when (type) {
-            is MezzeType.VarType -> substitution[type.variable] ?: type
-            is MezzeType.FunctionType -> MezzeType.FunctionType(
-                applyType(type.paramType, substitution),
-                applyType(type.returnType, substitution),
-                type.effects,
-                type.abilityConstraints
-            )
-            is MezzeType.RecordType -> MezzeType.RecordType(
-                type.fields.mapValues { (_, ft) -> applyType(ft, substitution) },
-                type.rowVar,
-                typeName = type.typeName,
-                typeHash = type.typeHash
-            )
-            is MezzeType.VariantType -> MezzeType.VariantType(
-                type.constructors.mapValues { (_, dt) -> dt?.let { applyType(it, substitution) } },
-                type.rowVar,
-                typeName = type.typeName,
-                typeArgs = type.typeArgs.map { applyType(it, substitution) },
-                typeHash = type.typeHash,
-                nominalWall = type.nominalWall
-            )
-            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
-                type.name,
-                type.constructor,
-                applyType(type.wrappedType, substitution)
-            )
-            is MezzeType.TypeApplication -> MezzeType.TypeApplication(
-                type.constructor,
-                type.args.map { applyType(it, substitution) },
-                type.typeHash
-            )
-            is MezzeType.ListType -> MezzeType.ListType(applyType(type.elementType, substitution))
-            is MezzeType.MapType -> MezzeType.MapType(
-                applyType(type.keyType, substitution),
-                applyType(type.valueType, substitution)
-            )
-            is MezzeType.SetType -> MezzeType.SetType(applyType(type.elementType, substitution))
-            is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-                applyType(type.keyType, substitution),
-                applyType(type.valueType, substitution)
-            )
-            is MezzeType.SortedSetType -> MezzeType.SortedSetType(applyType(type.elementType, substitution))
-            is MezzeType.SeqType -> MezzeType.SeqType(applyType(type.elementType, substitution))
-            is MezzeType.SuspendedType -> MezzeType.SuspendedType(
-                applyType(type.valueType, substitution),
-                type.effects
-            )
-            // Fully-resolved primitives carry no type variables.
-            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-            is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
-            is MezzeType.CharType -> type
-            // Effect rows currently don't carry type variables in Mezze (open
-            // question #2 in 18-monomorphizer.md). When they do, this case
-            // gets the parallel substitution.
-            is MezzeType.EffectRow -> type
-        }
+        return com.mezze.language.typechecker.solving.Substitution(substitution).apply(type)
     }
 
     /** Apply substitution to a TypedExpr, rewriting every `type:` field and

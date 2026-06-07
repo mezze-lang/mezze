@@ -76,10 +76,10 @@ sealed interface ValidationError {
     ) : ValidationError {
         override val code: ErrorCode = ErrorCode.V0402_ABILITY_NOT_SATISFIED
         override val hints: List<String>
-            get() = listOf("implement `impl $abilityName for ${formatType(type)} where { ... }`")
+            get() = listOf("implement `impl $abilityName for ${prettyPrintType(type)} where { ... }`")
 
         override fun message(): String = buildString {
-            val typeName = formatType(type)
+            val typeName = prettyPrintType(type)
             val friendlyAbility = friendlyAbilityName(abilityName)
 
             append("$typeName cannot be used here because it doesn't support $friendlyAbility")
@@ -443,7 +443,7 @@ sealed interface ValidationError {
             if (context != null) {
                 append(" in $context")
             }
-            append(": expected ${formatType(expected)}, but got ${formatType(actual)}")
+            append(": expected ${prettyPrintType(expected)}, but got ${prettyPrintType(actual)}")
         }
 
         override fun location() = loc
@@ -577,10 +577,10 @@ sealed interface ValidationError {
 
         override fun message(): String = buildString {
             append("Handler type mismatch for effect '$effectName':\n")
-            append("  Handler '$handlerName' expects '${formatType(expectedType)}'\n")
-            append("  But expression throws '${formatType(actualType)}'\n\n")
-            append("Suggestion: Use a handler that expects ${formatType(actualType)}, or ensure all ")
-            append("throw calls in the expression throw values of type ${formatType(expectedType)}")
+            append("  Handler '$handlerName' expects '${prettyPrintType(expectedType)}'\n")
+            append("  But expression throws '${prettyPrintType(actualType)}'\n\n")
+            append("Suggestion: Use a handler that expects ${prettyPrintType(actualType)}, or ensure all ")
+            append("throw calls in the expression throw values of type ${prettyPrintType(expectedType)}")
         }
 
         override fun location() = loc
@@ -727,8 +727,3 @@ sealed class ValidationResult {
         get() = this is Failure
 }
 
-/**
- * Format a type for error messages.
- * Delegates to prettyPrintType from TypePrinter.kt.
- */
-private fun formatType(type: MezzeType): String = prettyPrintType(type)

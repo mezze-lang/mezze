@@ -1775,8 +1775,8 @@ class ConstraintSolver(
      */
     private fun generateAbilityErrorMessage(abilityName: String, typeArgs: List<MezzeType>, loc: com.mezze.language.parsedast.Loc? = null): String {
         val hasFunctionType = typeArgs.any { it is MezzeType.FunctionType }
-        val typeNames = typeArgs.map { formatType(it) }.joinToString(", ")
-        val primaryType = typeArgs.firstOrNull()?.let { formatType(it) } ?: typeNames
+        val typeNames = typeArgs.map { prettyPrintType(it) }.joinToString(", ")
+        val primaryType = typeArgs.firstOrNull()?.let { prettyPrintType(it) } ?: typeNames
 
         // Get original operator from AST (ParsedBinaryOp/ParsedUnaryOp preserved in SyntaxMetadata)
         val operator = loc?.let { com.mezze.language.ast.SyntaxMetadata.getOperatorSyntax(it) }
@@ -1864,7 +1864,7 @@ class ConstraintSolver(
      */
     private fun abilityImplExistsForType(abilityName: String, typeArgs: List<MezzeType>): Boolean {
         val primaryType = typeArgs.firstOrNull() ?: return false
-        val primaryName = formatType(primaryType)
+        val primaryName = prettyPrintType(primaryType)
         val impls = context.getAbilityImpls(abilityName)
         return impls.any { info ->
             val targets = info.targetTypeAnnotations
@@ -2376,7 +2376,7 @@ class ConstraintSolver(
             }
             // Multi-constructor variants or no payload - can't access fields
             return ConstraintResult.Failure(
-                "Cannot access field '$fieldName' on variant type: ${formatType(recordType)}"
+                "Cannot access field '$fieldName' on variant type: ${prettyPrintType(recordType)}"
             )
         }
 
@@ -2435,7 +2435,7 @@ class ConstraintSolver(
 
         // Not a record type
         return ConstraintResult.Failure(
-            "Cannot access field '$fieldName' on non-record type: ${formatType(recordType)}"
+            "Cannot access field '$fieldName' on non-record type: ${prettyPrintType(recordType)}"
         )
     }
 
@@ -3142,7 +3142,7 @@ class ConstraintSolver(
 
         // Not a variant type
         return ConstraintResult.Failure(
-            "Cannot use constructor '$constructorName' on non-variant type: ${formatType(variantType)}"
+            "Cannot use constructor '$constructorName' on non-variant type: ${prettyPrintType(variantType)}"
         )
     }
 
@@ -3365,12 +3365,6 @@ class ConstraintSolver(
             is Constraint.RecordPatternExhaustive -> this.context
         }
     }
-
-    /**
-     * Format a type for error messages.
-     * Delegates to prettyPrintType from TypePrinter.kt.
-     */
-    private fun formatType(type: MezzeType): String = prettyPrintType(type)
 
     /**
      * Instantiate a type with fresh type variables.
