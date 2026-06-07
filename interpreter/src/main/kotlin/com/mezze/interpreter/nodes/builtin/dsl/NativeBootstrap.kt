@@ -29,7 +29,12 @@ object NativeBootstrap {
         if (loaded.compareAndSet(false, true)) {
             // Touching each Ops object's class forces top-level NativeOp
             // val initializers to run. Add a line per new *Ops.kt file.
-            FloatOps.MARKER  // FloatOps.MARKER is `Unit`; only side-effect is class-load
+            FloatOps.MARKER
+            BoolOps.MARKER
+            IntOps.MARKER
+            NatOps.MARKER
+            CharOps.MARKER
+            StringOps.MARKER
         }
     }
 }
