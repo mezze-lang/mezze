@@ -6,6 +6,7 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.concurrent.CancellationException;
 
 /**
  * Native Time operations - ULTRA PERFORMANT.
@@ -127,13 +128,12 @@ public final class TimeNatives {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             // Restore the interrupt flag so any outer Java code observes
-            // it, AND surface the interrupt to Mezze. Swallowing it (the
-            // previous behavior) made SIGINT/SIGTERM during a long Time.sleep
-            // silently no-op — the program kept running with no visible
-            // signal. Matches AsyncNatives.loomSleep's behavior so Time and
-            // Async behave identically on interrupt.
+            // it, AND surface the interrupt to Mezze. Matches
+            // AsyncNatives.loomSleep — throws CancellationException so the
+            // surrounding runPromiseTask marks the task CANCELLED and the
+            // awaiter sees Err { error = AsyncCancelled }.
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Sleep interrupted", e);
+            throw new CancellationException("Sleep cancelled");
         }
         return MezzeUnit.INSTANCE;
     }
@@ -146,7 +146,7 @@ public final class TimeNatives {
             Thread.sleep(millis, remainingNanos);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Sleep interrupted", e);
+            throw new CancellationException("Sleep cancelled");
         }
         return MezzeUnit.INSTANCE;
     }

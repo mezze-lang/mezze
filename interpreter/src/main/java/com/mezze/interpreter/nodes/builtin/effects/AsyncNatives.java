@@ -689,7 +689,7 @@ public final class AsyncNatives {
             Thread.sleep(ms);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Sleep interrupted", e);
+            throw new CancellationException("Sleep cancelled");
         }
         return MezzeUnit.INSTANCE;
     }
@@ -725,7 +725,7 @@ public final class AsyncNatives {
             LockSupport.parkNanos(backoffNanos);
             if (Thread.interrupted()) {
                 Thread.currentThread().interrupt();
-                throw new RuntimeException("Park interrupted");
+                throw new CancellationException("Park cancelled");
             }
             backoffNanos = Math.min(backoffNanos * 2, maxBackoffNanos);
         }
@@ -754,7 +754,10 @@ public final class AsyncNatives {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             scope.cancelAll();
-            throw new RuntimeException("Scoped execution interrupted", e);
+            throw new CancellationException("Scoped execution cancelled");
+        } catch (CancellationException ce) {
+            scope.cancelAll();
+            throw ce;
         } catch (RuntimeException e) {
             scope.cancelAll();
             throw e;
@@ -1071,6 +1074,13 @@ public final class AsyncNatives {
         } catch (TaskUnhandledOpException tue) {
             promise.setUnhandledOpCall(tue.opCall);
             promise.complete(null);
+        } catch (CancellationException ce) {
+            // Native blocking ops translate InterruptedException to
+            // CancellationException so cancel-during-blocking surfaces as
+            // a typed AsyncCancelled result on await rather than a generic
+            // task-failed runtime error. Mark the promise CANCELLED so
+            // awaiters return Err { error = AsyncCancelled }.
+            promise.cancel();
         } catch (Throwable e) {
             promise.fail(e);
         } finally {
@@ -1085,7 +1095,10 @@ public final class AsyncNatives {
             result = promise.await();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted while awaiting", e);
+            // The awaiter was cancelled while waiting. Surface as a typed
+            // CancellationException so the surrounding runPromiseTask marks
+            // the calling task CANCELLED (not FAILED).
+            throw new CancellationException("Interrupted while awaiting");
         }
         // Effect propagation across the spawn boundary:
         //
@@ -1223,12 +1236,18 @@ public final class AsyncNatives {
         return MezzeVariant.ok(value);
     }
 
+    /**
+     * Build a `Result _ AsyncError = Err { error = AsyncCancelled }` variant.
+     * Coop callers were returning the raw AsyncError variant — wrong; users
+     * pattern-match `Err { error = AsyncCancelled }` and saw a tag mismatch.
+     * Matches Loom's promiseAwaitResult line 988 / 1023.
+     */
     static MezzeVariant asyncCancelledResult() {
-        return createAsyncCancelled();
+        return MezzeVariant.err(createAsyncCancelled());
     }
 
     static MezzeVariant asyncFailedResult(String msg) {
-        return createAsyncFailed(msg);
+        return MezzeVariant.err(createAsyncFailed(msg));
     }
 
     static MezzeVariant asyncFailedResultFromPromise(MezzePromise promise) {

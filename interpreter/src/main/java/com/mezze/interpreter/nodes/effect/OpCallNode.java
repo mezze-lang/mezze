@@ -275,6 +275,50 @@ public final class OpCallNode extends MezzeNode {
      */
     @TruffleBoundary
     private Object chainDispatch(HandlerChainEntry[] chain, Object args) {
+        if (chainCallNode == null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            chainCallNode = insert(IndirectCallNode.create());
+        }
+        Object result = dispatchOpOnChain(
+            chain, operationName, args, effectHash, chainCallNode);
+        if (result == DISPATCH_NO_MATCH) {
+            return createSuspended(args);
+        }
+        return result;
+    }
+
+    /**
+     * Sentinel returned by {@link #dispatchOpOnChain} when no handler in the
+     * chain matches the op (caller decides how to fall back: suspend, lazy
+     * wrap, etc.).
+     */
+    public static final Object DISPATCH_NO_MATCH = new Object();
+
+    /**
+     * Walk a handler chain innermost-first, call the first matching op
+     * handler directly under a dispatch-only fiber. Used by:
+     *
+     * <ul>
+     *   <li>{@link OpCallNode#chainDispatch} — fiber-less op-call dispatch
+     *       on spawned tasks</li>
+     *   <li>{@link com.mezze.interpreter.values.MezzeSuspended#force} —
+     *       forcing a suspended op-call on a spawned task where a chain
+     *       has been installed but no fiber is current (#285)</li>
+     * </ul>
+     *
+     * Returns {@link #DISPATCH_NO_MATCH} when no handler in the chain
+     * matches. Otherwise returns the handler's result. Translates an
+     * {@code abort} inside the handler body to
+     * {@link TaskUnhandledOpException} so the spawned-task boundary
+     * stashes the op and {@code Async.await} re-issues it on the parent.
+     */
+    @TruffleBoundary
+    public static Object dispatchOpOnChain(
+            HandlerChainEntry[] chain,
+            String operationName,
+            Object args,
+            Hash effectHash,
+            IndirectCallNode callNode) {
         for (int i = 0; i < chain.length; i++) {
             // Filter by (effect_hash, op_name) — bare op_name match silently
             // misroutes when two effects in scope declare an op with the
@@ -287,11 +331,6 @@ public final class OpCallNode extends MezzeNode {
             }
             Object f = chain[i].handler().getField(operationName);
             if (f instanceof MezzeFunction op) {
-                if (chainCallNode == null) {
-                    CompilerDirectives.transferToInterpreterAndInvalidate();
-                    chainCallNode = insert(IndirectCallNode.create());
-                }
-
                 // Set up dispatch context so the handler body can read
                 // resume/abort via EffectBindingNode. Acquire from a
                 // per-thread 1-slot pool to avoid allocating a fresh
@@ -308,7 +347,7 @@ public final class OpCallNode extends MezzeNode {
 
                 EffectFiber prev = dispatchFiber.enterDispatch();
                 try {
-                    return chainCallNode.call(op.getCallTarget(), callArgs);
+                    return callNode.call(op.getCallTarget(), callArgs);
                 } catch (AbortPerformException abort) {
                     // The handler called abort {val = ...}. The enclosing
                     // perform lives on the parent fiber; re-issue the
@@ -323,7 +362,7 @@ public final class OpCallNode extends MezzeNode {
                 }
             }
         }
-        return createSuspended(args);
+        return DISPATCH_NO_MATCH;
     }
 
     /**

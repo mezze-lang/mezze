@@ -83,6 +83,26 @@ public final class SchedulerNatives {
     }
 
     /**
+     * Returns true if the currently-running coop task's promise has been
+     * cancelled. CoopAsync.is_cancelled binding.
+     */
+    public static boolean schedulerIsCancelled(MezzeRecord args) {
+        CoopScheduler scheduler = getScheduler(args, "sched");
+        return scheduler.isCancelledCurrent();
+    }
+
+    /**
+     * Cancellation checkpoint for CoopAsync. Throws CancellationException
+     * if the currently-running task is cancelled, which the tick-loop
+     * catches and maps to promise.cancel(). No-op otherwise.
+     */
+    public static MezzeUnit schedulerCheck(MezzeRecord args) {
+        CoopScheduler scheduler = getScheduler(args, "sched");
+        scheduler.checkCurrent();
+        return MezzeUnit.INSTANCE;
+    }
+
+    /**
      * Race multiple promises.
      */
     @TruffleBoundary

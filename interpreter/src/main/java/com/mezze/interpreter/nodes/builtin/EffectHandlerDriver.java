@@ -364,11 +364,21 @@ public final class EffectHandlerDriver {
         // finally blocks, so popHandlerOffChain in the conventional path
         // wouldn't fire for nested performs.
         int chainDepthBefore = EffectFiber.handlerChainDepth();
+        // Capture the chain *below* this perform's handler so the drive loop
+        // can chain-dispatch unhandled ops to handlers further down on this
+        // thread. Without this, an unhandled op inside `perform Inner in body`
+        // on a spawned task — where outerFiber is null — would bubble out as
+        // MezzeSuspended even though an outer handler is on the per-thread
+        // chain (e.g. layer2's `perform WithReader in do { Async.spawn ... }`
+        // calls Async.spawn that LoomAsync underneath should dispatch). #285.
+        HandlerChainEntry[] inheritedChain = outerFiber == null
+            ? EffectFiber.snapshotHandlerChainEntries()
+            : null;
         EffectFiber.pushHandlerOnChain(handler, effectHash);
 
         Object performResult;
         try {
-            performResult = drive(handler, effectHash, fiberHolder[0], outerFiber, null, callNode);
+            performResult = drive(handler, effectHash, fiberHolder[0], outerFiber, null, callNode, inheritedChain);
         } catch (AbortPerformException abort) {
             performResult = abort.value;
         } finally {
@@ -445,6 +455,29 @@ public final class EffectHandlerDriver {
             EffectFiber outerFiber,
             Object resumeWith,
             IndirectCallNode callNode) {
+        return drive(handler, handlerEffectHash, fiber, outerFiber, resumeWith, callNode, null);
+    }
+
+    /**
+     * Variant of {@link #drive(MezzeRecord, Hash, EffectFiber, EffectFiber,
+     * Object, IndirectCallNode)} that takes an {@code inheritedChain} — the
+     * per-thread handler chain *below* this perform's pushed entry. Used
+     * when this perform is running on a spawned task thread (no outer
+     * fiber): unhandled ops are first chain-dispatched against the
+     * inherited chain (e.g. a `perform WithReader in body` on a spawned
+     * task where Async.spawn must reach LoomAsync further down). When
+     * inheritedChain is null or empty, behavior matches the legacy
+     * "bubble as MezzeSuspended on no outer fiber" semantics. #285.
+     */
+    @TruffleBoundary
+    private static Object drive(
+            MezzeRecord handler,
+            Hash handlerEffectHash,
+            EffectFiber fiber,
+            EffectFiber outerFiber,
+            Object resumeWith,
+            IndirectCallNode callNode,
+            HandlerChainEntry[] inheritedChain) {
         // Originally written recursively (every op-call dispatch tail-called
         // drive() with the next resume value). Java doesn't TCO so a body
         // with N op-calls in one perform grew the Java stack N deep — N=10K
@@ -485,6 +518,23 @@ public final class EffectHandlerDriver {
                 // throw a TaskUnhandledOpException so Async.spawn can store
                 // the op on the promise for re-raise at await time.
                 if (outerFiber == null) {
+                    // No outer fiber, but the per-thread chain may have a
+                    // handler below this perform that can dispatch the op
+                    // (this perform's body runs on a spawned task thread
+                    // where the parent's chain was installed). Try chain
+                    // dispatch against the inherited chain first — that's
+                    // the algebraic-effect-correct fallback. #285.
+                    if (inheritedChain != null && inheritedChain.length > 0) {
+                        Object chainResult = com.mezze.interpreter.nodes.effect.OpCallNode.dispatchOpOnChain(
+                            inheritedChain, opCall.opName(), opCall.args(),
+                            opCall.effectHash(), callNode);
+                        if (chainResult != com.mezze.interpreter.nodes.effect.OpCallNode.DISPATCH_NO_MATCH) {
+                            // Feed the result back into the fiber as the
+                            // op-call's return value.
+                            resumeWith = chainResult;
+                            continue;
+                        }
+                    }
                     if (TASK_BOUNDARY.get()) {
                         throw new TaskUnhandledOpException(opCall);
                     }

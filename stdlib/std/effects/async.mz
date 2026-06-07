@@ -257,8 +257,8 @@ impl Async for CoopAsync where {
       __native_scheduler_await_result { sched = scope, p = native_p },
   cancel = { p } -> __native_promise_cancel { p = p },
   sleep = { ms } -> __native_scheduler_sleep { sched = scope, ms = ms },
-  is_cancelled = {} -> False,
-  check = {} -> {},
+  is_cancelled = {} -> __native_scheduler_is_cancelled { sched = scope },
+  check = {} -> __native_scheduler_check { sched = scope },
   scoped = { f } -> f { sc = Scope { val = {} } },
   ## Park: run ready tasks until predicate returns True.
   park = { predicate } -> __native_scheduler_park_until { sched = scope, predicate = predicate },

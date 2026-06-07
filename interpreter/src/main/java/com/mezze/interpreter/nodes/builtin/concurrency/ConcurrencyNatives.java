@@ -628,7 +628,12 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord semaphoreAcquire(MezzeRecord args) {
         MezzeSemaphore sem = getSemaphore(args, "sem");
-        try { sem.acquire(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        try {
+            sem.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new CancellationException("Semaphore acquire cancelled");
+        }
         return MezzeRecord.empty();
     }
 
@@ -690,7 +695,12 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord latchAwait(MezzeRecord args) {
         MezzeLatch latch = getLatch(args, "latch");
-        try { latch.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new CancellationException("Latch await cancelled");
+        }
         return MezzeRecord.empty();
     }
 
@@ -753,7 +763,12 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord waitgroupWait(MezzeRecord args) {
         MezzeWaitGroup wg = getWaitGroup(args, "wg");
-        try { wg.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        try {
+            wg.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new CancellationException("WaitGroup wait cancelled");
+        }
         return MezzeRecord.empty();
     }
 
@@ -892,7 +907,7 @@ public final class ConcurrencyNatives {
                 Thread.sleep(1);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                break;
+                throw new CancellationException("Channel select cancelled");
             }
         }
         return createNone();
@@ -1214,7 +1229,12 @@ public final class ConcurrencyNatives {
             }
             // Commit-conflict retry path: exponential-ish backoff.
             if (!blocked) {
-                try { Thread.sleep(Math.min(i, 10)); } catch (InterruptedException e) { break; }
+                try {
+                    Thread.sleep(Math.min(i, 10));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new CancellationException("STM transaction cancelled during retry backoff");
+                }
             }
         }
         throw new RuntimeException("STM transaction failed after max retries");
@@ -1251,7 +1271,7 @@ public final class ConcurrencyNatives {
                 LockSupport.park(txn);
                 if (Thread.interrupted()) {
                     Thread.currentThread().interrupt();
-                    throw new RuntimeException("STM.retry interrupted");
+                    throw new CancellationException("STM.retry cancelled");
                 }
             }
         } finally {
@@ -1434,7 +1454,7 @@ public final class ConcurrencyNatives {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Semaphore acquire interrupted");
+            throw new CancellationException("Semaphore acquire cancelled");
         }
     }
 
@@ -1446,6 +1466,7 @@ public final class ConcurrencyNatives {
             for (int i = 0; i < permits; i++) sem.acquire();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new CancellationException("Semaphore acquireN cancelled");
         }
         return MezzeRecord.empty();
     }
@@ -1792,7 +1813,7 @@ public final class ConcurrencyNatives {
         } catch (InterruptedException e) {
             for (Thread t : threads) t.interrupt();
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Parallel map interrupted", e);
+            throw new CancellationException("Parallel map cancelled");
         }
 
         SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel map");
@@ -1871,7 +1892,7 @@ public final class ConcurrencyNatives {
         } catch (InterruptedException e) {
             for (Thread t : threads) t.interrupt();
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Parallel filter interrupted", e);
+            throw new CancellationException("Parallel filter cancelled");
         }
 
         SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel filter");
@@ -1973,7 +1994,7 @@ public final class ConcurrencyNatives {
         } catch (InterruptedException e) {
             for (Thread t : threads) t.interrupt();
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Parallel fold map phase interrupted", e);
+            throw new CancellationException("Parallel fold map phase cancelled");
         }
 
         SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel fold");
@@ -2101,7 +2122,7 @@ public final class ConcurrencyNatives {
         } catch (InterruptedException e) {
             for (Thread t : threads) t.interrupt();
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Parallel all interrupted", e);
+            throw new CancellationException("Parallel all cancelled");
         }
 
         SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel all");
@@ -2186,7 +2207,7 @@ public final class ConcurrencyNatives {
         } catch (InterruptedException e) {
             for (Thread t : threads) t.interrupt();
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Parallel any interrupted", e);
+            throw new CancellationException("Parallel any cancelled");
         }
 
         SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel any");
@@ -2342,7 +2363,7 @@ public final class ConcurrencyNatives {
                 LockSupport.park(readSet);
                 if (Thread.interrupted()) {
                     Thread.currentThread().interrupt();
-                    throw new RuntimeException("STM.retry interrupted");
+                    throw new CancellationException("STM.retry cancelled");
                 }
             }
         } finally {
@@ -2651,7 +2672,7 @@ public final class ConcurrencyNatives {
         } catch (InterruptedException e) {
             for (Thread t : threads) t.interrupt();
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Parallel find interrupted", e);
+            throw new CancellationException("Parallel find cancelled");
         }
 
         SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel find");
@@ -2739,7 +2760,7 @@ public final class ConcurrencyNatives {
         } catch (InterruptedException e) {
             for (Thread t : threads) t.interrupt();
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Parallel partition interrupted", e);
+            throw new CancellationException("Parallel partition cancelled");
         }
 
         SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel partition");
@@ -2837,7 +2858,7 @@ public final class ConcurrencyNatives {
             Thread.currentThread().interrupt();
             leftThread.interrupt();
             rightThread.interrupt();
-            throw new RuntimeException("Parallel both interrupted", e);
+            throw new CancellationException("Parallel both cancelled");
         } catch (ExecutionException e) {
             leftThread.interrupt();
             rightThread.interrupt();
@@ -2891,7 +2912,7 @@ public final class ConcurrencyNatives {
             aThread.interrupt();
             bThread.interrupt();
             cThread.interrupt();
-            throw new RuntimeException("Parallel both3 interrupted", e);
+            throw new CancellationException("Parallel both3 cancelled");
         } catch (ExecutionException e) {
             aThread.interrupt();
             bThread.interrupt();

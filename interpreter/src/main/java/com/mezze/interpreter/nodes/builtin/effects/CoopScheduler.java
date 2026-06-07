@@ -37,6 +37,10 @@ public final class CoopScheduler {
     private static final ThreadLocal<CoopScheduler> CURRENT = new ThreadLocal<>();
     /** Per-thread handle for the coop fiber currently executing on this scheduler. */
     private static final ThreadLocal<EffectFiber> CURRENT_FIBER = new ThreadLocal<>();
+    /** Per-thread handle for the result promise of the coop fiber currently
+     *  executing on this scheduler. Used by isCancelledCurrent / checkCurrent
+     *  so the running fiber body can observe its own cancellation. */
+    private static final ThreadLocal<AsyncNatives.MezzePromise> CURRENT_PROMISE = new ThreadLocal<>();
 
     private final Deque<CoopFiber> readyQueue = new ArrayDeque<>();
     private final List<CoopFiber> parkedFibers = new ArrayList<>();
@@ -147,6 +151,31 @@ public final class CoopScheduler {
     }
 
     /**
+     * Returns true if the currently-running coop fiber's result promise is
+     * in the CANCELLED state. Called from inside a fiber body. If called
+     * outside any coop fiber (no current promise), returns false.
+     */
+    @TruffleBoundary
+    public boolean isCancelledCurrent() {
+        AsyncNatives.MezzePromise self = CURRENT_PROMISE.get();
+        return self != null && self.isCancelled();
+    }
+
+    /**
+     * Cancellation checkpoint for cooperative scheduler. If the running
+     * fiber's promise is CANCELLED, throws CancellationException so the
+     * tick-loop catches it and propagates the cancel cleanly. If no fiber
+     * is running, no-op (matches LoomAsync.check semantics outside spawn).
+     */
+    @TruffleBoundary
+    public void checkCurrent() {
+        AsyncNatives.MezzePromise self = CURRENT_PROMISE.get();
+        if (self != null && self.isCancelled()) {
+            throw new java.util.concurrent.CancellationException("Coop task cancelled");
+        }
+    }
+
+    /**
      * Park the *current* fiber until {@code predicate} returns True.
      *
      * <p>Called from inside a fiber body. Suspends via Continuation.yield,
@@ -205,16 +234,24 @@ public final class CoopScheduler {
 
         CoopScheduler prevSched = CURRENT.get();
         EffectFiber prevFiber = CURRENT_FIBER.get();
+        AsyncNatives.MezzePromise prevPromise = CURRENT_PROMISE.get();
         CURRENT.set(this);
         CURRENT_FIBER.set(task.fiber);
+        CURRENT_PROMISE.set(task.promise);
         try {
             task.fiber.runUnscoped();
+        } catch (java.util.concurrent.CancellationException ce) {
+            // Body called Async.check {} (or a coop-aware native) and observed
+            // cancellation. Mark the promise CANCELLED instead of FAILED.
+            task.promise.cancel();
+            return true;
         } catch (Throwable t) {
             task.promise.fail(t);
             return true;
         } finally {
             CURRENT.set(prevSched);
             CURRENT_FIBER.set(prevFiber);
+            CURRENT_PROMISE.set(prevPromise);
         }
 
         if (task.fiber.isDone()) {

@@ -1,0 +1,50 @@
+## Reader effect — typed ambient context.
+##
+## The algebraic-effect encoding of Haskell's Reader monad. Pass
+## values down a call tree without threading them through every
+## signature. Spawned tasks inherit the binding automatically via
+## the existing handler-chain snapshot path.
+##
+## Correspondence with Haskell Reader:
+##   ask                       ↔ Reader.ask {}
+##   runReader env m           ↔ perform WithReader { val = env } in m {}
+##   local f m                 ↔ nested perform WithReader shadowing
+##   Reader r a                ↔ a computation with <Reader r> in its row
+##
+## Same pattern, same semantics. Difference: effects mix freely via
+## rows; no monad transformer stack.
+##
+## Usage:
+##   perform WithReader { val = "req-7" } in do
+##     handle_request {}
+##
+##   # Inside handle_request (or any callee / spawned task):
+##   let id : Str = Reader.ask {}
+##
+## See docs/async/scoped-effect-spec.md for the full design.
+
+effect Reader having 'a where {
+  ## Read the current binding from the nearest enclosing handler.
+  ## Calling this without an enclosing `perform WithReader …` frame
+  ## is a type error: the row demands a handler that isn't installed.
+  ask: {} -> 'a <Reader>
+}
+
+## Trivial impl: binds the value for the body. Multiple binds of
+## the same carrier shadow — innermost wins inside the inner body.
+impl Reader for WithReader { val: 'a } having 'a = 'a where {
+  ask = {} -> val,
+}
+
+## Shorthand: bind a value for the body. Equivalent to
+## `perform WithReader { val = v } in body {}` but reads more
+## naturally at the call site.
+##
+##   let result = with_reader { val = "req-7", body = {} ->
+##     handle_request {}
+##   }
+pub let with_reader : { val: 'a, body: {} -> 'b <Reader, ...> } -> 'b <...> = { val, body } ->
+  perform WithReader { val = val } in body {}
+
+## Shorthand for `Reader.ask {}` — read the current binding.
+pub let ask : {} -> 'a <Reader> = {} -> Reader.ask {}

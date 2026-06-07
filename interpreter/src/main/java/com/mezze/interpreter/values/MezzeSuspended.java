@@ -125,7 +125,15 @@ public final class MezzeSuspended implements TruffleObject {
         com.mezze.interpreter.nodes.continuation.EffectFiber fiber =
             com.mezze.interpreter.nodes.continuation.EffectFiber.current();
         if (fiber == null) {
-            return this;
+            // No fiber, but a chain may be installed on this thread (e.g.
+            // we're inside the body of an Async.spawn that inherited the
+            // parent's handler chain, where chain-dispatch — not fiber
+            // suspend — is the dispatch path). If the suspended thunk is
+            // a deferred effect call, try chain-dispatching it here, the
+            // same way OpCallNode does its no-fiber fallback. Without
+            // this, force() returns `this` unforced (#285) and the
+            // unevaluated MezzeSuspended leaks back to the caller.
+            return forceWithoutFiber(callNode);
         }
         if (computation instanceof BlockNode.ComposedBlockThunk composedThunk) {
             return forceComposedBlock(composedThunk, fiber, callNode);
@@ -144,6 +152,29 @@ public final class MezzeSuspended implements TruffleObject {
         }
         // Regular function thunk — no effect to dispatch, just execute.
         return computation.execute(callNode);
+    }
+
+    @TruffleBoundary
+    private Object forceWithoutFiber(IndirectCallNode callNode) {
+        if (!computation.isDeferredEffectCall()) {
+            return this;
+        }
+        com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chain =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChainEntries();
+        if (chain.length == 0) {
+            return this;
+        }
+        Object result = com.mezze.interpreter.nodes.effect.OpCallNode.dispatchOpOnChain(
+            chain,
+            computation.getOperationName(),
+            computation.getArguments(),
+            computation.getEffectContentHash(),
+            callNode
+        );
+        if (result == com.mezze.interpreter.nodes.effect.OpCallNode.DISPATCH_NO_MATCH) {
+            return this;
+        }
+        return result;
     }
 
     /**

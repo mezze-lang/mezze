@@ -998,6 +998,25 @@ class TypedASTCompiler(
         }
     }
 
+    /**
+     * #284: Decide whether a top-level binding by hash is a real function
+     * definition (RHS is an explicit lambda) vs an alias or value thunk.
+     * Used at name-as-value read sites to pick `ReadGlobalFnByHashIR`
+     * (no auto-eval) for true lambdas, vs `ReadGlobalByHashIR` (auto-eval)
+     * for value thunks and aliases.
+     *
+     * Only user-module decls are inspected. Stdlib references fall through
+     * to the auto-evaluating path; that's safe because no current stdlib
+     * pattern exposes a named user-callable thunk in value position to a
+     * native spawn-like API. If such a pattern is introduced later this
+     * check would need to extend to PrecompiledStdlib, but the obvious
+     * heuristic (paramSlots.isNotEmpty) breaks a large class of legitimate
+     * stdlib value thunks — needs a sharper signal.
+     */
+    private fun isLambdaHash(hash: com.mezze.language.typedast.Hash, decl: com.mezze.language.typedast.TypedLetDecl?): Boolean {
+        return decl != null && decl.value is TypedLambda
+    }
+
     private fun compileVar(expr: TypedVar, src: SourceInfo): NodeIR {
         return when (val binding = expr.binding) {
             is BindingRef.Local -> {
@@ -1071,7 +1090,20 @@ class TypedASTCompiler(
                         if (binding.depth > 0) {
                             val topDecl = declIndex?.values?.find { it.name == expr.name }
                             if (topDecl != null) {
-                                return ReadGlobalByHashIR(topDecl.hash, src)
+                                // #284: if the top-level declaration's RHS is an
+                                // explicit lambda, the user wants the function
+                                // reference, not the auto-evaluated result.
+                                // Emit the no-eval form so passing the name
+                                // as a value (e.g., `Async.spawn { f = grandchild }`)
+                                // hands back the MezzeFunction, not the body result.
+                                // Aliases (`let toggle_bool = toggle`) and value
+                                // thunks (`let pi = 3.14`) still go via the auto-
+                                // evaluating path so they cache properly.
+                                return if (isLambdaHash(topDecl.hash, topDecl)) {
+                                    ReadGlobalFnByHashIR(topDecl.hash, src)
+                                } else {
+                                    ReadGlobalByHashIR(topDecl.hash, src)
+                                }
                             }
                         }
                         val newSlot = allocLocal(expr.name)
@@ -1105,10 +1137,15 @@ class TypedASTCompiler(
                         if (captureIdx != null) {
                             ReadCaptureIR(captureIdx, typeToSlotKind(expr.type), src)
                         } else {
-                            // Read the value/function from context by hash.
-                            // Both value thunks (trig::pi) and function references (trig::sin) are
-                            // registered in context — MonomorphicCallNode handles calling them.
-                            ReadGlobalByHashIR(binding.hash, src)
+                            // #284: same logic as the BindingRef.Local site above —
+                            // if the top-level RHS is an explicit lambda, the
+                            // user wants the function reference. Aliases and
+                            // value thunks go through the auto-evaluating path.
+                            if (isLambdaHash(binding.hash, declIndex?.get(binding.hash))) {
+                                ReadGlobalFnByHashIR(binding.hash, src)
+                            } else {
+                                ReadGlobalByHashIR(binding.hash, src)
+                            }
                         }
                     }
                 }
