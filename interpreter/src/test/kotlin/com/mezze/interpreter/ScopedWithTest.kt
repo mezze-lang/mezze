@@ -8,11 +8,9 @@ import org.junit.jupiter.api.parallel.ExecutionMode
 /**
  * Spec tests for `scoped_with` — §3 / #239.
  *
- * v1 wires three of four policies (OnAllSettled, OnFailure, OnFirst);
- * OnSuccess intentionally falls through to OnAllOutcome until the
- * dedicated helper can be made to typecheck against the stdlib precompile
- * (currently trips a non-termination in :typechecker:generateWellKnownHashes
- * — see memory/project_239_match_user_adt_bug.md).
+ * All four policies wired up. The parser non-termination on inline `||`
+ * between two seq calls inside a record-field lambda body was worked
+ * around by let-binding the operands; see join_on_success in async.mz.
  */
 @Execution(ExecutionMode.SAME_THREAD)
 class ScopedWithTest {
@@ -90,11 +88,9 @@ class ScopedWithTest {
     }
 
     @Test
-    fun `OnSuccess falls through to OnAllOutcome in v1`() {
-        // v1: OnSuccess uses the OnAllSettled path (see comment in scoped_with).
+    fun `OnSuccess returns OnSuccessOutcome wrapping the winner`() {
         val source = """
             use std::effects::async::{Async, LoomAsync, scope_spawn, scoped_with}
-            use std::result
 
             let main = {} -> do
               let outcome = scoped_with {
@@ -102,9 +98,7 @@ class ScopedWithTest {
                 body = { sc } -> [scope_spawn { sc = sc, f = {} -> 42 }]
               }
               match outcome is
-                OnAllOutcome { results } -> match results is
-                  [Ok { val = v }] -> v
-                  _ -> 0
+                OnSuccessOutcome { winner, losers_cancelled = _ } -> winner
                 _ -> 0
 
             perform LoomAsync in main {}

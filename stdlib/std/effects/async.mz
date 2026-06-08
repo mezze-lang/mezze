@@ -587,12 +587,43 @@ pub let scoped_with : { policy: JoinPolicy, body: { sc: Scope 'a } -> [Promise '
     match policy is
       OnAllSettled -> OnAllOutcome { results = all { ps = ps } }
       OnFailure    -> join_on_failure { sc = sc, ps = ps }
+      OnSuccess    -> join_on_success { sc = sc, ps = ps }
       OnFirst      -> join_on_first   { sc = sc, ps = ps }
-      # OnSuccess intentionally falls through to OnAllSettled v1 — the
-      # dedicated helper trips a typechecker pathology under stdlib
-      # precompile (see project_239_match_user_adt_bug + open followup).
-      OnSuccess    -> OnAllOutcome { results = all { ps = ps } }
   }
+
+## OnSuccess: park until at least one promise succeeds OR all fail. On first
+## success: cancel everyone else, return OnSuccessOutcome with the winner +
+## the count of cancelled siblings. If everyone failed, return
+## OnSuccessAllFailed with the per-task errors in input order.
+##
+## The let-bindings around `||` in the park predicate work around a parser
+## non-termination on `{} -> seq::any { ... } || seq::all { ... }`.
+pub let join_on_success : { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Async, ...> = { sc, ps } -> do
+  Async.park { predicate = {} -> do
+    let any_ok = seq::any { xs = ps, p = { x } -> is_done { p = x } && !is_failed { p = x } }
+    let all_done = seq::all { xs = ps, p = { x } -> is_done { p = x } }
+    any_ok || all_done }
+  let winner_opt = seq::find { xs = ps, p = { x } -> is_done { p = x } && !is_failed { p = x } }
+  match winner_opt is
+    Some { val = winner } -> do
+      let winner_val = match inspect { p = winner } is
+        Completed { val = v } -> v
+        Failed    { err = _ } -> crash { msg = "on_success: winner reverted to Failed" }
+        Pending               -> crash { msg = "on_success: winner reverted to Pending" }
+      scope_cancel_all { sc = sc }
+      let cancelled = seq::fold { xs = ps, init = 0, f = { acc, x } ->
+        match promise_eq { l = x, r = winner } is
+          True  -> acc
+          False -> match is_done { p = x } is
+            True  -> acc
+            False -> acc + 1 }
+      OnSuccessOutcome { winner = winner_val, losers_cancelled = cancelled }
+    None -> OnSuccessAllFailed {
+      errs = seq::map { xs = ps, f = { x } -> match inspect { p = x } is
+        Failed    { err = e } -> e
+        Completed { val = _ } -> AsyncFailed { msg = "on_success: expected Failed, got Completed" }
+        Pending               -> AsyncFailed { msg = "on_success: expected Failed, got Pending" } },
+    }
 
 ## OnFailure: wait for every promise; if any fail, cancel rest and return
 ## OnFailureCaught with partial successes; otherwise return OnFailureOutcome
