@@ -80,18 +80,20 @@ fun main(args: Array<String>) {
     // the body changes. See `MutEraser` for the rewrite rules.
     val mutErasedFunctions = com.mezze.language.truffleir.MutEraser.erase(rawFunctions)
 
-    // Optional trivial-wrapper inlining (`core::pow` → `__native_float_pow`,
-    // `float::abs` → `__native_float_abs`, etc.). Gated behind the
-    // MEZZE_INLINE_WRAPPERS env var because the current implementation
-    // regresses JIT-compiled steady-state perf — likely because the
-    // substituted bodies break some PE assumption tied to how
-    // MezzeFunctionRootNode caches CallTargets. The pass is correct
-    // (5222 :interpreter:test PASSED), just slower in practice. Kept
-    // available for follow-up investigation. See TrivialWrapperInliner.
-    val functions = if (System.getenv("MEZZE_INLINE_WRAPPERS") == "1") {
-        com.mezze.language.truffleir.TrivialWrapperInliner.inline(mutErasedFunctions)
-    } else {
+    // Inline trivial one-line wrapper functions (`core::pow` →
+    // `__native_float_pow`, `float::abs` → `__native_float_abs`, etc.)
+    // at every call site. Pairs with the scalar-ABI work: after
+    // wrappers are inlined, hot loops call straight into the native
+    // dispatch with no intermediate CallTarget per iteration.
+    // Measured on `/tmp/primitive-bench` (JIT-on jar, N=10M):
+    //   float_sqrt:   ~1000ms → ~650ms (~1.5× faster)
+    //   float_inline:  ~200ms → ~145ms (~1.4× faster)
+    // Disable with MEZZE_INLINE_WRAPPERS=0 for debugging. See
+    // TrivialWrapperInliner for eligibility rules.
+    val functions = if (System.getenv("MEZZE_INLINE_WRAPPERS") == "0") {
         mutErasedFunctions
+    } else {
+        com.mezze.language.truffleir.TrivialWrapperInliner.inline(mutErasedFunctions)
     }
 
     val initTime = (System.nanoTime() - startTime) / 1_000_000
