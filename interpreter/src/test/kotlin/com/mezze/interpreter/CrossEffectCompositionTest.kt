@@ -41,9 +41,9 @@ class CrossEffectCompositionTest {
           let ch = chan_bounded { cap = 2 }
           let total = tvar { init = 0 }
           let producer = Async.spawn { f = {} -> do
-            send { ch = ch, value = 5 }
-            send { ch = ch, value = 7 }
-            send { ch = ch, value = 11 }
+            send { ch = ch, val = 5 }
+            send { ch = ch, val = 7 }
+            send { ch = ch, val = 11 }
           }
           let consumer = Async.spawn { f = {} -> do
             let v1 = recv { ch = ch }
@@ -181,13 +181,13 @@ class CrossEffectCompositionTest {
         perform $handler in do
           let ch = chan_bounded { cap = 4 }
           let m = mutex {}
-          let counter = atom { value = 0 }
+          let counter = atom { val = 0 }
           let make_producer = { tag } -> {} -> do
             lock_async { mutex = m }
             let v = deref { atom = counter }
-            let _ = reset { atom = counter, value = v + 1 }
+            let _ = reset { atom = counter, val = v + 1 }
             unlock { mutex = m }
-            send { ch = ch, value = tag }
+            send { ch = ch, val = tag }
           let p1 = Async.spawn { f = make_producer { tag = 1 } }
           let p2 = Async.spawn { f = make_producer { tag = 2 } }
           let p3 = Async.spawn { f = make_producer { tag = 3 } }
@@ -224,7 +224,7 @@ class CrossEffectCompositionTest {
           let wg = wait_group {}
           add { wg = wg, delta = 3 }
           let worker = { v } -> {} -> do
-            send { ch = ch, value = v }
+            send { ch = ch, val = v }
             done { wg = wg }
           let p1 = Async.spawn { f = worker { v = 10 } }
           let p2 = Async.spawn { f = worker { v = 20 } }
@@ -262,7 +262,7 @@ class CrossEffectCompositionTest {
           let ready = tvar { init = False }
           let ch = chan_bounded { cap = 1 }
           let producer = Async.spawn { f = {} -> do
-            send { ch = ch, value = 99 }
+            send { ch = ch, val = 99 }
             atomically { f = {} -> STM.write { var = ready, val = True } }
           }
           let consumer = Async.spawn { f = {} -> do
@@ -303,7 +303,7 @@ class CrossEffectCompositionTest {
           let ch = chan_bounded { cap = 4 }
           let work = { v } -> {} -> do
             acquire_async { sem = sem }
-            send { ch = ch, value = v }
+            send { ch = ch, val = v }
             release { sem = sem }
           let p1 = Async.spawn { f = work { v = 100 } }
           let p2 = Async.spawn { f = work { v = 200 } }
@@ -345,7 +345,7 @@ class CrossEffectCompositionTest {
         perform ExceptionToResult in perform $handler in do
           let ch = chan_bounded { cap = 1 }
           let t = Async.spawn { f = {} -> do
-            send { ch = ch, value = 1 }
+            send { ch = ch, val = 1 }
             Exception.throw { error = "from-spawned" }
           }
           let _ = recv { ch = ch }

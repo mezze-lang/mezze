@@ -74,8 +74,8 @@ class SynchronizationPointsTest {
             $loomSetup
             $atomSetup
 
-            let depStarted = atom {value = False}
-            let mainStarted = atom {value = False}
+            let depStarted = atom {val = False}
+            let mainStarted = atom {val = False}
 
             # Create dependency operation (must complete first)
             let setDepStarted = {current: Bool} -> True
@@ -110,8 +110,8 @@ class SynchronizationPointsTest {
             $loomSetup
             $atomSetup
 
-            let computationStarted = atom {value = False}
-            let computationCompleted = atom {value = False}
+            let computationStarted = atom {val = False}
+            let computationCompleted = atom {val = False}
 
             # Create a lazy computation
             let syncPoint = Async.spawn {f = {} -> do
@@ -195,9 +195,9 @@ class SynchronizationPointsTest {
             let aLatch = latch {count = 1}
             let bLatch = latch {count = 1}
             let cLatch = latch {count = 1}
-            let aValue = atom {value = 0}
-            let bValue = atom {value = 0}
-            let cValue = atom {value = 0}
+            let aValue = atom {val = 0}
+            let bValue = atom {val = 0}
+            let cValue = atom {val = 0}
 
             # Helper functions for swap
             let setToOne = {current: Int} -> 1
@@ -266,8 +266,8 @@ class SynchronizationPointsTest {
             # Simulate lazy coordinator with multiple operations
             let op1Ready = latch {count = 1}
             let op2Ready = latch {count = 1}
-            let op1Value = atom {value = 0}
-            let op2Value = atom {value = 0}
+            let op1Value = atom {val = 0}
+            let op2Value = atom {val = 0}
 
             # op1: no dependencies
             let p1 = Async.spawn {f = {} -> do
@@ -358,7 +358,7 @@ class SynchronizationPointsTest {
             $loomSetup
             $atomSetup
 
-            let results = atom {value = []}
+            let results = atom {val = []}
 
             # Create multiple concurrent computations
             let p0 = Async.spawn {f = {} -> do
@@ -407,7 +407,7 @@ class SynchronizationPointsTest {
             $loomSetup
             $atomSetup
 
-            let state = atom {value = "pending"}
+            let state = atom {val = "pending"}
             let completionLatch = latch {count = 1}
 
             let syncPoint = Async.spawn {f = {} -> do
@@ -452,7 +452,7 @@ class SynchronizationPointsTest {
             $atomSetup
 
             let gate = latch {count = 1}
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Spawn 3 threads all waiting on the same gate
             let p1 = Async.spawn {f = {} -> do
@@ -506,11 +506,11 @@ class SynchronizationPointsTest {
             let cLatch = latch {count = 1}
 
             # Use counter to verify sequential execution
-            let counter = atom {value = 0}
-            let aOrder = atom {value = 0}
-            let bOrder = atom {value = 0}
-            let cOrder = atom {value = 0}
-            let dOrder = atom {value = 0}
+            let counter = atom {val = 0}
+            let aOrder = atom {val = 0}
+            let bOrder = atom {val = 0}
+            let cOrder = atom {val = 0}
+            let dOrder = atom {val = 0}
 
             let incrementCounter = {current: Int} -> current + 1
 
@@ -576,7 +576,7 @@ class SynchronizationPointsTest {
             $atomSetup
 
             let l = latch {count = 3}
-            let completedOps = atom {value = 0}
+            let completedOps = atom {val = 0}
 
             # Complete 2 out of 3 operations
             let p1 = Async.spawn {f = {} -> do

@@ -42,7 +42,7 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, deref_agent}
 
-            let counter = agent { value = 42 }
+            let counter = agent { val = 42 }
             deref_agent { agent = counter }
         """)
         assertEquals(42L, result)
@@ -53,7 +53,7 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, deref_agent}
 
-            let name = agent { value = "hello" }
+            let name = agent { val = "hello" }
             deref_agent { agent = name }
         """)
         assertEquals("hello", result)
@@ -64,7 +64,7 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, deref_agent}
 
-            let stats = agent { value = { count = 0, sum = 0 } }
+            let stats = agent { val = { count = 0, sum = 0 } }
             let current = deref_agent { agent = stats }
             current.count + current.sum
         """)
@@ -80,7 +80,7 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, send, deref_agent, await_agent}
 
-            let counter = agent { value = 0 }
+            let counter = agent { val = 0 }
             send { agent = counter, f = { current } -> current + 1 }
             await_agent { agent = counter }
             deref_agent { agent = counter }
@@ -93,7 +93,7 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, send, deref_agent, await_agent}
 
-            let counter = agent { value = 0 }
+            let counter = agent { val = 0 }
             send { agent = counter, f = { current } -> current + 10 }
             send { agent = counter, f = { current } -> current + 20 }
             send { agent = counter, f = { current } -> current + 30 }
@@ -108,7 +108,7 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, send, deref_agent, await_agent}
 
-            let counter = agent { value = 1 }
+            let counter = agent { val = 1 }
             send { agent = counter, f = { current } -> current * 2 }  # 2
             send { agent = counter, f = { current } -> current * 2 }  # 4
             send { agent = counter, f = { current } -> current * 2 }  # 8
@@ -123,7 +123,7 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, send, deref_agent, await_agent}
 
-            let stats = agent { value = { count = 0, sum = 0 } }
+            let stats = agent { val = { count = 0, sum = 0 } }
             send { agent = stats, f = { current } -> { count = current.count + 1, sum = current.sum + 10 } }
             send { agent = stats, f = { current } -> { count = current.count + 1, sum = current.sum + 20 } }
             await_agent { agent = stats }
@@ -143,7 +143,7 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, agent_error}
 
-            let counter = agent { value = 0 }
+            let counter = agent { val = 0 }
             match agent_error { agent = counter } is
                 Some { val } -> False
                 None -> True
@@ -156,7 +156,7 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, has_error}
 
-            let counter = agent { value = 0 }
+            let counter = agent { val = 0 }
             has_error { agent = counter }
         """)
         assertEquals(false, result)
@@ -171,7 +171,7 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, send, await_agent_timeout}
 
-            let counter = agent { value = 0 }
+            let counter = agent { val = 0 }
             send { agent = counter, f = { current } -> current + 1 }
             await_agent_timeout { agent = counter, timeout_ms = 5000 }
         """)
@@ -183,7 +183,7 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, await_agent_timeout}
 
-            let counter = agent { value = 42 }
+            let counter = agent { val = 42 }
             # No pending updates, should succeed immediately
             await_agent_timeout { agent = counter, timeout_ms = 100 }
         """)
@@ -199,11 +199,11 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, send, deref_agent, await_agent, restart_agent}
 
-            let counter = agent { value = 0 }
+            let counter = agent { val = 0 }
             send { agent = counter, f = { current } -> current + 10 }
             await_agent { agent = counter }
 
-            restart_agent { agent = counter, value = 100 }
+            restart_agent { agent = counter, val = 100 }
             deref_agent { agent = counter }
         """)
         assertEquals(100L, result)
@@ -214,8 +214,8 @@ class AgentModuleTest {
         val result = eval("""
             use std::effects::async::agent::{agent, send, deref_agent, restart_agent, await_agent}
 
-            let counter = agent { value = 0 }
-            restart_agent { agent = counter, value = 999 }
+            let counter = agent { val = 0 }
+            restart_agent { agent = counter, val = 999 }
             await_agent { agent = counter }
             deref_agent { agent = counter }
         """)

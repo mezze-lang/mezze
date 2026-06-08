@@ -31,13 +31,13 @@ class TransitiveScopeCancelTest {
             use std::effects::async::atom::{atom, deref, reset}
 
             let main = {} -> do
-              let nested_ready = atom { value = False }
+              let nested_ready = atom { val = False }
               Async.scoped { f = { sc } -> do
                 let parent_sc = sc
                 let _child = scope_spawn { sc = parent_sc, f = {} ->
                   Async.scoped { f = { sc } -> do
                     let nested_sc = sc
-                    reset { atom = nested_ready, value = True }
+                    reset { atom = nested_ready, val = True }
                     # Park on the NESTED scope's cancel flag — the only way
                     # this returns is if cancel_all(parent_sc) walks into
                     # the childScopes list and marks nested_sc cancelled.

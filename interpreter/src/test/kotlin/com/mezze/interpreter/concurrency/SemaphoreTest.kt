@@ -156,8 +156,8 @@ class SemaphoreTest {
 
             # Semaphore with 2 permits - max 2 concurrent
             let sem = semaphore {permits = 2}
-            let max_concurrent = atom {value = 0}
-            let current = atom {value = 0}
+            let max_concurrent = atom {val = 0}
+            let current = atom {val = 0}
 
             # Function that tracks concurrent execution
             let work = {} -> do
@@ -202,7 +202,7 @@ class SemaphoreTest {
             $loomSetup
 
             let sem = semaphore {permits = 0}
-            let result = atom {value = 0}
+            let result = atom {val = 0}
 
             # Thread 1: Wait for permit, then set result
             let p1 = Async.spawn {f = {} -> do

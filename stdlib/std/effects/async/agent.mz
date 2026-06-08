@@ -18,13 +18,13 @@ impl Agent 'a where {
     await_agent_timeout { agent = it, timeout_ms = timeout_ms },
   error = { it } -> agent_error { agent = it },
   has_error = { it } -> has_error { agent = it },
-  restart = { it, value } -> restart_agent { agent = it, value = value },
+  restart = { it, val } -> restart_agent { agent = it, val = val },
   set_error_handler = { it, handler } -> set_error_handler { agent = it, handler = handler },
 }
 
 ## Create a new agent with the given initial value.
-pub let agent : { value: 'a } -> Agent 'a <Async> = { value } ->
-  __native_agent_new { value = value }
+pub let agent : { val: 'a } -> Agent 'a <Async> = { val } ->
+  __native_agent_new { val = val }
 
 ## Read the current value of the agent (non-blocking snapshot).
 pub let deref_agent : { agent: Agent 'a } -> 'a <Async> = { agent } ->
@@ -59,8 +59,8 @@ pub let has_error : { agent: Agent 'a } -> Bool <Async> = { agent } ->
 
 
 ## Restart an agent with a new value, clearing any error state.
-pub let restart_agent : { agent: Agent 'a, value: 'a } -> {} <Async> = { agent, value } ->
-  __native_agent_restart { agent = agent, value = value }
+pub let restart_agent : { agent: Agent 'a, val: 'a } -> {} <Async> = { agent, val } ->
+  __native_agent_restart { agent = agent, val = val }
 
 ## Set a custom error handler invoked when an action throws.
 pub let set_error_handler : { agent: Agent 'a, handler: { agent: Agent 'a, error: Str } -> {} } -> {} <Async> = { agent, handler } ->

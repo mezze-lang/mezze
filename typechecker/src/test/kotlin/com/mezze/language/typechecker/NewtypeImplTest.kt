@@ -111,7 +111,7 @@ class NewtypeImplTest {
                 use std::effects::async::{Async, LoomAsync}
                 let main = {} -> perform LoomAsync in do
                     let ch: Chan Int = chan {}
-                    send {ch = ch, value = 42}
+                    send {ch = ch, val = 42}
                     recv {ch = ch}
             """.trimIndent(), "Chan send/recv")
         }
@@ -260,7 +260,7 @@ class NewtypeImplTest {
                 use std::effects::async::atom::{Atom, atom}
                 use std::effects::async::{Async, LoomAsync}
                 let main = {} -> perform LoomAsync in do
-                    let a: Atom Int = atom {value = 42}
+                    let a: Atom Int = atom {val = 42}
                     let same = a == a
                     same
             """.trimIndent(), "Atom Eq")
@@ -272,9 +272,9 @@ class NewtypeImplTest {
                 use std::effects::async::atom::{Atom, atom}
                 use std::effects::async::{Async, LoomAsync}
                 let main = {} -> perform LoomAsync in do
-                    let a = atom {value = 42}
+                    let a = atom {val = 42}
                     let v = a.deref {}
-                    a.reset {value = 100}
+                    a.reset {val = 100}
             """.trimIndent(), "Atom .deref/.reset")
         }
     }

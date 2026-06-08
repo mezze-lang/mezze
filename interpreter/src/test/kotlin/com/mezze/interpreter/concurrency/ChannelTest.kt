@@ -38,7 +38,7 @@ class ChannelTest {
             let ch = chan {}
             perform LoomAsync in do
                 # Channel was created successfully if we can try_send
-                try_send { ch = ch, value = 42 }
+                try_send { ch = ch, val = 42 }
         """)
         assertEquals(true, result)
     }
@@ -52,7 +52,7 @@ class ChannelTest {
             let ch = chan_bounded { cap = 10 }
             perform LoomAsync in do
                 # Channel was created successfully if we can try_send
-                try_send { ch = ch, value = 42 }
+                try_send { ch = ch, val = 42 }
         """)
         assertEquals(true, result)
     }
@@ -69,7 +69,7 @@ class ChannelTest {
 
             let ch = chan {}
             perform LoomAsync in do
-                send { ch = ch, value = 42 }
+                send { ch = ch, val = 42 }
                 recv { ch = ch }
         """)
         assertEquals(42L, result)
@@ -83,11 +83,11 @@ class ChannelTest {
 
             let ch = chan {}
             perform LoomAsync in do
-                send { ch = ch, value = 1 }
-                send { ch = ch, value = 2 }
-                send { ch = ch, value = 3 }
-                send { ch = ch, value = 4 }
-                send { ch = ch, value = 5 }
+                send { ch = ch, val = 1 }
+                send { ch = ch, val = 2 }
+                send { ch = ch, val = 3 }
+                send { ch = ch, val = 4 }
+                send { ch = ch, val = 5 }
 
                 let a = recv { ch = ch }
                 let b = recv { ch = ch }
@@ -111,7 +111,7 @@ class ChannelTest {
             perform LoomAsync in do
                 close { ch = ch }
                 # try_send should return false on closed channel
-                try_send { ch = ch, value = 42 }
+                try_send { ch = ch, val = 42 }
         """)
         assertEquals(false, result)
     }
@@ -128,7 +128,7 @@ class ChannelTest {
 
             let ch = chan {}
             perform LoomAsync in do
-                try_send { ch = ch, value = 42 }
+                try_send { ch = ch, val = 42 }
         """)
         assertEquals(true, result)
     }
@@ -142,7 +142,7 @@ class ChannelTest {
             let ch = chan {}
             perform LoomAsync in do
                 close { ch = ch }
-                try_send { ch = ch, value = 42 }
+                try_send { ch = ch, val = 42 }
         """)
         assertEquals(false, result)
     }
@@ -155,7 +155,7 @@ class ChannelTest {
 
             let ch = chan {}
             perform LoomAsync in do
-                send { ch = ch, value = 42 }
+                send { ch = ch, val = 42 }
                 match try_recv { ch = ch } is
                     Some { val } -> val
                     None -> -1
@@ -242,8 +242,8 @@ class ChannelTest {
 
             let ch = chan {}
             perform LoomAsync in do
-                send { ch = ch, value = 1 }
-                send { ch = ch, value = 2 }
+                send { ch = ch, val = 1 }
+                send { ch = ch, val = 2 }
                 close { ch = ch }
 
                 # Should still receive queued values
@@ -268,10 +268,10 @@ class ChannelTest {
             let ch2 = chan {}
             perform LoomAsync in do
                 # Send to second channel only
-                send { ch = ch2, value = 42 }
+                send { ch = ch2, val = 42 }
 
                 match recv_any_timeout { channels = [ch1, ch2], ms = 1000 } is
-                    Some { val } -> val.index == 1 && val.value == 42
+                    Some { val } -> val.index == 1 && val.val == 42
                     None -> False
         """)
         assertEquals(true, result)
@@ -287,12 +287,12 @@ class ChannelTest {
             let ch2 = chan {}
             perform LoomAsync in do
                 # Send to both channels
-                send { ch = ch1, value = 1 }
-                send { ch = ch2, value = 2 }
+                send { ch = ch1, val = 1 }
+                send { ch = ch2, val = 2 }
 
                 # Should return first channel's value (index 0)
                 match recv_any_timeout { channels = [ch1, ch2], ms = 1000 } is
-                    Some { val } -> val.index == 0 && val.value == 1
+                    Some { val } -> val.index == 0 && val.val == 1
                     None -> False
         """)
         assertEquals(true, result)
@@ -324,10 +324,10 @@ class ChannelTest {
             let ch1 = chan {}
             let ch2 = chan {}
             perform LoomAsync in do
-                send { ch = ch2, value = 99 }
+                send { ch = ch2, val = 99 }
 
                 match recv_any_timeout { channels = [ch1, ch2], ms = 1000 } is
-                    Some { val } -> val.index == 1 && val.value == 99
+                    Some { val } -> val.index == 1 && val.val == 99
                     None -> False
         """)
         assertEquals(true, result)
@@ -345,7 +345,7 @@ class ChannelTest {
 
             let ch = chan {}
             perform LoomAsync in do
-                send { ch = ch, value = 42 }
+                send { ch = ch, val = 42 }
                 recv { ch = ch }
         """)
         assertEquals(42L, result)
@@ -381,16 +381,16 @@ class ChannelTest {
             perform LoomAsync in do
                     # Producer sends 10 values
                     let producer = Async.spawn { f = {} -> do
-                        send { ch = ch, value = 1 }
-                        send { ch = ch, value = 2 }
-                        send { ch = ch, value = 3 }
-                        send { ch = ch, value = 4 }
-                        send { ch = ch, value = 5 }
-                        send { ch = ch, value = 6 }
-                        send { ch = ch, value = 7 }
-                        send { ch = ch, value = 8 }
-                        send { ch = ch, value = 9 }
-                        send { ch = ch, value = 10 }
+                        send { ch = ch, val = 1 }
+                        send { ch = ch, val = 2 }
+                        send { ch = ch, val = 3 }
+                        send { ch = ch, val = 4 }
+                        send { ch = ch, val = 5 }
+                        send { ch = ch, val = 6 }
+                        send { ch = ch, val = 7 }
+                        send { ch = ch, val = 8 }
+                        send { ch = ch, val = 9 }
+                        send { ch = ch, val = 10 }
                         {}
                     }
 
@@ -424,22 +424,22 @@ class ChannelTest {
             perform LoomAsync in do
                     # Producer 1 sends 1, 2
                     let p1 = Async.spawn { f = {} -> do
-                        send { ch = ch, value = 1 }
-                        send { ch = ch, value = 2 }
+                        send { ch = ch, val = 1 }
+                        send { ch = ch, val = 2 }
                         {}
                     }
 
                     # Producer 2 sends 10, 20
                     let p2 = Async.spawn { f = {} -> do
-                        send { ch = ch, value = 10 }
-                        send { ch = ch, value = 20 }
+                        send { ch = ch, val = 10 }
+                        send { ch = ch, val = 20 }
                         {}
                     }
 
                     # Producer 3 sends 100, 200
                     let p3 = Async.spawn { f = {} -> do
-                        send { ch = ch, value = 100 }
-                        send { ch = ch, value = 200 }
+                        send { ch = ch, val = 100 }
+                        send { ch = ch, val = 200 }
                         {}
                     }
 
@@ -471,7 +471,7 @@ class ChannelTest {
             perform LoomAsync in do
                     # Spawn sender
                     let p = Async.spawn { f = {} -> do
-                        send { ch = ch, value = 42 }
+                        send { ch = ch, val = 42 }
                         {}
                     }
 
@@ -495,7 +495,7 @@ class ChannelTest {
                     # Spawn sender that delays then sends
                     let sender = Async.spawn { f = {} -> do
                         Async.sleep { ms = 50 }
-                        send { ch = ch, value = 42 }
+                        send { ch = ch, val = 42 }
                         {}
                     }
 
@@ -519,7 +519,7 @@ class ChannelTest {
 
             let ch = chan {}
             perform LoomAsync in do
-                send { ch = ch, value = "hello" }
+                send { ch = ch, val = "hello" }
                 recv { ch = ch }
         """)
         assertEquals("hello", result)
@@ -533,7 +533,7 @@ class ChannelTest {
 
             let ch = chan {}
             perform LoomAsync in do
-                send { ch = ch, value = { x = 10, y = 20 } }
+                send { ch = ch, val = { x = 10, y = 20 } }
                 let point = recv { ch = ch }
                 point.x + point.y
         """)
@@ -550,7 +550,7 @@ class ChannelTest {
 
             let ch = chan {}
             perform LoomAsync in do
-                send { ch = ch, value = Pong { value = 42 } }
+                send { ch = ch, val = Pong { value = 42 } }
                 match recv { ch = ch } is
                     Ping -> 0
                     Pong { value } -> value

@@ -11,9 +11,9 @@ impl Eq 'a for Chan 'a where {
 }
 
 impl Chan 'a where {
-  send = { it, value } -> send { ch = it, value = value },
+  send = { it, val } -> send { ch = it, val = val },
   recv = { it } -> recv { ch = it },
-  try_send = { it, value } -> try_send { ch = it, value = value },
+  try_send = { it, val } -> try_send { ch = it, val = val },
   try_recv = { it } -> try_recv { ch = it },
   close = { it } -> close { ch = it },
   is_closed = { it } -> is_closed { ch = it },
@@ -27,9 +27,9 @@ pub let chan_bounded : { cap: Int } -> Chan 'a <Async> = { cap } ->
   __native_channel_make_buffered { capacity = cap }
 
 ## Send a value, parking until the channel has capacity.
-pub let send : { ch: Chan 'a, value: 'a } -> {} <Async, ...> = { ch, value } -> do
+pub let send : { ch: Chan 'a, val: 'a } -> {} <Async, ...> = { ch, val } -> do
   Async.park {
-    predicate = {} -> __native_channel_try_send { ch = ch, value = value },
+    predicate = {} -> __native_channel_try_send { ch = ch, val = val },
   }
 
 ## Receive a value, parking until the channel has one.
@@ -38,11 +38,11 @@ pub let recv : { ch: Chan 'a } -> 'a <Async, ...> = { ch } -> do
   # so the outer call doesn't need to re-poll. If two racing receivers
   # both see Some at the same instant but only one wins the queue
   # element, the loser's slot stays None and we recurse.
-  let slot = atom { value = None }
+  let slot = atom { val = None }
   Async.park {
     predicate = {} -> match __native_channel_try_recv { ch = ch } is
       Some { val } -> do
-        let _ = reset { atom = slot, value = Some { val = val } }
+        let _ = reset { atom = slot, val = Some { val = val } }
         True
       None -> False,
   }
@@ -51,8 +51,8 @@ pub let recv : { ch: Chan 'a } -> 'a <Async, ...> = { ch } -> do
     None -> recv { ch = ch }
 
 ## Try to send without blocking. Returns True on success.
-pub let try_send : { ch: Chan 'a, value: 'a } -> Bool <Async> = { ch, value } ->
-  __native_channel_try_send { ch = ch, value = value }
+pub let try_send : { ch: Chan 'a, val: 'a } -> Bool <Async> = { ch, val } ->
+  __native_channel_try_send { ch = ch, val = val }
 
 ## Try to receive without blocking. Returns None if the channel is empty.
 pub let try_recv : { ch: Chan 'a } -> Option 'a <Async> = { ch } ->
@@ -67,9 +67,9 @@ pub let is_closed : { ch: Chan 'a } -> Bool <Async> = { ch } ->
   __native_channel_is_closed { ch = ch }
 
 ## Receive from the first available channel.
-pub let recv_any : { channels: [Chan 'a] } -> { index: Int, value: 'a } <Async> = { channels } ->
+pub let recv_any : { channels: [Chan 'a] } -> { index: Int, val: 'a } <Async> = { channels } ->
   __native_channel_recv_any { channels = channels }
 
 ## Receive from the first available channel, or None on timeout.
-pub let recv_any_timeout : { channels: [Chan 'a], ms: Int } -> Option { index: Int, value: 'a } <Async> = { channels, ms } ->
+pub let recv_any_timeout : { channels: [Chan 'a], ms: Int } -> Option { index: Int, val: 'a } <Async> = { channels, ms } ->
   __native_channel_recv_any_timeout { channels = channels, ms = ms }

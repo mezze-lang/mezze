@@ -161,7 +161,7 @@ class LatchTest {
             $loomSetup
 
             let l = latch {count = 3}
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Spawn 3 workers that each count down
             let p1 = Async.spawn {f = {} -> do
@@ -195,7 +195,7 @@ class LatchTest {
             $loomSetup
 
             let l = latch {count = 1}
-            let result = atom {value = 0}
+            let result = atom {val = 0}
 
             # Thread 1: Wait for latch, then set result
             let p1 = Async.spawn {f = {} -> do
@@ -229,7 +229,7 @@ class LatchTest {
             $loomSetup
 
             let l = latch {count = 1}
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Spawn 3 threads all waiting on the same latch
             let p1 = Async.spawn {f = {} -> do

@@ -29,7 +29,7 @@ class AgentTest {
 
             perform LoomAsync in do
 
-            let counter = agent {value = 42}
+            let counter = agent {val = 42}
             deref_agent {agent = counter}
         """.trimIndent())
 
@@ -44,7 +44,7 @@ class AgentTest {
 
             perform LoomAsync in do
 
-            let stats = agent {value = {count = 0, sum = 0}}
+            let stats = agent {val = {count = 0, sum = 0}}
             let current = deref_agent {agent = stats}
             current.count
         """.trimIndent())
@@ -62,7 +62,7 @@ class AgentTest {
 
             perform LoomAsync in do
 
-            let counter = agent {value = 0}
+            let counter = agent {val = 0}
             send {agent = counter, f = {current} -> current + 1}
             await_agent {agent = counter}
             deref_agent {agent = counter}
@@ -79,7 +79,7 @@ class AgentTest {
 
             perform LoomAsync in do
 
-            let counter = agent {value = 0}
+            let counter = agent {val = 0}
             send {agent = counter, f = {current} -> current + 1}
             send {agent = counter, f = {current} -> current + 1}
             send {agent = counter, f = {current} -> current + 1}
@@ -99,7 +99,7 @@ class AgentTest {
 
             perform LoomAsync in do
 
-            let counter = agent {value = 1}
+            let counter = agent {val = 1}
             send {agent = counter, f = {current} -> current * 2}  # 2
             send {agent = counter, f = {current} -> current * 2}  # 4
             send {agent = counter, f = {current} -> current * 2}  # 8
@@ -120,7 +120,7 @@ class AgentTest {
 
             perform LoomAsync in do
 
-            let counter = agent {value = 0}
+            let counter = agent {val = 0}
             agent_error {agent = counter}
         """.trimIndent())
 
@@ -136,7 +136,7 @@ class AgentTest {
 
             perform LoomAsync in do
 
-            let counter = agent {value = 0}
+            let counter = agent {val = 0}
             has_error {agent = counter}
         """.trimIndent())
 
@@ -153,7 +153,7 @@ class AgentTest {
 
             perform LoomAsync in do
 
-            let counter = agent {value = 0}
+            let counter = agent {val = 0}
             send {agent = counter, f = {current} -> current + 1}
             await_agent_timeout {agent = counter, timeout_ms = 5000}
         """.trimIndent())
@@ -171,11 +171,11 @@ class AgentTest {
 
             perform LoomAsync in do
 
-            let counter = agent {value = 0}
+            let counter = agent {val = 0}
             send {agent = counter, f = {current} -> current + 10}
             await_agent {agent = counter}
 
-            restart_agent {agent = counter, value = 100}
+            restart_agent {agent = counter, val = 100}
             deref_agent {agent = counter}
         """.trimIndent())
 
@@ -192,7 +192,7 @@ class AgentTest {
 
             perform LoomAsync in do
 
-            let stats = agent {value = {count = 0, sum = 0}}
+            let stats = agent {val = {count = 0, sum = 0}}
             send {agent = stats, f = {current} -> {count = current.count + 1, sum = current.sum + 10}}
             send {agent = stats, f = {current} -> {count = current.count + 1, sum = current.sum + 20}}
             await_agent {agent = stats}
@@ -212,7 +212,7 @@ class AgentTest {
 
             perform LoomAsync in do
 
-            let log = agent {value = "start"}
+            let log = agent {val = "start"}
             send {agent = log, f = {current} -> "updated"}
             await_agent {agent = log}
             deref_agent {agent = log}

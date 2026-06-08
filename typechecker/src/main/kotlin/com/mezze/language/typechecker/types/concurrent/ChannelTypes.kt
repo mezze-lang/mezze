@@ -40,9 +40,9 @@ object ChannelTypes {
                 effects("Async")
             }
 
-            // __native_channel_try_send: { ch: Chan 'a, value: 'a } -> Bool <Async>
+            // __native_channel_try_send: { ch: Chan 'a, val: 'a } -> Bool <Async>
             fn("__native_channel_try_send") {
-                param("ch" to chanType, "value" to elementType)
+                param("ch" to chanType, "val" to elementType)
                 returns(bool)
                 effects("Async")
             }
@@ -68,18 +68,18 @@ object ChannelTypes {
                 effects("Async")
             }
 
-            // __native_channel_recv_any: { channels: [Chan 'a] } -> { index: Int, value: 'a } <Async>
+            // __native_channel_recv_any: { channels: [Chan 'a] } -> { index: Int, val: 'a } <Async>
             fn("__native_channel_recv_any") {
                 param("channels" to seq(chanType))
-                returns(rec("index" to int, "value" to elementType))
+                returns(rec("index" to int, "val" to elementType))
                 effects("Async")
             }
 
-            // __native_channel_recv_any_timeout: { channels: [Chan 'a], ms: Int } -> Option { index: Int, value: 'a } <Async>
+            // __native_channel_recv_any_timeout: { channels: [Chan 'a], ms: Int } -> Option { index: Int, val: 'a } <Async>
             fn("__native_channel_recv_any_timeout") {
                 param("channels" to seq(chanType), "ms" to int)
                 returns(WellKnownTypeApp.of("Option", listOf(
-                    rec("index" to int, "value" to elementType)
+                    rec("index" to int, "val" to elementType)
                 )))
                 effects("Async")
             }

@@ -134,7 +134,7 @@ class AsyncHelpersTest {
             use std::effects::async::atom::{atom, deref, swap}
 
             perform LoomAsync in do
-              let counter = atom { value = 0 }
+              let counter = atom { val = 0 }
               par_for_each { xs = [1, 2, 3, 4, 5], f = { x } -> do
                 let _ = swap { atom = counter, f = { current } -> current + x }
                 {}

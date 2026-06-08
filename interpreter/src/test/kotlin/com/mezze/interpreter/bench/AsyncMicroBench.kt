@@ -378,7 +378,7 @@ class AsyncMicroBench {
                 let send_loop : { n: Int } -> {} <Async, ...> = { n } ->
                     if n <= 0 then {}
                     else do
-                        send { ch = ch, value = n }
+                        send { ch = ch, val = n }
                         send_loop { n = n - 1 }
                 let recv_loop : { n: Int, acc: Int } -> Int <Async, ...> = { n, acc } ->
                     if n <= 0 then acc

@@ -34,11 +34,11 @@ class AutoCancelSiblingsTest {
             use std::effects::async::atom::{ atom, deref, reset }
 
             perform LoomAsync in do
-              let counter = atom { value = 0 }
+              let counter = atom { val = 0 }
               let fast = {} -> 42
               let slow = {} -> do
                 Async.sleep { ms = 200 }
-                let _ = reset { atom = counter, value = 1 }
+                let _ = reset { atom = counter, val = 1 }
                 0
               let pf = Async.spawn { f = fast }
               let ps = Async.spawn { f = slow }
@@ -58,11 +58,11 @@ class AutoCancelSiblingsTest {
             use std::effects::async::atom::{ atom, deref, reset }
 
             perform CoopAsync in do
-              let counter = atom { value = 0 }
+              let counter = atom { val = 0 }
               let fast = {} -> 42
               let slow = {} -> do
                 Async.sleep { ms = 200 }
-                let _ = reset { atom = counter, value = 1 }
+                let _ = reset { atom = counter, val = 1 }
                 0
               let pf = Async.spawn { f = fast }
               let ps = Async.spawn { f = slow }
@@ -102,11 +102,11 @@ class AutoCancelSiblingsTest {
             use std::effects::async::atom::{ atom, deref, reset }
 
             perform LoomAsync in do
-              let counter = atom { value = 0 }
+              let counter = atom { val = 0 }
               let failer = {} -> crash { msg = "boom" }
               let slow = {} -> do
                 Async.sleep { ms = 200 }
-                reset { atom = counter, value = 1 }
+                reset { atom = counter, val = 1 }
                 0
               try_join { l = failer, r = slow }
               Async.sleep { ms = 400 }
@@ -125,11 +125,11 @@ class AutoCancelSiblingsTest {
             use std::effects::async::atom::{ atom, deref, reset }
 
             perform CoopAsync in do
-              let counter = atom { value = 0 }
+              let counter = atom { val = 0 }
               let failer = {} -> crash { msg = "boom" }
               let slow = {} -> do
                 Async.sleep { ms = 200 }
-                reset { atom = counter, value = 1 }
+                reset { atom = counter, val = 1 }
                 0
               try_join { l = failer, r = slow }
               Async.sleep { ms = 400 }
@@ -151,7 +151,7 @@ class AutoCancelSiblingsTest {
             use std::effects::async::atom::{ atom, deref, swap }
 
             perform LoomAsync in do
-              let counter = atom { value = 0 }
+              let counter = atom { val = 0 }
               let bump = {} -> do
                 let _ = swap { atom = counter, f = { current } -> current + 1 }
                 0
@@ -171,7 +171,7 @@ class AutoCancelSiblingsTest {
             use std::effects::async::atom::{ atom, deref, swap }
 
             perform CoopAsync in do
-              let counter = atom { value = 0 }
+              let counter = atom { val = 0 }
               let bump = {} -> do
                 let _ = swap { atom = counter, f = { current } -> current + 1 }
                 0
@@ -190,7 +190,7 @@ class AutoCancelSiblingsTest {
             use std::effects::async::atom::{ atom, deref, swap }
 
             perform LoomAsync in do
-              let counter = atom { value = 0 }
+              let counter = atom { val = 0 }
               let failer = {} -> crash { msg = "boom" }
               let slow1 = {} -> do
                 Async.sleep { ms = 200 }
@@ -217,7 +217,7 @@ class AutoCancelSiblingsTest {
             use std::effects::async::atom::{ atom, deref, swap }
 
             perform CoopAsync in do
-              let counter = atom { value = 0 }
+              let counter = atom { val = 0 }
               let failer = {} -> crash { msg = "boom" }
               let slow1 = {} -> do
                 Async.sleep { ms = 200 }
@@ -244,7 +244,7 @@ class AutoCancelSiblingsTest {
             use std::effects::async::atom::{ atom, deref, swap }
 
             perform LoomAsync in do
-              let counter = atom { value = 0 }
+              let counter = atom { val = 0 }
               let bump = {} -> do
                 let _ = swap { atom = counter, f = { current } -> current + 1 }
                 0
@@ -261,7 +261,7 @@ class AutoCancelSiblingsTest {
             use std::effects::async::atom::{ atom, deref, swap }
 
             perform CoopAsync in do
-              let counter = atom { value = 0 }
+              let counter = atom { val = 0 }
               let bump = {} -> do
                 let _ = swap { atom = counter, f = { current } -> current + 1 }
                 0

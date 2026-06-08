@@ -11,7 +11,7 @@ impl Eq 'a for Atom 'a where {
 
 impl Atom 'a where {
   deref = { it } -> deref { atom = it },
-  reset = { it, value } -> reset { atom = it, value = value },
+  reset = { it, val } -> reset { atom = it, val = val },
   swap = { it, f } -> swap { atom = it, f = f },
   compare_and_set = { it, expected, new } ->
     compare_and_set { atom = it, expected = expected, new = new },
@@ -23,16 +23,16 @@ impl Atom 'a where {
 }
 
 ## Create a new atom with an initial value.
-pub let atom : { value: 'a } -> Atom 'a <Async> = { value } ->
-  __native_atom_new { value = value }
+pub let atom : { val: 'a } -> Atom 'a <Async> = { val } ->
+  __native_atom_new { val = val }
 
 ## Read the current value of an atom (non-blocking).
 pub let deref : { atom: Atom 'a } -> 'a <Async> = { atom } ->
   __native_atom_deref { atom = atom }
 
 ## Set the atom to a new value directly (not atomic with reads -- use swap for CAS).
-pub let reset : { atom: Atom 'a, value: 'a } -> 'a <Async> = { atom, value } ->
-  __native_atom_reset { atom = atom, value = value }
+pub let reset : { atom: Atom 'a, val: 'a } -> 'a <Async> = { atom, val } ->
+  __native_atom_reset { atom = atom, val = val }
 
 ## Atomically apply f to the atom's value, retrying on contention.
 pub let swap : { atom: Atom 'a, f: { current: 'a } -> 'a } -> 'a <Async> = { atom, f } ->
@@ -59,8 +59,8 @@ pub let remove_watch : { atom: Atom 'a, key: Str } -> {} <Async> = { atom, key }
   __native_atom_remove_watch { atom = atom, key = key }
 
 ## Create an atom with a validator that rejects invalid updates.
-pub let atom_validated : { value: 'a, validator: { val: 'a } -> Bool } -> Atom 'a <Async> = { value, validator } ->
-  __native_atom_new_validated { value = value, validator = validator }
+pub let atom_validated : { val: 'a, validator: { val: 'a } -> Bool } -> Atom 'a <Async> = { val, validator } ->
+  __native_atom_new_validated { val = val, validator = validator }
 
 ## Set a validator on an existing atom. Future updates must pass it.
 pub let set_validator : { atom: Atom 'a, validator: { val: 'a } -> Bool } -> {} <Async> = { atom, validator } ->

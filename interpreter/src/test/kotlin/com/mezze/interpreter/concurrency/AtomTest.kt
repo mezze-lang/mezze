@@ -48,7 +48,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 42}
+            let counter = atom {val = 42}
             deref {atom = counter}
         """
         val result = eval(code)
@@ -60,7 +60,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let name = atom {value = "hello"}
+            let name = atom {val = "hello"}
             deref {atom = name}
         """
         val result = eval(code)
@@ -72,8 +72,8 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 0}
-            let _ = reset {atom = counter, value = 100}
+            let counter = atom {val = 0}
+            let _ = reset {atom = counter, val = 100}
             deref {atom = counter}
         """
         val result = eval(code)
@@ -85,8 +85,8 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 0}
-            reset {atom = counter, value = 42}
+            let counter = atom {val = 0}
+            reset {atom = counter, val = 42}
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -101,7 +101,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 10}
+            let counter = atom {val = 10}
             swap {atom = counter, f = {current} -> current + 1}
         """
         val result = eval(code)
@@ -113,7 +113,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 5}
+            let counter = atom {val = 5}
             let _ = swap {atom = counter, f = {current} -> current * 2}
             deref {atom = counter}
         """
@@ -126,7 +126,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
             let _ = swap {atom = counter, f = {current} -> current + 1}
             let _ = swap {atom = counter, f = {current} -> current + 1}
             let _ = swap {atom = counter, f = {current} -> current + 1}
@@ -141,7 +141,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 1}
+            let counter = atom {val = 1}
             let _ = swap {atom = counter, f = {current} -> (current + 1) * 2}  # (1 + 1) * 2 = 4
             let _ = swap {atom = counter, f = {current} -> (current + 1) * 2}  # (4 + 1) * 2 = 10
             deref {atom = counter}
@@ -159,7 +159,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 1}
+            let counter = atom {val = 1}
             compare_and_set {atom = counter, expected = 1, new = 2}
         """
         val result = eval(code)
@@ -171,7 +171,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 1}
+            let counter = atom {val = 1}
             compare_and_set {atom = counter, expected = 999, new = 2}
         """
         val result = eval(code)
@@ -183,7 +183,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 10}
+            let counter = atom {val = 10}
             let _ = compare_and_set {atom = counter, expected = 10, new = 20}
             deref {atom = counter}
         """
@@ -196,7 +196,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 10}
+            let counter = atom {val = 10}
             let _ = compare_and_set {atom = counter, expected = 999, new = 20}
             deref {atom = counter}
         """
@@ -213,7 +213,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Helper to increment N times using explicit iteration
             let increment_10 = {} -> do
@@ -248,7 +248,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let state = atom {value = {count = 0, name = "test"}}
+            let state = atom {val = {count = 0, name = "test"}}
             let current = deref {atom = state}
             current.count
         """
@@ -261,7 +261,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let state = atom {value = {count = 0}}
+            let state = atom {val = {count = 0}}
             let _ = swap {atom = state, f = {current} -> {count = current.count + 1}}
             let _ = swap {atom = state, f = {current} -> {count = current.count + 1}}
             let result = deref {atom = state}
@@ -280,15 +280,15 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 0}
-            let log = atom {value = 0}
+            let counter = atom {val = 0}
+            let log = atom {val = 0}
 
             # Add a watch that records the sum of old + new
             let _ = add_watch {
                 atom = counter,
                 key = "logger",
                 f = {key, old, new} -> do
-                    let _ = reset {atom = log, value = old + new}
+                    let _ = reset {atom = log, val = old + new}
                     {}
             }
 
@@ -307,19 +307,19 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 5}
-            let log = atom {value = 0}
+            let counter = atom {val = 5}
+            let log = atom {val = 0}
 
             let _ = add_watch {
                 atom = counter,
                 key = "logger",
                 f = {key, old, new} -> do
-                    let _ = reset {atom = log, value = old + new}
+                    let _ = reset {atom = log, val = old + new}
                     {}
             }
 
             # reset should trigger the watch
-            let _ = reset {atom = counter, value = 15}
+            let _ = reset {atom = counter, val = 15}
 
             # Watch should have recorded 5 + 15 = 20
             deref {atom = log}
@@ -333,15 +333,15 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 0}
-            let log1 = atom {value = 0}
-            let log2 = atom {value = 0}
+            let counter = atom {val = 0}
+            let log1 = atom {val = 0}
+            let log2 = atom {val = 0}
 
             let _ = add_watch {
                 atom = counter,
                 key = "watch1",
                 f = {key, old, new} -> do
-                    let _ = reset {atom = log1, value = new}
+                    let _ = reset {atom = log1, val = new}
                     {}
             }
 
@@ -349,7 +349,7 @@ class AtomTest {
                 atom = counter,
                 key = "watch2",
                 f = {key, old, new} -> do
-                    let _ = reset {atom = log2, value = new * 2}
+                    let _ = reset {atom = log2, val = new * 2}
                     {}
             }
 
@@ -368,8 +368,8 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 0}
-            let log = atom {value = 0}
+            let counter = atom {val = 0}
+            let log = atom {val = 0}
 
             let _ = add_watch {
                 atom = counter,
@@ -400,14 +400,14 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 0}
-            let key_log = atom {value = "none"}
+            let counter = atom {val = 0}
+            let key_log = atom {val = "none"}
 
             let _ = add_watch {
                 atom = counter,
                 key = "my_watch_key",
                 f = {key, old, new} -> do
-                    let _ = reset {atom = key_log, value = key}
+                    let _ = reset {atom = key_log, val = key}
                     {}
             }
 
@@ -424,8 +424,8 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 0}
-            let call_count = atom {value = 0}
+            let counter = atom {val = 0}
+            let call_count = atom {val = 0}
 
             let _ = add_watch {
                 atom = counter,
@@ -455,7 +455,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let positive = atom_validated {value = 10, validator = {val} -> val >= 0}
+            let positive = atom_validated {val = 10, validator = {val} -> val >= 0}
             deref {atom = positive}
         """
         val result = eval(code)
@@ -467,7 +467,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let positive = atom_validated {value = -5, validator = {val} -> val >= 0}
+            let positive = atom_validated {val = -5, validator = {val} -> val >= 0}
             deref {atom = positive}
         """
         val exception = assertThrows(Exception::class.java) {
@@ -481,7 +481,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let positive = atom_validated {value = 5, validator = {val} -> val >= 0}
+            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
             let _ = swap {atom = positive, f = {current} -> current + 10}
             deref {atom = positive}
         """
@@ -494,7 +494,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let positive = atom_validated {value = 5, validator = {val} -> val >= 0}
+            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
             swap {atom = positive, f = {current} -> current - 100}
         """
         val exception = assertThrows(Exception::class.java) {
@@ -508,8 +508,8 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let positive = atom_validated {value = 5, validator = {val} -> val >= 0}
-            reset {atom = positive, value = -10}
+            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
+            reset {atom = positive, val = -10}
         """
         val exception = assertThrows(Exception::class.java) {
             eval(code)
@@ -522,7 +522,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 10}
+            let counter = atom {val = 10}
             let _ = set_validator {atom = counter, validator = {val} -> val < 100}
 
             # This should be allowed
@@ -538,7 +538,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 10}
+            let counter = atom {val = 10}
             let _ = set_validator {atom = counter, validator = {val} -> val < 100}
 
             # This should fail because 10 + 100 = 110 >= 100
@@ -555,7 +555,7 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
             let _ = swap {atom = counter, f = {current} -> current - 1000}
             deref {atom = counter}
         """
@@ -569,8 +569,8 @@ class AtomTest {
         val code = """
             $atomSetup
 
-            let positive = atom_validated {value = 5, validator = {val} -> val >= 0}
-            let result = atom {value = 0}
+            let positive = atom_validated {val = 5, validator = {val} -> val >= 0}
+            let result = atom {val = 0}
 
             # Try an invalid swap inside a function that catches the error
             # Since Mezze doesn't have try/catch, we'll just verify the atom value is preserved

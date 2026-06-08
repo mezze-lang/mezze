@@ -18,10 +18,10 @@ import com.mezze.language.typechecker.util.WellKnownTypeApp
 object AtomTypes {
 
     fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
-        // __native_atom_new: {value: 'a} -> Atom 'a <Async>
+        // __native_atom_new: {val: 'a} -> Atom 'a <Async>
         fn("__native_atom_new") {
             val a = tvar("a")
-            param("value" to a)
+            param("val" to a)
             returns(WellKnownTypeApp.of("Atom", listOf(a)))
             effects("Async")
         }
@@ -34,10 +34,10 @@ object AtomTypes {
             effects("Async")
         }
 
-        // __native_atom_reset: {atom: Atom 'a, value: 'a} -> 'a <Async>
+        // __native_atom_reset: {atom: Atom 'a, val: 'a} -> 'a <Async>
         fn("__native_atom_reset") {
             val a = tvar("a")
-            param("atom" to WellKnownTypeApp.of("Atom", listOf(a)), "value" to a)
+            param("atom" to WellKnownTypeApp.of("Atom", listOf(a)), "val" to a)
             returns(a)
             effects("Async")
         }
@@ -111,14 +111,14 @@ object AtomTypes {
             effects("Async")
         }
 
-        // __native_atom_new_validated: {value: 'a, validator: {val: 'a} -> Bool} -> Atom 'a <Async>
+        // __native_atom_new_validated: {val: 'a, validator: {val: 'a} -> Bool} -> Atom 'a <Async>
         fn("__native_atom_new_validated") {
             val a = tvar("a")
             val validatorType = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("val" to a)),
                 bool
             )
-            param("value" to a, "validator" to validatorType)
+            param("val" to a, "validator" to validatorType)
             returns(WellKnownTypeApp.of("Atom", listOf(a)))
             effects("Async")
         }

@@ -19,11 +19,11 @@ class SemaphoreUnderBothSchedulersTest {
 
         perform $handler in do
           let s = semaphore { permits = 1 }
-          let counter = atom { value = 0 }
+          let counter = atom { val = 0 }
           let bump = {} -> do
             acquire_async { sem = s }
             let v = deref { atom = counter }
-            let _ = reset { atom = counter, value = v + 1 }
+            let _ = reset { atom = counter, val = v + 1 }
             release { sem = s }
           let p1 = Async.spawn { f = bump }
           let p2 = Async.spawn { f = bump }

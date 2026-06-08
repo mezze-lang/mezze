@@ -19,10 +19,10 @@ import com.mezze.language.typechecker.util.WellKnownTypeApp
 object AgentTypes {
 
     fun registerAll(context: MutableMap<String, MezzeType>) = natives(context) {
-        // __native_agent_new: {value: 'a} -> Agent 'a <Async>
+        // __native_agent_new: {val: 'a} -> Agent 'a <Async>
         fn("__native_agent_new") {
             val a = tvar("a")
-            param("value" to a)
+            param("val" to a)
             returns(WellKnownTypeApp.of("Agent", listOf(a)))
             effects("Async")
         }
@@ -83,10 +83,10 @@ object AgentTypes {
             effects("Async")
         }
 
-        // __native_agent_restart: {agent: Agent 'a, value: 'a} -> {} <Async>
+        // __native_agent_restart: {agent: Agent 'a, val: 'a} -> {} <Async>
         fn("__native_agent_restart") {
             val a = tvar("a")
-            param("agent" to WellKnownTypeApp.of("Agent", listOf(a)), "value" to a)
+            param("agent" to WellKnownTypeApp.of("Agent", listOf(a)), "val" to a)
             returns(unit)
             effects("Async")
         }

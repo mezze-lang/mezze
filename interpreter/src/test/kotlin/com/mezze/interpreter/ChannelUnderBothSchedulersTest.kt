@@ -25,9 +25,9 @@ class ChannelUnderBothSchedulersTest {
         perform $handler in do
           let ch = chan_bounded { cap = 2 }
           let producer = Async.spawn { f = {} -> do
-            send { ch = ch, value = 10 }
-            send { ch = ch, value = 20 }
-            send { ch = ch, value = 30 }
+            send { ch = ch, val = 10 }
+            send { ch = ch, val = 20 }
+            send { ch = ch, val = 30 }
           }
           let v1 = recv { ch = ch }
           let v2 = recv { ch = ch }

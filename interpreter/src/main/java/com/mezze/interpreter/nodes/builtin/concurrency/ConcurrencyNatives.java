@@ -465,13 +465,13 @@ public final class ConcurrencyNatives {
 
     @TruffleBoundary
     public static MezzeAtom atomNew(MezzeRecord args) {
-        Object value = getField(args, "value");
+        Object value = getField(args, "val");
         return new MezzeAtom(value);
     }
 
     @TruffleBoundary
     public static MezzeAtom atomNewValidated(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        Object value = getField(args, "value");
+        Object value = getField(args, "val");
         MezzeFunction validator = getFunction(args, "validator");
 
         // Create atom with validator and validate initial value
@@ -500,7 +500,7 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static Object atomReset(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeAtom atom = getAtom(args, "atom");
-        Object value = getField(args, "value");
+        Object value = getField(args, "val");
         atom.reset(value, callNode);
         return value;  // Return the new value
     }
@@ -509,7 +509,7 @@ public final class ConcurrencyNatives {
     public static Object atomSwap(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         // Simple value replacement version (no function callback)
         MezzeAtom atom = getAtom(args, "atom");
-        Object val = getField(args, "value");
+        Object val = getField(args, "val");
         return atom.swap(val, callNode);
     }
 
@@ -841,7 +841,7 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static boolean channelTrySend(MezzeRecord args) {
         MezzeChannel ch = getChannel(args, "ch");
-        Object val = getField(args, "value");
+        Object val = getField(args, "val");
         if (ch.isClosed()) return false;
         return ch.queue.offer(val);
     }
@@ -870,7 +870,7 @@ public final class ConcurrencyNatives {
             Object val = ch.queue.poll();
             if (val != null) {
                 return createSome(MezzeRecord.fromFields(
-                    new String[]{"index", "value"},
+                    new String[]{"index", "val"},
                     new Object[]{(long) i, val}
                 ));
             }
@@ -898,7 +898,7 @@ public final class ConcurrencyNatives {
                 Object val = ch.queue.poll();
                 if (val != null) {
                     return createSome(MezzeRecord.fromFields(
-                        new String[]{"index", "value"},
+                        new String[]{"index", "val"},
                         new Object[]{(long) i, val}
                     ));
                 }
@@ -1152,7 +1152,7 @@ public final class ConcurrencyNatives {
 
     @TruffleBoundary
     public static MezzeAgent agentNew(MezzeRecord args) {
-        Object value = getField(args, "value");
+        Object value = getField(args, "val");
         return new MezzeAgent(value);
     }
 
@@ -2542,7 +2542,7 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord agentRestart(MezzeRecord args) {
         MezzeAgent agent = getAgent(args, "agent");
-        Object value = getField(args, "value");
+        Object value = getField(args, "val");
         agent.clearError(value);
         return MezzeRecord.empty();
     }

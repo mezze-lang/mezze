@@ -34,8 +34,8 @@ class CoopParkTest {
             use std::effects::async::atom::{atom, deref, reset}
 
             perform CoopAsync in do
-              let flag = atom { value = 0 }
-              let _ = Async.spawn { f = {} -> reset { atom = flag, value = 1 } }
+              let flag = atom { val = 0 }
+              let _ = Async.spawn { f = {} -> reset { atom = flag, val = 1 } }
               Async.park { predicate = {} -> deref { atom = flag } == 1 }
               deref { atom = flag }
         """.trimIndent()

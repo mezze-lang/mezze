@@ -107,17 +107,17 @@ class SmartEffectSchedulerBasicTest {
             $loomSetup
             $atomSetup
 
-            let a = atom {value = 0}
-            let b = atom {value = 0}
+            let a = atom {val = 0}
+            let b = atom {val = 0}
 
             let op1 = Async.spawn {f = {} -> do
                 let _ = Async.sleep {ms = 10}
-                reset {atom = a, value = 1}
+                reset {atom = a, val = 1}
             }
 
             let op2 = Async.spawn {f = {} -> do
                 let _ = Async.sleep {ms = 10}
-                reset {atom = b, value = 2}
+                reset {atom = b, val = 2}
             }
 
             let _ = unwrap { result = Async.await {p = op1} }
@@ -141,10 +141,10 @@ class SmartEffectSchedulerBasicTest {
             $loomSetup
             $atomSetup
 
-            let shared = atom {value = 0}
+            let shared = atom {val = 0}
 
             # op1 writes to shared
-            let op1 = Async.spawn {f = {} -> reset {atom = shared, value = 42}}
+            let op1 = Async.spawn {f = {} -> reset {atom = shared, val = 42}}
 
             # Wait for op1 to complete before op2 reads
             let _ = unwrap { result = Async.await {p = op1} }
@@ -165,12 +165,12 @@ class SmartEffectSchedulerBasicTest {
             $loomSetup
             $atomSetup
 
-            let x = atom {value = 0}
+            let x = atom {val = 0}
 
             # Sequence: write x, then read x
             let writer = Async.spawn {f = {} -> do
                 let _ = Async.sleep {ms = 5}
-                reset {atom = x, value = 100}
+                reset {atom = x, val = 100}
             }
 
             let _ = unwrap { result = Async.await {p = writer} }
@@ -194,23 +194,23 @@ class SmartEffectSchedulerBasicTest {
             $loomSetup
             $atomSetup
 
-            let x = atom {value = 0}
-            let y = atom {value = 0}
-            let z = atom {value = 0}
+            let x = atom {val = 0}
+            let y = atom {val = 0}
+            let z = atom {val = 0}
 
             # op1: writes x
-            let op1 = Async.spawn {f = {} -> reset {atom = x, value = 1}}
+            let op1 = Async.spawn {f = {} -> reset {atom = x, val = 1}}
             let _ = unwrap { result = Async.await {p = op1} }
 
             # op2: reads x, writes y (depends on op1)
             let op2 = Async.spawn {f = {} -> do
                 let xVal = deref {atom = x}
-                reset {atom = y, value = xVal + 1}
+                reset {atom = y, val = xVal + 1}
             }
             let _ = unwrap { result = Async.await {p = op2} }
 
             # op3: writes z (independent of op1, op2)
-            let op3 = Async.spawn {f = {} -> reset {atom = z, value = 10}}
+            let op3 = Async.spawn {f = {} -> reset {atom = z, val = 10}}
             let _ = unwrap { result = Async.await {p = op3} }
 
             # Verify final state
@@ -228,7 +228,7 @@ class SmartEffectSchedulerBasicTest {
             $loomSetup
             $atomSetup
 
-            let results = atom {value = []}
+            let results = atom {val = []}
 
             # Three independent operations - all are "roots"
             let op1 = Async.spawn {f = {} -> 1}
@@ -257,14 +257,14 @@ class SmartEffectSchedulerBasicTest {
             $loomSetup
             $atomSetup
 
-            let a = atom {value = 0}
-            let b = atom {value = 0}
-            let c = atom {value = 0}
+            let a = atom {val = 0}
+            let b = atom {val = 0}
+            let c = atom {val = 0}
 
             # All three are independent and can be grouped
-            let op1 = Async.spawn {f = {} -> reset {atom = a, value = 10}}
-            let op2 = Async.spawn {f = {} -> reset {atom = b, value = 20}}
-            let op3 = Async.spawn {f = {} -> reset {atom = c, value = 30}}
+            let op1 = Async.spawn {f = {} -> reset {atom = a, val = 10}}
+            let op2 = Async.spawn {f = {} -> reset {atom = b, val = 20}}
+            let op3 = Async.spawn {f = {} -> reset {atom = c, val = 30}}
 
             let _ = unwrap { result = Async.await {p = op1} }
             let _ = unwrap { result = Async.await {p = op2} }
@@ -284,7 +284,7 @@ class SmartEffectSchedulerBasicTest {
             $loomSetup
             $atomSetup
 
-            let x = atom {value = 1}
+            let x = atom {val = 1}
 
             # First group: write x
             let group1Op = Async.spawn {f = {} -> swap {atom = x, f = {current} -> current * 2}}
@@ -310,7 +310,7 @@ class SmartEffectSchedulerBasicTest {
             $loomSetup
             $atomSetup
 
-            let state = atom {value = 0}
+            let state = atom {val = 0}
 
             # Phase 1: Independent initialization
             let init1 = Async.spawn {f = {} -> 10}
@@ -383,12 +383,12 @@ class SmartEffectSchedulerBasicTest {
             $loomSetup
             $atomSetup
 
-            let a = atom {value = 0}
-            let b = atom {value = 0}
+            let a = atom {val = 0}
+            let b = atom {val = 0}
 
             # These two operations are independent and could merge
-            let op1 = Async.spawn {f = {} -> reset {atom = a, value = 5}}
-            let op2 = Async.spawn {f = {} -> reset {atom = b, value = 10}}
+            let op1 = Async.spawn {f = {} -> reset {atom = a, val = 5}}
+            let op2 = Async.spawn {f = {} -> reset {atom = b, val = 10}}
 
             let _ = unwrap { result = Async.await {p = op1} }
             let _ = unwrap { result = Async.await {p = op2} }

@@ -31,7 +31,7 @@ class NewtypeImplRuntimeTest {
         void atomEqSameReference() {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::atom::{Atom, atom}
-                let a = atom {value = 42}
+                let a = atom {val = 42}
                 a == a
                 """);
             assertEquals(true, result);
@@ -41,8 +41,8 @@ class NewtypeImplRuntimeTest {
         void atomEqDifferentReferences() {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::atom::{Atom, atom}
-                let a1 = atom {value = 42}
-                let a2 = atom {value = 42}
+                let a1 = atom {val = 42}
+                let a2 = atom {val = 42}
                 a1 == a2
                 """);
             assertEquals(false, result);
@@ -52,8 +52,8 @@ class NewtypeImplRuntimeTest {
         void atomNeq() {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::atom::{Atom, atom}
-                let a1 = atom {value = 1}
-                let a2 = atom {value = 1}
+                let a1 = atom {val = 1}
+                let a2 = atom {val = 1}
                 a1 != a2
                 """);
             assertEquals(true, result);
@@ -63,7 +63,7 @@ class NewtypeImplRuntimeTest {
         void atomDerefMethod() {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::atom::{Atom, atom}
-                let a = atom {value = 99}
+                let a = atom {val = 99}
                 a.deref {}
                 """);
             assertEquals(99L, result);
@@ -73,8 +73,8 @@ class NewtypeImplRuntimeTest {
         void atomResetMethod() {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::atom::{Atom, atom}
-                let a = atom {value = 10}
-                let _ = a.reset {value = 20}
+                let a = atom {val = 10}
+                let _ = a.reset {val = 20}
                 a.deref {}
                 """);
             assertEquals(20L, result);
@@ -84,7 +84,7 @@ class NewtypeImplRuntimeTest {
         void atomSwapMethod() {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::atom::{Atom, atom}
-                let a = atom {value = 5}
+                let a = atom {val = 5}
                 let _ = a.swap {f = {current} -> current + 10}
                 a.deref {}
                 """);

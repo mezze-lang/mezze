@@ -52,7 +52,7 @@ class StructuredConcurrencyTest {
             $loomSetup
             $atomSetup
 
-            let completedTasks = atom {value = 0}
+            let completedTasks = atom {val = 0}
 
             # Submit 5 tasks
             let t1 = Async.spawn {f = {} -> do
@@ -102,7 +102,7 @@ class StructuredConcurrencyTest {
             $loomSetup
             $atomSetup
 
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Run 3 tasks
             let t1 = Async.spawn {f = {} -> do
@@ -136,8 +136,8 @@ class StructuredConcurrencyTest {
             $loomSetup
             $atomSetup
 
-            let outerResults = atom {value = 0}
-            let innerResults = atom {value = 0}
+            let outerResults = atom {val = 0}
+            let innerResults = atom {val = 0}
 
             let parent = Async.spawn {f = {} -> do
                 let _ = swap {atom = outerResults, f = {current} -> current + 1}
@@ -188,7 +188,7 @@ class StructuredConcurrencyTest {
             $loomSetup
             $atomSetup
 
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Spawn 3 tasks that each sleep for 200ms
             let t1 = Async.spawn {f = {} -> do
@@ -229,8 +229,8 @@ class StructuredConcurrencyTest {
             $loomSetup
             $atomSetup
 
-            let totalSpawned = atom {value = 0}
-            let totalCompleted = atom {value = 0}
+            let totalSpawned = atom {val = 0}
+            let totalCompleted = atom {val = 0}
 
             # Track spawning
             let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
@@ -276,14 +276,14 @@ class StructuredConcurrencyTest {
             $loomSetup
             $atomSetup
 
-            let parentValue = atom {value = 0}
-            let childValue = atom {value = 0}
+            let parentValue = atom {val = 0}
+            let childValue = atom {val = 0}
 
             let parent = Async.spawn {f = {} -> do
-                let _ = reset {atom = parentValue, value = 10}
+                let _ = reset {atom = parentValue, val = 10}
 
                 let child = Async.spawn {f = {} -> do
-                    let _ = reset {atom = childValue, value = 20}
+                    let _ = reset {atom = childValue, val = 20}
                     "child done"
                 }
                 let _ = unwrap { result = Async.await {p = child} }
@@ -371,7 +371,7 @@ class StructuredConcurrencyTest {
             $loomSetup
             $atomSetup
 
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Spawn 3 threads that each increment 10 times
             let increment_10 = {} -> do
@@ -576,7 +576,7 @@ class StructuredConcurrencyTest {
             $loomSetup
             $atomSetup
 
-            let results = atom {value = ""}
+            let results = atom {val = ""}
 
             let t1 = Async.spawn {f = {} -> do
                 let _ = Async.sleep {ms = 50}
@@ -611,7 +611,7 @@ class StructuredConcurrencyTest {
             $loomSetup
             $atomSetup
 
-            let data = atom {value = list::empty {}}
+            let data = atom {val = list::empty {}}
 
             let t1 = Async.spawn {f = {} -> do
                 let _ = Async.sleep {ms = 10}

@@ -86,7 +86,7 @@ class LoomConcurrencyManagerTest {
             $loomSetup
             $atomSetup
 
-            let results = atom {value = 0}
+            let results = atom {val = 0}
 
             # Submit multiple tasks
             let t1 = Async.spawn {f = {} -> do
@@ -127,7 +127,7 @@ class LoomConcurrencyManagerTest {
             $loomSetup
             $atomSetup
 
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Spawn 5 tasks that each increment counter
             let t1 = Async.spawn {f = {} -> do
@@ -223,8 +223,8 @@ class LoomConcurrencyManagerTest {
             $loomSetup
             $atomSetup
 
-            let totalSpawned = atom {value = 0}
-            let totalCompleted = atom {value = 0}
+            let totalSpawned = atom {val = 0}
+            let totalCompleted = atom {val = 0}
 
             # Track spawning
             let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
@@ -269,14 +269,14 @@ class LoomConcurrencyManagerTest {
             $loomSetup
             $atomSetup
 
-            let parentValue = atom {value = 0}
-            let childValue = atom {value = 0}
+            let parentValue = atom {val = 0}
+            let childValue = atom {val = 0}
 
             let parent = Async.spawn {f = {} -> do
-                let _ = reset {atom = parentValue, value = 10}
+                let _ = reset {atom = parentValue, val = 10}
 
                 let child = Async.spawn {f = {} -> do
-                    let _ = reset {atom = childValue, value = 20}
+                    let _ = reset {atom = childValue, val = 20}
                     "child done"
                 }
                 let _ = unwrap { result = Async.await {p = child} }
@@ -360,7 +360,7 @@ class LoomConcurrencyManagerTest {
             $loomSetup
             $atomSetup
 
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Spawn 10 threads that each increment 10 times
             let increment_10 = {} -> do

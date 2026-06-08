@@ -165,7 +165,7 @@ class WaitGroupTest {
             $loomSetup
 
             let wg = wait_group {}
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Add 3 tasks
             let _ = add {wg = wg, delta = 3}
@@ -202,7 +202,7 @@ class WaitGroupTest {
             $loomSetup
 
             let wg = wait_group {}
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Add tasks one at a time
             let _ = add {wg = wg, delta = 1}
@@ -240,7 +240,7 @@ class WaitGroupTest {
             $loomSetup
 
             let wg = wait_group {}
-            let result = atom {value = 0}
+            let result = atom {val = 0}
 
             let _ = add {wg = wg, delta = 1}
 

@@ -153,16 +153,16 @@ class MutexTest {
             $loomSetup
 
             let m = mutex {}
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Function that increments counter 5 times with mutex protection
             let increment_5 = {} -> do
                 with_lock {mutex = m, f = {} -> do
-                    let _ = reset {atom = counter, value = deref {atom = counter} + 1}
-                    let _ = reset {atom = counter, value = deref {atom = counter} + 1}
-                    let _ = reset {atom = counter, value = deref {atom = counter} + 1}
-                    let _ = reset {atom = counter, value = deref {atom = counter} + 1}
-                    reset {atom = counter, value = deref {atom = counter} + 1}
+                    let _ = reset {atom = counter, val = deref {atom = counter} + 1}
+                    let _ = reset {atom = counter, val = deref {atom = counter} + 1}
+                    let _ = reset {atom = counter, val = deref {atom = counter} + 1}
+                    let _ = reset {atom = counter, val = deref {atom = counter} + 1}
+                    reset {atom = counter, val = deref {atom = counter} + 1}
                 }
 
             # Spawn 3 threads
@@ -217,7 +217,7 @@ class MutexTest {
             $loomSetup
 
             let m = mutex {}
-            let try_result = atom {value = True}
+            let try_result = atom {val = True}
 
             # Thread 1 holds lock for a while
             let p1 = Async.spawn {f = {} -> do
@@ -232,7 +232,7 @@ class MutexTest {
             # Thread 2 tries to acquire - should fail
             let p2 = Async.spawn {f = {} -> do
                 let acquired = try_lock {mutex = m}
-                let _ = reset {atom = try_result, value = acquired}
+                let _ = reset {atom = try_result, val = acquired}
                 if acquired then unlock {mutex = m} else {}
             }
 

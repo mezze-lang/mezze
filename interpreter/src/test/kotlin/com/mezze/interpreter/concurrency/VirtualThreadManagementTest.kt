@@ -90,7 +90,7 @@ class VirtualThreadManagementTest {
             $loomSetup
             $atomSetup
 
-            let results = atom {value = 0}
+            let results = atom {val = 0}
 
             # Spawn multiple threads that each sleep briefly and increment counter
             let t1 = Async.spawn {f = {} -> do
@@ -147,7 +147,7 @@ class VirtualThreadManagementTest {
             $loomSetup
             $atomSetup
 
-            let contextCounter = atom {value = 0}
+            let contextCounter = atom {val = 0}
 
             # Each thread captures its context (closure) and increments counter
             let t1 = Async.spawn {f = {} -> do
@@ -187,7 +187,7 @@ class VirtualThreadManagementTest {
             $loomSetup
             $atomSetup
 
-            let successCounter = atom {value = 0}
+            let successCounter = atom {val = 0}
 
             # Spawn threads that complete independently
             let t1 = Async.spawn {f = {} -> do
@@ -226,8 +226,8 @@ class VirtualThreadManagementTest {
             $loomSetup
             $atomSetup
 
-            let totalSpawned = atom {value = 0}
-            let totalCompleted = atom {value = 0}
+            let totalSpawned = atom {val = 0}
+            let totalCompleted = atom {val = 0}
 
             # Track spawning and completion
             let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
@@ -288,14 +288,14 @@ class VirtualThreadManagementTest {
             $loomSetup
             $atomSetup
 
-            let parentValue = atom {value = 0}
-            let childValue = atom {value = 0}
+            let parentValue = atom {val = 0}
+            let childValue = atom {val = 0}
 
             let parent = Async.spawn {f = {} -> do
-                let _ = reset {atom = parentValue, value = 10}
+                let _ = reset {atom = parentValue, val = 10}
 
                 let child = Async.spawn {f = {} -> do
-                    let _ = reset {atom = childValue, value = 20}
+                    let _ = reset {atom = childValue, val = 20}
                     "child done"
                 }
                 let _ = unwrap { result = Async.await {p = child} }
@@ -349,7 +349,7 @@ class VirtualThreadManagementTest {
             $loomSetup
             $atomSetup
 
-            let counter = atom {value = 0}
+            let counter = atom {val = 0}
 
             # Spawn 20 threads that each increment counter
             let t1 = Async.spawn {f = {} -> swap {atom = counter, f = {current} -> current + 1}}
@@ -417,11 +417,11 @@ class VirtualThreadManagementTest {
             $loomSetup
             $atomSetup
 
-            let contextValue = atom {value = "initial"}
+            let contextValue = atom {val = "initial"}
 
             let thread = Async.spawn {f = {} -> do
                 # Set context value before suspension
-                let _ = reset {atom = contextValue, value = "test-value"}
+                let _ = reset {atom = contextValue, val = "test-value"}
 
                 # Suspension point 1
                 let _ = Async.sleep {ms = 50}

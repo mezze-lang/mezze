@@ -20,11 +20,11 @@ class MutexUnderBothSchedulersTest {
 
         perform $handler in do
           let m = mutex {}
-          let counter = atom { value = 0 }
+          let counter = atom { val = 0 }
           let bump = {} -> do
             lock_async { mutex = m }
             let v = deref { atom = counter }
-            let _ = reset { atom = counter, value = v + 1 }
+            let _ = reset { atom = counter, val = v + 1 }
             unlock { mutex = m }
           let p1 = Async.spawn { f = bump }
           let p2 = Async.spawn { f = bump }

@@ -114,7 +114,7 @@ class ParallelErrorPropagationTest {
             $loomSetup
             $atomSetup
 
-            let execution_count = atom {value = 0}
+            let execution_count = atom {val = 0}
 
             let p1 = Async.spawn {f = {} -> do
                 let _ = swap {atom = execution_count, f = {current} -> current + 1}
@@ -318,11 +318,11 @@ class ParallelErrorPropagationTest {
             $loomSetup
             $atomSetup
 
-            let executed = atom {value = False}
+            let executed = atom {val = False}
 
             let op = Async.spawn {f = {} -> do
                 let _ = Async.sleep {ms = 500}
-                let _ = reset {atom = executed, value = True}
+                let _ = reset {atom = executed, val = True}
                 42
             }
 
