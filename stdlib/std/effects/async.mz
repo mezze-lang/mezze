@@ -144,6 +144,30 @@ pub type CancelOutcome = |
   NotCancellable,
 |
 
+## How `scoped_with` decides when to stop waiting for its children.
+##
+## - `OnFailure`    — wait for everyone; bail early on the first failure
+## - `OnSuccess`    — first success wins; cancel the rest
+## - `OnAllSettled` — wait for everyone; return per-item Results
+## - `OnFirst`      — first to settle (success or failure) wins; cancel the rest
+pub type JoinPolicy = |
+  OnFailure,
+  OnSuccess,
+  OnAllSettled,
+  OnFirst,
+|
+
+## Per-policy outcome of `scoped_with`. Pattern-match exhaustiveness
+## guarantees you handle every case the chosen policy can produce.
+pub type JoinOutcome 'a = |
+  OnFailureOutcome   { results: ['a] },
+  OnFailureCaught    { failed_at: Int, err: AsyncError, partial: [Option 'a] },
+  OnSuccessOutcome   { winner: 'a, losers_cancelled: Int },
+  OnSuccessAllFailed { errs: [AsyncError] },
+  OnAllOutcome       { results: [Result 'a AsyncError] },
+  OnFirstOutcome     { result: Result 'a AsyncError, settled_at: Int, cancelled: Int },
+|
+
 ## Unified async effect for spawning, awaiting, and structured concurrency.
 ##
 ## The effect carries only the primitives that a handler must implement.
@@ -173,8 +197,12 @@ effect Async where {
   is_cancelled: {} -> Bool <Async>,
   ## Cancellation checkpoint -- throws if cancelled.
   check: {} -> {} <Async>,
-  ## Run f within a structured concurrency scope.
-  scoped: { f: { sc: Scope 'a } -> 'a <...> } -> 'a <Async, ...>,
+  ## Run f within a structured concurrency scope. The Scope's phantom
+  ## type 'a is independent of the body's return type 'b — the body can
+  ## return any value, not just the Scope's phantom. (#239: needed so
+  ## `scoped_with` can build a [Promise 'a] in the body and return a
+  ## JoinOutcome 'a aggregate.)
+  scoped: { f: { sc: Scope 'a } -> 'b <...> } -> 'b <Async, ...>,
   ## Suspend until {@code predicate} returns True. How "suspend" is
   ## realized depends on the handler.
   park: { predicate: {} -> Bool <...> } -> {} <Async, ...>
@@ -516,6 +544,26 @@ pub let scope_get_token : { sc: Scope 'a } -> CancellationToken = { sc } ->
 ## Check if a scope has been cancelled.
 pub let scope_is_cancelled : { sc: Scope 'a } -> Bool = { sc } ->
   __native_async_scope_is_cancelled { sc = sc }
+
+# ============================================================================
+# scoped_with — policy-driven structured concurrency over Async.scoped
+#
+# Wraps Async.scoped: the body spawns children into `sc` and returns the
+# [Promise 'a] list of what it spawned. scoped_with parks on those
+# promises according to `policy`, cancels losers, and constructs the
+# appropriate JoinOutcome arm.
+#
+# v0: implements OnAllSettled only — always returns OnAllOutcome
+# regardless of `policy`. The match-on-JoinPolicy slot-shift bug
+# (#239) that blocked the four-policy semantics has been fixed in the
+# typechecker; per-policy dispatch can land next.
+# ============================================================================
+
+pub let scoped_with : { policy: JoinPolicy, body: { sc: Scope 'a } -> [Promise 'a] <Async, ...> } -> JoinOutcome 'a <Async, ...> =
+  { policy, body } -> Async.scoped { f = { sc } -> do
+    let ps = body { sc = sc }
+    OnAllOutcome { results = all { ps = ps } }
+  }
 
 # ============================================================================
 # Cancellation tokens
