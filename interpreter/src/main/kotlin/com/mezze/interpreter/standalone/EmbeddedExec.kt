@@ -311,6 +311,18 @@ object EmbeddedExec {
             ).buildLiteral()
             mark("source built — calling context.eval()")
 
+            // AppCDS training mode: by this point Engine + Context + language
+            // are loaded and all Truffle/Polyglot infrastructure classes have
+            // been touched. Skip the actual user-code eval so we can capture
+            // a class-data-sharing archive without executing main(). The
+            // build pipeline runs the jar once with this flag set, captures
+            // the .jsa, then the launcher uses it on real runs to shave
+            // ~50% off cold start. (#215)
+            if (System.getenv("MEZZE_CDS_DRYRUN") == "1") {
+                mark("CDS_DRYRUN — skipping context.eval()")
+                return
+            }
+
             context.eval(source)
             mark("context.eval() returned")
         } finally {
