@@ -311,7 +311,17 @@ public final class MezzeFunctionRootNode extends RootNode {
         @Override
         public Object executeRepeatingWithValue(VirtualFrame frame) {
             try {
-                return bodyNode.execute(frame);
+                Object result = bodyNode.execute(frame);
+                // Throw-free self-tail-call path: a TailContinueScalarNode
+                // deep in the body has already written new param values to
+                // the frame and returned this sentinel. Just loop. The
+                // sentinel propagates up through IfNode/BlockNode/etc.
+                // because those container nodes return their last
+                // expression's value untouched. (#100)
+                if (result == TailLoopContinue.INSTANCE) {
+                    return CONTINUE_LOOP_STATUS;
+                }
+                return result;
             } catch (TailCallScalarException tse) {
                 // Tail call to SELF: rebind frame args, continue the loop.
                 // Tail call to ANOTHER function (e.g. lambda body whose only

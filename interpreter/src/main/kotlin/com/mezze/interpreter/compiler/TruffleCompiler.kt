@@ -70,6 +70,34 @@ class TruffleCompiler(
      */
     private val compilingFunctions = mutableSetOf<com.mezze.language.typedast.Hash>()
 
+    /**
+     * Per-function compile context. Set by `compile(ir)` before walking the
+     * body. Read by `compileNodeImpl` at `CallDirectIR` sites to detect
+     * self-tail-calls in a "tail-loop eligible" function and emit a
+     * throw-free TailContinueScalarNode instead of the
+     * TailCallDirectScalarNode trampoline. (#100)
+     */
+    private data class TailLoopCtx(
+        val selfHash: com.mezze.language.typedast.Hash,
+        val paramKinds: IntArray,         // 0=LONG, 1=DOUBLE, 2=BOOLEAN, 3=OBJECT
+        val paramSlotIndices: IntArray,   // closureCount + i for each param
+    )
+    private var currentTailLoopCtx: TailLoopCtx? = null
+
+    /**
+     * Default OFF — opt in with MEZZE_TAIL_LOOP=1. The throw-free continue
+     * path is correct (all 5262 interpreter tests pass) but on JIT-on JVM
+     * measured roughly neutral vs the existing TailCallScalarException
+     * throw path on the perf-isolate micro-benches (N=10M): Truffle's
+     * partial-evaluator + escape analysis is already eliminating the
+     * exception alloc and throw/catch transition. Keeping the code as
+     * opt-in infrastructure for environments where EA is weaker (e.g.
+     * AOT native-image without Graal compiler) or as a base for future
+     * loop-shape rewrites. See #100, #110.
+     */
+    private val tailLoopDisabled: Boolean =
+        System.getenv("MEZZE_TAIL_LOOP") != "1"
+
     /** Register all FunctionIRs so MakeLambdaIR can find them */
     fun registerFunctions(functions: List<FunctionIR>) {
         for (fn in functions) {
@@ -89,7 +117,17 @@ class TruffleCompiler(
     fun compile(ir: FunctionIR): com.oracle.truffle.api.nodes.RootNode {
         val source = getOrCreateSource(ir.sourceFile)
         val frameDescriptor = buildFrameDescriptor(ir)
-        val bodyNode = compileNode(ir.body, source)
+
+        // Decide tail-loop eligibility BEFORE compiling the body so that
+        // CallDirectIR sites inside compileNodeImpl can pick the throw-free
+        // node when self-tail-calls match this function.
+        val prevCtx = currentTailLoopCtx
+        currentTailLoopCtx = computeTailLoopCtx(ir)
+        val bodyNode = try {
+            compileNode(ir.body, source)
+        } finally {
+            currentTailLoopCtx = prevCtx
+        }
 
         val section = createSourceSection(source, ir.sourceSection)
 
@@ -252,9 +290,25 @@ class TruffleCompiler(
                     // Scalar ABI: positional values in callee param order, no record allocation.
                     val argsArray = argNodes.toTypedArray()
                     if (node.isTailCall) {
-                        com.mezze.interpreter.nodes.function.TailCallDirectScalarNode(
-                            node.targetHash, node.targetHash.toString(), argsArray
-                        )
+                        // Tail-loop fast path: if this whole function was
+                        // marked tail-loop eligible (every tail call is
+                        // self-scalar with matching arity), emit the
+                        // throw-free TailContinueScalarNode. The body
+                        // returns a sentinel that BodyRepeatingNode
+                        // recognises and continues the LoopNode driver.
+                        // No exception, no Object[] payload, no virtual
+                        // catch across nested nodes. (#100)
+                        val ctx = currentTailLoopCtx
+                        if (ctx != null && ctx.selfHash == node.targetHash &&
+                            argsArray.size == ctx.paramSlotIndices.size) {
+                            com.mezze.interpreter.nodes.function.TailContinueScalarNode(
+                                argsArray, ctx.paramSlotIndices, ctx.paramKinds
+                            )
+                        } else {
+                            com.mezze.interpreter.nodes.function.TailCallDirectScalarNode(
+                                node.targetHash, node.targetHash.toString(), argsArray
+                            )
+                        }
                     } else {
                         com.mezze.interpreter.nodes.function.CallDirectScalarNode(
                             node.targetHash, node.targetHash.toString(), argsArray
@@ -1809,6 +1863,124 @@ class TruffleCompiler(
         SlotKind.DOUBLE -> ReadLocalNode.KIND_DOUBLE
         SlotKind.BOOLEAN -> ReadLocalNode.KIND_BOOLEAN
         SlotKind.OBJECT -> ReadLocalNode.KIND_OBJECT
+    }
+
+    /**
+     * Compute the tail-loop compile context for [ir], or null if it isn't
+     * eligible. A function is eligible when EVERY tail call in its body is
+     * a self-tail-call (same hash) with scalar ABI and arity matching the
+     * function's params. Cross-fn tail calls and non-scalar self-tail-calls
+     * disqualify, because mixing those with the throw-free continue path
+     * would require receiving sentinel + payload, which we don't support.
+     */
+    private fun computeTailLoopCtx(ir: FunctionIR): TailLoopCtx? {
+        if (tailLoopDisabled) return null
+        if (ir.paramSlots.isEmpty()) return null
+        // Eligibility: all tail calls in body must be self + scalar ABI + arity match.
+        // No BOOLEAN params (existing payload code doesn't bind bools) — those keep
+        // the legacy throw path.
+        for (k in ir.paramSlots) {
+            if (k == SlotKind.BOOLEAN) return null
+        }
+        if (!allTailCallsAreSelfScalar(ir.body, ir.hash, ir.paramSlots.size)) return null
+
+        val captureCount = ir.captureSlots.size
+        val n = ir.paramSlots.size
+        val kinds = IntArray(n) { slotKindToInt(ir.paramSlots[it]) }
+        val slots = IntArray(n) { captureCount + it }
+        return TailLoopCtx(ir.hash, kinds, slots)
+    }
+
+    private fun allTailCallsAreSelfScalar(
+        node: NodeIR,
+        selfHash: com.mezze.language.typedast.Hash,
+        arity: Int,
+    ): Boolean {
+        return when (node) {
+            is CallDirectIR -> {
+                if (node.isTailCall) {
+                    // Tail call must be self, scalar ABI, matching arity.
+                    if (node.targetHash != selfHash) return false
+                    if (!node.isScalarABI) return false
+                    if (node.args.size != arity) return false
+                }
+                // Whether tail or not, children must also satisfy.
+                node.args.all { allTailCallsAreSelfScalar(it, selfHash, arity) }
+            }
+            // Any other tail-flagged call shape disqualifies (cross-fn, indirect, local).
+            is CallLocalIR -> if (node.isTailCall) false
+                else allTailCallsAreSelfScalar(node.arg, selfHash, arity)
+            is CallIndirectIR -> if (node.isTailCall) false
+                else allTailCallsAreSelfScalar(node.function, selfHash, arity) &&
+                     allTailCallsAreSelfScalar(node.arg, selfHash, arity)
+            is CallIndirectScalarIR -> if (node.isTailCall) false
+                else allTailCallsAreSelfScalar(node.function, selfHash, arity) &&
+                     node.args.all { allTailCallsAreSelfScalar(it, selfHash, arity) }
+            is PartialApplyDirectIR -> if (node.isTailCall) false
+                else node.partialFields.all { allTailCallsAreSelfScalar(it.value, selfHash, arity) }
+            // Container nodes: walk children.
+            is IfIR -> allTailCallsAreSelfScalar(node.cond, selfHash, arity) &&
+                       allTailCallsAreSelfScalar(node.thenBr, selfHash, arity) &&
+                       allTailCallsAreSelfScalar(node.elseBr, selfHash, arity)
+            is BlockIR -> {
+                for (s in node.stmts) {
+                    val ok = when (s) {
+                        is StmtIR.Let -> allTailCallsAreSelfScalar(s.value, selfHash, arity)
+                        is StmtIR.Expr -> allTailCallsAreSelfScalar(s.node, selfHash, arity)
+                    }
+                    if (!ok) return false
+                }
+                allTailCallsAreSelfScalar(node.result, selfHash, arity)
+            }
+            is MatchIR -> {
+                if (!allTailCallsAreSelfScalar(node.scrutinee, selfHash, arity)) return false
+                for (c in node.cases) {
+                    if (!allTailCallsAreSelfScalar(c.body, selfHash, arity)) return false
+                    val g = c.guard
+                    if (g != null && !allTailCallsAreSelfScalar(g, selfHash, arity)) return false
+                    for (ilb in c.ifLetBindings) {
+                        if (!allTailCallsAreSelfScalar(ilb.expr, selfHash, arity)) return false
+                    }
+                }
+                true
+            }
+            is CallNativeIR -> node.args.all { allTailCallsAreSelfScalar(it, selfHash, arity) } &&
+                               allTailCallsAreSelfScalar(node.arg, selfHash, arity)
+            is InlineBinaryOpIR -> allTailCallsAreSelfScalar(node.left, selfHash, arity) &&
+                                   allTailCallsAreSelfScalar(node.right, selfHash, arity)
+            is SpecializedCallIR -> node.args.all { allTailCallsAreSelfScalar(it, selfHash, arity) }
+            is MakeRecordIR -> node.fields.all { allTailCallsAreSelfScalar(it.value, selfHash, arity) }
+            is RecordUpdateIR -> allTailCallsAreSelfScalar(node.record, selfHash, arity) &&
+                                 node.updates.all { allTailCallsAreSelfScalar(it.value, selfHash, arity) }
+            is ReadFieldIR -> allTailCallsAreSelfScalar(node.record, selfHash, arity)
+            is MakeVariantIR -> node.payload?.let { allTailCallsAreSelfScalar(it, selfHash, arity) } ?: true
+            is WriteLocalIR -> allTailCallsAreSelfScalar(node.value, selfHash, arity)
+            is HandleIR -> allTailCallsAreSelfScalar(node.body, selfHash, arity)
+            is PerformOpIR -> allTailCallsAreSelfScalar(node.arg, selfHash, arity)
+            is DictMethodCallIR -> allTailCallsAreSelfScalar(node.arg, selfHash, arity)
+            is MakeSeqIR -> node.elements.all {
+                when (it) {
+                    is SeqElementIR.Regular -> allTailCallsAreSelfScalar(it.node, selfHash, arity)
+                    is SeqElementIR.Spread -> allTailCallsAreSelfScalar(it.node, selfHash, arity)
+                }
+            }
+            is SeqGetIR -> allTailCallsAreSelfScalar(node.seq, selfHash, arity) &&
+                           allTailCallsAreSelfScalar(node.index, selfHash, arity)
+            is InterpolatedStringIR -> node.parts.all { p ->
+                when (p) {
+                    is StringPartIR.Lit -> true
+                    is StringPartIR.Expr -> allTailCallsAreSelfScalar(p.node, selfHash, arity)
+                }
+            }
+            // Leaves and lambdas: lambdas have their own body compiled separately;
+            // we don't peer into them.
+            is MakeLambdaIR,
+            is ReadLocalIR, is ReadCaptureIR, is ReadArgIR,
+            is ReadGlobalByHashIR, is ReadGlobalFnByHashIR,
+            is EffectBindingIR,
+            is LongLitIR, is DoubleLitIR, is BoolLitIR, is StringLitIR,
+            is UnitLitIR, is CharLitIR, is FracLitIR -> true
+        }
     }
 
     fun getOrCreateSourcePublic(file: String): Source = getOrCreateSource(file)
