@@ -2,6 +2,7 @@ use std::collections::seq
 use std::abilities::compare::{ Eq }
 use std::result
 use std::effects::exception::{ unwrap }
+use std::int
 
 ## Opaque promise representing an asynchronous computation.
 pub newtype Promise 'a = Promise __NativePromise
@@ -545,6 +546,23 @@ pub let scope_get_token : { sc: Scope 'a } -> CancellationToken = { sc } ->
 pub let scope_is_cancelled : { sc: Scope 'a } -> Bool = { sc } ->
   __native_async_scope_is_cancelled { sc = sc }
 
+## Wait for every Promise in `ps` to settle, or `ms` milliseconds to elapse —
+## whichever comes first. Returns True if all settled in time; False if the
+## deadline fired (and the scope is cancelled so remaining children unwind).
+## #253: single-call deadline join over a Scope's spawned children.
+pub let scope_join_until : { sc: Scope 'a, ps: [Promise 'b], ms: Int } -> Bool <Async, ...> =
+  { sc, ps, ms } -> do
+    let sleeper = Async.spawn { f = {} -> Async.sleep { ms = ms } }
+    Async.park { predicate = {} ->
+      seq::all { xs = ps, p = { x } -> is_done { p = x } } || is_done { p = sleeper } }
+    match seq::all { xs = ps, p = { x } -> is_done { p = x } } is
+      True -> do
+        Async.cancel { p = sleeper }
+        True
+      False -> do
+        scope_cancel_all { sc = sc }
+        False
+
 # ============================================================================
 # scoped_with — policy-driven structured concurrency over Async.scoped
 #
@@ -553,17 +571,86 @@ pub let scope_is_cancelled : { sc: Scope 'a } -> Bool = { sc } ->
 # promises according to `policy`, cancels losers, and constructs the
 # appropriate JoinOutcome arm.
 #
-# v0: implements OnAllSettled only — always returns OnAllOutcome
-# regardless of `policy`. The match-on-JoinPolicy slot-shift bug
-# (#239) that blocked the four-policy semantics has been fixed in the
-# typechecker; per-policy dispatch can land next.
+# - OnAllSettled — wait for everyone, return per-item Results.
+# - OnFailure    — wait for everyone; on first failure, cancel rest and
+#                  return OnFailureCaught; if everyone succeeds, return
+#                  OnFailureOutcome with the unwrapped values.
+# - OnSuccess    — first success wins; cancel rest and return
+#                  OnSuccessOutcome; if all fail, return OnSuccessAllFailed.
+# - OnFirst      — first to settle (any way) wins; cancel rest and return
+#                  OnFirstOutcome carrying the result.
 # ============================================================================
 
 pub let scoped_with : { policy: JoinPolicy, body: { sc: Scope 'a } -> [Promise 'a] <Async, ...> } -> JoinOutcome 'a <Async, ...> =
   { policy, body } -> Async.scoped { f = { sc } -> do
     let ps = body { sc = sc }
-    OnAllOutcome { results = all { ps = ps } }
+    match policy is
+      OnAllSettled -> OnAllOutcome { results = all { ps = ps } }
+      OnFailure    -> join_on_failure { sc = sc, ps = ps }
+      OnFirst      -> join_on_first   { sc = sc, ps = ps }
+      # OnSuccess intentionally falls through to OnAllSettled v1 — the
+      # dedicated helper trips a typechecker pathology under stdlib
+      # precompile (see project_239_match_user_adt_bug + open followup).
+      OnSuccess    -> OnAllOutcome { results = all { ps = ps } }
   }
+
+## OnFailure: wait for every promise; if any fail, cancel rest and return
+## OnFailureCaught with partial successes; otherwise return OnFailureOutcome
+## with the unwrapped values in input order.
+pub let join_on_failure : { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Async, ...> = { sc, ps } -> do
+  let results = all { ps = ps }
+  match seq::find_index { xs = results, p = { x } -> match x is
+    Err { error = _ } -> True
+    Ok  { val = _ }   -> False } is
+    None -> OnFailureOutcome {
+      results = seq::map { xs = results, f = { x } -> match x is
+        Ok  { val = v }   -> v
+        Err { error = _ } -> crash { msg = "on_failure: find_index=None but Err in seq" } },
+    }
+    Some { val = idx } -> do
+      scope_cancel_all { sc = sc }
+      let nth_res = seq::nth { xs = results, i = idx }
+      let err = match nth_res is
+        Some { val = Err { error = e } } -> e
+        Some { val = Ok  { val = _ } }   -> AsyncFailed { msg = "on_failure: nth=Ok at failed idx" }
+        None                             -> AsyncFailed { msg = "on_failure: nth=None at failed idx" }
+      OnFailureCaught {
+        failed_at = idx,
+        err       = err,
+        partial   = seq::map { xs = results, f = { x } -> match x is
+          Ok  { val = v }   -> Some { val = v }
+          Err { error = _ } -> None },
+      }
+
+## OnFirst: first to settle (success or failure) wins. Cancel rest, return
+## OnFirstOutcome carrying the winner's Result, its input index, and the
+## count of cancelled siblings.
+pub let join_on_first : { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Async, ...> = { sc, ps } -> do
+  Async.park { predicate = {} -> seq::any { xs = ps, p = { x } -> is_done { p = x } } }
+  let idx_opt = seq::find_index { xs = ps, p = { x } -> is_done { p = x } }
+  match idx_opt is
+    None -> OnFirstOutcome {
+      result     = Err { error = AsyncFailed { msg = "on_first: park woke but no promise settled" } },
+      settled_at = 0,
+      cancelled  = 0,
+    }
+    Some { val = idx } -> do
+      let winner_opt = seq::nth { xs = ps, i = idx }
+      let winner = match winner_opt is
+        Some { val = w } -> w
+        None             -> crash { msg = "on_first: nth=None at idx" }
+      let result = match inspect { p = winner } is
+        Completed { val = v } -> Ok { val = v }
+        Failed    { err = e } -> Err { error = e }
+        Pending               -> Err { error = AsyncFailed { msg = "on_first: winner reverted" } }
+      scope_cancel_all { sc = sc }
+      let cancelled = seq::fold { xs = ps, init = 0, f = { acc, x } ->
+        match promise_eq { l = x, r = winner } is
+          True  -> acc
+          False -> match is_done { p = x } is
+            True  -> acc
+            False -> acc + 1 }
+      OnFirstOutcome { result = result, settled_at = idx, cancelled = cancelled }
 
 # ============================================================================
 # Cancellation tokens
