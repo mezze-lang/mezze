@@ -338,10 +338,18 @@ public final class AsyncNatives {
     /**
      * Structured concurrency scope - tracks child tasks and propagates cancellation.
      * Uses ConcurrentLinkedQueue instead of CopyOnWriteArrayList for O(1) addChild.
+     *
+     * Transitive cancellation (#252): each MezzeScope also tracks any nested
+     * Scopes opened while one of its spawned tasks was running. `cancelAll()`
+     * walks `childScopes` so cancelling a parent reaches grandchildren even
+     * when the descendant task is uninterruptibly blocked (e.g., parked on a
+     * non-Thread.interrupt-aware primitive). Parent linkage is established via
+     * the CURRENT_SCOPE ThreadLocal in loomScoped.
      */
     public static final class MezzeScope {
         // OPTIMIZATION: ConcurrentLinkedQueue has O(1) add vs CopyOnWriteArrayList's O(n)
         private final ConcurrentLinkedQueue<MezzePromise> children = new ConcurrentLinkedQueue<>();
+        private final ConcurrentLinkedQueue<MezzeScope> childScopes = new ConcurrentLinkedQueue<>();
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
         private final AtomicInteger pendingCount = new AtomicInteger(0);
 
@@ -351,6 +359,10 @@ public final class AsyncNatives {
         void addChild(MezzePromise promise) {
             children.add(promise);
             pendingCount.incrementAndGet();
+        }
+
+        void addChildScope(MezzeScope nested) {
+            childScopes.add(nested);
         }
 
         void childCompleted() {
@@ -365,6 +377,12 @@ public final class AsyncNatives {
             if (cancelled.compareAndSet(false, true)) {
                 for (MezzePromise child : children) {
                     child.cancel();
+                }
+                // Walk into nested scopes so cancellation reaches descendants
+                // even when a child task's thread is blocked on something that
+                // doesn't honour Thread.interrupt().
+                for (MezzeScope nested : childScopes) {
+                    nested.cancelAll();
                 }
             }
         }
@@ -383,6 +401,14 @@ public final class AsyncNatives {
             }
         }
     }
+
+    /**
+     * Tracks the innermost MezzeScope currently executing on this thread (if
+     * any). Used by loomScoped to wire up parent→child linkage for transitive
+     * cancellation (#252). A scope opened by a task that is itself a child of
+     * an outer scope adopts that outer scope as parent.
+     */
+    private static final ThreadLocal<MezzeScope> CURRENT_SCOPE = new ThreadLocal<>();
 
     // ==================== Promise Tracker (for scoped effects) ====================
 
@@ -740,6 +766,18 @@ public final class AsyncNatives {
         Env env = MezzeContext.get(node).getEnv();
         scope.env = env;
 
+        // Transitive cancellation linkage (#252): if this thread is already
+        // running inside a parent Scope (because we were spawned by a parent
+        // scope's body), register as its child so `cancelAll(parent)` reaches
+        // us. Outermost scopes have no parent → CURRENT_SCOPE is null.
+        MezzeScope prev = CURRENT_SCOPE.get();
+        if (prev != null) {
+            prev.addChildScope(scope);
+        }
+
+        // Install this scope as current for the duration of the body so any
+        // nested `Async.scoped` calls in the body register us as their parent.
+        CURRENT_SCOPE.set(scope);
         try {
             MezzeRecord scopeArg = MezzeRecord.fromFields(
                 new String[]{"sc"},
@@ -761,6 +799,12 @@ public final class AsyncNatives {
         } catch (RuntimeException e) {
             scope.cancelAll();
             throw e;
+        } finally {
+            if (prev == null) {
+                CURRENT_SCOPE.remove();
+            } else {
+                CURRENT_SCOPE.set(prev);
+            }
         }
     }
 
@@ -788,6 +832,10 @@ public final class AsyncNatives {
         scope.addChild(promise);
 
         Thread vThread = env.newTruffleThreadBuilder(() -> {
+            // Pin this scope as current on the spawned thread so any nested
+            // `Async.scoped` opened by the body registers itself as child of
+            // `scope` (#252 transitive cancellation linkage).
+            CURRENT_SCOPE.set(scope);
             try {
                 EffectFiber.runWithHandlerChain(handlerChain, () -> {
                     if (scope.isCancelled()) {
@@ -804,6 +852,7 @@ public final class AsyncNatives {
                 promise.fail(e);
             } finally {
                 scope.childCompleted();
+                CURRENT_SCOPE.remove();
             }
         }).virtual(true).build();
 
