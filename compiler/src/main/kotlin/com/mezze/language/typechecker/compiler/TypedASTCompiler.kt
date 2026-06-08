@@ -608,8 +608,14 @@ class TypedASTCompiler(
         for ((h, fnIR) in preloweredFunctions) erasureMap[h] = fnIR
         for (fn in deduped) erasureMap[fn.hash] = fn
         val erasedMap = com.mezze.language.truffleir.MutEraser.erase(erasureMap)
-        val erased = deduped.map { erasedMap[it.hash] ?: it }
-        return CompileResult(erased, performerRecords.toList())
+        // Optional trivial-wrapper inlining for user code, mirroring the
+        // stdlib precompile gate. Off by default — see the comment in
+        // StdlibPrecompiler.kt for why it's currently a perf regression.
+        val inlinedMap = if (System.getenv("MEZZE_INLINE_WRAPPERS") == "1") {
+            com.mezze.language.truffleir.TrivialWrapperInliner.inline(erasedMap)
+        } else erasedMap
+        val final = deduped.map { inlinedMap[it.hash] ?: it }
+        return CompileResult(final, performerRecords.toList())
     }
 
     private fun compileLetDecl(decl: TypedLetDecl): FunctionIR {

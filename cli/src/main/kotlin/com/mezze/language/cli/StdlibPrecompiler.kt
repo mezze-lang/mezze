@@ -78,7 +78,21 @@ fun main(args: Array<String>) {
     // After this pass, e.g. `incr1` directly calls `__native_mut_int_incr`
     // with no OpCallNode, no fiber, no marker. Same function hash; only
     // the body changes. See `MutEraser` for the rewrite rules.
-    val functions = com.mezze.language.truffleir.MutEraser.erase(rawFunctions)
+    val mutErasedFunctions = com.mezze.language.truffleir.MutEraser.erase(rawFunctions)
+
+    // Optional trivial-wrapper inlining (`core::pow` → `__native_float_pow`,
+    // `float::abs` → `__native_float_abs`, etc.). Gated behind the
+    // MEZZE_INLINE_WRAPPERS env var because the current implementation
+    // regresses JIT-compiled steady-state perf — likely because the
+    // substituted bodies break some PE assumption tied to how
+    // MezzeFunctionRootNode caches CallTargets. The pass is correct
+    // (5222 :interpreter:test PASSED), just slower in practice. Kept
+    // available for follow-up investigation. See TrivialWrapperInliner.
+    val functions = if (System.getenv("MEZZE_INLINE_WRAPPERS") == "1") {
+        com.mezze.language.truffleir.TrivialWrapperInliner.inline(mutErasedFunctions)
+    } else {
+        mutErasedFunctions
+    }
 
     val initTime = (System.nanoTime() - startTime) / 1_000_000
     println("Stdlib compiled: ${functions.size} functions, ${performers.size} performers (${initTime}ms)")
