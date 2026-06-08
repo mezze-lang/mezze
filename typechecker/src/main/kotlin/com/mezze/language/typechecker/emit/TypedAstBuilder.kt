@@ -137,6 +137,43 @@ class TypedAstBuilder(
     /** Stack of lambda parameter names — these shadow content hashes */
     private val lambdaParamScopes = ArrayDeque<MutableList<String>>()
 
+    /**
+     * Parallel stack: true = this scope is a true lambda boundary (push from
+     * ParsedLambda); false = this scope is a block-level binding scope inside
+     * a lambda (push from buildMatchCase pattern bindings or do-block).
+     *
+     * resolveBinding uses this to compute depth as the count of *lambda
+     * boundaries crossed*, not the raw scope-index gap — references that
+     * cross block scopes but stay inside the same lambda are at depth 0.
+     */
+    private val lambdaScopeIsLambdaBoundary = ArrayDeque<Boolean>()
+
+    private fun pushScope(names: MutableList<String>, isLambdaBoundary: Boolean) {
+        lambdaParamScopes.addLast(names)
+        lambdaScopeIsLambdaBoundary.addLast(isLambdaBoundary)
+    }
+
+    private fun popScope() {
+        lambdaParamScopes.removeLast()
+        lambdaScopeIsLambdaBoundary.removeLast()
+    }
+
+    /**
+     * Depth measured in lambda boundaries crossed, NOT scope indices.
+     * scopeIdx is the index into lambdaParamScopes where the binding was found.
+     * Returns 0 if the binding is in the innermost lambda (possibly via block
+     * scopes), 1 if it's in the parent lambda, etc.
+     */
+    private fun lambdaDepthFromScope(scopeIdx: Int): Int {
+        var depth = 0
+        for (i in (scopeIdx + 1) until lambdaParamScopes.size) {
+            if (lambdaScopeIsLambdaBoundary.getOrNull(i) == true) {
+                depth++
+            }
+        }
+        return depth
+    }
+
     /** Get the effective identifier content hashes (precomputed if available) */
     private val effectiveContentHashes: Map<BindingKey, Hash>
         get() = precomputedHashes ?: identifierContentHashes
@@ -614,7 +651,7 @@ class TypedAstBuilder(
                 }
 
                 // Track lambda params so resolveBinding prefers Local over ByHash
-                lambdaParamScopes.addLast(params.map { it.name }.toMutableList())
+                pushScope(params.map { it.name }.toMutableList(), isLambdaBoundary = true)
 
                 // Infer return type from context if available
                 val returnType = when (val ct = substitution.apply(contextType)) {
@@ -625,7 +662,7 @@ class TypedAstBuilder(
                 val body = buildExpr(expr.body, file, returnType)
 
                 // Restore scopes
-                lambdaParamScopes.removeLast()
+                popScope()
                 for ((name, prevType) in savedContext) {
                     if (prevType != null) identifierContext[name] = prevType
                     else identifierContext.remove(name)
@@ -966,7 +1003,7 @@ class TypedAstBuilder(
                 // instead of BindingRef.Local, causing inner lambdas to miss captures.
                 val pushedBlockScope = lambdaParamScopes.isEmpty()
                 if (pushedBlockScope) {
-                    lambdaParamScopes.addLast(mutableListOf())
+                    pushScope(mutableListOf(), isLambdaBoundary = false)
                 }
                 val stmts = mutableListOf<TypedStatement>()
                 for (stmt in expr.statements) {
@@ -1063,7 +1100,7 @@ class TypedAstBuilder(
                 }
                 val result = buildExpr(expr.result, file, contextType)
                 if (pushedBlockScope) {
-                    lambdaParamScopes.removeLast()
+                    popScope()
                 }
                 TypedBlock(stmts, result, result.type, loc)
             }
@@ -1215,8 +1252,11 @@ class TypedAstBuilder(
             PatternBinding(name, resolvedTypes[name]!!, case.loc)
         }
 
-        // Push pattern bindings so case body sees them as locals, not globals
-        lambdaParamScopes.addLast(bindingNames.toMutableList())
+        // Push pattern bindings so case body sees them as locals, not globals.
+        // This is a block-level scope (NOT a lambda boundary) — references
+        // through it to outer let-bindings should remain depth=0 in the
+        // enclosing lambda, not be promoted to depth=1 captures.
+        pushScope(bindingNames.toMutableList(), isLambdaBoundary = false)
         // Register binding types in identifierContext so resolveIdentifierType
         // returns the concrete type when guard/body references the binding —
         // without this, `w == h` in the guard sees `w: VarType("unknown")` and
@@ -1242,7 +1282,7 @@ class TypedAstBuilder(
         for ((name, prev) in savedContext) {
             if (prev != null) identifierContext[name] = prev else identifierContext.remove(name)
         }
-        lambdaParamScopes.removeLast()
+        popScope()
 
         return TypedCase(patterns, bindings, guard, body, case.loc, typedIfLetBindings)
     }
@@ -1388,14 +1428,19 @@ class TypedAstBuilder(
             // Also capture ByHash refs that are actually outer scope locals/params
             // (The TypedAstBuilder may resolve local params as ByHash if they have content hashes)
             if (binding is BindingRef.ByHash && expr.name !in seen && expr.name !in paramNames) {
-                // Check if this name is in an outer lambda scope
+                // Check if this name is in an outer lambda scope (lambda-boundary-aware).
                 if (lambdaParamScopes.size >= 2) {
                     for (i in 0 until lambdaParamScopes.size - 1) {
                         if (expr.name in lambdaParamScopes[i]) {
-                            seen.add(expr.name)
-                            val depth = lambdaParamScopes.size - 1 - i
-                            val index = lambdaParamScopes[i].indexOf(expr.name)
-                            captures.add(TypedCapture(expr.name, expr.type, BindingRef.Local(depth, index)))
+                            val depth = lambdaDepthFromScope(i)
+                            // Only record as capture if it actually crosses a
+                            // lambda boundary (depth > 0). Same-lambda refs
+                            // via block scopes are not captures.
+                            if (depth > 0) {
+                                seen.add(expr.name)
+                                val index = lambdaParamScopes[i].indexOf(expr.name)
+                                captures.add(TypedCapture(expr.name, expr.type, BindingRef.Local(depth, index)))
+                            }
                             break
                         }
                     }
@@ -1575,12 +1620,16 @@ class TypedAstBuilder(
      * 4. Fallback → Local(0, 0)
      */
     private fun resolveBinding(name: String, qualifier: ParsedModulePath?): BindingRef {
-        // Lambda params / match bindings — search from innermost scope outward
+        // Lambda params / match bindings — search from innermost scope outward.
+        // depth counts only lambda boundaries crossed (not block-scope pushes
+        // from match-case pattern bindings or do-block opens) — so a let in
+        // the same lambda body referenced from inside a match arm is still at
+        // depth=0, not depth=1.
         if (qualifier == null) {
             for (i in lambdaParamScopes.indices.reversed()) {
                 val scope = lambdaParamScopes[i]
                 if (name in scope) {
-                    val depth = lambdaParamScopes.size - 1 - i  // 0 = innermost
+                    val depth = lambdaDepthFromScope(i)
                     val index = scope.indexOf(name)  // position within scope
                     return BindingRef.Local(depth, index)
                 }
