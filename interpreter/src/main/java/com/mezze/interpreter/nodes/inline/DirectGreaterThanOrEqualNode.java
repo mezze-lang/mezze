@@ -5,7 +5,9 @@ import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
+import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.nodes.UnexpectedResultException;
 
 /**
  * Direct greater-than-or-equal node that takes left and right operands directly.
@@ -18,6 +20,11 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 @NodeChild(value = "right", type = MezzeNode.class)
 @NodeInfo(shortName = "direct-ge")
 public abstract class DirectGreaterThanOrEqualNode extends MezzeNode {
+
+    /** Typed executeBoolean so `if`-conditions don't pay a Boolean box
+     *  per iteration in hot loops. */
+    @Override
+    public abstract boolean executeBoolean(VirtualFrame frame) throws UnexpectedResultException;
 
     @Specialization
     protected static boolean geLongs(long left, long right) {

@@ -6,7 +6,9 @@ import com.mezze.interpreter.values.MezzeSuspended;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
+import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.nodes.UnexpectedResultException;
 
 /**
  * Direct addition node that takes left and right operands directly.
@@ -21,6 +23,14 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 @NodeChild(value = "right", type = MezzeNode.class)
 @NodeInfo(shortName = "direct-add")
 public abstract class DirectAddNode extends MezzeNode {
+
+    /** Typed execute methods so callers in tail-call hot loops can read
+     *  the result directly without Long/Double boxing through execute(). */
+    @Override
+    public abstract long executeLong(VirtualFrame frame) throws UnexpectedResultException;
+
+    @Override
+    public abstract double executeDouble(VirtualFrame frame) throws UnexpectedResultException;
 
     /**
      * Fast path: Int + Int (unboxed longs).

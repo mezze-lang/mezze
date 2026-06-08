@@ -5,7 +5,9 @@ import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
+import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.nodes.UnexpectedResultException;
 
 /**
  * Direct subtraction node that takes left and right operands directly.
@@ -18,6 +20,14 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 @NodeChild(value = "right", type = MezzeNode.class)
 @NodeInfo(shortName = "direct-sub")
 public abstract class DirectSubtractNode extends MezzeNode {
+
+    /** Typed execute methods so callers in tail-call hot loops can read
+     *  the result without boxing through execute(). */
+    @Override
+    public abstract long executeLong(VirtualFrame frame) throws UnexpectedResultException;
+
+    @Override
+    public abstract double executeDouble(VirtualFrame frame) throws UnexpectedResultException;
 
     @Specialization(rewriteOn = ArithmeticException.class)
     protected static long subLongs(long left, long right) {
