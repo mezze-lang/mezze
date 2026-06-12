@@ -595,14 +595,10 @@ pub let scoped_with : { policy: JoinPolicy, body: { sc: Scope 'a } -> [Promise '
 ## success: cancel everyone else, return OnSuccessOutcome with the winner +
 ## the count of cancelled siblings. If everyone failed, return
 ## OnSuccessAllFailed with the per-task errors in input order.
-##
-## The let-bindings around `||` in the park predicate work around a parser
-## non-termination on `{} -> seq::any { ... } || seq::all { ... }`.
 pub let join_on_success : { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Async, ...> = { sc, ps } -> do
-  Async.park { predicate = {} -> do
-    let any_ok = seq::any { xs = ps, p = { x } -> is_done { p = x } && !is_failed { p = x } }
-    let all_done = seq::all { xs = ps, p = { x } -> is_done { p = x } }
-    any_ok || all_done }
+  Async.park { predicate = {} ->
+    seq::any { xs = ps, p = { x } -> is_done { p = x } && !is_failed { p = x } } ||
+    seq::all { xs = ps, p = { x } -> is_done { p = x } } }
   let winner_opt = seq::find { xs = ps, p = { x } -> is_done { p = x } && !is_failed { p = x } }
   match winner_opt is
     Some { val = winner } -> do

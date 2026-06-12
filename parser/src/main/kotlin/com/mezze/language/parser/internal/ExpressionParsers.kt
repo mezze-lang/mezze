@@ -1722,12 +1722,22 @@ internal val MezzeParser.logicalOrExpression: Parser<ParsedExpr>
     get() = { stream ->
         var result: ParseResult<ParsedExpr> = logicalAndExpression(stream)
 
+        // Stream-advancement guard: see postfixExpression for rationale.
+        var lastOrPos = -1
         while (result is ParseResult.Success) {
             val currentStream = result.remaining
+            val pos = currentStream.position
+            if (pos == lastOrPos) {
+                break
+            }
+            lastOrPos = pos
             val op = currentStream.current()
 
             if (op?.type == TokenType.OR) {
-                val opStream = currentStream.advance()
+                // Skip newlines after the operator so multi-line expressions
+                // like `a ||\n  b` parse without breaking. Mirrors pipe and
+                // dot-chain handling at the same precedence levels.
+                val opStream = skipNewlines(currentStream.advance())
                 val right = logicalAndExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> {
@@ -1761,7 +1771,7 @@ internal val MezzeParser.logicalAndExpression: Parser<ParsedExpr>
             val op = currentStream.current()
 
             if (op?.type == TokenType.AND) {
-                val opStream = currentStream.advance()
+                val opStream = skipNewlines(currentStream.advance())
                 val right = pipeExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> {
@@ -1968,7 +1978,7 @@ internal val MezzeParser.comparisonExpression: Parser<ParsedExpr>
             if (op?.type == TokenType.EQ || op?.type == TokenType.NEQ ||
                 op?.type == TokenType.LT || op?.type == TokenType.GT ||
                 op?.type == TokenType.LTE || op?.type == TokenType.GTE) {
-                val opStream = currentStream.advance()
+                val opStream = skipNewlines(currentStream.advance())
                 val right = additiveExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> {
@@ -2024,7 +2034,8 @@ internal val MezzeParser.additiveExpression: Parser<ParsedExpr>
                     break
                 }
 
-                val right = multiplicativeExpression(opStream)
+                val rhsStream = skipNewlines(opStream)
+                val right = multiplicativeExpression(rhsStream)
                 when (right) {
                     is ParseResult.Success -> {
                         val loc = result.value.loc.spanTo(right.value.loc)
@@ -2084,7 +2095,8 @@ internal val MezzeParser.multiplicativeExpression: Parser<ParsedExpr>
                     break
                 }
 
-                val right = unaryExpression(opStream)
+                val rhsStream = skipNewlines(opStream)
+                val right = unaryExpression(rhsStream)
                 when (right) {
                     is ParseResult.Success -> {
                         val loc = result.value.loc.spanTo(right.value.loc)
@@ -2202,8 +2214,21 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
     get() = { stream ->
         var result: ParseResult<ParsedExpr> = primaryExpression(stream)
 
+        // Stream-advancement guard: every iteration must move the stream
+        // forward. Without this guard, certain expression shapes (notably
+        // `f { ... } || g { ... }` inside a record-field lambda body) used
+        // to non-terminate in subtle ways via the recursive descent. The
+        // primary fix is the `skipNewlines` added after each binary operator
+        // (see logicalOrExpression et al.); this guard is a cheap safety
+        // net so future shapes can't accidentally regress to a hang.
+        var lastPosition = -1
         while (result is ParseResult.Success) {
             val currentStream = result.remaining
+            val pos = currentStream.position
+            if (pos == lastPosition) {
+                break
+            }
+            lastPosition = pos
             val token = currentStream.current()
 
             when (token?.type) {
