@@ -283,7 +283,19 @@ public final class EffectFiber {
             com.mezze.language.typedast.Hash effectHash) {
         ArrayDeque<HandlerChainEntry> chain = HANDLER_CHAIN.get();
         if (chain.isEmpty()) return null;
+        // Fast path: the innermost entry usually matches (perform Mut.x
+        // inside `handle Mut { ... }`). Check it without setting up the
+        // iterator — saves Iterator alloc + a virtual call per perform.
+        HandlerChainEntry head = chain.peek();
+        if (head != null) {
+            com.mezze.language.typedast.Hash eh = head.effectHash();
+            if (eh != null && eh.equals(effectHash)) {
+                return head.handler();
+            }
+        }
+        // Slow path: walk the rest of the chain looking for an outer handler.
         for (HandlerChainEntry entry : chain) {
+            if (entry == head) continue;  // already checked above
             com.mezze.language.typedast.Hash eh = entry.effectHash();
             if (eh != null && eh.equals(effectHash)) {
                 return entry.handler();
