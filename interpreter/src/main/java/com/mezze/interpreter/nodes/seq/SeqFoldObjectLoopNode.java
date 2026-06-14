@@ -130,15 +130,14 @@ public final class SeqFoldObjectLoopNode extends Node {
 
         private Object callFolder(Object acc, Object element,
                                   Object[] closureValues, int closureLength) {
-            MezzeRecord arg = MezzeRecord.wrapAccX(acc, element);
-            if (closureLength == 0) {
-                return callNode.call(new Object[]{arg});
+            // Scalar ABI: pass [closure..., acc, element] positionally.
+            // See SeqFoldLongLoopNode for rationale. (#262)
+            Object[] callArgs = new Object[closureLength + 2];
+            if (closureLength > 0) {
+                System.arraycopy(closureValues, 0, callArgs, 0, closureLength);
             }
-            Object[] callArgs = new Object[closureLength + 1];
-            for (int i = 0; i < closureLength; i++) {
-                callArgs[i] = closureValues[i];
-            }
-            callArgs[closureLength] = arg;
+            callArgs[closureLength] = acc;
+            callArgs[closureLength + 1] = element;
             return callNode.call(callArgs);
         }
     }

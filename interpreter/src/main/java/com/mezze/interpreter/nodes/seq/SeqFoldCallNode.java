@@ -391,18 +391,19 @@ public final class SeqFoldCallNode extends MezzeNode {
     @ExplodeLoop
     private Object callFolder(Object acc, Object element,
                               Object[] closureValues, int closureLength, DirectCallNode callNode) {
-        // Use fast wrapper - no @TruffleBoundary, pre-cached shape
-        MezzeRecord arg = MezzeRecord.wrapAccX(acc, element);
-
+        // Scalar ABI: pass [closure..., acc, element] positionally,
+        // skipping the MezzeRecord wrapper alloc. See SeqFoldLongLoopNode
+        // for rationale. (#262)
         if (closureLength == 0) {
-            return callNode.call(new Object[] { arg });
+            return callNode.call(new Object[] { acc, element });
         } else {
-            Object[] args = new Object[closureLength + 1];
+            Object[] args = new Object[closureLength + 2];
             // Closure copy loop - JIT can unroll for small closures
             for (int i = 0; i < closureLength; i++) {
                 args[i] = closureValues[i];
             }
-            args[closureLength] = arg;
+            args[closureLength] = acc;
+            args[closureLength + 1] = element;
             return callNode.call(args);
         }
     }
