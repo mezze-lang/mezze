@@ -47,6 +47,22 @@ public abstract class NativeBridgeNode extends MezzeNode {
         Object apply(Object a, IndirectCallNode callNode);
     }
 
+    /** Typed long-in, long-out handler. Skips both boxing and Object[] alloc.
+     *  Used by intrinsic-style natives (int::abs, int::neg, int::sign, etc.)
+     *  where the call site evaluates a LONG-typed arg and the receiver is
+     *  about to consume a primitive long. */
+    @FunctionalInterface
+    public interface HandlerLongLong {
+        long apply(long a);
+    }
+
+    /** Typed double-in, double-out handler. Same shape as HandlerLongLong
+     *  for float intrinsics (float::abs, float::sqrt, etc.). */
+    @FunctionalInterface
+    public interface HandlerDoubleDouble {
+        double apply(double a);
+    }
+
     /** Handler signature for 2-arg specialization. */
     @FunctionalInterface
     public interface Handler2 {
@@ -120,6 +136,90 @@ public abstract class NativeBridgeNode extends MezzeNode {
             }
             return handler.apply(a, callNode);
         }
+    }
+
+    /**
+     * Typed long→long 1-arg native bridge. Skips all boxing for intrinsic-
+     * style ops (int::abs, int::neg, etc.). The arg expression is read via
+     * executeLong so the JVM never sees a boxed Long; the handler receives
+     * a primitive long and returns a primitive long which we box once for
+     * the Object-returning execute contract.
+     *
+     * Critically, this node also overrides {@link #executeLong} — if the
+     * caller is a typed-aware path (DirectAdd, TailContinueScalar, etc.),
+     * we hand back the primitive directly with no box at all.
+     */
+    @NodeInfo(shortName = "native-bridge-l2l")
+    public static final class OneArgLongLong extends NativeBridgeNode {
+        @Child private MezzeNode arg;
+        private final HandlerLongLong handler;
+
+        OneArgLongLong(MezzeNode arg, HandlerLongLong handler) {
+            this.arg = arg;
+            this.handler = handler;
+        }
+
+        @Override
+        public Object execute(VirtualFrame frame) {
+            // Slow path for Object-returning execute contract — only called
+            // when an upstream node consumes via execute, not executeLong.
+            try {
+                return handler.apply(arg.executeLong(frame));
+            } catch (com.oracle.truffle.api.nodes.UnexpectedResultException ure) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                throw new RuntimeException(
+                    "long native bridge got non-long arg: " + ure.getResult());
+            }
+        }
+
+        @Override
+        public long executeLong(VirtualFrame frame)
+                throws com.oracle.truffle.api.nodes.UnexpectedResultException {
+            return handler.apply(arg.executeLong(frame));
+        }
+    }
+
+    /**
+     * Typed double→double 1-arg native bridge. Same shape as
+     * {@link OneArgLongLong} but for float intrinsics (float::abs,
+     * float::sqrt, etc.).
+     */
+    @NodeInfo(shortName = "native-bridge-d2d")
+    public static final class OneArgDoubleDouble extends NativeBridgeNode {
+        @Child private MezzeNode arg;
+        private final HandlerDoubleDouble handler;
+
+        OneArgDoubleDouble(MezzeNode arg, HandlerDoubleDouble handler) {
+            this.arg = arg;
+            this.handler = handler;
+        }
+
+        @Override
+        public Object execute(VirtualFrame frame) {
+            try {
+                return handler.apply(arg.executeDouble(frame));
+            } catch (com.oracle.truffle.api.nodes.UnexpectedResultException ure) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                throw new RuntimeException(
+                    "double native bridge got non-double arg: " + ure.getResult());
+            }
+        }
+
+        @Override
+        public double executeDouble(VirtualFrame frame)
+                throws com.oracle.truffle.api.nodes.UnexpectedResultException {
+            return handler.apply(arg.executeDouble(frame));
+        }
+    }
+
+    /** Build a typed long→long bridge node. */
+    public static MezzeNode createLongLong(MezzeNode arg, HandlerLongLong handler) {
+        return new OneArgLongLong(arg, handler);
+    }
+
+    /** Build a typed double→double bridge node. */
+    public static MezzeNode createDoubleDouble(MezzeNode arg, HandlerDoubleDouble handler) {
+        return new OneArgDoubleDouble(arg, handler);
     }
 
     /**

@@ -346,6 +346,16 @@ class TruffleCompiler(
                 // positional typed args directly. See
                 // docs/perf/scalar-native-abi-2026-06.md.
                 if (node.isScalarABI) {
+                    // Typed-intrinsic fast path: for unary long→long and
+                    // double→double natives in tight loops, skip the
+                    // NativeDispatchScalarNode handler-lambda + Object[] +
+                    // boxing dance. Emit a typed bridge that propagates
+                    // primitives end-to-end (including overriding
+                    // executeLong/executeDouble so the parent arith node
+                    // never sees a box).
+                    val typedBridge = tryCompileTypedScalarNative(node, source)
+                    if (typedBridge != null) return typedBridge
+
                     val handler = com.mezze.interpreter.nodes.builtin.dsl
                         .NativeHandlers.handlerOf(node.name)
                     if (handler != null) {
@@ -1534,13 +1544,17 @@ class TruffleCompiler(
             // Skip __native_float_to_str / __native_float_from_string —
             // they go through Double.toString / parsing helpers that benefit
             // less from the DS-Wire and are colder.
-            "__native_float_abs" -> bridge(fields("n")) { args, _ ->
-                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
-                    .floatAbs(args[0] as Double)
+            "__native_float_abs" -> {
+                val n = field("n") ?: return null
+                com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createDoubleDouble(
+                    compileNode(n, source)
+                ) { x -> com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.floatAbs(x) }
             }
-            "__native_float_sqrt" -> bridge(fields("n")) { args, _ ->
-                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
-                    .floatSqrt(args[0] as Double)
+            "__native_float_sqrt" -> {
+                val n = field("n") ?: return null
+                com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createDoubleDouble(
+                    compileNode(n, source)
+                ) { x -> com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.floatSqrt(x) }
             }
             "__native_float_floor" -> bridge(fields("n")) { args, _ ->
                 com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
@@ -1813,9 +1827,11 @@ class TruffleCompiler(
             // ==================== Int (hot ones) ====================
             // Most int ops are already lowered to InlineBinaryOpIR (+, -, *, /, ==, <, >, etc),
             // but a few stdlib utilities still go through the native call path.
-            "__native_int_abs" -> bridge(fields("n")) { args, _ ->
-                com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
-                    .intAbs(args[0] as Long)
+            "__native_int_abs" -> {
+                val n = field("n") ?: return null
+                com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createLongLong(
+                    compileNode(n, source)
+                ) { x -> com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.intAbs(x) }
             }
             "__native_int_min" -> bridge(fields("l", "r")) { args, _ ->
                 com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives
@@ -1847,6 +1863,46 @@ class TruffleCompiler(
                 args[0] as Long
             }
 
+            else -> null
+        }
+    }
+
+    /**
+     * Typed-intrinsic fast path for scalar-ABI unary native ops where both
+     * the arg and the result are a Truffle primitive (long or double).
+     *
+     * Lowers to NativeBridgeNode.OneArgLongLong / OneArgDoubleDouble, which
+     * override executeLong / executeDouble — so a parent typed-arith node
+     * (DirectAdd, InlineBinaryOp, etc.) propagates primitives end-to-end
+     * with zero boxing through the bridge.
+     *
+     * Only fires in scalar-ABI mode (positional `args`, populated `argKinds`).
+     * Returns null for any unsupported op so the caller falls through to the
+     * generic NativeDispatchScalarNode handler dispatch.
+     */
+    private fun tryCompileTypedScalarNative(node: CallNativeIR, source: Source): MezzeNode? {
+        if (node.args.size != 1) return null
+        if (node.argKinds.size != 1) return null
+        val argNode = compileNode(node.args[0], source)
+        return when (node.name) {
+            "__native_int_abs" -> {
+                if (node.argKinds[0] != SlotKind.LONG) return null
+                com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createLongLong(
+                    argNode
+                ) { x -> com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.intAbs(x) }
+            }
+            "__native_float_abs" -> {
+                if (node.argKinds[0] != SlotKind.DOUBLE) return null
+                com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createDoubleDouble(
+                    argNode
+                ) { x -> com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.floatAbs(x) }
+            }
+            "__native_float_sqrt" -> {
+                if (node.argKinds[0] != SlotKind.DOUBLE) return null
+                com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createDoubleDouble(
+                    argNode
+                ) { x -> com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.floatSqrt(x) }
+            }
             else -> null
         }
     }
