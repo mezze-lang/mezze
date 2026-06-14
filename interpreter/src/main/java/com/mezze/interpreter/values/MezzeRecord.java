@@ -418,8 +418,16 @@ public final class MezzeRecord implements TruffleObject {
 
     /**
      * Get field by name (convenience method, returns null if not found).
+     *
+     * Not a TruffleBoundary: {@link Shape#findFieldIndex} is non-boundary
+     * for small shapes (≤ SMALL_SHAPE_THRESHOLD) so we can stay on the
+     * PE-visible path. The cached lookup path remains @TruffleBoundary
+     * for large shapes, which is fine — large records are rare and the
+     * HashMap.get itself isn't PE-friendly anyway.
+     *
+     * Frees the FractionHelper hot path (getNumerator/getDenominator) from
+     * the per-call PE bailout it used to take.
      */
-    @TruffleBoundary
     public Object getField(String name) {
         int index = shape.findFieldIndex(name);
         if (index < 0) {

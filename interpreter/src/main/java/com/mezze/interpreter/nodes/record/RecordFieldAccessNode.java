@@ -100,18 +100,18 @@ final class DynamicFieldAccessNode extends MezzeNode {
     @Override
     public Object execute(com.oracle.truffle.api.frame.VirtualFrame frame) {
         Object recordObj = recordNode.execute(frame);
-        return accessField(recordObj);
-    }
-
-    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
-    private Object accessField(Object recordObj) {
         if (recordObj instanceof MezzeRecord record) {
+            // getField is non-boundary for small shapes (≤ SMALL_SHAPE_THRESHOLD)
+            // since shape.findFieldIndex unrolls the name compare. Large
+            // shapes still pay the HashMap boundary internally — acceptable.
             Object value = record.getField(fieldName);
             if (value == null) {
+                com.oracle.truffle.api.CompilerDirectives.transferToInterpreterAndInvalidate();
                 throw new RuntimeException("Field not found: " + fieldName);
             }
             return value;
         }
+        com.oracle.truffle.api.CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("Expected record, got: " + recordObj.getClass().getSimpleName());
     }
 }

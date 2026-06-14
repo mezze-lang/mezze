@@ -38,7 +38,18 @@ public final class DictMethodCallNode extends MezzeNode {
 
     @Override
     public Object execute(VirtualFrame frame) {
-        Object dictValue = frame.getValue(dictSlot);
+        // Dict slots are always OBJECT-kind frame slots (the dict is a
+        // MezzeFunction). getObject is direct vs getValue's switch-on-kind
+        // dispatch + boxing. Fall back to getValue if the slot turned out
+        // not to hold an Object (shouldn't happen — the compiler always
+        // allocates dict slots as OBJECT — but stay safe).
+        Object dictValue;
+        try {
+            dictValue = frame.getObject(dictSlot);
+        } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            dictValue = frame.getValue(dictSlot);
+        }
 
         if (!(dictValue instanceof MezzeFunction fn)) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
