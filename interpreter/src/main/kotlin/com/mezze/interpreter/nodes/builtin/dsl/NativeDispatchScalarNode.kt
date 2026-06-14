@@ -7,6 +7,7 @@ import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.nodes.ExplodeLoop
 import com.oracle.truffle.api.nodes.IndirectCallNode
 import com.oracle.truffle.api.nodes.NodeInfo
+import com.oracle.truffle.api.nodes.UnexpectedResultException
 
 /**
  * Scalar-ABI native call site.
@@ -47,8 +48,35 @@ class NativeDispatchScalarNode(
     override fun execute(frame: VirtualFrame): Any {
         val n = argNodes.size
         val values = arrayOfNulls<Any>(n)
+        // Per-arg typed evaluation. argKinds[i] is @CompilationFinal so
+        // PE unrolls the loop and picks one branch per arg statically.
+        // When the arg node also overrides executeLong/executeDouble
+        // (e.g. DirectAddNode does), the primitive value flows in
+        // unboxed form right up until we put it in the Object[] —
+        // Truffle's escape analysis can then scalar-replace the
+        // Long.valueOf / Double.valueOf box because it's consumed
+        // immediately inside the handler body (which @CompilationFinal-
+        // resolves to the lambda's per-arg `as Long` / `as Double` cast,
+        // letting EA delete both halves of the box-unbox pair).
+        // Without typed exec here, the arg's primitive result was first
+        // boxed by `execute()`'s Object return convention, escaping the
+        // EA-friendly site. (#103)
         for (i in 0 until n) {
-            values[i] = argNodes[i].execute(frame)
+            val v: Any = try {
+                when (argKinds[i]) {
+                    SlotKind.LONG.ordinal    -> argNodes[i].executeLong(frame)
+                    SlotKind.DOUBLE.ordinal  -> argNodes[i].executeDouble(frame)
+                    SlotKind.BOOLEAN.ordinal -> argNodes[i].executeBoolean(frame)
+                    else                     -> argNodes[i].execute(frame)
+                }
+            } catch (ure: UnexpectedResultException) {
+                // Typed exec saw a value of a different kind. Surface as the
+                // raw result so the cast in the handler will throw a
+                // ClassCastException at the right place (matching the
+                // pre-typed-exec behavior).
+                ure.result
+            }
+            values[i] = v
         }
         val args = if (needsNode) {
             // First call lazily creates and adopts the IndirectCallNode.
