@@ -1253,12 +1253,15 @@ class TypedASTCompiler(
                 // for ability-method call sites, but the compiler never
                 // consulted monoCallSiteRewrites here — so every method-call
                 // spec went to waste. Mirror the ByHash branch's check.
+                //
+                // Phase B3: route through emitCallDirect so scalar ABI fires
+                // when the impl's param names match (the common case after
+                // monomorphization). Falls back to record path on arity
+                // mismatch or unknown param names. (#273)
                 val specialized = monoCallSiteRewrites[expr.loc]
-                if (specialized != null) {
-                    census.methodConcrete++
-                    return CallDirectIR(specialized, listOf(recordIR), expr.isTailCall, src)
-                }
-                return CallDirectIR(opHash, listOf(recordIR), expr.isTailCall, src)
+                val effectiveHash = specialized ?: opHash
+                if (specialized != null) census.methodConcrete++
+                return emitCallDirect(effectiveHash, recordIR, expr.isTailCall, src)
             }
 
             // VarType receiver — try dictionary passing first, then fall back to dynamic dispatch.
