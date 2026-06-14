@@ -132,15 +132,23 @@ public final class SeqFoldLongLoopNode extends Node {
 
         private Object callFolder(Object acc, long element,
                                   Object[] closureValues, int closureLength) {
-            MezzeRecord arg = MezzeRecord.wrapAccX(acc, element);
-            if (closureLength == 0) {
-                return callNode.call(new Object[]{arg});
+            // Scalar ABI: pass [closure..., acc, element] as positional args.
+            // The folder is a 2-arg lambda {acc, x} -> ...; its
+            // MezzeFunctionRootNode detects scalar ABI by arity
+            // (parameterCount=2 + closureCount, no record at args[closureCount]).
+            // Saves the per-iter MezzeRecord alloc — Truffle EA was supposed
+            // to scalarize it but the cross-boundary alloc was load-bearing
+            // for some seq.fold benches. (#262)
+            //
+            // The Long.valueOf(element) box still happens here, but it's
+            // immediately consumed by bindSlot in the receiver — EA-eligible
+            // because the box doesn't escape the inlined folder body.
+            Object[] callArgs = new Object[closureLength + 2];
+            if (closureLength > 0) {
+                System.arraycopy(closureValues, 0, callArgs, 0, closureLength);
             }
-            Object[] callArgs = new Object[closureLength + 1];
-            for (int i = 0; i < closureLength; i++) {
-                callArgs[i] = closureValues[i];
-            }
-            callArgs[closureLength] = arg;
+            callArgs[closureLength] = acc;
+            callArgs[closureLength + 1] = element;
             return callNode.call(callArgs);
         }
     }
