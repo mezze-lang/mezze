@@ -152,6 +152,7 @@ public abstract class NativeBridgeNode extends MezzeNode {
     @NodeInfo(shortName = "native-bridge-l2l")
     public static final class OneArgLongLong extends NativeBridgeNode {
         @Child private MezzeNode arg;
+        @CompilerDirectives.CompilationFinal
         private final HandlerLongLong handler;
 
         OneArgLongLong(MezzeNode arg, HandlerLongLong handler) {
@@ -187,6 +188,7 @@ public abstract class NativeBridgeNode extends MezzeNode {
     @NodeInfo(shortName = "native-bridge-d2d")
     public static final class OneArgDoubleDouble extends NativeBridgeNode {
         @Child private MezzeNode arg;
+        @CompilerDirectives.CompilationFinal
         private final HandlerDoubleDouble handler;
 
         OneArgDoubleDouble(MezzeNode arg, HandlerDoubleDouble handler) {
@@ -255,6 +257,7 @@ public abstract class NativeBridgeNode extends MezzeNode {
     public static final class TwoArgLongLongLong extends NativeBridgeNode {
         @Child private MezzeNode arg0;
         @Child private MezzeNode arg1;
+        @CompilerDirectives.CompilationFinal
         private final HandlerLongLongLong handler;
 
         TwoArgLongLongLong(MezzeNode arg0, MezzeNode arg1, HandlerLongLongLong handler) {
@@ -289,6 +292,7 @@ public abstract class NativeBridgeNode extends MezzeNode {
     public static final class TwoArgDoubleDoubleDouble extends NativeBridgeNode {
         @Child private MezzeNode arg0;
         @Child private MezzeNode arg1;
+        @CompilerDirectives.CompilationFinal
         private final HandlerDoubleDoubleDouble handler;
 
         TwoArgDoubleDoubleDouble(MezzeNode arg0, MezzeNode arg1, HandlerDoubleDoubleDouble handler) {
@@ -318,6 +322,7 @@ public abstract class NativeBridgeNode extends MezzeNode {
     @NodeInfo(shortName = "native-bridge-d2l")
     public static final class OneArgDoubleLong extends NativeBridgeNode {
         @Child private MezzeNode arg;
+        @CompilerDirectives.CompilationFinal
         private final HandlerDoubleLong handler;
 
         OneArgDoubleLong(MezzeNode arg, HandlerDoubleLong handler) {
@@ -346,6 +351,7 @@ public abstract class NativeBridgeNode extends MezzeNode {
     @NodeInfo(shortName = "native-bridge-l2d")
     public static final class OneArgLongDouble extends NativeBridgeNode {
         @Child private MezzeNode arg;
+        @CompilerDirectives.CompilationFinal
         private final HandlerLongDouble handler;
 
         OneArgLongDouble(MezzeNode arg, HandlerLongDouble handler) {
