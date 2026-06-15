@@ -222,6 +222,167 @@ public abstract class NativeBridgeNode extends MezzeNode {
         return new OneArgDoubleDouble(arg, handler);
     }
 
+    /** Typed (long, long)→long handler. */
+    @FunctionalInterface
+    public interface HandlerLongLongLong {
+        long apply(long a, long b);
+    }
+
+    /** Typed (double, double)→double handler. */
+    @FunctionalInterface
+    public interface HandlerDoubleDoubleDouble {
+        double apply(double a, double b);
+    }
+
+    /** Typed double→long handler (e.g. float::round). */
+    @FunctionalInterface
+    public interface HandlerDoubleLong {
+        long apply(double a);
+    }
+
+    /** Typed long→double handler (e.g. int::to_float). */
+    @FunctionalInterface
+    public interface HandlerLongDouble {
+        double apply(long a);
+    }
+
+    /**
+     * Typed (long, long)→long 2-arg bridge. Both args read as primitive longs,
+     * result returned as primitive long via executeLong. Box only when an
+     * Object-returning parent consumes us.
+     */
+    @NodeInfo(shortName = "native-bridge-ll2l")
+    public static final class TwoArgLongLongLong extends NativeBridgeNode {
+        @Child private MezzeNode arg0;
+        @Child private MezzeNode arg1;
+        private final HandlerLongLongLong handler;
+
+        TwoArgLongLongLong(MezzeNode arg0, MezzeNode arg1, HandlerLongLongLong handler) {
+            this.arg0 = arg0;
+            this.arg1 = arg1;
+            this.handler = handler;
+        }
+
+        @Override
+        public Object execute(VirtualFrame frame) {
+            try {
+                return handler.apply(arg0.executeLong(frame), arg1.executeLong(frame));
+            } catch (com.oracle.truffle.api.nodes.UnexpectedResultException ure) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                throw new RuntimeException("long bridge2 got non-long arg: " + ure.getResult());
+            }
+        }
+
+        @Override
+        public long executeLong(VirtualFrame frame)
+                throws com.oracle.truffle.api.nodes.UnexpectedResultException {
+            return handler.apply(arg0.executeLong(frame), arg1.executeLong(frame));
+        }
+    }
+
+    /**
+     * Typed (double, double)→double 2-arg bridge. Same shape as
+     * {@link TwoArgLongLongLong}. Covers float::pow, float::min/max,
+     * float::hypot, float::atan2, etc.
+     */
+    @NodeInfo(shortName = "native-bridge-dd2d")
+    public static final class TwoArgDoubleDoubleDouble extends NativeBridgeNode {
+        @Child private MezzeNode arg0;
+        @Child private MezzeNode arg1;
+        private final HandlerDoubleDoubleDouble handler;
+
+        TwoArgDoubleDoubleDouble(MezzeNode arg0, MezzeNode arg1, HandlerDoubleDoubleDouble handler) {
+            this.arg0 = arg0;
+            this.arg1 = arg1;
+            this.handler = handler;
+        }
+
+        @Override
+        public Object execute(VirtualFrame frame) {
+            try {
+                return handler.apply(arg0.executeDouble(frame), arg1.executeDouble(frame));
+            } catch (com.oracle.truffle.api.nodes.UnexpectedResultException ure) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                throw new RuntimeException("double bridge2 got non-double arg: " + ure.getResult());
+            }
+        }
+
+        @Override
+        public double executeDouble(VirtualFrame frame)
+                throws com.oracle.truffle.api.nodes.UnexpectedResultException {
+            return handler.apply(arg0.executeDouble(frame), arg1.executeDouble(frame));
+        }
+    }
+
+    /** Typed double→long 1-arg bridge (float::round). */
+    @NodeInfo(shortName = "native-bridge-d2l")
+    public static final class OneArgDoubleLong extends NativeBridgeNode {
+        @Child private MezzeNode arg;
+        private final HandlerDoubleLong handler;
+
+        OneArgDoubleLong(MezzeNode arg, HandlerDoubleLong handler) {
+            this.arg = arg;
+            this.handler = handler;
+        }
+
+        @Override
+        public Object execute(VirtualFrame frame) {
+            try {
+                return handler.apply(arg.executeDouble(frame));
+            } catch (com.oracle.truffle.api.nodes.UnexpectedResultException ure) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                throw new RuntimeException("d→l bridge got non-double arg: " + ure.getResult());
+            }
+        }
+
+        @Override
+        public long executeLong(VirtualFrame frame)
+                throws com.oracle.truffle.api.nodes.UnexpectedResultException {
+            return handler.apply(arg.executeDouble(frame));
+        }
+    }
+
+    /** Typed long→double 1-arg bridge (int::to_float). */
+    @NodeInfo(shortName = "native-bridge-l2d")
+    public static final class OneArgLongDouble extends NativeBridgeNode {
+        @Child private MezzeNode arg;
+        private final HandlerLongDouble handler;
+
+        OneArgLongDouble(MezzeNode arg, HandlerLongDouble handler) {
+            this.arg = arg;
+            this.handler = handler;
+        }
+
+        @Override
+        public Object execute(VirtualFrame frame) {
+            try {
+                return handler.apply(arg.executeLong(frame));
+            } catch (com.oracle.truffle.api.nodes.UnexpectedResultException ure) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                throw new RuntimeException("l→d bridge got non-long arg: " + ure.getResult());
+            }
+        }
+
+        @Override
+        public double executeDouble(VirtualFrame frame)
+                throws com.oracle.truffle.api.nodes.UnexpectedResultException {
+            return handler.apply(arg.executeLong(frame));
+        }
+    }
+
+    public static MezzeNode createLongLongLong(MezzeNode a, MezzeNode b, HandlerLongLongLong h) {
+        return new TwoArgLongLongLong(a, b, h);
+    }
+    public static MezzeNode createDoubleDoubleDouble(MezzeNode a, MezzeNode b, HandlerDoubleDoubleDouble h) {
+        return new TwoArgDoubleDoubleDouble(a, b, h);
+    }
+    public static MezzeNode createDoubleLong(MezzeNode a, HandlerDoubleLong h) {
+        return new OneArgDoubleLong(a, h);
+    }
+    public static MezzeNode createLongDouble(MezzeNode a, HandlerLongDouble h) {
+        return new OneArgLongDouble(a, h);
+    }
+
     /**
      * 2-arg specialization: no Object[] allocation, two args
      * evaluated and passed directly. Used by the typical Mut state-

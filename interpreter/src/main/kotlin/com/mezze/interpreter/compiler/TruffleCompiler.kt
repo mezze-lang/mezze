@@ -1881,30 +1881,140 @@ class TruffleCompiler(
      * generic NativeDispatchScalarNode handler dispatch.
      */
     private fun tryCompileTypedScalarNative(node: CallNativeIR, source: Source): MezzeNode? {
-        if (node.args.size != 1) return null
-        if (node.argKinds.size != 1) return null
-        val argNode = compileNode(node.args[0], source)
+        val n = node.args.size
+        if (n == 0 || n > 2) return null
+        if (node.argKinds.size != n) return null
+        // Need to know arg shape before allocating child nodes — avoid double
+        // compile by computing kinds first.
+        val k0 = node.argKinds[0]
+        val k1 = if (n == 2) node.argKinds[1] else null
+
+        // ---- 1-arg unary intrinsics ----
+        if (n == 1) {
+            val arg = compileNode(node.args[0], source)
+            return when (node.name) {
+                // long → long
+                "__native_int_abs" -> guardL(k0, arg) { x ->
+                    com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.intAbs(x) }
+                "__native_int_negate" -> guardL(k0, arg) { x -> -x }
+                "__native_int_sign" -> guardL(k0, arg) { x ->
+                    com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.intSign(x) }
+                "__native_int_bitwise_not" -> guardL(k0, arg) { x -> x.inv() }
+                "__native_int_popcount" -> guardL(k0, arg) { x ->
+                    java.lang.Long.bitCount(x).toLong() }
+                "__native_int_count_leading_zeros" -> guardL(k0, arg) { x ->
+                    java.lang.Long.numberOfLeadingZeros(x).toLong() }
+                "__native_int_count_trailing_zeros" -> guardL(k0, arg) { x ->
+                    java.lang.Long.numberOfTrailingZeros(x).toLong() }
+                // double → double
+                "__native_float_abs" -> guardD(k0, arg) { x ->
+                    com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.floatAbs(x) }
+                "__native_float_sqrt" -> guardD(k0, arg) { x ->
+                    com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.floatSqrt(x) }
+                "__native_float_negate" -> guardD(k0, arg) { x -> -x }
+                "__native_float_floor" -> guardD(k0, arg) { x -> Math.floor(x) }
+                "__native_float_ceil" -> guardD(k0, arg) { x -> Math.ceil(x) }
+                "__native_float_trunc" -> guardD(k0, arg) { x ->
+                    com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.floatTrunc(x) }
+                "__native_float_sin" -> guardD(k0, arg) { x -> Math.sin(x) }
+                "__native_float_cos" -> guardD(k0, arg) { x -> Math.cos(x) }
+                "__native_float_tan" -> guardD(k0, arg) { x -> Math.tan(x) }
+                "__native_float_asin" -> guardD(k0, arg) { x -> Math.asin(x) }
+                "__native_float_acos" -> guardD(k0, arg) { x -> Math.acos(x) }
+                "__native_float_atan" -> guardD(k0, arg) { x -> Math.atan(x) }
+                "__native_float_exp" -> guardD(k0, arg) { x -> Math.exp(x) }
+                "__native_float_log" -> guardD(k0, arg) { x -> Math.log(x) }
+                "__native_float_log10" -> guardD(k0, arg) { x -> Math.log10(x) }
+                "__native_float_cbrt" -> guardD(k0, arg) { x -> Math.cbrt(x) }
+                "__native_float_sinh" -> guardD(k0, arg) { x -> Math.sinh(x) }
+                "__native_float_cosh" -> guardD(k0, arg) { x -> Math.cosh(x) }
+                "__native_float_tanh" -> guardD(k0, arg) { x -> Math.tanh(x) }
+                "__native_float_expm1" -> guardD(k0, arg) { x -> Math.expm1(x) }
+                "__native_float_log1p" -> guardD(k0, arg) { x -> Math.log1p(x) }
+                "__native_float_signum" -> guardD(k0, arg) { x -> Math.signum(x) }
+                // __native_float_round skipped: stdlib types it as Float→Float
+                // but PrimitiveNatives.floatRound returns long; the DSL handler
+                // coerces. Don't typed-bridge it — would return long.
+                // long → double (int::to_float)
+                "__native_int_to_float" -> {
+                    if (k0 != SlotKind.LONG) return null
+                    com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createLongDouble(
+                        arg
+                    ) { x -> x.toDouble() }
+                }
+                "__native_int_from_nat" -> {
+                    // nat is also LONG-shaped; pass-through identity.
+                    if (k0 != SlotKind.LONG) return null
+                    com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createLongLong(
+                        arg
+                    ) { x -> x }
+                }
+                else -> null
+            }
+        }
+
+        // ---- 2-arg binary intrinsics ----
+        val a = compileNode(node.args[0], source)
+        val b = compileNode(node.args[1], source)
         return when (node.name) {
-            "__native_int_abs" -> {
-                if (node.argKinds[0] != SlotKind.LONG) return null
-                com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createLongLong(
-                    argNode
-                ) { x -> com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.intAbs(x) }
-            }
-            "__native_float_abs" -> {
-                if (node.argKinds[0] != SlotKind.DOUBLE) return null
-                com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createDoubleDouble(
-                    argNode
-                ) { x -> com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.floatAbs(x) }
-            }
-            "__native_float_sqrt" -> {
-                if (node.argKinds[0] != SlotKind.DOUBLE) return null
-                com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createDoubleDouble(
-                    argNode
-                ) { x -> com.mezze.interpreter.nodes.builtin.primitives.PrimitiveNatives.floatSqrt(x) }
-            }
+            // long, long → long
+            "__native_int_min" -> guardLL(k0, k1, a, b) { x, y -> Math.min(x, y) }
+            "__native_int_max" -> guardLL(k0, k1, a, b) { x, y -> Math.max(x, y) }
+            "__native_int_compare" -> guardLL(k0, k1, a, b) { x, y ->
+                java.lang.Long.compare(x, y).toLong() }
+            "__native_int_bitwise_and" -> guardLL(k0, k1, a, b) { x, y -> x and y }
+            "__native_int_bitwise_or"  -> guardLL(k0, k1, a, b) { x, y -> x or y }
+            "__native_int_bitwise_xor" -> guardLL(k0, k1, a, b) { x, y -> x xor y }
+            "__native_int_shift_left"  -> guardLL(k0, k1, a, b) { x, y -> x shl y.toInt() }
+            "__native_int_shift_right" -> guardLL(k0, k1, a, b) { x, y -> x shr y.toInt() }
+            "__native_int_unsigned_shift_right" -> guardLL(k0, k1, a, b) { x, y -> x ushr y.toInt() }
+            // double, double → double
+            "__native_float_min" -> guardDD(k0, k1, a, b) { x, y -> Math.min(x, y) }
+            "__native_float_max" -> guardDD(k0, k1, a, b) { x, y -> Math.max(x, y) }
+            "__native_float_pow" -> guardDD(k0, k1, a, b) { x, y -> Math.pow(x, y) }
+            "__native_float_atan2" -> guardDD(k0, k1, a, b) { x, y -> Math.atan2(x, y) }
+            "__native_float_hypot" -> guardDD(k0, k1, a, b) { x, y -> Math.hypot(x, y) }
+            "__native_float_copy_sign" -> guardDD(k0, k1, a, b) { x, y -> Math.copySign(x, y) }
             else -> null
         }
+    }
+
+    /** long→long bridge gated on the arg being LONG-typed; null otherwise. */
+    private inline fun guardL(
+        k: SlotKind,
+        arg: MezzeNode,
+        crossinline h: (Long) -> Long
+    ): MezzeNode? {
+        if (k != SlotKind.LONG) return null
+        return com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createLongLong(arg) { x -> h(x) }
+    }
+
+    /** double→double bridge gated on the arg being DOUBLE-typed. */
+    private inline fun guardD(
+        k: SlotKind,
+        arg: MezzeNode,
+        crossinline h: (Double) -> Double
+    ): MezzeNode? {
+        if (k != SlotKind.DOUBLE) return null
+        return com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createDoubleDouble(arg) { x -> h(x) }
+    }
+
+    private inline fun guardLL(
+        k0: SlotKind, k1: SlotKind?,
+        a: MezzeNode, b: MezzeNode,
+        crossinline h: (Long, Long) -> Long
+    ): MezzeNode? {
+        if (k0 != SlotKind.LONG || k1 != SlotKind.LONG) return null
+        return com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createLongLongLong(a, b) { x, y -> h(x, y) }
+    }
+
+    private inline fun guardDD(
+        k0: SlotKind, k1: SlotKind?,
+        a: MezzeNode, b: MezzeNode,
+        crossinline h: (Double, Double) -> Double
+    ): MezzeNode? {
+        if (k0 != SlotKind.DOUBLE || k1 != SlotKind.DOUBLE) return null
+        return com.mezze.interpreter.nodes.builtin.NativeBridgeNode.createDoubleDoubleDouble(a, b) { x, y -> h(x, y) }
     }
 
     private fun slotKindToFrameKind(kind: SlotKind): FrameSlotKind = when (kind) {
