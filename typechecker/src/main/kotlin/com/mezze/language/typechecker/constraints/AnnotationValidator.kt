@@ -1,0 +1,444 @@
+package com.mezze.language.typechecker.constraints
+
+import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
+import com.mezze.language.typechecker.context.DeclarationRegistry
+import com.mezze.language.typechecker.solving.ConstraintSolver
+import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.typechecker.TypeCheckError
+import com.mezze.language.typechecker.WellKnownHashes
+import com.mezze.language.parsedast.diagnostics.ErrorCode
+
+internal class AnnotationValidator(
+    private val registry: DeclarationRegistry,
+) {
+    fun validateAnnotationAgainstExpression(
+        binding: ParsedLetDecl,
+        annotatedType: MezzeType,
+        annotation: ParsedTypeAnnotation,
+        expression: ParsedExpr,
+        inferredType: MezzeType
+    ) {
+        if (expression is ParsedRecordLit) {
+            val resolvedRecordInfo = resolveToRecordType(annotatedType)
+            if (resolvedRecordInfo != null) {
+                val (annotatedFields, isOpen) = resolvedRecordInfo
+                val literalFields = mutableSetOf<String>()
+
+                for (entry in expression.entries) {
+                    when (entry) {
+                        is ParsedRecordEntry.Field -> literalFields.add(entry.name)
+                        is ParsedRecordEntry.Spread -> {
+                            return
+                        }
+                    }
+                }
+
+                if (!isOpen) {
+                    val extraFields = literalFields - annotatedFields
+                    if (extraFields.isNotEmpty()) {
+                        throw TypeCheckError(
+                            "Type annotation mismatch: record has extra field(s) ${extraFields.sorted().joinToString(", ")} " +
+                            "not present in closed record type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }",
+                            expression.loc,
+                            code = ErrorCode.T0203_RECORD_EXTRA_FIELDS,
+                        )
+                    }
+                }
+
+                val missingFields = annotatedFields - literalFields
+                if (missingFields.isNotEmpty()) {
+                    throw TypeCheckError(
+                        "Type annotation mismatch: record is missing field(s) ${missingFields.sorted().joinToString(", ")} " +
+                        "required by ${if (isOpen) "open" else "closed"} record type { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }}${if (isOpen) ", ..." else ""} }",
+                        expression.loc,
+                        code = ErrorCode.T0202_RECORD_MISSING_FIELDS,
+                    )
+                }
+            }
+        }
+
+        if (annotatedType is MezzeType.FunctionType && expression is ParsedLambda) {
+            val annotatedParamType = annotatedType.paramType
+
+            val expectedParamCount = when (annotatedParamType) {
+                is MezzeType.RecordType -> annotatedParamType.fields.size
+                else -> 1
+            }
+
+            val actualParamCount = when (val params = expression.params) {
+                is ParsedLambdaParams.Untyped -> params.names.size
+                is ParsedLambdaParams.Typed -> params.fields.size
+            }
+
+            if (expectedParamCount != actualParamCount) {
+                throw TypeCheckError(
+                    "Type annotation mismatch: function expects $expectedParamCount parameter(s) " +
+                    "but lambda has $actualParamCount parameter(s)",
+                    expression.loc,
+                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                )
+            }
+        }
+    }
+
+    fun validatePolymorphismPreserved(
+        annotationType: MezzeType,
+        substitution: Substitution,
+        varName: String,
+        sourceLoc: Loc? = null,
+        abilityConstrainedTypeVars: Set<TypeVar> = emptySet()
+    ) {
+        val annotationTypeVars = collectTypeVars(annotationType)
+
+        for (typeVar in annotationTypeVars) {
+            if (abilityConstrainedTypeVars.any {
+                it.name.removePrefix("'") == typeVar.name.removePrefix("'") || it.id == typeVar.id
+            }) {
+                continue
+            }
+
+            val substituted = substitution.apply(MezzeType.VarType(typeVar))
+            if (substituted !is MezzeType.VarType) {
+                val substitutedTypeVars = collectTypeVars(substituted)
+                if (substitutedTypeVars.isEmpty()) {
+                    throw TypeCheckError(
+                        "Type annotation mismatch for '$varName': Annotation declares type variable '${typeVar.name}' " +
+                        "but implementation forces it to concrete type '${prettyPrintType(substituted)}'. " +
+                        "The implementation must work for all types, not just specific ones.",
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                    )
+                }
+            }
+        }
+    }
+
+    fun validateEffectsMatch(
+        annotationType: MezzeType,
+        inferredType: MezzeType,
+        varName: String,
+        expression: ParsedExpr
+    ) {
+        if (annotationType is MezzeType.FunctionType && inferredType is MezzeType.FunctionType) {
+            val annotatedEffects = annotationType.effects?.effects ?: emptySet()
+            val inferredEffects = inferredType.effects?.effects ?: emptySet()
+
+            val extraEffects = inferredEffects - annotatedEffects
+            if (extraEffects.isNotEmpty()) {
+                throw TypeCheckError(
+                    "Type annotation mismatch for '$varName': Implementation uses effects ${extraEffects.joinToString(", ")} " +
+                    "which are not declared in the annotation.",
+                    expression.loc,
+                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                )
+            }
+
+            val missingEffects = annotatedEffects - inferredEffects
+            if (missingEffects.isNotEmpty()) {
+                throw TypeCheckError(
+                    "Type annotation mismatch for '$varName': Annotation declares effects ${missingEffects.joinToString(", ")} " +
+                    "which are not used in the implementation.",
+                    expression.loc,
+                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                )
+            }
+        }
+    }
+
+    fun validateEffectsNotOverpromised(
+        annotationType: MezzeType,
+        inferredType: MezzeType,
+        varName: String,
+        sourceLoc: Loc? = null
+    ) {
+        if (annotationType is MezzeType.FunctionType && inferredType is MezzeType.FunctionType) {
+            val annotatedEffects = annotationType.effects?.effects ?: emptySet()
+            val inferredEffects = inferredType.effects?.effects ?: emptySet()
+
+            val isPolymorphic = annotationType.effects?.isOpen == true
+            val overpromisedEffects = annotatedEffects - inferredEffects
+            if (overpromisedEffects.isNotEmpty() && !isPolymorphic) {
+                throw TypeCheckError(
+                    "Type annotation mismatch for '$varName': Annotation declares effects ${overpromisedEffects.joinToString(", ")} " +
+                    "which are not used in the implementation.",
+                    sourceLoc,
+                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                )
+            }
+        }
+    }
+
+    fun validateAbilityOnCorrectTypeVar(
+        annotationType: MezzeType,
+        inferredAbilityConstraints: List<Constraint.AbilityRequired>,
+        varName: String,
+        substitution: Substitution,
+        sourceLoc: Loc? = null
+    ) {
+        if (annotationType !is MezzeType.FunctionType) return
+
+        val annotatedAbilities = annotationType.abilityConstraints
+        val annotationTypeVars = collectTypeVars(annotationType)
+
+        val actualUsageConstraints = inferredAbilityConstraints.filter { constraint ->
+            constraint.context == null || !constraint.context.startsWith("Type annotation on")
+        }
+
+        fun areUnified(tv1: TypeVar, tv2: TypeVar): Boolean {
+            if (tv1.id == tv2.id) return true
+            val resolved1 = substitution.apply(MezzeType.VarType(tv1))
+            val resolved2 = substitution.apply(MezzeType.VarType(tv2))
+            if (resolved1 == resolved2 ||
+                (resolved1 is MezzeType.VarType && resolved1.variable.id == tv2.id) ||
+                (resolved2 is MezzeType.VarType && resolved2.variable.id == tv1.id)) return true
+            if (resolved1 is MezzeType.VarType && resolved2 is MezzeType.VarType &&
+                resolved1.variable.name == resolved2.variable.name) return true
+            return false
+        }
+
+        for (usage in actualUsageConstraints) {
+            if (WellKnownHashes.isInspect(usage.abilityHash)) continue
+
+            val matchingAnnotatedList = annotatedAbilities.filter { it.abilityName == usage.abilityName }
+
+            if (matchingAnnotatedList.isNotEmpty()) {
+                val resolvedUsageTypeVar = substitution.apply(MezzeType.VarType(usage.typeVar))
+                val hasMatchingTypeVar = matchingAnnotatedList.any { matchingAnnotated ->
+                    matchingAnnotated.typeArgs.any { annotatedTypeArg ->
+                        when {
+                            annotatedTypeArg is MezzeType.VarType ->
+                                areUnified(usage.typeVar, annotatedTypeArg.variable)
+                            else -> resolvedUsageTypeVar == annotatedTypeArg
+                        }
+                    }
+                }
+
+                if (!hasMatchingTypeVar) {
+                    val declaredVars = matchingAnnotatedList.flatMap { it.typeArgs }
+                        .filterIsInstance<MezzeType.VarType>()
+                        .map { it.variable.name }
+                        .distinct()
+                    throw TypeCheckError(
+                        "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
+                        "Annotation declares constraint on ${declaredVars.joinToString()} but implementation uses it on '${usage.typeVar.name}'.",
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                    )
+                }
+            } else {
+                val isOnAnnotationTypeVar = annotationTypeVars.any { annotationVar ->
+                    areUnified(usage.typeVar, annotationVar)
+                }
+                if (isOnAnnotationTypeVar) {
+                    throw TypeCheckError(
+                        "Type annotation mismatch for '$varName': Implementation requires '${usage.abilityName}' on type variable '${usage.typeVar.name}', " +
+                        "but the annotation does not declare this constraint.",
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                    )
+                }
+            }
+        }
+    }
+
+    fun validateAbilitiesMatch(
+        annotationType: MezzeType,
+        inferredType: MezzeType,
+        inferredAbilityConstraints: List<Constraint.AbilityRequired>,
+        varName: String,
+        expression: ParsedExpr
+    ) {
+        if (annotationType is MezzeType.FunctionType && inferredType is MezzeType.FunctionType) {
+            val annotatedAbilities = annotationType.abilityConstraints
+
+            val actualUsageConstraints = inferredAbilityConstraints.filter { constraint ->
+                constraint.context == null || !constraint.context.startsWith("Type annotation on")
+            }
+
+            for (usage in actualUsageConstraints) {
+                if (WellKnownHashes.isInspect(usage.abilityHash)) continue
+
+                val matchingAnnotated = annotatedAbilities.find { it.abilityName == usage.abilityName }
+                if (matchingAnnotated != null) {
+                    for ((i, annotatedTypeArg) in matchingAnnotated.typeArgs.withIndex()) {
+                        if (annotatedTypeArg is MezzeType.VarType) {
+                            if (usage.typeVar.name != annotatedTypeArg.variable.name) {
+                                throw TypeCheckError(
+                                    "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
+                                    "Annotation declares '${annotatedTypeArg.variable.name}' but implementation uses '${usage.typeVar.name}'.",
+                                    expression.loc,
+                                    code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                                    hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!containsFunctionCalls(expression)) {
+                for (annotated in annotatedAbilities) {
+                    if (WellKnownHashes.isInspect(annotated.abilityHash)) continue
+
+                    val hasConcreteTypes = annotated.typeArgs.any { it !is MezzeType.VarType }
+                    if (hasConcreteTypes) continue
+
+                    val matchingInferred = actualUsageConstraints.find { it.abilityName == annotated.abilityName }
+                    if (matchingInferred == null) {
+                        throw TypeCheckError(
+                            "Type annotation mismatch for '$varName': Annotation declares ability '${annotated.abilityName}' " +
+                            "which is not used in the implementation.",
+                            expression.loc,
+                            code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                            hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun collectTypeVars(type: MezzeType): Set<TypeVar> {
+        val result = mutableSetOf<TypeVar>()
+        collectTypeVarsRecursive(type, result)
+        return result
+    }
+
+    private fun collectTypeVarsRecursive(type: MezzeType, result: MutableSet<TypeVar>) {
+        when (type) {
+            is MezzeType.VarType -> result.add(type.variable)
+            is MezzeType.FunctionType -> {
+                collectTypeVarsRecursive(type.paramType, result)
+                collectTypeVarsRecursive(type.returnType, result)
+            }
+            is MezzeType.RecordType -> {
+                type.fields.values.forEach { collectTypeVarsRecursive(it, result) }
+            }
+            is MezzeType.VariantType -> {
+                type.constructors.values.filterNotNull().forEach { collectTypeVarsRecursive(it, result) }
+            }
+            is MezzeType.TypeApplication -> {
+                type.args.forEach { collectTypeVarsRecursive(it, result) }
+            }
+            is MezzeType.SeqType -> collectTypeVarsRecursive(type.elementType, result)
+            is MezzeType.ListType -> collectTypeVarsRecursive(type.elementType, result)
+            is MezzeType.SetType -> collectTypeVarsRecursive(type.elementType, result)
+            is MezzeType.SortedMapType -> {
+                collectTypeVarsRecursive(type.keyType, result)
+                collectTypeVarsRecursive(type.valueType, result)
+            }
+            is MezzeType.SortedSetType -> collectTypeVarsRecursive(type.elementType, result)
+            is MezzeType.MapType -> {
+                collectTypeVarsRecursive(type.keyType, result)
+                collectTypeVarsRecursive(type.valueType, result)
+            }
+            is MezzeType.NewtypeType -> collectTypeVarsRecursive(type.wrappedType, result)
+            is MezzeType.IntType,
+            is MezzeType.FloatType,
+            is MezzeType.StringType,
+            is MezzeType.BoolType,
+            is MezzeType.NatType,
+            is MezzeType.FracType,
+            is MezzeType.OrderingType,
+            is MezzeType.BytesType,
+            is MezzeType.ByteBufferType,
+            is MezzeType.CharType -> { }
+            is MezzeType.EffectRow -> { }
+            is MezzeType.SuspendedType -> collectTypeVarsRecursive(type.valueType, result)
+        }
+    }
+
+    private fun containsConcreteTypes(type: MezzeType): Boolean {
+        return when (type) {
+            is MezzeType.VarType -> false
+            is MezzeType.FunctionType ->
+                containsConcreteTypes(type.paramType) || containsConcreteTypes(type.returnType)
+            is MezzeType.RecordType ->
+                type.fields.values.any { containsConcreteTypes(it) }
+            is MezzeType.VariantType -> {
+                type.constructors.isNotEmpty() || type.constructors.values.any { it != null && containsConcreteTypes(it) }
+            }
+            is MezzeType.TypeApplication ->
+                type.args.any { containsConcreteTypes(it) }
+            is MezzeType.SeqType ->
+                containsConcreteTypes(type.elementType)
+            is MezzeType.ListType ->
+                containsConcreteTypes(type.elementType)
+            is MezzeType.SetType ->
+                containsConcreteTypes(type.elementType)
+            is MezzeType.SortedMapType ->
+                containsConcreteTypes(type.keyType) || containsConcreteTypes(type.valueType)
+            is MezzeType.SortedSetType ->
+                containsConcreteTypes(type.elementType)
+            is MezzeType.MapType ->
+                containsConcreteTypes(type.keyType) || containsConcreteTypes(type.valueType)
+            is MezzeType.IntType,
+            is MezzeType.StringType,
+            is MezzeType.BoolType,
+            is MezzeType.FloatType -> true
+            else -> true
+        }
+    }
+
+    private fun containsFunctionCalls(expr: ParsedExpr): Boolean {
+        return when (expr) {
+            is ParsedFunctionCall -> true
+            is ParsedLambda -> containsFunctionCalls(expr.body)
+            is ParsedIf -> {
+                containsFunctionCalls(expr.condition) ||
+                containsFunctionCalls(expr.thenBranch) ||
+                containsFunctionCalls(expr.elseBranch)
+            }
+            is ParsedMatch -> {
+                containsFunctionCalls(expr.scrutinee) ||
+                expr.cases.any { containsFunctionCalls(it.body) }
+            }
+            is ParsedSeqLit -> expr.elements.any { element ->
+                when (element) {
+                    is ParsedSeqElement.Regular -> containsFunctionCalls(element.expr)
+                    is ParsedSeqElement.Spread -> containsFunctionCalls(element.expr)
+                }
+            }
+            is ParsedRecordLit -> expr.entries.any { entry ->
+                when (entry) {
+                    is ParsedRecordEntry.Field -> entry.value?.let { containsFunctionCalls(it) } ?: false
+                    is ParsedRecordEntry.Spread -> containsFunctionCalls(entry.expr)
+                }
+            }
+            is ParsedMemberAccess -> containsFunctionCalls(expr.receiver)
+            is ParsedStringLit -> {
+                expr.parts.any { part ->
+                    part is ParsedStringPart.Interpolation && containsFunctionCalls(part.expr)
+                }
+            }
+            is ParsedDo -> true
+            else -> false
+        }
+    }
+
+    private fun resolveToRecordType(type: MezzeType): Pair<Set<String>, Boolean>? {
+        when (type) {
+            is MezzeType.RecordType -> {
+                return Pair(type.fields.keys, type.rowVar != null)
+            }
+            is MezzeType.TypeApplication -> {
+                val typeDecl = registry.typeDeclarations[type.constructor] ?: return null
+                val definition = typeDecl.definition
+                if (definition is ParsedRecordDef) {
+                    val fieldNames = definition.fields.map { it.name }.toSet()
+                    return Pair(fieldNames, definition.isOpen)
+                }
+                return null
+            }
+            else -> return null
+        }
+    }
+}
