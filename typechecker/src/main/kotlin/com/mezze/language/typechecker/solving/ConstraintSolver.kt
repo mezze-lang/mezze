@@ -5,6 +5,7 @@ import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.typechecker.printing.ErrorMessageBuilder
 
 class ConstraintSolver(
     private val context: TypingContext,

@@ -190,7 +190,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             effect Log where {
-              log : {message: Str} -> Unit <Log>
+              log : {message: Str} -> {} <Log>
             }
 
             impl Show for Int where {

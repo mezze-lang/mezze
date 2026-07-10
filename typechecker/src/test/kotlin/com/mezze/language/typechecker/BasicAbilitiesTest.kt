@@ -112,7 +112,7 @@ class BasicAbilitiesTest {
     fun testSimpleEffectDeclaration() {
         val source = """
             effect Log where {
-              log : {message: Str} -> Unit <Log>
+              log : {message: Str} -> {} <Log>
             }
         """.trimIndent()
 
@@ -131,11 +131,11 @@ class BasicAbilitiesTest {
     fun testSimpleEffectImplementation() {
         val source = """
             effect Log where {
-              log : {message: Str} -> Unit <Log>
+              log : {message: Str} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
-              log : {message: Str} -> Unit = {message} -> {}
+              log : {message: Str} -> {} = {message} -> {}
             }
         """.trimIndent()
 

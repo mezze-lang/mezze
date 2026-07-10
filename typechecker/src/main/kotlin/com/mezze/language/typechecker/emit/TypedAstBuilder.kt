@@ -1676,7 +1676,6 @@ class TypedAstBuilder(
     }
 
     // TODO: Could eventually use TypeAnnotationConverter from util/, but this version has
-    // special Unit handling ("Unit" -> empty RecordType), uppercase -> TypeApp logic,
     // instance-level typeVarCache, open row vars, and associatedTypeBindings on ability
     // constraints that are specific to typed AST emission.
     /**
@@ -1688,22 +1687,15 @@ class TypedAstBuilder(
     private fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
         return when (annotation) {
             is ParsedNamedType -> {
-                // Primitive types first
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
 
-                when (annotation.name) {
-                    "Unit" -> MezzeType.RecordType(emptyMap())
-                    else -> {
-                        // Type variable (lowercase or tick-prefixed) or type constructor
-                        if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
-                            val typeVar = typeVarCache.getOrPut(annotation.name) {
-                                TypeVar.freshWithName(annotation.name)
-                            }
-                            MezzeType.VarType(typeVar)
-                        } else {
-                            com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
-                        }
+                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
+                    val typeVar = typeVarCache.getOrPut(annotation.name) {
+                        TypeVar.freshWithName(annotation.name)
                     }
+                    MezzeType.VarType(typeVar)
+                } else {
+                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
                 }
             }
             is ParsedFunctionType -> {

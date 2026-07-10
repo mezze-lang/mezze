@@ -34,15 +34,7 @@ class ContextBuilder {
      */
     private val typeVarCache = mutableMapOf<String, TypeVar>()
 
-    /**
-     * Shared effect row variable for the annotation currently being converted.
-     * Lazily allocated the first time a `<...>` is seen, then reused for every
-     * other `<...>` in the same signature. This makes effect rows propagate
-     * naturally — `{ f: {} -> 'a <...> } -> Promise 'a <Async, ...>` carries
-     * f's effects into the output instead of allocating a fresh, discarded
-     * row variable per occurrence.
-     */
-    private var sharedAnnotationRowVar: RowVar? = null
+    private val sharedRowVar = com.mezze.language.typechecker.util.TypeAnnotationConverter.SharedRowVar()
 
     /**
      * Effect declarations available during the current build() invocation.
@@ -183,24 +175,14 @@ class ContextBuilder {
         // v1 implDecls removed — all consumers now use resolvedParsedPerformerDecls
         val abilityImplDecls = resolvedAbilityImplDecls
 
-        // Validate duplicates — tolerate prelude duplicates when modules are merged
-        // Build a list of all v2 declarations for validation (types, abilities, effects, ability impls, performers, lets)
+        // Validate duplicates — only include real effect performers (not those converted to ability impls)
         val allDeclsForValidation: List<ParsedDecl> = module.decls.filterIsInstance<ParsedTypeDecl>() +
             module.decls.filterIsInstance<ParsedAbilityDecl>() +
             module.decls.filterIsInstance<ParsedEffectDecl>() +
-            module.decls.filterIsInstance<ParsedPerformerDecl>() +
+            resolvedParsedPerformerDecls +
             abilityImplDecls +
             module.decls.filterIsInstance<ParsedLetDecl>()
-        try {
-            DuplicateDeclarationValidator.validateDecls(allDeclsForValidation)
-        } catch (e: TypeCheckError) {
-            // Only suppress duplicates from prelude injection (stdlib performer types)
-            // Re-throw user code duplicates
-            val msg = e.message ?: ""
-            val preludeTypes = PrimitiveTypes.allNames + BuiltinTypes.coreTypeNames
-            val isPrelude = preludeTypes.any { msg.contains("'$it'") && msg.contains("performer") }
-            if (!isPrelude) throw e
-        }
+        DuplicateDeclarationValidator.validateDecls(allDeclsForValidation)
 
         // Merge local and imported effect declarations for lookups (v2 types)
         val allEffectDecls = effectDecls + importedEffects
@@ -423,13 +405,17 @@ class ContextBuilder {
                 }
             )
         }
-        return when (val dataType = constructor.dataType) {
+        val ctorType = when (val dataType = constructor.dataType) {
             null -> resultType
-            else -> MezzeType.FunctionType(
-                paramType = convertParsedTypeAnnotationInternal(dataType),
-                returnType = resultType
-            )
+            else -> {
+                val paramType = convertParsedTypeAnnotationInternal(dataType)
+                MezzeType.FunctionType(
+                    paramType = paramType,
+                    returnType = resultType
+                )
+            }
         }
+        return ctorType
     }
 
     /**
@@ -1198,161 +1184,36 @@ class ContextBuilder {
     private fun getTypeName(annotation: ParsedTypeAnnotation): String =
         com.mezze.language.typechecker.util.AbilityImplFactory.typeNameOf(annotation)
 
-    /**
-     * Convert type annotation to MezzeType.
-     * This is a simple conversion - no inference, no validation.
-     *
-     * This is the public entry point that clears the type variable cache
-     * before conversion to ensure each top-level annotation gets fresh variables.
-     */
-    // Inline type annotation conversion (avoids dependency on util/TypeAnnotationConverter). This version does
-    // type declaration lookups (currentTypeDecls, currentEffectDecls, currentAbilityDecls),
-    // hermetic effect validation, content hash resolution, and List/Seq/Set/Map sugar
-    // that require ContextBuilder state not available to the shared utility.
-    /**
-     * Convert a ParsedTypeAnnotation to MezzeType.
-     * This is the primary converter — works directly on v2 types.
-     */
+    private fun buildConversionConfig() = com.mezze.language.typechecker.util.TypeAnnotationConverter.ConversionConfig(
+        resolveTypeHash = { currentTypeDecls[it]?.contentHash },
+        resolveAbilityHash = { currentAbilityDecls[it]?.contentHash },
+        validateEffects = { effectRow ->
+            com.mezze.language.typechecker.util.TypeAnnotationConverter.validateUnknownEffects(
+                effectRow, currentEffectDecls.keys
+            )
+        },
+        resolveEffectHashes = { names ->
+            names.mapNotNull { name ->
+                currentEffectDecls[name]?.contentHash?.let { name to it }
+            }.toMap()
+        },
+        resolveCollectionTypes = true,
+        honorOpenRowVars = false,
+        stripTickFromTypeVars = true,
+    )
+
     fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
         typeVarCache.clear()
-        sharedAnnotationRowVar = null
-        return convertParsedTypeAnnotationInternal(annotation)
+        sharedRowVar.reset()
+        return com.mezze.language.typechecker.util.TypeAnnotationConverter.convertWith(
+            annotation, buildConversionConfig(), typeVarCache, sharedRowVar
+        )
     }
 
-    /**
-     * Internal recursive v2 type annotation converter.
-     * Uses cached type variables to ensure consistency within a single annotation.
-     */
-    private fun convertParsedTypeAnnotationInternal(annotation: ParsedTypeAnnotation): MezzeType {
-        return when (annotation) {
-            is com.mezze.language.parsedast.ParsedNamedType -> {
-                PrimitiveTypes.fromName(annotation.name)?.let { return it }
-                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
-                    val varName = annotation.name.removePrefix("'")
-                    val typeVar = typeVarCache.getOrPut(varName) { TypeVar.freshWithName(varName) }
-                    MezzeType.VarType(typeVar)
-                } else {
-                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList(), currentTypeDecls[annotation.name]?.contentHash)
-                }
-            }
-            is com.mezze.language.parsedast.ParsedFunctionType -> {
-                MezzeType.FunctionType(
-                    paramType = convertParsedTypeAnnotationInternal(annotation.paramType),
-                    returnType = convertParsedTypeAnnotationInternal(annotation.returnType),
-                    effects = annotation.effects?.let { effectRow ->
-                        validateHermeticEffects(effectRow.allEffectNames)
-                        // Every effect named in the annotation must be in scope —
-                        // a declared `effect Foo { ... }` in this module or an
-                        // imported one. Silently dropping unknown names produced
-                        // baffling "annotation declares effects ... not used"
-                        // errors downstream.
-                        val unknown = effectRow.effects.filter { it !in currentEffectDecls }
-                        if (unknown.isNotEmpty()) {
-                            val name = unknown.first()
-                            val suggestion = com.mezze.language.parsedast.diagnostics
-                                .LevenshteinSuggest.closest(name, currentEffectDecls.keys)
-                            val didYouMean = suggestion?.let { ". Did you mean `$it`?" } ?: ""
-                            val candidateModules: List<String> = try {
-                                val store = com.mezze.language.typechecker.PrecompiledStdlib.getStore()
-                                store?.getDeclsByKind(com.mezze.language.store.DeclKind.EFFECT)
-                                    ?.filter { it.declName == name }
-                                    ?.map { it.modulePath }
-                                    ?.distinct()
-                                    ?: emptyList()
-                            } catch (_: Exception) { emptyList() }
-                            val hints = if (candidateModules.isNotEmpty()) {
-                                candidateModules.take(3).map { "import it: `use ${it}::{$name}`" }
-                            } else listOf(
-                                "declare `effect $name { ... }` in this module, or",
-                                "import it: `use some_module::$name`",
-                            )
-                            val fixHints = buildList {
-                                if (suggestion != null) {
-                                    add(com.mezze.language.parsedast.diagnostics
-                                        .FixHint.Rename(effectRow.loc, listOf(suggestion)))
-                                }
-                                if (candidateModules.isNotEmpty()) {
-                                    add(com.mezze.language.parsedast.diagnostics
-                                        .FixHint.Import(effectRow.loc, name, candidateModules))
-                                }
-                            }
-                            throw TypeCheckError(
-                                "Effect `$name` is not defined or not imported$didYouMean",
-                                effectRow.loc,
-                                code = ErrorCode.V0505_EFFECT_NOT_DEFINED,
-                                hints = hints,
-                                fixHints = fixHints,
-                            )
-                        }
-                        val hashes = effectRow.effects.mapNotNull { name ->
-                            currentEffectDecls[name]?.contentHash?.let { name to it }
-                        }.toMap()
-                        val rowVar = if (effectRow.isPolymorphic) {
-                            // All `<...>` markers within one signature share the same
-                            // row variable — that's what carries effects from an input
-                            // closure to the output. First `<...>` allocates; rest reuse.
-                            sharedAnnotationRowVar
-                                ?: RowVar.fresh().also { sharedAnnotationRowVar = it }
-                        } else null
-                        MezzeType.EffectRow.simple(effectRow.effects.toSet(), rowVar, effectRow.isPerformed, hashes)
-                    },
-                    abilityConstraints = annotation.abilityConstraints.map { constraint ->
-                        MezzeType.FunctionAbilityConstraint(
-                            abilityName = constraint.abilityName,
-                            typeArgs = constraint.typeArgs.map { convertParsedTypeAnnotationInternal(it) },
-                            abilityHash = currentAbilityDecls[constraint.abilityName]?.contentHash
-                        )
-                    }
-                )
-            }
-            is com.mezze.language.parsedast.ParsedRecordType -> {
-                MezzeType.RecordType(
-                    fields = annotation.entries.associate { entry ->
-                        entry.name to convertParsedTypeAnnotationInternal(entry.type)
-                    },
-                    rowVar = if (annotation.isOpen) RowVar.userOpen() else null
-                )
-            }
-            is com.mezze.language.parsedast.ParsedVariantType -> {
-                MezzeType.VariantType(
-                    constructors = annotation.constructors.associate { ctor ->
-                        ctor.name to ctor.dataType?.let { convertParsedTypeAnnotationInternal(it) }
-                    },
-                    rowVar = null
-                )
-            }
-            is com.mezze.language.parsedast.ParsedTypeApp -> {
-                val resolvedTypeHash = currentTypeDecls[annotation.constructor]?.contentHash
-                when (annotation.constructor) {
-                    "List" -> if (annotation.args.size == 1) MezzeType.ListType(convertParsedTypeAnnotationInternal(annotation.args[0]))
-                        else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
-                    "Seq" -> if (annotation.args.size == 1) MezzeType.SeqType(convertParsedTypeAnnotationInternal(annotation.args[0]))
-                        else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
-                    "Set" -> if (annotation.args.size == 1) MezzeType.SetType(convertParsedTypeAnnotationInternal(annotation.args[0]))
-                        else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
-                    "Map" -> if (annotation.args.size == 2) MezzeType.MapType(
-                            keyType = convertParsedTypeAnnotationInternal(annotation.args[0]),
-                            valueType = convertParsedTypeAnnotationInternal(annotation.args[1])
-                        ) else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertParsedTypeAnnotationInternal(it) }, resolvedTypeHash)
-                    else -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
-                        constructor = annotation.constructor,
-                        args = annotation.args.map { convertParsedTypeAnnotationInternal(it) },
-                        typeHash = resolvedTypeHash
-                    )
-                }
-            }
-            is com.mezze.language.parsedast.ParsedSeqType -> {
-                MezzeType.SeqType(elementType = convertParsedTypeAnnotationInternal(annotation.elementType))
-            }
-            is com.mezze.language.parsedast.ParsedQualifiedType -> {
-                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
-                com.mezze.language.typechecker.util.WellKnownTypeApp.of(
-                    constructor = qualifiedName,
-                    args = annotation.args.map { convertParsedTypeAnnotationInternal(it) },
-                    typeHash = currentTypeDecls[qualifiedName]?.contentHash
-                )
-            }
-        }
+    fun convertParsedTypeAnnotationInternal(annotation: ParsedTypeAnnotation): MezzeType {
+        return com.mezze.language.typechecker.util.TypeAnnotationConverter.convertWith(
+            annotation, buildConversionConfig(), typeVarCache, sharedRowVar
+        )
     }
 
     /**

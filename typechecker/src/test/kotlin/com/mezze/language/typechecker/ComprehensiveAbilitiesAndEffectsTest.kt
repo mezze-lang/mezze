@@ -190,7 +190,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             effect Log where {
-              log : {message: Str} -> Unit <Log>
+              log : {message: Str} -> {} <Log>
             }
 
             let fetchUser: {id: Int} -> Str <Database> = {id} ->
@@ -222,7 +222,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             effect Log where {
-              log : {message: Str} -> Unit <Log>
+              log : {message: Str} -> {} <Log>
             }
 
             effect SecureDatabase where {
@@ -324,7 +324,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             effect Log where {
-              log : {message: Str} -> Unit <Log>
+              log : {message: Str} -> {} <Log>
             }
 
             impl Show for Int where {
@@ -332,7 +332,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             impl Log for ConsoleLogger where {
-              log : {message: Str} -> Unit = {message} -> {}
+              log : {message: Str} -> {} = {message} -> {}
             }
 
             let loggedShow: {val: 'a} with Show 'a -> Str <Log> = {val} -> do

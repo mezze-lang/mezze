@@ -824,32 +824,13 @@ internal class VariantSolver(
         annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
         typeParamSubst: Map<String, MezzeType>
     ): MezzeType {
-        return when (annotation) {
-            is com.mezze.language.parsedast.ParsedNamedType -> {
-                PrimitiveTypes.fromName(annotation.name)?.let { return it }
-                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
-                    typeParamSubst[annotation.name]
-                        ?: typeParamSubst["'" + annotation.name.trimStart('\'')]
-                        ?: MezzeType.VarType(TypeVar.freshWithName(annotation.name))
-                } else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
-            }
-            is com.mezze.language.parsedast.ParsedFunctionType -> MezzeType.FunctionType(
-                paramType = convertTypeAnnotation(annotation.paramType, typeParamSubst),
-                returnType = convertTypeAnnotation(annotation.returnType, typeParamSubst),
-                effects = annotation.effects?.let { ContextBuilder.validateHermeticEffects(it.allEffectNames); MezzeType.EffectRow.simple(it.effects.toSet(), null, it.isPerformed) }
-            )
-            is com.mezze.language.parsedast.ParsedRecordType -> MezzeType.RecordType(
-                fields = annotation.entries.associate { it.name to convertTypeAnnotation(it.type, typeParamSubst) },
-                rowVar = if (annotation.isOpen) RowVar.userOpen() else null
-            )
-            is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertTypeAnnotation(dt, typeParamSubst) } })
-            is com.mezze.language.parsedast.ParsedTypeApp -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { convertTypeAnnotation(it, typeParamSubst) })
-            is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(convertTypeAnnotation(annotation.elementType, typeParamSubst))
-            is com.mezze.language.parsedast.ParsedQualifiedType -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
-                (annotation.modulePath + annotation.typeName).joinToString("::"),
-                annotation.args.map { convertTypeAnnotation(it, typeParamSubst) }
-            )
-        }
+        val config = com.mezze.language.typechecker.util.TypeAnnotationConverter.ConversionConfig(
+            validateEffects = { ContextBuilder.validateHermeticEffects(it.allEffectNames) },
+            honorOpenRowVars = true,
+            typeParamSubst = typeParamSubst,
+            resolveCollectionTypes = false,
+        )
+        return com.mezze.language.typechecker.util.TypeAnnotationConverter.convertWith(annotation, config)
     }
 
     private fun instantiateWithFreshVars(type: MezzeType): MezzeType {

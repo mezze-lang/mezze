@@ -1,9 +1,9 @@
-package com.mezze.language.typechecker.solving
+package com.mezze.language.typechecker.printing
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.constraints.ErrorContext
-import com.mezze.language.typechecker.printing.TypeDiffPrinter
+import com.mezze.language.typechecker.solving.UnificationResult
 
 /**
  * Pure formatting helpers that turn a failed [Constraint.Equality] +
