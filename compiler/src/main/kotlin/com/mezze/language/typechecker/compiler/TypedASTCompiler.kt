@@ -34,7 +34,8 @@ class TypedASTCompiler(
      * of `CallDirectIR(genericHash)` + dict injection. Sites not in the map
      * keep the existing dict-passing path. Empty by default → mono is off.
      */
-    private val monoCallSiteRewrites: Map<com.mezze.language.parsedast.Loc, Hash> = emptyMap()
+    private val monoCallSiteRewrites: Map<com.mezze.language.parsedast.Loc, Hash> = emptyMap(),
+    private val preloweredFunctions: Map<Hash, FunctionIR> = emptyMap()
 ) {
 
     /** Ability operation index: methodName → list of (implHash, targetTypes, opHash) */
@@ -80,7 +81,7 @@ class TypedASTCompiler(
     /** Pre-populated at compile() start: hash → callee's paramNames (regular + dict),
      *  in callee declaration order. Used by emitCallDirect to decide scalar ABI for
      *  cross-function direct calls (extends self-recursive coverage from #61).
-     *  Source: declIndex (user TypedLetDecls) ∪ PrecompiledStdlib.preloweredFunctions. */
+     *  Source: declIndex (user TypedLetDecls) ∪ preloweredFunctions. */
     private val hashToParamNames = mutableMapOf<Hash, List<String>>()
 
     /** Populated as we compile each function: hash → its lowered FunctionIR.
@@ -464,13 +465,9 @@ class TypedASTCompiler(
         performerRecords.clear()
         files.clear()
         hashToFunctionIR.clear()
-        // Seed inlining index with stdlib FunctionIRs (already compiled).
-        // Guard against init re-entry like populateHashToParamNames does.
-        try {
-            for ((h, fnIR) in com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions) {
-                hashToFunctionIR[h] = fnIR
-            }
-        } catch (_: Throwable) { /* stdlib not yet initialized */ }
+        for ((h, fnIR) in preloweredFunctions) {
+            hashToFunctionIR[h] = fnIR
+        }
 
         // Pre-scan all modules to discover which functions need dictionary params.
         // This must happen before compilation so call sites can inject dict fields.
@@ -608,15 +605,7 @@ class TypedASTCompiler(
         // the body changes. The lookup map seeds from PrecompiledStdlib so
         // act-lambdas in already-precompiled stdlib functions resolve.
         val erasureMap = HashMap<Hash, FunctionIR>(deduped.size + 1200)
-        // Seed with already-precompiled stdlib functions so act-lambdas
-        // declared there can be looked up. Robust against init re-entry
-        // (during stdlib precompile itself the map is null/empty).
-        try {
-            val stdlibFns = com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions
-            if (stdlibFns != null) {
-                for ((h, fnIR) in stdlibFns) erasureMap[h] = fnIR
-            }
-        } catch (_: Throwable) { /* stdlib not ready — fine */ }
+        for ((h, fnIR) in preloweredFunctions) erasureMap[h] = fnIR
         for (fn in deduped) erasureMap[fn.hash] = fn
         val erasedMap = com.mezze.language.truffleir.MutEraser.erase(erasureMap)
         val erased = deduped.map { erasedMap[it.hash] ?: it }
@@ -2456,20 +2445,8 @@ class TypedASTCompiler(
             }
         }
 
-        // Stdlib — pre-lowered FunctionIRs already have the canonical paramNames.
-        // Guarded with try/catch because PrecompiledStdlib.preloweredFunctions is
-        // a non-null Kotlin var that gets assigned partway through PrecompiledStdlib.init.
-        // The slow-path init re-enters this compiler before that assignment happens,
-        // so reading the field there would NPE. In that case stdlib hashes simply
-        // aren't available for cross-function scalar emission yet — fine, we just
-        // miss some scalar opportunities for that one bootstrap-time compile pass.
-        try {
-            for ((hash, fnIR) in com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions) {
-                hashToParamNames[hash] = fnIR.paramNames
-            }
-        } catch (_: Throwable) {
-            // PrecompiledStdlib not yet initialized (we're being called during its init).
-            // Skip stdlib entries; user-decl scalar emission still works.
+        for ((hash, fnIR) in preloweredFunctions) {
+            hashToParamNames[hash] = fnIR.paramNames
         }
     }
 

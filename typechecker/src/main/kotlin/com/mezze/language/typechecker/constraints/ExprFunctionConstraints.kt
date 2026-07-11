@@ -7,7 +7,7 @@ import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.ErrorType
-import com.mezze.language.typechecker.solving.collectFreeTypeVars
+import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 
 /**
@@ -949,7 +949,7 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     val returnType: MezzeType = run {
         val ft = functionResult.type
         if (ft is MezzeType.FunctionType) {
-            val freeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(ft.returnType)
+            val freeVars = com.mezze.language.ast.solving.collectFreeTypeVars(ft.returnType)
             if (freeVars.isEmpty()) ft.returnType
             else MezzeType.VarType(TypeVar.fresh())
         } else MezzeType.VarType(TypeVar.fresh())

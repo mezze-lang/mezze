@@ -363,7 +363,7 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                     val annotatedType = convertParsedTypeAnnotation(annotation)
 
                     // Collect type variables from the annotation
-                    val typeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(annotatedType)
+                    val typeVars = com.mezze.language.ast.solving.collectFreeTypeVars(annotatedType)
 
                     // Convert annotation's ability constraints to AbilityConstraint
                     // ParsedFnAbilityConstraint has typeArgs - find the type variable(s) among them

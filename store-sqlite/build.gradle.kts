@@ -10,6 +10,7 @@ repositories {
 dependencies {
     api(project(":store"))
     implementation(project(":ast"))
+    implementation(project(":compiler"))
     implementation(project(":parser"))
     implementation(project(":typechecker"))
 

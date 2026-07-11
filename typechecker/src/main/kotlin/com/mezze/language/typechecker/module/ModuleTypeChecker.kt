@@ -5,7 +5,7 @@ import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.context.TypeScheme
-import com.mezze.language.typechecker.context.collectFreeTypeVars
+import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.ModuleError
 
 /**
@@ -145,7 +145,7 @@ class ModuleTypeChecker(
                 modulePath = modulePath,
                 exports = emptyMap(),  // checker-side ExportedItem; not the same shape as v2 ExportEntry
                 context = com.mezze.language.typechecker.context.TypingContext.empty,
-                substitution = com.mezze.language.typechecker.solving.Substitution.empty,
+                substitution = com.mezze.language.ast.solving.Substitution.empty,
                 typedModule = v2Module,
                 parsedModule = null,
                 typeContext = typeContext

@@ -1,4 +1,4 @@
-package com.mezze.language.typechecker.solving
+package com.mezze.language.ast.solving
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.RowVar

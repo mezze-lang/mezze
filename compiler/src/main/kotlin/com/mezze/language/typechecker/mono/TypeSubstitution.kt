@@ -76,11 +76,11 @@ object TypeSubstitution {
     /** Apply the substitution to a single MezzeType. Public so the worklist
      *  can rewrite TypeInstantiation entries and specialization keys.
      *
-     *  Delegates to [com.mezze.language.typechecker.solving.Substitution.apply]
+     *  Delegates to [com.mezze.language.ast.solving.Substitution.apply]
      *  which handles cycle detection and effect-row substitution. */
     fun applyType(type: MezzeType, substitution: Map<TypeVar, MezzeType>): MezzeType {
         if (substitution.isEmpty()) return type
-        return com.mezze.language.typechecker.solving.Substitution(substitution).apply(type)
+        return com.mezze.language.ast.solving.Substitution(substitution).apply(type)
     }
 
     /** Apply substitution to a TypedExpr, rewriting every `type:` field and

@@ -4,7 +4,7 @@ import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.solving.ConstraintSolver
-import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.parsedast.diagnostics.ErrorCode

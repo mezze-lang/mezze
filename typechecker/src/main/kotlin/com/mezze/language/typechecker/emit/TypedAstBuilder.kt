@@ -12,9 +12,9 @@ import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.constraints.ConstraintResult.MethodCallInfo
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.module.ModuleImportContext
-import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.typechecker.WellKnownHashConstants
-import com.mezze.language.typechecker.solving.closeGeneratedRowVars
+import com.mezze.language.ast.solving.closeGeneratedRowVars
 
 /**
  * TypedAstBuilder — walks ParsedModule + Substitution + ConstraintResults

@@ -146,7 +146,7 @@ data class CompiledModuleInterface(
             // Process bindings
             for ((name, binding) in importContext.importedBindings) {
                 val bindingKey = BindingKey.parse(name)
-                val freeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(binding.type)
+                val freeVars = com.mezze.language.ast.solving.collectFreeTypeVars(binding.type)
                 if (freeVars.isEmpty()) {
                     monoBindings.add(MonoBinding(bindingKey, binding.type, binding.modulePath, binding.contentHash))
                 } else {

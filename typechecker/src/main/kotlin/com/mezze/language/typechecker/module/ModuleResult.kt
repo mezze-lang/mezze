@@ -4,7 +4,7 @@ import com.mezze.language.ast.*
 import com.mezze.language.ast.hashing.MezzeHash
 import com.mezze.language.typechecker.ProgramIndex
 import com.mezze.language.typechecker.context.TypingContext
-import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.ast.solving.Substitution
 
 /**
  * Result types and data structures for the module system.

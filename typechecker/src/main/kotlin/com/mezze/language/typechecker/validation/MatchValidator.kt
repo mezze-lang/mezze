@@ -2,7 +2,7 @@ package com.mezze.language.typechecker.validation
 
 import com.mezze.language.ast.*
 import com.mezze.language.typechecker.constraints.ConstraintResult
-import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.typechecker.solving.expandTypeApplicationToVariant
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
 

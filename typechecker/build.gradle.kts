@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
     implementation(project(":ast"))
+    implementation(project(":compiler"))
     implementation(project(":store"))
     implementation(project(":parser"))
     implementation(project(":stdlib"))

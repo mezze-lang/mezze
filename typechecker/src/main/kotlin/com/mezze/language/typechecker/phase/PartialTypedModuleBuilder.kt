@@ -6,7 +6,7 @@ import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.module.ModuleImportContext
-import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.ast.solving.Substitution
 
 /**
  * Emit a best-effort partial TypedModule when global constraint solving

@@ -5,7 +5,7 @@ import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypeScheme
 import com.mezze.language.typechecker.context.TypingContext
-import com.mezze.language.typechecker.context.collectFreeTypeVars
+import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.module.ModuleImportContext
 
 /**

@@ -10,7 +10,7 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.SpreadSyntaxError
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
-import com.mezze.language.typechecker.solving.collectFreeTypeVars
+import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.typechecker.util.StringDistance
 import com.mezze.language.ast.Keywords

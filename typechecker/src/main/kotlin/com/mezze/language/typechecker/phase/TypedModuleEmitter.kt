@@ -10,7 +10,7 @@ import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.module.ModuleImportContext
 import com.mezze.language.typechecker.module.TypedModule
 import com.mezze.language.typechecker.solving.ConstraintSolver
-import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.ast.solving.Substitution
 
 /**
  * Result of emitting a typed module.
@@ -254,10 +254,12 @@ private fun compileModule(
     )
 
     // Compile with TypedASTCompiler
+    val stdlibFns = try { PrecompiledStdlib.preloweredFunctions } catch (_: Throwable) { emptyMap() }
     val compiler = com.mezze.language.typechecker.compiler.TypedASTCompiler(
         abilityImpls = allAbilityImpls,
         stdlibHashes = preludeHashes,
-        monoCallSiteRewrites = monoResult.bySiteLoc
+        monoCallSiteRewrites = monoResult.bySiteLoc,
+        preloweredFunctions = stdlibFns
     )
     compiler.setDeclIndex(declIndex)
 

@@ -36,7 +36,7 @@ data class ProgramConstraintResult(
     val constraintResults: Map<String, ConstraintResult>,
     val perBindingMustBeOpenRowVars: Set<RowVar>,  // Row variables that must stay open from per-binding solving
     val perBindingSolveErrors: List<com.mezze.language.typechecker.solving.ConstraintSolver.ConstraintError> = emptyList(),  // Errors from per-binding solving
-    val perBindingSubstitution: com.mezze.language.typechecker.solving.Substitution = com.mezze.language.typechecker.solving.Substitution.empty,  // Accumulated substitution from per-binding solving (for bidirectional inference)
+    val perBindingSubstitution: com.mezze.language.ast.solving.Substitution = com.mezze.language.ast.solving.Substitution.empty,  // Accumulated substitution from per-binding solving (for bidirectional inference)
     val collectedTypeCheckErrors: List<com.mezze.language.typechecker.TypeCheckError> = emptyList()  // TypeCheckErrors caught during recovery
 ) {
 }
@@ -125,7 +125,7 @@ class ConstraintGenerator(
         val collectedTypeCheckErrors = mutableListOf<com.mezze.language.typechecker.TypeCheckError>()
 
         // Track accumulated substitution from per-binding solving (for bidirectional inference)
-        var perBindingSubstitution = com.mezze.language.typechecker.solving.Substitution.empty
+        var perBindingSubstitution = com.mezze.language.ast.solving.Substitution.empty
 
         // Import constraint solver for incremental solving
         val solver = com.mezze.language.typechecker.solving.ConstraintSolver(context, registry)
@@ -427,7 +427,7 @@ class ConstraintGenerator(
                                 val bindingKey = BindingKey.unqualified(name)
                                 bindingKey to run {
                                 // Collect free type variables in the solved type
-                                val freeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(solvedType)
+                                val freeVars = com.mezze.language.ast.solving.collectFreeTypeVars(solvedType)
 
                                 // Get free type variables from current context
                                 // CRITICAL: Exclude the binding being generalized from context vars calculation
@@ -494,7 +494,7 @@ class ConstraintGenerator(
                                         // where the target type ('a in Result 'a Error) needs to stay monomorphic
                                         // so later usage (val.name) can constrain it.
                                         val typeArgsHaveQuantifiableVars = constraint.typeArgs.any { typeArg ->
-                                            val freeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(typeArg)
+                                            val freeVars = com.mezze.language.ast.solving.collectFreeTypeVars(typeArg)
                                             freeVars.any { freeVar ->
                                                 val resolved = substitution.apply(MezzeType.VarType(freeVar))
                                                 if (resolved is MezzeType.VarType) {
@@ -1077,12 +1077,12 @@ class ConstraintGenerator(
 
             when (binding) {
                 is TypingContext.Binding.Monomorphic -> {
-                    freeVars.addAll(com.mezze.language.typechecker.context.collectFreeTypeVars(binding.type))
+                    freeVars.addAll(com.mezze.language.ast.solving.collectFreeTypeVars(binding.type))
                 }
                 is TypingContext.Binding.Polymorphic -> {
                     // Don't include quantified variables - they're bound by the scheme
                     // Only include free variables in the type that aren't quantified
-                    val typeFreeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(binding.scheme.type)
+                    val typeFreeVars = com.mezze.language.ast.solving.collectFreeTypeVars(binding.scheme.type)
                     val unquantified = typeFreeVars - binding.scheme.quantifiedVars.toSet()
                     freeVars.addAll(unquantified)
                 }
@@ -1107,7 +1107,7 @@ class ConstraintGenerator(
     internal fun addAbilityConstraintsToFunctionType(
         type: MezzeType,
         abilityConstraints: List<Constraint.AbilityRequired>,
-        substitution: com.mezze.language.typechecker.solving.Substitution
+        substitution: com.mezze.language.ast.solving.Substitution
     ): MezzeType {
         DebugLogger.debugSection(Category.ConstraintGenerator, "addAbilityConstraintsToFunctionType") {
             val lines = mutableListOf("Type: $type")

@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.solving
 
 import com.mezze.language.ast.*
+import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger

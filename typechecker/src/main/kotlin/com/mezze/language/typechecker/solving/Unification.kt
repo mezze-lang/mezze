@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker.solving
 
 import com.mezze.language.ast.*
+import com.mezze.language.ast.solving.Substitution
+import com.mezze.language.ast.solving.occursCheck
 import com.mezze.language.typechecker.WellKnownHashes
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.context.DeclarationRegistry

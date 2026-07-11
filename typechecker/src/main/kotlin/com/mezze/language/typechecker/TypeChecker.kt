@@ -11,12 +11,12 @@ import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.context.TypeScheme
-import com.mezze.language.typechecker.context.collectFreeTypeVars
+import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.module.*
 import com.mezze.language.typechecker.solving.ConstraintSolver
-import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.typechecker.validation.TypeValidator
 import com.mezze.language.typechecker.validation.ValidationResult
 import com.mezze.language.typechecker.printing.ErrorFormatter
@@ -731,7 +731,7 @@ class TypeChecker(
                     modulePath = modulePath,
                     exports = emptyMap(),
                     context = TypingContext.empty,
-                    substitution = com.mezze.language.typechecker.solving.Substitution()
+                    substitution = com.mezze.language.ast.solving.Substitution()
                 )
                 com.mezze.language.typechecker.module.ModuleTypeChecker.preloadIntoGlobalCache(modulePath, typedModule)
             }

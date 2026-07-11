@@ -4,7 +4,8 @@ import com.mezze.language.ast.AbilityConstraint
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.RowVar
 import com.mezze.language.ast.TypeVar
-import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.ast.solving.Substitution
+import com.mezze.language.ast.solving.collectFreeTypeVars
 
 /**
  * Type scheme for polymorphic types.
@@ -194,71 +195,3 @@ private fun clearAbilityConstraints(type: MezzeType): MezzeType = when (type) {
     else -> type
 }
 
-/**
- * Collect free type variables in a type.
- * Helper for generalization.
- * Made public for use in ConstraintGenerator for let-polymorphism.
- */
-fun collectFreeTypeVars(type: MezzeType): Set<TypeVar> {
-    return when (type) {
-        is MezzeType.VarType -> setOf(type.variable)
-        is MezzeType.FunctionType -> {
-            collectFreeTypeVars(type.paramType) +
-            collectFreeTypeVars(type.returnType)
-        }
-        is MezzeType.RecordType -> {
-            // Row variables are not type variables, so we don't include them
-            type.fields.values.flatMap { collectFreeTypeVars(it) }.toSet()
-        }
-        is MezzeType.VariantType -> {
-            // Row variables are not type variables, so we don't include them
-            (type.constructors.values
-                .filterNotNull()
-                .flatMap { collectFreeTypeVars(it) } +
-             type.typeArgs.flatMap { collectFreeTypeVars(it) }
-            ).toSet()
-        }
-        is MezzeType.TypeApplication -> {
-            type.args.flatMap { collectFreeTypeVars(it) }.toSet()
-        }
-        is MezzeType.SeqType -> {
-            collectFreeTypeVars(type.elementType)
-        }
-        is MezzeType.ListType -> {
-            collectFreeTypeVars(type.elementType)
-        }
-        is MezzeType.SetType -> {
-            collectFreeTypeVars(type.elementType)
-        }
-        is MezzeType.SortedMapType -> {
-            collectFreeTypeVars(type.keyType) + collectFreeTypeVars(type.valueType)
-        }
-        is MezzeType.SortedSetType -> {
-            collectFreeTypeVars(type.elementType)
-        }
-        is MezzeType.MapType -> {
-            collectFreeTypeVars(type.keyType) + collectFreeTypeVars(type.valueType)
-        }
-        is MezzeType.SuspendedType -> {
-            collectFreeTypeVars(type.valueType)
-        }
-        is MezzeType.NewtypeType -> {
-            collectFreeTypeVars(type.wrappedType)
-        }
-        is MezzeType.EffectRow -> {
-            // Effect rows don't contain type variables
-            emptySet()
-        }
-        // Concrete types have no free variables
-        is MezzeType.IntType,
-        is MezzeType.FloatType,
-        is MezzeType.StringType,
-        is MezzeType.BoolType,
-        is MezzeType.NatType,
-        is MezzeType.FracType,
-        is MezzeType.OrderingType,
-        is MezzeType.BytesType,
-        is MezzeType.ByteBufferType,
-        is MezzeType.CharType -> emptySet()
-    }
-}
