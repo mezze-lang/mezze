@@ -1038,30 +1038,6 @@ class ConstraintGenerator(
     }
 
     /**
-     * Generate constraints for an expression.
-     * Delegates to ExpressionConstraintGenerator.
-     */
-    fun generateExpression(
-        expr: ParsedExpr,
-        context: ConstraintContext
-    ): ConstraintResult {
-        return expressionGenerator.generate(expr, context)
-    }
-
-    /**
-     * Generate constraints for a pattern.
-     * Delegates to PatternConstraintGenerator.
-     */
-    fun generatePattern(
-        pattern: ParsedPattern,
-        scrutineeType: MezzeType,
-        context: ConstraintContext,
-        sourceLoc: Loc? = null
-    ): PatternConstraintResult {
-        return patternGenerator.generate(pattern, scrutineeType, context, sourceLoc)
-    }
-
-    /**
      * Helper: Get all free type variables from context bindings.
      * Used for let-polymorphism to determine which variables to quantify.
      *

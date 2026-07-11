@@ -378,29 +378,6 @@ data class ModuleImportContext(
         )
     }
 
-    /**
-     * Check if context is empty.
-     */
-    fun isEmpty(): Boolean {
-        return importedBindings.isEmpty() &&
-               importedTypes.isEmpty() &&
-               importedAbilities.isEmpty() &&
-               importedEffects.isEmpty() &&
-               importedImpls.isEmpty() &&
-               importedAbilityImpls.isEmpty()
-    }
-
-    /**
-     * Look up an effect by its content hash.
-     * This is the preferred lookup method - O(1) with no string parsing.
-     */
-    fun getEffectByHash(contentHash: com.mezze.language.typedast.Hash): com.mezze.language.parsedast.ParsedEffectDecl? = effectsByHash[contentHash]
-
-    /**
-     * Look up an ability by its content hash.
-     * This is the preferred lookup method - O(1) with no string parsing.
-     */
-    fun getAbilityByHash(contentHash: com.mezze.language.typedast.Hash): com.mezze.language.parsedast.ParsedAbilityDecl? = abilitiesByHash[contentHash]
 }
 
 /**
@@ -417,48 +394,3 @@ data class ImportedBinding(
     val contentHash: com.mezze.language.typedast.Hash  // Content hash for content-addressed lookup (REQUIRED)
 )
 
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-/**
- * Format a module load result for display.
- */
-fun formatModuleLoadResult(result: ModuleLoadResult): String {
-    return when (result) {
-        is ModuleLoadResult.Success -> buildString {
-            appendLine("✓ Module loaded: ${result.module.modulePath}")
-            appendLine("  File: ${result.module.filePath}")
-            appendLine("  Exports: ${result.module.exports.size} item(s)")
-            appendLine("  Dependencies: ${result.module.dependencies.size}")
-        }
-        is ModuleLoadResult.Failure -> buildString {
-            appendLine("✗ Module loading failed with ${result.errors.size} error(s):")
-            for ((index, error) in result.errors.withIndex()) {
-                appendLine("${index + 1}. ${error.message}")
-            }
-        }
-    }
-}
-
-/**
- * Format an import resolution result for display.
- */
-fun formatImportResolutionResult(result: ImportResolutionResult): String {
-    return when (result) {
-        is ImportResolutionResult.Success -> buildString {
-            appendLine("✓ Imports resolved successfully")
-            appendLine("  Loaded modules: ${result.loadedModules.size}")
-            appendLine("  Imported bindings: ${result.importContext.importedBindings.size}")
-            appendLine("  Imported types: ${result.importContext.importedTypes.size}")
-            appendLine("  Imported abilities: ${result.importContext.importedAbilities.size}")
-            appendLine("  Imported effects: ${result.importContext.importedEffects.size}")
-        }
-        is ImportResolutionResult.Failure -> buildString {
-            appendLine("✗ Import resolution failed with ${result.errors.size} error(s):")
-            for ((index, error) in result.errors.withIndex()) {
-                appendLine("${index + 1}. ${error.message}")
-            }
-        }
-    }
-}

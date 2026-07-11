@@ -153,43 +153,6 @@ object ErrorFormatter {
     }.trimEnd()
 
     /**
-     * Format constraint solver error.
-     */
-    fun formatSolverError(
-        error: ConstraintSolver.ConstraintError,
-        sourceCode: String? = null
-    ): String {
-        return buildString {
-            appendLine("❌ Type Error [Constraint Solving]")
-            appendLine("━".repeat(50))
-
-            // Error message
-            appendLine()
-            appendLine("Error: ${error.message}")
-
-            // Context
-            if (error.context != null) {
-                appendLine()
-                appendLine("Context: ${error.context}")
-            }
-
-            // Constraint info
-            appendLine()
-            appendLine("Failed constraint: ${error.constraint}")
-
-            // Suggestions
-            val suggestions = SuggestionGenerator.suggestForSolverError(error)
-            if (suggestions.isNotEmpty()) {
-                appendLine()
-                appendLine("💡 Suggestions:")
-                suggestions.forEach { suggestion ->
-                    appendLine("   - $suggestion")
-                }
-            }
-        }.trim()
-    }
-
-    /**
      * Format module error.
      */
     fun formatModuleError(error: ModuleError): String {

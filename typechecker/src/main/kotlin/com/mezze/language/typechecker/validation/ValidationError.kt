@@ -117,66 +117,6 @@ sealed interface ValidationError {
     }
 
     /**
-     * Effect not handled.
-     *
-     * Example: Using IO.readFile without IO handler in scope
-     */
-    data class EffectNotHandled(
-        val effectName: String,
-        @Deprecated("Unused — was for v1 PerformExpression") val usedBy: Any? = null,
-        val availableHandlers: List<String> = emptyList(),
-        val loc: Loc? = null
-    ) : ValidationError {
-        override val code: ErrorCode = ErrorCode.V0501_EFFECT_NOT_HANDLED
-        override val hints: List<String>
-            get() = buildList {
-                add("wrap the expression in `perform $effectName in do ...` or install a handler")
-                // Did-you-mean: if a handler in scope looks similar to the
-                // effect name, the user may have a typo on the effect name.
-                if (availableHandlers.isNotEmpty()) {
-                    val closest = com.mezze.language.parsedast.diagnostics.LevenshteinSuggest
-                        .closest(effectName, availableHandlers)
-                    if (closest != null) add("did you mean `$closest`?")
-                }
-            }
-
-        override fun message(): String = buildString {
-            append("Effect '$effectName' is not handled")
-            if (usedBy != null) {
-                append(" in expression")
-            }
-            if (availableHandlers.isNotEmpty()) {
-                append(". Available handlers: ${availableHandlers.joinToString()}")
-            }
-            append(". Add a handler or propagate the effect in the function signature.")
-        }
-
-        override fun location() = loc
-
-        override val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint>
-            get() {
-                if (loc == null) return emptyList()
-                // Close-match handler → likely typo on the effect name.
-                if (availableHandlers.isNotEmpty()) {
-                    val close = com.mezze.language.parsedast.diagnostics
-                        .LevenshteinSuggest.closestN(effectName, availableHandlers, 3)
-                    if (close.isNotEmpty()) {
-                        return listOf(com.mezze.language.parsedast.diagnostics.FixHint.Rename(loc, close))
-                    }
-                }
-                // No close match → user genuinely forgot to handle / propagate.
-                return listOf(
-                    com.mezze.language.parsedast.diagnostics.FixHint.WrapInPerform(
-                        loc, effectName, availableHandlers
-                    ),
-                    com.mezze.language.parsedast.diagnostics.FixHint.AddEffectToAnnotation(
-                        loc, effectName
-                    ),
-                )
-            }
-    }
-
-    /**
      * Pattern matching not exhaustive.
      *
      * Example: match x { Some {val} -> ... } missing None case
@@ -277,25 +217,6 @@ sealed interface ValidationError {
 
         override fun message(): String {
             return "Type constructor '$constructor' expects $expectedArity type arguments, but got $actualArity"
-        }
-
-        override fun location() = loc
-    }
-
-    /**
-     * Recursive type without base case.
-     *
-     * Example: type List 'a = List 'a (infinite recursion!)
-     */
-    data class InvalidRecursiveType(
-        val typeName: String,
-        val reason: String,
-        val loc: Loc? = null
-    ) : ValidationError {
-        override val code: ErrorCode = ErrorCode.V0706_INVALID_RECURSIVE_TYPE
-
-        override fun message(): String {
-            return "Invalid recursive type '$typeName': $reason"
         }
 
         override fun location() = loc
@@ -630,29 +551,6 @@ sealed interface ValidationError {
     }
 
     /**
-     * Top-level expression has performed effects (<*>).
-     *
-     * Top-level expressions (bare function calls, etc.) cannot have performed effects
-     * because that would mean executing effects at module load time without assignment.
-     *
-     * Example: myEffectfulFunc {}  (NOT ALLOWED at top level)
-     */
-    data class TopLevelExpressionPerformedEffects(
-        val effectRow: MezzeType.EffectRow,
-        val loc: Loc? = null
-    ) : ValidationError {
-        override val code: ErrorCode = ErrorCode.V0503_BARE_EFFECT_EXPR
-
-        override fun message(): String = buildString {
-            append("Bare expression with performed effects <*> is not allowed at module level. ")
-            append("This would execute effects when the module loads, which is not permitted. ")
-            append("Move this expression inside a function body.")
-        }
-
-        override fun location() = loc
-    }
-
-    /**
      * Structural validation error (not a type mismatch).
      *
      * Used for errors like missing/extra/duplicate operations in effect implementations,
@@ -670,28 +568,6 @@ sealed interface ValidationError {
         override fun location() = loc
     }
 
-/**
-     * Missing content hash on identifier.
-     *
-     * This is an internal compiler bug - identifiers should always have
-     * their resolvedContentHash populated after typechecking (for top-level/imported bindings).
-     *
-     * Example: Identifier `foo` has no resolvedContentHash
-     */
-    data class MissingContentHash(
-        val identifierName: String,
-        val kind: String,  // "identifier", "ability call", "effect handler", etc.
-        val loc: Loc? = null
-    ) : ValidationError {
-        override val code: ErrorCode = ErrorCode.I0003_MISSING_CONTENT_HASH
-
-        override fun message(): String = buildString {
-            append("Internal error: $kind '$identifierName' has no content hash. ")
-            append("This is a bug in the typechecker - content hashes should be populated for all top-level/imported bindings.")
-        }
-
-        override fun location() = loc
-    }
 }
 
 /**

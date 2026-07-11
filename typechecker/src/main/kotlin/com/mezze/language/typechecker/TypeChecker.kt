@@ -67,11 +67,6 @@ class TypeChecker(
         return loadPreludeModulesInternal(importResolver, ModuleImportContext.empty())
     }
 
-    /** Bridge for PrecompiledStdlib to call mergeImportContext */
-    internal fun mergeImportContextPublic(base: TypingContext, importCtx: ModuleImportContext): TypingContext {
-        return mergeImportContext(base, importCtx)
-    }
-
     /** Bridge for PrecompiledStdlib to get cachedPreludeLoadedModules */
     internal fun getCachedPreludeLoadedModules(): Map<com.mezze.language.ast.ModulePath, com.mezze.language.typechecker.module.TypedModule>? {
         return cachedPreludeLoadedModules
@@ -546,11 +541,6 @@ class TypeChecker(
         return cachedTypeAliases
     }
 
-    @Deprecated("Use inferredType on AST nodes instead", ReplaceWith("typedProgram.items"))
-    fun getContext(): Map<String, MezzeType> {
-        return emptyMap()
-    }
-
     /**
      * Type check a ParsedModule (v2 entry point).
      *
@@ -654,30 +644,6 @@ class TypeChecker(
 
         private val v1ToV2ModuleCache = java.util.concurrent.ConcurrentHashMap<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>()
 
-        @Volatile
-        private var cachedPreludeEnhancedContext: TypingContext? = null
-        @Volatile
-        private var cachedPreludeEnhancedContextParentId: Int = 0
-
-        internal fun getOrBuildPreludeEnhancedContext(parentContext: TypingContext): TypingContext? {
-            val parentId = System.identityHashCode(parentContext)
-            val cached = cachedPreludeEnhancedContext
-            if (cached != null && cachedPreludeEnhancedContextParentId == parentId) {
-                return cached
-            }
-            val preludeCtx = cachedPreludeContext ?: return null
-            val enhanced = mergeImportContext(parentContext, preludeCtx)
-            cachedPreludeEnhancedContext = enhanced
-            cachedPreludeEnhancedContextParentId = parentId
-            return enhanced
-        }
-
-        fun clearPreludeCache() {
-            cachedPreludeContext = null
-            cachedPreludeLoadedModules = null
-            cachedPreludeEnhancedContext = null
-        }
-
         private fun createInitialContext(): TypingContext {
             val nativeFunctions = mutableMapOf<String, MezzeType>()
             NativeFunctionTypes.registerAll(nativeFunctions)
@@ -714,61 +680,6 @@ class TypeChecker(
         @Deprecated("Use ModuleResolver.getFromCache(modulePath)?.parsedModule instead")
         fun getTypedModule(modulePath: String): com.mezze.language.parsedast.ParsedModule? {
             return ModuleResolver.getFromCache(modulePath)?.parsedModule
-        }
-
-        @JvmStatic
-        fun getAllCachedModules(): Map<String, Any> = emptyMap()
-
-        @JvmStatic
-        fun restoreModuleCache(modules: Map<String, Any>) { }
-
-        @JvmStatic
-        fun preloadModules(modules: Map<String, com.mezze.language.parsedast.ParsedModule>) {
-            val resolver = ModuleResolver.create()
-            for ((modulePath, parsedModule) in modules) {
-                resolver.updateModuleExportsV2(modulePath, parsedModule)
-                val typedModule = com.mezze.language.typechecker.module.TypedModule(
-                    modulePath = modulePath,
-                    exports = emptyMap(),
-                    context = TypingContext.empty,
-                    substitution = com.mezze.language.ast.solving.Substitution()
-                )
-                com.mezze.language.typechecker.module.ModuleTypeChecker.preloadIntoGlobalCache(modulePath, typedModule)
-            }
-        }
-    }
-}
-
-/**
- * Format a type check result for display.
- */
-fun formatTypeCheckResult(
-    result: TypeChecker.TypeCheckResult,
-    sourceCode: String? = null,
-    colorize: Boolean = false
-): String {
-    return when (result) {
-        is TypeChecker.TypeCheckResult.Success -> buildString {
-            appendLine("✓ Type checking succeeded!")
-            if (result.warnings.isNotEmpty()) {
-                appendLine("Warnings:")
-                for (warning in result.warnings) {
-                    appendLine("  - $warning")
-                }
-            }
-        }
-        is TypeChecker.TypeCheckResult.Failure -> buildString {
-            appendLine("✗ Type checking failed with ${result.errors.size} error(s):")
-            appendLine()
-            for ((index, error) in result.errors.withIndex()) {
-                if (index > 0) {
-                    appendLine()
-                    appendLine("━".repeat(60))
-                    appendLine()
-                }
-                val formattedError = ErrorFormatter.format(error, sourceCode, colorize)
-                appendLine(formattedError)
-            }
         }
     }
 }

@@ -329,14 +329,6 @@ data class TypingContext(
     }
 
     /**
-     * Get effect operation types by declaration hash.
-     * Preferred over name-based lookup — stable across renames/aliases.
-     */
-    fun getEffectOperationTypeByHash(effectDeclHash: Hash): MezzeType? {
-        return effectOperationTypesByHash[effectDeclHash] ?: parent?.getEffectOperationTypeByHash(effectDeclHash)
-    }
-
-    /**
      * Extend context with ability operation types.
      */
     fun extendWithAbilityOperationType(abilityName: String, operationType: MezzeType, abilityDeclHash: Hash? = null): TypingContext {

@@ -98,7 +98,6 @@ enum class ErrorCode {
     // ─── Validator: effects (V05xx) ──────────────────────────────────────
     V0501_EFFECT_NOT_HANDLED,
     V0502_TOP_LEVEL_PERFORM,
-    V0503_BARE_EFFECT_EXPR,
     V0504_HERMETIC_EFFECT_CONFLICT,
     V0505_EFFECT_NOT_DEFINED,
     V0506_SCOPED_EFFECT_INIT_FINALIZE_REQUIRED,
@@ -120,7 +119,6 @@ enum class ErrorCode {
     V0703_UNKNOWN_FIELD,
     V0704_UNKNOWN_CONSTRUCTOR,
     V0705_TYPE_ARITY_MISMATCH,
-    V0706_INVALID_RECURSIVE_TYPE,
     V0707_CONSTRUCTOR_MUST_BE_UPPERCASE,
     V0708_SPREAD_ONLY_RECORD_FORBIDDEN,
     V0709_CIRCULAR_TYPE_DEPENDENCY,
@@ -141,7 +139,6 @@ enum class ErrorCode {
     // ─── Internal compiler errors (I00xx) ────────────────────────────────
     I0001_UNKNOWN_TYPECHECK_FAILURE,
     I0002_PIPELINE_NO_TYPED_MODULE,
-    I0003_MISSING_CONTENT_HASH,
 }
 
 /** Format an [ErrorCode] for display in the error header, e.g. `T0201`. */

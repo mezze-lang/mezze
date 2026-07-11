@@ -81,21 +81,6 @@ object StringDistance {
     }
 
     /**
-     * Check if two strings are similar (within edit distance threshold).
-     *
-     * Also considers case-insensitive equality as similar.
-     *
-     * @param s1 First string
-     * @param s2 Second string
-     * @param maxDistance Maximum edit distance to consider similar
-     * @return true if strings are similar
-     */
-    fun isSimilar(s1: String, s2: String, maxDistance: Int = 2): Boolean {
-        return s1.equals(s2, ignoreCase = true) ||
-               levenshteinDistance(s1, s2) <= maxDistance
-    }
-
-    /**
      * Generate a "Did you mean...?" suggestion string.
      *
      * @param target The string that wasn't found

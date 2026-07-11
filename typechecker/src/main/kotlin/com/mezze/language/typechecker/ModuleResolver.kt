@@ -28,8 +28,6 @@ import kotlin.io.path.isRegularFile
  * @property typeDeclarations Type declarations by name
  * @property abilityDeclarations Ability declarations by name
  * @property effectDeclarations Effect declarations by name
- * @property implsByPerformer Impl declarations indexed by performer name
- * @property implsByEffect Impl declarations grouped by effect name
  * @property abilityImplsByAbility Ability impls grouped by ability name
  * @property letBindings Let bindings by variable name (simple bindings only)
  * @property useDeclarations All use declarations
@@ -47,14 +45,6 @@ data class ProgramIndex(
     val useDeclarations: List<ParsedUseDecl>,
     val pubUseDeclarations: List<ParsedPubUseDecl>
 ) {
-    /** @deprecated Use performersByName — kept for source compat during migration */
-    @Deprecated("Use performersByName", ReplaceWith("performersByName"))
-    val implsByPerformer: Map<String, ParsedPerformerDecl> get() = performersByName
-
-    /** @deprecated Use performersByEffect — kept for source compat during migration */
-    @Deprecated("Use performersByEffect", ReplaceWith("performersByEffect"))
-    val implsByEffect: Map<String, List<ParsedPerformerDecl>> get() = performersByEffect
-
     companion object {
         private val syntheticLoc = Loc(file = "<index>", startLine = 0, startCol = 0, endLine = 0, endCol = 0)
 
@@ -503,18 +493,6 @@ class ModuleResolver(
          * Get all cached modules as a map of module paths to Programs.
          * Used for bundling modules into compiled JARs.
          */
-        @JvmStatic
-        fun getCacheKeys(): Set<String> {
-            synchronized(cacheLock) {
-                return moduleCache.keys.toSet()
-            }
-        }
-
-        @JvmStatic
-        fun getAllModules(): Map<String, com.mezze.language.parsedast.ParsedModule> {
-            return getAllParsedModules()
-        }
-
         /**
          * Get all cached modules as ParsedModules.
          * Returns only modules that have a parsedModule stored (all modules loaded
@@ -552,11 +530,6 @@ class ModuleResolver(
          * @param modulePath The module path
          * @return The source hash, or null if not cached or no hash available
          */
-        @JvmStatic
-        fun getModuleSourceHash(modulePath: String): com.mezze.language.typedast.Hash? {
-            return getFromCache(modulePath)?.sourceHash
-        }
-
         /**
          * Look up a type declaration by name from all cached modules.
          *
@@ -574,33 +547,6 @@ class ModuleResolver(
                     val typeDecl = module.index.typeDeclarations[typeName]
                     if (typeDecl != null) {
                         return typeDecl
-                    }
-                }
-                return null
-            }
-        }
-
-        /**
-         * Look up a type declaration that contains the given constructor from all cached modules.
-         *
-         * This is used during constraint solving when we encounter a constructor (like `Success`)
-         * and need to find its declaring type (like `MyResult`) to get the full variant type.
-         *
-         * @param constructorName The constructor name to look up (e.g., "Success", "Info")
-         * @return The ParsedTypeDecl containing that constructor, or null if not found
-         */
-        @JvmStatic
-        fun lookupTypeDeclarationForConstructor(constructorName: String): ParsedTypeDecl? {
-            synchronized(cacheLock) {
-                for ((_, module) in moduleCache) {
-                    for ((_, typeDecl) in module.index.typeDeclarations) {
-                        val definition = typeDecl.definition
-                        if (definition is ParsedVariantDef) {
-                            val hasConstructor = definition.constructors.any { it.name == constructorName }
-                            if (hasConstructor) {
-                                return typeDecl
-                            }
-                        }
                     }
                 }
                 return null
@@ -1332,14 +1278,6 @@ class ModuleResolver(
         return fromSegments.take(parentSegments.size) == parentSegments
     }
     
-    /**
-     * Preload core stdlib modules for better performance
-     * TODO: Implement proper stdlib module preloading
-     */
-    fun preloadCoreStdlibModules() {
-        // For now, do nothing - stdlib modules will be loaded on demand
-        // TODO: Implement preloading of essential stdlib modules
-    }
     /**
      * Update a module's exports from a ParsedModule (v2 path).
      *

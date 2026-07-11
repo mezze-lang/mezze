@@ -48,11 +48,6 @@ object DebugLogger {
     }
 
     /**
-     * Check if debug logging is enabled
-     */
-    fun isDebugEnabled(): Boolean = isEnabled
-
-    /**
      * Check if a specific category is enabled
      */
     fun isCategoryEnabled(category: Category): Boolean {

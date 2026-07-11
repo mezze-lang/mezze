@@ -31,8 +31,6 @@ object ContentHashComputer {
     private val typeStringCache = object : LinkedHashMap<Int, String>(256, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, String>?) = size > 1000
     }
-    fun clearCaches() { typeStringCache.clear() }
-
     /**
      * Convert a MezzeType to a canonical string for ability impl lookup keys.
      *
@@ -98,13 +96,4 @@ object ContentHashComputer {
      * @param hashMap The hash map from computeHashes
      * @return The content hash if found
      */
-    fun lookupEffectHandlerHash(
-        performerName: String,
-        hashMap: Map<String, MezzeHash>
-    ): MezzeHash? {
-        return hashMap[performerName]
-    }
-
-    // Note: updateResolvedAbilitiesWithHashes and buildImplRefToHashMap were removed.
-    // Content hashes are computed in Phase 0.5 before validation.
 }

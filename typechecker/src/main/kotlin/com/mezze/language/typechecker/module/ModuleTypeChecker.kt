@@ -395,11 +395,4 @@ class ModuleTypeChecker(
         return context
     }
 
-    /**
-     * Get a cached module (if available) from the global cache.
-     */
-    fun getCachedModule(modulePath: String): TypedModule? {
-        return getFromGlobalCache(modulePath)
-    }
-
 }

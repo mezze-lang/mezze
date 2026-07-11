@@ -1070,58 +1070,6 @@ class TypeValidator(
     ): ValidationResult = matchValidator.validateParsedExhaustiveness(matchExpr, scrutineeType)
 
     /**
-     * Validate type application.
-     *
-     * Ensures type constructor has correct arity.
-     */
-    fun validateTypeApplication(
-        typeApp: MezzeType.TypeApplication,
-        expectedArity: Int
-    ): ValidationResult {
-        if (typeApp.args.size != expectedArity) {
-            return ValidationResult.Failure(
-                listOf(
-                    ValidationError.InvalidTypeApplication(
-                        constructor = typeApp.constructor,
-                        expectedArity = expectedArity,
-                        actualArity = typeApp.args.size,
-                        loc = null
-                    )
-                )
-            )
-        }
-
-        return ValidationResult.Success()
-    }
-
-    /**
-     * Validate ability implementation.
-     *
-     * Checks for orphan instances and overlapping instances.
-     */
-    fun validateAbilityImpl(
-        implDecl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
-        context: TypingContext
-    ): ValidationResult {
-        val errors = mutableListOf<ValidationError>()
-
-        // Orphan checking is not needed here: the orphan rule is enforced by the
-        // module loader, which only allows impls in the module that defines either
-        // the ability or the type. See OrphanInstance error variant.
-
-        // Overlap checking is not needed here: the DeclarationRegistry deduplicates
-        // impls by (ability, target-type) pair at registration time, and the
-        // ConstraintSolver picks the single matching impl during solving.
-        // See OverlappingInstance error variant for the diagnostic path.
-
-        return if (errors.isEmpty()) {
-            ValidationResult.Success()
-        } else {
-            ValidationResult.Failure(errors)
-        }
-    }
-
-    /**
      * Find similar names for suggestions using Levenshtein distance.
      *
      * Returns up to 3 most similar names.

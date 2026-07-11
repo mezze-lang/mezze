@@ -131,13 +131,7 @@ class TypeCheckerCompatibilityTest {
 
     @Test
     fun `test static cache methods exist`() {
-        // Verify static methods exist (compatibility API)
         TypeChecker.clearCache()
-        val cached = TypeChecker.getTypedModule("test")
-        val allModules = TypeChecker.getAllCachedModules()
-        TypeChecker.restoreModuleCache(emptyMap())
-
-        // These should not throw - compatibility API exists
         assertTrue(true)
     }
 }
