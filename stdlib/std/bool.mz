@@ -29,26 +29,26 @@ impl Default for Bool where {
 }
 
 ## Convert a Bool to "True" or "False".
-pub let to_str = { b: Bool } -> __native_bool_to_str { b = b }
+pub let to_str: { b: Bool } -> Str = { b } -> __native_bool_to_str { b = b }
 
 ## Logical AND.
-pub let and = { l: Bool, r: Bool } -> __native_bool_and { l = l, r = r }
+pub let and: { l: Bool, r: Bool } -> Bool = { l, r } -> __native_bool_and { l = l, r = r }
 
 ## Logical OR.
-pub let or = { l: Bool, r: Bool } -> __native_bool_or { l = l, r = r }
+pub let or: { l: Bool, r: Bool } -> Bool = { l, r } -> __native_bool_or { l = l, r = r }
 
 ## Logical NOT.
-pub let not = { b: Bool } -> __native_bool_not { b = b }
+pub let not: { b: Bool } -> Bool = { b } -> __native_bool_not { b = b }
 
 ## Exclusive OR.
-pub let xor = { l: Bool, r: Bool } -> __native_bool_xor { l = l, r = r }
+pub let xor: { l: Bool, r: Bool } -> Bool = { l, r } -> __native_bool_xor { l = l, r = r }
 
 ## Material implication: !l || r.
-pub let implies = { l: Bool, r: Bool } ->
+pub let implies: { l: Bool, r: Bool } -> Bool = { l, r } ->
   __native_bool_or { l = __native_bool_not { b = l }, r = r }
 
 ## Biconditional: True when both values are equal.
-pub let iff = { l: Bool, r: Bool } ->
+pub let iff: { l: Bool, r: Bool } -> Bool = { l, r } ->
   __native_bool_or {
     l = __native_bool_and { l = l, r = r },
     r = __native_bool_and {

@@ -4,236 +4,71 @@ import com.mezze.language.ast.ModulePath
 import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.Module as ResolverModule
 import com.mezze.language.typechecker.ModuleError as ResolverModuleError
-import com.mezze.language.typechecker.ProgramIndex
 import java.nio.file.Paths
+import com.mezze.language.parser.MezzeParser
+import com.mezze.language.typechecker.ExportedItemType as ResolverItemType
 
-/**
- * Module loader - loads and parses modules from the filesystem.
- *
- * This wraps the existing ModuleResolver with a clean interface
- * that returns our new result types.
- *
- * ## Design:
- * - Pure functions (no mutation!)
- * - Immutable results
- * - Explicit error handling
- * - Uses existing ModuleResolver for actual loading
- *
- * ## Usage:
- * ```kotlin
- * val loader = ModuleLoader.create()
- * val result = loader.loadModule("std::collections::seq")
- *
- * when (result) {
- *     is ModuleLoadResult.Success -> {
- *         val module = result.module
- *         // Use the loaded module
- *     }
- *     is ModuleLoadResult.Failure -> {
- *         for (error in result.errors) {
- *             println(error.message)
- *         }
- *     }
- * }
- * ```
- */
 class ModuleLoader(
     private val resolver: ModuleResolver
 ) {
-    /**
-     * Load a module by its structured path.
-     *
-     * This loads and parses the module, but does NOT type-check it yet.
-     * Type-checking is done by ModuleTypeChecker.
-     *
-     * @param path Structured ModulePath
-     * @return ModuleLoadResult (Success or Failure)
-     */
-    fun loadModule(path: ModulePath): ModuleLoadResult {
-        return try {
-            // Use existing ModuleResolver to load the module
-            val resolverModule = resolver.resolveModule(path)
-
-            // Convert to our LoadedModule type
-            val loadedModule = convertResolverModule(resolverModule)
-
-            ModuleLoadResult.Success(loadedModule)
-
-        } catch (e: ResolverModuleError) {
-            // Convert ModuleResolver errors to our error types
-            val moduleError = convertResolverError(e)
-            ModuleLoadResult.Failure(listOf(moduleError))
-
-        } catch (e: Exception) {
-            // Catch unexpected errors
-            val moduleError = ModuleError.ParseError(
-                modulePath = path.fullPath,
-                error = "Unexpected error: ${e.message ?: "Unknown error"}"
-            )
-            ModuleLoadResult.Failure(listOf(moduleError))
-        }
+    fun loadModule(path: ModulePath): ModuleLoadResult = try {
+        ModuleLoadResult.Success(convertResolverModule(resolver.resolveModule(path)))
+    } catch (e: ResolverModuleError) {
+        ModuleLoadResult.Failure(listOf(convertResolverError(e)))
+    } catch (e: Exception) {
+        ModuleLoadResult.Failure(listOf(ModuleError.ParseError(path.fullPath, "Unexpected error: ${e.message ?: "Unknown error"}")))
     }
 
-    /**
-     * Load a module by its path string.
-     * Prefer loadModule(ModulePath) for structured paths.
-     *
-     * @param modulePath Module path string (e.g., "std::collections::seq")
-     * @return ModuleLoadResult (Success or Failure)
-     */
-    fun loadModule(modulePath: String): ModuleLoadResult {
-        return loadModule(ModulePath.parse(modulePath))
+    fun loadModule(modulePath: String): ModuleLoadResult = loadModule(ModulePath.parse(modulePath))
+
+    fun getResolver(): ModuleResolver = resolver
+
+    fun getModule(modulePath: String): LoadedModule? = try {
+        convertResolverModule(resolver.resolveModule(modulePath))
+    } catch (_: Exception) {
+        null
     }
 
-    /**
-     * Get the underlying ModuleResolver.
-     *
-     * This allows ModuleTypeChecker to update the resolver's cache
-     * with inferred types after type-checking.
-     */
-    fun getResolver(): ModuleResolver {
-        return resolver
-    }
-
-    /**
-     * Get a module from the cache if it's already been loaded.
-     *
-     * @param modulePath Module path (e.g., "std::collections::seq")
-     * @return LoadedModule if cached, null otherwise
-     */
-    fun getModule(modulePath: String): LoadedModule? {
-        return try {
-            val resolverModule = resolver.resolveModule(modulePath)
-            convertResolverModule(resolverModule)
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    /**
-     * Load all dependencies of a module.
-     *
-     * This recursively loads all transitive dependencies,
-     * building a complete dependency graph.
-     *
-     * @param module The module whose dependencies to load
-     * @return Map of module path -> LoadedModule
-     */
     fun loadDependencies(module: LoadedModule): Map<ModulePath, LoadedModule> {
         val loaded = mutableMapOf<ModulePath, LoadedModule>()
-        val toLoad = mutableListOf<ModulePath>()
-
-        // Start with direct dependencies
-        toLoad.addAll(module.dependencies)
-
-        // Track loading to detect cycles
+        val toLoad = ArrayDeque(module.dependencies)
         val loading = mutableSetOf<ModulePath>()
 
         while (toLoad.isNotEmpty()) {
-            val path = toLoad.removeAt(0)
+            val path = toLoad.removeFirst()
+            if (path in loaded) continue
+            if (path in loading) throw ModuleError.CircularDependency(loading.map { it.fullPath } + path.fullPath)
 
-            // Skip if already loaded
-            if (loaded.containsKey(path)) {
-                continue
-            }
-
-            // Check for circular dependency
-            if (loading.contains(path)) {
-                throw ModuleError.CircularDependency(
-                    loading.map { it.fullPath } + path.fullPath
-                )
-            }
-
-            // Mark as loading
             loading.add(path)
-
-            // Load the module using structured path
-            val result = loadModule(path)
-
-            when (result) {
+            when (val result = loadModule(path)) {
                 is ModuleLoadResult.Success -> {
-                    val dependency = result.module
-                    loaded[path] = dependency
-
-                    // Add transitive dependencies
-                    toLoad.addAll(dependency.dependencies.filter { !loaded.containsKey(it) })
+                    loaded[path] = result.module
+                    toLoad.addAll(result.module.dependencies.filter { it !in loaded })
                 }
-                is ModuleLoadResult.Failure -> {
-                    // Propagate error
-                    throw result.errors.first()
-                }
+                is ModuleLoadResult.Failure -> throw result.errors.first()
             }
-
-            // Done loading this module
             loading.remove(path)
         }
-
         return loaded
     }
 
-    /**
-     * Load a module and all its dependencies (structured path version).
-     *
-     * @param path Structured ModulePath to load
-     * @return ModuleLoadResult (Success or Failure)
-     */
-    fun loadModuleWithDependencies(path: ModulePath): ModuleLoadResult {
-        return try {
-            // Load the root module
-            val rootResult = loadModule(path)
-
-            when (rootResult) {
-                is ModuleLoadResult.Success -> {
-                    // Load all dependencies
-                    val dependencies = loadDependencies(rootResult.module)
-
-                    // Return success with the root module
-                    // (dependencies are tracked separately)
-                    rootResult
-                }
-                is ModuleLoadResult.Failure -> {
-                    // Propagate failure
-                    rootResult
-                }
-            }
-
-        } catch (e: ModuleError) {
-            ModuleLoadResult.Failure(listOf(e))
-        } catch (e: Exception) {
-            ModuleLoadResult.Failure(
-                listOf(
-                    ModuleError.ParseError(
-                        path.fullPath,
-                        "Failed to load dependencies: ${e.message}"
-                    )
-                )
-            )
-        }
+    fun loadModuleWithDependencies(path: ModulePath): ModuleLoadResult = try {
+        val rootResult = loadModule(path)
+        if (rootResult is ModuleLoadResult.Success) loadDependencies(rootResult.module)
+        rootResult
+    } catch (e: ModuleError) {
+        ModuleLoadResult.Failure(listOf(e))
+    } catch (e: Exception) {
+        ModuleLoadResult.Failure(listOf(ModuleError.ParseError(path.fullPath, "Failed to load dependencies: ${e.message}")))
     }
 
-    /**
-     * Load a module and all its dependencies (string path version).
-     * Prefer loadModuleWithDependencies(ModulePath) for structured paths.
-     *
-     * @param modulePath Module path string to load
-     * @return ModuleLoadResult (Success or Failure)
-     */
-    fun loadModuleWithDependencies(modulePath: String): ModuleLoadResult {
-        return loadModuleWithDependencies(ModulePath.parse(modulePath))
-    }
+    fun loadModuleWithDependencies(modulePath: String): ModuleLoadResult =
+        loadModuleWithDependencies(ModulePath.parse(modulePath))
 
-    // ========================================================================
-    // CONVERSION HELPERS
-    // ========================================================================
-
-    /**
-     * Convert ModuleResolver's Module to our LoadedModule type.
-     */
     private fun convertResolverModule(resolverModule: ResolverModule): LoadedModule {
-        // Prefer the parsedModule stored on the resolver Module (set during loadModule).
         @Suppress("DEPRECATION")
         val parsedModule = resolverModule.parsedModule
-            ?: com.mezze.language.parser.MezzeParser().parseParsedModule(
+            ?: MezzeParser().parseParsedModule(
                 try { java.io.File(resolverModule.filePath).readText() } catch (_: Exception) { "" },
                 resolverModule.filePath
             )
@@ -257,71 +92,26 @@ class ModuleLoader(
         )
     }
 
-    /**
-     * Convert ModuleResolver's ExportedItemType to our enum.
-     */
     private fun convertExportType(
-        resolverType: com.mezze.language.typechecker.ExportedItemType
-    ): ExportedItemType {
-        return when (resolverType) {
-            com.mezze.language.typechecker.ExportedItemType.FUNCTION -> ExportedItemType.FUNCTION
-            com.mezze.language.typechecker.ExportedItemType.TYPE -> ExportedItemType.TYPE
-            com.mezze.language.typechecker.ExportedItemType.CONSTRUCTOR -> ExportedItemType.CONSTRUCTOR
-            com.mezze.language.typechecker.ExportedItemType.ABILITY -> ExportedItemType.ABILITY
-            com.mezze.language.typechecker.ExportedItemType.EFFECT -> ExportedItemType.EFFECT
-        }
+        resolverType: ResolverItemType
+    ): ExportedItemType = when (resolverType) {
+        ResolverItemType.FUNCTION -> ExportedItemType.FUNCTION
+        ResolverItemType.TYPE -> ExportedItemType.TYPE
+        ResolverItemType.CONSTRUCTOR -> ExportedItemType.CONSTRUCTOR
+        ResolverItemType.ABILITY -> ExportedItemType.ABILITY
+        ResolverItemType.EFFECT -> ExportedItemType.EFFECT
     }
 
-    /**
-     * Convert ModuleResolver errors to our error types.
-     */
-    private fun convertResolverError(error: ResolverModuleError): ModuleError {
-        return when (error) {
-            is ResolverModuleError.ModuleNotFound -> ModuleError.ModuleNotFound(
-                modulePath = error.modulePath,
-                searchPaths = error.searchPaths
-            )
-            is ResolverModuleError.CircularDependency -> ModuleError.CircularDependency(
-                cycle = error.cycle
-            )
-            is ResolverModuleError.ParseError -> ModuleError.ParseError(
-                modulePath = error.modulePath,
-                error = error.error
-            )
-            is ResolverModuleError.ExportNotFound -> ModuleError.ExportNotFound(
-                modulePath = error.modulePath,
-                exportName = error.exportName,
-                loc = error.loc
-            )
-            else -> {
-                // Fallback for other error types
-                ModuleError.ParseError(
-                    modulePath = "unknown",
-                    error = error.message ?: "Unknown error"
-                )
-            }
-        }
+    private fun convertResolverError(error: ResolverModuleError): ModuleError = when (error) {
+        is ResolverModuleError.ModuleNotFound -> ModuleError.ModuleNotFound(error.modulePath, error.searchPaths)
+        is ResolverModuleError.CircularDependency -> ModuleError.CircularDependency(error.cycle)
+        is ResolverModuleError.ParseError -> ModuleError.ParseError(error.modulePath, error.error)
+        is ResolverModuleError.ExportNotFound -> ModuleError.ExportNotFound(error.modulePath, error.exportName, error.loc)
+        else -> ModuleError.ParseError("unknown", error.message ?: "Unknown error")
     }
-
-    // ========================================================================
-    // FACTORY METHODS
-    // ========================================================================
 
     companion object {
-        /**
-         * Create a module loader with default configuration.
-         */
-        fun create(): ModuleLoader {
-            val resolver = ModuleResolver(Paths.get("."))
-            return ModuleLoader(resolver)
-        }
-
-        /**
-         * Create a module loader from a specific directory.
-         */
-        fun fromPath(path: String): ModuleLoader {
-            val resolver = ModuleResolver(Paths.get(path))
-            return ModuleLoader(resolver)
-        }
+        fun create() = ModuleLoader(ModuleResolver(Paths.get(".")))
+        fun fromPath(path: String) = ModuleLoader(ModuleResolver(Paths.get(path)))
     }
 }

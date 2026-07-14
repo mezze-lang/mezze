@@ -4,22 +4,19 @@ import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.module.ImportResolutionResult
 import com.mezze.language.typechecker.module.ImportResolver
+import com.mezze.language.ast.ModulePath
+import com.mezze.language.typechecker.desugar.DoBindDesugar
 import com.mezze.language.typechecker.module.ModuleImportContext
+import com.mezze.language.typechecker.module.TypedModule
 
-/**
- * Load prelude modules and return a combined ModuleImportContext.
- * Cached globally -- computed once per JVM process since stdlib doesn't change.
- */
 internal fun loadPreludeModules(
     importResolver: ImportResolver,
     userImportContext: ModuleImportContext,
     cachedPreludeContext: ModuleImportContext?,
-    onPreludeLoaded: (ModuleImportContext, Map<com.mezze.language.ast.ModulePath, com.mezze.language.typechecker.module.TypedModule>) -> Unit,
+    onPreludeLoaded: (ModuleImportContext, Map<ModulePath, TypedModule>) -> Unit,
 ): ModuleImportContext {
-    // Return cached prelude if available
     cachedPreludeContext?.let { return it }
 
-    // Load prelude module list from _prelude.mz (compiler-internal, not user-importable).
     val preludeSource = ModuleResolver.readStdlibFile("stdlib/std/_prelude.mz")
         ?: ModuleResolver.readStdlibFile("std/_prelude.mz")
         ?: error(
@@ -32,20 +29,8 @@ internal fun loadPreludeModules(
     val result = importResolver.resolveImports(syntheticModule)
     val preludeContext = when (result) {
         is ImportResolutionResult.Success -> {
-            // Import inherent impls for method syntax + named ability impls for
-            // context-based constraint solving (replacing hardcoded checks).
-            // No bindings -- prevents name collisions (option::fold vs seq::fold).
-            //
-            // Abilities ARE carried so that `with X 'a` constraints in user
-            // code can refer to prelude abilities (Sized, Show, etc.) and
             // method-call resolution sees their operation types (#304).
-            //
-            // Effects and effect impls are stripped. The Exception effect /
-            // ExceptionToResult performer needed by the do-bind desugar are
-            // injected per-module by `injectExceptionToResultForBind` ONLY
-            // when the module contains a `<-`. See do-bind-proposal.md.
             val ctx = result.importContext
-            // Cache loaded modules for inclusion in Monomorphizer's allModules
             onPreludeLoaded(ctx, result.loadedModules)
             ModuleImportContext(
                 importedBindings = emptyMap(),
@@ -65,12 +50,6 @@ internal fun loadPreludeModules(
     return preludeContext
 }
 
-/**
- * Inject Exception + ExceptionToResult into the import context so the
- * synthetic `perform ExceptionToResult in ...` emitted by DoBindDesugar
- * resolves at constraint-generation time. Only called when the module
- * actually contains `<-`.
- */
 internal fun injectExceptionToResultForBind(
     baseCtx: ModuleImportContext,
     importResolver: ImportResolver,
@@ -78,8 +57,8 @@ internal fun injectExceptionToResultForBind(
     onCached: (ModuleImportContext) -> Unit,
 ): ModuleImportContext {
     val exceptionCtx = cachedExceptionForBindCtx ?: run {
-        val effectName = com.mezze.language.typechecker.desugar.DoBindDesugar.EXCEPTION_EFFECT_NAME
-        val performerName = com.mezze.language.typechecker.desugar.DoBindDesugar.EXCEPTION_TO_RESULT_NAME
+        val effectName = DoBindDesugar.EXCEPTION_EFFECT_NAME
+        val performerName = DoBindDesugar.EXCEPTION_TO_RESULT_NAME
         val syntheticSrc = "use std::effects::exception::{ $effectName, $performerName }"
         val syntheticModule = MezzeParser().parseParsedModule(syntheticSrc, file = "<dobind-synthetic>")
         when (val r = importResolver.resolveImports(syntheticModule)) {

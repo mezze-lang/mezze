@@ -120,9 +120,9 @@ let serialize_pretty : { json: Json, indent: Int, indent_size: Int } -> Str = { 
 
 let escape_string : { s: Str } -> Str = { s } -> s
 
-pub let parse = { bytes } -> __native_json_parse_bytes { bytes = bytes }
+pub let parse: { bytes: Bytes } -> Result Json { path: [Str], message: Str, expected: Str, found: Option Str } = { bytes } -> __native_json_parse_bytes { bytes = bytes }
 
-pub let parse_str = { s: Str } -> __native_json_parse { s = s }
+pub let parse_str: { s: Str } -> Result Json { path: [Str], message: Str, expected: Str, found: Option Str } = { s } -> __native_json_parse { s = s }
 
 pub let transform_field_name = { name: Str, transform: FieldTransform } -> match transform is
   Identity -> name

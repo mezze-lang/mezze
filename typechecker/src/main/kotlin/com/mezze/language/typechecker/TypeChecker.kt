@@ -1,166 +1,113 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.*
-import com.mezze.language.parsedast.ParsedModule
+import com.mezze.language.ast.solving.Substitution
+import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.parser.MezzeParser
-import com.mezze.language.typechecker.NativeFunctionTypes
-
+import com.mezze.language.parsedast.*
+import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.parsedast.diagnostics.FixHint
+import com.mezze.language.truffleir.FunctionIR
+import com.mezze.language.typechecker.cache.TypeCheckCache
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.constraints.ConstraintGenerator
 import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.context.ContextBuilder
-import com.mezze.language.typechecker.context.TypingContext
+import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypeScheme
-import com.mezze.language.ast.solving.collectFreeTypeVars
+import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.typechecker.desugar.DoBindDesugar
+import com.mezze.language.typechecker.hashing.ContentHashComputer
 import com.mezze.language.typechecker.module.*
+import com.mezze.language.typechecker.phase.*
+import com.mezze.language.typechecker.printing.ErrorFormatter
 import com.mezze.language.typechecker.solving.ConstraintSolver
-import com.mezze.language.ast.solving.Substitution
+import com.mezze.language.typechecker.solving.clearUnificationCache
+import com.mezze.language.typechecker.solving.withInScopeAliasNames
 import com.mezze.language.typechecker.validation.TypeValidator
 import com.mezze.language.typechecker.validation.ValidationResult
-import com.mezze.language.typechecker.printing.ErrorFormatter
-import com.mezze.language.typechecker.cache.TypeCheckCache
-import com.mezze.language.parsedast.diagnostics.ErrorCode
-import com.mezze.language.typechecker.hashing.ContentHashComputer
-import com.mezze.language.typechecker.phase.*
+import com.mezze.language.typedast.Hash
+import com.mezze.language.typedast.TypedModule as TypedAstModule
 import java.nio.file.Path
 import java.nio.file.Paths
+import com.mezze.language.typechecker.TypeCheckResult as OutputTypeCheckResult
+import com.mezze.language.typechecker.TypeCheckWarning as OutputTypeCheckWarning
 
-/**
- * New type checker - orchestrates all phases of type checking.
- *
- * ## Phase Architecture:
- *
- * **PHASE 0: Module Resolution** (optional - only if imports present)
- * - Input: ParsedModule with ParsedUseDecl
- * - Output: ModuleImportContext + TypedModules
- * - What: Load and type-check imported modules
- *
- * **PHASE 1: Build Context**
- * - Input: ParsedModule (+ optional ModuleImportContext)
- * - Output: TypingContext (immutable!)
- *
- * **PHASE 2: Generate Constraints**
- * - Input: ParsedModule, TypingContext
- * - Output: List<Constraint>
- *
- * **PHASE 3: Solve Constraints**
- * - Input: List<Constraint>
- * - Output: Substitution
- *
- * **PHASE 4: Validate Constraints**
- * - Input: Constraints, Substitution
- * - Output: ValidationResult
- *
- * **PHASE 5: Emit TypedAST + Compile**
- * - Input: ParsedModule, Substitution, ConstraintResults
- * - Output: TypedModule, FunctionIR list
- *
- * Each phase's logic lives in `phase/`; this file orchestrates.
- */
 class TypeChecker(
     internal val parentContext: TypingContext = createInitialContext()
 ) {
-    /** Bridge for PrecompiledStdlib to call loadPreludeModules */
     internal fun loadPreludeModulesPublic(importResolver: ImportResolver): ModuleImportContext {
         return loadPreludeModulesInternal(importResolver, ModuleImportContext.empty())
     }
 
-    /** Bridge for PrecompiledStdlib to get cachedPreludeLoadedModules */
-    internal fun getCachedPreludeLoadedModules(): Map<com.mezze.language.ast.ModulePath, com.mezze.language.typechecker.module.TypedModule>? {
+    internal fun getCachedPreludeLoadedModules(): Map<ModulePath, TypedModule>? {
         return cachedPreludeLoadedModules
     }
 
-    /**
-     * Result of type checking.
-     *
-     * Sealed type - exhaustive pattern matching, no nulls!
-     */
-    sealed class TypeCheckResult {
-        /**
-         * Type checking succeeded.
-         */
-        data class Success(
+        sealed class TypeCheckResult {
+                data class Success(
             val substitution: Substitution,
             val importContext: ModuleImportContext? = null,
             val warnings: List<TypeCheckWarning> = emptyList(),
-            val loadedModules: Map<com.mezze.language.ast.ModulePath, TypedModule> = emptyMap(),
-            val abilityImpls: Map<com.mezze.language.typedast.Hash, com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap(),
-            val typedModule: com.mezze.language.typedast.TypedModule? = null,
-            val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR>? = null,
+            val loadedModules: Map<ModulePath, TypedModule> = emptyMap(),
+            val abilityImpls: Map<Hash, TypingContext.AbilityImplInfo> = emptyMap(),
+            val typedModule: TypedAstModule? = null,
+            val loweredFunctions: List<FunctionIR>? = null,
             val loweredPerformers: List<Array<String>> = emptyList(),
             val typeContext: Map<String, MezzeType> = emptyMap(),
-            val resolvedParsedModule: com.mezze.language.parsedast.ParsedModule? = null,
-            val expectedTypeAt: Map<com.mezze.language.parsedast.Loc, MezzeType> = emptyMap(),
+            val resolvedParsedModule: ParsedModule? = null,
+            val expectedTypeAt: Map<Loc, MezzeType> = emptyMap(),
         ) : TypeCheckResult()
 
-        /**
-         * Type checking failed.
-         */
-        data class Failure(
+                data class Failure(
             val errors: List<TypeCheckError>,
-            val typedModule: com.mezze.language.typedast.TypedModule? = null,
-            val expectedTypeAt: Map<com.mezze.language.parsedast.Loc, MezzeType> = emptyMap(),
+            val typedModule: TypedAstModule? = null,
+            val expectedTypeAt: Map<Loc, MezzeType> = emptyMap(),
         ) : TypeCheckResult()
     }
 
-    /**
-     * Type checking error.
-     */
-    data class TypeCheckError(
+        data class TypeCheckError(
         val phase: String,
         val message: String,
-        val loc: com.mezze.language.parsedast.Loc? = null,
+        val loc: Loc? = null,
         val errorType: ErrorType = ErrorType.GENERAL,
         val metadata: Map<String, Any> = emptyMap(),
-        val code: com.mezze.language.parsedast.diagnostics.ErrorCode =
-            com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED,
+        val code: ErrorCode =
+            ErrorCode.UNCATEGORIZED,
         val hints: List<String> = emptyList(),
-        val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint> = emptyList(),
+        val fixHints: List<FixHint> = emptyList(),
     )
 
-    /**
-     * Type checking warning.
-     */
-    data class TypeCheckWarning(
+        data class TypeCheckWarning(
         val message: String,
-        val loc: com.mezze.language.parsedast.Loc? = null
+        val loc: Loc? = null
     )
 
 
-    /**
-     * Type-check a ParsedModule directly (v2 entry point).
-     *
-     * This is the REAL implementation. Uses the v2 pipeline directly:
-     * ParsedModule -> Phase 0 (import resolution) -> Phase 1-5 (all v2).
-     */
-    fun checkParsedModule(
-        module: com.mezze.language.parsedast.ParsedModule,
+        fun checkParsedModule(
+        module: ParsedModule,
         currentPath: Path = Paths.get("."),
         currentModulePath: String? = null,
         enablePrelude: Boolean = false
     ): TypeCheckResult {
-        // Pre-phase: desugar pipe expressions
         @Suppress("NAME_SHADOWING")
         var module = desugarPipesInParsedModule(module)
 
-        // Pre-phase: desugar do-block <- statements
-        val bindDesugarResult = com.mezze.language.typechecker.desugar.DoBindDesugar.desugar(module)
+        val bindDesugarResult = DoBindDesugar.desugar(module)
         module = bindDesugarResult.module
         val bindLetLocs = bindDesugarResult.bindLetLocs
         val moduleUsesBind = bindLetLocs.isNotEmpty()
 
-        // Clear caches for fresh type checking
-        com.mezze.language.typechecker.solving.clearUnificationCache()
+        clearUnificationCache()
         if (!TypeCheckCache.hasPersistence()) {
             TypeCheckCache.initializeInMemory()
         }
 
-        // PHASE 0: Module Resolution
         var importContext: ModuleImportContext? = null
-        var loadedModules: Map<com.mezze.language.ast.ModulePath, TypedModule> = emptyMap()
-        val shouldInjectPrelude = !com.mezze.language.ast.ModulePathConventions.isStdlib(currentModulePath)
+        var loadedModules: Map<ModulePath, TypedModule> = emptyMap()
+        val shouldInjectPrelude = !ModulePathConventions.isStdlib(currentModulePath)
         val hasUserImports = hasImportsParsed(module)
         val precompiled = try { PrecompiledStdlib } catch (_: Exception) { null }
 
@@ -195,10 +142,10 @@ class TypeChecker(
                     loadedModules = importResult.loadedModules
 
                     val localTypeNames = module.decls
-                        .filterIsInstance<com.mezze.language.parsedast.ParsedTypeDecl>()
+                        .filterIsInstance<ParsedTypeDecl>()
                         .map { it.name }
                         .toSet()
-                    val builtinNames = com.mezze.language.ast.BuiltinTypes.allBuiltinTypeNames
+                    val builtinNames = BuiltinTypes.allBuiltinTypeNames
                     if (shouldInjectPrelude) {
                         val preludeContext = loadPreludeModulesInternal(importResolver, importContext!!)
                         importContext = importContext!!.merge(preludeContext)
@@ -218,7 +165,6 @@ class TypeChecker(
             parentContext
         }
 
-        // PHASE 1: Build Context
         val contextBuilder = ContextBuilder()
         val buildResult = contextBuilder.build(
             module = module,
@@ -234,7 +180,6 @@ class TypeChecker(
 
         cachedTypeAliases = buildTypeAliasesFromParsedModule(parsedModule, contextBuilder, importContext)
 
-        // PHASE 2: Generate Constraints
         val abilityNames = buildResult.registry.abilityNames +
             (importContext?.importedAbilities?.keys ?: emptySet())
         val effectNames = buildResult.registry.effectNames +
@@ -244,15 +189,14 @@ class TypeChecker(
             listOf("abilityNames = $abilityNames", "effectNames = $effectNames")
         }
 
-        // Collect transitive effects and abilities from all loaded modules
-        val transitiveEffects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
+        val transitiveEffects = mutableMapOf<String, ParsedEffectDecl>()
         for ((_, mod) in loadedModules) {
-            mod.parsedModule?.decls?.filterIsInstance<com.mezze.language.parsedast.ParsedEffectDecl>()?.forEach {
+            mod.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach {
                 transitiveEffects[it.name] = it
             }
         }
-        for ((_, cached) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
-            cached.parsedModule?.decls?.filterIsInstance<com.mezze.language.parsedast.ParsedEffectDecl>()?.forEach {
+        for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
+            cached.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach {
                 transitiveEffects[it.name] = it
             }
         }
@@ -263,20 +207,20 @@ class TypeChecker(
             (importContext?.importedTypes ?: emptyMap())
 
         val importedAbilities = importContext?.importedAbilities ?: emptyMap()
-        val transitiveAbilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
+        val transitiveAbilities = mutableMapOf<String, ParsedAbilityDecl>()
         for ((_, mod) in loadedModules) {
-            mod.parsedModule?.decls?.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()?.forEach {
+            mod.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.forEach {
                 transitiveAbilities[it.name] = it
             }
         }
-        for ((_, cached) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
-            cached.parsedModule?.decls?.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()?.forEach {
+        for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
+            cached.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.forEach {
                 transitiveAbilities[it.name] = it
             }
         }
         val allAbilityDeclarations = transitiveAbilities + buildResult.registry.abilityDeclarations + importedAbilities
 
-        val registry = com.mezze.language.typechecker.context.DeclarationRegistry.from(
+        val registry = DeclarationRegistry.from(
             allTypeDeclarations, allAbilityDeclarations, allEffectDeclarations,
         )
 
@@ -290,8 +234,8 @@ class TypeChecker(
 
         val inScopeAliasNames = buildResult.registry.typeNames +
             (importContext?.explicitlyImportedTypeNames ?: emptySet()) +
-            com.mezze.language.ast.BuiltinTypes.allBuiltinTypeNames
-        val programConstraintResult = com.mezze.language.typechecker.solving.withInScopeAliasNames(inScopeAliasNames) {
+            BuiltinTypes.allBuiltinTypeNames
+        val programConstraintResult = withInScopeAliasNames(inScopeAliasNames) {
             constraintGenerator.generateProgram(parsedModule, context)
         }
         val constraintResults = programConstraintResult.constraintResults
@@ -319,7 +263,6 @@ class TypeChecker(
             })
         }
 
-        // Check for undefined variables
         val undefinedVarErrors = checkUndefinedVariables(
             constraintResults = constraintResults,
             context = context,
@@ -330,7 +273,6 @@ class TypeChecker(
         )
         collectedErrors.addAll(undefinedVarErrors)
 
-        // Check for duplicate bindings
         val duplicateBindings = constraintResults.values.flatMap { it.duplicateBindings }
         if (duplicateBindings.isNotEmpty()) {
             collectedErrors.addAll(duplicateBindings.map { duplicate ->
@@ -343,7 +285,6 @@ class TypeChecker(
             })
         }
 
-        // Collect warnings
         val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
             TypeCheckWarning(
                 message = "Unused variable '${unused.name}'. Prefix with '_' to suppress this warning.",
@@ -360,16 +301,15 @@ class TypeChecker(
             } + constraintResults.values.flatMap { it.abilityConstraints } +
               constraintResults.values.flatMap { it.associatedTypeConstraints }
 
-        // PHASE 3: Solve Constraints
         val solver = ConstraintSolver(context, registry)
-        val solveResult = com.mezze.language.typechecker.solving.withInScopeAliasNames(inScopeAliasNames) {
+        val solveResult = withInScopeAliasNames(inScopeAliasNames) {
             solver.solve(allConstraints)
         }
 
         when (solveResult) {
             is ConstraintSolver.SolveResult.Failure -> {
                 collectedErrors.addAll(solveResult.errors.map { classifyConstraintError(it) })
-                val seen = mutableSetOf<Pair<com.mezze.language.parsedast.Loc?, String>>()
+                val seen = mutableSetOf<Pair<Loc?, String>>()
                 val deduped = collectedErrors.filter { e -> seen.add(e.loc to e.message) }
                 val partialTyped = buildPartialTypedModule(
                     parsedModule = parsedModule, substitution = perBindingSubstitution,
@@ -378,7 +318,7 @@ class TypeChecker(
                     registry = registry, bindLetLocs = bindLetLocs,
                 )
                 val partialExpectedTypeAt = constraintResults.values
-                    .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType>()) { acc, r ->
+                    .fold(emptyMap<Loc, MezzeType>()) { acc, r ->
                         acc + r.expectedTypeAt
                     }
                     .mapValues { (_, type) -> perBindingSubstitution.apply(type) }
@@ -397,7 +337,7 @@ class TypeChecker(
 
                 val mustBeOpenRowVars = solveResult.mustBeOpenRowVars + perBindingMustBeOpenRowVars
 
-                val tempGenerator = ConstraintGenerator.create(com.mezze.language.typechecker.context.DeclarationRegistry.from(buildResult.registry.typeDeclarations, emptyMap(), emptyMap()))
+                val tempGenerator = ConstraintGenerator.create(DeclarationRegistry.from(buildResult.registry.typeDeclarations, emptyMap(), emptyMap()))
                 val globallyResolvedConstraintResults = constraintResults.mapValues { (_, result) ->
                     val resolvedType = substitution.apply(result.type)
                     val typeWithAbilities = tempGenerator.addAbilityConstraintsToFunctionType(resolvedType, result.abilityConstraints, substitution)
@@ -406,20 +346,19 @@ class TypeChecker(
 
                 val tailCallLocations = constraintResults.values.flatMap { it.tailCalls }.filterNotNull().toSet()
                 val allMethodCallResolutions = constraintResults.values
-                    .fold(emptyMap<Pair<com.mezze.language.parsedast.Loc, String>, ConstraintResult.MethodCallInfo>()) { acc, r -> acc + r.methodCallResolutions }
+                    .fold(emptyMap<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()) { acc, r -> acc + r.methodCallResolutions }
                 val allCallReturnTypes = constraintResults.values
-                    .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType>()) { acc, r -> acc + r.callReturnTypes }
+                    .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.callReturnTypes }
                 val allMatchCaseBindings = constraintResults.values
-                    .fold(emptyMap<com.mezze.language.parsedast.Loc, Map<String, com.mezze.language.ast.MezzeType>>()) { acc, r ->
+                    .fold(emptyMap<Loc, Map<String, MezzeType>>()) { acc, r ->
                         acc + r.matchCaseBindings.mapValues { (_, bindings) ->
                             bindings.mapValues { (_, ty) -> substitution.apply(ty) }
                         }
                     }
                 val allExpectedTypeAt = constraintResults.values
-                    .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType>()) { acc, r -> acc + r.expectedTypeAt }
+                    .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.expectedTypeAt }
                     .mapValues { (_, type) -> substitution.apply(type) }
 
-                // PHASE 4: Validate Constraints
                 val validator = TypeValidator(context, registry, buildResult.implDeclarations)
                 val constraintValidation = validator.validateConstraints(allConstraints, substitution)
                 when (constraintValidation) {
@@ -438,8 +377,7 @@ class TypeChecker(
                     }
                 }
 
-                // PHASE 5: Emit TypedAST + Compile
-                val isStdlibModule = com.mezze.language.ast.ModulePathConventions.isStdlib(currentModulePath)
+                val isStdlibModule = ModulePathConventions.isStdlib(currentModulePath)
                 val emitResult = emitTypedModuleAndLower(
                     parsedModule = parsedModule, module = module,
                     substitution = substitution,
@@ -457,7 +395,6 @@ class TypeChecker(
                     currentModulePath = currentModulePath,
                 )
 
-                // V2 Validation
                 val v2ValidationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution)
                 if (v2ValidationResult is ValidationResult.Failure) {
                     collectedErrors.addAll(v2ValidationResult.errors.map { error ->
@@ -475,9 +412,8 @@ class TypeChecker(
                     v2ValidationResult.warnings.map { TypeCheckWarning(message = it, loc = null) }
                 } else emptyList()
 
-                // Final disposition
                 if (collectedErrors.isNotEmpty()) {
-                    val seen = mutableSetOf<Pair<com.mezze.language.parsedast.Loc?, String>>()
+                    val seen = mutableSetOf<Pair<Loc?, String>>()
                     val deduped = collectedErrors.filter { e -> seen.add(e.loc to e.message) }
                     return TypeCheckResult.Failure(
                         errors = deduped, typedModule = emitResult.typedModule,
@@ -502,7 +438,7 @@ class TypeChecker(
 
     private fun hasImportsParsed(module: ParsedModule): Boolean {
         return module.decls.any { decl ->
-            decl is com.mezze.language.parsedast.ParsedUseDecl || decl is com.mezze.language.parsedast.ParsedPubUseDecl
+            decl is ParsedUseDecl || decl is ParsedPubUseDecl
         }
     }
 
@@ -534,30 +470,24 @@ class TypeChecker(
         )
     }
 
-    // Cached type aliases from the last type check
     private var cachedTypeAliases: Map<String, TypeAliasInfo> = emptyMap()
 
     fun getTypeAliases(): Map<String, TypeAliasInfo> {
         return cachedTypeAliases
     }
 
-    /**
-     * Type check a ParsedModule (v2 entry point).
-     *
-     * @throws TypeCheckError if type checking fails
-     */
-    @JvmOverloads
-    fun typeCheck(module: com.mezze.language.parsedast.ParsedModule, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): com.mezze.language.typechecker.TypeCheckResult {
-        com.mezze.language.ast.TypeVar.resetCounter()
+        @JvmOverloads
+    fun typeCheck(module: ParsedModule, currentPath: Path, enablePrelude: Boolean = false, modulePath: String? = null): OutputTypeCheckResult {
+        TypeVar.resetCounter()
         val result = checkParsedModule(module, currentPath, currentModulePath = modulePath, enablePrelude = enablePrelude)
 
         return when (result) {
             is TypeCheckResult.Success -> {
                 val resolvedImports = buildResolvedImports(result.importContext)
                 val structuredWarnings = result.warnings.map { warning ->
-                    com.mezze.language.typechecker.TypeCheckWarning(warning.message, warning.loc)
+                    OutputTypeCheckWarning(warning.message, warning.loc)
                 }
-                com.mezze.language.typechecker.TypeCheckResult(
+                OutputTypeCheckResult(
                     resolvedImports = resolvedImports,
                     warnings = structuredWarnings,
                     importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
@@ -570,7 +500,7 @@ class TypeChecker(
                         .mapNotNull { (path, m) ->
                             val fp = m.filePath ?: return@mapNotNull null
                             val sh = m.sourceHash ?: return@mapNotNull null
-                            path to com.mezze.language.typechecker.LoadedModuleSource(fp, sh)
+                            path to LoadedModuleSource(fp, sh)
                         }.toMap(),
                     expectedTypeAt = result.expectedTypeAt,
                 )
@@ -590,15 +520,15 @@ class TypeChecker(
     }
 
     data class ParsedModuleCheckResult(
-        val module: com.mezze.language.typedast.TypedModule,
-        val loadedModules: Map<com.mezze.language.ast.ModulePath, com.mezze.language.typechecker.module.TypedModule>
+        val module: TypedAstModule,
+        val loadedModules: Map<ModulePath, TypedModule>
     )
 
     fun checkParsedModuleToTyped(
         module: ParsedModule,
         currentPath: Path = Paths.get("."),
         enablePrelude: Boolean = false
-    ): com.mezze.language.typedast.TypedModule {
+    ): TypedAstModule {
         return checkParsedModuleWithDeps(module, currentPath, enablePrelude).module
     }
 
@@ -640,30 +570,20 @@ class TypeChecker(
 
         @Volatile
         @JvmStatic
-        var cachedPreludeLoadedModules: Map<com.mezze.language.ast.ModulePath, com.mezze.language.typechecker.module.TypedModule>? = null
-
-        private val v1ToV2ModuleCache = java.util.concurrent.ConcurrentHashMap<com.mezze.language.typedast.Hash, com.mezze.language.typedast.TypedModule>()
+        var cachedPreludeLoadedModules: Map<ModulePath, TypedModule>? = null
 
         private fun createInitialContext(): TypingContext {
-            val nativeFunctions = mutableMapOf<String, MezzeType>()
-            NativeFunctionTypes.registerAll(nativeFunctions)
-
-            var context = TypingContext.empty
-            for ((name, type) in nativeFunctions) {
-                val bindingKey = BindingKey.parse(name)
-                val freeVars = collectFreeTypeVars(type)
-                if (freeVars.isEmpty()) {
-                    context = context.extendMono(bindingKey, type)
-                } else {
-                    val scheme = TypeScheme(
-                        quantifiedVars = freeVars.toList(),
-                        constraints = emptyList(),
-                        type = type
-                    )
-                    context = context.extendPoly(bindingKey, scheme)
-                }
-            }
-            return context
+            val crashType = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("msg" to MezzeType.StringType)),
+                MezzeType.VarType(TypeVar.fresh())
+            )
+            val freeVars = collectFreeTypeVars(crashType)
+            val scheme = TypeScheme(
+                quantifiedVars = freeVars.toList(),
+                constraints = emptyList(),
+                type = crashType
+            )
+            return TypingContext.empty.extendPoly(BindingKey.parse("crash"), scheme)
         }
 
         fun create(): TypeChecker = TypeChecker()
@@ -673,12 +593,11 @@ class TypeChecker(
         fun clearCache() {
             ModuleResolver.clearCache()
             TypeCheckCache.clearAll()
-            v1ToV2ModuleCache.clear()
         }
 
         @JvmStatic
         @Deprecated("Use ModuleResolver.getFromCache(modulePath)?.parsedModule instead")
-        fun getTypedModule(modulePath: String): com.mezze.language.parsedast.ParsedModule? {
+        fun getTypedModule(modulePath: String): ParsedModule? {
             return ModuleResolver.getFromCache(modulePath)?.parsedModule
         }
     }

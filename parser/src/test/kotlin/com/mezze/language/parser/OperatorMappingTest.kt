@@ -1,5 +1,6 @@
 package com.mezze.language.parser
 
+import com.mezze.language.ast.OperatorMapping
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 

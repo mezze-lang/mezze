@@ -6,7 +6,16 @@ import com.mezze.language.ast.debug.ContentHashRegistry.DeclarationKind
 import com.mezze.language.ast.hashing.MezzeHash
 import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.parser.MezzeParser
+import com.mezze.language.parser.ParsedModuleCacheHolder
+import com.mezze.language.parser.ParseException
 import com.mezze.language.parsedast.*
+import com.mezze.language.parsedast.Visibility as ParsedVisibility
+import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.parsedast.diagnostics.FixHint
+import com.mezze.language.parsedast.diagnostics.LevenshteinSuggest
+import com.mezze.language.store.MezzeStore
+import com.mezze.language.store.StoreSerialization
+import com.mezze.language.typedast.Hash
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.hashing.ContentHashComputer
@@ -19,20 +28,6 @@ import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 
-/**
- * Pre-computed index for O(1) lookup of program declarations.
- *
- * Built once per module during loading, eliminates O(N) filterIsInstance().find() scans
- * throughout the codebase - particularly in ImportResolver.
- *
- * @property typeDeclarations Type declarations by name
- * @property abilityDeclarations Ability declarations by name
- * @property effectDeclarations Effect declarations by name
- * @property abilityImplsByAbility Ability impls grouped by ability name
- * @property letBindings Let bindings by variable name (simple bindings only)
- * @property useDeclarations All use declarations
- * @property pubUseDeclarations All pub use declarations
- */
 data class ProgramIndex(
     val typeDeclarations: Map<String, ParsedTypeDecl>,
     val abilityDeclarations: Map<String, ParsedAbilityDecl>,
@@ -40,18 +35,12 @@ data class ProgramIndex(
     val performersByName: Map<String, ParsedPerformerDecl>,
     val performersByEffect: Map<String, List<ParsedPerformerDecl>>,
     val abilityImplsByAbility: Map<String, List<ParsedImplAbilityDecl>>,
-    val abilityImplsByHash: Map<com.mezze.language.typedast.Hash, ParsedImplAbilityDecl>,
+    val abilityImplsByHash: Map<Hash, ParsedImplAbilityDecl>,
     val letBindings: Map<String, ParsedLetDecl>,
     val useDeclarations: List<ParsedUseDecl>,
     val pubUseDeclarations: List<ParsedPubUseDecl>
 ) {
     companion object {
-        private val syntheticLoc = Loc(file = "<index>", startLine = 0, startCol = 0, endLine = 0, endCol = 0)
-
-        /**
-         * Build an index from a ParsedModule (v2 AST).
-         * Populates all fields directly from v2 types — no v1 conversion.
-         */
         fun build(module: ParsedModule): ProgramIndex {
             val decls = module.decls
 
@@ -66,8 +55,7 @@ data class ProgramIndex(
             val abilityImplDecls = decls.filterIsInstance<ParsedImplAbilityDecl>()
             val letDecls = decls.filterIsInstance<ParsedLetDecl>()
 
-            // Compute content hashes using ParsedDeclHasher (v2-native, Unison-style)
-            val hasher = com.mezze.language.parsedast.ParsedDeclHasher
+            val hasher = ParsedDeclHasher
             val file = module.path
 
             val hashedEffects = effectDecls.mapValues { (_, decl) ->
@@ -114,10 +102,7 @@ data class ProgramIndex(
             )
         }
 
-        /**
-         * Empty index for built-in modules that have no declarations.
-         */
-        val EMPTY = ProgramIndex(
+                val EMPTY = ProgramIndex(
             typeDeclarations = emptyMap(),
             abilityDeclarations = emptyMap(),
             effectDeclarations = emptyMap(),
@@ -132,45 +117,27 @@ data class ProgramIndex(
     }
 }
 
-/**
- * Represents a loaded module with its exports
- *
- * @property path The module path as structured ModulePath
- * @property filePath The file system path to the source file
- * @property exports Map of exported items (functions, types, etc.)
- * @property dependencies List of module dependencies
- * @property sourceHash Content hash of the source file (for cache invalidation)
- * @property index Pre-computed index for O(1) declaration lookups
- */
 data class Module(
     val path: ModulePath,
     val filePath: String,
     val exports: Map<String, ExportedItem>,
     val dependencies: List<ModuleDependency>,
-    val sourceHash: com.mezze.language.typedast.Hash? = null,
+    val sourceHash: Hash? = null,
     val index: ProgramIndex = ProgramIndex.EMPTY,
-    /** V2 ParsedModule — the primary AST. */
-    val parsedModule: com.mezze.language.parsedast.ParsedModule? = null
+    val parsedModule: ParsedModule? = null
 ) {
-    /** Legacy accessor for module name as string. Use path.fullPath instead. */
     val name: String get() = path.fullPath
 }
 
-/**
- * Represents an exported item from a module
- */
 data class ExportedItem(
     val name: String,
     val type: ExportedItemType,
     val mezzeType: MezzeType,
     val originalName: String,
-    val visibility: com.mezze.language.parsedast.Visibility = com.mezze.language.parsedast.Visibility.PUBLIC,
-    val contentHash: com.mezze.language.typedast.Hash  // Content hash for content-addressed lookup (REQUIRED)
+    val visibility: ParsedVisibility = ParsedVisibility.PUBLIC,
+    val contentHash: Hash  // Content hash for content-addressed lookup (REQUIRED)
 )
 
-/**
- * Types of exported items
- */
 enum class ExportedItemType {
     FUNCTION,
     TYPE,
@@ -179,48 +146,39 @@ enum class ExportedItemType {
     EFFECT
 }
 
-/**
- * Represents a module dependency
- */
 data class ModuleDependency(
     val modulePath: String,
     val usePath: UsePath,
     val alias: String? = null
 )
 
-/**
- * Module-related errors
- */
 sealed class ModuleError(message: String) : Exception(message) {
-    /** Stable error code; UNCATEGORIZED until each subtype assigns one below. */
-    open val code: com.mezze.language.parsedast.diagnostics.ErrorCode =
-        com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED
+    open val code: ErrorCode =
+        ErrorCode.UNCATEGORIZED
 
-    /** Cursor position the diagnostic should point at, when known. */
-    open val errorLoc: com.mezze.language.parsedast.Loc? = null
+    open val errorLoc: Loc? = null
 
-    /** Structured one-click fixes — LSP code actions read this; CLI ignores. */
-    open val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint> = emptyList()
+    open val fixHints: List<FixHint> = emptyList()
 
     data class ModuleNotFound(val modulePath: String, val searchPaths: List<String>) :
         ModuleError("Module not found: $modulePath. Searched in: ${searchPaths.joinToString(", ")}") {
-        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0801_MODULE_NOT_FOUND
+        override val code = ErrorCode.M0801_MODULE_NOT_FOUND
     }
 
     data class CircularDependency(val cycle: List<String>) :
         ModuleError("Circular dependency detected: ${cycle.joinToString(" -> ")}") {
-        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0802_CIRCULAR_DEPENDENCY
+        override val code = ErrorCode.M0802_CIRCULAR_DEPENDENCY
     }
 
     data class ParseError(val modulePath: String, val error: String) :
         ModuleError("Failed to parse module $modulePath: $error") {
-        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0804_MODULE_HAS_ERRORS
+        override val code = ErrorCode.M0804_MODULE_HAS_ERRORS
     }
 
     data class InternalModuleAccess(
         val fromModule: String,
         val toModule: String,
-        val loc: com.mezze.language.parsedast.Loc? = null
+        val loc: Loc? = null
     ) : ModuleError(
         if (fromModule.isEmpty())
             "Cannot access internal module '$toModule' from outside its package"
@@ -233,7 +191,7 @@ sealed class ModuleError(message: String) : Exception(message) {
     data class ExportNotFound(
         val modulePath: String,
         val exportName: String,
-        val loc: com.mezze.language.parsedast.Loc? = null,
+        val loc: Loc? = null,
         val availableExports: List<String> = emptyList()
     ) : ModuleError(buildString {
         append("Export '$exportName' not found in module '$modulePath'")
@@ -242,37 +200,33 @@ sealed class ModuleError(message: String) : Exception(message) {
             append(StringDistance.suggestOrList(exportName, availableExports, "exports"))
         }
     }) {
-        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0803_NOT_EXPORTED
+        override val code = ErrorCode.M0803_NOT_EXPORTED
         override val errorLoc get() = loc
         // Did-you-mean: emit a Rename FixHint when an export close to
         // `exportName` exists — turns the typo into a one-click fix.
         override val fixHints
-            get(): List<com.mezze.language.parsedast.diagnostics.FixHint> {
+            get(): List<FixHint> {
                 if (loc == null || availableExports.isEmpty()) return emptyList()
-                val close = com.mezze.language.parsedast.diagnostics
-                    .LevenshteinSuggest.closestN(exportName, availableExports, 3)
+                val close = LevenshteinSuggest.closestN(exportName, availableExports, 3)
                 return if (close.isNotEmpty())
-                    listOf(com.mezze.language.parsedast.diagnostics.FixHint.Rename(loc, close))
+                    listOf(FixHint.Rename(loc, close))
                 else emptyList()
             }
     }
 
-    /**
-     * Thrown when trying to import an item that exists but is not public.
-     */
-    data class PrivateExport(
+        data class PrivateExport(
         val modulePath: String,
         val exportName: String,
-        val loc: com.mezze.language.parsedast.Loc? = null
+        val loc: Loc? = null
     ) : ModuleError("'$exportName' exists in module '$modulePath' but is not public. Add 'pub' to export it.") {
-        override val code = com.mezze.language.parsedast.diagnostics.ErrorCode.M0803_NOT_EXPORTED
+        override val code = ErrorCode.M0803_NOT_EXPORTED
         override val errorLoc get() = loc
         // Surface an AddPub fix so the lightbulb can offer one-click cross-
         // module visibility change once we have a real cross-file edit.
         override val fixHints
-            get(): List<com.mezze.language.parsedast.diagnostics.FixHint> =
+            get(): List<FixHint> =
                 if (loc != null)
-                    listOf(com.mezze.language.parsedast.diagnostics.FixHint.AddPub(loc, modulePath, exportName))
+                    listOf(FixHint.AddPub(loc, modulePath, exportName))
                 else emptyList()
     }
 
@@ -280,23 +234,12 @@ sealed class ModuleError(message: String) : Exception(message) {
         ModuleError("Deprecated core module: $modulePath. $suggestion")
 }
 
-/**
- * Find the project root for user module resolution.
- *
- * This function looks for Mezze.toml (user projects) to determine the project root.
- * It does NOT look for stdlib - stdlib resolution is handled separately.
- *
- * @param startPath The path to start searching from (typically the source file's directory)
- * @return The project root path (directory containing Mezze.toml), or the startPath if not found
- */
 private fun findProjectRoot(startPath: Path = Paths.get(".")): Path {
     var current = startPath.toAbsolutePath()
 
     DebugLogger.debug(Category.ModuleResolver) { "Finding project root, starting from: $current" }
 
-    // Look for Mezze.toml in current and parent directories
-    // This is how user projects are identified
-    for (i in 0..10) { // Check up to 10 levels up
+    for (i in 0..10) {
         val mezzeToml = current.resolve("Mezze.toml")
         if (Files.exists(mezzeToml) && Files.isRegularFile(mezzeToml)) {
             DebugLogger.debug(Category.ModuleResolver) { "Found project root (Mezze.toml): $current" }
@@ -308,70 +251,35 @@ private fun findProjectRoot(startPath: Path = Paths.get(".")): Path {
         current = parent
     }
 
-    // Fallback to start path if no Mezze.toml found
     DebugLogger.debug(Category.ModuleResolver) { "No Mezze.toml found, using fallback project root: ${startPath.toAbsolutePath()}" }
     return startPath.toAbsolutePath()
 }
 
-/**
- * Module resolution system for Mezze
- * Handles loading, parsing, and caching of modules
- *
- * ## Thread Safety
- *
- * **THREAD-SAFE FOR PARALLEL MODULE LOADING**: Each module parse creates a fresh parser instance.
- * The module cache uses synchronized access for thread-safe concurrent module resolution.
- *
- * Safe parallel usage:
- * ```kotlin
- * val resolver = ModuleResolver()
- * val modules = modulePaths.parallelStream().map { path ->
- *     resolver.resolveModule(path)  // Safe - thread-safe cache + fresh parsers
- * }.toList()
- * ```
- */
 class ModuleResolver(
     currentPath: Path = Paths.get(".")
 ) {
     private val projectRoot: Path = findProjectRoot(currentPath)
 
     companion object {
-        // Primary cache: module path -> Module (for lookup by path)
-        // Access is synchronized for thread safety
         private val moduleCache = mutableMapOf<String, Module>()
-
-        // Secondary cache: source content hash -> Module (for content-addressed deduplication)
-        // Same content at different paths shares a single Module instance
-        private val contentHashCache = mutableMapOf<com.mezze.language.typedast.Hash, Module>()
-
+        private val contentHashCache = mutableMapOf<Hash, Module>()
         private val cacheLock = Any()
-        // Per-module locks to prevent duplicate loading of the same module
         private val moduleLoadingLocks = mutableMapOf<String, Any>()
 
-        /**
-         * Optional MezzeStore for parsed module caching.
-         * When set, ModuleResolver reads cached ParsedModules from the store
-         * instead of going through ParsedModuleCacheHolder.
-         * Set by CLI/LSP at startup via setStore().
-         */
-        @Volatile
-        private var store: com.mezze.language.store.MezzeStore? = null
+                @Volatile
+        private var store: MezzeStore? = null
 
         @JvmStatic
-        fun setStore(store: com.mezze.language.store.MezzeStore) {
+        fun setStore(store: MezzeStore) {
             this.store = store
         }
 
-        /**
-         * Try loading a cached ParsedModule from the store.
-         * Returns null on miss or any error — caller falls through to parser.
-         */
-        private fun tryLoadParsedFromStore(modulePath: String, sourceHash: com.mezze.language.typedast.Hash): com.mezze.language.parsedast.ParsedModule? {
+                private fun tryLoadParsedFromStore(modulePath: String, sourceHash: Hash): ParsedModule? {
             val s = store ?: return null
             return try {
                 // SQLite is the wire boundary — unwrap Hash to hex String here.
                 val blob = s.getParsedModule(modulePath, sourceHash.hex) ?: return null
-                com.mezze.language.store.StoreSerialization.deserializeParsedModule(blob)
+                StoreSerialization.deserializeParsedModule(blob)
             } catch (e: Exception) {
                 // Cache hit but blob can't be deserialized — almost always
                 // serialized-shape mismatch (older cache from a different
@@ -387,11 +295,7 @@ class ModuleResolver(
             }
         }
 
-        /**
-         * Read a stdlib file from classpath resources.
-         * Path is relative to resources root, e.g. "stdlib/std/abilities/numeric.mz".
-         */
-        @JvmStatic
+                @JvmStatic
         fun readStdlibFile(path: String): String? {
             return try {
                 val resourceStream = ModuleResolver::class.java.classLoader.getResourceAsStream(path)
@@ -409,10 +313,7 @@ class ModuleResolver(
             }
         }
 
-        /**
-         * Clear the module cache. This is useful for tests to ensure clean state between runs.
-         */
-        @JvmStatic
+                @JvmStatic
         fun clearCache() {
             synchronized(cacheLock) {
                 moduleCache.clear()
@@ -421,14 +322,7 @@ class ModuleResolver(
             }
         }
 
-        /**
-         * Watch-mode targeted eviction: drop entries for the given module paths.
-         * Stdlib + unchanged user modules stay cached.
-         *
-         * Also drops the corresponding content-hash entries so a future load with
-         * the (now-changed) source content doesn't get a stale hit.
-         */
-        @JvmStatic
+                @JvmStatic
         fun invalidateModulePaths(modulePaths: Collection<String>) {
             synchronized(cacheLock) {
                 for (path in modulePaths) {
@@ -439,66 +333,37 @@ class ModuleResolver(
             }
         }
 
-        /**
-         * Get or create a per-module lock for loading (thread-safe).
-         */
-        private fun getModuleLock(modulePath: String): Any {
+                private fun getModuleLock(modulePath: String): Any {
             synchronized(cacheLock) {
                 return moduleLoadingLocks.getOrPut(modulePath) { Any() }
             }
         }
 
-        /**
-         * Get a module from the cache by path (thread-safe).
-         */
-        internal fun getFromCache(modulePath: String): Module? {
+                internal fun getFromCache(modulePath: String): Module? {
             synchronized(cacheLock) {
                 return moduleCache[modulePath]
             }
         }
 
-        /**
-         * Public read-only snapshot of (modulePath -> Module) for tooling
-         * (e.g. mez dev watch mode needs file paths to register watches).
-         */
-        @JvmStatic
+                @JvmStatic
         fun snapshot(): Map<String, Module> = synchronized(cacheLock) { moduleCache.toMap() }
 
-        /**
-         * Get a module from the cache by content hash (thread-safe).
-         * This enables content-addressed deduplication - same content at different
-         * paths returns the same Module instance.
-         */
-        internal fun getFromCacheByContentHash(contentHash: com.mezze.language.typedast.Hash): Module? {
+                internal fun getFromCacheByContentHash(contentHash: Hash): Module? {
             synchronized(cacheLock) {
                 return contentHashCache[contentHash]
             }
         }
 
-        /**
-         * Put a module in the cache (thread-safe).
-         * Adds to both path-based and content-hash-based caches.
-         */
-        internal fun putInCache(modulePath: String, module: Module) {
+                internal fun putInCache(modulePath: String, module: Module) {
             synchronized(cacheLock) {
                 moduleCache[modulePath] = module
-                // Also add to content hash cache for deduplication
                 module.sourceHash?.let { hash ->
                     contentHashCache[hash] = module
                 }
             }
         }
 
-        /**
-         * Get all cached modules as a map of module paths to Programs.
-         * Used for bundling modules into compiled JARs.
-         */
-        /**
-         * Get all cached modules as ParsedModules.
-         * Returns only modules that have a parsedModule stored (all modules loaded
-         * through the normal loadModule path).
-         */
-        @JvmStatic
+                        @JvmStatic
         fun getAllParsedModules(): Map<String, ParsedModule> {
             synchronized(cacheLock) {
                 return moduleCache.mapNotNull { (key, module) ->
@@ -507,40 +372,17 @@ class ModuleResolver(
             }
         }
 
-        /**
-         * Check if a cached module is stale (source file has changed).
-         *
-         * @param modulePath The module path to check
-         * @param sourceContent The current source content to compare against
-         * @return true if the module needs to be reloaded, false if cache is valid
-         */
-        @JvmStatic
+                @JvmStatic
         fun isModuleStale(modulePath: String, sourceContent: String): Boolean {
             val cachedModule = getFromCache(modulePath) ?: return true  // Not cached = stale
             val cachedHash = cachedModule.sourceHash ?: return true     // No hash = stale
-            val currentHash = com.mezze.language.typedast.Hash(
+            val currentHash = Hash(
                 MezzeHashBuilder().append(sourceContent).build().toString()
             )
             return cachedHash != currentHash
         }
 
-        /**
-         * Get the source hash for a cached module.
-         *
-         * @param modulePath The module path
-         * @return The source hash, or null if not cached or no hash available
-         */
-        /**
-         * Look up a type declaration by name from all cached modules.
-         *
-         * This is used during unification when we need to expand a TypeApplication
-         * (like `LogLevel`) that references a type from an imported module, even if
-         * the type itself wasn't explicitly imported.
-         *
-         * @param typeName The simple name of the type to look up (e.g., "LogLevel")
-         * @return The ParsedTypeDecl if found in any cached module, null otherwise
-         */
-        @JvmStatic
+                        @JvmStatic
         fun lookupTypeDeclaration(typeName: String): ParsedTypeDecl? {
             synchronized(cacheLock) {
                 for ((_, module) in moduleCache) {
@@ -553,10 +395,7 @@ class ModuleResolver(
             }
         }
 
-        /**
-         * Factory method to create a new ModuleResolver instance.
-         */
-        @JvmStatic
+                @JvmStatic
         fun create(): ModuleResolver {
             return ModuleResolver()
         }
@@ -565,29 +404,23 @@ class ModuleResolver(
     // Track modules currently being loaded to detect circular dependencies (per-instance to track call stack)
     private val loadingStack = mutableSetOf<String>()
     
-    // Core modules that define built-in types - these should be skipped
-    // since built-in types are now available directly in the typechecker
-    // NOTE: Only skip modules where ALL functionality is built-in and there's no stdlib wrapper file.
-    // Do NOT skip collection modules with stdlib wrappers (map.mz, set.mz) - they provide wrapper functions
+    // Only skip modules where ALL functionality is built-in and there's no stdlib wrapper.
+    // Collection modules with stdlib wrappers (map.mz, set.mz) are NOT skipped.
     private val coreTypeModules = setOf(
-        "std::core::primitives",     // Primitive type implementations
-        "std::core::abilities",      // Core ability definitions (NumAdd, Eq, etc.)
-        "std::core::operators",      // Operator definitions
-        "std::core::option",         // Option type definition
-        "std::core::result",         // Result type definition
-        "std::types::int",           // Int type operations (now built-in)
-        "std::types::float",         // Float type operations (now built-in)
-        "std::types::string",        // String type operations (now built-in)
-        "std::types::boolean",       // Boolean type operations (now built-in)
-        "std::types::nat",           // Natural number operations (now built-in)
-        "std::types::frac"           // Fraction operations (now built-in)
-        // NOTE: std::collections::seq, std::collections::map and std::collections::set are NOT skipped - they have stdlib files
+        "std::core::primitives",
+        "std::core::abilities",
+        "std::core::operators",
+        "std::core::option",
+        "std::core::result",
+        "std::types::int",
+        "std::types::float",
+        "std::types::string",
+        "std::types::boolean",
+        "std::types::nat",
+        "std::types::frac"
     )
     
-    /**
-     * Check if a module path refers to a deprecated core module and provide migration guidance
-     */
-    private fun checkForDeprecatedCoreModule(modulePath: String) {
+        private fun checkForDeprecatedCoreModule(modulePath: String) {
         val deprecatedModules = mapOf(
             "std/core/abilities" to "Abilities are now built-in. Remove this import - Eq, Ord, Inspect, etc. are always available.",
             "std/core/operators" to "Operators are now built-in. Remove this import - +, -, *, /, ==, <, etc. work automatically.",
@@ -613,70 +446,43 @@ class ModuleResolver(
         }
     }
 
-    /**
-     * Resolve and load a module by its structured path.
-     * This is the primary API - accepts ModulePath directly.
-     */
-    fun resolveModule(path: ModulePath, fromModule: ModulePath? = null): Module {
+        fun resolveModule(path: ModulePath, fromModule: ModulePath? = null): Module {
         return resolveModuleInternal(path.fullPath, fromModule?.fullPath)
     }
 
-    /**
-     * Resolve and load a module by its path string.
-     * Prefer resolveModule(ModulePath) for structured paths.
-     */
-    fun resolveModule(modulePath: String, fromModule: String? = null): Module {
+        fun resolveModule(modulePath: String, fromModule: String? = null): Module {
         return resolveModuleInternal(modulePath, fromModule)
     }
 
-    /**
-     * Internal implementation of module resolution.
-     */
-    private fun resolveModuleInternal(modulePath: String, fromModule: String? = null): Module {
-        // Skip core type modules - they are now built-in
+        private fun resolveModuleInternal(modulePath: String, fromModule: String? = null): Module {
         if (modulePath in coreTypeModules) {
             return createEmptyModule(modulePath, "Core module skipped - types are now built-in")
         }
 
-        // Use per-module lock to prevent duplicate loading of the same module
-        // This implements proper double-checked locking
         val moduleLock = getModuleLock(modulePath)
         synchronized(moduleLock) {
-            // Check for deprecated core modules and provide migration warnings
             checkForDeprecatedCoreModule(modulePath)
 
-            // Check for circular dependency
             if (modulePath in loadingStack) {
                 throw ModuleError.CircularDependency(loadingStack.toList() + modulePath)
             }
 
-            // Find the file for this module
             val filePath = resolveModuleFile(modulePath)
                 ?: throw ModuleError.ModuleNotFound(modulePath, getSearchPaths(modulePath))
 
-            // Read source and compute content hash BEFORE checking cache.
-            // Hash uses MezzeHash.toString() (truncated display form, prefixed `#`)
-            // for backwards-compat with the on-disk parsed-modules SQLite cache —
-            // those rows are keyed by the same truncated form. Hash accepts `#` +
-            // hex chars, so the typed wrapper holds the same string the rest of
-            // the system was already using.
             val source = Files.readString(filePath)
-            val sourceHash = com.mezze.language.typedast.Hash(
+            val sourceHash = Hash(
                 MezzeHashBuilder().append(source).build().toString()
             )
 
-            // First, check content-hash cache for deduplication
-            // If same content exists at a different path, reuse that module
             getFromCacheByContentHash(sourceHash)?.let { cachedModule ->
                 DebugLogger.debug(Category.ModuleResolver) {
                     "Found module with same content hash at different path: $modulePath (reusing ${cachedModule.name})"
                 }
-                // Update path-based cache to point to this module
                 putInCache(modulePath, cachedModule)
                 return cachedModule
             }
 
-            // Check path-based cache with content validation
             getFromCache(modulePath)?.let { cachedModule ->
                 if (cachedModule.sourceHash == sourceHash) {
                     DebugLogger.debug(Category.ModuleResolver) {
@@ -687,32 +493,22 @@ class ModuleResolver(
                     DebugLogger.debug(Category.ModuleResolver) {
                         "Cached module has stale content hash, reloading: $modulePath"
                     }
-                    // Continue to reload the module
                 }
             }
 
-            // Mark as loading
             loadingStack.add(modulePath)
 
             try {
-                // Try the parsed-modules cache (store → fallback to ParsedModuleCacheHolder → parse).
                 val cached = tryLoadParsedFromStore(modulePath, sourceHash)
-                    ?: com.mezze.language.parser.ParsedModuleCacheHolder.get(filePath.toString(), sourceHash.hex)
+                    ?: ParsedModuleCacheHolder.get(filePath.toString(), sourceHash.hex)
                 val parsedModule = cached ?: run {
                     val parser = MezzeParser()
                     parser.parseParsedModule(source, file = filePath.toString())
                 }
 
-                // Extract exports from ParsedModule (v2 path)
                 val parsedExports = extractExportsFromParsedModule(parsedModule, modulePath)
-
-                // Extract dependencies from ParsedModule (v2 path)
                 val dependencies = extractDependenciesFromParsedModule(parsedModule)
-
-                // Build program index for O(1) declaration lookups (v2 path)
                 val programIndex = ProgramIndex.build(parsedModule)
-
-                // Create module representation
                 val structuredPath = ModulePath.parse(modulePath)
                 val module = Module(
                     path = structuredPath,
@@ -724,15 +520,12 @@ class ModuleResolver(
                     parsedModule = parsedModule
                 )
 
-                // Cache the module (thread-safe)
                 putInCache(modulePath, module)
                 return module
 
-            } catch (e: com.mezze.language.parser.ParseException) {
-                // Preserve the formatted error message with code snippets
+            } catch (e: ParseException) {
                 throw ModuleError.ParseError(modulePath, e.message ?: "Unknown parse error")
             } catch (e: Exception) {
-                // Catch other unexpected errors
                 throw ModuleError.ParseError(modulePath, "Unexpected error: ${e.message}")
             } finally {
                 loadingStack.remove(modulePath)
@@ -740,10 +533,7 @@ class ModuleResolver(
         }
     }
     
-    /**
-     * Create an empty module for core modules that are now built-in
-     */
-    private fun createEmptyModule(modulePath: String, reason: String): Module {
+        private fun createEmptyModule(modulePath: String, reason: String): Module {
         return Module(
             path = ModulePath.parse(modulePath),
             filePath = "built-in",
@@ -754,12 +544,8 @@ class ModuleResolver(
         )
     }
     
-    /**
-     * Load stdlib module from JAR resources
-     */
-    private fun loadStdlibFromResource(relativeFilePath: String): String? {
+        private fun loadStdlibFromResource(relativeFilePath: String): String? {
         return try {
-            // Try to load from classpath resources (works in JAR and native binary)
             val resourceStream = javaClass.classLoader.getResourceAsStream(relativeFilePath)
             resourceStream?.bufferedReader()?.use { it.readText() }
         } catch (e: Exception) {
@@ -794,32 +580,22 @@ class ModuleResolver(
         return target
     }
 
-    /**
-     * Resolve a module file path from module path string.
-     */
-    private fun resolveModuleFile(modulePath: String): Path? {
+        private fun resolveModuleFile(modulePath: String): Path? {
         return resolveModuleFile(ModulePath.parse(modulePath))
     }
 
-    /**
-     * Resolve a module file path from structured ModulePath.
-     */
-    private fun resolveModuleFile(path: ModulePath): Path? {
+        private fun resolveModuleFile(path: ModulePath): Path? {
         val segments = path.segments
 
-        // Special handling for std:: modules - always look in stdlib directory
         if (segments.isNotEmpty() && segments[0] == "std") {
-            val stdSegments = segments.drop(1) // Remove "std" prefix
+            val stdSegments = segments.drop(1)
             val relativeFilePath = "stdlib/std/" + stdSegments.joinToString("/") + ".mz"
 
-            // First, try to load from embedded resources (works in JAR and native binary)
             val resourceContent = loadStdlibFromResource(relativeFilePath)
             if (resourceContent != null) {
                 return materializeStdlibTempFile(relativeFilePath, resourceContent)
             }
 
-            // Fall back to filesystem (for development)
-            // Note: relativeFilePath already contains "stdlib/std/..." prefix
             val possibleRoots = listOf(
                 projectRoot,
                 Paths.get("."),
@@ -837,17 +613,13 @@ class ModuleResolver(
             return null
         }
 
-        // For flat stdlib modules (int, string, float, etc.), check resources first, then filesystem
         if (segments.size == 1) {
-            // Try to load from embedded resources first (works in JAR and native binary)
             val relativeFilePath = "stdlib/std/${segments[0]}.mz"
             val resourceContent = loadStdlibFromResource(relativeFilePath)
             if (resourceContent != null) {
                 return materializeStdlibTempFile(relativeFilePath, resourceContent)
             }
 
-            // Fall back to filesystem for development
-            // Note: relativeFilePath already contains "stdlib/std/..." prefix
             val flatStdlibPath = projectRoot.resolve(relativeFilePath)
             DebugLogger.debug(Category.ModuleResolver) { "Checking flat stdlib path: $flatStdlibPath (exists: ${Files.exists(flatStdlibPath)})" }
             if (Files.exists(flatStdlibPath) && Files.isRegularFile(flatStdlibPath)) {
@@ -855,8 +627,6 @@ class ModuleResolver(
             }
         }
         
-        // Regular module resolution for non-std modules
-        // First, search in local project directories
         val localSearchRoots = listOf(
             projectRoot.resolve("src"),
             projectRoot.resolve("lib"),
@@ -870,10 +640,6 @@ class ModuleResolver(
             }
         }
 
-        // Then, search in .deps/mezze/ for downloaded dependencies
-        // For a module path like "json::parser", we look in:
-        //   .deps/mezze/json-*/src/parser.mz
-        //   .deps/mezze/json-*/parser.mz
         if (segments.isNotEmpty()) {
             val packageName = segments[0]
             val restOfPath = if (segments.size > 1) segments.drop(1).joinToString("/") + ".mz" else "$packageName.mz"
@@ -888,7 +654,6 @@ class ModuleResolver(
                         .toList()
 
                     for (depDir in matchingDirs) {
-                        // Search in src/ and root of the dependency
                         val searchPaths = listOf(
                             depDir.resolve("src").resolve(restOfPath),
                             depDir.resolve(restOfPath)
@@ -907,20 +672,13 @@ class ModuleResolver(
         return null
     }
     
-    /**
-     * Get possible search paths for error reporting
-     */
-    private fun getSearchPaths(modulePath: String): List<String> {
+        private fun getSearchPaths(modulePath: String): List<String> {
         return getSearchPaths(ModulePath.parse(modulePath))
     }
 
-    /**
-     * Get possible search paths for error reporting (structured path version)
-     */
-    private fun getSearchPaths(path: ModulePath): List<String> {
+        private fun getSearchPaths(path: ModulePath): List<String> {
         val segments = path.segments
         
-        // Special paths for std:: modules
         if (segments.isNotEmpty() && segments[0] == "std") {
             val stdSegments = segments.drop(1)
             return listOf(
@@ -928,7 +686,6 @@ class ModuleResolver(
             )
         }
         
-        // For flat stdlib modules, include stdlib directory
         if (segments.size == 1) {
             return listOf(
                 "stdlib/${segments[0]}.mz",
@@ -938,7 +695,6 @@ class ModuleResolver(
             )
         }
         
-        // Regular search paths (including .deps/mezze/)
         val packageName = segments[0]
         return listOf(
             "src/${segments.joinToString("/")}.mz",
@@ -949,19 +705,6 @@ class ModuleResolver(
         )
     }
     
-    /**
-     * Extract exported items directly from a ParsedModule without needing a v1 Program.
-     *
-     * Walks [module.decls] and converts each public declaration to an [ExportedItem].
-     * Content hashes are computed using ParsedDeclHasher which hashes directly from
-     * parsed AST nodes without converting to v1.
-     *
-     * @param module The parsed module to extract exports from.
-     * @param modulePath Optional qualified module path (e.g. "std::int") used only for
-     *   registering the hash in [ContentHashRegistry] for debugging.
-     * @param typeContext Optional type context from type-checking — maps binding names to
-     *   their inferred MezzeType. When provided, overrides the annotation-derived types.
-     */
     private fun extractExportsFromParsedModule(
         module: ParsedModule,
         modulePath: String? = null,
@@ -973,26 +716,18 @@ class ModuleResolver(
         for (decl in module.decls) {
             when (decl) {
 
-                // ----------------------------------------------------------------
-                // Let bindings — only PUBLIC ones are exported
-                // ----------------------------------------------------------------
                 is ParsedLetDecl -> {
-                    if (decl.visibility != com.mezze.language.parsedast.Visibility.PUBLIC) continue
-
-                    // Only simple bindings have a stable single name to export
+                    if (decl.visibility != Visibility.PUBLIC) continue
                     if (!decl.isSimpleBinding) continue
                     val name = decl.variableName
 
-                    // Priority: 1) typeContext (inferred), 2) annotation, 3) fresh var
                     val fromContext = typeContext?.get(name)
                     val fromAnnotation = decl.typeAnnotation
                         ?.let { TypeAnnotationConverter.convert(it, faithful = false) }
                     val mezzeType: MezzeType = fromContext
                         ?: fromAnnotation
                         ?: MezzeType.VarType(TypeVar.fresh())
-
-                    // Compute content hash via ParsedDeclHasher (v2-native, Unison-style)
-                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashLetDecl(decl)
+                    val contentHash = ParsedDeclHasher.hashLetDecl(decl)
 
                     exports[name] = ExportedItem(
                         name = name,
@@ -1011,15 +746,9 @@ class ModuleResolver(
                     )
                 }
 
-                // ----------------------------------------------------------------
-                // Type declarations — only PUBLIC ones are exported
-                // ----------------------------------------------------------------
                 is ParsedTypeDecl -> {
-                    if (decl.visibility != com.mezze.language.parsedast.Visibility.PUBLIC) continue
-
-                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashTypeDecl(decl)
-
-                    // Priority: 1) typeContext (inferred), 2) fresh var
+                    if (decl.visibility != Visibility.PUBLIC) continue
+                    val contentHash = ParsedDeclHasher.hashTypeDecl(decl)
                     val fromContext = typeContext?.get(decl.name)
                     val typeMezzeType = fromContext ?: MezzeType.VarType(TypeVar.fresh())
 
@@ -1038,7 +767,6 @@ class ModuleResolver(
                         kind = DeclarationKind.TYPE
                     )
 
-                    // Also export each variant constructor
                     if (decl.definition is ParsedVariantDef) {
                         for (ctor in (decl.definition as ParsedVariantDef).constructors) {
                             exports[ctor.name] = ExportedItem(
@@ -1052,13 +780,8 @@ class ModuleResolver(
                     }
                 }
 
-                // ----------------------------------------------------------------
-                // Effect declarations — always public
-                // ----------------------------------------------------------------
                 is ParsedEffectDecl -> {
-                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl)
-
-                    // Priority: 1) typeContext (inferred), 2) fresh var
+                    val contentHash = ParsedDeclHasher.hashEffectDecl(decl)
                     val fromContext = typeContext?.get(decl.name)
                     val mezzeType = fromContext ?: MezzeType.VarType(TypeVar.fresh())
 
@@ -1083,13 +806,8 @@ class ModuleResolver(
                     // didn't go through ability-method dispatch and crashed at runtime.
                 }
 
-                // ----------------------------------------------------------------
-                // Ability declarations — always public
-                // ----------------------------------------------------------------
                 is ParsedAbilityDecl -> {
-                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashAbilityDecl(decl)
-
-                    // Priority: 1) typeContext (inferred), 2) fresh var
+                    val contentHash = ParsedDeclHasher.hashAbilityDecl(decl)
                     val fromContext = typeContext?.get(decl.name)
                     val abilityMezzeType = fromContext ?: MezzeType.VarType(TypeVar.fresh())
 
@@ -1109,16 +827,11 @@ class ModuleResolver(
                     )
                 }
 
-                // ----------------------------------------------------------------
-                // Performer (effect implementation) declarations
-                // ----------------------------------------------------------------
                 is ParsedPerformerDecl -> {
-                    val contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(decl)
-
-                    // Don't overwrite an existing TYPE export with a HANDLER export
+                    val contentHash = ParsedDeclHasher.hashPerformerDecl(decl)
                     val existingExport = exports[decl.performerName]
+                    // Don't overwrite a TYPE export with a HANDLER export
                     if (existingExport?.type != ExportedItemType.TYPE) {
-                        // Priority: 1) typeContext (inferred), 2) fresh var
                         val fromContext = typeContext?.get(decl.performerName)
                         val performerMezzeType = fromContext ?: MezzeType.VarType(TypeVar.fresh())
 
@@ -1139,66 +852,37 @@ class ModuleResolver(
                     }
                 }
 
-                // ----------------------------------------------------------------
-                // Ability implementation declarations
-                // ----------------------------------------------------------------
-                is ParsedImplAbilityDecl -> {
-                    // Ability impls are NOT exported through the exports map.
-                    // They're imported via ProgramIndex.abilityImplsByHash instead.
-                }
+                // Ability impls imported via ProgramIndex.abilityImplsByHash, not exports map
+                is ParsedImplAbilityDecl -> {}
 
-                // ----------------------------------------------------------------
-                // Use / pub use declarations
-                // ----------------------------------------------------------------
                 is ParsedPubUseDecl -> {
                     // TODO: re-export the transitive items from the imported module
                 }
 
-                // ----------------------------------------------------------------
-                // Everything else — not exported
-                // ----------------------------------------------------------------
-                else -> { /* ParsedUseDecl, ParsedTopLevelExpr */ }
+                else -> {}
             }
         }
 
         return exports
     }
 
-    /**
-     * Extract module dependencies from use declarations
-     */
-    /**
-     * Extract module dependencies from a ParsedModule's use declarations.
-     */
-    private fun extractDependenciesFromParsedModule(module: ParsedModule): List<ModuleDependency> {
-        val dependencies = mutableListOf<ModuleDependency>()
-
-        for (decl in module.decls) {
-            when (decl) {
-                is ParsedUseDecl -> {
-                    val v1Path = parsedUsePathToV1(decl.path)
-                    dependencies.add(ModuleDependency(
-                        modulePath = pathToString(v1Path),
-                        usePath = v1Path,
-                        alias = decl.alias
-                    ))
+    private fun extractDependenciesFromParsedModule(module: ParsedModule): List<ModuleDependency> =
+        buildList {
+            for (decl in module.decls) {
+                val (path, alias) = when (decl) {
+                    is ParsedUseDecl -> decl.path to decl.alias
+                    is ParsedPubUseDecl -> decl.path to decl.alias
+                    else -> continue
                 }
-                is ParsedPubUseDecl -> {
-                    val v1Path = parsedUsePathToV1(decl.path)
-                    dependencies.add(ModuleDependency(
-                        modulePath = pathToString(v1Path),
-                        usePath = v1Path,
-                        alias = decl.alias
-                    ))
-                }
-                else -> { /* Other items don't create dependencies */ }
+                val v1Path = parsedUsePathToV1(path)
+                add(ModuleDependency(
+                    modulePath = pathToString(v1Path),
+                    usePath = v1Path,
+                    alias = alias
+                ))
             }
         }
 
-        return dependencies
-    }
-
-    /** Convert v2 ParsedUsePath to v1 UsePath (for dependency extraction) */
     private fun parsedUsePathToV1(path: ParsedUsePath): UsePath {
         return when (path) {
             is ParsedUsePath.Module -> ModulePath(path.path.segments)
@@ -1209,42 +893,19 @@ class ModuleResolver(
         }
     }
     
-    /**
-     * Convert UsePath to string representation for module loading.
-     * Note: This uses `::` as the path separator, which is an internal convention
-     * for the module loader API. User-facing code uses structured ModulePath.
-     */
-    private fun pathToString(path: UsePath): String {
-        return when (path) {
-            is ModulePath -> path.fullPath
-            is SelectivePath -> ModulePath(path.module).fullPath
-        }
+    private fun pathToString(path: UsePath): String = when (path) {
+        is ModulePath -> path.fullPath
+        is SelectivePath -> ModulePath(path.module).fullPath
     }
     
     
-    /**
-     * Check if a module can access internal/private modules of another module.
-     *
-     * Convention (Gleam-inspired):
-     * - `internal/` and `private/` folders are internal by default
-     * - Internal modules can only be accessed by modules in the same parent hierarchy
-     * - This is recursive: foo/internal/bar can only be accessed by modules under foo/
-     *
-     * Examples:
-     * - math/internal/helpers can only be accessed by modules under math/
-     * - mylib/private/utils can only be accessed by modules under mylib/
-     * - app/internal/deep/nested can only be accessed by modules under app/
-     */
-    fun canAccessInternal(fromModule: String, toModule: String): Boolean {
+        fun canAccessInternal(fromModule: String, toModule: String): Boolean {
         val from = if (fromModule.isEmpty()) null else ModulePath.parse(fromModule)
         val to = ModulePath.parse(toModule)
         return canAccessInternal(from, to)
     }
 
-    /**
-     * Check if a module can access internal/private modules of another module (structured version).
-     */
-    fun canAccessInternal(fromModule: ModulePath?, toModule: ModulePath): Boolean {
+        fun canAccessInternal(fromModule: ModulePath?, toModule: ModulePath): Boolean {
         val toSegments = toModule.segments
         val internalMarkers = setOf("internal", "private")
 
@@ -1278,25 +939,7 @@ class ModuleResolver(
         return fromSegments.take(parentSegments.size) == parentSegments
     }
     
-    /**
-     * Update a module's exports from a ParsedModule (v2 path).
-     *
-     * This is the v2 replacement for [updateModuleExports] — it works entirely from
-     * ParsedModule + typeContext, avoiding the need for a v1 Program.
-     *
-     * When the module is already cached (normal case after loadModule), this method
-     * updates only the export types from the typeContext while preserving the content
-     * hashes and ProgramIndex from the original load. This ensures content-addressed
-     * lookups remain consistent.
-     *
-     * When the module is NOT cached (rare — typically only during initial prelude load),
-     * this falls back to extractExportsFromParsedModule which recomputes hashes.
-     *
-     * @param modulePath The module's qualified path (e.g. "std::int")
-     * @param parsedModule The v2 ParsedModule
-     * @param typeContext Optional context from type-checking with inferred MezzeTypes
-     */
-    fun updateModuleExportsV2(
+        fun updateModuleExportsV2(
         modulePath: String,
         parsedModule: ParsedModule,
         typeContext: Map<String, MezzeType>? = null
@@ -1309,9 +952,6 @@ class ModuleResolver(
         val module = getFromCache(modulePath)
 
         if (module != null) {
-            // Module already cached — update export types from typeContext and
-            // rebuild ProgramIndex so abilityImplsByHash/abilityImplsByAbility
-            // are populated (needed by import resolution).
             val updatedExports = if (typeContext != null && typeContext.isNotEmpty()) {
                 module.exports.mapValues { (_, export) ->
                     val inferredType = typeContext[export.originalName]
@@ -1334,7 +974,6 @@ class ModuleResolver(
                 "Cached module (v2, updated types+index) with ${updatedModule.exports.size} exports"
             }
         } else {
-            // Module NOT in cache — compute exports from scratch using ParsedModule
             val updatedExports = extractExportsFromParsedModule(parsedModule, modulePath, typeContext)
             val updatedIndex = ProgramIndex.build(parsedModule)
 

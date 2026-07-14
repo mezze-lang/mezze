@@ -23,92 +23,92 @@ impl Ord 'a for SortedSet 'a where {
 }
 
 ## Creates an empty sorted set.
-pub let empty = {} -> __native_sorted_set_empty {}
+pub let empty: {} -> SortedSet 'a = {} -> __native_sorted_set_empty {}
 
 ## Creates a sorted set with one element.
-pub let singleton = { x } -> __native_sorted_set_singleton { x = x }
+pub let singleton: { x: 'a } -> SortedSet 'a = { x } -> __native_sorted_set_singleton { x = x }
 
 ## Creates a sorted set from a list.
-pub let from_list = { xs } -> __native_sorted_set_from_list { xs = xs }
+pub let from_list: { xs: List 'a } -> SortedSet 'a = { xs } -> __native_sorted_set_from_list { xs = xs }
 
 ## Adds an element, returning a new set.
-pub let add = { s, x } -> __native_sorted_set_add { s = s, x = x }
+pub let add: { s: SortedSet 'a, x: 'a } -> SortedSet 'a = { s, x } -> __native_sorted_set_add { s = s, x = x }
 
 ## Removes an element, returning a new set.
-pub let remove = { s, x } -> __native_sorted_set_remove { s = s, x = x }
+pub let remove: { s: SortedSet 'a, x: 'a } -> SortedSet 'a = { s, x } -> __native_sorted_set_remove { s = s, x = x }
 
 ## Returns True if the element is in the set.
-pub let contains = { s, x } -> __native_sorted_set_contains { s = s, x = x }
+pub let contains: { s: SortedSet 'a, x: 'a } -> Bool = { s, x } -> __native_sorted_set_contains { s = s, x = x }
 
 ## Returns the number of elements.
-pub let size = { s } -> __native_sorted_set_size { s = s }
+pub let size: { s: SortedSet 'a } -> Int = { s } -> __native_sorted_set_size { s = s }
 
 ## Returns True if the set has no elements.
-pub let is_empty = { s } -> __native_sorted_set_is_empty { s = s }
+pub let is_empty: { s: SortedSet 'a } -> Bool = { s } -> __native_sorted_set_is_empty { s = s }
 
 ## Returns elements in either set.
-pub let union = { s1, s2 } -> __native_sorted_set_union { s1 = s1, s2 = s2 }
+pub let union: { s1: SortedSet 'a, s2: SortedSet 'a } -> SortedSet 'a = { s1, s2 } -> __native_sorted_set_union { s1 = s1, s2 = s2 }
 
 ## Returns elements in both sets.
-pub let intersect = { s1, s2 } -> __native_sorted_set_intersect { s1 = s1, s2 = s2 }
+pub let intersect: { s1: SortedSet 'a, s2: SortedSet 'a } -> SortedSet 'a = { s1, s2 } -> __native_sorted_set_intersect { s1 = s1, s2 = s2 }
 
 ## Returns elements in s1 but not in s2.
-pub let difference = { s1, s2 } -> __native_sorted_set_difference { s1 = s1, s2 = s2 }
+pub let difference: { s1: SortedSet 'a, s2: SortedSet 'a } -> SortedSet 'a = { s1, s2 } -> __native_sorted_set_difference { s1 = s1, s2 = s2 }
 
 ## Returns the minimum element, or None if empty.
-pub let min = { s } -> __native_sorted_set_min { s = s }
+pub let min: { s: SortedSet 'a } -> Option 'a = { s } -> __native_sorted_set_min { s = s }
 
 ## Returns the maximum element, or None if empty.
-pub let max = { s } -> __native_sorted_set_max { s = s }
+pub let max: { s: SortedSet 'a } -> Option 'a = { s } -> __native_sorted_set_max { s = s }
 
 ## Converts to a List in sorted order.
-pub let to_list = { s } -> __native_sorted_set_to_list { s = s }
+pub let to_list: { s: SortedSet 'a } -> List 'a = { s } -> __native_sorted_set_to_list { s = s }
 
 ## Creates a SortedSet from a regular Set.
-pub let from_set = { s } -> __native_sorted_set_from_set { s = s }
+pub let from_set: { s: Set 'a } -> SortedSet 'a = { s } -> __native_sorted_set_from_set { s = s }
 
 ## Converts to a regular Set.
-pub let to_set = { s } -> __native_sorted_set_to_set { s = s }
+pub let to_set: { s: SortedSet 'a } -> Set 'a = { s } -> __native_sorted_set_to_set { s = s }
 
 ## Returns True if the two sorted sets are equal.
-pub let equals = { s1, s2 } -> __native_sorted_set_equals { s1 = s1, s2 = s2 }
+pub let equals: { s1: SortedSet 'a, s2: SortedSet 'a } -> Bool = { s1, s2 } -> __native_sorted_set_equals { s1 = s1, s2 = s2 }
 
 ## Splits into elements matching and not matching the predicate.
-pub let partition = { s, p } -> __native_sorted_set_partition { s = s, p = p }
+pub let partition: { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> { pass: SortedSet 'a, fail: SortedSet 'a } <...> = { s, p } -> __native_sorted_set_partition { s = s, p = p }
 
 ## Returns the minimum element by a key function, or None.
-pub let min_by = { s, f } -> __native_sorted_set_min_by { s = s, f = f }
+pub let min_by: { s: SortedSet 'a, f: { val: 'a } -> 'b <...> } -> Option 'a <...> = { s, f } -> __native_sorted_set_min_by { s = s, f = f }
 
 ## Returns the maximum element by a key function, or None.
-pub let max_by = { s, f } -> __native_sorted_set_max_by { s = s, f = f }
+pub let max_by: { s: SortedSet 'a, f: { val: 'a } -> 'b <...> } -> Option 'a <...> = { s, f } -> __native_sorted_set_max_by { s = s, f = f }
 
 ## Takes the first n elements in sorted order.
-pub let take = { s, n } -> __native_sorted_set_take { s = s, n = n }
+pub let take: { s: SortedSet 'a, n: Int } -> SortedSet 'a = { s, n } -> __native_sorted_set_take { s = s, n = n }
 
 ## Drops the first n elements in sorted order.
-pub let drop = { s, n } -> __native_sorted_set_drop { s = s, n = n }
+pub let drop: { s: SortedSet 'a, n: Int } -> SortedSet 'a = { s, n } -> __native_sorted_set_drop { s = s, n = n }
 
 ## Returns elements in range [lo, hi] inclusive.
-pub let range = { s, lo, hi } -> __native_sorted_set_range { s = s, lo = lo, hi = hi }
+pub let range: { s: SortedSet 'a, lo: 'a, hi: 'a } -> SortedSet 'a = { s, lo, hi } -> __native_sorted_set_range { s = s, lo = lo, hi = hi }
 
 ## Returns elements in either set but not both.
-pub let symmetric_difference = { s1, s2 } ->
+pub let symmetric_difference: { s1: SortedSet 'a, s2: SortedSet 'a } -> SortedSet 'a = { s1, s2 } ->
   __native_sorted_set_symmetric_difference { s1 = s1, s2 = s2 }
 
 ## Returns elements strictly less than the given element.
-pub let head_set = { s, to } -> __native_sorted_set_head_set { s = s, to = to }
+pub let head_set: { s: SortedSet 'a, to: 'a } -> SortedSet 'a = { s, to } -> __native_sorted_set_head_set { s = s, to = to }
 
 ## Returns elements >= the given element.
-pub let tail_set = { s, from } -> __native_sorted_set_tail_set { s = s, from = from }
+pub let tail_set: { s: SortedSet 'a, from: 'a } -> SortedSet 'a = { s, from } -> __native_sorted_set_tail_set { s = s, from = from }
 
 ## Maps elements with f, collecting only Some results into a SortedSet.
-pub let filter_map = { set, f } -> __native_sorted_set_filter_map { set = set, f = f }
+pub let filter_map: { set: SortedSet 'a, f: { val: 'a } -> Option 'b <...> } -> SortedSet 'b <...> = { set, f } -> __native_sorted_set_filter_map { set = set, f = f }
 
 ## Maps elements with f, collecting only Some results into a Seq.
-pub let collect_seq = { set, f } -> __native_sorted_set_collect_seq { set = set, f = f }
+pub let collect_seq: { set: SortedSet 'a, f: { val: 'a } -> Option 'b <...> } -> ['b] <...> = { set, f } -> __native_sorted_set_collect_seq { set = set, f = f }
 
 ## Maps elements with f, collecting only Some results into a List.
-pub let collect_list = { set, f } -> __native_sorted_set_collect_list { set = set, f = f }
+pub let collect_list: { set: SortedSet 'a, f: { val: 'a } -> Option 'b <...> } -> List 'b <...> = { set, f } -> __native_sorted_set_collect_list { set = set, f = f }
 
 ## Keeps only elements for which the predicate returns True.
 pub let filter : { s: SortedSet 'a, p: { val: 'a } -> Bool <...> } -> SortedSet 'a <...> = { s, p } ->

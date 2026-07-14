@@ -10,28 +10,6 @@ import kotlinx.serialization.cbor.Cbor
 import kotlinx.serialization.decodeFromByteArray
 import kotlinx.serialization.encodeToByteArray
 
-/**
- * On-disk snapshot of PrecompiledStdlib's runtime state, used to bootstrap
- * the stdlib in environments where SQLite isn't available — primarily the
- * native binary built by `mez build --native`. Built once at gradle time
- * by the `serializeStdlibSnapshot` task from PrecompiledStdlib's in-memory
- * caches; deserialized on every CLI / native binary boot via
- * [PrecompiledStdlib.tryLoadFromSnapshot].
- *
- * Everything that the existing SQLite-backed `FullCacheData` path provides
- * is captured here, in the same field order so the load site can swap
- * either source in.
- *
- * Versioned in case the on-disk format ever changes — bumping
- * [CURRENT_VERSION] invalidates older snapshots and falls back to the
- * slow path. Don't reuse old version numbers across format changes; the
- * loader explicitly refuses anything other than the current one.
- *
- * Performers are stored as `List<List<String>>` rather than
- * `List<Array<String>>` because kotlinx-serialization handles List
- * cleanly without a custom serializer; callers convert back to
- * `Array<String>` at read time.
- */
 @Serializable
 data class StdlibSnapshot(
     val version: Int = CURRENT_VERSION,

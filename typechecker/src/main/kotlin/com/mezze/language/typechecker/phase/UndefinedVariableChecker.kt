@@ -1,8 +1,13 @@
 package com.mezze.language.typechecker.phase
 
 import com.mezze.language.ast.ModulePath
+import com.mezze.language.ast.debug.ContentHashRegistry
+import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.parsedast.diagnostics.FixHint
+import com.mezze.language.typechecker.PrecompiledStdlib
 import com.mezze.language.typechecker.TypeChecker
+import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
@@ -18,8 +23,8 @@ internal fun checkUndefinedVariables(
     constraintResults: Map<String, ConstraintResult>,
     context: TypingContext,
     registry: DeclarationRegistry,
-    implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,
-    loadedModules: Map<com.mezze.language.ast.ModulePath, TypedModule>,
+    implDeclarations: Map<String, ParsedPerformerDecl>,
+    loadedModules: Map<ModulePath, TypedModule>,
     importContext: ModuleImportContext?,
 ): List<TypeChecker.TypeCheckError> {
     val undefinedVars = constraintResults.values.flatMap { it.undefinedVariables }
@@ -35,7 +40,7 @@ internal fun checkUndefinedVariables(
 
     return undefinedVars.map { undefinedVar ->
         var privateItemForFix: PrivateItemResult? = null
-        val isBuiltInAbility = com.mezze.language.typechecker.abilities.BuiltInAbilities.isBuiltInAbility(undefinedVar.name)
+        val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(undefinedVar.name)
         val isUserDefinedAbility = registry.lookupAbility(undefinedVar.name) != null
         val isEffect = registry.lookupEffect(undefinedVar.name) != null
 
@@ -95,9 +100,9 @@ internal fun checkUndefinedVariables(
             }
         }
         // Emit structured FixHints so the LSP can offer one-click QuickFix
-        val undefFixHints: List<com.mezze.language.parsedast.diagnostics.FixHint> = buildList {
+        val undefFixHints: List<FixHint> = buildList {
             if (undefinedVar.loc != null && privateItemForFix != null) {
-                add(com.mezze.language.parsedast.diagnostics.FixHint.AddPub(
+                add(FixHint.AddPub(
                     undefinedVar.loc!!,
                     privateItemForFix!!.declModulePath,
                     privateItemForFix!!.declName,
@@ -109,7 +114,7 @@ internal fun checkUndefinedVariables(
                 val candidateNames = allVariables.keys.map { key -> key.toKeyString() } + peerBindingNames
                 val similarNames = validator.findSimilarNames(undefinedVar.name, candidateNames)
                 if (similarNames.isNotEmpty()) {
-                    add(com.mezze.language.parsedast.diagnostics.FixHint.Rename(
+                    add(FixHint.Rename(
                         undefinedVar.loc!!, similarNames.take(3)
                     ))
                 }
@@ -136,7 +141,7 @@ internal data class PrivateItemResult(val message: String, val declModulePath: S
  */
 internal fun checkIfPrivateQualifiedItem(
     undefinedVar: ConstraintResult.UndefinedVariable,
-    loadedModules: Map<com.mezze.language.ast.ModulePath, TypedModule>,
+    loadedModules: Map<ModulePath, TypedModule>,
     importContext: ModuleImportContext?
 ): PrivateItemResult? {
     if (!undefinedVar.isQualified) return null
@@ -166,7 +171,7 @@ internal fun checkIfPrivateQualifiedItem(
     }
 
     if (matchingBinding != null) {
-        val modulePath = com.mezze.language.ast.ModulePath.parse(matchingBinding.value.modulePath)
+        val modulePath = ModulePath.parse(matchingBinding.value.modulePath)
         val module = loadedModules[modulePath]
         if (module != null) {
             val existsButNotExported = checkIfItemExistsInModule(module, itemName)
@@ -195,13 +200,13 @@ private fun checkIfItemExistsInModule(module: TypedModule, itemName: String): Bo
     if (parsedModule != null) {
         for (decl in parsedModule.decls) {
             when (decl) {
-                is com.mezze.language.parsedast.ParsedLetDecl -> {
+                is ParsedLetDecl -> {
                     if (decl.isSimpleBinding && decl.variableName == itemName) return true
                 }
-                is com.mezze.language.parsedast.ParsedTypeDecl -> if (decl.name == itemName) return true
-                is com.mezze.language.parsedast.ParsedAbilityDecl -> if (decl.name == itemName) return true
-                is com.mezze.language.parsedast.ParsedEffectDecl -> if (decl.name == itemName) return true
-                is com.mezze.language.parsedast.ParsedPerformerDecl -> if (decl.performerName == itemName) return true
+                is ParsedTypeDecl -> if (decl.name == itemName) return true
+                is ParsedAbilityDecl -> if (decl.name == itemName) return true
+                is ParsedEffectDecl -> if (decl.name == itemName) return true
+                is ParsedPerformerDecl -> if (decl.performerName == itemName) return true
                 else -> {}
             }
         }
@@ -218,14 +223,14 @@ private fun checkIfItemExistsInModule(module: TypedModule, itemName: String): Bo
  */
 internal fun findStdlibFreeFunctionCarriers(name: String): List<String> {
     val modules = LinkedHashSet<String>()
-    for ((hash, qualifiedName) in com.mezze.language.ast.debug.ContentHashRegistry.allMappings()) {
+    for ((hash, qualifiedName) in ContentHashRegistry.allMappings()) {
         val sepIdx = qualifiedName.lastIndexOf("::")
         if (sepIdx <= 0) continue
         val simpleName = qualifiedName.substring(sepIdx + 2)
         if (simpleName != name) continue
-        val kind = com.mezze.language.ast.debug.ContentHashRegistry.kindForHash(hash)
-        if (kind != com.mezze.language.ast.debug.ContentHashRegistry.DeclarationKind.FUNCTION &&
-            kind != com.mezze.language.ast.debug.ContentHashRegistry.DeclarationKind.CONSTANT) continue
+        val kind = ContentHashRegistry.kindForHash(hash)
+        if (kind != ContentHashRegistry.DeclarationKind.FUNCTION &&
+            kind != ContentHashRegistry.DeclarationKind.CONSTANT) continue
         val modulePath = qualifiedName.substring(0, sepIdx)
         modules.add(modulePath)
         if (modules.size >= 3) break
@@ -238,7 +243,7 @@ internal fun findStdlibFreeFunctionCarriers(name: String): List<String> {
  * prelude inherent impls whose operations include that name.
  */
 internal fun findPreludeMethodCarriers(name: String): List<String> {
-    val precompiled = try { com.mezze.language.typechecker.PrecompiledStdlib } catch (_: Exception) { return emptyList() }
+    val precompiled = try { PrecompiledStdlib } catch (_: Exception) { return emptyList() }
     val ctx = try { precompiled.preludeImportContext } catch (_: Throwable) { return emptyList() }
     @Suppress("SENSELESS_COMPARISON") if (ctx == null) return emptyList()
     val carriers = mutableListOf<String>()
@@ -247,8 +252,8 @@ internal fun findPreludeMethodCarriers(name: String): List<String> {
         if (impl.operations.none { it.name == name }) continue
         val target = impl.targetTypes.firstOrNull() ?: continue
         val targetName = when (target) {
-            is com.mezze.language.parsedast.ParsedNamedType -> target.name
-            is com.mezze.language.parsedast.ParsedTypeApp -> target.constructor
+            is ParsedNamedType -> target.name
+            is ParsedTypeApp -> target.constructor
             else -> null
         } ?: continue
         if (targetName !in carriers) carriers.add(targetName)

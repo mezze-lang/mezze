@@ -2,17 +2,6 @@ package com.mezze.language.parser.internal
 
 import com.mezze.language.parser.*
 
-/**
-import com.mezze.language.parser.internal.lib.*
- * Lexer for Mezze language.
- * Converts source code into a stream of tokens.
- *
- * Performance optimizations:
- * - Interned strings for common tokens (keywords, operators)
- * - Pre-allocated token text for single-character tokens
- * - Reusable StringBuilder for identifier parsing
- */
-
 data class Token(
     val type: TokenType,
     val text: String,
@@ -54,10 +43,6 @@ enum class TokenType {
     COMMENT
 }
 
-/**
- * Interned strings for common tokens to reduce memory allocation.
- * These are pre-allocated and reused across all lexer instances.
- */
 private object InternedTokens {
     // Single-character tokens
     const val PLUS = "+"
@@ -202,7 +187,6 @@ class Lexer(
 
         val char = current()
 
-        // Handle newlines explicitly
         // Note: advance() already increments line and resets column for newlines
         if (char == '\n') {
             advance()
@@ -320,12 +304,10 @@ class Lexer(
     }
 
     private fun lexNumber(start: Int, startLine: Int, startColumn: Int): Token {
-        // Read digits, allowing underscores as separators
         while (!isAtEnd() && (current().isDigit() || current() == '_')) {
             advance()
         }
 
-        // Check for fraction (e.g., 1//2)
         if (!isAtEnd() && position + 1 < source.length && current() == '/' && peek() == '/' && position + 2 < source.length && source[position + 2].isDigit()) {
             advance()  // consume first '/'
             advance()  // consume second '/'
@@ -336,7 +318,6 @@ class Lexer(
             return Token(TokenType.FRACTION, text, start, startLine, startColumn)
         }
 
-        // Check for float
         if (!isAtEnd() && current() == '.' && peek().isDigit()) {
             advance()  // consume '.'
             while (!isAtEnd() && (current().isDigit() || current() == '_')) {
@@ -358,7 +339,6 @@ class Lexer(
             }
         }
 
-        // Regular integer (remove underscores from text)
         val text = source.substring(start, position).replace("_", "")
         return Token(TokenType.INTEGER, text, start, startLine, startColumn)
     }
@@ -375,7 +355,6 @@ class Lexer(
                 advance()  // skip escape character
                 if (!isAtEnd()) advance()
             } else if (current() == '$' && peek() == '(') {
-                // Handle string interpolation $()
                 advance()  // skip $
                 advance()  // skip (
                 lexInterpolationContent()
@@ -392,10 +371,6 @@ class Lexer(
         return Token(TokenType.STRING, source.substring(start, position), start, startLine, startColumn)
     }
 
-    /**
-     * Lex the content inside $() interpolation, handling nested parentheses and strings.
-     * This method is called after consuming "$(" and should consume until the matching ")".
-     */
     private fun lexInterpolationContent() {
         var parenDepth = 1  // We've already consumed the opening (
 
@@ -410,11 +385,9 @@ class Lexer(
                     if (parenDepth > 0) advance()  // Don't advance past the final )
                 }
                 current() == '"' -> {
-                    // Handle nested string inside interpolation
                     lexNestedString()
                 }
                 current() == '#' -> {
-                    // Skip comments inside interpolation
                     while (!isAtEnd() && current() != '\n') {
                         advance()
                     }
@@ -433,9 +406,6 @@ class Lexer(
         }
     }
 
-    /**
-     * Lex a nested string inside an interpolation (e.g., the "yes" in $(if {c} then "yes" else "no"))
-     */
     private fun lexNestedString() {
         advance()  // skip opening quote
 
@@ -448,7 +418,6 @@ class Lexer(
                 advance()  // skip escape character
                 if (!isAtEnd()) advance()
             } else if (current() == '$' && peek() == '(') {
-                // Handle nested interpolation inside nested string
                 advance()  // skip $
                 advance()  // skip (
                 lexInterpolationContent()
@@ -480,15 +449,12 @@ class Lexer(
 
         val text = source.substring(start, position)
 
-        // Check for _ placeholder
         if (text == "_") {
             return Token(TokenType.PLACEHOLDER, InternedTokens.PLACEHOLDER, start, startLine, startColumn)
         }
 
-        // Check if it's a keyword
         val keywordType = keywords[text]
         if (keywordType != null) {
-            // Use interned keyword string
             val internedText = when (keywordType) {
                 TokenType.LET -> InternedTokens.LET
                 TokenType.TYPE -> InternedTokens.TYPE
@@ -515,7 +481,6 @@ class Lexer(
             return Token(keywordType, internedText, start, startLine, startColumn)
         }
 
-        // Use interned string for common identifiers (True, False, Some, None, Ok, Err)
         val internedText = if (text in InternedTokens.commonIdentifiers) {
             when (text) {
                 "True" -> InternedTokens.TRUE
@@ -547,7 +512,6 @@ class Lexer(
         while (!isAtEnd()) {
             val char = current()
 
-            // Skip spaces and tabs (but not newlines - we want to track them)
             // Don't skip comments - they are now emitted as COMMENT tokens
             if (char == ' ' || char == '\t' || char == '\r') {
                 advance()

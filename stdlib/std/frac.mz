@@ -54,59 +54,59 @@ impl Default for Frac where {
 }
 
 ## Add two fractions.
-pub let add = { l, r } -> __native_frac_add { l = l, r = r }
+pub let add: { l: Frac, r: Frac } -> Frac = { l, r } -> __native_frac_add { l = l, r = r }
 
 ## Subtract two fractions.
-pub let subtract = { l, r } -> __native_frac_subtract { l = l, r = r }
+pub let subtract: { l: Frac, r: Frac } -> Frac = { l, r } -> __native_frac_subtract { l = l, r = r }
 
 ## Multiply two fractions.
-pub let multiply = { l, r } -> __native_frac_multiply { l = l, r = r }
+pub let multiply: { l: Frac, r: Frac } -> Frac = { l, r } -> __native_frac_multiply { l = l, r = r }
 
 ## Divide two fractions.
-pub let divide = { l, r } -> __native_frac_divide { l = l, r = r }
+pub let divide: { l: Frac, r: Frac } -> Frac = { l, r } -> __native_frac_divide { l = l, r = r }
 
 ## True if two fractions are equal.
-pub let equals = { l, r } -> __native_frac_equals { l = l, r = r }
+pub let equals: { l: Frac, r: Frac } -> Bool = { l, r } -> __native_frac_equals { l = l, r = r }
 
 ## True if l is less than r.
-pub let less_than = { l, r } -> __native_frac_less_than { l = l, r = r }
+pub let less_than: { l: Frac, r: Frac } -> Bool = { l, r } -> __native_frac_less_than { l = l, r = r }
 
 ## True if l is greater than r.
-pub let greater_than = { l, r } -> __native_frac_greater_than { l = l, r = r }
+pub let greater_than: { l: Frac, r: Frac } -> Bool = { l, r } -> __native_frac_greater_than { l = l, r = r }
 
 ## Compare two fractions, returning an Ordering.
-pub let compare = { l, r } -> __native_frac_compare { l = l, r = r }
+pub let compare: { l: Frac, r: Frac } -> Ordering = { l, r } -> __native_frac_compare { l = l, r = r }
 
 ## Convert a fraction to a Float.
-pub let to_float = { n } -> __native_frac_to_float { n = n }
+pub let to_float: { n: Frac } -> Float = { n } -> __native_frac_to_float { n = n }
 
 ## Convert a fraction to its string representation (e.g. "3/4").
-pub let to_str = { n } -> __native_frac_to_str { n = n }
+pub let to_str: { n: Frac } -> Str = { n } -> __native_frac_to_str { n = n }
 
 ## Create a fraction from numerator and denominator. Auto-reduces.
-pub let make = { numerator, denominator } ->
+pub let make: { numerator: Int, denominator: Int } -> Frac = { numerator, denominator } ->
   __native_make_frac { numerator = numerator, denominator = denominator }
 
 ## Convert an integer to a fraction.
-pub let from_int = { n } -> __native_int_to_frac { n = n }
+pub let from_int: { n: Int } -> Frac = { n } -> __native_int_to_frac { n = n }
 
 ## Convert a natural number to a fraction.
-pub let from_nat = { n } -> __native_nat_to_frac { n = n }
+pub let from_nat: { n: Nat } -> Frac = { n } -> __native_nat_to_frac { n = n }
 
 ## Get the numerator.
-pub let numerator = { n } -> __native_frac_numerator { n = n }
+pub let numerator: { n: Frac } -> Int = { n } -> __native_frac_numerator { n = n }
 
 ## Get the denominator.
-pub let denominator = { n } -> __native_frac_denominator { n = n }
+pub let denominator: { n: Frac } -> Int = { n } -> __native_frac_denominator { n = n }
 
 ## Reduce to lowest terms (fractions auto-reduce, but this is explicit).
-pub let reduce = { n } -> __native_reduce_frac { n = n }
+pub let reduce: { n: Frac } -> Frac = { n } -> __native_reduce_frac { n = n }
 
 ## Absolute value of a fraction.
-pub let abs = { n } -> __native_abs_frac { n = n }
+pub let abs: { n: Frac } -> Frac = { n } -> __native_abs_frac { n = n }
 
 ## Negate a fraction.
-pub let negate = { n } -> __native_negate_frac { n = n }
+pub let negate: { n: Frac } -> Frac = { n } -> __native_negate_frac { n = n }
 
 impl Frac where {
   to_float = { it } -> __native_frac_to_float { n = it },

@@ -1,45 +1,35 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.ModulePath
 import com.mezze.language.parsedast.Loc
+import com.mezze.language.parsedast.ParsedAbilityDecl
+import com.mezze.language.parsedast.ParsedEffectDecl
+import com.mezze.language.truffleir.FunctionIR
+import com.mezze.language.typedast.Hash
+import com.mezze.language.typedast.TypedLetDecl
+import com.mezze.language.typedast.TypedModule
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
-
-/**
- * Public output types from the typechecker.
- * These are the results of type checking — consumed by the interpreter, CLI, and LSP.
- */
 
 @Serializable
 data class TypeCheckResult(
     val resolvedImports: List<ResolvedImport> = emptyList(),
     val warnings: List<TypeCheckWarning> = emptyList(),
-    val importedAbilities: Map<String, com.mezze.language.parsedast.ParsedAbilityDecl> = emptyMap(),
-    val importedEffects: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),
-    val loweredFunctions: List<com.mezze.language.truffleir.FunctionIR> = emptyList(),
-    val typedModule: com.mezze.language.typedast.TypedModule? = null,
+    val importedAbilities: Map<String, ParsedAbilityDecl> = emptyMap(),
+    val importedEffects: Map<String, ParsedEffectDecl> = emptyMap(),
+    val loweredFunctions: List<FunctionIR> = emptyList(),
+    val typedModule: TypedModule? = null,
     val performerRecords: List<Array<String>> = emptyList(),
-    val loadedModules: Map<com.mezze.language.ast.ModulePath, com.mezze.language.typedast.TypedModule> = emptyMap(),
-    /**
-     * For each typechecked module loaded transitively (imports), the source
-     * file path and content hash. Lets StorePopulator persist a typed_modules
-     * row for every module, not just the entry. modulePath is keyed the same
-     * way as `loadedModules` above.
-     */
-    val loadedModuleSources: Map<com.mezze.language.ast.ModulePath, LoadedModuleSource> = emptyMap(),
-    /**
-     * Per-source-position "expected type" hint, populated by the constraint
-     * generator wherever a constraint with a Loc fires. After global
-     * substitution the values are concrete types. Used by the LSP ranker
-     * for type-aware completion ranking. Transient — not persisted; the
-     * LSP recomputes it on every typecheck.
-     */
+    val loadedModules: Map<ModulePath, TypedModule> = emptyMap(),
+    val loadedModuleSources: Map<ModulePath, LoadedModuleSource> = emptyMap(),
+    // Per-position "expected type" for LSP completion ranking. Transient — recomputed each typecheck.
     @Transient
     val expectedTypeAt: Map<Loc, MezzeType> = emptyMap(),
 ) {
     fun getVariableType(name: String): MezzeType? {
         return typedModule?.decls
-            ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            ?.filterIsInstance<TypedLetDecl>()
             ?.find { it.name == name }
             ?.scheme?.type
     }
@@ -48,7 +38,7 @@ data class TypeCheckResult(
 @Serializable
 data class LoadedModuleSource(
     val filePath: String,
-    val sourceHash: com.mezze.language.typedast.Hash,
+    val sourceHash: Hash,
 )
 
 @Serializable

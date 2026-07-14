@@ -1,32 +1,19 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.parsedast.Loc
+import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.parsedast.diagnostics.FixHint
 
-/**
- * Exception thrown when type checking fails.
- *
- * @param message The error message
- * @param loc Optional source location where the error occurred
- * @param errorType Optional error type categorization
- * @param metadata Optional additional metadata about the error
- */
 class TypeCheckError(
     override val message: String,
     val loc: Loc? = null,
     val errorType: ErrorType = ErrorType.GENERAL,
     val metadata: Map<String, Any> = emptyMap(),
     /** Stable error code — see ErrorCode. */
-    val code: com.mezze.language.parsedast.diagnostics.ErrorCode =
-        com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED,
+    val code: ErrorCode = ErrorCode.UNCATEGORIZED,
     /** Zero or more "what to do next" hints. */
     val hints: List<String> = emptyList(),
-    /**
-     * Structured, machine-actionable suggestions for fixing this error.
-     * Consumed by the LSP code-action handler to offer one-click fixes
-     * without parsing the user-facing message text. Empty list = no
-     * automated fix available.
-     */
-    val fixHints: List<com.mezze.language.parsedast.diagnostics.FixHint> = emptyList(),
+        val fixHints: List<FixHint> = emptyList(),
 ) : Exception(message) {
 
     override fun toString(): String {
@@ -38,9 +25,6 @@ class TypeCheckError(
     }
 }
 
-/**
- * Enum for categorizing type check errors.
- */
 enum class ErrorType {
     GENERAL,
     TYPE_MISMATCH,

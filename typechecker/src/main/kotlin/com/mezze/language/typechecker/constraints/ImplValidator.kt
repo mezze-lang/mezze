@@ -6,7 +6,7 @@ import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.typechecker.TypeCheckError
-import com.mezze.language.typechecker.WellKnownHashes
+import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 
@@ -469,7 +469,7 @@ internal class ImplValidator(
                     validationReason = "Effect body validation",
                     recordLiteralBindings = scopeRecordBindings,
                     prepareContext = { ctx ->
-                        com.mezze.language.typechecker.types.effects.EffectHandlerBindings
+                        EffectHandlerBindings
                             .extendWithAbortAndResume(ctx, expectedReturnType)
                     },
                     onBodyResult = { bodyResult, _ ->

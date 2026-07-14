@@ -65,40 +65,40 @@ impl Default for Nat where {
 }
 
 ## Subtract two Nats, returning an Int (result may be negative).
-pub let subtract_to_int = { l: Nat, r: Nat } -> __native_nat_subtract_to_int { l = l, r = r }
+pub let subtract_to_int: { l: Nat, r: Nat } -> Int = { l, r } -> __native_nat_subtract_to_int { l = l, r = r }
 
 ## Convert an Int to a Nat. Returns None if negative.
-pub let from_int = { n: Int } -> __native_nat_from_int { n = n }
+pub let from_int: { n: Int } -> Option Nat = { n } -> __native_nat_from_int { n = n }
 
 ## Convert a Float to a Nat. Returns None if negative or non-integer.
-pub let from_float = { n: Float } -> __native_nat_from_float { n = n }
+pub let from_float: { n: Float } -> Option Nat = { n } -> __native_nat_from_float { n = n }
 
 ## Parse a string as a Nat. Returns None on failure.
-pub let from_string = { s: Str } -> __native_nat_from_string { s = s }
+pub let from_string: { s: Str } -> Option Nat = { s } -> __native_nat_from_string { s = s }
 
 ## Return the smaller of two Nats.
-pub let min = { l: Nat, r: Nat } -> __native_nat_min { l = l, r = r }
+pub let min: { l: Nat, r: Nat } -> Nat = { l, r } -> __native_nat_min { l = l, r = r }
 
 ## Return the larger of two Nats.
-pub let max = { l: Nat, r: Nat } -> __native_nat_max { l = l, r = r }
+pub let max: { l: Nat, r: Nat } -> Nat = { l, r } -> __native_nat_max { l = l, r = r }
 
 ## True if n is zero.
-pub let is_zero = { n: Nat } -> n == 0n
+pub let is_zero: { n: Nat } -> Bool = { n } -> n == 0n
 
 ## True if n is even.
-pub let is_even = { n: Nat } -> (n % 2n) == 0n
+pub let is_even: { n: Nat } -> Bool = { n } -> (n % 2n) == 0n
 
 ## True if n is odd.
-pub let is_odd = { n: Nat } -> if is_even { n = n } then False else True
+pub let is_odd: { n: Nat } -> Bool = { n } -> if is_even { n = n } then False else True
 
 ## Convert a Nat to an Int (always succeeds).
-pub let to_int = { n: Nat } -> __native_nat_to_int { n = n }
+pub let to_int: { n: Nat } -> Int = { n } -> __native_nat_to_int { n = n }
 
 ## Convert a Nat to a string.
-pub let to_str = { n: Nat } -> __native_nat_to_str { n = n }
+pub let to_str: { n: Nat } -> Str = { n } -> __native_nat_to_str { n = n }
 
 ## Clamp n to the range [min, max].
-pub let clamp = { n: Nat, min: Nat, max: Nat } ->
+pub let clamp: { n: Nat, min: Nat, max: Nat } -> Nat = { n, min, max } ->
   __native_nat_clamp { n = n, min = min, max = max }
 
 impl Nat where {

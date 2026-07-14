@@ -16,7 +16,6 @@ fun main(args: Array<String>) {
 
     val parser = com.mezze.language.parser.MezzeParser()
 
-    // Collect all ability, effect, and type declarations from stdlib
     // (typed Hash end-to-end).
     val abilities = mutableMapOf<String, Hash>() // name → content hash
     val effects = mutableMapOf<String, Hash>()
@@ -36,7 +35,6 @@ fun main(args: Array<String>) {
                     }
                     is ParsedTypeDecl -> {
                         // Public types only — private types aren't well-known.
-                        // Skip duplicates: first declaration wins (which means
                         // a name collision across stdlib files would silently
                         // hide the second; ok for now since stdlib enforces
                         // unique names, but worth a follow-up assertion.)
@@ -49,7 +47,6 @@ fun main(args: Array<String>) {
                 }
             }
         } catch (_: Exception) {
-            // Skip files that fail to parse
         }
     }
 

@@ -1,82 +1,28 @@
 package com.mezze.language.typechecker.module
 
 import com.mezze.language.ast.*
-import com.mezze.language.parsedast.Loc
+import com.mezze.language.parsedast.*
+import com.mezze.language.parsedast.Visibility
+import com.mezze.language.typedast.Hash
+import com.mezze.language.typedast.TypedLambda
+import com.mezze.language.typedast.TypedModule as TypedAstModule
 
-
-/**
- * Import resolver - resolves imports and builds module import context.
- *
- * This processes UseDeclaration and PubUseDeclaration to build a
- * ModuleImportContext containing all imported items.
- *
- * ## Supported Import Patterns:
- *
- * **Module Import** (imports all public exports):
- * ```mezze
- * use std::collections::seq
- * ```
- *
- * **Selective Import** (imports specific items):
- * ```mezze
- * use std::collections::seq::{map, filter, fold}
- * ```
- *
- * **Aliased Import**:
- * ```mezze
- * use std::collections::seq as arr
- * ```
- *
- * **Re-export** (import and re-export):
- * ```mezze
- * pub use std::collections::seq::{map, filter}
- * ```
- *
- * ## Design:
- * - Pure functions (no mutation!)
- * - Immutable contexts
- * - Explicit error handling
- * - Prevents transitive import pollution
- *
- * ## Usage:
- * ```kotlin
- * val resolver = ImportResolver(moduleLoader)
- * val result = resolver.resolveImports(program, baseContext)
- *
- * when (result) {
- *     is ImportResolutionResult.Success -> {
- *         val context = result.importContext
- *         val modules = result.loadedModules
- *         // Use the import context
- *     }
- *     is ImportResolutionResult.Failure -> {
- *         for (error in result.errors) {
- *             println(error.message)
- *         }
- *     }
- * }
- * ```
- */
 class ImportResolver(
     private val loader: ModuleLoader,
-    private val typeChecker: ModuleTypeChecker? = null  // Optional, for type-checking imports
+    private val typeChecker: ModuleTypeChecker? = null
 ) {
-    /**
-     * Resolve imports from a ParsedModule (v2 AST entry point).
-     * Converts v2 use path to UsePath and processes each import.
-     */
-    fun resolveImports(module: com.mezze.language.parsedast.ParsedModule): ImportResolutionResult {
+    fun resolveImports(module: ParsedModule): ImportResolutionResult {
         val errors = mutableListOf<ModuleError>()
         var importContext = ModuleImportContext.empty()
-        val loadedModules = mutableMapOf<com.mezze.language.ast.ModulePath, TypedModule>()
+        val loadedModules = mutableMapOf<ModulePath, TypedModule>()
 
         for (decl in module.decls) {
             val (usePath, alias, isPublic, loc) = when (decl) {
-                is com.mezze.language.parsedast.ParsedUseDecl -> UseInfo(
+                is ParsedUseDecl -> UseInfo(
                     parsedUsePathToV1(decl.path), decl.alias, false,
                     decl.loc
                 )
-                is com.mezze.language.parsedast.ParsedPubUseDecl -> UseInfo(
+                is ParsedPubUseDecl -> UseInfo(
                     parsedUsePathToV1(decl.path), decl.alias, true,
                     decl.loc
                 )
@@ -86,7 +32,7 @@ class ImportResolver(
             when (result) {
                 is ProcessResult.Success -> {
                     importContext = importContext.merge(result.context)
-                    result.module?.let { loadedModules[com.mezze.language.ast.ModulePath.parse(it.modulePath)] = it }
+                    result.module?.let { loadedModules[ModulePath.parse(it.modulePath)] = it }
                 }
                 is ProcessResult.Failure -> errors.addAll(result.errors)
             }
@@ -99,7 +45,6 @@ class ImportResolver(
         }
     }
 
-    /** Helper data class for destructuring use declarations. */
     private data class UseInfo(
         val path: UsePath,
         val alias: String?,
@@ -107,12 +52,11 @@ class ImportResolver(
         val loc: Loc?
     )
 
-    /** Convert v2 ParsedUsePath to UsePath */
-    private fun parsedUsePathToV1(path: com.mezze.language.parsedast.ParsedUsePath): UsePath {
+    private fun parsedUsePathToV1(path: ParsedUsePath): UsePath {
         return when (path) {
-            is com.mezze.language.parsedast.ParsedUsePath.Module ->
+            is ParsedUsePath.Module ->
                 ModulePath(path.path.segments)
-            is com.mezze.language.parsedast.ParsedUsePath.Selective ->
+            is ParsedUsePath.Selective ->
                 SelectivePath(
                     module = path.modulePath.segments,
                     items = path.items.map { item ->
@@ -122,11 +66,6 @@ class ImportResolver(
         }
     }
 
-    /**
-     * Process a single use declaration.
-     *
-     * This loads the module and extracts the requested imports.
-     */
     private fun processUseDeclaration(
         usePath: UsePath,
         alias: String?,
@@ -135,53 +74,38 @@ class ImportResolver(
     ): ProcessResult {
         return when (usePath) {
             is ModulePath -> {
-                // Import all exports: use module
                 processModulePath(usePath, alias, isPublic, sourceLoc)
             }
             is SelectivePath -> {
-                // Import specific items: use module::{foo, bar}
                 processSelectivePath(usePath, isPublic, sourceLoc)
             }
         }
     }
 
-    /**
-     * Process a module path import (imports all exports).
-     *
-     * Example: use std::collections::seq
-     *
-     * Module imports use the last segment as the qualifier.
-     * e.g., `use std::math::core` makes items available as `core::pi`
-     */
     private fun processModulePath(
         path: ModulePath,
         alias: String?,
         isPublic: Boolean,
         sourceLoc: Loc? = null
     ): ProcessResult {
-        // Check for internal module access using structured path
-        // Top-level imports (fromModule = null) cannot access internal modules
         if (!loader.getResolver().canAccessInternal(null, path)) {
             return ProcessResult.Failure(
                 listOf(ModuleError.InternalModuleAccess("", path.fullPath, sourceLoc))
             )
         }
 
-        // Load the module using structured path
         val loadResult = loader.loadModule(path)
-        val modulePath = path.fullPath  // Keep string for error messages
+        val modulePath = path.fullPath
 
         return when (loadResult) {
             is ModuleLoadResult.Success -> {
                 val module = loadResult.module
 
-                // Type-check the module if type checker is available
                 val typedModule = typeChecker?.let { checker ->
                     val typeCheckResult = checker.typeCheckModule(module)
                     when (typeCheckResult) {
                         is ModuleTypeCheckResult.Success -> typeCheckResult.module
                         is ModuleTypeCheckResult.Failure -> {
-                            // Type checking failed, return errors
                             return ProcessResult.Failure(
                                 typeCheckResult.errors.map { error ->
                                     ModuleError.ImportError(
@@ -195,28 +119,17 @@ class ImportResolver(
                     }
                 }
 
-                // Module imports are ALWAYS qualified with the last segment
-                // e.g., `use std::math::core` -> items accessible as `core::pi`
-                // If an alias is provided, use that instead
                 val qualifierName = alias ?: path.segments.lastOrNull()
 
-                // CRITICAL FIX: Use exports from typedModule if available (has real inferred types),
-                // otherwise fall back to module.exports (has placeholder types).
-                // Preloaded modules may have empty exports — use module.exports in that case.
                 val exportsToUse = typedModule?.exports?.takeIf { it.isNotEmpty() } ?: module.exports
 
-                // Build import context from all exports
                 var context = buildContextFromExports(
                     exports = exportsToUse,
                     modulePath = modulePath,
                     alias = qualifierName,
-                    isQualified = true  // Module imports are always qualified
+                    isQualified = true
                 )
 
-                // Harvest inferred return types for inherent-impl operations
-                // from the home module's TypedAbilityImpl. Without this, the
-                // importer rebuilds InherentMethodInfo with fresh TypeVars and
-                // the body's solved return type is lost — calls like
                 // `xs.length {}` render as `'a`. (See issue #213.)
                 val v2Module = typedModule?.typedModule
                 if (v2Module != null) {
@@ -251,36 +164,26 @@ class ImportResolver(
         }
     }
 
-    /**
-     * Process a selective path import (imports specific items).
-     *
-     * Example: use std::collections::seq::{map, filter, fold}
-     */
     private fun processSelectivePath(
         path: SelectivePath,
         isPublic: Boolean,
         sourceLoc: Loc? = null
     ): ProcessResult {
-        // Convert to structured ModulePath
         val structuredPath = ModulePath(path.module)
 
-        // Check for internal module access using structured path
-        // Top-level imports (fromModule = null) cannot access internal modules
         if (!loader.getResolver().canAccessInternal(null, structuredPath)) {
             return ProcessResult.Failure(
                 listOf(ModuleError.InternalModuleAccess("", structuredPath.fullPath, sourceLoc))
             )
         }
 
-        // Load the module using structured path
         val loadResult = loader.loadModule(structuredPath)
-        val modulePath = structuredPath.fullPath  // Keep string for error messages
+        val modulePath = structuredPath.fullPath
 
         return when (loadResult) {
             is ModuleLoadResult.Success -> {
                 val module = loadResult.module
 
-                // Type-check the module if type checker is available
                 val typedModule = typeChecker?.let { checker ->
                     val typeCheckResult = checker.typeCheckModule(module)
                     when (typeCheckResult) {
@@ -299,22 +202,14 @@ class ImportResolver(
                     }
                 }
 
-                // CRITICAL FIX: Use exports from typedModule if available (has real inferred types),
-                // otherwise fall back to module.exports (has placeholder types).
-                // Preloaded modules may have empty exports — use module.exports in that case.
                 val exportsToUse = typedModule?.exports?.takeIf { it.isNotEmpty() } ?: module.exports
 
-                // Extract specific items
                 var context = buildContextFromSelectiveImports(
                     exports = exportsToUse,
                     modulePath = modulePath,
                     items = path.items
                 )
 
-                // Harvest inferred return types for inherent-impl operations
-                // from the home module's TypedAbilityImpl. The selective path
-                // ALSO needs this — without it, `use std::effects::async::{...}`
-                // loses the Promise impl methods' return types and `p.map_ok {…}`
                 // dispatch produces a bare TypeVar. (Same fix as #213, extended
                 // to selective imports for #175.)
                 val v2ModuleSel = typedModule?.typedModule
@@ -334,13 +229,10 @@ class ImportResolver(
                     }
                 }
 
-                // Check if all requested items were found
-                // Also check if items exist but are private (not exported)
                 val errors = mutableListOf<ModuleError>()
 
                 for (item in path.items) {
                     if (!module.exports.containsKey(item.name)) {
-                        // Check if the item exists in the module but isn't public
                         val existsButPrivate = checkIfItemExistsButPrivate(module, item.name)
 
                         if (existsButPrivate) {
@@ -376,11 +268,6 @@ class ImportResolver(
         }
     }
 
-    /**
-     * Build import context from all exports.
-     *
-     * Used for module path imports (use module).
-     */
     private fun buildContextFromExports(
         exports: Map<String, ExportedItem>,
         modulePath: String,
@@ -388,25 +275,20 @@ class ImportResolver(
         isQualified: Boolean
     ): ModuleImportContext {
         val bindings = mutableMapOf<String, ImportedBinding>()
-        val types = mutableMapOf<String, com.mezze.language.parsedast.ParsedTypeDecl>()
-        // Subset of `types` keys that the USER explicitly listed in a `use` clause
-        // (vs. auto-imported because some imported binding referenced them).
+        val types = mutableMapOf<String, ParsedTypeDecl>()
         // Used by the structural-alias check (#148) to decide whether a type name
         // acts as a nominal wall.
         val explicitTypeNames = mutableSetOf<String>()
-        val abilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
-        val effects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
-        val impls = mutableMapOf<String, com.mezze.language.parsedast.ParsedPerformerDecl>()
-        val abilityImpls = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedImplAbilityDecl>()
-        // Content-hash indexed maps for O(1) lookup
-        val effectsByHash = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedEffectDecl>()
-        val abilitiesByHash = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedAbilityDecl>()
+        val abilities = mutableMapOf<String, ParsedAbilityDecl>()
+        val effects = mutableMapOf<String, ParsedEffectDecl>()
+        val impls = mutableMapOf<String, ParsedPerformerDecl>()
+        val abilityImpls = mutableMapOf<Hash, ParsedImplAbilityDecl>()
+        val effectsByHash = mutableMapOf<Hash, ParsedEffectDecl>()
+        val abilitiesByHash = mutableMapOf<Hash, ParsedAbilityDecl>()
 
-        // Get the loaded module to access its declarations
         val module = loader.getModule(modulePath)
 
         for ((name, export) in exports) {
-            // Determine the local name using BindingKey (use alias if provided for qualified imports)
             val bindingKey = if (isQualified && alias != null) {
                 BindingKey.qualified(alias, name)
             } else {
@@ -414,7 +296,6 @@ class ImportResolver(
             }
             val localName = bindingKey.toKeyString()
 
-            // Add to appropriate category
             when (export.type) {
                 ExportedItemType.FUNCTION -> {
                     bindings[localName] = ImportedBinding(
@@ -427,19 +308,14 @@ class ImportResolver(
                     )
                 }
                 ExportedItemType.TYPE -> {
-                    // O(1) lookup via module index (replaces O(N) filterIsInstance().find())
                     val typeDecl = module?.index?.typeDeclarations?.get(export.originalName)
 
                     if (typeDecl != null) {
-                        // CRITICAL: Store under ORIGINAL name (not qualified name)!
-                        // TypeApplication.constructor contains the unqualified type name (e.g., "Continuation")
-                        // so the lookup in expandTypeApplicationToRecord must find it by that name.
                         types[export.originalName] = typeDecl
                         // This is an explicit `use foo::{TypeName}` — record it for #148.
                         explicitTypeNames.add(export.originalName)
                     }
 
-                    // Also add as a binding for name resolution
                     bindings[localName] = ImportedBinding(
                         name = localName,
                         originalName = export.originalName,
@@ -458,32 +334,23 @@ class ImportResolver(
                         isQualified = isQualified,
                         contentHash = export.contentHash
                     )
-                    // CRITICAL: When a CONSTRUCTOR shares a name with a type declaration
-                    // (e.g., type Person = | Person { ... } |), also import the type declaration.
-                    // Without this, ability impl matching fails because the type isn't in
-                    // allTypeDeclarations and typeMatchesAnnotation can't resolve it.
                     val typeDecl = module?.index?.typeDeclarations?.get(export.originalName)
                     if (typeDecl != null) {
                         types[export.originalName] = typeDecl
-                        // newtype-style constructors share the type name; importing the
                         // constructor brings the type name into scope as well (#148).
                         explicitTypeNames.add(export.originalName)
                     }
                 }
                 ExportedItemType.ABILITY -> {
-                    // O(1) lookup via module index (replaces O(N) filterIsInstance().find())
                     val abilityDecl = module?.index?.abilityDeclarations?.get(export.originalName)
 
                     if (abilityDecl != null) {
-                        // Store under the qualified name for lookup
                         abilities[localName] = abilityDecl
-                        // Also store by content hash for O(1) lookup without string parsing
                         abilityDecl.contentHash?.let { hash ->
                             abilitiesByHash[hash] = abilityDecl
                         }
                     }
 
-                    // Also add as a binding for name resolution
                     bindings[localName] = ImportedBinding(
                         name = localName,
                         originalName = export.originalName,
@@ -494,19 +361,15 @@ class ImportResolver(
                     )
                 }
                 ExportedItemType.EFFECT -> {
-                    // O(1) lookup via module index (replaces O(N) filterIsInstance().find())
                     val effectDecl = module?.index?.effectDeclarations?.get(export.originalName)
 
                     if (effectDecl != null) {
-                        // Store under the qualified name for lookup
                         effects[localName] = effectDecl
-                        // Also store by content hash for O(1) lookup without string parsing
                         effectDecl.contentHash?.let { hash ->
                             effectsByHash[hash] = effectDecl
                         }
                     }
 
-                    // Also add as a binding for name resolution
                     bindings[localName] = ImportedBinding(
                         name = localName,
                         originalName = export.originalName,
@@ -519,11 +382,6 @@ class ImportResolver(
             }
         }
 
-        // CRITICAL: Auto-import type declarations for types referenced by imported values.
-        // When a user imports `default_http_config` which has type `HttpConfig`, they need
-        // the HttpConfig type declaration available for spread operations and type inference.
-        // This extracts TypeApplication constructors from all imported binding types.
-        //
         // #183 follow-up: also collect from inherent impl method types. When the
         // user imports `client` from std::effects::http but doesn't explicitly
         // import `Request`, a chain like `client {}.get { path }.headers` needs
@@ -535,10 +393,6 @@ class ImportResolver(
             for ((_, binding) in bindings) {
                 collectTypeApplicationConstructors(binding.type, referencedTypes)
             }
-            // Also walk every impl op's annotated types AND the impl's
-            // target — names that may not be in the user's explicit
-            // imports. The harvest path picks impl methodTypes from
-            // these annotations / from the typed lambda's return.
             for ((_, implDecl) in module.index.abilityImplsByHash) {
                 for (targetAnn in implDecl.targetTypes) {
                     collectTypeAnnotationConstructors(targetAnn, referencedTypes)
@@ -557,24 +411,15 @@ class ImportResolver(
             }
         }
 
-        // CRITICAL: Extract ALL impl declarations and ability impls from the module
-        // These are always imported along with their effects/abilities
-        // O(1) via index instead of O(N) filterIsInstance scans
         if (module != null) {
-            // Use index for O(1) access to all impl declarations (effect handlers)
-            // For module imports (isQualified=true), also add under qualified names
-            // so that `perform log::Console` resolves correctly
             for ((performerName, perf) in module.index.performersByName) {
                 impls[performerName] = perf
                 if (isQualified && alias != null) {
-                    // Use BindingKey for qualified performer lookup
                     val qualifiedKey = BindingKey.qualified(alias, performerName)
                     impls[qualifiedKey.toKeyString()] = perf
                 }
             }
 
-            // Import all ability implementations — always keyed by content hash.
-            // ProgramIndex.build computes hashes on-demand for unhashed impls.
             abilityImpls.putAll(module.index.abilityImplsByHash)
         }
 
@@ -591,41 +436,30 @@ class ImportResolver(
         )
     }
 
-    /**
-     * Build import context from selective imports.
-     *
-     * Used for selective path imports (use module::{foo, bar}).
-     */
     private fun buildContextFromSelectiveImports(
         exports: Map<String, ExportedItem>,
         modulePath: String,
         items: List<ImportItem>
     ): ModuleImportContext {
         val bindings = mutableMapOf<String, ImportedBinding>()
-        val types = mutableMapOf<String, com.mezze.language.parsedast.ParsedTypeDecl>()
-        // Subset of `types` keys that the USER explicitly listed in a `use` clause
-        // (vs. auto-imported because some imported binding referenced them).
+        val types = mutableMapOf<String, ParsedTypeDecl>()
         // Used by the structural-alias check (#148) to decide whether a type name
         // acts as a nominal wall.
         val explicitTypeNames = mutableSetOf<String>()
-        val abilities = mutableMapOf<String, com.mezze.language.parsedast.ParsedAbilityDecl>()
-        val effects = mutableMapOf<String, com.mezze.language.parsedast.ParsedEffectDecl>()
-        val impls = mutableMapOf<String, com.mezze.language.parsedast.ParsedPerformerDecl>()
-        val abilityImpls = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedImplAbilityDecl>()
-        // Content-hash indexed maps for O(1) lookup
-        val effectsByHash = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedEffectDecl>()
-        val abilitiesByHash = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedAbilityDecl>()
+        val abilities = mutableMapOf<String, ParsedAbilityDecl>()
+        val effects = mutableMapOf<String, ParsedEffectDecl>()
+        val impls = mutableMapOf<String, ParsedPerformerDecl>()
+        val abilityImpls = mutableMapOf<Hash, ParsedImplAbilityDecl>()
+        val effectsByHash = mutableMapOf<Hash, ParsedEffectDecl>()
+        val abilitiesByHash = mutableMapOf<Hash, ParsedAbilityDecl>()
 
-        // Get the loaded module to access its declarations
         val module = loader.getModule(modulePath)
 
         for (item in items) {
             val export = exports[item.name] ?: continue
 
-            // Determine the local name (use alias if provided)
             val localName = item.alias ?: item.name
 
-            // Add to appropriate category based on export type
             when (export.type) {
                 ExportedItemType.FUNCTION, ExportedItemType.CONSTRUCTOR -> {
                     bindings[localName] = ImportedBinding(
@@ -633,13 +467,9 @@ class ImportResolver(
                         originalName = export.originalName,
                         modulePath = modulePath,
                         type = export.mezzeType,
-                        isQualified = false,  // Selective imports are unqualified
+                        isQualified = false,
                         contentHash = export.contentHash
                     )
-                    // CRITICAL: When a CONSTRUCTOR shares a name with a type declaration
-                    // (e.g., type Person = | Person { ... } |), also import the type declaration.
-                    // Without this, ability impl matching fails because the type isn't in
-                    // allTypeDeclarations and typeMatchesAnnotation can't resolve it.
                     if (export.type == ExportedItemType.CONSTRUCTOR) {
                         val typeDecl = module?.index?.typeDeclarations?.get(item.name)
                         if (typeDecl != null) {
@@ -650,86 +480,60 @@ class ImportResolver(
                     }
                 }
                 ExportedItemType.TYPE -> {
-                    // O(1) lookup via module index
                     val typeDecl = module?.index?.typeDeclarations?.get(item.name)
                     if (typeDecl != null) {
                         types[localName] = typeDecl
                         // Explicit `use foo::{TypeName}` (#148)
                         explicitTypeNames.add(localName)
                     }
-                    // Note: Types are NOT added to bindings because they don't have runtime values.
-                    // Type imports are compile-time only (used by typechecker, not interpreter).
-                    // If we added them to bindings, the interpreter would try to look up a
-                    // non-existent value by content hash.
                 }
                 ExportedItemType.ABILITY -> {
-                    // O(1) lookup via module index
                     val abilityDecl = module?.index?.abilityDeclarations?.get(item.name)
                     if (abilityDecl != null) {
                         abilities[localName] = abilityDecl
-                        // Also store by content hash for O(1) lookup
                         abilityDecl.contentHash?.let { hash ->
                             abilitiesByHash[hash] = abilityDecl
                         }
                     }
-                    // Note: Abilities are NOT added to bindings because they don't have runtime values.
-                    // Ability imports are compile-time only (used by typechecker, not interpreter).
                 }
                 ExportedItemType.EFFECT -> {
-                    // O(1) lookup via module index
                     val effectDecl = module?.index?.effectDeclarations?.get(item.name)
                     if (effectDecl != null) {
                         effects[localName] = effectDecl
-                        // Also store by content hash for O(1) lookup
                         effectDecl.contentHash?.let { hash ->
                             effectsByHash[hash] = effectDecl
                         }
                     }
-                    // Note: Effects are NOT added to bindings because they don't have runtime values.
-                    // Effect imports are compile-time only (used by typechecker, not interpreter).
                 }
             }
         }
 
-        // CRITICAL: Also extract performer and ability impl declarations for the imported items
-        // These are needed to build the performerToEffect mapping
-        // All lookups via O(1) index instead of O(N) filterIsInstance scans
         if (module != null) {
             val index = module.index
 
-            // Extract performer declarations for imported effects
-            // (Handlers are associated with effects, not exported separately)
             for (item in items) {
-                // O(1) check if this is an effect import
                 val effectDecl = index.effectDeclarations[item.name]
 
                 if (effectDecl != null) {
-                    // O(1) lookup of all performer declarations for this effect
                     val effectPerformers = index.performersByEffect[effectDecl.name] ?: emptyList()
 
-                    // Add each performer with a unique key (performerName)
                     for (perf in effectPerformers) {
                         impls[perf.performerName] = perf
                     }
                 }
 
-                // O(1) check if this is a direct performer import (e.g., Console)
                 val performerImpl = index.performersByName[item.name]
                 if (performerImpl != null && !impls.containsKey(item.name)) {
                     impls[item.name] = performerImpl
                 }
             }
 
-            // Extract ability impl declarations for imported abilities
             for (item in items) {
-                // O(1) check if this is an ability import
                 val abilityDecl = index.abilityDeclarations[item.name]
 
                 if (abilityDecl != null) {
-                    // O(1) lookup of all impl declarations for this ability
                     val abilityImplsList = index.abilityImplsByAbility[abilityDecl.name] ?: emptyList()
 
-                    // Add each impl keyed by content hash
                     for (abilityImpl in abilityImplsList) {
                         val implKey = abilityImpl.contentHash
                             ?: throw IllegalStateException(
@@ -740,17 +544,8 @@ class ImportResolver(
                 }
             }
 
-            // ALSO import all ability impls from the module, even if the ability
-            // is defined elsewhere. This allows impls to be defined in separate
-            // modules from their abilities (e.g., Show in abilities/show.mz,
-            // impl Show for Int in impls/show_impls.mz).
-            // O(1) access via index instead of filterIsInstance scan
             abilityImpls.putAll(index.abilityImplsByHash)
 
-            // CRITICAL: Auto-import type declarations for types referenced by imported values.
-            // When a user imports `default_http_config` which has type `HttpConfig`, they need
-            // the HttpConfig type declaration available for spread operations and type inference.
-            //
             // #183 follow-up: also collect from inherent impl op annotations
             // (param + return + impl target) so chain expressions like
             // `client {}.get { path }.headers` can expand `Request` even
@@ -790,50 +585,28 @@ class ImportResolver(
         )
     }
 
-    // ========================================================================
-    // HELPER FUNCTIONS
-    // ========================================================================
-
-    /**
-     * Check if an item exists in the module but is not public (not exported).
-     *
-     * This helps provide better error messages when a user tries to import
-     * something that exists but hasn't been marked with `pub`.
-     */
     private fun checkIfItemExistsButPrivate(module: LoadedModule, itemName: String): Boolean {
         val index = module.index
 
-        // Check let bindings (functions/values)
         index.letBindings[itemName]?.let { binding ->
-            // Found it - it exists but wasn't exported (otherwise it would be in exports)
-            return binding.visibility != com.mezze.language.parsedast.Visibility.PUBLIC
+            return binding.visibility != Visibility.PUBLIC
         }
 
-        // Check type declarations
         index.typeDeclarations[itemName]?.let { typeDecl ->
-            return typeDecl.visibility != com.mezze.language.parsedast.Visibility.PUBLIC
+            return typeDecl.visibility != Visibility.PUBLIC
         }
 
-        // Check ability declarations (abilities are always public, so if it's here but not exported, something is wrong)
         if (index.abilityDeclarations.containsKey(itemName)) {
-            return false  // Abilities are always public
+            return false
         }
 
-        // Check effect declarations (effects are always public)
         if (index.effectDeclarations.containsKey(itemName)) {
-            return false  // Effects are always public
+            return false
         }
 
-        // Item not found at all
         return false
     }
 
-    /**
-     * Recursively collect all TypeApplication constructor names from a MezzeType.
-     *
-     * This is used to auto-import type declarations for types referenced by imported values.
-     * For example, if a value has type `Result HttpConfig Error`, we collect "Result", "HttpConfig", "Error".
-     */
     private fun collectTypeApplicationConstructors(type: MezzeType?, result: MutableSet<String>) {
         when (type) {
             null -> {}
@@ -875,12 +648,10 @@ class ImportResolver(
                 collectTypeApplicationConstructors(type.valueType, result)
             }
             is MezzeType.EffectRow -> {
-                // Effect rows don't contain type applications
             }
             is MezzeType.NewtypeType -> {
                 collectTypeApplicationConstructors(type.wrappedType, result)
             }
-            // Simple types that don't contain other types
             is MezzeType.VarType,
             is MezzeType.IntType,
             is MezzeType.NatType,
@@ -895,55 +666,39 @@ class ImportResolver(
         }
     }
 
-    /**
-     * Walk a ParsedTypeAnnotation and collect every named-type constructor.
-     * Used to surface type names referenced by impl op annotations so the
-     * importer can auto-import them. Without this, a chain like
-     * `client {}.get { path }.headers` fails with "Cannot expand type
-     * application Request" because Request isn't in the user's
-     * `typeDeclarations` at solve time.
-     */
     private fun collectTypeAnnotationConstructors(
-        ann: com.mezze.language.parsedast.ParsedTypeAnnotation?,
+        ann: ParsedTypeAnnotation?,
         result: MutableSet<String>
     ) {
         when (ann) {
             null -> {}
-            is com.mezze.language.parsedast.ParsedNamedType -> {
-                // Skip lowercase (type variable) names.
+            is ParsedNamedType -> {
                 if (ann.name.isNotEmpty() && ann.name[0].isUpperCase()) result.add(ann.name)
             }
-            is com.mezze.language.parsedast.ParsedQualifiedType -> {
+            is ParsedQualifiedType -> {
                 result.add(ann.typeName)
                 ann.args.forEach { collectTypeAnnotationConstructors(it, result) }
             }
-            is com.mezze.language.parsedast.ParsedTypeApp -> {
+            is ParsedTypeApp -> {
                 if (ann.constructor.isNotEmpty() && ann.constructor[0].isUpperCase()) result.add(ann.constructor)
                 ann.args.forEach { collectTypeAnnotationConstructors(it, result) }
             }
-            is com.mezze.language.parsedast.ParsedRecordType -> {
+            is ParsedRecordType -> {
                 ann.entries.forEach { collectTypeAnnotationConstructors(it.type, result) }
             }
-            is com.mezze.language.parsedast.ParsedVariantType -> {
+            is ParsedVariantType -> {
                 ann.constructors.forEach { collectTypeAnnotationConstructors(it.dataType, result) }
             }
-            is com.mezze.language.parsedast.ParsedFunctionType -> {
+            is ParsedFunctionType -> {
                 collectTypeAnnotationConstructors(ann.paramType, result)
                 collectTypeAnnotationConstructors(ann.returnType, result)
             }
-            is com.mezze.language.parsedast.ParsedSeqType -> {
+            is ParsedSeqType -> {
                 collectTypeAnnotationConstructors(ann.elementType, result)
             }
         }
     }
 
-    // ========================================================================
-    // INTERNAL RESULT TYPE
-    // ========================================================================
-
-    /**
-     * Internal result type for processing a single import.
-     */
     private sealed class ProcessResult {
         data class Success(
             val context: ModuleImportContext,
@@ -955,28 +710,15 @@ class ImportResolver(
         ) : ProcessResult()
     }
 
-    /**
-     * Pull (implContentHash → opName → returnType) out of a typechecked
-     * module, restricted to inherent impls (those whose abilityHash is
-     * Hash.ZERO — see TypedAstBuilder.buildAbilityImpl). The returned map
-     * lets ContextBuilder reuse the home module's solved return type when
-     * registering the impl across the module boundary, instead of giving
-     * each operation a fresh unbound TypeVar.
-     */
     private fun harvestInherentImplOpReturnTypes(
-        v2Module: com.mezze.language.typedast.TypedModule,
+        v2Module: TypedAstModule,
         exports: Map<String, ExportedItem>
-    ): Map<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>> {
-        val result = mutableMapOf<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>>()
+    ): Map<Hash, Map<String, MezzeType>> {
+        val result = mutableMapOf<Hash, Map<String, MezzeType>>()
         for (impl in v2Module.abilityImpls) {
-            // Inherent impls use abilityHash = Hash.ZERO.
-            if (impl.abilityHash != com.mezze.language.typedast.Hash.ZERO) continue
-            val opMap = mutableMapOf<String, com.mezze.language.ast.MezzeType>()
+            if (impl.abilityHash != Hash.ZERO) continue
+            val opMap = mutableMapOf<String, MezzeType>()
             for ((opName, opExpr) in impl.operations) {
-                // Use the impl op's BODY type as the source of truth — it's
-                // the actual return type at the call site. Previously we
-                // preferred a same-named exported binding's signature
-                // (`length` op → `pub let length = ...` export), which
                 // helped for thin-wrapper impls that #215 strips, but
                 // silently corrupted Stage B's chainable HTTP: `Client.get`
                 // returns a Request record, while the exported `pub let get`
@@ -984,33 +726,28 @@ class ImportResolver(
                 // typed `c.get { path }` as `Result …`, and the follow-up
                 // `.send {}` reported "Result vs Request". Effects have the
                 // same warning (#181); apply it to return types too.
-                val bodyReturnType: com.mezze.language.ast.MezzeType =
-                    if (opExpr is com.mezze.language.typedast.TypedLambda) {
+                val bodyReturnType: MezzeType =
+                    if (opExpr is TypedLambda) {
                         opExpr.body.type
                     } else when (val t = opExpr.type) {
-                        is com.mezze.language.ast.MezzeType.FunctionType -> t.returnType
+                        is MezzeType.FunctionType -> t.returnType
                         else -> t
                     }
 
-                // Fall back to a same-named export's return type ONLY when
-                // the body type is itself a bare TypeVar — that's the
                 // #215 case where TypedAstBuilder dropped polymorphic args
                 // and the export is the only place the full signature
                 // survives. Concrete record / variant / nominal body types
                 // always win.
                 val exportedFn = exports[opName]
-                val exportReturnType = (exportedFn?.mezzeType as? com.mezze.language.ast.MezzeType.FunctionType)?.returnType
+                val exportReturnType = (exportedFn?.mezzeType as? MezzeType.FunctionType)?.returnType
 
-                val rawReturnType = if (bodyReturnType is com.mezze.language.ast.MezzeType.VarType && exportReturnType != null) {
+                val rawReturnType = if (bodyReturnType is MezzeType.VarType && exportReturnType != null) {
                     exportReturnType
                 } else {
                     bodyReturnType
                 }
 
-                // Skip placeholder TypeVars that are not informative (e.g. "ret",
-                // "op_*"). Only keep concrete types or quote-prefixed type vars
-                // that have actual meaning (like 'a in a generic impl).
-                val isPlaceholder = rawReturnType is com.mezze.language.ast.MezzeType.VarType &&
+                val isPlaceholder = rawReturnType is MezzeType.VarType &&
                     !rawReturnType.variable.name.startsWith("'")
                 if (isPlaceholder) continue
 
@@ -1040,14 +777,14 @@ class ImportResolver(
      * impl's own TypedLambda.
      */
     private fun harvestInherentImplOpEffects(
-        v2Module: com.mezze.language.typedast.TypedModule
-    ): Map<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType.EffectRow>> {
-        val result = mutableMapOf<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType.EffectRow>>()
+        v2Module: TypedAstModule
+    ): Map<Hash, Map<String, MezzeType.EffectRow>> {
+        val result = mutableMapOf<Hash, Map<String, MezzeType.EffectRow>>()
         for (impl in v2Module.abilityImpls) {
-            if (impl.abilityHash != com.mezze.language.typedast.Hash.ZERO) continue
-            val opMap = mutableMapOf<String, com.mezze.language.ast.MezzeType.EffectRow>()
+            if (impl.abilityHash != Hash.ZERO) continue
+            val opMap = mutableMapOf<String, MezzeType.EffectRow>()
             for ((opName, opExpr) in impl.operations) {
-                val effects = (opExpr.type as? com.mezze.language.ast.MezzeType.FunctionType)?.effects
+                val effects = (opExpr.type as? MezzeType.FunctionType)?.effects
                 if (effects != null) {
                     opMap[opName] = effects
                 }
@@ -1074,36 +811,29 @@ class ImportResolver(
      * the body's stored type).
      */
     private fun harvestInherentImplOpParamTypes(
-        v2Module: com.mezze.language.typedast.TypedModule,
+        v2Module: TypedAstModule,
         exports: Map<String, ExportedItem>
-    ): Map<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>> {
-        val result = mutableMapOf<com.mezze.language.typedast.Hash, Map<String, com.mezze.language.ast.MezzeType>>()
+    ): Map<Hash, Map<String, MezzeType>> {
+        val result = mutableMapOf<Hash, Map<String, MezzeType>>()
         for (impl in v2Module.abilityImpls) {
-            // Inherent impls use abilityHash = Hash.ZERO.
-            if (impl.abilityHash != com.mezze.language.typedast.Hash.ZERO) continue
-            val opMap = mutableMapOf<String, com.mezze.language.ast.MezzeType>()
+            if (impl.abilityHash != Hash.ZERO) continue
+            val opMap = mutableMapOf<String, MezzeType>()
             for ((opName, opExpr) in impl.operations) {
-                // Use the impl op's body shape — its params are the
-                // ones the call-site sees.
-                val rawParamType: com.mezze.language.ast.MezzeType =
-                    if (opExpr is com.mezze.language.typedast.TypedLambda) {
-                        com.mezze.language.ast.MezzeType.RecordType(
+                val rawParamType: MezzeType =
+                    if (opExpr is TypedLambda) {
+                        MezzeType.RecordType(
                             fields = opExpr.params.associate { it.name to it.type },
                             rowVar = null
                         )
                     } else when (val t = opExpr.type) {
-                        is com.mezze.language.ast.MezzeType.FunctionType -> t.paramType
+                        is MezzeType.FunctionType -> t.paramType
                         else -> continue
                     }
 
-                // Skip when the harvested record is *all* uninformative
-                // TypeVars — gives the importer nothing better than what it
-                // would synthesize itself, and risks crashing the alignment
-                // pass with cross-instance var identity.
-                val record = rawParamType as? com.mezze.language.ast.MezzeType.RecordType
+                val record = rawParamType as? MezzeType.RecordType
                 if (record != null) {
                     val anyInformative = record.fields.values.any { v ->
-                        v !is com.mezze.language.ast.MezzeType.VarType ||
+                        v !is MezzeType.VarType ||
                             v.variable.name.startsWith("'")
                     }
                     if (!anyInformative) continue

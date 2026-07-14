@@ -6,20 +6,14 @@ import com.mezze.language.ast.SyntaxMetadata
 
 import com.mezze.language.parser.internal.lib.*
 
-/**
- * Lookahead function to check if there's an arrow after the closing brace.
- * This is the explicit disambiguation mechanism between lambdas and record literals.
- */
 internal fun MezzeParser.lookAheadForArrowAfterBrace(stream: TokenStream): Boolean {
     var pos = stream.position
     val tokens = stream.tokens
 
     if (pos >= tokens.size || tokens[pos].type != TokenType.LBRACE) return false
-    pos++  // Skip LBRACE
-
+    pos++
     var braceDepth = 1
 
-    // Find matching RBRACE
     while (pos < tokens.size && braceDepth > 0) {
         when (tokens[pos].type) {
             TokenType.LBRACE -> braceDepth++
@@ -30,13 +24,11 @@ internal fun MezzeParser.lookAheadForArrowAfterBrace(stream: TokenStream): Boole
         pos++
     }
 
-    // Now pos is after RBRACE, check if next non-newline token is ARROW
     while (pos < tokens.size && tokens[pos].type == TokenType.NEWLINE) {
         pos++
     }
 
     val result = pos < tokens.size && tokens[pos].type == TokenType.ARROW
-    // Debug logging
     if (System.getProperty("parser.debug") == "true") {
         println("[lookAheadForArrowAfterBrace] Looking at position ${stream.position}, found arrow: $result")
     }
@@ -55,14 +47,9 @@ internal fun MezzeParser.lookAheadForArrowAfterBrace(stream: TokenStream): Boole
  */
 internal val MezzeParser.ifLetBindingExpression: Parser<ParsedExpr>
     get() = { stream ->
-        // Parse using the special postfix that doesn't use arrow lookahead
         ifLetPostfixExpression(stream)
     }
 
-/**
- * Postfix expression parser for if-let contexts.
- * Always treats {..} after an identifier as function arguments, never as lambda.
- */
 internal val MezzeParser.ifLetPostfixExpression: Parser<ParsedExpr>
     get() = { stream ->
         var result: ParseResult<ParsedExpr> = primaryExpression(stream)
@@ -73,14 +60,12 @@ internal val MezzeParser.ifLetPostfixExpression: Parser<ParsedExpr>
 
             when (token?.type) {
                 TokenType.LBRACE -> {
-                    // In if-let context: always treat as function call/variant, never lambda
                     val args = recordLiteral(currentStream)
                     result = when (args) {
                         is ParseResult.Success -> {
                             val expr = result.value
                             when {
                                 expr is ParsedVariantConstruct && expr.value == null -> {
-                                    // Variant construction: Some {val = 42}
                                     ParseResult.Success(
                                         ParsedVariantConstruct(
                                             constructor = expr.constructor,
@@ -97,7 +82,6 @@ internal val MezzeParser.ifLetPostfixExpression: Parser<ParsedExpr>
                                     )
                                 }
                                 expr is ParsedIdentifier && expr.localName.firstOrNull()?.isUpperCase() == true -> {
-                                    // Variant construction: Some {val = 42}
                                     ParseResult.Success(
                                         ParsedVariantConstruct(
                                             constructor = expr.localName,
@@ -108,7 +92,6 @@ internal val MezzeParser.ifLetPostfixExpression: Parser<ParsedExpr>
                                     )
                                 }
                                 else -> {
-                                    // Regular function call: f {x = 1}
                                     ParseResult.Success(
                                         ParsedFunctionCall(
                                             result.value,
@@ -124,7 +107,6 @@ internal val MezzeParser.ifLetPostfixExpression: Parser<ParsedExpr>
                     }
                 }
                 TokenType.DOT -> {
-                    // Member access: obj.field
                     val dotStream = currentStream.advance()
                     val member = memberIdentifierParser(dotStream)
                     result = when (member) {
@@ -149,27 +131,16 @@ internal val MezzeParser.ifLetPostfixExpression: Parser<ParsedExpr>
         result
     }
 
-/**
- * Lambda or record expression parser.
- * This is the key to solving the ambiguity!
- *
- * We explicitly check for ARROW after RBRACE to distinguish:
- * - {x} -> body  (lambda)
- * - {x}          (record literal with punning)
- */
 internal val MezzeParser.lambdaOrRecordExpression: Parser<ParsedExpr>
     get() = { stream ->
         if (stream.current()?.type != TokenType.LBRACE) {
             stream.failure("Expected '{' to start a lambda or record literal, but got ${tokenGotDescription(stream.current())}")
         } else {
-            // Look ahead to find the matching RBRACE and check if there's an ARROW after it
             val hasArrowAfterBrace = lookAheadForArrowAfterBrace(stream)
 
             if (hasArrowAfterBrace) {
-                // It's a lambda!
                 lambdaExpression(stream)
             } else {
-                // It's a record literal
                 recordLiteral(stream)
             }
         }
@@ -178,9 +149,7 @@ internal val MezzeParser.lambdaOrRecordExpression: Parser<ParsedExpr>
 
 internal val MezzeParser.lambdaExpression: Parser<ParsedExpr>
     get() = parser@{ stream ->
-        // Parse {params} -> body
 
-        // Parse opening brace
         when (val lbrace = tok(TokenType.LBRACE)(stream)) {
             is ParseResult.Failure -> return@parser lbrace
             is ParseResult.Success -> {
@@ -188,21 +157,17 @@ internal val MezzeParser.lambdaExpression: Parser<ParsedExpr>
                 val lbraceTok = lbrace.value
                 val stream1 = skipNewlines(lbrace.remaining)
 
-                // Parse parameters - could be typed or untyped
                 when (val paramsResult = lambdaParameters(stream1)) {
                     is ParseResult.Failure -> return@parser paramsResult
                     is ParseResult.Success -> {
-                        // Parse closing brace
                         val stream2 = skipNewlines(paramsResult.remaining)
                         when (val rbrace = tok(TokenType.RBRACE)(stream2)) {
                             is ParseResult.Failure -> return@parser rbrace
                             is ParseResult.Success -> {
-                                // Parse arrow
                                 val stream3 = skipNewlines(rbrace.remaining)
                                 when (val arrow = tok(TokenType.ARROW)(stream3)) {
                                     is ParseResult.Failure -> return@parser arrow
                                     is ParseResult.Success -> {
-                                        // Parse body
                                         val stream4 = skipNewlines(arrow.remaining)
 
                                         // Targeted error: lambda body cannot be a `let`.
@@ -251,7 +216,6 @@ internal val MezzeParser.lambdaExpression: Parser<ParsedExpr>
                                             val firstChar = nextTok.text.firstOrNull()
                                             val isTypeName = firstChar != null && firstChar.isUpperCase()
                                             if (isTypeName) {
-                                                // Consume the head type ident plus any same-line
                                                 // identifier args (e.g. `List Int`, `Result Int Str`).
                                                 // Stop at newline, `do`, or anything that isn't an ident.
                                                 var scan = stream4.advance()
@@ -311,7 +275,6 @@ internal val MezzeParser.lambdaExpression: Parser<ParsedExpr>
 
 internal val MezzeParser.lambdaParameters: Parser<ParsedLambdaParams>
     get() = { stream ->
-        // Try typed parameters first (they have colons)
         val typedResult = typedLambdaParams(stream)
         when (typedResult) {
             is ParseResult.Success -> typedResult
@@ -319,8 +282,6 @@ internal val MezzeParser.lambdaParameters: Parser<ParsedLambdaParams>
         }
     }
 
-// Parser for a single lambda parameter entry with optional type annotation
-// Accepts: x, x: Int, x: String, etc.
 internal val MezzeParser.lambdaParameterEntry: Parser<Pair<String, ParsedTypeAnnotation?>>
     get() = { stream ->
         val ident = identifierParser(stream)
@@ -328,7 +289,6 @@ internal val MezzeParser.lambdaParameterEntry: Parser<Pair<String, ParsedTypeAnn
             is ParseResult.Success -> {
                 val paramName = ident.value.text
 
-                // Check for reserved names
                 val reservedError = checkReservedName(paramName)
                 if (reservedError != null) {
                     // Use remaining position so this error "wins" over earlier failures,
@@ -342,9 +302,7 @@ internal val MezzeParser.lambdaParameterEntry: Parser<Pair<String, ParsedTypeAnn
                 } else {
                     val stream1 = ident.remaining
 
-                    // Check if there's a colon (type annotation)
                     if (stream1.current()?.type == TokenType.COLON) {
-                        // Parse type annotation
                         val colon = tok(TokenType.COLON)(stream1)
                         when (colon) {
                             is ParseResult.Success -> {
@@ -362,7 +320,6 @@ internal val MezzeParser.lambdaParameterEntry: Parser<Pair<String, ParsedTypeAnn
                             is ParseResult.Failure -> colon
                         }
                     } else {
-                        // No type annotation - this is an untyped parameter
                         ParseResult.Success(Pair(paramName, null), stream1)
                     }
                 }
@@ -380,21 +337,16 @@ internal val MezzeParser.typedLambdaParams: Parser<ParsedLambdaParams>
             is ParseResult.Success -> {
                 val entryList = entries.value
                 if (entryList.isEmpty()) {
-                    // No parameters found
                     stream.failure("Expected at least one parameter in lambda. Use {x} -> expr or {x: Type} -> expr")
                 } else {
-                    // Check if at least one parameter has a type annotation
                     val hasTypedParam = entryList.any { it.second != null }
                     if (hasTypedParam) {
                         val file = currentFile ?: "<unknown>"
-                        // Convert to ParsedRecordTypeEntry list, generating inferred type annotations for untyped params
                         val recordEntries = entryList.map { (name, typeAnnotation) ->
                             val finalType: ParsedTypeAnnotation = typeAnnotation ?: run {
-                                // For untyped params in a typed context, generate a type var like 'name
                                 val loc = streamLoc(entries.remaining, file)
                                 ParsedNamedType("'${name}", loc)
                             }
-                            // We need a loc for the entry — use a dummy loc from the stream
                             val loc = streamLoc(entries.remaining, file)
                             ParsedRecordTypeEntry(name, finalType, loc)
                         }
@@ -417,7 +369,6 @@ internal val MezzeParser.untypedLambdaParams: Parser<ParsedLambdaParams>
             is ParseResult.Success -> {
                 val tokens = params.value
 
-                // Check for reserved names in parameter names
                 for (token in tokens) {
                     val reservedError = checkReservedName(token.text)
                     if (reservedError != null) {
@@ -435,14 +386,12 @@ internal val MezzeParser.untypedLambdaParams: Parser<ParsedLambdaParams>
                 val nameLocs = tokens.map { tokenLoc(it, file) }
                 val stream1 = params.remaining
 
-                // Check for optional comma before ellipsis (same logic as recordPatternParser)
                 val afterComma = if (stream1.current()?.type == TokenType.COMMA) {
                     skipNewlines(stream1.advance())
                 } else {
                     stream1
                 }
 
-                // Check for ellipsis (open record marker: ...)
                 val isOpen = afterComma.current()?.type == TokenType.ELLIPSIS
 
                 val stream2 = if (isOpen) {
@@ -461,7 +410,6 @@ internal val MezzeParser.untypedLambdaParams: Parser<ParsedLambdaParams>
 internal val MezzeParser.recordLiteral: Parser<ParsedExpr>
     get() = { stream ->
         // {x = 1, y = 2} or {x, y} (punning) or {...rest} or {x = 1, ...} (anonymous open record)
-        // Supports multiline with newlines between entries
         val lbrace = tok(TokenType.LBRACE)(stream)
         when (lbrace) {
             is ParseResult.Success -> {
@@ -469,7 +417,6 @@ internal val MezzeParser.recordLiteral: Parser<ParsedExpr>
                 val recordStartToken = lbrace.value
                 val stream1 = skipNewlines(lbrace.remaining)
 
-                // Use custom sepEndBy that skips newlines after commas and allows trailing commas
                 val entries = sepEndByWithNewlines(
                     recordLiteralEntryParser,
                     tok(TokenType.COMMA)
@@ -479,8 +426,6 @@ internal val MezzeParser.recordLiteral: Parser<ParsedExpr>
                     is ParseResult.Success -> {
                         val stream2 = skipNewlines(entries.remaining)
 
-                        // Check for trailing ellipsis: {x = 1, ...}
-                        // Note: sepEndBy already consumed any trailing comma
                         var streamAfterEllipsis = stream2
 
                         val ellipsisCheck = tok(TokenType.ELLIPSIS)(stream2)
@@ -510,12 +455,10 @@ internal val MezzeParser.recordLiteral: Parser<ParsedExpr>
 
 internal val MezzeParser.recordLiteralEntryParser: Parser<ParsedRecordEntry>
     get() = { stream ->
-        // ... (spread), x = value, or x (punning)
         val current = stream.current()
         val file = currentFile ?: "<unknown>"
 
         if (current?.type == TokenType.ELLIPSIS) {
-            // Spread syntax
             val ellipsis = tok(TokenType.ELLIPSIS)(stream)
             when (ellipsis) {
                 is ParseResult.Success -> {
@@ -535,18 +478,15 @@ internal val MezzeParser.recordLiteralEntryParser: Parser<ParsedRecordEntry>
                 is ParseResult.Failure -> ellipsis
             }
         } else {
-            // x = value or x (punning)
             val ident = identifierParser(stream)
             when (ident) {
                 is ParseResult.Success -> {
                     val stream1 = ident.remaining
                     val fieldToken = ident.value
 
-                    // Check for ASSIGN
                     val assign = tok(TokenType.ASSIGN)(stream1)
                     when (assign) {
                         is ParseResult.Success -> {
-                            // x = value
                             val expr = expression(assign.remaining)
                             when (expr) {
                                 is ParseResult.Success -> {
@@ -560,7 +500,6 @@ internal val MezzeParser.recordLiteralEntryParser: Parser<ParsedRecordEntry>
                             }
                         }
                         is ParseResult.Failure -> {
-                            // Punning: x means {x} with value = null
                             val loc = tokenLoc(fieldToken, file)
                             ParseResult.Success(
                                 ParsedRecordEntry.Field(ident.value.text, null, loc),
@@ -577,7 +516,6 @@ internal val MezzeParser.recordLiteralEntryParser: Parser<ParsedRecordEntry>
 
 internal val MezzeParser.arrayLiteral: Parser<ParsedExpr>
     get() = { stream ->
-        // Parse: [element1, element2, ...]
         // Supports spread only at the start: [...xs, a, b, c]
         // NOT allowed: [a, ...xs] or [a, ...xs, b]
         val file = currentFile ?: "<unknown>"
@@ -592,7 +530,6 @@ internal val MezzeParser.arrayLiteral: Parser<ParsedExpr>
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(lbracket.remaining)
 
-                // Check for empty seq []
                 val rbracket = tok(TokenType.RBRACKET)(stream1)
                 if (rbracket is ParseResult.Success) {
                     val loc = spanLoc(lbracket.value, rbracket.value, file)
@@ -601,7 +538,6 @@ internal val MezzeParser.arrayLiteral: Parser<ParsedExpr>
                         rbracket.remaining
                     )
                 } else {
-                    // Parse elements separated by commas (with optional trailing comma)
                     val elements = sepEndByWithNewlines(
                         arrayElementParser,
                         tok(TokenType.COMMA)
@@ -637,11 +573,6 @@ internal val MezzeParser.arrayLiteral: Parser<ParsedExpr>
         }
     }
 
-/**
- * Validate that seq spread elements only appear at the beginning.
- * Valid: [...xs, a, b, c] or [...xs]
- * Invalid: [a, ...xs] or [a, ...xs, b]
- */
 private fun validateSeqSpreadPosition(elements: List<ParsedSeqElement>, loc: Loc, source: String?, file: String?) {
     var seenRegular = false
     for (element in elements) {
@@ -671,7 +602,6 @@ internal val MezzeParser.arrayElementParser: Parser<ParsedSeqElement>
         val file = currentFile ?: "<unknown>"
 
         if (current?.type == TokenType.ELLIPSIS) {
-            // Spread syntax: ...expr
             val ellipsis = tok(TokenType.ELLIPSIS)(stream)
             when (ellipsis) {
                 is ParseResult.Success -> {
@@ -691,7 +621,6 @@ internal val MezzeParser.arrayElementParser: Parser<ParsedSeqElement>
                 is ParseResult.Failure -> ellipsis
             }
         } else {
-            // Regular element
             val expr = expression(stream)
             when (expr) {
                 is ParseResult.Success -> ParseResult.Success(
@@ -706,7 +635,6 @@ internal val MezzeParser.arrayElementParser: Parser<ParsedSeqElement>
 
 internal val MezzeParser.primaryExpression: Parser<ParsedExpr>
     get() = { stream ->
-        // Check for common mistakes and provide helpful error messages
         val current = stream.current()
         val next = stream.peek(1)
 
@@ -716,7 +644,6 @@ internal val MezzeParser.primaryExpression: Parser<ParsedExpr>
                     "Cannot use 'let' here. To sequence multiple statements, wrap them in a 'do' block"
                 )
             }
-            // Check for () which is a common mistake from other languages
             current?.type == TokenType.LPAREN && next?.type == TokenType.RPAREN -> {
                 val afterParen = stream.advance(2)
                 val afterParenToken = afterParen.current()
@@ -754,35 +681,28 @@ internal val MezzeParser.primaryExpression: Parser<ParsedExpr>
 
 internal val MezzeParser.ifExpression: Parser<ParsedExpr>
     get() = parser@{ stream ->
-        // Parse: if <condition> then <thenBranch> else <elseBranch>
         val file = currentFile ?: "<unknown>"
 
-        // Parse 'if' keyword
         when (val ifToken = tok(TokenType.IF)(stream)) {
             is ParseResult.Failure -> return@parser ifToken
             is ParseResult.Success -> {
                 val ifTok = ifToken.value
-                // Parse condition
                 val stream1 = skipNewlines(ifToken.remaining)
                 when (val condition = expression(stream1)) {
                     is ParseResult.Failure -> return@parser condition
                     is ParseResult.Success -> {
-                        // Parse 'then' keyword
                         val stream2 = skipNewlines(condition.remaining)
                         when (val thenToken = tok(TokenType.THEN)(stream2)) {
                             is ParseResult.Failure -> return@parser thenToken
                             is ParseResult.Success -> {
-                                // Parse then branch
                                 val stream3 = skipNewlines(thenToken.remaining)
                                 when (val thenBranch = expression(stream3)) {
                                     is ParseResult.Failure -> return@parser thenBranch
                                     is ParseResult.Success -> {
-                                        // Parse 'else' keyword
                                         val stream4 = skipNewlines(thenBranch.remaining)
                                         when (val elseToken = tok(TokenType.ELSE)(stream4)) {
                                             is ParseResult.Failure -> return@parser elseToken
                                             is ParseResult.Success -> {
-                                                // Parse else branch
                                                 val stream5 = skipNewlines(elseToken.remaining)
                                                 when (val elseBranch = expression(stream5)) {
                                                     is ParseResult.Failure -> return@parser elseBranch
@@ -810,10 +730,6 @@ internal val MezzeParser.ifExpression: Parser<ParsedExpr>
 
 
 
-/**
- * Parses a qualified reference like "module::Name" or just "Name".
- * Returns a ParsedQualifiedRef with structured qualifier and localName.
- */
 internal fun MezzeParser.parseQualifiedRef(stream: TokenStream): ParseResult<ParsedQualifiedRef> {
     val file = currentFile ?: "<unknown>"
     val firstId = identifierParser(stream)
@@ -823,7 +739,6 @@ internal fun MezzeParser.parseQualifiedRef(stream: TokenStream): ParseResult<Par
             val segments = mutableListOf(firstId.value.text)
             var currentStream = firstId.remaining
 
-            // Consume ::identifier sequences to build qualified name
             while (true) {
                 val doubleColon = tok(TokenType.DOUBLE_COLON)(currentStream)
                 if (doubleColon is ParseResult.Success) {
@@ -859,7 +774,6 @@ internal fun MezzeParser.parseQualifiedRef(stream: TokenStream): ParseResult<Par
 
 internal val MezzeParser.performExpression: Parser<ParsedExpr>
     get() = { stream ->
-        // Parse two forms:
         // 1. perform operation {args} - simple effect call
         // 2. perform Handler1, Handler2 in expression - perform with handlers
         val file = currentFile ?: "<unknown>"
@@ -869,7 +783,6 @@ internal val MezzeParser.performExpression: Parser<ParsedExpr>
                 val performTok = performToken.value
                 val stream1 = skipNewlines(performToken.remaining)
 
-                // Parse first handler/operation reference (can be qualified, e.g., log::Console)
                 val firstRef = parseQualifiedRef(stream1)
                 when (firstRef) {
                     is ParseResult.Success -> {
@@ -892,7 +805,6 @@ internal val MezzeParser.performExpression: Parser<ParsedExpr>
                             handlers.add(ParsedPerformHandler(firstQualifiedRef, firstParams))
                             var currentStream = streamAfterParams
 
-                            // Parse remaining handlers if there are commas
                             var errorResult: ParseResult.Failure? = null
                             while (errorResult == null) {
                                 val commaToken = tok(TokenType.COMMA)(currentStream)
@@ -905,7 +817,6 @@ internal val MezzeParser.performExpression: Parser<ParsedExpr>
                                                 val handlerRef = handlerRefResult.value
                                                 val stream4 = skipNewlines(handlerRefResult.remaining)
 
-                                                // Check for optional params
                                                 val paramsResult = recordLiteral(stream4)
                                                 val (params, stream5) = when (paramsResult) {
                                                     is ParseResult.Success -> Pair(paramsResult.value as? ParsedRecordLit, paramsResult.remaining)
@@ -925,7 +836,6 @@ internal val MezzeParser.performExpression: Parser<ParsedExpr>
                             if (errorResult != null) {
                                 errorResult
                             } else {
-                                // Parse 'in' keyword
                                 val inToken = tok(TokenType.IN)(currentStream)
                                 when (inToken) {
                                     is ParseResult.Success -> {
@@ -969,7 +879,6 @@ internal val MezzeParser.performExpression: Parser<ParsedExpr>
 
 internal val MezzeParser.doExpression: Parser<ParsedExpr>
     get() = { stream ->
-        // Parse: do <statement>* <result-expression>
         val file = currentFile ?: "<unknown>"
         val doToken = tok(TokenType.DO)(stream)
         when (doToken) {
@@ -977,7 +886,6 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                 val doTok = doToken.value
                 val stream1 = skipNewlines(doToken.remaining)
 
-                // Parse statements (let statements and expression statements) and final result expression
                 val statements = mutableListOf<ParsedStatement>()
                 var currentStream = stream1
                 var finalResult: Pair<ParsedExpr, TokenStream>? = null
@@ -1008,9 +916,7 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                 // Track the column of the first token in the do block to determine scope
                 val doBlockColumn = stream1.current()?.column
 
-                // Parse statements until we find the final result expression
                 while (finalResult == null) {
-                    // Check if we've left the do block scope (token at lower indentation)
                     val currentToken = currentStream.current()
                     if (currentToken != null && doBlockColumn != null && currentToken.column < doBlockColumn && currentToken.type != TokenType.EOF) {
                         break
@@ -1019,7 +925,6 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                     // Try to parse a let statement
                     val letToken = tok(TokenType.LET)(currentStream)
                     if (letToken is ParseResult.Success) {
-                        // Parse let statement with pattern support
                         val stream2 = skipNewlines(letToken.remaining)
                         val patternResult = letBindingPattern(stream2)
 
@@ -1030,7 +935,6 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
 
                                 // Validate that the pattern is irrefutable
                                 if (!pattern.isIrrefutable()) {
-                                    // Skip this - refutable patterns not allowed in let statements
                                     break
                                 }
 
@@ -1112,7 +1016,6 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                                 ).copy(isFatal = true)
                                 break
                             }
-                            // Consume the BIND token
                             val afterBind = skipNewlines(bindStream.advance())
                             val rhs = expression(afterBind)
                             when (rhs) {
@@ -1144,7 +1047,6 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                             is ParseResult.Success -> {
                                 val streamAfterExpr = skipNewlines(expr.remaining)
 
-                                // Check if there's more content in this do block after this expression
                                 // If the next token is within the do block scope (higher column), it's a statement
                                 // Otherwise, this expression is the final result
                                 val nextToken = streamAfterExpr.current()
@@ -1243,7 +1145,6 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
 
 internal val MezzeParser.matchExpression: Parser<ParsedExpr>
     get() = { stream ->
-        // Parse: match <expr> is <case1> <case2> ...
         val file = currentFile ?: "<unknown>"
         val matchToken = tok(TokenType.MATCH)(stream)
         when (matchToken) {
@@ -1301,7 +1202,6 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
                                 // Track the column of the first match case to determine scope
                                 val firstCaseColumn = stream3.current()?.column
 
-                                // Parse match cases (at least one required)
                                 val firstCase = matchCase(stream3)
 
                                 when (firstCase) {
@@ -1309,7 +1209,6 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
                                         val cases = mutableListOf(firstCase.value)
                                         var currentStream = skipNewlines(firstCase.remaining)
 
-                                        // Parse additional cases while they're at the same or greater indentation
                                         while (true) {
                                             val currentToken = currentStream.current()
 
@@ -1392,15 +1291,12 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
 
 internal val MezzeParser.matchCase: Parser<ParsedMatchCase>
     get() = { stream ->
-        // Parse: <pattern> [| <pattern>]* [if <guard>] -> <expression>
-        // Skip leading newlines before pattern
         val file = currentFile ?: "<unknown>"
         val stream1 = skipNewlines(stream)
         val firstPattern = patternParser(stream1)
 
         when (firstPattern) {
             is ParseResult.Success -> {
-                // Parse additional patterns separated by |
                 val patterns = mutableListOf(firstPattern.value)
                 var currentStream = skipNewlines(firstPattern.remaining)
 
@@ -1423,19 +1319,16 @@ internal val MezzeParser.matchCase: Parser<ParsedMatchCase>
 
                 val stream2 = currentStream
 
-                // Check for optional guard: if <expression> or if let bindings
                 val ifToken = keyword("if", TokenType.IF)(stream2)
 
                 when (ifToken) {
                     is ParseResult.Success -> {
                         val stream3 = skipNewlines(ifToken.remaining)
 
-                        // Check for 'let' keyword (if-let guard)
                         val letCheck = tok(TokenType.LET)(stream3)
 
                         when (letCheck) {
                             is ParseResult.Success -> {
-                                // Parse if-let bindings (can be multiple: if let P1 = E1 if let P2 = E2 ...)
                                 parseIfLetBindingsAndBody(patterns, letCheck.remaining, letCheck.value, file)
                             }
                             is ParseResult.Failure -> {
@@ -1514,10 +1407,6 @@ internal val MezzeParser.matchCase: Parser<ParsedMatchCase>
         }
     }
 
-/**
- * Helper function to parse a single if-let binding: Pattern = Expression
- * Returns a pair of (ParsedIfLetGuard, remaining stream)
- */
 private fun MezzeParser.parseIfLetBinding(
     stream: TokenStream,
     letToken: Token,
@@ -1534,7 +1423,6 @@ private fun MezzeParser.parseIfLetBinding(
             when (eqToken) {
                 is ParseResult.Success -> {
                     val afterEq = skipNewlines(eqToken.remaining)
-                    // Parse expression using special if-let parser that doesn't confuse {} with lambda
                     val bindingExpr = ifLetBindingExpression(afterEq)
 
                     when (bindingExpr) {
@@ -1579,10 +1467,6 @@ private fun MezzeParser.parseIfLetBinding(
     }
 }
 
-/**
- * Helper function to parse multiple if-let bindings followed by -> and body expression.
- * Syntax: if let P1 = E1 && let P2 = E2 && ... -> body
- */
 private fun MezzeParser.parseIfLetBindingsAndBody(
     patterns: List<ParsedPattern>,
     firstBindingStream: TokenStream,
@@ -1591,17 +1475,14 @@ private fun MezzeParser.parseIfLetBindingsAndBody(
 ): ParseResult<ParsedMatchCase> {
     val ifLetBindings = mutableListOf<ParsedIfLetGuard>()
 
-    // Parse first binding
     val firstBindingResult = parseIfLetBinding(firstBindingStream, firstLetToken, file)
     when (firstBindingResult) {
         is ParseResult.Success -> {
             ifLetBindings.add(firstBindingResult.value.first)
             var currentStream = firstBindingResult.value.second
 
-            // Parse additional if let bindings separated by &&
             while (true) {
                 val nextStream = skipNewlines(currentStream)
-                // Check for && followed by let
                 val andToken = tok(TokenType.AND)(nextStream)
                 when (andToken) {
                     is ParseResult.Success -> {
@@ -1643,7 +1524,6 @@ private fun MezzeParser.parseIfLetBindingsAndBody(
             // Now parse -> and result expression
             val streamBeforeArrow = skipNewlines(currentStream)
 
-            // Check for || which is not allowed in if-let chains - give helpful error
             val orCheck = tok(TokenType.OR)(streamBeforeArrow)
             if (orCheck is ParseResult.Success) {
                 return ParseResult.Failure(
@@ -1734,7 +1614,6 @@ internal val MezzeParser.logicalOrExpression: Parser<ParsedExpr>
             val op = currentStream.current()
 
             if (op?.type == TokenType.OR) {
-                // Skip newlines after the operator so multi-line expressions
                 // like `a ||\n  b` parse without breaking. Mirrors pipe and
                 // dot-chain handling at the same precedence levels.
                 val opStream = skipNewlines(currentStream.advance())
@@ -2015,7 +1894,6 @@ internal val MezzeParser.additiveExpression: Parser<ParsedExpr>
                 val opStream = currentStream.advance()
                 val nextToken = opStream.current()
 
-                // Check for repeated SAME operators like ++ or -- which are not valid in Mezze
                 // But allow +- or -+ which mean "add negative" or "subtract negative"
                 if (nextToken?.type == op.type) {
                     val doubleOp = op.text + nextToken.text
@@ -2080,7 +1958,6 @@ internal val MezzeParser.multiplicativeExpression: Parser<ParsedExpr>
                 val opStream = currentStream.advance()
                 val nextToken = opStream.current()
 
-                // Check for repeated SAME operators like ** or // which are not valid in Mezze
                 // Note: // is valid for fractions (e.g., 1//2), but that's handled by the lexer
                 if (nextToken?.type == op.type) {
                     val doubleOp = op.text + nextToken.text
@@ -2135,13 +2012,11 @@ internal val MezzeParser.unaryExpression: Parser<ParsedExpr>
         val file = currentFile ?: "<unknown>"
 
         if (token?.type == TokenType.MINUS) {
-            // Check if this is a negative literal (skip newlines first)
             val opLoc = tokenLoc(token, file)
             val streamAfterMinus = skipNewlines(stream.advance())
             val literalToken = streamAfterMinus.current()
 
             if (literalToken?.type == TokenType.INTEGER || literalToken?.type == TokenType.FLOAT || literalToken?.type == TokenType.FRACTION) {
-                // Parse as negative literal
 
                 when (literalToken.type) {
                     TokenType.INTEGER -> ParseResult.Success(
@@ -2153,7 +2028,6 @@ internal val MezzeParser.unaryExpression: Parser<ParsedExpr>
                         streamAfterMinus.advance()
                     )
                     TokenType.FRACTION -> {
-                        // Parse fraction like "1//2" into numerator and denominator
                         val parts = literalToken.text.split("//")
                         if (parts.size == 2) {
                             ParseResult.Success(
@@ -2190,7 +2064,6 @@ internal val MezzeParser.unaryExpression: Parser<ParsedExpr>
                 }
             }
         } else if (token?.type == TokenType.NOT) {
-            // Desugar to ability method call
             val file2 = currentFile ?: "<unknown>"
             val opLoc = tokenLoc(token, file2)
             val opStream = stream.advance()
@@ -2203,12 +2076,10 @@ internal val MezzeParser.unaryExpression: Parser<ParsedExpr>
                 is ParseResult.Failure -> operand
             }
         } else {
-            // No unary operator, parse postfix
             postfixExpression(stream)
         }
     }
 
-    // Postfix expressions: function calls and member access
     // Handles: f {x = 1}, obj.field, f {x = 1}.field, etc.
 internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
     get() = { stream ->
@@ -2233,17 +2104,13 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
 
             when (token?.type) {
                 TokenType.LBRACE -> {
-                    // Function call or variant construction: f {x = 1} or Some {x = 1}
-                    // Check if this is a record literal (arguments) not a lambda
                     if (!lookAheadForArrowAfterBrace(currentStream)) {
                         val args = recordLiteral(currentStream)
                         result = when (args) {
                             is ParseResult.Success -> {
-                                // Check if the function is an uppercase identifier (variant constructor)
                                 val expr = result.value
                                 when {
                                     expr is ParsedIdentifier && expr.localName.firstOrNull()?.isUpperCase() == true -> {
-                                        // This is a variant construction: Some {val = 42}
                                         ParseResult.Success(
                                             ParsedVariantConstruct(
                                                 constructor = expr.localName,
@@ -2254,14 +2121,12 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                                         )
                                     }
                                     expr is ParsedVariantConstruct -> {
-                                        // Already parsed as variant construction (uppercase id), now add the payload
                                         ParseResult.Success(
                                             expr.copy(value = args.value, loc = expr.loc.spanTo(args.value.loc)),
                                             args.remaining
                                         )
                                     }
                                     else -> {
-                                        // Regular function call: f {x = 1}
                                         ParseResult.Success(
                                             ParsedFunctionCall(
                                                 result.value,
@@ -2280,7 +2145,6 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                     }
                 }
                 TokenType.DOT -> {
-                    // Member access: obj.field
                     val dotStream = currentStream.advance()
                     val member = memberIdentifierParser(dotStream)
                     result = when (member) {
@@ -2387,14 +2251,12 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                     break
                 }
                 TokenType.STRING, TokenType.INTEGER, TokenType.FLOAT, TokenType.FRACTION, TokenType.BOOLEAN -> {
-                    // Function call with literal argument without {} syntax
                     val funcExpr = result.value
                     if (funcExpr is ParsedIdentifier || funcExpr is ParsedMemberAccess || funcExpr is ParsedVariantConstruct) {
                         val funcName = when (funcExpr) {
                             is ParsedIdentifier -> funcExpr.localName
                             is ParsedVariantConstruct -> funcExpr.constructor
                             is ParsedMemberAccess -> {
-                                // Extract clean name for member access like Parse.decode
                                 val receiverName = when (val receiver = funcExpr.receiver) {
                                     is ParsedIdentifier -> receiver.localName
                                     is ParsedVariantConstruct -> receiver.constructor
@@ -2461,8 +2323,6 @@ internal val MezzeParser.atPlaceholderExpression: Parser<ParsedExpr>
 
 internal val MezzeParser.identifierExpression: Parser<ParsedExpr>
     get() = { stream ->
-        // Parse qualified names: module::function or just function
-        // Builds structured ParsedIdentifier with qualifier and localName
         val first = identifierParser(stream)
         when (first) {
             is ParseResult.Success -> {
@@ -2472,7 +2332,6 @@ internal val MezzeParser.identifierExpression: Parser<ParsedExpr>
                 var currentStream = first.remaining
                 var failed: ParseResult.Failure? = null
 
-                // Check for :: to build qualified name segments
                 while (failed == null) {
                     val doubleColon = tok(TokenType.DOUBLE_COLON)(currentStream)
                     if (doubleColon is ParseResult.Success) {
@@ -2495,17 +2354,14 @@ internal val MezzeParser.identifierExpression: Parser<ParsedExpr>
                     val localName = segments.last()
                     val isQualified = segments.size > 1
 
-                    // Check if this is an uppercase identifier (variant constructor without payload)
                     // Only for simple names (not qualified names with ::)
                     if (!isQualified && localName.firstOrNull()?.isUpperCase() == true) {
-                        // This is a variant construction without payload: None, True, False, etc.
                         val loc = tokenLoc(startToken, file)
                         ParseResult.Success(
                             ParsedVariantConstruct(constructor = localName, value = null, loc = loc),
                             currentStream
                         )
                     } else {
-                        // Regular identifier - structured with qualifier
                         val qualifier = if (isQualified) {
                             ParsedModulePath(segments.dropLast(1))
                         } else {
@@ -2556,7 +2412,6 @@ internal val MezzeParser.literalExpression: Parser<ParsedExpr>
                 )
             }
             TokenType.FRACTION -> {
-                // Parse fraction like "1//2" into numerator and denominator
                 val parts = token.text.split("//")
                 if (parts.size == 2) {
                     val loc = tokenLoc(token, file)
@@ -2572,12 +2427,9 @@ internal val MezzeParser.literalExpression: Parser<ParsedExpr>
                 val stringContent = token.text.removeSurrounding("\"")
                 val loc = tokenLoc(token, file)
 
-                // Check if this is an interpolated string (has unescaped $()
                 if (hasUnescapedInterpolation(stringContent)) {
-                    // Parse as interpolated string using parsedast types
                     parseParsedInterpolatedString(stringContent, stream.advance(), loc)
                 } else {
-                    // Simple string literal - process escape sequences
                     val processedContent = processEscapeSequences(stringContent)
                     ParseResult.Success(
                         ParsedStringLit(listOf(ParsedStringPart.Literal(processedContent)), loc),
@@ -2591,7 +2443,6 @@ internal val MezzeParser.literalExpression: Parser<ParsedExpr>
 
 internal val MezzeParser.parenExpression: Parser<ParsedExpr>
     get() = { stream ->
-        // Check for common mistake: () used as unit/empty tuple (not valid in Mezze)
         val current = stream.current()
         val next = stream.peek(1)
         if (current?.type == TokenType.LPAREN && next?.type == TokenType.RPAREN) {
@@ -2624,7 +2475,6 @@ internal val MezzeParser.parenExpression: Parser<ParsedExpr>
                                 is ParseResult.Failure -> rparen
                                 is ParseResult.Success -> {
                                     val loc = spanLoc(lparen.value, rparen.value, file)
-                                    // Wrap in ParsedParens to preserve the grouping
                                     ParseResult.Success(
                                         ParsedParens(
                                             expr = innerResult.value,
@@ -2642,36 +2492,23 @@ internal val MezzeParser.parenExpression: Parser<ParsedExpr>
     }
 
 
-/**
- * Desugar a binary operator into a ParsedExpr method call.
- * For example: x + y becomes x.add { r = y }
- */
 internal fun MezzeParser.desugarBinaryOperatorParsed(
     operator: String,
     left: ParsedExpr,
     right: ParsedExpr,
     loc: Loc
 ): ParsedExpr {
-    // Preserve the operator in the AST — typechecker desugars to method call internally
     return ParsedBinaryOp(operator, left, right, loc)
 }
 
-/**
- * Desugar a unary operator into a ParsedExpr method call.
- * For example: -x becomes x.neg {}, !x becomes x.not {}
- */
 internal fun MezzeParser.desugarUnaryOperatorParsed(
     operator: String,
     operand: ParsedExpr,
     loc: Loc
 ): ParsedExpr {
-    // Preserve the operator in the AST — typechecker desugars to method call internally
     return ParsedUnaryOp(operator, operand, loc)
 }
 
-/**
- * Parse an interpolated string into ParsedStringLit with parts.
- */
 internal fun MezzeParser.parseParsedInterpolatedString(
     content: String,
     remaining: TokenStream,
@@ -2694,12 +2531,10 @@ internal fun MezzeParser.parseParsedInterpolatedString(
 
     while (i < content.length) {
         if (i + 1 < content.length && content[i] == '$' && content[i + 1] == '(') {
-            // Flush literal text
             if (sb.isNotEmpty()) {
                 parts.add(ParsedStringPart.Literal(processEscapeSequences(sb.toString())))
                 sb.clear()
             }
-            // Find matching close paren
             var depth = 1
             var j = i + 2
             while (j < content.length && depth > 0) {
@@ -2708,7 +2543,6 @@ internal fun MezzeParser.parseParsedInterpolatedString(
                 j++
             }
             val exprText = content.substring(i + 2, j - 1)
-            // Empty $() is a common typo — give a clear error rather than
             // letting the empty token stream hit some random "expected X"
             // deep in the expression parser (which surfaces confusing
             // messages like "Expected 'perform' but got end of file").
@@ -2762,7 +2596,6 @@ internal fun MezzeParser.parseParsedInterpolatedString(
                     )
                 }
             }
-            // Advance contentLine/contentCol past `$(...)` (i..j-1 inclusive).
             for (k in i until j) {
                 if (content[k] == '\n') { contentLine++; contentCol = 1 } else contentCol++
             }

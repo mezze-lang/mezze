@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.solving
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.ParsedTypeDecl
 import com.mezze.language.parsedast.ParsedVariantDef
+import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.context.DeclarationRegistry
 
 /**
@@ -50,11 +51,7 @@ import com.mezze.language.typechecker.context.DeclarationRegistry
  */
 object AliasStripper {
 
-    /**
-     * Strip alias labels not in [inScope] from [type].
-     * [registry] is consulted to look up declarations for stripping decisions.
-     */
-    fun strip(
+        fun strip(
         type: MezzeType,
         inScope: Set<String>,
         registry: DeclarationRegistry
@@ -91,7 +88,6 @@ object AliasStripper {
             valueType = stripImpl(type.valueType, inScope, registry, recursionGuard),
             effects = stripEffectRow(type.effects, inScope, registry, recursionGuard)
         )
-        // Leaves: nothing to strip
         else -> type
     }
 
@@ -101,35 +97,26 @@ object AliasStripper {
         registry: DeclarationRegistry,
         recursionGuard: MutableSet<String>
     ): MezzeType {
-        // Strip args first
         val strippedArgs = type.args.map { stripImpl(it, inScope, registry, recursionGuard) }
 
-        // If the alias name is in scope, retain the nominal application.
-        // Built-ins (Option/Result/Seq/etc.) are always in scope by virtue of
-        // the prelude — callers add `BuiltinTypes.allBuiltinTypeNames` to
-        // the in-scope set before invoking the stripper.
         if (type.constructor in inScope) {
             return type.copy(args = strippedArgs)
         }
 
-        // Look up the declaration. If unavailable (synthetic / type-var), leave alone.
         val decl = registry.lookupType(type.constructor)
-            ?: com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(type.constructor)
+            ?: ModuleResolver.lookupTypeDeclaration(type.constructor)
             ?: return type.copy(args = strippedArgs)
 
-        // Only variant aliases get stripped. Newtypes and records stay nominal.
         if (decl.definition !is ParsedVariantDef) {
             return type.copy(args = strippedArgs)
         }
 
-        // Avoid infinite recursion on self-referential variant aliases.
         if (!recursionGuard.add(type.constructor)) {
             return type.copy(args = strippedArgs)
         }
         try {
             val expanded = expandTypeApplicationToVariant(type.copy(args = strippedArgs), registry)
                 ?: return type.copy(args = strippedArgs)
-            // Drop the nominal label.
             return MezzeType.VariantType(
                 constructors = expanded.constructors.mapValues { (_, payload) ->
                     payload?.let { stripImpl(it, inScope, registry, recursionGuard) }
@@ -153,16 +140,11 @@ object AliasStripper {
             payload?.let { stripImpl(it, inScope, registry, recursionGuard) }
         }
         val name = type.typeName
-        // Walls always keep their label and structure — these are intentional
-        // ascription/inferred barriers, not user-visible aliases.
-        // Built-ins are kept too — they're added to `inScope` by the caller.
         val keepName = type.nominalWall ||
             name == null ||
             name in inScope ||
-            // Records / newtypes can also share a name with a VariantType representation;
-            // only strip when the actual decl is a variant alias.
             (registry.lookupType(name)?.definition !is ParsedVariantDef &&
-                com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(name)?.definition !is ParsedVariantDef)
+                ModuleResolver.lookupTypeDeclaration(name)?.definition !is ParsedVariantDef)
         return if (keepName) {
             type.copy(constructors = newCtors)
         } else {
@@ -212,7 +194,6 @@ object AliasStripper {
         registry: DeclarationRegistry,
         recursionGuard: MutableSet<String>
     ): MezzeType.RecordType {
-        // Records stay nominal — never strip the typeName.
         val newFields = type.fields.mapValues { (_, fieldType) ->
             stripImpl(fieldType, inScope, registry, recursionGuard)
         }

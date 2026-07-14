@@ -29,10 +29,6 @@ object TypeCheckCache {
 
     fun hasPersistence(): Boolean = store != null
 
-    // ========================================================================
-    // ABILITY IMPLEMENTATION CACHE
-    // ========================================================================
-
     data class CachedAbilityImpl(
         val implementationHash: Hash,
         val modulePath: String?,
@@ -51,7 +47,7 @@ object TypeCheckCache {
         abilityImplCacheL1[key] = CachedAbilityImpl(implHash, modulePath)
     }
 
-    fun computeAbilityKey(abilityName: String, targetTypes: List<MezzeType>): Hash {
+    private fun computeAbilityKey(abilityName: String, targetTypes: List<MezzeType>): Hash {
         val builder = MezzeHashBuilder()
         builder.append("abilityKey")
         builder.append(abilityName)

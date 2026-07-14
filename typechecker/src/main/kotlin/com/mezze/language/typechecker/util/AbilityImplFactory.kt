@@ -23,17 +23,7 @@ import com.mezze.language.typedast.Hash
  */
 internal object AbilityImplFactory {
 
-    /**
-     * Build an `AbilityImplInfo` from a `ParsedImplAbilityDecl`.
-     *
-     * @param implDecl the parsed impl declaration. Must have `contentHash` populated.
-     * @param abilityDeclHash content hash of the ABILITY decl (not the impl).
-     *        Pass null only for inherent impls (where `implDecl.isInherent` is true).
-     *        Caller is responsible for the lookup since it depends on which
-     *        scope (local decls, imported, prelude) the ability lives in.
-     * @param sourceModule source module identifier for diagnostics. Defaults null.
-     */
-    internal fun build(
+        internal fun build(
         implDecl: ParsedImplAbilityDecl,
         abilityDeclHash: Hash?,
         sourceModule: String? = null
@@ -44,34 +34,16 @@ internal object AbilityImplFactory {
                 "Hash must be computed before AbilityImplFactory.build is called.")
 
         val annotations: List<ParsedTypeAnnotation> = if (implDecl.isInherent) {
-            // Inherent impls only have targetTypes (no ability type args).
             implDecl.targetTypes
         } else {
-            // Named impls flatten abilityTypeArgs (concrete only) + targetTypes
-            // via the convenience accessor. Type vars in abilityTypeArgs are
-            // quantifiers, not target-shape information, so they're filtered out.
             implDecl.allTypeArgs
         }
         val targetTypes = annotations.map { typeNameOf(it) }
 
-        // Type variables from generic impl header (e.g. 'a from `impl Eq 'a for ['a]`).
-        // Only ParsedNamedType starting with `'` is a real type var; concrete
-        // type names in abilityTypeArgs (e.g. `Str` in `impl Into Str for Int`)
-        // are not.
-        //
-        // Also include type vars from targetTypes — for abilities like
-        // `Tryable for 'm having 'inner` the impl has nothing in abilityTypeArgs
-        // (no params between `Tryable` and `for`) but quantifies vars in the
-        // receiver: `impl Tryable for Result 'a 'e having 'inner = 'a`. Without
-        // this, polymorphic ability impls with associated types can't be matched
-        // against concrete receiver types at call sites.
         val typeVars = if (implDecl.isInherent) emptySet() else {
             implDecl.forallVars.toSet()
         }
 
-        // Method-level constraints — collected from each operation's `with` clause.
-        // Inherent impls don't have ability-level constraints, but they CAN
-        // have per-op constraints (e.g. `impl Seq where { sort = ... with Ord 'a }`).
         val operationConstraints = implDecl.operations.flatMap { it.abilityConstraints }
 
         return TypingContext.AbilityImplInfo(
@@ -87,20 +59,7 @@ internal object AbilityImplFactory {
         )
     }
 
-    /**
-     * Convert a parsed type annotation to the synthetic-key form used by
-     * `AbilityImplInfo.targetTypes`. Examples:
-     *
-     *   Int          → "Int"
-     *   Maybe Int    → "Maybe_Int"
-     *   ['a]         → "Seq_a"
-     *   std::str::Str → "std_str_Str"
-     *
-     * Distinct from `toString()` (which produces source form like "Maybe Int")
-     * and from `prettyPrintType` (display form). This is for impl lookup keys
-     * only — never user-facing.
-     */
-    internal fun typeNameOf(annotation: ParsedTypeAnnotation): String {
+        internal fun typeNameOf(annotation: ParsedTypeAnnotation): String {
         return when (annotation) {
             is ParsedNamedType -> annotation.name.removePrefix("'")
             is ParsedTypeApp -> {

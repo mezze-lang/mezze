@@ -14,10 +14,7 @@ package com.mezze.language.typechecker.debug
  */
 object DebugLogger {
 
-    /**
-     * Debug categories for filtering output
-     */
-    enum class Category {
+        enum class Category {
         TypeChecker,
         ConstraintGenerator,
         ConstraintSolver,
@@ -47,37 +44,25 @@ object DebugLogger {
             ?.toSet()
     }
 
-    /**
-     * Check if a specific category is enabled
-     */
-    fun isCategoryEnabled(category: Category): Boolean {
+        fun isCategoryEnabled(category: Category): Boolean {
         if (!isEnabled) return false
         val categories = enabledCategories
         return categories == null || category in categories
     }
 
-    /**
-     * Log a debug message
-     */
-    inline fun debug(category: Category, message: () -> String) {
+        inline fun debug(category: Category, message: () -> String) {
         if (isCategoryEnabled(category)) {
             println("[DEBUG ${category.name}] ${message()}")
         }
     }
 
-    /**
-     * Log a debug message with a label
-     */
-    inline fun debug(category: Category, label: String, message: () -> String) {
+        inline fun debug(category: Category, label: String, message: () -> String) {
         if (isCategoryEnabled(category)) {
             println("[DEBUG ${category.name}] $label: ${message()}")
         }
     }
 
-    /**
-     * Log multiple lines for a debug section
-     */
-    inline fun debugSection(category: Category, header: String, content: () -> List<String>) {
+        inline fun debugSection(category: Category, header: String, content: () -> List<String>) {
         if (isCategoryEnabled(category)) {
             println("[DEBUG ${category.name}] === $header ===")
             content().forEach { line ->

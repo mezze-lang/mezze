@@ -356,16 +356,16 @@ pub let from_sorted_map : { m: SortedMap 'k 'v } -> List { k: 'k, v: 'v } = { m 
   __native_list_from_sorted_map { m = m }
 
 ## Returns the arithmetic mean, or None if empty.
-pub let average = { xs } -> __native_list_average { xs = xs }
+pub let average: { xs: List Float } -> Option Float = { xs } -> __native_list_average { xs = xs }
 
 ## Returns the population variance, or None if empty.
-pub let variance = { xs } -> __native_list_variance { xs = xs }
+pub let variance: { xs: List Float } -> Option Float = { xs } -> __native_list_variance { xs = xs }
 
 ## Returns the standard deviation, or None if empty.
-pub let stddev = { xs } -> __native_list_stddev { xs = xs }
+pub let stddev: { xs: List Float } -> Option Float = { xs } -> __native_list_stddev { xs = xs }
 
 ## Returns the median value, or None if empty.
-pub let median = { xs } -> __native_list_median { xs = xs }
+pub let median: { xs: List Float } -> Option Float = { xs } -> __native_list_median { xs = xs }
 
 ## Lexicographic comparison; returns -1, 0, or 1.
 pub let compare : { xs: List 'a, ys: List 'a } -> Int = { xs, ys } ->

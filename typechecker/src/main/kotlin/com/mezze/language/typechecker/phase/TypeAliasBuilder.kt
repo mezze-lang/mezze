@@ -3,14 +3,10 @@ package com.mezze.language.typechecker.phase
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.RowVar
 import com.mezze.language.ast.TypeAliasInfo
-import com.mezze.language.parsedast.ParsedModule
+import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.module.ModuleImportContext
 
-/**
- * Build type aliases from a ParsedModule (v2 path).
- * Same as buildTypeAliases but reads from ParsedModule instead of v1 Program.
- */
 internal fun buildTypeAliasesFromParsedModule(
     module: ParsedModule,
     contextBuilder: ContextBuilder,
@@ -18,9 +14,9 @@ internal fun buildTypeAliasesFromParsedModule(
 ): Map<String, TypeAliasInfo> {
     val result = mutableMapOf<String, TypeAliasInfo>()
 
-    fun addParsedTypeDecl(typeDecl: com.mezze.language.parsedast.ParsedTypeDecl) {
+    fun addParsedTypeDecl(typeDecl: ParsedTypeDecl) {
         val definitionType = when (val def = typeDecl.definition) {
-            is com.mezze.language.parsedast.ParsedVariantDef -> {
+            is ParsedVariantDef -> {
                 val constructors = def.constructors.associate { ctor ->
                     val dataType = ctor.dataType?.let { contextBuilder.convertParsedTypeAnnotation(it) }
                     ctor.name to dataType
@@ -31,7 +27,7 @@ internal fun buildTypeAliasesFromParsedModule(
                     typeName = typeDecl.name
                 )
             }
-            is com.mezze.language.parsedast.ParsedRecordDef -> {
+            is ParsedRecordDef -> {
                 val fields = def.fields.associate { field ->
                     field.name to contextBuilder.convertParsedTypeAnnotation(field.type)
                 }
@@ -54,7 +50,7 @@ internal fun buildTypeAliasesFromParsedModule(
 
     // Add local type declarations from ParsedModule
     for (decl in module.decls) {
-        if (decl is com.mezze.language.parsedast.ParsedTypeDecl) {
+        if (decl is ParsedTypeDecl) {
             addParsedTypeDecl(decl)
         }
     }

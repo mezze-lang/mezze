@@ -38,7 +38,6 @@ internal fun MezzeParser.parseAssociatedTypeBindings(
             var currentStream = streamAfterHaving
             val bindings = mutableMapOf<String, ParsedTypeAnnotation>()
 
-            // Parse first binding: 'typeVar = TypeAnnotation
             val firstTypeVar = identifierParser(currentStream)
             when (firstTypeVar) {
                 is ParseResult.Failure -> {
@@ -80,7 +79,6 @@ internal fun MezzeParser.parseAssociatedTypeBindings(
                                     bindings[firstTypeVar.value.text] = typeAnn.value
                                     currentStream = skipNewlines(typeAnn.remaining)
 
-                                    // Parse additional bindings separated by commas
                                     while (true) {
                                         val comma = tok(TokenType.COMMA)(currentStream)
                                         when (comma) {

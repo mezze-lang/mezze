@@ -9,8 +9,7 @@ import kotlinx.serialization.json.JsonClassDiscriminator
 /**
  * Type system representations for the Mezze language.
  *
- * Contains MezzeType (sealed interface for all type representations)
- * and TypeScheme (polymorphic type schemes for let-polymorphism).
+ * Contains MezzeType (sealed interface for all type representations).
  */
 
 @Serializable
@@ -49,6 +48,25 @@ sealed interface MezzeType {
                 if (depth == 0) toStringDepth.remove()
             }
         }
+    }
+
+    fun transformChildren(f: (MezzeType) -> MezzeType): MezzeType = when (this) {
+        is FunctionType -> copy(paramType = f(paramType), returnType = f(returnType),
+            abilityConstraints = abilityConstraints.map { c -> c.copy(typeArgs = c.typeArgs.map(f), associatedTypeBindings = c.associatedTypeBindings.mapValues { (_, v) -> f(v) }) })
+        is RecordType -> copy(fields = fields.mapValues { (_, v) -> f(v) })
+        is VariantType -> copy(constructors = constructors.mapValues { (_, v) -> v?.let(f) })
+        is TypeApplication -> copy(args = args.map(f))
+        is ListType -> copy(elementType = f(elementType))
+        is MapType -> copy(keyType = f(keyType), valueType = f(valueType))
+        is SetType -> copy(elementType = f(elementType))
+        is SortedMapType -> copy(keyType = f(keyType), valueType = f(valueType))
+        is SortedSetType -> copy(elementType = f(elementType))
+        is SeqType -> copy(elementType = f(elementType))
+        is SuspendedType -> copy(valueType = f(valueType))
+        is NewtypeType -> copy(wrappedType = f(wrappedType))
+        is VarType, is IntType, is FloatType, is StringType, is BoolType,
+        is NatType, is FracType, is OrderingType, is BytesType, is ByteBufferType,
+        is CharType, is EffectRow -> this
     }
 
     // Primitive types
@@ -263,11 +281,6 @@ sealed interface MezzeType {
             }
         }
 
-        /** Check if this effect matches another by name (ignoring associated types) */
-        fun matchesName(other: String): Boolean = name == other
-
-        /** Check if this effect matches another (same name, compatible associated types) */
-        fun matches(other: EffectInstance): Boolean = name == other.name
     }
 
     // Effect rows
@@ -346,120 +359,4 @@ sealed interface MezzeType {
         val hasAssociatedTypes: Boolean get() = associatedTypeBindings.isNotEmpty()
     }
 
-}
-
-/**
- * Type schemes for let-polymorphism
- * Represents ∀α₁,α₂,...,αₙ. τ (forall type variables, type τ)
- */
-@Serializable
-data class TypeScheme(
-    val quantifiedVars: Set<TypeVar>,
-    val type: MezzeType,
-    val constraints: List<AbilityConstraint> = emptyList()
-) {
-    /**
-     * Check if this type scheme is monomorphic (no quantified variables)
-     */
-    val isMonomorphic: Boolean get() = quantifiedVars.isEmpty()
-
-    /**
-     * Instantiate this type scheme with fresh type variables
-     */
-    fun instantiate(): MezzeType {
-        if (isMonomorphic) return type
-
-        val substitution = quantifiedVars.associateWith {
-            MezzeType.VarType(TypeVar.fresh())
-        }
-        return applySubstitutionToType(type, substitution)
-    }
-
-    companion object {
-        /**
-         * Generalize a type into a type scheme by quantifying over free type variables
-         */
-        fun generalize(type: MezzeType, constraints: List<AbilityConstraint> = emptyList()): TypeScheme {
-            val typeVars = mutableSetOf<TypeVar>()
-            collectTypeVariables(type, typeVars)
-
-            // Filter constraints to only include those relevant to the type variables
-            val relevantConstraints = constraints.filter { constraint ->
-                typeVars.any { it.name == constraint.typeParam }
-            }
-
-            return TypeScheme(typeVars, type, relevantConstraints)
-        }
-    }
-
-    /**
-     * Apply a substitution to a type
-     */
-    private fun applySubstitutionToType(type: MezzeType, substitution: Map<TypeVar, MezzeType>): MezzeType {
-        return when (type) {
-            is MezzeType.VarType -> substitution[type.variable] ?: type
-            is MezzeType.FunctionType -> MezzeType.FunctionType(
-                applySubstitutionToType(type.paramType, substitution),
-                applySubstitutionToType(type.returnType, substitution),
-                type.effects,
-                type.abilityConstraints
-            )
-            is MezzeType.RecordType -> MezzeType.RecordType(
-                type.fields.mapValues { (_, fieldType) ->
-                    applySubstitutionToType(fieldType, substitution)
-                },
-                type.rowVar,
-                typeName = type.typeName,
-                typeHash = type.typeHash
-            )
-            is MezzeType.VariantType -> MezzeType.VariantType(
-                type.constructors.mapValues { (_, dataType) ->
-                    dataType?.let { applySubstitutionToType(it, substitution) }
-                },
-                type.rowVar,
-                typeName = type.typeName,
-                typeHash = type.typeHash
-            )
-            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
-                type.name,
-                type.constructor,
-                applySubstitutionToType(type.wrappedType, substitution)
-            )
-            is MezzeType.TypeApplication -> MezzeType.TypeApplication(
-                type.constructor,
-                type.args.map { applySubstitutionToType(it, substitution) },
-                type.typeHash
-            )
-            is MezzeType.ListType -> MezzeType.ListType(
-                applySubstitutionToType(type.elementType, substitution)
-            )
-            is MezzeType.MapType -> MezzeType.MapType(
-                applySubstitutionToType(type.keyType, substitution),
-                applySubstitutionToType(type.valueType, substitution)
-            )
-            is MezzeType.SetType -> MezzeType.SetType(
-                applySubstitutionToType(type.elementType, substitution)
-            )
-            is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-                applySubstitutionToType(type.keyType, substitution),
-                applySubstitutionToType(type.valueType, substitution)
-            )
-            is MezzeType.SortedSetType -> MezzeType.SortedSetType(
-                applySubstitutionToType(type.elementType, substitution)
-            )
-            is MezzeType.SeqType -> MezzeType.SeqType(
-                applySubstitutionToType(type.elementType, substitution)
-            )
-            is MezzeType.SuspendedType -> MezzeType.SuspendedType(
-                applySubstitutionToType(type.valueType, substitution),
-                type.effects
-            )
-            // Concrete types remain unchanged
-            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-            is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
-            is MezzeType.CharType -> type
-            is MezzeType.EffectRow -> type // Effects don't contain type variables for now
-        }
-    }
 }

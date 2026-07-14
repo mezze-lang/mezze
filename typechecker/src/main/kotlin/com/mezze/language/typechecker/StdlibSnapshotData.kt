@@ -5,33 +5,6 @@ import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedAbilityImpl
 import com.mezze.language.truffleir.FunctionIR
 
-/**
- * Build-time-initialized holder for the deserialized stdlib snapshot.
- *
- * Native-image is told to initialize this object at build time via
- *   --initialize-at-build-time=com.mezze.language.typechecker.StdlibSnapshotData
- *
- * The `init {}` block runs once during native-image's build JVM —
- * reads the CBOR resource, decodes it into the typed fields below, and
- * those fields land in the binary's `.data` section. At runtime the
- * binary just reads them as static fields (zero decode cost).
- *
- * Crucially this object contains ONLY pure data (Maps, Lists, Hash, IR
- * nodes). No file handles, no thread state, no paths captured from the
- * build CWD. That's a hard requirement for `--initialize-at-build-time`
- * — anything that references build-time state would either fail
- * native-image's heap validator or, worse, freeze a wrong value into
- * the binary.
- *
- * On the JVM (e.g. `mez run`, `mez dev`), the `init {}` still runs
- * normally — same cost as before, just relocated from PrecompiledStdlib
- * to here. JDK-mode users don't lose anything.
- *
- * `present` is false when the resource is missing — older builds, or
- * environments where stdlib is being recompiled from sources. Callers
- * (see PrecompiledStdlib.tryLoadFromSnapshotData) check that before
- * reading the other fields.
- */
 object StdlibSnapshotData {
     val present: Boolean
     val importContext: ModuleImportContext?
@@ -43,17 +16,6 @@ object StdlibSnapshotData {
     val moduleHashes: Set<Hash>
 
     init {
-        // Read + decode the bundled CBOR resource. Wrapped in try/catch
-        // because missing resources are a normal "older build" state —
-        // we fall back to the SQLite path in PrecompiledStdlib.
-        //
-        // Distinguish three states:
-        //   resource missing → silent null (older build, dev mode).
-        //   resource present + version mismatch → silent null (rebuild
-        //     pending, already-warned-elsewhere via PrecompiledStdlib).
-        //   resource present + decode threw → ALWAYS emit a one-line
-        //     warning (not gated on MEZZE_DEBUG) so a silent ~1.5s perf
-        //     regression doesn't hide a real data-format break. Full
         //     stacktrace stays gated. See task #203 + #201.
         val decoded: StdlibSnapshot? = try {
             val cl = StdlibSnapshotData::class.java.classLoader

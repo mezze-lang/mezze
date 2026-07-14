@@ -2,21 +2,12 @@ package com.mezze.language.typechecker.phase
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.parsedast.diagnostics.FixHint
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.constraints.ErrorContext
 import com.mezze.language.typechecker.solving.ConstraintSolver
 
-/**
- * Classifies raw solver [ConstraintSolver.ConstraintError] into
- * [TypeChecker.TypeCheckError] with stable error codes and hints.
- *
- * Phase A2 entry point for the new diagnostic shape -- Phase B will grow the
- * match arms until every error has a real code.
- *
- * Sites NOT yet classified fall through with `code = UNCATEGORIZED`, so output
- * stays identical to before until each kind is migrated.
- */
 internal fun classifyConstraintError(
     error: ConstraintSolver.ConstraintError
 ): TypeChecker.TypeCheckError {
@@ -67,17 +58,13 @@ internal fun classifyConstraintError(
         }
     }
 
-    // When the failure is a pure effect-row mismatch on a TypeAnnotation /
-    // ReturnType constraint, mine the constraint's actual/expected effect
-    // rows to emit structured `AddEffectToAnnotation` fixes.
-    val solverFixHints: List<com.mezze.language.parsedast.diagnostics.FixHint> =
+    val solverFixHints: List<FixHint> =
         if (ctx is ErrorContext.TypeAnnotation ||
             ctx is ErrorContext.ReturnType) {
             effectRowExtraEffects(constraint).let { extras ->
                 if (extras.isNotEmpty() && error.constraint.loc != null) {
                     extras.map { effect ->
-                        com.mezze.language.parsedast.diagnostics.FixHint
-                            .AddEffectToAnnotation(error.constraint.loc!!, effect)
+                        FixHint.AddEffectToAnnotation(error.constraint.loc!!, effect)
                     }
                 } else emptyList()
             }
@@ -93,12 +80,6 @@ internal fun classifyConstraintError(
     )
 }
 
-/**
- * Returns the effects that exist in the constraint's actual (left) side
- * but not in the expected (right) side, when both are function types that
- * only differ in their effect rows. Empty when the constraint is some
- * other shape -- caller falls back to other fix kinds.
- */
 private fun effectRowExtraEffects(
     constraint: Constraint
 ): List<String> {

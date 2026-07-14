@@ -8,15 +8,7 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 
-/**
- * Method-call constraint generators: ability methods, inherent methods, and disambiguation.
- *
- * Extension functions on [ExpressionConstraintGenerator].
- */
-
 internal fun ExpressionConstraintGenerator.stripReceiverFromMethodType(methodType: MezzeType, receiverTypeVar: MezzeType.VarType): MezzeType {
-    // Strip `it` from the method's param record for method-call syntax.
-    // The receiver is passed separately via the member access (x.method {args}).
     if (methodType !is MezzeType.FunctionType) return methodType
     val params = (methodType.paramType as? MezzeType.RecordType)?.fields ?: return methodType
     val strippedParams = params.filterKeys { it != Keywords.IT }
@@ -27,16 +19,6 @@ internal fun ExpressionConstraintGenerator.stripReceiverFromMethodType(methodTyp
     )
 }
 
-/**
- * Try to generate constraints for method call syntax: `value.method { args }`.
- *
- * Desugars `42.show {}` to `Show.show { it = 42 }`.
- *
- * The method's receiver parameter is stripped (bound via `it`), and the explicit
- * arguments are matched against the remaining parameters.
- *
- * Returns null if no matching ability method is found (fall through to field access).
- */
 internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     expr: ParsedFunctionCall,
     memberAccess: ParsedMemberAccess,
@@ -44,8 +26,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
 ): ConstraintResult? {
     val methodName = memberAccess.member
 
-    // FIELD ACCESS: If the receiver is known to have a field with this name,
-    // it's plain field access — skip method call resolution.
     if (memberAccess.receiver is ParsedIdentifier) {
         val receiverVarName = (memberAccess.receiver as ParsedIdentifier).localName
         val lookupResult = context.typingContext.lookup(receiverVarName)
@@ -55,26 +35,22 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
                 is TypingContext.Binding.Polymorphic -> binding.scheme.instantiate().type
             }
             if (receiverType is MezzeType.RecordType && receiverType.fields.containsKey(methodName)) {
-                return null // It's a field — let normal field access handle it
+                return null
             }
         }
     }
 
-    // Find abilities that have this method name
     val matchingAbilities = context.typingContext.findAbilitiesByMethodName(methodName)
 
-    // Also check built-in abilities
     val builtInMatches = BuiltInAbilities.getAllAbilityNames()
         .filter { BuiltInAbilities.getAbilityMethodType(it, methodName, MezzeType.VarType(TypeVar.fresh())) != null }
 
-    // Check inherent impl methods (impl Type where { ... })
     val inherentMethods = context.typingContext.findAnonymousMethodsByName(methodName)
 
     if (matchingAbilities.isEmpty() && builtInMatches.isEmpty() && inherentMethods.isEmpty()) {
-        return null // No matching ability or inherent method — fall through to field access
+        return null
     }
 
-    // If ONLY inherent methods match (no ability methods), handle them directly.
     if (matchingAbilities.isEmpty() && builtInMatches.isEmpty() && inherentMethods.isNotEmpty()) {
         // Closed-record method-call inference (issue #216): when there are
         // multiple candidate inherent methods AND the receiver's type is
@@ -84,15 +60,7 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         // Returning null here falls through to plain field-access
         // constraint generation, which infers `xs.length` as access into
         // a closed record `{ length: arg -> 'r }`.
-        //
-        // When there's exactly ONE candidate, there's no ambiguity even
-        // with an unresolved receiver — keep dispatching.
         if (inherentMethods.size > 1 && isReceiverUnresolved(memberAccess.receiver, context)) {
-            // When the receiver's type isn't yet inferred, try a syntactic
-            // shortcut: if it's a variant constructor like `Some {val=42}`
-            // or `Ok {val=42}`, look up which type that constructor belongs
-            // to and filter candidates by that. Fixes the case where the
-            // ambiguity is statically resolvable from the surface syntax.
             val syntacticTypeName = lookupConstructorTypeName(memberAccess.receiver, context)
             if (syntacticTypeName != null) {
                 val filtered = inherentMethods.filter { it.targetTypeName == syntacticTypeName }
@@ -151,8 +119,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     // Without this, `nums.add {x=4}` (nums : [Int]) routes to NumAdd.add
     // expecting `{r}` and fires a cascading "[Int] does not implement
     // NumAdd" error.
-    //
-    // Originally guarded on `matchingAbilities.isEmpty()` — fine when
     // operator abilities lived only in BuiltInAbilities. After #306
     // those abilities also reach the regular ability registry. The
     // guard now also fires on user-defined abilities — but only if
@@ -181,23 +147,12 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
                 else -> emptySet()
             }
             val matchingInherent = inherentMethods.filter { it.targetTypeName in receiverTypeNames }
-            // Compute call-site field names locally (the cached value is
-            // declared further down). Field-shape filter: keep only
-            // inherents whose param record matches the call-site argument
-            // record. Without this, an unrelated inherent with the same
-            // name but different signature shadows a user ability
-            // designed for that exact concrete type.
             val localCallSiteFields: Set<String>? = when (val args = expr.arguments) {
                 is ParsedRecordLit -> args.entries.filterIsInstance<ParsedRecordEntry.Field>().map { it.name }.toSet()
                 else -> null
             }
             val shapeMatched = if (localCallSiteFields != null) {
                 matchingInherent.filter { info ->
-                    // InherentMethodInfo's `methodType` storage shape
-                    // varies: some paths register the param record WITH
-                    // an `it` receiver field; others (when the impl op
-                    // declares its param annotation explicitly) leave it
-                    // out. Compare both shapes.
                     val pf = (info.methodType as? MezzeType.FunctionType)
                         ?.paramType
                         ?.let { it as? MezzeType.RecordType }
@@ -211,17 +166,13 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         }
     }
 
-    // Generate constraints for the receiver expression
     val receiverResult = generate(memberAccess.receiver, context.notInTailPosition())
 
-    // Generate constraints for the arguments
     val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
 
-    // Resolve to the matching ability and get the receiver-stripped method type
     val strippedMethodType: MezzeType.FunctionType
-    val receiverConstraintType: MezzeType  // The type the receiver must match (first field's type)
-    var resolvedAbilityName: String? = null  // Tracks which ability was resolved for MethodCallInfo
-    // Collect ability constraints: from this method call AND from nested sub-expressions
+    val receiverConstraintType: MezzeType
+    var resolvedAbilityName: String? = null
     val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
     val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
     abilityConstraints.addAll(receiverResult.abilityConstraints)
@@ -229,9 +180,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     associatedTypeConstraints.addAll(receiverResult.associatedTypeConstraints)
     associatedTypeConstraints.addAll(argumentResult.associatedTypeConstraints)
 
-    // When both user-defined and built-in abilities match the same method name,
-    // disambiguate by checking which ability's parameter fields match the call-site arguments.
-    // e.g., `x + y` desugars to `x.add {r = y}` which should match NumAdd.add {r} not Math.add {x, y}.
     val callSiteFieldNames: Set<String>? = when (val args = expr.arguments) {
         is ParsedRecordLit -> args.entries.filterIsInstance<ParsedRecordEntry.Field>().map { entry -> entry.name }.toSet()
         else -> null
@@ -245,15 +193,12 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
                 }
                 else -> null
             }
-            // Keep the ability if we can't determine fields (conservative) or if fields match
             methodParamFields == null || methodParamFields == callSiteFieldNames
         }
     } else {
         matchingAbilities
     }
 
-    // When the enclosing function annotation declared specific ability
-    // constraints, prefer those abilities over coincidentally-matching ones
     // (e.g. user-defined Container.size vs prelude Sized.size). #304.
     val filteredMatchingAbilities = if (
         fieldFilteredAbilities.size > 1 &&
@@ -268,8 +213,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     }
 
     if (builtInMatches.size == 1 && filteredMatchingAbilities.isEmpty()) {
-        // Built-in ability — method type from .mz files includes `it` param.
-        // Strip `it` for method-call syntax (receiver is handled separately).
         val abilityName = builtInMatches.first()
         resolvedAbilityName = abilityName
         val freshTypeVar = MezzeType.VarType(TypeVar.fresh())
@@ -277,7 +220,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
 
         if (fullMethodType !is MezzeType.FunctionType) return null
 
-        // Strip receiver param from param record — call-site only has the other params
         val fullParams = (fullMethodType.paramType as? MezzeType.RecordType)?.fields ?: emptyMap()
         val strippedParams = fullParams.filterKeys { it != Keywords.IT }
         strippedMethodType = MezzeType.FunctionType(
@@ -297,7 +239,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             loc = expr.loc
         ))
     } else if (filteredMatchingAbilities.isNotEmpty()) {
-        // User-defined ability
         val (abilityName, rawMethodType) = filteredMatchingAbilities.first()
         resolvedAbilityName = abilityName
         val abilityDecl = context.abilityDeclarations[abilityName]
@@ -307,9 +248,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             rawMethodType, associatedTypeNames
         )
 
-        // Ensure ALL ability type params have fresh vars, not just those in the method type.
-        // The receiver type param (e.g. 'a in `ability Convert 'b for 'a`) may not appear
-        // in the method signature (`convert : {} -> 'b`) but is needed for the ability constraint.
         val originalToFresh = originalToFreshFromMethod.toMutableMap()
         if (abilityDecl != null) {
             for (paramName in abilityDecl.typeParams) {
@@ -320,19 +258,14 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             }
         }
 
-        // Find the fresh var for the ability's primary type param
         val abilityTypeVars = abilityDecl?.typeParams?.mapNotNull { paramName ->
             originalToFresh[paramName.removePrefix("'")]
         } ?: emptyList()
 
-        // The receiver type comes from the ability's `for` type param (receiverTypeParam).
-        // In the new design, method signatures don't contain the receiver — it's implicit `it`.
-        // Find the fresh var that corresponds to the receiverTypeParam.
         val receiverParamName = abilityDecl?.receiverTypeParam?.removePrefix("'")
         val receiverFreshVar = if (receiverParamName != null) {
             originalToFresh[receiverParamName]
         } else {
-            // Fallback: use last type param (receiver is always last in typeParams)
             abilityTypeVars.lastOrNull()
         }
 
@@ -368,12 +301,11 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
                 loc = expr.loc
             ))
 
-            // Build associated type vars map and add AssociatedTypeResolution constraint
             if (associatedTypeNames.isNotEmpty()) {
                 val associatedTypeNamesNormalized = associatedTypeNames.map { it.removePrefix("'") }.toSet()
                 val associatedTypeVarsMap = mutableMapOf<String, TypeVar>()
                 for ((origName, freshVar) in originalToFresh) {
-                    if (associatedTypeNamesNormalized.contains(origName)) {
+                    if (origName in associatedTypeNamesNormalized) {
                         associatedTypeVarsMap[origName] = freshVar
                     }
                 }
@@ -389,17 +321,10 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             }
         }
 
-        // Handle method-level constraints
         if (instantiatedMethodType.abilityConstraints.isNotEmpty()) {
             for (constraint in instantiatedMethodType.abilityConstraints) {
                 val constrainedType = constraint.typeArgs.firstOrNull()
                 if (constrainedType is MezzeType.VarType) {
-                    // The constrainedType.variable may be an un-instantiated TypeVar from the
-                    // ability method's stored type (e.g., TypeVar("a", id=0) from ContextBuilder).
-                    // If so, use originalToFresh to get the proper fresh TypeVar that is connected
-                    // to the receiver/annotation TypeVars through the constraint solver.
-                    // This handles the case where the ability type param only appears in
-                    // abilityConstraints (not in param/return types), so instantiation missed it.
                     val normalizedName = constrainedType.variable.name.removePrefix("'")
                     val freshTypeVar = originalToFresh[normalizedName] ?: constrainedType.variable
                     abilityConstraints.add(Constraint.AbilityRequired(
@@ -417,20 +342,11 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         return null
     }
 
-    // Now we have:
-    // - receiverConstraintType: the type the receiver must match (first field's type)
-    // - strippedMethodType: method with receiver removed, e.g. {r: 'a} -> Bool or {} -> Str
-    // - receiverResult: the receiver expression (e.g., 42)
-    // - argumentResult: the explicit arguments (e.g., { r = 10 })
-
     val resultType = MezzeType.VarType(TypeVar.fresh())
     val constraints = mutableListOf<Constraint>()
     constraints.addAll(receiverResult.constraints)
     constraints.addAll(argumentResult.constraints)
 
-    // Unwrap SuspendedType from receiver — effects are orthogonal to data types.
-    // An effectful expression like `may_fail {x}` has type Suspended<Int, {Exception}>,
-    // but for method dispatch we want the value type (Int) and propagate the effects.
     val receiverType: MezzeType
     val extraEffects: Set<String>
     val extraEffectInstances: Set<MezzeType.EffectInstance>
@@ -447,7 +363,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         }
     }
 
-    // Constrain: receiver type = first field's type (the receiver parameter)
     constraints.add(Constraint.Equality(
         left = receiverType,
         right = receiverConstraintType,
@@ -455,7 +370,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         loc = expr.loc
     ))
 
-    // Constrain: explicit args = stripped method's param type
     constraints.add(Constraint.Equality(
         left = argumentResult.type,
         right = strippedMethodType.paramType,
@@ -463,7 +377,6 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         loc = expr.loc
     ))
 
-    // Constrain: result type = method's return type
     constraints.add(Constraint.Equality(
         left = resultType,
         right = strippedMethodType.returnType,
@@ -471,13 +384,9 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         loc = expr.loc
     ))
 
-    // Propagate effects declared by the ability method's arrow type
-    // (e.g. `try: {it: 'm} -> 'inner <Exception>`) into the call result.
     val (callType, methodDeclaredEffects, methodDeclaredEffectInstances) =
         wrapCallResultWithEffects(resultType, strippedMethodType.effects)
 
-    // Store method call resolution for the TypedAstBuilder.
-    //
     // #218: stash the ability's instantiation TyVars into typeArgs so the
     // monomorphizer can substitute them when specializing the enclosing
     // function. Without this, an in-isolation lambda body checks `w.eq`
@@ -492,8 +401,8 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     val methodCallInfo = ConstraintResult.MethodCallInfo(
         abilityName = resolvedAbilityName,
         methodName = methodName,
-        methodHash = null,  // Resolved at TypedAstBuilder time via ability impl index
-        receiverFieldName = Keywords.IT,  // Language convention: receiver param is always `it`
+        methodHash = null,
+        receiverFieldName = Keywords.IT,
         isInherentMethod = false,
         typeArgs = methodCallTypeArgs
     )
@@ -528,23 +437,15 @@ internal fun ExpressionConstraintGenerator.isReceiverUnresolved(receiver: Parsed
     return getReceiverConcreteType(receiver, context) == null
 }
 
-/**
- * If the receiver has a known concrete type — either a literal (whose type
- * is determined syntactically) or an identifier bound to a non-VarType —
- * return it. Used to bias method-call dispatch toward inherent impls when
- * the receiver is concrete. Returns null when the receiver type is still
- * a free TypeVar so callers fall through to closed-record inference.
- */
 internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: ParsedExpr, context: ConstraintContext): MezzeType? {
-    // Literals have a known concrete type directly from syntax.
     when (receiver) {
-        is com.mezze.language.parsedast.ParsedIntLit -> return MezzeType.IntType
-        is com.mezze.language.parsedast.ParsedNatLit -> return MezzeType.NatType
-        is com.mezze.language.parsedast.ParsedFloatLit -> return MezzeType.FloatType
-        is com.mezze.language.parsedast.ParsedFracLit -> return MezzeType.FracType
-        is com.mezze.language.parsedast.ParsedStringLit -> return MezzeType.StringType
-        is com.mezze.language.parsedast.ParsedCharLit -> return MezzeType.CharType
-        is com.mezze.language.parsedast.ParsedSeqLit ->
+        is ParsedIntLit -> return MezzeType.IntType
+        is ParsedNatLit -> return MezzeType.NatType
+        is ParsedFloatLit -> return MezzeType.FloatType
+        is ParsedFracLit -> return MezzeType.FracType
+        is ParsedStringLit -> return MezzeType.StringType
+        is ParsedCharLit -> return MezzeType.CharType
+        is ParsedSeqLit ->
             return MezzeType.SeqType(MezzeType.VarType(TypeVar.fresh()))
         else -> { /* fall through */ }
     }
@@ -559,12 +460,6 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
     return if (type is MezzeType.VarType) null else type
 }
 
-/**
- * Generate constraints for an inherent method call.
- *
- * Inherent methods come from `impl Type where { method = ... }` — no ability constraint needed.
- * The receiver type is unified with the target type from the inherent impl.
- */
 internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     expr: ParsedFunctionCall,
     memberAccess: ParsedMemberAccess,
@@ -573,11 +468,9 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
 ): ConstraintResult {
     val methodName = memberAccess.member
 
-    // Generate constraints for receiver and arguments
     val receiverResult = generate(memberAccess.receiver, context.notInTailPosition())
     val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
 
-    // Unwrap SuspendedType from receiver
     val receiverType: MezzeType
     val extraEffects: Set<String>
     val extraEffectInstances: Set<MezzeType.EffectInstance>
@@ -599,11 +492,6 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     constraints.addAll(receiverResult.constraints)
     constraints.addAll(argumentResult.constraints)
 
-    // Disambiguate by receiver type name when multiple types share a method name.
-    // When the inferred receiverType is still a fresh VarType (e.g., the
-    // receiver is a `Some {val=42}` whose type the solver hasn't pinned yet),
-    // fall back to a syntactic lookup: find the type-decl that declares the
-    // constructor and match impls against that type-decl name.
     val receiverTypeName = getReceiverTypeName(receiverType)
         ?: lookupConstructorTypeName(memberAccess.receiver, context)
     val methodInfo = if (inherentMethods.size == 1) {
@@ -614,18 +502,7 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         inherentMethods.firstOrNull()
     }
 
-    // Imported (cross-module) impls: fresh-instantiate the method type so
-    // per-call unification of generic impls (e.g. `impl Seq 'a where {
-    // first }`) doesn't leak between call sites — `nums.first {}` on
-    // `[Int]` should pin `'a := Int` for that site only. Concrete bits
     // (after issue #213 pinned non-generic returns to e.g. `Int`) survive.
-    //
-    // Same-module impls: use methodType directly so the registered
-    // method type's TypeVars stay shared with the constraint
-    // ConstraintGenerator added between method-return and body type
-    // (`Equality(methodType.returnType, body.type)`). Severing that
-    // link would leave call sites unable to recover the body's
-    // inferred return type.
     val freshMethodType: MezzeType? = if (methodInfo != null) {
         if (methodInfo.isImported) {
             instantiateTypeWithFreshVars(methodInfo.methodType)
@@ -636,19 +513,10 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
 
     if (methodInfo != null && freshMethodType != null) {
         if (freshMethodType is MezzeType.FunctionType) {
-            // Strip receiver param from param type — method syntax passes receiver separately
             val fullParams = (freshMethodType.paramType as? MezzeType.RecordType)?.fields ?: emptyMap()
             val strippedParams = fullParams.filterKeys { it != Keywords.IT }
             val strippedParamType = MezzeType.RecordType(fields = strippedParams, rowVar = null)
 
-            // For imported (cross-module) impls only: unify the receiver's
-            // actual type with the impl's `it` slot. For generic imports
-            // (e.g. `impl Seq 'a where { first }`) this is what lets `'a`
-            // get bound to the concrete element type at the call site —
-            // without it, `nums.first {}` on `[Int]` reports `Option 'a`
-            // instead of `Option Int`. Same-module impls don't need this:
-            // ConstraintGenerator already binds the impl's it slot via the
-            // body-context constraint pass.
             if (methodInfo.isImported) {
                 val itType = fullParams[Keywords.IT]
                 if (itType != null) {
@@ -661,7 +529,6 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
                 }
             }
 
-            // Constrain arguments (without it)
             constraints.add(Constraint.Equality(
                 left = argumentResult.type,
                 right = strippedParamType,
@@ -669,7 +536,6 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
                 loc = expr.loc
             ))
 
-            // Constrain return type
             constraints.add(Constraint.Equality(
                 left = resultType,
                 right = freshMethodType.returnType,
@@ -679,8 +545,6 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         }
     }
 
-    // Store inherent method call resolution for the TypedAstBuilder.
-    //
     // #217: stash the impl's `it`-slot TyVar (post fresh-instantiation for
     // imports) into typeArgs so mono can substitute the concrete receiver
     // type when specializing the enclosing function. Mirror the #218
@@ -691,10 +555,10 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         ?.let { (it.paramType as? MezzeType.RecordType)?.fields?.get(Keywords.IT) }
     val inherentMethodCallInfo = if (methodInfo != null) {
         ConstraintResult.MethodCallInfo(
-            abilityName = null,  // Inherent methods have no ability
+            abilityName = null,
             methodName = methodName,
-            methodHash = null,   // Resolved at TypedAstBuilder time via impl loc
-            receiverFieldName = Keywords.IT,  // Language convention: receiver param is always `it`
+            methodHash = null,
+            receiverFieldName = Keywords.IT,
             isInherentMethod = true,
             implContentHash = methodInfo.implContentHash,
             implStartLine = methodInfo.implStartLine,
@@ -705,8 +569,6 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         )
     } else null
 
-    // Propagate effects declared by the inherent method's arrow type
-    // into the call result. Same logic as ability methods and function calls.
     val (callType, methodDeclaredEffects, methodDeclaredEffectInstances) =
         wrapCallResultWithEffects(resultType, (freshMethodType as? MezzeType.FunctionType)?.effects)
 
@@ -724,26 +586,6 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     )
 }
 
-/**
- * Try to generate constraints for effect operation calls.
- *
- * Example: Log.println {msg = "Hello"}
- *
- * Returns null if this is not an effect operation (so caller can try ability method instead).
- * Returns ConstraintResult if this is an effect operation.
- *
- * Effect operations are similar to ability methods, but they wrap the result in SuspendedType with the effect.
- */
-
-/** Extract type name from receiver type for inherent method disambiguation. */
-/**
- * When the inferred receiver type is still an unresolved VarType, try to
- * derive a type name from the receiver expression itself. For variant
- * constructors like `Some {val=42}`, this finds the type-decl whose
- * variant defines `Some` and returns its name (`"Option"`). Fixes inherent
- * method dispatch when constraint solving hasn't yet pinned the receiver
- * type.
- */
 internal fun ExpressionConstraintGenerator.lookupConstructorTypeName(receiver: ParsedExpr, context: ConstraintContext): String? =
     lookupConstructorTypeName(receiver, context, depth = 0)
 
@@ -760,16 +602,12 @@ internal fun ExpressionConstraintGenerator.lookupConstructorTypeName(
 ): String? {
     if (depth > 4) return null
 
-    // Variant constructor receiver: `Some {val=42}`, `Ok {val=42}`.
     val ctorName = when (receiver) {
         is ParsedVariantConstruct -> receiver.constructor
         is ParsedFunctionCall -> (receiver.function as? ParsedVariantConstruct)?.constructor
         else -> null
     }
     if (ctorName != null) {
-        // Built-in variant constructors don't appear in typeDeclarations —
-        // they're hardcoded as TypeApplication("Result", ...) etc. in
-        // BasicTypes.kt and friends. Map the well-known ones explicitly.
         when (ctorName) {
             "Ok", "Err" -> return "Result"
             "Some", "None" -> return "Option"
@@ -781,10 +619,6 @@ internal fun ExpressionConstraintGenerator.lookupConstructorTypeName(
             }
         }
     }
-    // Method-chain receiver: `s.insert {x=1}.insert {x=2}` — the outer
-    // call's receiver is itself a ParsedFunctionCall whose function is a
-    // ParsedMemberAccess. Recurse on the inner receiver to find its type
-    // name, then look up the inherent method's return type.
     if (receiver is ParsedFunctionCall && receiver.function is ParsedMemberAccess) {
         val memberAccess = receiver.function as ParsedMemberAccess
         val innerTypeName = lookupConstructorTypeName(memberAccess.receiver, context, depth + 1) ?: return null
@@ -794,10 +628,6 @@ internal fun ExpressionConstraintGenerator.lookupConstructorTypeName(
         val ret = (method.methodType as? MezzeType.FunctionType)?.returnType ?: return null
         return getReceiverTypeName(ret)
     }
-    // Function-call receiver: `set::empty {}` returns `Set 'a`. Look up the
-    // function's binding type and extract the return-type's constructor.
-    // Also handles bare identifiers like `s` whose binding may already have
-    // a non-VarType (rare here, but covered).
     val fnExpr: ParsedExpr? = when (receiver) {
         is ParsedFunctionCall -> receiver.function
         else -> receiver
@@ -818,8 +648,6 @@ internal fun ExpressionConstraintGenerator.lookupConstructorTypeName(
         }
         else -> null
     }
-    // For function calls, extract the return type. For bare identifiers,
-    // use the binding type directly.
     val resultType = when {
         bindingType is MezzeType.FunctionType && receiver is ParsedFunctionCall -> bindingType.returnType
         bindingType != null && receiver !is ParsedFunctionCall -> bindingType
@@ -841,7 +669,7 @@ internal fun ExpressionConstraintGenerator.findMatchingRecordTypeAliases(
     val matches = mutableListOf<String>()
     for ((aliasName, typeDecl) in context.typeDeclarations) {
         val def = typeDecl.definition
-        if (def is com.mezze.language.parsedast.ParsedRecordDef) {
+        if (def is ParsedRecordDef) {
             val aliasFieldNames = def.fields.map { it.name }.toSet()
             if (aliasFieldNames == recordType.fields.keys) {
                 matches.add(aliasName)
@@ -862,7 +690,7 @@ internal fun ExpressionConstraintGenerator.findMatchingVariantTypeAliases(
     val matches = mutableListOf<String>()
     for ((aliasName, typeDecl) in context.typeDeclarations) {
         val def = typeDecl.definition
-        if (def is com.mezze.language.parsedast.ParsedVariantDef) {
+        if (def is ParsedVariantDef) {
             val aliasCtorNames = def.constructors.map { it.name }.toSet()
             if (aliasCtorNames.containsAll(variantType.constructors.keys)) {
                 matches.add(aliasName)

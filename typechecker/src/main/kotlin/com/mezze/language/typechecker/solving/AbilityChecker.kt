@@ -1,7 +1,11 @@
 package com.mezze.language.typechecker.solving
 
 import com.mezze.language.ast.*
+import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.ast.solving.Substitution
+import com.mezze.language.parsedast.*
+import com.mezze.language.typechecker.ModuleResolver
+import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.typechecker.constraints.Constraint
@@ -9,9 +13,10 @@ import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
-import com.mezze.language.typechecker.WellKnownHashes
-import com.mezze.language.typechecker.WellKnownHashConstants
+import com.mezze.language.typechecker.hashing.ContentHashComputer
 import com.mezze.language.typechecker.util.TypeAnnotationMatcher
+import com.mezze.language.typechecker.util.WellKnownTypeApp
+import com.mezze.language.typedast.Hash
 
 internal class AbilityChecker(
     private val context: TypingContext,
@@ -22,28 +27,27 @@ internal class AbilityChecker(
     data class GeneratedCodecImpl(
         val abilityName: String,
         val targetTypes: List<MezzeType>,
-        val contentHash: com.mezze.language.typedast.Hash
+        val contentHash: Hash
     )
 
     private data class TrackedAbilityConstraint(
         val abilityName: String,
-        val abilityHash: com.mezze.language.typedast.Hash?,
+        val abilityHash: Hash?,
         val typeArgs: List<MezzeType>,
-        val loc: com.mezze.language.parsedast.Loc?,
+        val loc: Loc?,
         val fromAnnotation: Boolean = false
     )
 
-    private val generatedCodecImpls = mutableMapOf<com.mezze.language.typedast.Hash, GeneratedCodecImpl>()
+    private val generatedCodecImpls = mutableMapOf<Hash, GeneratedCodecImpl>()
     private val typeVarAbilityConstraints = mutableMapOf<TypeVar, MutableList<TrackedAbilityConstraint>>()
     private val deferredInference = mutableMapOf<TypeVar, MezzeType>()
     private val associatedTypeResolutionConstraints = mutableMapOf<TypeVar, MutableList<Constraint.AssociatedTypeResolution>>()
-    private val typeMatchesAnnotationCache = mutableMapOf<Pair<Int, Int>, Boolean>()
 
     fun getGeneratedCodecImpls(): Collection<GeneratedCodecImpl> = generatedCodecImpls.values
     fun getDeferredInference(): Map<TypeVar, MezzeType> = deferredInference
     fun getAssociatedTypeResolutionConstraints(): Map<TypeVar, MutableList<Constraint.AssociatedTypeResolution>> = associatedTypeResolutionConstraints
 
-    internal fun validateAbilityConstraints(substitution: Substitution): Pair<String, com.mezze.language.parsedast.Loc?>? {
+    internal fun validateAbilityConstraints(substitution: Substitution): Pair<String, Loc?>? {
         for ((typeVar, abilityConstraints) in typeVarAbilityConstraints) {
             val varType = MezzeType.VarType(typeVar)
             val boundType = substitution.apply(varType)
@@ -53,8 +57,8 @@ internal class AbilityChecker(
                     val abilityName = tracked.abilityName
                     val typeArgs = tracked.typeArgs
                     val errorLoc = tracked.loc
-                    val trackedResolvedHash = tracked.abilityHash ?: WellKnownHashes.resolveHash(abilityName)
-                    if (WellKnownHashes.isInspect(trackedResolvedHash)) continue
+                    val trackedResolvedHash = tracked.abilityHash ?: WellKnownHashConstants.resolveHash(abilityName)
+                    if (WellKnownHashConstants.isInspect(trackedResolvedHash)) continue
                     val concreteTypeArgs: List<MezzeType> = typeArgs.map { typeArg ->
                         if (typeArg is MezzeType.VarType &&
                             (typeArg.variable.id == typeVar.id ||
@@ -99,8 +103,8 @@ internal class AbilityChecker(
         val abilityName = constraint.abilityName
         val typeArgs = constraint.typeArgs
 
-        val resolvedHash = constraint.abilityHash ?: WellKnownHashes.resolveHash(abilityName)
-        if (WellKnownHashes.isInspect(resolvedHash)) {
+        val resolvedHash = constraint.abilityHash ?: WellKnownHashConstants.resolveHash(abilityName)
+        if (WellKnownHashConstants.isInspect(resolvedHash)) {
             return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
         }
 
@@ -208,10 +212,10 @@ internal class AbilityChecker(
     }
 
     private fun substituteAnnotationWithImplBindings(
-        annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        annotation: ParsedTypeAnnotation,
         implTypeVarBindings: Map<String, MezzeType>,
     ): MezzeType {
-        if (annotation is com.mezze.language.parsedast.ParsedNamedType) {
+        if (annotation is ParsedNamedType) {
             val name = annotation.name
             implTypeVarBindings[name]?.let { return it }
             implTypeVarBindings["'$name"]?.let { return it }
@@ -240,20 +244,20 @@ internal class AbilityChecker(
         return null
     }
 
-    private fun typeAnnotationToMezzeType(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
+    private fun typeAnnotationToMezzeType(annotation: ParsedTypeAnnotation): MezzeType {
         return when (annotation) {
-            is com.mezze.language.parsedast.ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
-            is com.mezze.language.parsedast.ParsedTypeApp -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, annotation.args.map { typeAnnotationToMezzeType(it) })
-            is com.mezze.language.parsedast.ParsedSeqType -> MezzeType.SeqType(typeAnnotationToMezzeType(annotation.elementType))
-            is com.mezze.language.parsedast.ParsedRecordType -> MezzeType.RecordType(fields = annotation.entries.associate { it.name to typeAnnotationToMezzeType(it.type) })
-            is com.mezze.language.parsedast.ParsedFunctionType -> MezzeType.FunctionType(paramType = typeAnnotationToMezzeType(annotation.paramType), returnType = typeAnnotationToMezzeType(annotation.returnType))
-            is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> typeAnnotationToMezzeType(dt) } })
-            is com.mezze.language.parsedast.ParsedQualifiedType -> com.mezze.language.typechecker.util.WellKnownTypeApp.of((annotation.modulePath + annotation.typeName).joinToString("::"), annotation.args.map { typeAnnotationToMezzeType(it) })
+            is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: WellKnownTypeApp.of(annotation.name, emptyList())
+            is ParsedTypeApp -> WellKnownTypeApp.of(annotation.constructor, annotation.args.map { typeAnnotationToMezzeType(it) })
+            is ParsedSeqType -> MezzeType.SeqType(typeAnnotationToMezzeType(annotation.elementType))
+            is ParsedRecordType -> MezzeType.RecordType(fields = annotation.entries.associate { it.name to typeAnnotationToMezzeType(it.type) })
+            is ParsedFunctionType -> MezzeType.FunctionType(paramType = typeAnnotationToMezzeType(annotation.paramType), returnType = typeAnnotationToMezzeType(annotation.returnType))
+            is ParsedVariantType -> MezzeType.VariantType(constructors = annotation.constructors.associate { it.name to it.dataType?.let { dt -> typeAnnotationToMezzeType(dt) } })
+            is ParsedQualifiedType -> WellKnownTypeApp.of((annotation.modulePath + annotation.typeName).joinToString("::"), annotation.args.map { typeAnnotationToMezzeType(it) })
         }
     }
 
-    internal fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>, abilityHash: com.mezze.language.typedast.Hash? = null): Boolean {
-        val effectiveHash = abilityHash ?: WellKnownHashes.resolveHash(abilityName)
+    internal fun checkAbilityImplementation(abilityName: String, typeArgs: List<MezzeType>, abilityHash: Hash? = null): Boolean {
+        val effectiveHash = abilityHash ?: WellKnownHashConstants.resolveHash(abilityName)
         if (typeArgs.size == 1) {
             if (canDeriveAbility(abilityName, typeArgs.first(), effectiveHash)) {
                 return true
@@ -270,12 +274,12 @@ internal class AbilityChecker(
             } else if (typeArgs.size == 1 && (effectiveHash == WellKnownHashConstants.ABILITY_ENCODEREPR || effectiveHash == WellKnownHashConstants.ABILITY_DECODEREPR)) {
                 val dataType = typeArgs[0]
                 if (codecGenerator.isSerializable(dataType) && !containsVarType(dataType)) {
-                    val hashBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()
+                    val hashBuilder = MezzeHashBuilder()
                     hashBuilder.append("codec_impl")
                     hashBuilder.append(abilityName)
                     hashBuilder.append("_single_param_")
-                    hashBuilder.append(com.mezze.language.typechecker.hashing.ContentHashComputer.mezzeTypeToString(dataType))
-                    val implKey = com.mezze.language.typedast.Hash(hashBuilder.build().toFullHexString())
+                    hashBuilder.append(ContentHashComputer.mezzeTypeToString(dataType))
+                    val implKey = Hash(hashBuilder.build().toFullHexString())
                     if (!generatedCodecImpls.containsKey(implKey)) {
                         generatedCodecImpls[implKey] = GeneratedCodecImpl(
                             abilityName = abilityName,
@@ -299,7 +303,6 @@ internal class AbilityChecker(
             if (arg is MezzeType.SuspendedType) arg.valueType else arg
         }
 
-
         val hasImpl = impls.any { implInfo ->
             val annotations = implInfo.targetTypeAnnotations ?: return@any false
 
@@ -317,7 +320,7 @@ internal class AbilityChecker(
                 implInfo.operationConstraints.all { constraint ->
                     val resolvedTypeArgs = constraint.typeArgs.map { typeArg ->
                         when (typeArg) {
-                            is com.mezze.language.parsedast.ParsedNamedType -> {
+                            is ParsedNamedType -> {
                                 val bound = typeVarBindings[typeArg.name]
                                 if (bound != null) bound
                                 else typeAnnotationToMezzeType(typeArg)
@@ -325,7 +328,7 @@ internal class AbilityChecker(
                             else -> typeAnnotationToMezzeType(typeArg)
                         }
                     }
-                    checkAbilityImplementation(constraint.abilityName, resolvedTypeArgs, WellKnownHashes.resolveHash(constraint.abilityName))
+                    checkAbilityImplementation(constraint.abilityName, resolvedTypeArgs, WellKnownHashConstants.resolveHash(constraint.abilityName))
                 }
             } else {
                 true
@@ -335,8 +338,8 @@ internal class AbilityChecker(
         return hasImpl
     }
 
-    private fun isCodecAbility(abilityName: String, abilityHash: com.mezze.language.typedast.Hash? = null): Boolean =
-        WellKnownHashes.isCodecAbility(abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName))
+    private fun isCodecAbility(abilityName: String, abilityHash: Hash? = null): Boolean =
+        WellKnownHashConstants.isCodecAbility(abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName))
 
     private fun checkCodecAbilityImplementation(
         abilityName: String,
@@ -351,12 +354,12 @@ internal class AbilityChecker(
             return false
         }
 
-        val hashBuilder = com.mezze.language.ast.hashing.MezzeHashBuilder()
+        val hashBuilder = MezzeHashBuilder()
         hashBuilder.append("codec_impl")
         hashBuilder.append(abilityName)
-        hashBuilder.append(com.mezze.language.typechecker.hashing.ContentHashComputer.mezzeTypeToString(formatType))
-        hashBuilder.append(com.mezze.language.typechecker.hashing.ContentHashComputer.mezzeTypeToString(dataType))
-        val implKey = com.mezze.language.typedast.Hash(hashBuilder.build().toFullHexString())
+        hashBuilder.append(ContentHashComputer.mezzeTypeToString(formatType))
+        hashBuilder.append(ContentHashComputer.mezzeTypeToString(dataType))
+        val implKey = Hash(hashBuilder.build().toFullHexString())
 
         if (generatedCodecImpls.containsKey(implKey)) {
             return true
@@ -404,7 +407,7 @@ internal class AbilityChecker(
                     return type
                 }
                 val closedArgs = type.args.map { closeOpenRecordsForCodec(it) }
-                com.mezze.language.typechecker.util.WellKnownTypeApp.of(type.constructor, closedArgs, type.typeHash)
+                WellKnownTypeApp.of(type.constructor, closedArgs, type.typeHash)
             }
             is MezzeType.VariantType -> {
                 val needsClosing = type.rowVar != null || type.constructors.values.any { it != null && needsClosingForCodec(it) }
@@ -507,7 +510,7 @@ internal class AbilityChecker(
         }
     }
 
-    private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: com.mezze.language.typedast.Hash? = null): Boolean {
+    private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
         val resolvedHash = abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName)
         var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
 
@@ -515,8 +518,8 @@ internal class AbilityChecker(
 
         if (unwrappedType is MezzeType.TypeApplication) {
             val typeDecl = registry.lookupType(unwrappedType.constructor)
-                ?: com.mezze.language.typechecker.ModuleResolver.lookupTypeDeclaration(unwrappedType.constructor)
-            if (typeDecl?.definition is com.mezze.language.parsedast.ParsedNewtypeDef) {
+                ?: ModuleResolver.lookupTypeDeclaration(unwrappedType.constructor)
+            if (typeDecl?.definition is ParsedNewtypeDef) {
                 isNewtype = true
             }
 
@@ -531,14 +534,14 @@ internal class AbilityChecker(
             }
         }
 
-        if (isNewtype && !WellKnownHashes.isInspect(abilityHash)) {
+        if (isNewtype && !WellKnownHashConstants.isInspect(abilityHash)) {
             return false
         }
 
         return when {
-            WellKnownHashes.isInspect(abilityHash) -> true
+            WellKnownHashConstants.isInspect(abilityHash) -> true
 
-            WellKnownHashes.isEq(abilityHash) -> {
+            WellKnownHashConstants.isEq(abilityHash) -> {
                 unwrappedType is MezzeType.VarType || BuiltInAbilities.isBoolVariant(unwrappedType) ||
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
                 (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
@@ -546,7 +549,7 @@ internal class AbilityChecker(
                 (unwrappedType is MezzeType.SeqType && canDeriveOrHasImpl(abilityName, unwrappedType.elementType, abilityHash))
             }
 
-            WellKnownHashes.isOrd(abilityHash) -> {
+            WellKnownHashConstants.isOrd(abilityHash) -> {
                 unwrappedType is MezzeType.VarType ||
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
                 (unwrappedType is MezzeType.VariantType && unwrappedType.constructors.values.all { it == null || canDeriveOrHasImpl(abilityName, it, abilityHash) }) ||
@@ -565,18 +568,18 @@ internal class AbilityChecker(
         }
     }
 
-    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType, abilityHash: com.mezze.language.typedast.Hash? = null): Boolean {
+    private fun canDeriveOrHasImpl(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
         if (canDeriveAbility(abilityName, type, abilityHash)) return true
         if (abilityHash != null && checkAbilityImplementation(abilityName, listOf(type), abilityHash)) return true
         return checkAbilityImplementation(abilityName, listOf(type))
     }
 
-    internal fun generateAbilityErrorMessage(abilityName: String, typeArgs: List<MezzeType>, loc: com.mezze.language.parsedast.Loc? = null): String {
+    internal fun generateAbilityErrorMessage(abilityName: String, typeArgs: List<MezzeType>, loc: Loc? = null): String {
         val hasFunctionType = typeArgs.any { it is MezzeType.FunctionType }
         val typeNames = typeArgs.map { prettyPrintType(it) }.joinToString(", ")
         val primaryType = typeArgs.firstOrNull()?.let { prettyPrintType(it) } ?: typeNames
 
-        val operator = loc?.let { com.mezze.language.ast.SyntaxMetadata.getOperatorSyntax(it) }
+        val operator = loc?.let { SyntaxMetadata.getOperatorSyntax(it) }
 
         if (hasFunctionType) {
             return if (operator != null) {
@@ -677,29 +680,29 @@ internal class AbilityChecker(
         return "\n  Available impls: " + shown.joinToString("; ") { "impl $abilityName for $it" } + suffix
     }
 
-    private fun renderAnnotation(a: com.mezze.language.parsedast.ParsedTypeAnnotation): String = when (a) {
-        is com.mezze.language.parsedast.ParsedNamedType -> a.name
-        is com.mezze.language.parsedast.ParsedQualifiedType -> {
+    private fun renderAnnotation(a: ParsedTypeAnnotation): String = when (a) {
+        is ParsedNamedType -> a.name
+        is ParsedQualifiedType -> {
             val prefix = a.modulePath.joinToString("::")
             val head = if (prefix.isEmpty()) a.typeName else "$prefix::${a.typeName}"
             if (a.args.isEmpty()) head else "$head ${a.args.joinToString(" ") { renderAnnotation(it) }}"
         }
-        is com.mezze.language.parsedast.ParsedTypeApp ->
+        is ParsedTypeApp ->
             if (a.args.isEmpty()) a.constructor else "${a.constructor} ${a.args.joinToString(" ") { renderAnnotation(it) }}"
-        is com.mezze.language.parsedast.ParsedRecordType -> {
+        is ParsedRecordType -> {
             val fields = a.entries.joinToString(", ") { "${it.name}: ${renderAnnotation(it.type)}" }
             if (a.isOpen) "{ $fields, ... }" else "{ $fields }"
         }
-        is com.mezze.language.parsedast.ParsedVariantType -> {
+        is ParsedVariantType -> {
             val ctors = a.constructors.joinToString(", ") { c ->
                 val dt = c.dataType
                 if (dt == null) c.name else "${c.name} ${renderAnnotation(dt)}"
             }
             "| $ctors |"
         }
-        is com.mezze.language.parsedast.ParsedFunctionType ->
+        is ParsedFunctionType ->
             "${renderAnnotation(a.paramType)} -> ${renderAnnotation(a.returnType)}"
-        is com.mezze.language.parsedast.ParsedSeqType -> "[${renderAnnotation(a.elementType)}]"
+        is ParsedSeqType -> "[${renderAnnotation(a.elementType)}]"
         else -> a::class.simpleName?.removePrefix("Parsed")?.removeSuffix("Type") ?: "?"
     }
 
@@ -740,7 +743,7 @@ internal class AbilityChecker(
         }
     }
 
-    internal fun tryBidirectionalInference(abilityName: String, typeArgs: List<MezzeType>, abilityHash: com.mezze.language.typedast.Hash? = null): Substitution? {
+    internal fun tryBidirectionalInference(abilityName: String, typeArgs: List<MezzeType>, abilityHash: Hash? = null): Substitution? {
         val resolvedHash = abilityHash ?: WellKnownHashConstants.resolveAbilityHash(abilityName)
         if (resolvedHash == WellKnownHashConstants.ABILITY_DECODEREPR && typeArgs.size == 1) {
             val dataType = typeArgs[0]
@@ -783,7 +786,7 @@ internal class AbilityChecker(
             return null
         }
 
-        val matchingImpls = mutableListOf<List<com.mezze.language.parsedast.ParsedTypeAnnotation>>()
+        val matchingImpls = mutableListOf<List<ParsedTypeAnnotation>>()
 
         for (impl in allImpls) {
             val annotations = impl.targetTypeAnnotations
@@ -836,15 +839,15 @@ internal class AbilityChecker(
         }
     }
 
-    private fun convertAnnotationToType(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType? {
+    private fun convertAnnotationToType(annotation: ParsedTypeAnnotation): MezzeType? {
         return when (annotation) {
-            is com.mezze.language.parsedast.ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.name, emptyList())
-            is com.mezze.language.parsedast.ParsedTypeApp -> { val args = annotation.args.mapNotNull { convertAnnotationToType(it) }; if (args.size != annotation.args.size) null else com.mezze.language.typechecker.util.WellKnownTypeApp.of(annotation.constructor, args) }
-            is com.mezze.language.parsedast.ParsedSeqType -> convertAnnotationToType(annotation.elementType)?.let { MezzeType.SeqType(it) }
-            is com.mezze.language.parsedast.ParsedRecordType -> { val fields = mutableMapOf<String, MezzeType>(); for (e in annotation.entries) { val ft = convertAnnotationToType(e.type) ?: return null; fields[e.name] = ft }; MezzeType.RecordType(fields) }
-            is com.mezze.language.parsedast.ParsedVariantType -> MezzeType.VariantType(annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertAnnotationToType(dt) } })
-            is com.mezze.language.parsedast.ParsedFunctionType -> { val p = convertAnnotationToType(annotation.paramType) ?: return null; val r = convertAnnotationToType(annotation.returnType) ?: return null; MezzeType.FunctionType(p, r) }
-            is com.mezze.language.parsedast.ParsedQualifiedType -> null
+            is ParsedNamedType -> PrimitiveTypes.fromName(annotation.name) ?: WellKnownTypeApp.of(annotation.name, emptyList())
+            is ParsedTypeApp -> { val args = annotation.args.mapNotNull { convertAnnotationToType(it) }; if (args.size != annotation.args.size) null else WellKnownTypeApp.of(annotation.constructor, args) }
+            is ParsedSeqType -> convertAnnotationToType(annotation.elementType)?.let { MezzeType.SeqType(it) }
+            is ParsedRecordType -> { val fields = mutableMapOf<String, MezzeType>(); for (e in annotation.entries) { val ft = convertAnnotationToType(e.type) ?: return null; fields[e.name] = ft }; MezzeType.RecordType(fields) }
+            is ParsedVariantType -> MezzeType.VariantType(annotation.constructors.associate { it.name to it.dataType?.let { dt -> convertAnnotationToType(dt) } })
+            is ParsedFunctionType -> { val p = convertAnnotationToType(annotation.paramType) ?: return null; val r = convertAnnotationToType(annotation.returnType) ?: return null; MezzeType.FunctionType(p, r) }
+            is ParsedQualifiedType -> null
         }
     }
 

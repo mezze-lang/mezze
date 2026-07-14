@@ -263,28 +263,28 @@ class PatternBugProbeTest {
     // ========================================================================
 
     @Test
-    fun `WellKnownHashes resolves stdlib type hashes for hash-based identity`() {
+    fun `WellKnownHashConstants resolves stdlib type hashes for hash-based identity`() {
         // After #309 — the WellKnownHashGenerator scans stdlib for ParsedTypeDecl
         // alongside abilities and effects. Public stdlib types should have
         // resolvable hashes; an unknown type returns null.
-        val jsonHash = com.mezze.language.typechecker.WellKnownHashes.resolveTypeHash("Json")
+        val jsonHash = com.mezze.language.typechecker.WellKnownHashConstants.resolveTypeHash("Json")
         assertTrue(jsonHash != null,
-            "Json (declared in std::codec::json) should be in WellKnownHashes (#309)")
+            "Json (declared in std::codec::json) should be in WellKnownHashConstants (#309)")
 
-        val httpHash = com.mezze.language.typechecker.WellKnownHashes.resolveTypeHash("HttpError")
+        val httpHash = com.mezze.language.typechecker.WellKnownHashConstants.resolveTypeHash("HttpError")
         assertTrue(httpHash != null,
-            "HttpError (declared in std::effects::http) should resolve via WellKnownHashes")
+            "HttpError (declared in std::effects::http) should resolve via WellKnownHashConstants")
 
         // Unknown type resolves to null (not a default/empty hash that would
         // accidentally match something).
-        val unknown = com.mezze.language.typechecker.WellKnownHashes.resolveTypeHash("DefinitelyNotARealStdlibType")
+        val unknown = com.mezze.language.typechecker.WellKnownHashConstants.resolveTypeHash("DefinitelyNotARealStdlibType")
         assertEquals(null, unknown,
             "Unknown type names should return null, not a default hash")
 
         // Built-in synthetic types (Option, Result, Bool, Ordering) are NOT in
         // the registry — they're built in Kotlin in ContextBuilder, not parsed
         // from .mz. Confirming they don't accidentally resolve.
-        val optionHash = com.mezze.language.typechecker.WellKnownHashes.resolveTypeHash("Option")
+        val optionHash = com.mezze.language.typechecker.WellKnownHashConstants.resolveTypeHash("Option")
         assertEquals(null, optionHash,
             "Built-in synthetic Option (constructed in Kotlin) is not in the source-derived registry. " +
             "If Option ever gets a real .mz declaration, this test should flip.")

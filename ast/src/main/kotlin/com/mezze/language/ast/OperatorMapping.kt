@@ -1,11 +1,5 @@
-package com.mezze.language.parser
+package com.mezze.language.ast
 
-/**
- * Canonical operator-to-ability mapping for Mezze.
- *
- * Binary operators desugar to method calls: `x + y` -> `x.add {r = y}` (NumAdd ability).
- * Unary operators similarly: `-x` -> `x.neg {}` (NumSub ability).
- */
 object OperatorMapping {
 
     data class BinaryOp(val ability: String, val method: String)

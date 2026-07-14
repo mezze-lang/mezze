@@ -4,13 +4,6 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.parser.*
 
 import com.mezze.language.parser.internal.lib.*
-/**
- * Type annotation parsers for all type constructs.
- *
- * All parsers return ParsedTypeAnnotation (from parsedast package).
- * All functions are internal - only used within the parser module.
- */
-
 // Helper data class for effect row parsing result
 private data class EffectRowParseResult(
     val effects: List<String>,
@@ -158,7 +151,6 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
             val startToken = stream.current() ?: break
             var currentStream = result.remaining
 
-            // Check for 'with' keyword BEFORE the arrow (ability constraints on parameter)
             val abilityConstraints = mutableListOf<ParsedFnAbilityConstraint>()
             val streamBeforeWith = skipNewlines(currentStream)
             if (streamBeforeWith.current()?.type == TokenType.WITH) {
@@ -443,9 +435,6 @@ internal val MezzeParser.primaryTypeAnnotation: Parser<ParsedTypeAnnotation>
         )(stream)
     }
 
-/**
- * Parse atomic type annotations (identifiers only, no type applications).
- */
 internal val MezzeParser.atomicTypeAnnotation: Parser<ParsedTypeAnnotation>
     get() = { stream ->
         Parsers.oneOf(
@@ -631,7 +620,6 @@ internal val MezzeParser.variantTypeAnnotationParser: Parser<ParsedTypeAnnotatio
         }
     }
 
-// Simple type argument parser (for type applications)
 internal val MezzeParser.simpleTypeArgument: Parser<ParsedTypeAnnotation>
     get() = { stream ->
         Parsers.oneOf(

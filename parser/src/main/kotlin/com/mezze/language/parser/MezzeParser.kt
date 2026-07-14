@@ -5,29 +5,14 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.parser.internal.*
 import com.mezze.language.parser.internal.lib.*
 
-/**
- * Mezze language parser using parser combinators.
- *
- * Disambiguates lambda expressions ({x} -> body) from record literals ({x = value})
- * using explicit lookahead for the arrow token.
- *
- * Not thread-safe for concurrent use of the same instance. Use a fresh MezzeParser()
- * per thread for parallel parsing.
- */
+// Not thread-safe — use a fresh MezzeParser() per thread for parallel parsing.
 class MezzeParser {
-    // Store source and file during parsing for better error messages
     internal var currentSource: String?? = null
     internal var currentFile: String?? = null
 
     companion object
 
-    /**
-     * Parse source into ParsedModule (v2 AST — clean, no nullable typechecker fields).
-     *
-     * This is the primary (and only) parse entry point.
-     */
     fun parseParsedModule(source: String, file: String = "<unknown>"): ParsedModule {
-        // Store for error reporting in nested parser methods
         currentSource = source
         currentFile = file
 
@@ -93,9 +78,6 @@ class MezzeParser {
         }
     }
 
-    /**
-     * Result of parsing with error recovery.
-     */
     data class ParseResultWithRecovery(
         val module: ParsedModule,
         val errors: List<ParseException>
@@ -104,12 +86,6 @@ class MezzeParser {
         val isSuccess: Boolean get() = errors.isEmpty()
     }
 
-    /**
-     * Parse with error recovery - continues parsing after errors and collects all errors.
-     *
-     * This is useful for IDEs/LSP to show all errors at once instead of stopping at the first one.
-     * Returns a partial AST with successfully parsed items plus a list of all parse errors.
-     */
     fun parseWithRecovery(source: String, file: String? = null): ParseResultWithRecovery {
         currentSource = source
         currentFile = file
@@ -154,12 +130,10 @@ class MezzeParser {
 
             var stream = TokenStream(tokens)
 
-            // Skip leading newlines and collect annotations
             val (startStream, leadingBlock) = skipNewlinesCollectAnnotations(stream)
             stream = startStream
             var pendingBlock = leadingBlock
 
-            // Parse top-level items with recovery
             while (stream.current()?.type != TokenType.EOF) {
                 when (val result = parsedTopLevelItem(stream)) {
                     is ParseResult.Success -> {
@@ -167,7 +141,6 @@ class MezzeParser {
                         decls.add(decl)
                         pendingBlock = AnnotationBlock(emptyList(), null, null)
 
-                        // Check for trailing comment
                         val afterDecl = result.remaining
                         val nextToken = afterDecl.current()
                         if (nextToken?.type == TokenType.COMMENT && nextToken.line == getLastDeclLine(decl)) {
@@ -186,7 +159,6 @@ class MezzeParser {
                         stream = nextStream
                     }
                     is ParseResult.Failure -> {
-                        // Record the error
                         errors.add(ParseException(
                             result.message,
                             result.position,
@@ -231,10 +203,6 @@ class MezzeParser {
         }
     }
 
-    /**
-     * Skip tokens until we find a likely start of a new top-level declaration.
-     * This enables error recovery by jumping past problematic code.
-     */
     private fun synchronizeToNextDeclaration(stream: TokenStream): TokenStream {
         var current = stream.advance() // Skip at least one token
 
@@ -270,9 +238,6 @@ class MezzeParser {
         return current
     }
 
-    /**
-     * Check if a token type typically starts a top-level declaration.
-     */
     private fun isDeclarationStart(type: TokenType): Boolean {
         return type in setOf(
             TokenType.LET,
@@ -287,7 +252,6 @@ class MezzeParser {
 
 
     private val parsedModuleParser: Parser<ParsedModule> = { stream ->
-        // Skip leading newlines and collect annotations
         val (startStream, leadingBlock) = skipNewlinesCollectAnnotations(stream)
         var currentStream = startStream
         val decls = mutableListOf<ParsedDecl>()
@@ -295,7 +259,6 @@ class MezzeParser {
         var pendingBlock = leadingBlock
         var failure: ParseResult.Failure? = null
 
-        // Parse top-level items, collecting annotations between them
         while (currentStream.current()?.type != TokenType.EOF && failure == null) {
             when (val result = parsedTopLevelItem(currentStream)) {
                 is ParseResult.Success -> {
@@ -304,7 +267,6 @@ class MezzeParser {
                     decls.add(decl)
                     pendingBlock = AnnotationBlock(emptyList(), null, null)
 
-                    // Check for trailing comment on the same line
                     val afterDecl = result.remaining
                     val nextToken = afterDecl.current()
                     if (nextToken?.type == TokenType.COMMENT && nextToken.line == getLastDeclLine(decl)) {
@@ -319,7 +281,6 @@ class MezzeParser {
                         currentStream = afterDecl
                     }
 
-                    // Collect annotations before next declaration
                     val (nextStream, betweenBlock) = skipNewlinesCollectAnnotations(currentStream)
                     pendingBlock = betweenBlock
                     currentStream = nextStream
@@ -348,21 +309,6 @@ class MezzeParser {
     }
 
     private fun getLastDeclLine(decl: ParsedDecl): Int = decl.loc.endLine
-
-    private fun attachCommentsToDecl(decl: ParsedDecl, comments: List<ParsedComment>): ParsedDecl {
-        if (comments.isEmpty()) return decl
-        return when (decl) {
-            is ParsedLetDecl -> decl.copy(leadingComments = comments)
-            is ParsedTypeDecl -> decl.copy(leadingComments = comments)
-            is ParsedEffectDecl -> decl.copy(leadingComments = comments)
-            is ParsedAbilityDecl -> decl.copy(leadingComments = comments)
-            is ParsedImplAbilityDecl -> decl.copy(leadingComments = comments)
-            is ParsedPerformerDecl -> decl.copy(leadingComments = comments)
-            is ParsedUseDecl -> decl.copy(leadingComments = comments)
-            is ParsedPubUseDecl -> decl.copy(leadingComments = comments)
-            is ParsedTopLevelExpr -> decl.copy(leadingComments = comments)
-        }
-    }
 
     private fun attachAnnotationsToDecl(decl: ParsedDecl, block: AnnotationBlock): ParsedDecl {
         val (comments, doc, meta) = block
@@ -408,7 +354,6 @@ class MezzeParser {
 
 
     init {
-        // Initialize parsers after all properties are available
         parsedEffectDeclaration = { stream -> parseEffectDeclaration(stream) }
         parsedImplDeclaration = { stream -> parseImplDeclaration(stream) }
         parsedImplAbilityDeclaration = { stream -> parseImplAbilityDeclaration(stream) }
@@ -428,19 +373,15 @@ class MezzeParser {
             }
         }
 
-        // Initialize parsedTopLevelItem AFTER all other parsers are initialized
         parsedTopLevelItem = parsedTopLevelItem@{ stream ->
-            // Check for optional 'pub' modifier
             val pubToken = tok(TokenType.PUB)(stream)
             val (visibility, streamAfterPub, pubLocation) = when (pubToken) {
                 is ParseResult.Success -> Triple(Visibility.PUBLIC, pubToken.remaining, pubToken.value)
                 is ParseResult.Failure -> Triple(Visibility.PRIVATE, stream, null)
             }
 
-            // Parse the actual declaration with visibility
             val streamAfterPubSkipNl = skipNewlines(streamAfterPub)
 
-            // Check for pub before declarations that don't support it
             if (pubLocation != null) {
                 val nextToken = streamAfterPubSkipNl.current()
                 when (nextToken?.type) {
@@ -517,9 +458,6 @@ class MezzeParser {
         return current
     }
 
-    /**
-     * Result of collecting comments, doc strings, and metadata between declarations.
-     */
     internal data class AnnotationBlock(
         val regularComments: List<ParsedComment>,
         val docComment: String?,
@@ -536,17 +474,6 @@ class MezzeParser {
      *   the doc and metadata accumulators — only the last contiguous block survives
      * - Ordering enforced: `##` before `#{}`, error if `##` after `#{}`
      * - Only one `#{}` block allowed
-     */
-    internal fun skipNewlinesCollectComments(stream: TokenStream): Pair<TokenStream, List<ParsedComment>> {
-        val (finalStream, _) = skipNewlinesCollectAnnotations(stream)
-        // For backward compatibility with callers that still use the old signature,
-        // return all comments as a flat list. The module parser uses skipNewlinesCollectAnnotations directly.
-        return Pair(finalStream, emptyList())
-    }
-
-    /**
-     * Collects annotations (doc comments, metadata) and regular comments between declarations.
-     * Implements Roc-style reset: blank lines and regular comments reset doc/metadata.
      */
     internal fun skipNewlinesCollectAnnotations(stream: TokenStream): Pair<TokenStream, AnnotationBlock> {
         var current = stream
@@ -608,7 +535,6 @@ class MezzeParser {
                             docLines.add(docText)
                         }
                         else -> {
-                            // Regular # comment → reset doc and metadata
                             docLines = mutableListOf()
                             metadata = null
                             metadataLoc = null
@@ -636,12 +562,9 @@ class MezzeParser {
                 var currentStream = first.remaining
 
                 while (true) {
-                    // Try to match separator
                     when (val sep = separator(currentStream)) {
                         is ParseResult.Success -> {
-                            // Skip newlines after separator
                             val afterSep = skipNewlines(sep.remaining)
-                            // Try to match next item
                             when (val next = parser(afterSep)) {
                                 is ParseResult.Success -> {
                                     results.add(next.value)
@@ -668,12 +591,9 @@ class MezzeParser {
                 var currentStream = first.remaining
 
                 while (true) {
-                    // Try to match separator
                     when (val sep = separator(currentStream)) {
                         is ParseResult.Success -> {
-                            // Skip newlines after separator
                             val afterSep = skipNewlines(sep.remaining)
-                            // Try to match next item
                             when (val next = parser(afterSep)) {
                                 is ParseResult.Success -> {
                                     results.add(next.value)
@@ -699,20 +619,12 @@ class MezzeParser {
 
     internal val identifierParser: Parser<Token> = tok(TokenType.IDENTIFIER)
 
-    /**
-     * Parser for member names after `.` in member access expressions.
-     * Accepts identifiers and keywords that are valid as member names (e.g., `for` in `Show.for`).
-     */
     internal val memberIdentifierParser: Parser<Token> =
         Parsers.token(
             { it.type == TokenType.IDENTIFIER || it.type == TokenType.FOR },
             "identifier or keyword member"
         )
 
-    /**
-     * Parse a qualified name: module::name or just name
-     * Returns the full qualified name as a String
-     */
     internal fun parseQualifiedName(stream: TokenStream): ParseResult<String> {
         val first = identifierParser(stream)
         return when (first) {
@@ -720,7 +632,6 @@ class MezzeParser {
                 var name = first.value.text
                 var currentStream = first.remaining
 
-                // Check for :: to build qualified name
                 while (true) {
                     val doubleColon = tok(TokenType.DOUBLE_COLON)(currentStream)
                     if (doubleColon is ParseResult.Success) {
@@ -748,15 +659,10 @@ class MezzeParser {
 
 
 
-    /**
-     * Check if a string contains unescaped $( for interpolation.
-     * Returns true if there's a $( that is NOT preceded by a backslash.
-     */
     internal fun hasUnescapedInterpolation(input: String): Boolean {
         var i = 0
         while (i < input.length - 1) {
             if (input[i] == '\\') {
-                // Skip the next character (it's escaped)
                 i += 2
             } else if (input[i] == '$' && input[i + 1] == '(') {
                 return true
@@ -767,9 +673,6 @@ class MezzeParser {
         return false
     }
 
-    /**
-     * Process escape sequences in a string (e.g., \n, \t, \\, \")
-     */
     internal fun processEscapeSequences(input: String): String {
         val result = StringBuilder()
         var i = 0
@@ -820,7 +723,6 @@ class MezzeParser {
 
         while (i < content.length) {
             if (content[i] == '\\' && i + 1 < content.length) {
-                // Handle escape sequence
                 when (content[i + 1]) {
                     'n' -> { currentStringPart.append('\n'); i += 2 }
                     't' -> { currentStringPart.append('\t'); i += 2 }
@@ -833,7 +735,6 @@ class MezzeParser {
                 lastWasCapture = false
             } else if (content[i] == '$' && i + 1 < content.length && content[i + 1] == '(') {
                 // Found unescaped interpolation start
-                // Check for adjacent captures (not allowed)
                 if (lastWasCapture && currentStringPart.isEmpty()) {
                     return stream.failure(
                         "Adjacent captures without separator are not allowed in string patterns. " +
@@ -841,21 +742,17 @@ class MezzeParser {
                     )
                 }
 
-                // Add any accumulated string part
                 if (currentStringPart.isNotEmpty()) {
                     parts.add(ParsedStringPatternPart.Literal(currentStringPart.toString()))
                     currentStringPart.clear()
                 }
 
-                // Find the matching closing paren
                 i += 2  // Skip "$("
 
-                // Skip whitespace before variable name
                 while (i < content.length && content[i].isWhitespace()) {
                     i++
                 }
 
-                // Parse variable name (identifier)
                 val varNameStart = i
                 if (i >= content.length || !(content[i].isLetter() || content[i] == '_')) {
                     return stream.failure(
@@ -869,7 +766,6 @@ class MezzeParser {
                 }
                 val varName = content.substring(varNameStart, i)
 
-                // Skip whitespace after variable name
                 while (i < content.length && content[i].isWhitespace()) {
                     i++
                 }
@@ -893,7 +789,6 @@ class MezzeParser {
             }
         }
 
-        // Add any remaining string part
         if (currentStringPart.isNotEmpty()) {
             parts.add(ParsedStringPatternPart.Literal(currentStringPart.toString()))
         }
@@ -974,10 +869,6 @@ class ParseException(
     }
 }
 
-/**
- * Convert a TokenType to a user-friendly description for error messages.
- * Instead of "Expected RBRACE but got IDENTIFIER", we show "Expected '}' but got identifier".
- */
 internal fun tokenDescription(type: TokenType): String = when (type) {
     // Delimiters - show the actual character
     TokenType.LPAREN -> "'('"
@@ -1053,9 +944,6 @@ internal fun tokenDescription(type: TokenType): String = when (type) {
     TokenType.COMMENT -> "comment"
 }
 
-/**
- * Convert a Token (or null) to a user-friendly description for "but got X" messages.
- */
 internal fun tokenGotDescription(token: Token?): String = when {
     token == null -> "end of file"
     token.type == TokenType.IDENTIFIER -> "'${token.text}'"

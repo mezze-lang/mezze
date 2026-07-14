@@ -3,61 +3,22 @@ package com.mezze.language.typechecker.hashing
 import com.mezze.language.ast.*
 import com.mezze.language.ast.hashing.MezzeHash
 
-/**
- * Computes content-addressable hashes for all declarations in a program.
- *
- * This is invoked by the TypeChecker after substitution is applied (Phase 4)
- * and before validation (Phase 5). At this point:
- * - All types are inferred
- * - All ability/effect references are resolved
- * - The AST structure is finalized
- *
- * ## Hash Usage
- *
- * Content hashes enable:
- * 1. **Caching**: Skip re-processing if hash hasn't changed
- * 2. **Reference**: Identify implementations by hash instead of mangled names
- * 3. **Incremental Compilation**: Only recompile changed definitions
- *
- * ## Hash Properties
- *
- * - Deterministic: Same code structure = same hash
- * - Alpha-invariant: Renaming internal bindings doesn't change hash
- * - API-sensitive: Parameter names (record fields) affect hash (Mezze-specific)
- * - Metadata-invariant: Source locations, inferred types don't affect hash
- */
 object ContentHashComputer {
 
     private val typeStringCache = object : LinkedHashMap<Int, String>(256, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, String>?) = size > 1000
     }
-    /**
-     * Convert a MezzeType to a canonical string for ability impl lookup keys.
-     *
-     * This is the MezzeType equivalent of typeAnnotationToString.
-     * Used during ability resolution when we have inferred types, not annotations.
-     *
-     * IMPORTANT: Must produce consistent keys that match typeAnnotationToString
-     * for the same underlying type structure.
-     *
-     * Uses LRU caching for complex types to avoid repeated computation.
-     */
     fun mezzeTypeToString(type: MezzeType): String {
-        // Fast path for primitive types using centralized registry (no caching needed)
         PrimitiveTypes.toName(type)?.let { return it }
 
         return when (type) {
-            is MezzeType.VarType -> type.variable.name  // Keep 'a format for type variables
+            is MezzeType.VarType -> type.variable.name
             is MezzeType.FunctionType -> "Function"
-            // Complex types - use cache
             else -> mezzeTypeToStringCached(type)
         }
     }
 
-    /**
-     * Cached implementation for complex types.
-     */
-    private fun mezzeTypeToStringCached(type: MezzeType): String {
+        private fun mezzeTypeToStringCached(type: MezzeType): String {
         val key = System.identityHashCode(type)
         typeStringCache[key]?.let { return it }
 
@@ -88,12 +49,4 @@ object ContentHashComputer {
         return result
     }
 
-
-    /**
-     * Look up the content hash for an effect handler implementation.
-     *
-     * @param performerName The performer/handler name
-     * @param hashMap The hash map from computeHashes
-     * @return The content hash if found
-     */
-}
+    }

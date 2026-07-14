@@ -149,16 +149,7 @@ object AnonymousConstructorShapeValidator {
         }
     }
 
-    /**
-     * Two payloads are shape-consistent if they unify. This handles:
-     *  - same concrete shape: `Red {id: Int}` vs `Red {id: Int}` → ok
-     *  - polymorphic instantiations: `Ok {val: 'a}` vs `Ok {val: Int}` → ok
-     *  - structural mismatch: `Red {id}` vs `Red {isLight}` → reject (no unifier)
-     *  - type mismatch: `Red {id: Int}` vs `Red {id: Str}` → reject (no unifier)
-     *
-     * The bindings produced are discarded — we only need yes/no.
-     */
-    private fun shapesMatch(a: MezzeType, b: MezzeType): Boolean =
+        private fun shapesMatch(a: MezzeType, b: MezzeType): Boolean =
         unify(a, b) is UnificationResult.Success
 
     private fun describe(t: MezzeType): String = when (t) {

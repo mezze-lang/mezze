@@ -5,14 +5,6 @@ import com.mezze.language.parsedast.ParsedEffectDecl
 import com.mezze.language.parsedast.ParsedTypeDecl
 import com.mezze.language.typedast.Hash
 
-/**
- * Unified declaration lookup — tries hash first, falls back to name.
- *
- * Wraps both string-keyed and hash-keyed declaration maps.
- * Callers use a single lookup method; the registry handles resolution.
- * As callers migrate to passing hashes, the string-keyed maps become
- * unused and can be removed.
- */
 class DeclarationRegistry(
     private val typesByName: Map<String, ParsedTypeDecl>,
     private val typesByHash: Map<Hash, ParsedTypeDecl>,

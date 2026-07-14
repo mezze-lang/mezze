@@ -70,44 +70,44 @@ impl Default for Float where {
 }
 
 ## Convert a float to its string representation.
-pub let to_str = { n: Float } -> __native_float_to_str { n = n }
+pub let to_str: { n: Float } -> Str = { n } -> __native_float_to_str { n = n }
 
 ## Convert an Int to a Float.
-pub let from_int = { n: Int } -> __native_float_from_int { n = n }
+pub let from_int: { n: Int } -> Float = { n } -> __native_float_from_int { n = n }
 
 ## Convert a Nat to a Float.
-pub let from_nat = { n: Nat } -> __native_float_from_nat { n = n }
+pub let from_nat: { n: Nat } -> Float = { n } -> __native_float_from_nat { n = n }
 
 ## Parse a string as a float. Returns None on failure.
-pub let from_string = { s: Str } -> __native_float_from_string { s = s }
+pub let from_string: { s: Str } -> Option Float = { s } -> __native_float_from_string { s = s }
 
 ## Absolute value.
-pub let abs = { n: Float } -> __native_float_abs { n = n }
+pub let abs: { n: Float } -> Float = { n } -> __native_float_abs { n = n }
 
 ## Return the smaller of two floats.
-pub let min = { l: Float, r: Float } -> __native_float_min { l = l, r = r }
+pub let min: { l: Float, r: Float } -> Float = { l, r } -> __native_float_min { l = l, r = r }
 
 ## Return the larger of two floats.
-pub let max = { l: Float, r: Float } -> __native_float_max { l = l, r = r }
+pub let max: { l: Float, r: Float } -> Float = { l, r } -> __native_float_max { l = l, r = r }
 
 ## True if the value is NaN.
-pub let is_nan = { n: Float } -> __native_float_is_nan { n = n }
+pub let is_nan: { n: Float } -> Bool = { n } -> __native_float_is_nan { n = n }
 
 ## True if the value is positive or negative infinity.
-pub let is_infinite = { n: Float } -> __native_float_is_infinite { n = n }
+pub let is_infinite: { n: Float } -> Bool = { n } -> __native_float_is_infinite { n = n }
 
 ## True if the value is neither NaN nor infinite.
-pub let is_finite = { n: Float } -> __native_float_is_finite { n = n }
+pub let is_finite: { n: Float } -> Bool = { n } -> __native_float_is_finite { n = n }
 
 ## Sign of the float: -1.0, 0.0, or 1.0. Returns NaN for NaN input.
-pub let sign = { n: Float } -> __native_float_sign { n = n }
+pub let sign: { n: Float } -> Float = { n } -> __native_float_sign { n = n }
 
 ## Clamp n to the range [min, max].
-pub let clamp = { n: Float, min: Float, max: Float } ->
+pub let clamp: { n: Float, min: Float, max: Float } -> Float = { n, min, max } ->
   __native_float_clamp { n = n, min = min, max = max }
 
 ## Truncate toward zero. Returns None for NaN or infinity.
-pub let to_int = { n: Float } -> __native_float_to_int { n = n }
+pub let to_int: { n: Float } -> Option Int = { n } -> __native_float_to_int { n = n }
 
 impl Float where {
   to_int = { it } -> __native_float_to_int { n = it },

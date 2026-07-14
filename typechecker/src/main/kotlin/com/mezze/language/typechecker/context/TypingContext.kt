@@ -2,73 +2,40 @@ package com.mezze.language.typechecker.context
 
 import com.mezze.language.ast.BindingKey
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.parsedast.ParsedFnAbilityConstraint
+import com.mezze.language.parsedast.ParsedTypeAnnotation
 import com.mezze.language.typedast.Hash
 
-/**
- * Immutable typing context for type checking.
- *
- * Replaces mutable `context: MutableMap<String, MezzeType>` with immutable,
- * scoped context that is passed down and extended, never mutated.
- *
- * Design principles:
- * - Immutable: all fields are `val`, no mutation
- * - Scoped: supports nested scopes via parent chain
- * - Type-safe: lookup returns sealed type, not nullable
- * - Fast: backed by persistent map for efficient extension
- * - O(1) ability lookup: secondary index by ability name
- */
 data class TypingContext(
     private val bindings: Map<BindingKey, Binding>,
-    private val abilityImpls: Map<Hash, AbilityImplInfo> = emptyMap(),  // Keyed by content hash
-    private val abilityImplsByName: Map<String?, List<Hash>> = emptyMap(),  // Secondary index: abilityName -> [contentHash] (null key = inherent impls)
-    private val abilityImplsByAbilityHash: Map<Hash, List<Hash>> = emptyMap(),  // Secondary index: abilityDeclHash -> [implContentHash]
-    // Dedicated maps for ability/effect operation types (replaces "${name}_ability" pattern)
+    private val abilityImpls: Map<Hash, AbilityImplInfo> = emptyMap(),
+    private val abilityImplsByName: Map<String?, List<Hash>> = emptyMap(),
+    private val abilityImplsByAbilityHash: Map<Hash, List<Hash>> = emptyMap(),
     private val abilityOperationTypes: Map<String, MezzeType> = emptyMap(),  // abilityName -> RecordType of operations
     private val abilityOperationTypesByHash: Map<Hash, MezzeType> = emptyMap(),  // abilityDeclHash -> RecordType of operations
     private val effectOperationTypes: Map<String, MezzeType> = emptyMap(),   // effectName -> RecordType of operations
     private val effectOperationTypesByHash: Map<Hash, MezzeType> = emptyMap(),   // effectDeclHash -> RecordType of operations
-    // Dedicated map for performer associated types (replaces "${name}_performer" pattern)
-    // Keyed by content hash for cross-module safety
     private val performerAssociatedTypes: Map<Hash, PerformerTypeInfo> = emptyMap(),  // contentHash -> associated types
     private val performerAssociatedTypesByName: Map<String, List<Hash>> = emptyMap(),  // performerName -> [contentHash] index
-    // Anonymous impl methods: "TypeName::methodName" -> method info
     private val anonymousImplMethods: Map<String, InherentMethodInfo> = emptyMap(),
-    // Secondary index for anonymous methods: "TypeName" -> [methodName]
     private val anonymousImplMethodsByType: Map<String, List<String>> = emptyMap(),
-    // Hash-based secondary index for anonymous methods. Key = computeOpHash(typeHash, methodName) —
-    // a single Hash derived from the (type-decl hash, method name) pair, mirroring how the rest of
-    // the typechecker keys per-operation entries. Used when typeHash is available for stable
-    // cross-module resolution.
     private val anonymousImplMethodsByHash: Map<Hash, InherentMethodInfo> = emptyMap(),
     val parent: TypingContext? = null
 ) {
-    /**
-     * Lookup result - sealed type, no nulls!
-     */
     sealed class LookupResult {
         data class Found(val binding: Binding) : LookupResult()
         data class NotFound(val key: BindingKey) : LookupResult() {
-            /** Display name for error messages */
             val displayName: String get() = if (key.qualifier != null) "${key.qualifier}.${key.localName}" else key.localName
         }
     }
 
-    /**
-     * A binding in the context - variable name mapped to type scheme
-     */
     sealed class Binding {
-        /**
-         * Monomorphic binding - single type, no quantifiers
-         */
         data class Monomorphic(
             val type: MezzeType,
             val sourceModule: String? = null,
             val contentHash: Hash? = null,
         ) : Binding()
 
-        /**
-         * Polymorphic binding - type scheme with quantified variables
-         */
         data class Polymorphic(
             val scheme: TypeScheme,
             val sourceModule: String? = null,
@@ -76,70 +43,41 @@ data class TypingContext(
         ) : Binding()
     }
 
-    /**
-     * Information about an ability implementation.
-     *
-     * Stored with content hash as the key (e.g., "a1b2c3d4e5f6...").
-     * Content hashes are computed in TypeChecker Phase 0.5 before context building.
-     */
     data class AbilityImplInfo(
         val abilityName: String?,  // null for inherent impls — for error messages and fallback
-        val abilityDeclHash: Hash? = null,  // Content hash of the ability DECLARATION (not the impl)
-        val targetTypes: List<String>,  // Type names for string-based matching, e.g., ["String"], ["Maybe_Int"]
-        val targetTypeAnnotations: List<com.mezze.language.parsedast.ParsedTypeAnnotation>? = null,  // Original annotations for structural matching
-        val associatedTypeBindings: Map<String, com.mezze.language.parsedast.ParsedTypeAnnotation> = emptyMap(),  // Associated type bindings like 'item = Int
+        val abilityDeclHash: Hash? = null,
+        val targetTypes: List<String>,
+        val targetTypeAnnotations: List<ParsedTypeAnnotation>? = null,
+        val associatedTypeBindings: Map<String, ParsedTypeAnnotation> = emptyMap(),
         val sourceModule: String? = null,
-        val contentHash: Hash,  // Content hash of the IMPL (same as the map key)
-        val typeVars: Set<String> = emptySet(),  // Type variables from generic impl header, e.g., {"'a"} for `impl Eq 'a for ['a]`
-        val operationConstraints: List<com.mezze.language.parsedast.ParsedFnAbilityConstraint> = emptyList()  // Method-level constraints from impl operations
+        val contentHash: Hash,
+        val typeVars: Set<String> = emptySet(),
+        val operationConstraints: List<ParsedFnAbilityConstraint> = emptyList()
     )
 
-    /**
-     * Information about a performer's associated types.
-     *
-     * Stored with content hash as the key for cross-module safety.
-     * Example: For `impl State for Counter having 'state = Int`:
-     * - performerName = "Counter"
-     * - effectName = "State"
-     * - associatedTypes = RecordType({'state -> Int})
-     */
     data class PerformerTypeInfo(
         val performerName: String,
         val effectName: String,
-        val associatedTypes: MezzeType,  // RecordType with associated type bindings
-        val performerFields: MezzeType? = null,  // RecordType with performer parameter types (e.g., {cont: Continuation 'a 'b 'c})
-        val suspensionType: MezzeType? = null,  // Type passed to suspend_with in the handler (for continuation inference)
+        val associatedTypes: MezzeType,
+        val performerFields: MezzeType? = null,
+        val suspensionType: MezzeType? = null,
         val contentHash: Hash? = null
     )
 
-    /**
-     * Information about a method from an anonymous impl (`impl Type where { ... }`).
-     */
     data class InherentMethodInfo(
         val targetTypeName: String,     // e.g., "Int" — for error messages and fallback
         val methodName: String,         // e.g., "to_float"
-        val methodType: MezzeType,      // The function type of the method (without receiver)
-        val implContentHash: Hash,      // Content hash of the impl declaration
+        val methodType: MezzeType,
+        val implContentHash: Hash,
         val sourceModule: String? = null,
-        val targetTypeHash: Hash? = null,    // Content hash of the target type declaration (stable across renames)
-        val implStartLine: Int = 0,     // Loc of the impl declaration — for computing TypedAbilityImpl hash
+        val targetTypeHash: Hash? = null,
+        val implStartLine: Int = 0,
         val implStartCol: Int = 0,
-        val implSourceFile: String = "", // Source file of impl — disambiguates same line/col in different files
-        // True for impls imported from another module — call sites should
-        // fresh-instantiate methodType so per-call unification doesn't bleed
-        // between sites of generic impls (e.g. `impl Seq 'a where { first }`
-        // imported from std::collections::seq). For same-module impls we keep
-        // the shared TypeVars so ConstraintGenerator's body↔method-return link
-        // can flow the inferred type to the call site.
+        val implSourceFile: String = "",
         val isImported: Boolean = false
     )
 
-    /**
-     * Look up a variable in this context or parent contexts using a BindingKey.
-     * Returns sealed type - no nulls, exhaustive when required!
-     */
     fun lookup(key: BindingKey): LookupResult {
-        // Check local bindings first
         val localBinding = bindings[key]
         return when {
             localBinding != null -> LookupResult.Found(localBinding)
@@ -148,77 +86,40 @@ data class TypingContext(
         }
     }
 
-    /**
-     * Look up by simple name (unqualified).
-     * Convenience method for local variable lookups.
-     */
     fun lookup(name: String): LookupResult = lookup(BindingKey.unqualified(name))
 
-    /**
-     * Extend context with a new binding using a BindingKey.
-     * Returns NEW context, does not mutate!
-     */
     fun extend(key: BindingKey, binding: Binding): TypingContext {
         return copy(bindings = bindings + (key to binding))
     }
 
-    /**
-     * Extend context with a new binding by simple name (unqualified).
-     * Convenience method for local variable bindings.
-     */
     fun extend(name: String, binding: Binding): TypingContext {
         return extend(BindingKey.unqualified(name), binding)
     }
 
-    /**
-     * Extend context with a monomorphic binding using a BindingKey.
-     */
     fun extendMono(key: BindingKey, type: MezzeType, sourceModule: String? = null, contentHash: Hash? = null): TypingContext {
         return extend(key, Binding.Monomorphic(type, sourceModule, contentHash))
     }
 
-    /**
-     * Extend context with a monomorphic binding by simple name (unqualified).
-     * Convenience method for local variable bindings.
-     */
     fun extendMono(name: String, type: MezzeType, sourceModule: String? = null, contentHash: Hash? = null): TypingContext {
         return extendMono(BindingKey.unqualified(name), type, sourceModule, contentHash)
     }
 
-    /**
-     * Extend context with a polymorphic binding using a BindingKey.
-     */
     fun extendPoly(key: BindingKey, scheme: TypeScheme, sourceModule: String? = null, contentHash: Hash? = null): TypingContext {
         return extend(key, Binding.Polymorphic(scheme, sourceModule, contentHash))
     }
 
-    /**
-     * Extend context with a polymorphic binding by simple name (unqualified).
-     * Convenience method for local variable bindings.
-     */
     fun extendPoly(name: String, scheme: TypeScheme, sourceModule: String? = null, contentHash: Hash? = null): TypingContext {
         return extendPoly(BindingKey.unqualified(name), scheme, sourceModule, contentHash)
     }
 
-    /**
-     * Extend context with multiple bindings at once using BindingKeys.
-     */
     fun extendAll(newBindings: Map<BindingKey, Binding>): TypingContext {
         return copy(bindings = bindings + newBindings)
     }
 
-    /**
-     * Extend context with an ability implementation.
-     *
-     * Key is the content hash of the ImplAbilityDeclaration.
-     * Updates both primary (by hash) and secondary (by name) indexes.
-     */
     fun extendWithImpl(key: Hash, implInfo: AbilityImplInfo): TypingContext {
-        // Update secondary index: abilityName -> [contentHash]
         val existingHashes = abilityImplsByName[implInfo.abilityName] ?: emptyList()
         val newImplsByName = abilityImplsByName + (implInfo.abilityName to (existingHashes + key))
 
-        // Update hash-based secondary index: abilityDeclHash -> [implContentHash]
         val newImplsByAbilityHash = if (implInfo.abilityDeclHash != null) {
             val existingByHash = abilityImplsByAbilityHash[implInfo.abilityDeclHash] ?: emptyList()
             abilityImplsByAbilityHash + (implInfo.abilityDeclHash to (existingByHash + key))
@@ -233,56 +134,17 @@ data class TypingContext(
         )
     }
 
-    /**
-     * Check if an ability implementation exists by content hash.
-     *
-     * @param contentHash The content hash of the implementation
-     * @return True if implementation exists
-     *
-     * Checks both local and parent contexts.
-     */
-    fun hasAbilityImpl(contentHash: Hash): Boolean {
-        return abilityImpls.containsKey(contentHash) || (parent?.hasAbilityImpl(contentHash) ?: false)
-    }
-
-    /**
-     * Get ability implementation info by content hash.
-     *
-     * @param contentHash The content hash of the implementation
-     * @return The implementation info, or null if not found
-     *
-     * Checks both local and parent contexts.
-     */
     fun getAbilityImpl(contentHash: Hash): AbilityImplInfo? {
         return abilityImpls[contentHash] ?: parent?.getAbilityImpl(contentHash)
     }
 
-    /**
-     * Get all implementations for a given ability name.
-     *
-     * This is used for multi-parameter ability resolution where we need to find
-     * implementations that match a subset of type parameters.
-     *
-     * Example: For ability "Convert", returns all implementations like:
-     * - Convert_Int_String
-     * - Convert_String_Int
-     * - Convert_Float_String
-     *
-     * Uses secondary index for O(1) lookup instead of O(N) filter.
-     * Checks both local and parent contexts.
-     */
     fun getAbilityImpls(abilityName: String): List<AbilityImplInfo> {
-        // O(1) lookup via secondary index instead of O(N) filter
         val localHashes = abilityImplsByName[abilityName] ?: emptyList()
         val localImpls = localHashes.mapNotNull { abilityImpls[it] }
         val parentImpls = parent?.getAbilityImpls(abilityName) ?: emptyList()
         return localImpls + parentImpls
     }
 
-    /**
-     * Get all implementations for a given ability by its declaration hash.
-     * Preferred over name-based lookup — enables renaming via `use X as Y`.
-     */
     fun getAbilityImplsByDeclHash(abilityDeclHash: Hash): List<AbilityImplInfo> {
         val localHashes = abilityImplsByAbilityHash[abilityDeclHash] ?: emptyList()
         val localImpls = localHashes.mapNotNull { abilityImpls[it] }
@@ -290,47 +152,20 @@ data class TypingContext(
         return localImpls + parentImpls
     }
 
-    /**
-     * Get all ability implementations (for debugging/introspection).
-     *
-     * Checks both local and parent contexts.
-     */
     fun getAllAbilityImpls(): Map<Hash, AbilityImplInfo> {
         val parentImpls = parent?.getAllAbilityImpls() ?: emptyMap()
-        return parentImpls + abilityImpls  // Local impls override parent impls
+        return parentImpls + abilityImpls
     }
 
-    // ========================================================================
-    // ABILITY/EFFECT OPERATION TYPES
-    // ========================================================================
+    fun getAbilityOperationType(abilityName: String): MezzeType? =
+        abilityOperationTypes[abilityName] ?: parent?.getAbilityOperationType(abilityName)
 
-    /**
-     * Get ability operation types (the RecordType of its operations).
-     * Used for qualified access like Show.display.
-     */
-    fun getAbilityOperationType(abilityName: String): MezzeType? {
-        return abilityOperationTypes[abilityName] ?: parent?.getAbilityOperationType(abilityName)
-    }
+    fun getAbilityOperationTypeByHash(abilityDeclHash: Hash): MezzeType? =
+        abilityOperationTypesByHash[abilityDeclHash] ?: parent?.getAbilityOperationTypeByHash(abilityDeclHash)
 
-    /**
-     * Get ability operation types by declaration hash.
-     * Preferred over name-based lookup — stable across renames/aliases.
-     */
-    fun getAbilityOperationTypeByHash(abilityDeclHash: Hash): MezzeType? {
-        return abilityOperationTypesByHash[abilityDeclHash] ?: parent?.getAbilityOperationTypeByHash(abilityDeclHash)
-    }
+    fun getEffectOperationType(effectName: String): MezzeType? =
+        effectOperationTypes[effectName] ?: parent?.getEffectOperationType(effectName)
 
-    /**
-     * Get effect operation types (the RecordType of its operations).
-     * Used for qualified access like Log.write.
-     */
-    fun getEffectOperationType(effectName: String): MezzeType? {
-        return effectOperationTypes[effectName] ?: parent?.getEffectOperationType(effectName)
-    }
-
-    /**
-     * Extend context with ability operation types.
-     */
     fun extendWithAbilityOperationType(abilityName: String, operationType: MezzeType, abilityDeclHash: Hash? = null): TypingContext {
         val newHashIndex = if (abilityDeclHash != null) {
             abilityOperationTypesByHash + (abilityDeclHash to operationType)
@@ -343,11 +178,6 @@ data class TypingContext(
         )
     }
 
-    /**
-     * Find abilities that have a method with the given name.
-     * Returns list of (abilityName, methodType) pairs.
-     * Used for method call resolution: `value.method { args }`.
-     */
     fun findAbilitiesByMethodName(methodName: String): List<Pair<String, MezzeType>> {
         val results = mutableListOf<Pair<String, MezzeType>>()
         for ((abilityName, operationType) in abilityOperationTypes) {
@@ -362,9 +192,6 @@ data class TypingContext(
         return results.distinctBy { it.first }
     }
 
-    /**
-     * Extend context with effect operation types.
-     */
     fun extendWithEffectOperationType(effectName: String, operationType: MezzeType, effectDeclHash: Hash? = null): TypingContext {
         val newHashIndex = if (effectDeclHash != null) {
             effectOperationTypesByHash + (effectDeclHash to operationType)
@@ -377,42 +204,16 @@ data class TypingContext(
         )
     }
 
-    // ========================================================================
-    // ANONYMOUS IMPL METHODS
-    // ========================================================================
-
-    /**
-     * Find an anonymous impl method for a given type and method name.
-     * Used for `value.method { args }` resolution when no ability method matches.
-     */
     fun findAnonymousMethod(typeName: String, methodName: String): InherentMethodInfo? {
         val key = "$typeName::$methodName"
         return anonymousImplMethods[key] ?: parent?.findAnonymousMethod(typeName, methodName)
     }
 
-    /**
-     * Find an anonymous impl method by type hash and method name.
-     * Preferred over name-based lookup — stable across renames/aliases.
-     */
     fun findAnonymousMethodByHash(typeHash: Hash, methodName: String): InherentMethodInfo? {
         val key = Hash.computeOpHash(typeHash, methodName)
         return anonymousImplMethodsByHash[key] ?: parent?.findAnonymousMethodByHash(typeHash, methodName)
     }
 
-    /**
-     * Find all anonymous impl method names for a given type.
-     */
-    fun getAnonymousMethodNames(typeName: String): List<String> {
-        val local = anonymousImplMethodsByType[typeName] ?: emptyList()
-        val parentMethods = parent?.getAnonymousMethodNames(typeName) ?: emptyList()
-        return (local + parentMethods).distinct()
-    }
-
-    /**
-     * Find anonymous methods by method name (across all types).
-     * Returns list of (typeName, methodInfo) pairs.
-     * Used when receiver type is not yet known — matched by unification.
-     */
     fun findAnonymousMethodsByName(methodName: String): List<InherentMethodInfo> {
         val results = mutableListOf<InherentMethodInfo>()
         for ((key, info) in anonymousImplMethods) {
@@ -424,13 +225,9 @@ data class TypingContext(
         return results
     }
 
-    /**
-     * Extend context with an anonymous impl method.
-     */
     fun extendWithAnonymousMethod(info: InherentMethodInfo): TypingContext {
         val key = "${info.targetTypeName}::${info.methodName}"
         val existingMethods = anonymousImplMethodsByType[info.targetTypeName] ?: emptyList()
-        // Also update hash-based index if typeHash is available
         val newHashIndex = if (info.targetTypeHash != null) {
             val hashKey = Hash.computeOpHash(info.targetTypeHash, info.methodName)
             anonymousImplMethodsByHash + (hashKey to info)
@@ -444,21 +241,6 @@ data class TypingContext(
         )
     }
 
-    // ========================================================================
-    // PERFORMER ASSOCIATED TYPES
-    // ========================================================================
-
-    /**
-     * Get performer associated types by content hash.
-     */
-    fun getPerformerTypeInfo(contentHash: Hash): PerformerTypeInfo? {
-        return performerAssociatedTypes[contentHash] ?: parent?.getPerformerTypeInfo(contentHash)
-    }
-
-    /**
-     * Get performer associated types by performer name.
-     * Returns all matching infos (for cross-module scenarios).
-     */
     fun getPerformerTypeInfosByName(performerName: String): List<PerformerTypeInfo> {
         val localHashes = performerAssociatedTypesByName[performerName] ?: emptyList()
         val localInfos = localHashes.mapNotNull { performerAssociatedTypes[it] }
@@ -466,9 +248,6 @@ data class TypingContext(
         return localInfos + parentInfos
     }
 
-    /**
-     * Extend context with performer associated types.
-     */
     fun extendWithPerformerTypeInfo(contentHash: Hash, info: PerformerTypeInfo): TypingContext {
         val existingHashes = performerAssociatedTypesByName[info.performerName] ?: emptyList()
         return copy(
@@ -477,13 +256,10 @@ data class TypingContext(
         )
     }
 
-    /**
-     * Create a nested scope - new context with this as parent
-     */
     fun enterScope(): TypingContext {
         return TypingContext(
             bindings = emptyMap(),
-            abilityImpls = emptyMap(),  // Start with empty impls (inherit via parent)
+            abilityImpls = emptyMap(),
             abilityImplsByName = emptyMap(),
             abilityImplsByAbilityHash = emptyMap(),
             abilityOperationTypes = emptyMap(),
@@ -497,73 +273,26 @@ data class TypingContext(
         )
     }
 
-    /**
-     * Check if a binding key is bound locally (not in parent)
-     */
     fun hasLocal(key: BindingKey): Boolean = bindings.containsKey(key)
 
-    /**
-     * Check if a simple name is bound locally (unqualified lookup)
-     */
     fun hasLocal(name: String): Boolean = hasLocal(BindingKey.unqualified(name))
 
-    /**
-     * Get all local binding keys (for debugging/error messages)
-     */
-    fun localKeys(): Set<BindingKey> = bindings.keys
+    fun allKeys(): Set<BindingKey> = bindings.keys + (parent?.allKeys() ?: emptySet())
 
-    /**
-     * Get all local binding display names (for debugging/error messages)
-     */
-    fun localNames(): Set<String> = bindings.keys.map {
-        if (it.qualifier != null) "${it.qualifier}.${it.localName}" else it.localName
-    }.toSet()
+    fun getAllBindings(): Map<BindingKey, Binding> =
+        (parent?.getAllBindings() ?: emptyMap()) + bindings
 
-    /**
-     * Get all binding keys including parent contexts (for debugging)
-     */
-    fun allKeys(): Set<BindingKey> {
-        val parentKeys = parent?.allKeys() ?: emptySet()
-        return bindings.keys + parentKeys
-    }
-
-    /**
-     * Get all binding names including parent contexts (for debugging)
-     */
-    fun allNames(): Set<String> = allKeys().map {
-        if (it.qualifier != null) "${it.qualifier}.${it.localName}" else it.localName
-    }.toSet()
-
-    /**
-     * Get all bindings including parent contexts (for error messages with suggestions)
-     */
-    fun getAllBindings(): Map<BindingKey, Binding> {
-        val parentBindings = parent?.getAllBindings() ?: emptyMap()
-        return parentBindings + bindings  // Local bindings override parent bindings
-    }
-
-    /**
-     * Get content hashes for all bindings (for identifier resolution).
-     * Returns a map of binding key to content hash (only for bindings that have hashes).
-     */
-    fun getContentHashes(): Map<BindingKey, Hash> {
-        val result = mutableMapOf<BindingKey, Hash>()
+    fun getContentHashes(): Map<BindingKey, Hash> = buildMap {
         for ((key, binding) in getAllBindings()) {
             val hash = when (binding) {
                 is Binding.Monomorphic -> binding.contentHash
                 is Binding.Polymorphic -> binding.contentHash
             }
-            if (hash != null) {
-                result[key] = hash
-            }
+            if (hash != null) put(key, hash)
         }
-        return result
     }
 
     companion object {
-        /**
-         * Empty context - starting point
-         */
         val empty = TypingContext(
             bindings = emptyMap(),
             abilityImpls = emptyMap(),
@@ -576,32 +305,10 @@ data class TypingContext(
             parent = null
         )
 
-        /**
-         * Create context from map with BindingKeys.
-         */
-        fun fromBindingKeys(bindings: Map<BindingKey, MezzeType>): TypingContext {
-            return TypingContext(
-                bindings = bindings.mapValues { (_, type) ->
-                    Binding.Monomorphic(type)
-                },
-                abilityImpls = emptyMap(),
-                abilityImplsByName = emptyMap(),
-                abilityImplsByAbilityHash = emptyMap()
-            )
-        }
-
-        /**
-         * Create context from map with simple names (for testing - unqualified bindings only).
-         */
-        fun from(bindings: Map<String, MezzeType>): TypingContext {
-            return TypingContext(
-                bindings = bindings.map { (name, type) ->
-                    BindingKey.unqualified(name) to Binding.Monomorphic(type)
-                }.toMap(),
-                abilityImpls = emptyMap(),
-                abilityImplsByName = emptyMap(),
-                abilityImplsByAbilityHash = emptyMap()
-            )
-        }
+        fun from(bindings: Map<String, MezzeType>) = TypingContext(
+            bindings = bindings.map { (name, type) ->
+                BindingKey.unqualified(name) to Binding.Monomorphic(type)
+            }.toMap()
+        )
     }
 }

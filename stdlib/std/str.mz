@@ -58,111 +58,111 @@ impl Str where {
 }
 
 ## Concatenate two strings.
-pub let concat = { l: Str, r: Str } -> __native_string_concat { l = l, r = r }
+pub let concat: { l: Str, r: Str } -> Str = { l, r } -> __native_string_concat { l = l, r = r }
 
 ## Identity -- returns the string unchanged.
 pub let to_str = { s: Str } -> s
 
 ## Number of characters in the string.
-pub let size = { s: Str } -> __native_string_size { s = s }
+pub let size: { s: Str } -> Int = { s } -> __native_string_size { s = s }
 
 ## True if the string has zero length.
-pub let is_empty = { s: Str } -> size { s = s } == 0
+pub let is_empty: { s: Str } -> Bool = { s } -> size { s = s } == 0
 
 ## Convert all characters to uppercase.
-pub let to_upper = { s: Str } -> __native_string_to_upper { s = s }
+pub let to_upper: { s: Str } -> Str = { s } -> __native_string_to_upper { s = s }
 
 ## Convert all characters to lowercase.
-pub let to_lower = { s: Str } -> __native_string_to_lower { s = s }
+pub let to_lower: { s: Str } -> Str = { s } -> __native_string_to_lower { s = s }
 
 ## Strip leading and trailing whitespace.
-pub let trim = { s: Str } -> __native_string_trim { s = s }
+pub let trim: { s: Str } -> Str = { s } -> __native_string_trim { s = s }
 
 ## Reverse the string.
-pub let reverse = { s: Str } -> __native_string_reverse { s = s }
+pub let reverse: { s: Str } -> Str = { s } -> __native_string_reverse { s = s }
 
 ## True if the string starts with prefix.
-pub let starts_with = { s: Str, prefix: Str } ->
+pub let starts_with: { s: Str, prefix: Str } -> Bool = { s, prefix } ->
   __native_string_starts_with { s = s, prefix = prefix }
 
 ## True if the string ends with suffix.
-pub let ends_with = { s: Str, suffix: Str } ->
+pub let ends_with: { s: Str, suffix: Str } -> Bool = { s, suffix } ->
   __native_string_ends_with { s = s, suffix = suffix }
 
 ## True if the string contains the given substring.
-pub let contains = { s: Str, substring: Str } ->
+pub let contains: { s: Str, substring: Str } -> Bool = { s, substring } ->
   __native_string_contains { s = s, substring = substring }
 
 ## Repeat the string n times.
-pub let repeat = { s: Str, n: Int } -> if n <= 0 then "" else if n == 1 then s else concat { l = s, r = repeat { s = s, n = n - 1 } }
+pub let repeat: { s: Str, n: Int } -> Str = { s, n } -> if n <= 0 then "" else if n == 1 then s else concat { l = s, r = repeat { s = s, n = n - 1 } }
 
 ## Split by delimiter into a seq of strings.
-pub let split = { s: Str, delimiter: Str } ->
+pub let split: { s: Str, delimiter: Str } -> [Str] = { s, delimiter } ->
   __native_string_split { s = s, delimiter = delimiter }
 
 ## Join a seq of strings with separator.
-pub let join = { strings: [Str], separator: Str } ->
+pub let join: { strings: [Str], separator: Str } -> Str = { strings, separator } ->
   __native_string_join { strings = strings, separator = separator }
 
 ## Extract substring from start (inclusive) to end (exclusive).
-pub let substring = { s: Str, start: Int, end: Int } ->
+pub let substring: { s: Str, start: Int, end: Int } -> Str = { s, start, end } ->
   __native_string_substring { s = s, start = start, end = end }
 
 ## Replace the first occurrence of old with new.
-pub let replace = { s: Str, old: Str, new: Str } ->
+pub let replace: { s: Str, old: Str, new: Str } -> Str = { s, old, new } ->
   __native_string_replace { s = s, old = old, new = new }
 
 ## Replace all occurrences of old with new.
-pub let replace_all = { s: Str, old: Str, new: Str } ->
+pub let replace_all: { s: Str, old: Str, new: Str } -> Str = { s, old, new } ->
   __native_string_replace_all { s = s, old = old, new = new }
 
 ## Get character at index. Returns None if out of bounds.
-pub let char_at = { s: Str, i: Int } -> __native_string_char_at { s = s, i = i }
+pub let char_at: { s: Str, i: Int } -> Option Char = { s, i } -> __native_string_char_at { s = s, i = i }
 
 ## Find the first index of a substring. Returns None if not found.
-pub let index_of = { s: Str, sub: Str } -> __native_string_index_of { s = s, sub = sub }
+pub let index_of: { s: Str, sub: Str } -> Option Int = { s, sub } -> __native_string_index_of { s = s, sub = sub }
 
 ## Find the last index of a substring. Returns None if not found.
-pub let last_index_of = { s: Str, sub: Str } -> __native_string_last_index_of { s = s, sub = sub }
+pub let last_index_of: { s: Str, sub: Str } -> Option Int = { s, sub } -> __native_string_last_index_of { s = s, sub = sub }
 
 ## Strip leading whitespace.
-pub let trim_start = { s: Str } -> __native_string_trim_start { s = s }
+pub let trim_start: { s: Str } -> Str = { s } -> __native_string_trim_start { s = s }
 
 ## Strip trailing whitespace.
-pub let trim_end = { s: Str } -> __native_string_trim_end { s = s }
+pub let trim_end: { s: Str } -> Str = { s } -> __native_string_trim_end { s = s }
 
 ## Split by newlines.
-pub let lines = { s: Str } -> __native_string_lines { s = s }
+pub let lines: { s: Str } -> [Str] = { s } -> __native_string_lines { s = s }
 
 ## Split by whitespace, removing empty strings.
-pub let words = { s: Str } -> __native_string_words { s = s }
+pub let words: { s: Str } -> [Str] = { s } -> __native_string_words { s = s }
 
 ## Convert to a seq of characters.
-pub let chars = { s: Str } -> __native_string_chars { s = s }
+pub let chars: { s: Str } -> [Char] = { s } -> __native_string_chars { s = s }
 
 ## Pad on the left to reach target length.
-pub let pad_left = { s: Str, len: Int, c: Char } ->
+pub let pad_left: { s: Str, len: Int, c: Char } -> Str = { s, len, c } ->
   __native_string_pad_left { s = s, len = len, c = c }
 
 ## Pad on the right to reach target length.
-pub let pad_right = { s: Str, len: Int, c: Char } ->
+pub let pad_right: { s: Str, len: Int, c: Char } -> Str = { s, len, c } ->
   __native_string_pad_right { s = s, len = len, c = c }
 
 ## Match against a glob pattern (*, **, ?, [abc], [a-z]).
-pub let glob_match = { pattern: Str, s: Str } ->
+pub let glob_match: { pattern: Str, s: Str } -> Bool = { pattern, s } ->
   __native_string_glob_match { pattern = pattern, s = s }
 
 ## Convert to snake_case.
-pub let to_snake_case = { s: Str } -> __native_string_to_snake_case { s = s }
+pub let to_snake_case: { s: Str } -> Str = { s } -> __native_string_to_snake_case { s = s }
 
 ## Convert to camelCase.
-pub let to_camel_case = { s: Str } -> __native_string_to_camel_case { s = s }
+pub let to_camel_case: { s: Str } -> Str = { s } -> __native_string_to_camel_case { s = s }
 
 ## Convert to kebab-case.
-pub let to_kebab_case = { s: Str } -> __native_string_to_kebab_case { s = s }
+pub let to_kebab_case: { s: Str } -> Str = { s } -> __native_string_to_kebab_case { s = s }
 
 ## Convert to SCREAMING_SNAKE_CASE.
-pub let to_screaming_snake_case = { s: Str } -> __native_string_to_screaming_snake_case { s = s }
+pub let to_screaming_snake_case: { s: Str } -> Str = { s } -> __native_string_to_screaming_snake_case { s = s }
 
 impl Sized for Str where {
   size = { it } -> size { s = it },

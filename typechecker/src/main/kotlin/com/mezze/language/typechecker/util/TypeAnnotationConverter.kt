@@ -5,16 +5,13 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parsedast.diagnostics.FixHint
 import com.mezze.language.parsedast.diagnostics.LevenshteinSuggest
+import com.mezze.language.store.DeclKind
+import com.mezze.language.typechecker.PrecompiledStdlib
+import com.mezze.language.typechecker.TypeCheckError
+import com.mezze.language.typechecker.WellKnownHashConstants
+import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typedast.Hash
 
-/**
- * Shared utility for converting [ParsedTypeAnnotation] to [MezzeType].
- *
- * Callers create a [ConversionConfig] to inject context-specific behavior
- * (hash resolution, effect validation, collection sugar, etc.) and call
- * [convertWith] which manages a per-annotation session (type var cache,
- * shared row var).
- */
 object TypeAnnotationConverter {
 
     data class ConversionConfig(
@@ -150,10 +147,7 @@ object TypeAnnotationConverter {
         }
     }
 
-    /**
-     * Convert a [ParsedTypeAnnotation] to a [MezzeType] (legacy API for ModuleResolver/TypeValidator).
-     */
-    fun convert(
+        fun convert(
         annotation: ParsedTypeAnnotation,
         faithful: Boolean = true,
         includeAbilityConstraints: Boolean = true,
@@ -184,7 +178,7 @@ object TypeAnnotationConverter {
                         MezzeType.FunctionAbilityConstraint(
                             abilityName = c.abilityName,
                             typeArgs = c.typeArgs.map { convert(it, faithful, includeAbilityConstraints, typeVarCache) },
-                            abilityHash = com.mezze.language.typechecker.WellKnownHashConstants.resolveAbilityHash(c.abilityName)
+                            abilityHash = WellKnownHashConstants.resolveAbilityHash(c.abilityName)
                         )
                     }
                 } else {
@@ -253,7 +247,7 @@ object TypeAnnotationConverter {
         effectRow: ParsedEffectRow,
         knownEffects: Set<String>,
     ) {
-        com.mezze.language.typechecker.context.ContextBuilder.validateHermeticEffects(effectRow.allEffectNames)
+        ContextBuilder.validateHermeticEffects(effectRow.allEffectNames)
         val unknownEffects = (effectRow.effects + effectRow.effectAnnotations.map { it.name })
             .filter { it !in knownEffects }
         if (unknownEffects.isEmpty()) return
@@ -263,8 +257,8 @@ object TypeAnnotationConverter {
         val didYouMean = suggestion?.let { ". Did you mean `$it`?" } ?: ""
 
         val candidateModules: List<String> = try {
-            val store = com.mezze.language.typechecker.PrecompiledStdlib.getStore()
-            store?.getDeclsByKind(com.mezze.language.store.DeclKind.EFFECT)
+            val store = PrecompiledStdlib.getStore()
+            store?.getDeclsByKind(DeclKind.EFFECT)
                 ?.filter { it.declName == name }
                 ?.map { it.modulePath }
                 ?.distinct()
@@ -287,7 +281,7 @@ object TypeAnnotationConverter {
             }
         }
 
-        throw com.mezze.language.typechecker.TypeCheckError(
+        throw TypeCheckError(
             "Effect `$name` is not defined or not imported$didYouMean",
             effectRow.loc,
             code = ErrorCode.V0505_EFFECT_NOT_DEFINED,

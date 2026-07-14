@@ -6,12 +6,26 @@ import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.printing.ErrorMessageBuilder
+import com.mezze.language.typechecker.util.StringDistance
 
 class ConstraintSolver(
     private val context: TypingContext,
-    private val registry: com.mezze.language.typechecker.context.DeclarationRegistry = com.mezze.language.typechecker.context.DeclarationRegistry.EMPTY
+    private val registry: DeclarationRegistry = DeclarationRegistry.EMPTY
 ) {
+    private fun constraintPriority(c: Constraint): Int = when (c) {
+        is Constraint.Equality -> 0
+        is Constraint.HasField -> 1
+        is Constraint.HasConstructor -> 2
+        is Constraint.AbilityRequired,
+        is Constraint.AssociatedTypeResolution,
+        is Constraint.Subsumes,
+        is Constraint.MustBeOpen,
+        is Constraint.RecordPatternExhaustive -> 3
+    }
+
     private val abilityChecker = AbilityChecker(context, registry)
 
     internal fun getGeneratedCodecImpls(): Collection<AbilityChecker.GeneratedCodecImpl> = abilityChecker.getGeneratedCodecImpls()
@@ -45,8 +59,7 @@ class ConstraintSolver(
         val message: String,
         val constraint: Constraint,
         val context: String? = null,
-        val code: com.mezze.language.parsedast.diagnostics.ErrorCode =
-            com.mezze.language.parsedast.diagnostics.ErrorCode.UNCATEGORIZED,
+        val code: ErrorCode = ErrorCode.UNCATEGORIZED,
         val hints: List<String> = emptyList(),
     )
 
@@ -56,7 +69,6 @@ class ConstraintSolver(
         val warnings = mutableListOf<String>()
         val resolvedAbilities = mutableSetOf<Constraint.AbilityRequired>()
 
-        // PHASE 0: Infer variant types from HasConstructor constraints
         val (inferredEqualities, inferenceErrors) = variantSolver.inferVariantTypes(constraints)
 
         if (inferenceErrors.isNotEmpty() && constraints.isNotEmpty()) {
@@ -74,13 +86,11 @@ class ConstraintSolver(
 
         val allConstraints = constraints + inferredEqualities
 
-        // PHASE 0.5: Process MustBeOpen constraints to track which types must stay open
         val (mustBeOpenConstraints, constraintsAfterOpen) = allConstraints.partition { it is Constraint.MustBeOpen }
         for (constraint in mustBeOpenConstraints) {
             val result = solveConstraint(constraint, substitution)
         }
 
-        // PHASE 1: Process AbilityRequired and AssociatedTypeResolution constraints FIRST
         val (abilityConstraints, nonAbilityConstraints) = constraintsAfterOpen.partition {
             it is Constraint.AbilityRequired || it is Constraint.AssociatedTypeResolution
         }
@@ -105,7 +115,7 @@ class ConstraintSolver(
                         ConstraintError(
                             message = result.message,
                             constraint = appliedConstraint,
-                            context = appliedConstraint.getContext()
+                            context = appliedConstraint.context
                         )
                     )
                 }
@@ -114,7 +124,6 @@ class ConstraintSolver(
             }
         }
 
-        // PHASE 2a: First solve all HasConstructor constraints to collect variant constructors
         val hasConstructorConstraints = nonAbilityConstraints.filterIsInstance<Constraint.HasConstructor>()
         val otherConstraints = nonAbilityConstraints.filter { it !is Constraint.HasConstructor }
 
@@ -146,7 +155,6 @@ class ConstraintSolver(
                     is ConstraintResult.Failure -> {
                         val constraintType = appliedConstraint.variantType
                         if (constraintType is MezzeType.VarType && !result.terminal) {
-                            // Still a type variable - might be resolved later
                         } else {
                             errors.add(
                                 ConstraintError(
@@ -164,7 +172,6 @@ class ConstraintSolver(
             }
         }
 
-        // PHASE 2b: Resolve MustBeOpen types to their row vars
         for (typeVar in mustBeOpenTypes) {
             val resolved = substitution.apply(MezzeType.VarType(typeVar))
             DebugLogger.debug(Category.ConstraintSolver) { "MustBeOpen typeVar=$typeVar resolved to $resolved" }
@@ -181,29 +188,10 @@ class ConstraintSolver(
             )
         }
 
-        // PHASE 2c: Close pattern-based variants
         substitution = variantSolver.closePatternBasedVariants(substitution)
 
-        // PHASE 2d: Solve remaining constraints (Equality, HasField, etc.)
         val allRemainingConstraints = hasConstructorWorklist + otherConstraints
-        val sortedConstraints = buildList {
-            addAll(allRemainingConstraints.filterIsInstance<Constraint.Equality>())
-            addAll(allRemainingConstraints.filterIsInstance<Constraint.HasField>())
-            addAll(allRemainingConstraints.filterIsInstance<Constraint.HasConstructor>())
-            for (c in allRemainingConstraints) {
-                when (c) {
-                    is Constraint.Equality,
-                    is Constraint.HasField,
-                    is Constraint.HasConstructor -> { /* already added */ }
-                    is Constraint.AbilityRequired,
-                    is Constraint.AssociatedTypeResolution,
-                    is Constraint.EffectUsed,
-                    is Constraint.Subsumes,
-                    is Constraint.MustBeOpen,
-                    is Constraint.RecordPatternExhaustive -> add(c)
-                }
-            }
-        }
+        val sortedConstraints = allRemainingConstraints.sortedBy { constraintPriority(it) }
         val constraintWorklist = sortedConstraints.toMutableList()
         val processedInThisPass = mutableSetOf<Constraint>()
         var madeProgress = true
@@ -307,13 +295,12 @@ class ConstraintSolver(
                         }
 
                         if (constraintType is MezzeType.VarType) {
-                            // Keep in worklist - might resolve later
                         } else {
                             errors.add(
                                 ConstraintError(
                                     message = result.message,
                                     constraint = appliedConstraint,
-                                    context = appliedConstraint.getContext()
+                                    context = appliedConstraint.context
                                 )
                             )
                             iterator.remove()
@@ -325,7 +312,6 @@ class ConstraintSolver(
             }
         }
 
-        // Any remaining constraints that couldn't be solved are errors
         for (constraint in constraintWorklist) {
             val appliedConstraint = applySubstitutionToConstraint(constraint, substitution)
             val result = when (constraint) {
@@ -337,13 +323,12 @@ class ConstraintSolver(
                     ConstraintError(
                         message = result.message,
                         constraint = appliedConstraint,
-                        context = appliedConstraint.getContext()
+                        context = appliedConstraint.context
                     )
                 )
             }
         }
 
-        // Validate ability constraints with the FULL accumulated substitution
         val validationResult = abilityChecker.validateAbilityConstraints(substitution)
         if (validationResult != null) {
             val (validationError, errorLoc) = validationResult
@@ -356,14 +341,12 @@ class ConstraintSolver(
             )
         }
 
-        // Apply deferred inferences from bidirectional ability inference
         val deferredInference = abilityChecker.getDeferredInference()
         if (deferredInference.isNotEmpty()) {
             val deferredSubst = Substitution(deferredInference.toMap())
             substitution = deferredSubst.compose(substitution)
         }
 
-        // Resolve deferred associated type constraints
         val deferredEntries = abilityChecker.getAssociatedTypeResolutionConstraints().toList()
         DebugLogger.debug(Category.ConstraintSolver) {
             "Processing ${deferredEntries.size} deferred associated type constraints"
@@ -401,7 +384,6 @@ class ConstraintSolver(
             }
         }
 
-        // Resolve mustBeOpenTypes to their row variables
         for (typeVar in mustBeOpenTypes) {
             val resolvedType = substitution.apply(MezzeType.VarType(typeVar))
             if (resolvedType is MezzeType.VariantType) {
@@ -443,7 +425,6 @@ class ConstraintSolver(
             is Constraint.Equality -> solveEquality(constraint)
             is Constraint.AbilityRequired -> abilityChecker.solveAbilityRequired(constraint)
             is Constraint.AssociatedTypeResolution -> abilityChecker.solveAssociatedTypeResolution(constraint, currentSubst)
-            is Constraint.EffectUsed -> solveEffectUsed(constraint)
             is Constraint.Subsumes -> solveSubsumes(constraint)
             is Constraint.HasField -> solveHasField(constraint, currentSubst)
             is Constraint.HasConstructor -> variantSolver.solveHasConstructor(constraint, currentSubst)
@@ -473,10 +454,6 @@ class ConstraintSolver(
                 ConstraintResult.Failure(betterMessage)
             }
         }
-    }
-
-    private fun solveEffectUsed(constraint: Constraint.EffectUsed): ConstraintResult {
-        return ConstraintResult.Success(Substitution.empty)
     }
 
     private fun solveSubsumes(constraint: Constraint.Subsumes): ConstraintResult {
@@ -641,7 +618,7 @@ class ConstraintSolver(
                     return ConstraintResult.Success(Substitution.empty)
                 } else {
                     val availableFields = recordType.fields.keys.toList()
-                    val suggestion = com.mezze.language.typechecker.util.StringDistance.suggestOrList(
+                    val suggestion = StringDistance.suggestOrList(
                         fieldName,
                         availableFields,
                         "fields"
@@ -667,87 +644,7 @@ class ConstraintSolver(
     }
 
     private fun applySubstitutionToConstraint(constraint: Constraint, substitution: Substitution): Constraint {
-        return when (constraint) {
-            is Constraint.Equality -> Constraint.Equality(
-                left = substitution.apply(constraint.left),
-                right = substitution.apply(constraint.right),
-                context = constraint.context,
-                loc = constraint.loc,
-                isMatchCaseContext = constraint.isMatchCaseContext,
-                errorContext = constraint.errorContext,
-            )
-
-            is Constraint.AbilityRequired -> Constraint.AbilityRequired(
-                typeVar = constraint.typeVar,
-                abilityName = constraint.abilityName,
-                abilityHash = constraint.abilityHash,
-                typeArgs = constraint.typeArgs.map { substitution.apply(it) },
-                context = constraint.context,
-                loc = constraint.loc
-            )
-
-            is Constraint.EffectUsed -> constraint
-
-            is Constraint.Subsumes -> Constraint.Subsumes(
-                general = substitution.apply(constraint.general),
-                specific = substitution.apply(constraint.specific),
-                context = constraint.context,
-                loc = constraint.loc
-            )
-
-            is Constraint.HasField -> Constraint.HasField(
-                recordType = substitution.apply(constraint.recordType),
-                fieldName = constraint.fieldName,
-                fieldType = substitution.apply(constraint.fieldType),
-                context = constraint.context,
-                loc = constraint.loc,
-                strictFieldCheck = constraint.strictFieldCheck
-            )
-
-            is Constraint.HasConstructor -> Constraint.HasConstructor(
-                variantType = substitution.apply(constraint.variantType),
-                constructorName = constraint.constructorName,
-                payloadType = constraint.payloadType?.let { substitution.apply(it) },
-                context = constraint.context,
-                loc = constraint.loc,
-                isPatternContext = constraint.isPatternContext
-            )
-
-            is Constraint.MustBeOpen -> Constraint.MustBeOpen(
-                type = substitution.apply(constraint.type),
-                bindingName = constraint.bindingName,
-                context = constraint.context,
-                loc = constraint.loc
-            )
-
-            is Constraint.RecordPatternExhaustive -> Constraint.RecordPatternExhaustive(
-                recordType = substitution.apply(constraint.recordType),
-                patternFields = constraint.patternFields,
-                context = constraint.context,
-                loc = constraint.loc
-            )
-
-            is Constraint.AssociatedTypeResolution -> Constraint.AssociatedTypeResolution(
-                abilityName = constraint.abilityName,
-                primaryTypeVar = constraint.primaryTypeVar,
-                associatedTypeVars = constraint.associatedTypeVars,
-                context = constraint.context,
-                loc = constraint.loc
-            )
-        }
+        return constraint.mapTypes { substitution.apply(it) }
     }
 
-    private fun Constraint.getContext(): String? {
-        return when (this) {
-            is Constraint.Equality -> this.context
-            is Constraint.AbilityRequired -> this.context
-            is Constraint.AssociatedTypeResolution -> this.context
-            is Constraint.EffectUsed -> this.context
-            is Constraint.Subsumes -> this.context
-            is Constraint.HasField -> this.context
-            is Constraint.HasConstructor -> this.context
-            is Constraint.MustBeOpen -> this.context
-            is Constraint.RecordPatternExhaustive -> this.context
-        }
-    }
 }

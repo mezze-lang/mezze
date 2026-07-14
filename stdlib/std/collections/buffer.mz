@@ -1,31 +1,31 @@
 use std::abilities::sized::{ Sized }
 
 ## Creates a new buffer with the specified initial capacity.
-pub let new = { capacity } -> __native_buffer_new { capacity = capacity }
+pub let new: { capacity: Int } -> ByteBuffer = { capacity } -> __native_buffer_new { capacity = capacity }
 
 ## Creates an empty buffer with default capacity.
-pub let empty = {} -> __native_buffer_empty {}
+pub let empty: {} -> ByteBuffer = {} -> __native_buffer_empty {}
 
 ## Writes bytes to the buffer.
-pub let write = { buf, bytes } -> __native_buffer_write { buf = buf, bytes = bytes }
+pub let write: { buf: ByteBuffer, bytes: Bytes } -> ByteBuffer = { buf, bytes } -> __native_buffer_write { buf = buf, bytes = bytes }
 
 ## Writes a single byte (0-255) to the buffer.
-pub let write_byte = { buf, b } -> __native_buffer_write_byte { buf = buf, b = b }
+pub let write_byte: { buf: ByteBuffer, b: Int } -> ByteBuffer = { buf, b } -> __native_buffer_write_byte { buf = buf, b = b }
 
 ## Writes a UTF-8 string to the buffer.
-pub let write_string = { buf, s } -> __native_buffer_write_string { buf = buf, s = s }
+pub let write_string: { buf: ByteBuffer, s: Str } -> ByteBuffer = { buf, s } -> __native_buffer_write_string { buf = buf, s = s }
 
 ## Copies the buffer contents to immutable Bytes.
-pub let to_bytes = { buf } -> __native_buffer_to_bytes { buf = buf }
+pub let to_bytes: { buf: ByteBuffer } -> Bytes = { buf } -> __native_buffer_to_bytes { buf = buf }
 
 ## Returns the current size of the buffer in bytes.
-pub let size = { buf } -> __native_buffer_size { buf = buf }
+pub let size: { buf: ByteBuffer } -> Int = { buf } -> __native_buffer_size { buf = buf }
 
 ## Returns True if the buffer is empty.
-pub let is_empty = { buf } -> __native_buffer_is_empty { buf = buf }
+pub let is_empty: { buf: ByteBuffer } -> Bool = { buf } -> __native_buffer_is_empty { buf = buf }
 
 ## Clears the buffer, resetting it to empty. The buffer can be reused.
-pub let clear = { buf } -> __native_buffer_clear { buf = buf }
+pub let clear: { buf: ByteBuffer } -> ByteBuffer = { buf } -> __native_buffer_clear { buf = buf }
 
 impl Sized for ByteBuffer where {
   size = { it } -> size { buf = it },

@@ -48,7 +48,6 @@ internal object MetadataParser {
             reader.skipWhitespace()
             if (reader.isAtEnd()) break
 
-            // Parse key
             val key = reader.readIdentifier()
             if (key == null) {
                 // Can't parse a key — treat remaining content as raw string under "_raw" key
@@ -70,7 +69,6 @@ internal object MetadataParser {
             }
             reader.skipWhitespace()
 
-            // Parse value — always succeeds due to raw fallback
             val value = parseValue(reader) ?: ParsedMetadataValue.StringVal("")
             fields[key] = value
 

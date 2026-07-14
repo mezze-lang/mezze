@@ -4,89 +4,39 @@ import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.parsedast.Visibility as ParsedVisibility
 import com.mezze.language.typechecker.TypeCheckError
-import com.mezze.language.typechecker.WellKnownHashes
+import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.ast.ScopedEffectConstants
+import com.mezze.language.typechecker.util.AbilityImplFactory
+import com.mezze.language.typechecker.util.TypeAnnotationConverter
+import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.typechecker.validation.AbilityValidator
 import com.mezze.language.typechecker.validation.DuplicateDeclarationValidator
 import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.typedast.Hash
 
-/**
- * Builds immutable typing context from program declarations.
- *
- * Phase 1 of type checking: Build environment.
- * - Process type declarations
- * - Process ability declarations
- * - Process effect declarations
- * - Create type schemes for top-level bindings
- * - NO type inference, NO validation (those are later phases)
- *
- * Replaces the scattered context-building logic throughout TypeChecker
- * with a single, clear phase.
- */
 class ContextBuilder {
-    /**
-     * Type variable cache to ensure all occurrences of a type variable name
-     * within a single type declaration refer to the same TypeVar instance.
-     *
-     * CRITICAL: This prevents occurs check failures where 'a in the type
-     * parameters and 'a in the payload would be different instances, causing
-     * the type system to think we have infinite types like 'a = {val: 'a}.
-     */
     private val typeVarCache = mutableMapOf<String, TypeVar>()
 
-    private val sharedRowVar = com.mezze.language.typechecker.util.TypeAnnotationConverter.SharedRowVar()
+    private val sharedRowVar = TypeAnnotationConverter.SharedRowVar()
 
-    /**
-     * Effect declarations available during the current build() invocation.
-     * Populated at the start of build() so that convertTypeAnnotationV1Internal
-     * can resolve effect names to their content hashes for EffectRow.effectHashes.
-     */
     private var currentEffectDecls: Map<String, ParsedEffectDecl> = emptyMap()
-
-    /**
-     * Ability declarations available during the current build() invocation.
-     * Populated at the start of build() so that convertTypeAnnotationV1Internal
-     * can resolve ability names to their content hashes for FunctionAbilityConstraint.abilityHash.
-     */
     private var currentAbilityDecls: Map<String, ParsedAbilityDecl> = emptyMap()
-
-    /**
-     * Type declarations available during the current build() invocation.
-     * Populated at the start of build() so that convertTypeAnnotationV1Internal
-     * can resolve type constructor names to their content hashes for TypeApplication.typeHash.
-     */
     private var currentTypeDecls: Map<String, ParsedTypeDecl> = emptyMap()
 
-    /**
-     * Build result - contains all typing environments
-     */
     data class BuildResult(
         val context: TypingContext,
         val registry: DeclarationRegistry,
-        val performerToEffect: Map<String, String>,  // performer name → effect name (for error messages)
-        val performerToEffectHash: Map<com.mezze.language.typedast.Hash, com.mezze.language.typedast.Hash> = emptyMap(),  // performer contentHash → effect contentHash
-        /** Maps performer names to the set of effects they ADD (not handle) */
+        val performerToEffect: Map<String, String>,
+        val performerToEffectHash: Map<Hash, Hash> = emptyMap(),
         val performerAddedEffects: Map<String, Set<String>> = emptyMap(),
-        /** Maps performer names to their ParsedPerformerDecl (for content hash lookup) */
         val implDeclarations: Map<String, ParsedPerformerDecl> = emptyMap(),
-        /** ParsedModule with impl declarations resolved (ParsedPerformerDecl for abilities → ParsedImplAbilityDecl) */
         val resolvedModule: ParsedModule? = null,
     )
 
-    /**
-     * Build typing context from a parsed module.
-     * This is a pure function - no side effects!
-     *
-     * @param module The parsed module to build context from
-     * @param parentContext Optional parent context (for nested scopes/modules)
-     * @param importedImpls Optional imported effect implementations (from module imports)
-     * @param importedAbilities Optional imported ability declarations (for validating ability impls with qualified names)
-     * @param importedTypes Optional imported type declarations (for orphan rule validation)
-     */
     fun build(
         module: ParsedModule,
         parentContext: TypingContext = TypingContext.empty,
-        importedImpls: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl> = emptyMap(),
+        importedImpls: Map<String, ParsedPerformerDecl> = emptyMap(),
         importedAbilities: Map<String, ParsedAbilityDecl> = emptyMap(),
         importedTypes: Map<String, ParsedTypeDecl> = emptyMap(),
         importedEffects: Map<String, ParsedEffectDecl> = emptyMap(),
@@ -94,12 +44,10 @@ class ContextBuilder {
     ): BuildResult {
         val file = module.path
 
-        // Collect declarations by type — use v2 ParsedDecl types directly
         val typeDecls = module.decls.filterIsInstance<ParsedTypeDecl>()
             .associateBy { it.name }
-            .toMutableMap()  // Make mutable so we can add built-in types
+            .toMutableMap()
 
-        // Add built-in variant types (Option, Result) if not already defined
         addBuiltInParsedTypes(typeDecls)
 
         val abilityDecls = module.decls.filterIsInstance<ParsedAbilityDecl>()
@@ -110,39 +58,30 @@ class ContextBuilder {
             .mapValues { (_, decl) ->
                 if (decl.contentHash != null) decl
                 else {
-                    val hash = com.mezze.language.parsedast.ParsedDeclHasher.hashEffectDecl(decl)
+                    val hash = ParsedDeclHasher.hashEffectDecl(decl)
                     if (hash != null) decl.copy(contentHash = hash) else decl
                 }
             }
 
-        // v1 conversions completely removed — all consumers now use v2 types directly
-
-        // Resolve impl declarations: the parser can't distinguish ability impls from
-        // effect impls (same `impl X for Y where {}` syntax). The typechecker knows which
-        // names are abilities vs effects from imports, so we resolve here.
         val allAbilityNames = abilityDecls.keys + importedAbilities.keys +
             importedAbilities.values.map { it.name }.toSet()
         val allEffectNames = effectDecls.keys + importedEffects.keys +
             importedEffects.values.map { it.name }.toSet()
 
-        val resolvedParsedPerformerDecls = mutableListOf<ParsedPerformerDecl>()  // real effect performers
-        val resolvedAbilityImplDecls = mutableListOf<ParsedImplAbilityDecl>()  // ability impls
-        // Track which ParsedPerformerDecl were converted to ability impls (by identity)
+        val resolvedParsedPerformerDecls = mutableListOf<ParsedPerformerDecl>()
+        val resolvedAbilityImplDecls = mutableListOf<ParsedImplAbilityDecl>()
         val convertedPerformerDecls = mutableMapOf<ParsedPerformerDecl, ParsedImplAbilityDecl>()
 
-        // First, add explicitly parsed ability impls (compute content hashes if needed)
         for (impl in module.decls.filterIsInstance<ParsedImplAbilityDecl>()) {
             resolvedAbilityImplDecls.add(ensureContentHash(impl, file))
         }
 
-        // Then resolve ParsedPerformerDecl: ability impl or effect performer?
         for (perfDecl in module.decls.filterIsInstance<ParsedPerformerDecl>()) {
             val refName = perfDecl.effect.localName
             val isAbility = refName in allAbilityNames
             val isEffect = refName in allEffectNames
 
             if (isAbility && !isEffect) {
-                // This is actually an ability impl, convert it to ParsedImplAbilityDecl
                 val converted = ParsedImplAbilityDecl(
                     target = ParsedImplTarget.Named(perfDecl.effect),
                     targetTypes = listOf(ParsedNamedType(perfDecl.performerName, perfDecl.loc)),
@@ -165,17 +104,14 @@ class ContextBuilder {
                 resolvedAbilityImplDecls.add(withHash)
                 convertedPerformerDecls[perfDecl] = withHash
             } else {
-                // Real effect performer — compute content hash via ParsedDeclHasher
                 val perfWithHash = if (perfDecl.contentHash != null) perfDecl
-                    else perfDecl.copy(contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(perfDecl))
+                    else perfDecl.copy(contentHash = ParsedDeclHasher.hashPerformerDecl(perfDecl))
                 resolvedParsedPerformerDecls.add(perfWithHash)
             }
         }
 
-        // v1 implDecls removed — all consumers now use resolvedParsedPerformerDecls
         val abilityImplDecls = resolvedAbilityImplDecls
 
-        // Validate duplicates — only include real effect performers (not those converted to ability impls)
         val allDeclsForValidation: List<ParsedDecl> = module.decls.filterIsInstance<ParsedTypeDecl>() +
             module.decls.filterIsInstance<ParsedAbilityDecl>() +
             module.decls.filterIsInstance<ParsedEffectDecl>() +
@@ -184,24 +120,11 @@ class ContextBuilder {
             module.decls.filterIsInstance<ParsedLetDecl>()
         DuplicateDeclarationValidator.validateDecls(allDeclsForValidation)
 
-        // Merge local and imported effect declarations for lookups (v2 types)
         val allEffectDecls = effectDecls + importedEffects
-
-        // Make effect declarations available to convertTypeAnnotationV1Internal so it can
-        // populate EffectRow.effectHashes with content hashes for hermetic checks.
         currentEffectDecls = allEffectDecls
-
-        // Make ability and type declarations available to convertTypeAnnotationV1Internal
-        // so it can populate abilityHash / typeHash content hashes.
         currentAbilityDecls = abilityDecls + importedAbilities
         currentTypeDecls = typeDecls + importedTypes
 
-        // v1 effect decls for internal ContextBuilder methods
-        // allV1AbilityDecls and allV1TypeDecls removed — validators now use v2 types
-
-        // v1ImportedImpls removed — all consumers now use importedImpls (v2) directly
-
-        // Build performer to effect mapping (using v2 types)
         val localMapping = resolvedParsedPerformerDecls.associate { perf ->
             val effectDecl = allEffectDecls[perf.effect.localName]
             val effectName = effectDecl?.name ?: perf.effect.localName
@@ -211,34 +134,22 @@ class ContextBuilder {
             val effectDecl = allEffectDecls[perf.effect.localName]
             effectDecl?.name ?: perf.effect.localName
         }
-        val performerToEffectMap = importedMapping + localMapping  // Local impls override imports
+        val performerToEffectMap = importedMapping + localMapping
 
-        // Build hash-based performer→effect mapping
-        val performerToEffectHashMap = mutableMapOf<com.mezze.language.typedast.Hash, com.mezze.language.typedast.Hash>()
-        for (perf in resolvedParsedPerformerDecls) {
-            val perfHash = perf.contentHash ?: continue
-            val effectDecl = allEffectDecls[perf.effect.localName]
-            val effHash = effectDecl?.contentHash ?: continue
-            performerToEffectHashMap[perfHash] = effHash
-        }
-        for ((_, perf) in importedImpls) {
-            val perfHash = perf.contentHash ?: continue
-            val effectDecl = allEffectDecls[perf.effect.localName]
-            val effHash = effectDecl?.contentHash ?: continue
-            performerToEffectHashMap[perfHash] = effHash
+        val performerToEffectHashMap = buildMap<Hash, Hash> {
+            for (perf in resolvedParsedPerformerDecls + importedImpls.values) {
+                val perfHash = perf.contentHash ?: continue
+                val effHash = allEffectDecls[perf.effect.localName]?.contentHash ?: continue
+                put(perfHash, effHash)
+            }
         }
 
-        // Build context with bindings for declarations (uses v1 types internally)
         var ctx = parentContext
 
-        // Add type constructors to context (v2 types directly)
         for (typeDecl in typeDecls.values) {
             ctx = addParsedTypeConstructors(ctx, typeDecl)
         }
 
-        // Note: True and False are parsed as VariantConstruction nodes (uppercase variants).
-
-        // Add ability methods to context — both local AND imported abilities (v2 types)
         for (abilityDecl in abilityDecls.values) {
             ctx = addAbilityMethods(ctx, abilityDecl)
         }
@@ -248,12 +159,10 @@ class ContextBuilder {
             }
         }
 
-        // Add effect operations to context (using v2 ParsedEffectDecl directly)
         for (effectDecl in effectDecls.values) {
             ctx = addEffectOperations(ctx, effectDecl)
         }
 
-        // Add effect performers (impl blocks) to context (using v2 types directly)
         for (perfDecl in resolvedParsedPerformerDecls) {
             ctx = addEffectPerformer(ctx, perfDecl, allEffectDecls)
         }
@@ -261,17 +170,14 @@ class ContextBuilder {
             ctx = addEffectPerformer(ctx, perfDecl, allEffectDecls)
         }
 
-        // Add ability implementations to context (with ability declaration hashes for hash-based index)
         val allParsedAbilityDeclsForHash = abilityDecls + importedAbilities
         for (abilityImplDecl in abilityImplDecls) {
             ctx = addAbilityImpl(ctx, abilityImplDecl, allParsedAbilityDeclsForHash, importedAbilities, file)
         }
 
-        // VALIDATION PHASE: Run ability validations after context is built (v2 types)
         val allParsedAbilityDecls = abilityDecls + importedAbilities
         val allParsedTypeDecls = typeDecls + importedTypes
 
-        // Registry for local-only name collision checks (not including imports for abilities)
         val localValidationRegistry = DeclarationRegistry.from(allParsedTypeDecls, abilityDecls, effectDecls)
         AbilityValidator.validateNameCollisions(localValidationRegistry)
 
@@ -279,7 +185,6 @@ class ContextBuilder {
             AbilityValidator.validateAbilityDeclaration(abilityDecl)
         }
 
-        // Registry for ability impl validation (includes imported abilities + types)
         val implValidationRegistry = DeclarationRegistry.from(allParsedTypeDecls, allParsedAbilityDecls, effectDecls)
         for (abilityImplDecl in abilityImplDecls) {
             AbilityValidator.validateAbilityImplementation(
@@ -288,11 +193,10 @@ class ContextBuilder {
             )
         }
 
-        // Validate orphan rules
         val localAbilityNames = abilityDecls.keys
         val declaredTypeNames = module.decls.filterIsInstance<ParsedTypeDecl>().map { it.name }.toSet()
         val homeTypeNames = if (currentModulePath != null) {
-            BuiltinTypeRegistry.getLocalTypesForModule(com.mezze.language.ast.ModulePath.parse(currentModulePath))
+            BuiltinTypeRegistry.getLocalTypesForModule(ModulePath.parse(currentModulePath))
         } else emptySet()
         val localTypeNames = declaredTypeNames + homeTypeNames
         val importedAbilityNames = importedAbilities.keys
@@ -308,18 +212,15 @@ class ContextBuilder {
             )
         }
 
-        // Build performer added effects mapping (using v2 types)
         val performerAddedEffectsMap = (resolvedParsedPerformerDecls + importedImpls.values).associate { perf ->
             perf.performerName to perf.operations.flatMap { op ->
                 op.effects?.effects ?: emptyList()
             }.toSet()
         }.filterValues { it.isNotEmpty() }
 
-        // Build implDeclarations map: performer name -> ImplDeclaration
         val implDeclarationsMap: Map<String, ParsedPerformerDecl> = resolvedParsedPerformerDecls.associateBy { it.performerName } +
             importedImpls
 
-        // Build resolvedModule: replace converted ParsedPerformerDecl with ParsedImplAbilityDecl
         val resolvedMod = if (convertedPerformerDecls.isEmpty()) {
             module
         } else {
@@ -344,10 +245,6 @@ class ContextBuilder {
         )
     }
 
-
-    /**
-     * Add type constructors to context.
-     */
     fun addParsedTypeConstructors(ctx: TypingContext, typeDecl: ParsedTypeDecl, isImported: Boolean = false): TypingContext {
         var result = ctx
         when (val definition = typeDecl.definition) {
@@ -360,7 +257,7 @@ class ContextBuilder {
                     result = result.extendPoly(constructor.name, scheme)
                 }
             }
-            is ParsedRecordDef -> { /* Records don't have constructors */ }
+            is ParsedRecordDef -> { }
             is ParsedNewtypeDef -> {
                 if (isImported) return result
                 typeVarCache.clear()
@@ -368,7 +265,7 @@ class ContextBuilder {
                 val typeArgs = typeDecl.typeParams.map { param ->
                     MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar.freshWithName(param) })
                 }
-                val newtypeResult = com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeDecl.name, typeArgs)
+                val newtypeResult = WellKnownTypeApp.of(typeDecl.name, typeArgs)
                 val constructorType = MezzeType.FunctionType(paramType = wrappedMezzeType, returnType = newtypeResult)
                 val typeVars = mutableSetOf<TypeVar>()
                 collectTypeVarsFromType(constructorType, typeVars)
@@ -382,7 +279,7 @@ class ContextBuilder {
         typeVarCache.clear()
         val resultType = if (typeDecl.typeParams.isEmpty()) {
             when (val def = typeDecl.definition) {
-                is ParsedNewtypeDef -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeDecl.name, emptyList())
+                is ParsedNewtypeDef -> WellKnownTypeApp.of(typeDecl.name, emptyList())
                 else -> {
                     val constructors = when (def) {
                         is ParsedVariantDef -> def.constructors.associate { ctor ->
@@ -398,7 +295,7 @@ class ContextBuilder {
                 }
             }
         } else {
-            com.mezze.language.typechecker.util.WellKnownTypeApp.of(
+            WellKnownTypeApp.of(
                 constructor = typeDecl.name,
                 args = typeDecl.typeParams.map { param ->
                     MezzeType.VarType(typeVarCache.getOrPut(param) { TypeVar.freshWithName(param) })
@@ -418,13 +315,8 @@ class ContextBuilder {
         return ctorType
     }
 
-    /**
-     * Add ability methods to context
-     */
     private fun addAbilityMethods(ctx: TypingContext, abilityDecl: ParsedAbilityDecl): TypingContext {
-        var result = ctx
         typeVarCache.clear()
-
         val abilityRecordType = MezzeType.RecordType(
             fields = abilityDecl.operations.associate { op ->
                 val constraints = op.abilityConstraints.map { constraint ->
@@ -434,125 +326,54 @@ class ContextBuilder {
                         abilityHash = currentAbilityDecls[constraint.abilityName]?.contentHash
                     )
                 }
-                // Convert the ability operation's declared effect row (if any) onto the
-                // method's FunctionType. Without this, an ability method like
-                // `try: {it: 'm} -> 'inner <Exception>` would lose its `<Exception>`
-                // annotation when stored in the context, causing call sites to treat
-                // the call as pure (see tryGenerateMethodCall / generateInherentMethodCall
-                // in ExpressionConstraints.kt for the corresponding propagation).
                 val opEffects = op.effects?.let { effectRow ->
                     val hashes = effectRow.effects.mapNotNull { name ->
                         currentEffectDecls[name]?.contentHash?.let { name to it }
                     }.toMap()
                     MezzeType.EffectRow.simple(
-                        effectRow.effects.toSet(),
-                        rowVar = null,
-                        performed = effectRow.isPerformed,
-                        effectHashes = hashes
+                        effectRow.effects.toSet(), rowVar = null,
+                        performed = effectRow.isPerformed, effectHashes = hashes
                     )
                 }
-                val functionType = MezzeType.FunctionType(
+                op.name to MezzeType.FunctionType(
                     paramType = convertParsedTypeAnnotationInternal(op.paramType),
                     returnType = convertParsedTypeAnnotationInternal(op.returnType),
-                    effects = opEffects,
-                    abilityConstraints = constraints
+                    effects = opEffects, abilityConstraints = constraints
                 )
-                op.name to functionType
             }
         )
-        // Pass abilityDecl.contentHash so the by-hash index gets populated alongside
-        // the by-name index. Without this, getAbilityOperationTypeByHash always returns
-        // null even though the ability is in the context — the two registries silently
-        // drift, breaking any future hash-based lookup.
-        result = result.extendWithAbilityOperationType(
-            abilityDecl.name, abilityRecordType, abilityDecl.contentHash
-        )
-
-        return result
+        return ctx.extendWithAbilityOperationType(abilityDecl.name, abilityRecordType, abilityDecl.contentHash)
     }
 
-    /**
-     * Add effect operations to context
-     */
     private fun addEffectOperations(ctx: TypingContext, effectDecl: ParsedEffectDecl): TypingContext {
-        var result = ctx
-
-        // CRITICAL: Clear cache once BEFORE converting all operations for this effect
-        // This ensures all operations in this effect use the same TypeVar instances
-        // for associated types (e.g., all 'env references become TypeVar(name='env))
         typeVarCache.clear()
-
-        // Add effect record type (for qualified access like Log.write)
-        // NOTE: We don't add effects to the operation types here to avoid module import issues
-        // Instead, effects are added when the operation is called (in tryGenerateEffectOperationCall)
         val effectRecordType = MezzeType.RecordType(
             fields = effectDecl.operations.associate { op ->
-                // Convert the type annotation and strip any effects
-                // Effect operations are stored as plain function types
-                // IMPORTANT: Use internal converter to avoid clearing cache between operations
-                val convertedReturnType = convertParsedTypeAnnotationInternal(op.returnType)
-                val convertedParamType = convertParsedTypeAnnotationInternal(op.paramType)
-                val plainFunctionType = MezzeType.FunctionType(
-                    paramType = convertedParamType,
-                    returnType = convertedReturnType,
-                    effects = null  // NO effects here - added during call
+                op.name to MezzeType.FunctionType(
+                    paramType = convertParsedTypeAnnotationInternal(op.paramType),
+                    returnType = convertParsedTypeAnnotationInternal(op.returnType),
+                    effects = null
                 )
-                op.name to plainFunctionType
             }
         )
-        // Use dedicated map instead of "${name}_ability" pattern
-        // Pass effectDecl.contentHash so by-hash index stays in sync with by-name —
-        // see addAbilityMethods for the analogous registry-drift fix.
-        result = result.extendWithEffectOperationType(
-            effectDecl.name, effectRecordType, effectDecl.contentHash
-        )
-
-        return result
+        return ctx.extendWithEffectOperationType(effectDecl.name, effectRecordType, effectDecl.contentHash)
     }
 
-    /**
-     * Analyze an impl body to find an escape call and extract the perform's
-     * suspension type from it.
-     *
-     * Two patterns recognized:
-     *   - Legacy: `scope.cont.suspend_with {value = expr}` — old continuation API.
-     *   - Current: `abort {val = expr}` — runtime-contributed name available
-     *     inside op handler bodies.
-     *
-     * In both cases `expr` is the value the perform returns when the op
-     * handler escapes, so it determines the perform expression's type.
-     *
-     * Example: For `throw = {error} -> abort {val = Err {error}}`
-     *   - The suspension expression is `Err {error}`
-     *   - We infer `| Err { error: 'error } |` → `Result 'val 'error`
-     *
-     * @param implDecl The impl declaration to analyze
-     * @param associatedTypes Map of associated type names to their bound types
-     * @return The inferred suspension type, or null if not found/inferrable
-     */
     private fun extractSuspensionTypeV2(
         implDecl: ParsedPerformerDecl,
         associatedTypes: Map<String, MezzeType>
     ): MezzeType? {
-        // Walk parsed AST directly (no v1 conversion needed)
         for (op in implDecl.operations) {
             val impl = op.implementation
             if (impl !is ParsedLambda) continue
             val suspendWithValue = findSuspendWithValueParsed(impl.body)
             if (suspendWithValue != null) {
-                return inferSuspensionTypeFromParsedExpr(suspendWithValue, associatedTypes)
+                return inferParsedPayloadType(suspendWithValue, associatedTypes)
             }
         }
         return null
     }
 
-    /**
-     * Recursively find the escape-value expression in a parsed AST.
-     *
-     * Looks for `abort {val = expr}` — the runtime-contributed escape inside
-     * op handler bodies. Returns the `expr` so the perform's return type
-     * can be inferred from what the handler escapes with.
-     */
     private fun findSuspendWithValueParsed(expr: ParsedExpr): ParsedExpr? {
         return when (expr) {
             is ParsedFunctionCall -> {
@@ -563,13 +384,10 @@ class ContextBuilder {
                     val v = extractRecordField(expr.arguments, ScopedEffectConstants.VAL_FIELD)
                     if (v != null) return v
                 }
-                // Not an abort call — recurse into arguments for nested cases.
                 findSuspendWithValueParsed(expr.arguments)
             }
             is ParsedDo -> {
-                // Check the result expression
                 findSuspendWithValueParsed(expr.result) ?: run {
-                    // Check statements
                     for (stmt in expr.statements.reversed()) {
                         when (stmt) {
                             is ParsedStatement.Expr -> {
@@ -590,11 +408,9 @@ class ContextBuilder {
                 }
             }
             is ParsedIf -> {
-                // Check both branches
                 findSuspendWithValueParsed(expr.thenBranch) ?: findSuspendWithValueParsed(expr.elseBranch)
             }
             is ParsedMatch -> {
-                // Check all cases
                 for (case in expr.cases) {
                     val found = findSuspendWithValueParsed(case.body)
                     if (found != null) return found
@@ -606,11 +422,6 @@ class ContextBuilder {
         }
     }
 
-    /**
-     * Return the value bound to `fieldName` in a record-literal argument, or
-     * null if the argument isn't a record literal or doesn't contain that field.
-     * Used to peek inside calls like `abort {val = expr}` for type inference.
-     */
     private fun extractRecordField(args: ParsedExpr, fieldName: String): ParsedExpr? {
         if (args !is ParsedRecordLit) return null
         for (entry in args.entries) {
@@ -621,230 +432,100 @@ class ContextBuilder {
         return null
     }
 
-    /**
-     * Infer the suspension type from a parsed expression passed to abort.
-     *
-     * For variant constructors like `Err {error}`, we create a variant type.
-     * For other expressions, we try to infer a reasonable type.
-     */
-    private fun inferSuspensionTypeFromParsedExpr(
-        expr: ParsedExpr,
-        associatedTypes: Map<String, MezzeType>
-    ): MezzeType? {
-        return when (expr) {
+    private fun inferParsedPayloadType(expr: ParsedExpr, associatedTypes: Map<String, MezzeType>): MezzeType =
+        when (expr) {
             is ParsedVariantConstruct -> {
-                // Variant like Err {error} or Ok {val}
-                val constructorName = expr.constructor
-                val exprValue = expr.value
-                val payloadType = if (exprValue != null) {
-                    inferParsedPayloadType(exprValue, associatedTypes)
-                } else null
-
-                // Create a variant type with this constructor
-                // For Result patterns, we need both Ok and Err constructors
-                if (constructorName == BuiltinTypes.ERR || constructorName == BuiltinTypes.OK) {
-                    // This is a Result type - create Result 'val 'error
-                    // CRITICAL: Use the SAME type variable from associatedTypes
-                    // This ensures constraint propagation works - when the operation
-                    // call constrains 'error to String, the suspension type also sees it
-                    val errorType = associatedTypes["error"] ?: MezzeType.VarType(TypeVar.fresh())
-                    val valType = MezzeType.VarType(TypeVar.fresh())
-
-                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(
-                        constructor = BuiltinTypes.RESULT,
-                        args = listOf(valType, errorType)
-                    )
-                } else if (constructorName == BuiltinTypes.NONE) {
-                    // This is Option None - create Option 'a
-                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(
+                val payloadType = expr.value?.let { inferParsedPayloadType(it, associatedTypes) }
+                when (expr.constructor) {
+                    BuiltinTypes.ERR, BuiltinTypes.OK -> {
+                        val errorType = associatedTypes["error"] ?: MezzeType.VarType(TypeVar.fresh())
+                        WellKnownTypeApp.of(
+                            constructor = BuiltinTypes.RESULT,
+                            args = listOf(MezzeType.VarType(TypeVar.fresh()), errorType)
+                        )
+                    }
+                    BuiltinTypes.NONE -> WellKnownTypeApp.of(
                         constructor = BuiltinTypes.OPTION,
                         args = listOf(MezzeType.VarType(TypeVar.fresh()))
                     )
-                } else if (constructorName == BuiltinTypes.SOME) {
-                    // This is Option Some - create Option with the payload type
-                    val innerType = payloadType ?: MezzeType.VarType(TypeVar.fresh())
-                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(
+                    BuiltinTypes.SOME -> WellKnownTypeApp.of(
                         constructor = BuiltinTypes.OPTION,
-                        args = listOf(innerType)
+                        args = listOf(payloadType ?: MezzeType.VarType(TypeVar.fresh()))
                     )
-                } else {
-                    // Generic variant - create open variant type
-                    val constructors: Map<String, MezzeType?> = mapOf(constructorName to payloadType)
-                    MezzeType.VariantType(
-                        constructors = constructors,
+                    else -> MezzeType.VariantType(
+                        constructors = mapOf(expr.constructor to payloadType),
                         rowVar = RowVar.fresh()
                     )
                 }
             }
             is ParsedRecordLit -> {
-                // Record literal - infer field types
                 val fields = mutableMapOf<String, MezzeType>()
                 for (entry in expr.entries) {
                     if (entry is ParsedRecordEntry.Field) {
-                        val entryValue = entry.value
-                        val fieldType = if (entryValue != null) {
-                            inferParsedPayloadType(entryValue, associatedTypes)
-                        } else {
-                            // Shorthand {foo} - look up in associated types
-                            associatedTypes[entry.name] ?: MezzeType.VarType(TypeVar.fresh())
-                        }
-                        fields[entry.name] = fieldType
+                        fields[entry.name] = entry.value?.let { inferParsedPayloadType(it, associatedTypes) }
+                            ?: associatedTypes[entry.name]
+                            ?: MezzeType.VarType(TypeVar.fresh())
                     }
                 }
                 MezzeType.RecordType(fields)
             }
-            is ParsedIdentifier -> {
-                // Reference to a variable - check if it's an associated type
-                val name = expr.localName
-                associatedTypes[name] ?: MezzeType.VarType(TypeVar.fresh())
-            }
-            else -> {
-                // For other expressions, use a fresh type variable
-                MezzeType.VarType(TypeVar.fresh())
-            }
-        }
-    }
-
-    /**
-     * Infer the type of a payload expression from parsed AST.
-     */
-    private fun inferParsedPayloadType(expr: ParsedExpr, associatedTypes: Map<String, MezzeType>): MezzeType {
-        return when (expr) {
-            is ParsedRecordLit -> {
-                val fields = mutableMapOf<String, MezzeType>()
-                for (entry in expr.entries) {
-                    if (entry is ParsedRecordEntry.Field) {
-                        val entryValue = entry.value
-                        val fieldType = if (entryValue != null) {
-                            inferParsedPayloadType(entryValue, associatedTypes)
-                        } else {
-                            // Shorthand {foo} - look up in associated types
-                            associatedTypes[entry.name] ?: MezzeType.VarType(TypeVar.fresh())
-                        }
-                        fields[entry.name] = fieldType
-                    }
-                }
-                MezzeType.RecordType(fields)
-            }
-            is ParsedIdentifier -> {
-                val name = expr.localName
-                associatedTypes[name] ?: MezzeType.VarType(TypeVar.fresh())
-            }
+            is ParsedIdentifier -> associatedTypes[expr.localName] ?: MezzeType.VarType(TypeVar.fresh())
             else -> MezzeType.VarType(TypeVar.fresh())
         }
-    }
 
-    /**
-     * Add effect performer to context.
-     *
-     * Stores the performer's associated type bindings so they can be used
-     * for type substitution during effect operation calls.
-     *
-     * Example: For `impl State for Counter having 'state = Int`, stores:
-     * - Key: content hash of ImplDeclaration
-     * - Value: PerformerTypeInfo with RecordType containing {'state -> Int}
-     */
     private fun addEffectPerformer(
         ctx: TypingContext,
         implDecl: ParsedPerformerDecl,
         effectDecls: Map<String, ParsedEffectDecl>
     ): TypingContext {
-        // Ensure content hash is available (compute if missing)
         val implWithHash = if (implDecl.contentHash != null) implDecl else {
-            implDecl.copy(contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashPerformerDecl(implDecl))
+            implDecl.copy(contentHash = ParsedDeclHasher.hashPerformerDecl(implDecl))
         }
         @Suppress("NAME_SHADOWING")
         val implDecl = implWithHash
 
-        // Get the effect declaration to check associated types
         val effectDecl = effectDecls[implDecl.effect.localName] ?: return ctx
+        val hasAssocTypes = effectDecl.associatedTypes.isNotEmpty()
+        if (!hasAssocTypes && implDecl.params.isEmpty()) return ctx
 
-        // If the effect has associated types, store the performer's bindings
-        if (effectDecl.associatedTypes.isNotEmpty()) {
-            // Clear cache for performer bindings
-            typeVarCache.clear()
+        if (hasAssocTypes) typeVarCache.clear()
 
-            // Convert associated type bindings to MezzeTypes
-            val bindingFields = implDecl.associatedTypeBindings.mapValues { (_, typeAnnotation) ->
-                convertParsedTypeAnnotationInternal(typeAnnotation)
+        val contentHash = implDecl.contentHash
+            ?: error("Content hash not computed for impl: ${implDecl.performerName}. " +
+                "Ensure computeDeclarationHashes was called before ContextBuilder.")
+
+        val performerType = if (hasAssocTypes) {
+            val bindingFields = implDecl.associatedTypeBindings.mapValues { (_, ann) ->
+                convertParsedTypeAnnotationInternal(ann)
             }
-
-            // Store as RecordType with associated type names as field names
-            val performerType = MezzeType.RecordType(
+            MezzeType.RecordType(
                 fields = effectDecl.associatedTypes.associate { assocType ->
                     val varName = assocType.removePrefix("'")
-                    val value = bindingFields[assocType] ?: bindingFields["'$assocType"] ?: MezzeType.VarType(TypeVar.fresh())
-                    varName to value
+                    varName to (bindingFields[assocType] ?: bindingFields["'$assocType"] ?: MezzeType.VarType(TypeVar.fresh()))
                 }
             )
+        } else MezzeType.RecordType(emptyMap())
 
-            val contentHash = implDecl.contentHash
-                ?: throw IllegalStateException(
-                    "Content hash not computed for impl: ${implDecl.performerName}. " +
-                    "Ensure computeDeclarationHashes was called before ContextBuilder."
-                )
+        val performerFieldsType = if (implDecl.params.isNotEmpty()) {
+            MezzeType.RecordType(fields = implDecl.params.associate { p ->
+                p.name to convertParsedTypeAnnotationInternal(p.type)
+            })
+        } else null
 
-            val performerFieldsType = if (implDecl.params.isNotEmpty()) {
-                MezzeType.RecordType(
-                    fields = implDecl.params.associate { param ->
-                        param.name to convertParsedTypeAnnotationInternal(param.type)
-                    }
-                )
-            } else null
+        val associatedTypesMap = if (hasAssocTypes) performerType.fields else emptyMap()
+        val suspensionType = extractSuspensionTypeV2(implDecl, associatedTypesMap)
 
-            // Extract the suspension type from the impl body
-            val associatedTypesMap = performerType.fields.mapKeys { (k, _) -> k }
-            val suspensionType = extractSuspensionTypeV2(implDecl, associatedTypesMap)
-
-            val performerInfo = TypingContext.PerformerTypeInfo(
-                performerName = implDecl.performerName,
-                effectName = implDecl.effect.localName,
-                associatedTypes = performerType,
-                performerFields = performerFieldsType,
-                suspensionType = suspensionType,
-                contentHash = contentHash
-            )
-
-            return ctx.extendWithPerformerTypeInfo(contentHash, performerInfo)
-        }
-
-        // Even if no associated types, we still need to store performer fields for continuation inference
-        if (implDecl.params.isNotEmpty()) {
-            val contentHash = implDecl.contentHash
-                ?: throw IllegalStateException(
-                    "Content hash not computed for impl: ${implDecl.performerName}. " +
-                    "Ensure computeDeclarationHashes was called before ContextBuilder."
-                )
-
-            val performerFieldsType = MezzeType.RecordType(
-                fields = implDecl.params.associate { param ->
-                    param.name to convertParsedTypeAnnotationInternal(param.type)
-                }
-            )
-
-            val suspensionType = extractSuspensionTypeV2(implDecl, emptyMap())
-
-            val performerInfo = TypingContext.PerformerTypeInfo(
-                performerName = implDecl.performerName,
-                effectName = implDecl.effect.localName,
-                associatedTypes = MezzeType.RecordType(emptyMap()),
-                performerFields = performerFieldsType,
-                suspensionType = suspensionType,
-                contentHash = contentHash
-            )
-
-            return ctx.extendWithPerformerTypeInfo(contentHash, performerInfo)
-        }
-
-        return ctx
+        val performerInfo = TypingContext.PerformerTypeInfo(
+            performerName = implDecl.performerName,
+            effectName = implDecl.effect.localName,
+            associatedTypes = performerType,
+            performerFields = performerFieldsType,
+            suspensionType = suspensionType,
+            contentHash = contentHash
+        )
+        return ctx.extendWithPerformerTypeInfo(contentHash, performerInfo)
     }
 
-    /**
-     * Add ability implementation to context.
-     *
-     * Creates a key like "Eq_String" or "Convert_Int_String" and stores
-     * the implementation info for later validation.
-     */
     private fun addAbilityImpl(
         ctx: TypingContext,
         implDecl: ParsedImplAbilityDecl,
@@ -852,7 +533,6 @@ class ContextBuilder {
         importedAbilities: Map<String, ParsedAbilityDecl> = emptyMap(),
         file: String = "<module>"
     ): TypingContext {
-        // Extract target type names from type annotations (used by inherent path)
         val targetTypeNames = implDecl.targetTypes.map { getTypeName(it) }
 
         val implKey = implDecl.contentHash
@@ -861,334 +541,136 @@ class ContextBuilder {
                 "Ensure computeDeclarationHashes was called before ContextBuilder."
             )
 
-        // Handle inherent impls: impl Type where { methods }
         if (implDecl.isInherent) {
             return addAnonymousImpl(ctx, implDecl, targetTypeNames, implKey, file)
         }
 
-        // Look up the ability declaration hash from local + imported scopes.
-        // The factory takes the resolved hash (caller-aware lookup); everything
-        // else about the impl shape is unified across registration paths (#307).
         val abilityDeclHash = allAbilityDecls[implDecl.abilityName!!]?.contentHash
             ?: importedAbilities[implDecl.abilityName!!]?.contentHash
-        val implInfo = com.mezze.language.typechecker.util.AbilityImplFactory.build(
+        val implInfo = AbilityImplFactory.build(
             implDecl, abilityDeclHash
         )
 
         return ctx.extendWithImpl(implKey, implInfo)
     }
 
-    /**
-     * Register anonymous impl methods in context.
-     * Anonymous impls (`impl Type where { ... }`) attach methods directly to types.
-     */
     private fun addAnonymousImpl(
         ctx: TypingContext,
         implDecl: ParsedImplAbilityDecl,
         targetTypeNames: List<String>,
-        implKey: com.mezze.language.typedast.Hash,
-        file: String = "<module>"
+        implKey: Hash,
+        @Suppress("UNUSED_PARAMETER") file: String = "<module>"
     ): TypingContext {
-        var result = ctx
         val targetTypeName = targetTypeNames.firstOrNull() ?: return ctx
-        val implKeyHash = implKey
 
+        var result = ctx
         for (op in implDecl.operations) {
-            // Build method type from annotations if available
-            val opParamType = op.paramType
-            val paramType = if (opParamType != null) {
-                convertParsedTypeAnnotation(opParamType)
-            } else {
-                // Infer param type from the lambda's parameters (v2 ParsedExpr)
-                val lambda = op.implementation as? com.mezze.language.parsedast.ParsedLambda
-                if (lambda != null) {
-                    when (val params = lambda.params) {
-                        is com.mezze.language.parsedast.ParsedLambdaParams.Typed -> {
-                            // #177: detect parser-synthesized type-variable
-                            // annotations for lambda params the user left
-                            // unannotated. When the user writes
-                            //   { it, name: Str }
-                            // the parser fills `it`'s annotation with a
-                            // synthetic ParsedNamedType whose name matches
-                            // the param's name (`'it`). Naively converting
-                            // that via convertParsedTypeAnnotation creates
-                            // TypeVar("it", 0, 0) — and `data class` equality
-                            // makes that the SAME variable across every
-                            // impl method that has an unannotated `it`.
-                            // The substitution map then can't bind it to
-                            // both Req (for impl Req) and Resp (for impl
-                            // Resp); the global solve fails with
-                            // "Field 'it' type mismatch". Substitute a
-                            // fresh TypeVar per occurrence here so each
-                            // method's `it` is its own variable.
-                            MezzeType.RecordType(
-                                fields = params.fields.associate { entry ->
-                                    val parsedType = entry.type
-                                    val isSyntheticTyvar = (parsedType as? com.mezze.language.parsedast.ParsedNamedType)
-                                        ?.let { it.name.removePrefix("'") == entry.name } ?: false
-                                    val converted = if (isSyntheticTyvar) {
-                                        MezzeType.VarType(TypeVar.fresh())
-                                    } else {
-                                        convertParsedTypeAnnotation(parsedType)
-                                    }
-                                    entry.name to converted
-                                },
-                                rowVar = null
-                            )
-                        }
-                        is com.mezze.language.parsedast.ParsedLambdaParams.Untyped -> {
-                            if (params.names.isEmpty()) {
-                                MezzeType.RecordType(fields = emptyMap(), rowVar = null)
-                            } else {
-                                MezzeType.RecordType(
-                                    fields = params.names.associateWith { MezzeType.VarType(TypeVar.fresh()) },
-                                    rowVar = null
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    MezzeType.RecordType(fields = emptyMap(), rowVar = null)
+            val paramType = op.paramType?.let { convertParsedTypeAnnotation(it) }
+                ?: inferParamTypeFromLambda(op.implementation) { parsedType, name ->
+                    val isSynthetic = (parsedType as? ParsedNamedType)
+                        ?.let { it.name.removePrefix("'") == name } ?: false
+                    if (isSynthetic) MezzeType.VarType(TypeVar.fresh())
+                    else convertParsedTypeAnnotation(parsedType)
                 }
-            }
+            val returnType = op.returnType?.let { convertParsedTypeAnnotation(it) }
+                ?: MezzeType.VarType(TypeVar.fresh())
 
-            val opReturnType = op.returnType
-            val returnType = if (opReturnType != null) {
-                convertParsedTypeAnnotation(opReturnType)
-            } else {
-                // Return type unknown at registration time — use a fresh type variable.
-                // The actual type will be inferred during typechecking of the method call.
-                MezzeType.VarType(TypeVar.fresh())
-            }
-
-            val methodType = MezzeType.FunctionType(
-                paramType = paramType,
-                returnType = returnType
-            )
-
-            val methodInfo = TypingContext.InherentMethodInfo(
-                targetTypeName = targetTypeName,
-                methodName = op.name,
-                methodType = methodType,
-                implContentHash = implKeyHash,
-                implStartLine = implDecl.loc.startLine,
-                implStartCol = implDecl.loc.startCol,
+            result = result.extendWithAnonymousMethod(TypingContext.InherentMethodInfo(
+                targetTypeName = targetTypeName, methodName = op.name,
+                methodType = MezzeType.FunctionType(paramType = paramType, returnType = returnType),
+                implContentHash = implKey,
+                implStartLine = implDecl.loc.startLine, implStartCol = implDecl.loc.startCol,
                 implSourceFile = implDecl.loc.file
-            )
-
-            result = result.extendWithAnonymousMethod(methodInfo)
+            ))
         }
 
-        // Also register as a regular impl so the interpreter can find it by content hash.
-        // Inherent impls have abilityName=null and no abilityDeclHash (#307 helper).
-        val implInfo = com.mezze.language.typechecker.util.AbilityImplFactory.build(
-            implDecl, abilityDeclHash = null
-        )
-        result = result.extendWithImpl(implKeyHash, implInfo)
-
+        result = result.extendWithImpl(implKey, AbilityImplFactory.build(implDecl, abilityDeclHash = null))
         return result
     }
 
-    /**
-     * Register an imported inherent impl's methods in the context.
-     * This bypasses validation (since the impl was already validated in its home module)
-     * and only registers the InherentMethodInfo + AbilityImplInfo entries.
-     *
-     * Builds method types from annotations or lambda parameter shapes.
-     * The v2 ParsedImplAbilityDecl does not carry inferredType; types will be
-     * unified during type checking of method calls.
-     */
+    private fun inferParamTypeFromLambda(
+        implementation: ParsedExpr,
+        convertField: (ParsedTypeAnnotation, String) -> MezzeType = { ann, _ -> convertParsedTypeAnnotation(ann) }
+    ): MezzeType {
+        val lambda = implementation as? ParsedLambda
+            ?: return MezzeType.RecordType(fields = emptyMap(), rowVar = null)
+        return when (val params = lambda.params) {
+            is ParsedLambdaParams.Typed -> MezzeType.RecordType(
+                fields = params.fields.associate { it.name to convertField(it.type, it.name) },
+                rowVar = null
+            )
+            is ParsedLambdaParams.Untyped -> MezzeType.RecordType(
+                fields = if (params.names.isEmpty()) emptyMap()
+                         else params.names.associateWith { MezzeType.VarType(TypeVar.fresh()) },
+                rowVar = null
+            )
+        }
+    }
+
     fun registerImportedInherentImpl(
         ctx: TypingContext,
         implDecl: ParsedImplAbilityDecl,
-        implKey: com.mezze.language.typedast.Hash,
-        file: String = "<import>",
-        // Pre-inferred return types harvested from the home module's
-        // TypedAbilityImpl.operations (issue #213). Keyed by op name. Used
-        // when the operation has no return-type annotation — we'd otherwise
-        // assign a fresh unbound TypeVar and lose the body's solved type.
+        implKey: Hash,
+        @Suppress("UNUSED_PARAMETER") file: String = "<import>",
         opReturnTypes: Map<String, MezzeType> = emptyMap(),
-        // Pre-inferred param-record types — sibling of opReturnTypes for the
-        // arg side (issue #230). When the operation's lambda has untyped
-        // params, this map's record fields beat fresh TypeVars so callbacks
-        // like `Seq.all`'s `p: { x: 'a } -> Bool` reject `nums.all {p = 5}`.
         opParamTypes: Map<String, MezzeType> = emptyMap(),
-        // Pre-inferred effect rows — #181. Impl methods whose bodies
-        // perform effects (e.g. `send = { it } -> Http.request { ... }`)
-        // need the row to carry across the module boundary; without
-        // this, the FunctionType is reconstructed pure and the call
-        // site `r.send {}` is reported effect-free.
         opEffects: Map<String, MezzeType.EffectRow> = emptyMap()
     ): TypingContext {
-        var result = ctx
-        val targetTypeNames = implDecl.targetTypes.map { getTypeName(it) }
-        val targetTypeName = targetTypeNames.firstOrNull() ?: return ctx
-        val implKeyHash = implKey
+        val targetTypeName = implDecl.targetTypes.map { getTypeName(it) }.firstOrNull() ?: return ctx
 
-        // Resolve the impl's target type once. Used to bind `it` in unannotated
-        // method signatures so generic impls (e.g. `impl Seq 'a where { first }`)
-        // share their type variables across `it` and the return type — without
-        // this, fresh-instantiation at the call site has nothing to unify the
-        // receiver's actual element type against.
-        //
-        // The TypeVars in `implTargetType` come from `convertParsedTypeAnnotation`
-        // (e.g. fresh `'a`), but the harvested `opReturnTypes` use TypeVars from
-        // the home module's solver run with potentially different identity.
-        val implTargetType: MezzeType? = implDecl.targetTypes.firstOrNull()?.let {
-            convertParsedTypeAnnotation(it)
-        }
-        // Build a name → TypeVar map from the impl target's annotation so we can
-        // align return-type TypeVars by name when they happen to match.
-        val targetTypeVarsByName: MutableMap<String, com.mezze.language.ast.TypeVar> = mutableMapOf()
+        val implTargetType = implDecl.targetTypes.firstOrNull()?.let { convertParsedTypeAnnotation(it) }
+        val targetTypeVarsByName = mutableMapOf<String, TypeVar>()
         if (implTargetType != null) collectVarTypesByName(implTargetType, targetTypeVarsByName)
-        // The impl target's free TypeVars in declaration order. Used for
-        // positional alignment when name-based lookup fails (the solver-side
-        // TypeVars in harvested return types often carry generated names that
-        // don't match the user-facing `'a`).
-        val targetVarsInOrder: List<com.mezze.language.ast.TypeVar> = if (implTargetType != null) {
-            collectVarTypesInOrder(implTargetType)
-        } else emptyList()
+        val targetVarsInOrder = if (implTargetType != null) collectVarTypesInOrder(implTargetType) else emptyList()
 
+        var result = ctx
         for (op in implDecl.operations) {
-            // Issue #230: prefer the harvested post-solve param-record type
-            // when available — that's the only place callback fields like
-            // `p: { x: 'a } -> Bool` survive. Falls back to annotations,
-            // then to a fresh-var record built from the lambda's untyped
-            // param names (the legacy behaviour, which under-constrained
-            // call sites).
             val paramType = opParamTypes[op.name]
                 ?: op.paramType?.let { convertParsedTypeAnnotation(it) }
-                ?: run {
-                    val lambda = op.implementation as? com.mezze.language.parsedast.ParsedLambda
-                    if (lambda != null) {
-                        when (val params = lambda.params) {
-                            is com.mezze.language.parsedast.ParsedLambdaParams.Typed -> MezzeType.RecordType(
-                                fields = params.fields.associate { entry ->
-                                    entry.name to convertParsedTypeAnnotation(entry.type)
-                                },
-                                rowVar = null
-                            )
-                            is com.mezze.language.parsedast.ParsedLambdaParams.Untyped -> MezzeType.RecordType(
-                                fields = if (params.names.isEmpty()) emptyMap()
-                                         else params.names.associateWith { name ->
-                                             // Receiver param: bind to impl's target type so
-                                             // `it`'s shape (and any 'a vars in `Seq 'a`) is
-                                             // visible at the call site.
-                                             if (name == "it" && implTargetType != null) implTargetType
-                                             else MezzeType.VarType(TypeVar.fresh())
-                                         },
-                                rowVar = null
-                            )
-                        }
-                    } else {
-                        MezzeType.RecordType(fields = emptyMap(), rowVar = null)
-                    }
+                ?: inferParamTypeFromLambda(op.implementation) { ann, name ->
+                    if (name == "it" && implTargetType != null) implTargetType
+                    else convertParsedTypeAnnotation(ann)
                 }
             val rawReturnType = op.returnType?.let { convertParsedTypeAnnotation(it) }
-                ?: opReturnTypes[op.name]
-                ?: MezzeType.VarType(TypeVar.fresh())
-            // Align return-type TypeVars with the impl target's TypeVars so
-            // e.g. `'a` in `Option 'a` (return) is the *same* TypeVar instance
-            // as `'a` in `Seq 'a` (it). Fresh-instantiation at the call site
-            // then renames both consistently. We try name-based alignment
-            // first (works when both sides carry the same user-facing name);
-            // falls back to positional alignment when the harvested return
-            // type's vars are solver-generated names that don't match.
-            //
-            // Issue #230 also brings harvested PARAM types into the picture.
-            // Their TypeVars come from the same solver run as the return
-            // type's, so apply identical alignment to BOTH halves —
-            // otherwise the call-site receiver's `Seq Int` would unify with
-            // a different `'a` than `Option 'a` ever sees, and the return
-            // pin from #213/#215 silently breaks for first/last/etc.
-            val returnType = if (targetVarsInOrder.isNotEmpty()) {
-                val byName = alignVarTypesByName(rawReturnType, targetTypeVarsByName)
-                val freeAfterName = collectVarTypesInOrder(byName)
-                if (freeAfterName.size == targetVarsInOrder.size &&
-                    freeAfterName.zip(targetVarsInOrder).any { (a, b) -> a != b }) {
-                    val positional = freeAfterName.zip(targetVarsInOrder).toMap()
-                    alignVarTypesByMapping(byName, positional)
-                } else byName
-            } else rawReturnType
+                ?: opReturnTypes[op.name] ?: MezzeType.VarType(TypeVar.fresh())
 
-            val alignedParamType = if (targetVarsInOrder.isNotEmpty() && paramType is MezzeType.RecordType) {
-                // First pass: align by user-facing name (`'a` in both sides).
-                val byName = alignVarTypesByName(paramType, targetTypeVarsByName) as MezzeType.RecordType
-                // Second pass: positional alignment for solver-generated
-                // names — but only when the param record's free vars line
-                // up positionally with the target's. If the harvested
-                // record uses a different number of free vars (e.g.
-                // multi-arg ops with extra fresh vars unrelated to the
-                // target), skip positional and trust whatever name-match
-                // gave us.
-                val freeAfterName = collectVarTypesInOrder(byName)
-                if (freeAfterName.size == targetVarsInOrder.size &&
-                    freeAfterName.zip(targetVarsInOrder).any { (a, b) -> a != b }) {
-                    val positional = freeAfterName.zip(targetVarsInOrder).toMap()
-                    alignVarTypesByMapping(byName, positional) as MezzeType.RecordType
-                } else byName
-            } else paramType
+            val returnType = alignToTarget(rawReturnType, targetVarsInOrder, targetTypeVarsByName)
+            val alignedParamType = if (targetVarsInOrder.isNotEmpty() && paramType is MezzeType.RecordType)
+                alignToTarget(paramType, targetVarsInOrder, targetTypeVarsByName)
+            else paramType
 
-            // #181: carry the harvested effect row through. The row was
-            // computed by ConstraintGenerator from the impl body and
-            // preserved on TypedLambda.type by TypedAstBuilder, then
-            // harvested at the module boundary. Without this, the
-            // reconstructed FunctionType is pure and call sites in the
-            // importer module wrap the result as if effect-free —
-            // surrounding `perform` blocks then reject the call.
-            val methodType = MezzeType.FunctionType(
-                paramType = alignedParamType,
-                returnType = returnType,
-                effects = opEffects[op.name]
-            )
-
-            val methodInfo = TypingContext.InherentMethodInfo(
-                targetTypeName = targetTypeName,
-                methodName = op.name,
-                methodType = methodType,
-                implContentHash = implKeyHash,
-                implStartLine = implDecl.loc.startLine,
-                implStartCol = implDecl.loc.startCol,
-                implSourceFile = implDecl.loc.file,
-                isImported = true
-            )
-            result = result.extendWithAnonymousMethod(methodInfo)
+            result = result.extendWithAnonymousMethod(TypingContext.InherentMethodInfo(
+                targetTypeName = targetTypeName, methodName = op.name,
+                methodType = MezzeType.FunctionType(paramType = alignedParamType, returnType = returnType, effects = opEffects[op.name]),
+                implContentHash = implKey,
+                implStartLine = implDecl.loc.startLine, implStartCol = implDecl.loc.startCol,
+                implSourceFile = implDecl.loc.file, isImported = true
+            ))
         }
 
-        // Also register as a regular impl so the interpreter can find it by content hash.
-        // Inherent imported impl — same shape as locally-registered inherent (#307 helper).
-        val implInfo = com.mezze.language.typechecker.util.AbilityImplFactory.build(
-            implDecl, abilityDeclHash = null
-        )
-        result = result.extendWithImpl(implKeyHash, implInfo)
-
+        result = result.extendWithImpl(implKey, AbilityImplFactory.build(implDecl, abilityDeclHash = null))
         return result
     }
 
-    /**
-     * Extract type name from type annotation for impl keys.
-     *
-     * Examples:
-     * - IdentifierTypeAnnotation("String") → "String"
-     * - TypeApplicationAnnotation("Option", [Int]) → "Option_Int"
-     * - RecordTypeAnnotation → "{...}" (fallback for complex types)
-     */
-    /**
-     * Extract type name from ParsedTypeAnnotation for impl keys.
-     *
-     * Delegates to the shared factory util — same algorithm. Kept as a thin
-     * wrapper because callers in this file pass ParsedTypeAnnotation directly
-     * and a class-internal name is more discoverable than a deep import.
-     * (#307 — single source of truth.)
-     */
-    private fun getTypeName(annotation: ParsedTypeAnnotation): String =
-        com.mezze.language.typechecker.util.AbilityImplFactory.typeNameOf(annotation)
+    private fun alignToTarget(type: MezzeType, targetVarsInOrder: List<TypeVar>, targetVarsByName: Map<String, TypeVar>): MezzeType {
+        if (targetVarsInOrder.isEmpty()) return type
+        val byName = alignVarTypesByName(type, targetVarsByName)
+        val freeAfterName = collectVarTypesInOrder(byName)
+        if (freeAfterName.size == targetVarsInOrder.size &&
+            freeAfterName.zip(targetVarsInOrder).any { (a, b) -> a != b }) {
+            return alignVarTypesByMapping(byName, freeAfterName.zip(targetVarsInOrder).toMap())
+        }
+        return byName
+    }
 
-    private fun buildConversionConfig() = com.mezze.language.typechecker.util.TypeAnnotationConverter.ConversionConfig(
+    private fun getTypeName(annotation: ParsedTypeAnnotation): String =
+        AbilityImplFactory.typeNameOf(annotation)
+
+    private fun buildConversionConfig() = TypeAnnotationConverter.ConversionConfig(
         resolveTypeHash = { currentTypeDecls[it]?.contentHash },
         resolveAbilityHash = { currentAbilityDecls[it]?.contentHash },
         validateEffects = { effectRow ->
-            com.mezze.language.typechecker.util.TypeAnnotationConverter.validateUnknownEffects(
+            TypeAnnotationConverter.validateUnknownEffects(
                 effectRow, currentEffectDecls.keys
             )
         },
@@ -1205,185 +687,66 @@ class ContextBuilder {
     fun convertParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
         typeVarCache.clear()
         sharedRowVar.reset()
-        return com.mezze.language.typechecker.util.TypeAnnotationConverter.convertWith(
+        return TypeAnnotationConverter.convertWith(
             annotation, buildConversionConfig(), typeVarCache, sharedRowVar
         )
     }
 
     fun convertParsedTypeAnnotationInternal(annotation: ParsedTypeAnnotation): MezzeType {
-        return com.mezze.language.typechecker.util.TypeAnnotationConverter.convertWith(
+        return TypeAnnotationConverter.convertWith(
             annotation, buildConversionConfig(), typeVarCache, sharedRowVar
         )
     }
 
-    /**
-     * Collect all type variables from a MezzeType.
-     * Helper for building polymorphic type schemes.
-     */
     private fun collectTypeVarsFromType(type: MezzeType, typeVars: MutableSet<TypeVar>) {
-        when (type) {
-            is MezzeType.VarType -> typeVars.add(type.variable)
-            is MezzeType.FunctionType -> {
-                collectTypeVarsFromType(type.paramType, typeVars)
-                collectTypeVarsFromType(type.returnType, typeVars)
-                type.abilityConstraints.forEach { constraint ->
-                    constraint.typeArgs.forEach { collectTypeVarsFromType(it, typeVars) }
-                }
-            }
-            is MezzeType.RecordType -> {
-                type.fields.values.forEach { collectTypeVarsFromType(it, typeVars) }
-            }
-            is MezzeType.VariantType -> {
-                type.constructors.values.forEach { it?.let { collectTypeVarsFromType(it, typeVars) } }
-            }
-            is MezzeType.TypeApplication -> {
-                type.args.forEach { collectTypeVarsFromType(it, typeVars) }
-            }
-            is MezzeType.SeqType -> collectTypeVarsFromType(type.elementType, typeVars)
-            is MezzeType.ListType -> collectTypeVarsFromType(type.elementType, typeVars)
-            is MezzeType.SetType -> collectTypeVarsFromType(type.elementType, typeVars)
-            is MezzeType.SortedMapType -> {
-                collectTypeVarsFromType(type.keyType, typeVars)
-                collectTypeVarsFromType(type.valueType, typeVars)
-            }
-            is MezzeType.SortedSetType -> collectTypeVarsFromType(type.elementType, typeVars)
-            is MezzeType.MapType -> {
-                collectTypeVarsFromType(type.keyType, typeVars)
-                collectTypeVarsFromType(type.valueType, typeVars)
-            }
-            is MezzeType.SuspendedType -> collectTypeVarsFromType(type.valueType, typeVars)
-            is MezzeType.NewtypeType -> collectTypeVarsFromType(type.wrappedType, typeVars)
-            // Primitive types have no type variables
-            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-            is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
-            is MezzeType.CharType, is MezzeType.EffectRow -> {}
-        }
+        collectTypeVariables(type, typeVars)
     }
 
-    /**
-     * Register built-in variant types like Bool, Option and Result.
-     *
-     * These are fundamental types that should always be available.
-     * They are added automatically if not already defined in the program.
-     */
-
-    /**
-     * Register built-in variant types as ParsedTypeDecl (v2 types).
-     * Mirrors addBuiltInTypes but produces ParsedTypeDecl instead of TypeDeclaration.
-     */
     private fun addBuiltInParsedTypes(typeDecls: MutableMap<String, ParsedTypeDecl>) {
-        val syntheticLoc = Loc(file = "<builtin>", startLine = 0, startCol = 0, endLine = 0, endCol = 0)
-
-        if (!typeDecls.containsKey("Bool")) {
-            typeDecls["Bool"] = ParsedTypeDecl(
-                name = "Bool",
-                typeParams = emptyList(),
-                definition = ParsedVariantDef(
-                    constructors = listOf(
-                        ParsedVariantCtorDef("True", null, loc = syntheticLoc),
-                        ParsedVariantCtorDef("False", null, loc = syntheticLoc)
-                    ),
-                    isOpen = false,
-                    loc = syntheticLoc
-                ),
-                visibility = ParsedVisibility.PUBLIC,
-                loc = syntheticLoc
-            )
+        val loc = Loc(file = "<builtin>", startLine = 0, startCol = 0, endLine = 0, endCol = 0)
+        fun payloadField(fieldName: String, typeParam: String) =
+            ParsedRecordType(listOf(ParsedRecordTypeEntry(fieldName, ParsedNamedType(typeParam, loc), loc)), false, loc)
+        fun syntheticVariant(name: String, typeParams: List<String>, ctors: List<ParsedVariantCtorDef>) {
+            if (!typeDecls.containsKey(name)) {
+                typeDecls[name] = ParsedTypeDecl(name, typeParams,
+                    ParsedVariantDef(ctors, isOpen = false, loc = loc),
+                    visibility = ParsedVisibility.PUBLIC, loc = loc)
+            }
         }
-
-        if (!typeDecls.containsKey(BuiltinTypes.OPTION)) {
-            typeDecls[BuiltinTypes.OPTION] = ParsedTypeDecl(
-                name = BuiltinTypes.OPTION,
-                typeParams = listOf("a"),
-                definition = ParsedVariantDef(
-                    constructors = listOf(
-                        ParsedVariantCtorDef(BuiltinTypes.SOME,
-                            ParsedRecordType(listOf(ParsedRecordTypeEntry(BuiltinTypes.VAL_FIELD, ParsedNamedType("a", syntheticLoc), syntheticLoc)), false, syntheticLoc),
-                            loc = syntheticLoc),
-                        ParsedVariantCtorDef(BuiltinTypes.NONE, null, loc = syntheticLoc)
-                    ),
-                    isOpen = false,
-                    loc = syntheticLoc
-                ),
-                visibility = ParsedVisibility.PUBLIC,
-                loc = syntheticLoc
-            )
-        }
-
-        if (!typeDecls.containsKey(BuiltinTypes.RESULT)) {
-            typeDecls[BuiltinTypes.RESULT] = ParsedTypeDecl(
-                name = BuiltinTypes.RESULT,
-                typeParams = listOf("a", "e"),
-                definition = ParsedVariantDef(
-                    constructors = listOf(
-                        ParsedVariantCtorDef(BuiltinTypes.OK,
-                            ParsedRecordType(listOf(ParsedRecordTypeEntry(BuiltinTypes.VAL_FIELD, ParsedNamedType("a", syntheticLoc), syntheticLoc)), false, syntheticLoc),
-                            loc = syntheticLoc),
-                        ParsedVariantCtorDef(BuiltinTypes.ERR,
-                            ParsedRecordType(listOf(ParsedRecordTypeEntry(BuiltinTypes.ERROR_FIELD, ParsedNamedType("e", syntheticLoc), syntheticLoc)), false, syntheticLoc),
-                            loc = syntheticLoc)
-                    ),
-                    isOpen = false,
-                    loc = syntheticLoc
-                ),
-                visibility = ParsedVisibility.PUBLIC,
-                loc = syntheticLoc
-            )
-        }
-
-        if (!typeDecls.containsKey("Ordering")) {
-            typeDecls["Ordering"] = ParsedTypeDecl(
-                name = "Ordering",
-                typeParams = emptyList(),
-                definition = ParsedVariantDef(
-                    constructors = listOf(
-                        ParsedVariantCtorDef("LT", null, loc = syntheticLoc),
-                        ParsedVariantCtorDef("EQ", null, loc = syntheticLoc),
-                        ParsedVariantCtorDef("GT", null, loc = syntheticLoc)
-                    ),
-                    isOpen = false,
-                    loc = syntheticLoc
-                ),
-                visibility = ParsedVisibility.PUBLIC,
-                loc = syntheticLoc
-            )
-        }
+        syntheticVariant("Bool", emptyList(), listOf(
+            ParsedVariantCtorDef("True", null, loc = loc),
+            ParsedVariantCtorDef("False", null, loc = loc)))
+        syntheticVariant(BuiltinTypes.OPTION, listOf("a"), listOf(
+            ParsedVariantCtorDef(BuiltinTypes.SOME, payloadField(BuiltinTypes.VAL_FIELD, "a"), loc = loc),
+            ParsedVariantCtorDef(BuiltinTypes.NONE, null, loc = loc)))
+        syntheticVariant(BuiltinTypes.RESULT, listOf("a", "e"), listOf(
+            ParsedVariantCtorDef(BuiltinTypes.OK, payloadField(BuiltinTypes.VAL_FIELD, "a"), loc = loc),
+            ParsedVariantCtorDef(BuiltinTypes.ERR, payloadField(BuiltinTypes.ERROR_FIELD, "e"), loc = loc)))
+        syntheticVariant("Ordering", emptyList(), listOf(
+            ParsedVariantCtorDef("LT", null, loc = loc),
+            ParsedVariantCtorDef("EQ", null, loc = loc),
+            ParsedVariantCtorDef("GT", null, loc = loc)))
     }
 
-    /** Ensure a ParsedImplAbilityDecl has a content hash (compute via ParsedDeclHasher if missing). */
     private fun ensureContentHash(decl: ParsedImplAbilityDecl, @Suppress("UNUSED_PARAMETER") file: String): ParsedImplAbilityDecl {
         if (decl.contentHash != null) return decl
-        return decl.copy(contentHash = com.mezze.language.parsedast.ParsedDeclHasher.hashImplAbilityDecl(decl))
+        return decl.copy(contentHash = ParsedDeclHasher.hashImplAbilityDecl(decl))
     }
 
     companion object {
-        /**
-         * Validate that an effect set doesn't violate hermetic effect rules.
-         *
-         * Hermetic effects (like Mut) cannot coexist with other effects
-         * to ensure data-race freedom.  Uses hash-only identification via
-         * WellKnownHashes.isMut().
-         *
-         * @param effects The set of effect names
-         * @param effectHashes Map of effectName → contentHash for hash-based identification
-         * @param sourceLoc Optional source location for error messages
-         * @throws TypeCheckError if a hermetic effect coexists with other effects
-         */
         fun validateHermeticEffects(
             effects: Set<String>,
-            effectHashes: Map<String, com.mezze.language.typedast.Hash> = emptyMap(),
-            sourceLoc: com.mezze.language.parsedast.Loc? = null
+            effectHashes: Map<String, Hash> = emptyMap(),
+            sourceLoc: Loc? = null
         ) {
-            // Resolve effect hash from row or WellKnownHashes
-            fun resolveHash(name: String): com.mezze.language.typedast.Hash? = effectHashes[name] ?: WellKnownHashes.resolveHash(name)
+            fun resolveHash(name: String): Hash? = effectHashes[name] ?: WellKnownHashConstants.resolveHash(name)
 
             val hermeticEffect = effects.firstOrNull { name ->
-                WellKnownHashes.isMut(resolveHash(name))
+                WellKnownHashConstants.isMut(resolveHash(name))
             }
             if (hermeticEffect != null && effects.size > 1) {
                 val otherEffects = effects.filter { name ->
-                    !WellKnownHashes.isMut(resolveHash(name))
+                    !WellKnownHashConstants.isMut(resolveHash(name))
                 }.joinToString(", ")
                 throw TypeCheckError(
                     "$hermeticEffect effect is hermetic: cannot coexist with other effects ($otherEffects). " +
@@ -1397,161 +760,31 @@ class ContextBuilder {
         }
     }
 
-    /**
-     * Walk a MezzeType collecting all distinct VarTypes in left-to-right
-     * order. Used for positional alignment between the impl target's
-     * declared type vars and a harvested return type whose vars carry
-     * solver-generated names.
-     */
-    private fun collectVarTypesInOrder(type: MezzeType): List<com.mezze.language.ast.TypeVar> {
-        val seen = LinkedHashSet<com.mezze.language.ast.TypeVar>()
-        fun walk(t: MezzeType) {
-            when (t) {
-                is MezzeType.VarType -> seen.add(t.variable)
-                is MezzeType.FunctionType -> { walk(t.paramType); walk(t.returnType) }
-                is MezzeType.RecordType -> t.fields.values.forEach { walk(it) }
-                is MezzeType.VariantType -> t.constructors.values.filterNotNull().forEach { walk(it) }
-                is MezzeType.SeqType -> walk(t.elementType)
-                is MezzeType.ListType -> walk(t.elementType)
-                is MezzeType.SortedSetType -> walk(t.elementType)
-                is MezzeType.SetType -> walk(t.elementType)
-                is MezzeType.MapType -> { walk(t.keyType); walk(t.valueType) }
-                is MezzeType.SortedMapType -> { walk(t.keyType); walk(t.valueType) }
-                is MezzeType.TypeApplication -> t.args.forEach { walk(it) }
-                is MezzeType.SuspendedType -> walk(t.valueType)
-                is MezzeType.NewtypeType -> walk(t.wrappedType)
-                else -> {}
-            }
-        }
-        walk(type)
-        return seen.toList()
+    private fun collectVarTypesInOrder(type: MezzeType): List<TypeVar> {
+        return collectTypeVarsInOrder(type, sortFields = false).distinct()
     }
 
-    /**
-     * Replace each VarType in `type` with the corresponding TypeVar from
-     * `mapping`. TypeVars not in the mapping are left untouched.
-     */
+    private fun mapVarTypes(type: MezzeType, transform: (TypeVar) -> MezzeType?): MezzeType {
+        if (type is MezzeType.VarType) return transform(type.variable) ?: type
+        return type.transformChildren { mapVarTypes(it, transform) }
+    }
+
     private fun alignVarTypesByMapping(
         type: MezzeType,
-        mapping: Map<com.mezze.language.ast.TypeVar, com.mezze.language.ast.TypeVar>
-    ): MezzeType = when (type) {
-        is MezzeType.VarType -> mapping[type.variable]?.let { MezzeType.VarType(it) } ?: type
-        is MezzeType.FunctionType -> MezzeType.FunctionType(
-            paramType = alignVarTypesByMapping(type.paramType, mapping),
-            returnType = alignVarTypesByMapping(type.returnType, mapping),
-            effects = type.effects,
-            abilityConstraints = type.abilityConstraints
-        )
-        is MezzeType.RecordType -> MezzeType.RecordType(
-            fields = type.fields.mapValues { alignVarTypesByMapping(it.value, mapping) },
-            rowVar = type.rowVar
-        )
-        is MezzeType.VariantType -> MezzeType.VariantType(
-            constructors = type.constructors.mapValues { (_, v) -> v?.let { alignVarTypesByMapping(it, mapping) } }
-        )
-        is MezzeType.SeqType -> MezzeType.SeqType(alignVarTypesByMapping(type.elementType, mapping))
-        is MezzeType.ListType -> MezzeType.ListType(alignVarTypesByMapping(type.elementType, mapping))
-        is MezzeType.SetType -> MezzeType.SetType(alignVarTypesByMapping(type.elementType, mapping))
-        is MezzeType.SortedSetType -> MezzeType.SortedSetType(alignVarTypesByMapping(type.elementType, mapping))
-        is MezzeType.MapType -> MezzeType.MapType(
-            keyType = alignVarTypesByMapping(type.keyType, mapping),
-            valueType = alignVarTypesByMapping(type.valueType, mapping)
-        )
-        is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-            keyType = alignVarTypesByMapping(type.keyType, mapping),
-            valueType = alignVarTypesByMapping(type.valueType, mapping)
-        )
-        is MezzeType.TypeApplication -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
-            type.constructor,
-            type.args.map { alignVarTypesByMapping(it, mapping) },
-            type.typeHash
-        )
-        is MezzeType.SuspendedType -> MezzeType.SuspendedType(
-            valueType = alignVarTypesByMapping(type.valueType, mapping),
-            effects = type.effects
-        )
-        is MezzeType.NewtypeType -> MezzeType.NewtypeType(
-            type.name, type.constructor, alignVarTypesByMapping(type.wrappedType, mapping)
-        )
-        else -> type
-    }
+        mapping: Map<TypeVar, TypeVar>
+    ): MezzeType = mapVarTypes(type) { v -> mapping[v]?.let { MezzeType.VarType(it) } }
 
-    /**
-     * Walk a MezzeType collecting `name -> TypeVar` pairs for every VarType
-     * encountered. Used by `registerImportedInherentImpl` to align
-     * harvested return-type TypeVars with the impl target's TypeVars by
-     * name.
-     */
     private fun collectVarTypesByName(
         type: MezzeType,
-        out: MutableMap<String, com.mezze.language.ast.TypeVar>
+        out: MutableMap<String, TypeVar>
     ) {
-        when (type) {
-            is MezzeType.VarType -> { out.putIfAbsent(type.variable.name, type.variable) }
-            is MezzeType.FunctionType -> {
-                collectVarTypesByName(type.paramType, out); collectVarTypesByName(type.returnType, out)
-            }
-            is MezzeType.RecordType -> type.fields.values.forEach { collectVarTypesByName(it, out) }
-            is MezzeType.VariantType -> type.constructors.values.filterNotNull().forEach { collectVarTypesByName(it, out) }
-            is MezzeType.SeqType -> collectVarTypesByName(type.elementType, out)
-            is MezzeType.ListType -> collectVarTypesByName(type.elementType, out)
-            is MezzeType.SortedSetType -> collectVarTypesByName(type.elementType, out)
-            is MezzeType.SetType -> collectVarTypesByName(type.elementType, out)
-            is MezzeType.MapType -> { collectVarTypesByName(type.keyType, out); collectVarTypesByName(type.valueType, out) }
-            is MezzeType.SortedMapType -> { collectVarTypesByName(type.keyType, out); collectVarTypesByName(type.valueType, out) }
-            is MezzeType.TypeApplication -> type.args.forEach { collectVarTypesByName(it, out) }
-            is MezzeType.SuspendedType -> collectVarTypesByName(type.valueType, out)
-            is MezzeType.NewtypeType -> collectVarTypesByName(type.wrappedType, out)
-            else -> {}
+        for (tv in collectTypeVarsInOrder(type, sortFields = false)) {
+            out.putIfAbsent(tv.name, tv)
         }
     }
 
-    /**
-     * Replace each VarType in `type` with the corresponding TypeVar from
-     * `byName` if their names match. Other VarTypes are left untouched.
-     */
     private fun alignVarTypesByName(
         type: MezzeType,
-        byName: Map<String, com.mezze.language.ast.TypeVar>
-    ): MezzeType = when (type) {
-        is MezzeType.VarType -> byName[type.variable.name]?.let { MezzeType.VarType(it) } ?: type
-        is MezzeType.FunctionType -> MezzeType.FunctionType(
-            paramType = alignVarTypesByName(type.paramType, byName),
-            returnType = alignVarTypesByName(type.returnType, byName),
-            effects = type.effects,
-            abilityConstraints = type.abilityConstraints
-        )
-        is MezzeType.RecordType -> MezzeType.RecordType(
-            fields = type.fields.mapValues { alignVarTypesByName(it.value, byName) },
-            rowVar = type.rowVar
-        )
-        is MezzeType.VariantType -> MezzeType.VariantType(
-            constructors = type.constructors.mapValues { (_, v) -> v?.let { alignVarTypesByName(it, byName) } }
-        )
-        is MezzeType.SeqType -> MezzeType.SeqType(alignVarTypesByName(type.elementType, byName))
-        is MezzeType.ListType -> MezzeType.ListType(alignVarTypesByName(type.elementType, byName))
-        is MezzeType.SetType -> MezzeType.SetType(alignVarTypesByName(type.elementType, byName))
-        is MezzeType.SortedSetType -> MezzeType.SortedSetType(alignVarTypesByName(type.elementType, byName))
-        is MezzeType.MapType -> MezzeType.MapType(
-            keyType = alignVarTypesByName(type.keyType, byName),
-            valueType = alignVarTypesByName(type.valueType, byName)
-        )
-        is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-            keyType = alignVarTypesByName(type.keyType, byName),
-            valueType = alignVarTypesByName(type.valueType, byName)
-        )
-        is MezzeType.TypeApplication -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
-            type.constructor,
-            type.args.map { alignVarTypesByName(it, byName) },
-            type.typeHash
-        )
-        is MezzeType.SuspendedType -> MezzeType.SuspendedType(
-            valueType = alignVarTypesByName(type.valueType, byName),
-            effects = type.effects
-        )
-        is MezzeType.NewtypeType -> MezzeType.NewtypeType(
-            type.name, type.constructor, alignVarTypesByName(type.wrappedType, byName)
-        )
-        else -> type
-    }
+        byName: Map<String, TypeVar>
+    ): MezzeType = mapVarTypes(type) { v -> byName[v.name]?.let { MezzeType.VarType(it) } }
 }

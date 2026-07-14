@@ -7,6 +7,10 @@ import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.parsedast.*
+import com.mezze.language.typechecker.util.StringDistance
+import com.mezze.language.typechecker.util.TypeAnnotationConverter
+import com.mezze.language.typechecker.util.WellKnownTypeApp
 
 internal class VariantSolver(
     private val registry: DeclarationRegistry,
@@ -14,15 +18,15 @@ internal class VariantSolver(
     private val mustBeOpenRowVars: MutableSet<RowVar>,
 ) {
 
-    private val constructorIndex: Map<String, List<Pair<com.mezze.language.parsedast.ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>> by lazy {
+    private val constructorIndex: Map<String, List<Pair<ParsedTypeDecl, ParsedVariantDef>>> by lazy {
         buildConstructorIndex()
     }
 
-    private fun buildConstructorIndex(): Map<String, List<Pair<com.mezze.language.parsedast.ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>> {
-        val index = mutableMapOf<String, MutableList<Pair<com.mezze.language.parsedast.ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>>()
+    private fun buildConstructorIndex(): Map<String, List<Pair<ParsedTypeDecl, ParsedVariantDef>>> {
+        val index = mutableMapOf<String, MutableList<Pair<ParsedTypeDecl, ParsedVariantDef>>>()
         for (typeDecl in registry.allTypeDecls) {
             val definition = typeDecl.definition
-            if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
+            if (definition is ParsedVariantDef) {
                 for (constructor in definition.constructors) {
                     index.getOrPut(constructor.name) { mutableListOf() }
                         .add(Pair(typeDecl, definition))
@@ -42,7 +46,7 @@ internal class VariantSolver(
 
     fun inferVariantTypes(constraints: List<Constraint>): Pair<List<Constraint.Equality>, List<String>> {
         val constructorsByType = mutableMapOf<MezzeType, MutableMap<String, MezzeType?>>()
-        val firstLocByType = mutableMapOf<MezzeType, com.mezze.language.parsedast.Loc?>()
+        val firstLocByType = mutableMapOf<MezzeType, Loc?>()
 
         for (constraint in constraints) {
             if (constraint is Constraint.HasConstructor) {
@@ -93,9 +97,9 @@ internal class VariantSolver(
     private fun findVariantWithConstructors(
         constructors: Set<String>,
         constructorPayloads: Map<String, MezzeType?> = emptyMap(),
-        loc: com.mezze.language.parsedast.Loc? = null,
+        loc: Loc? = null,
     ): VariantInferenceResult? {
-        val rawCandidates = mutableSetOf<Pair<com.mezze.language.parsedast.ParsedTypeDecl, com.mezze.language.parsedast.ParsedVariantDef>>()
+        val rawCandidates = mutableSetOf<Pair<ParsedTypeDecl, ParsedVariantDef>>()
         for (constructorName in constructors) {
             constructorIndex[constructorName]?.let { variants ->
                 rawCandidates.addAll(variants)
@@ -146,9 +150,9 @@ internal class VariantSolver(
 
             if (definition.isOpen) {
                 val variantType = if (freshArgs.isNotEmpty()) {
-                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeName, freshArgs, typeHash = typeDecl.contentHash)
+                    WellKnownTypeApp.of(typeName, freshArgs, typeHash = typeDecl.contentHash)
                 } else {
-                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeName, emptyList(), typeHash = typeDecl.contentHash)
+                    WellKnownTypeApp.of(typeName, emptyList(), typeHash = typeDecl.contentHash)
                 }
                 return VariantInferenceResult.Success(variantType, payloadConstraints)
             } else {
@@ -156,7 +160,7 @@ internal class VariantSolver(
 
                 if (invalidConstructors.isNotEmpty()) {
                     val suggestions = invalidConstructors.map { invalid ->
-                        val suggestion = com.mezze.language.typechecker.util.StringDistance.suggestDidYouMean(
+                        val suggestion = StringDistance.suggestDidYouMean(
                             invalid,
                             declaredConstructors.toList()
                         )
@@ -168,9 +172,9 @@ internal class VariantSolver(
                 }
 
                 val variantType = if (freshArgs.isNotEmpty()) {
-                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeName, freshArgs, typeHash = typeDecl.contentHash)
+                    WellKnownTypeApp.of(typeName, freshArgs, typeHash = typeDecl.contentHash)
                 } else {
-                    com.mezze.language.typechecker.util.WellKnownTypeApp.of(typeName, emptyList(), typeHash = typeDecl.contentHash)
+                    WellKnownTypeApp.of(typeName, emptyList(), typeHash = typeDecl.contentHash)
                 }
                 return VariantInferenceResult.Success(variantType, payloadConstraints)
             }
@@ -236,56 +240,7 @@ internal class VariantSolver(
                 val declaringType = findTypeDeclarationForConstructor(constructorName)
 
                 if (declaringType != null) {
-                    val variantDef = declaringType.definition as com.mezze.language.parsedast.ParsedVariantDef
-
-                    val typeParamMapping = declaringType.typeParams.associate { param ->
-                        param to MezzeType.VarType(TypeVar.fresh())
-                    }
-
-                    val constructors = variantDef.constructors.associate { ctor ->
-                        val payloadType = ctor.dataType?.let { dataTypeAnnotation ->
-                            convertTypeAnnotation(dataTypeAnnotation, typeParamMapping)
-                        }
-                        ctor.name to payloadType
-                    }
-
-                    val declaredVariant = MezzeType.VariantType(
-                        constructors = constructors,
-                        rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
-                        typeName = declaringType.name,
-                        typeArgs = typeParamMapping.values.toList(),
-                        typeHash = declaringType.contentHash
-                    )
-
-                    var resultSubst = Substitution.single(variantType.variable, declaredVariant)
-
-                    val declaredPayload = constructors[constructorName]
-
-                    if (expectedPayloadType != null && declaredPayload != null) {
-                        val unifyResult = unify(expectedPayloadType, declaredPayload, registry)
-                        when (unifyResult) {
-                            is UnificationResult.Success -> {
-                                resultSubst = resultSubst.compose(unifyResult.substitution)
-                            }
-                            is UnificationResult.Failure -> {
-                                return ConstraintSolver.ConstraintResult.Failure(
-                                    "Pattern payload type mismatch for constructor '$constructorName': ${unifyResult.message}"
-                                )
-                            }
-                        }
-                    } else if (expectedPayloadType == null && declaredPayload != null) {
-                        return ConstraintSolver.ConstraintResult.Failure(
-                            "Constructor '$constructorName' has a payload that must be destructured. " +
-                            "Use '$constructorName { ... }' to match the payload."
-                        )
-                    } else if (expectedPayloadType != null && declaredPayload == null) {
-                        return ConstraintSolver.ConstraintResult.Failure(
-                            "Constructor '$constructorName' has no payload, but pattern tries to destructure it. " +
-                            "Use '$constructorName' without '{ ... }'."
-                        )
-                    }
-
-                    return ConstraintSolver.ConstraintResult.Success(resultSubst)
+                    return resolveConstructorAgainstDecl(declaringType, constructorName, expectedPayloadType, variantType.variable)
                 }
 
                 if (constructorName == BuiltinTypes.CONS || constructorName == BuiltinTypes.NIL) {
@@ -338,56 +293,7 @@ internal class VariantSolver(
                 val declaringTypeExpr = findTypeDeclarationForConstructor(constructorName)
 
                 if (declaringTypeExpr != null) {
-                    val variantDef = declaringTypeExpr.definition as com.mezze.language.parsedast.ParsedVariantDef
-
-                    val typeParamMapping = declaringTypeExpr.typeParams.associate { param ->
-                        param to MezzeType.VarType(TypeVar.fresh())
-                    }
-
-                    val constructors = variantDef.constructors.associate { ctor ->
-                        val payloadType = ctor.dataType?.let { dataTypeAnnotation ->
-                            convertTypeAnnotation(dataTypeAnnotation, typeParamMapping)
-                        }
-                        ctor.name to payloadType
-                    }
-
-                    val declaredVariant = MezzeType.VariantType(
-                        constructors = constructors,
-                        rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
-                        typeName = declaringTypeExpr.name,
-                        typeArgs = typeParamMapping.values.toList(),
-                        typeHash = declaringTypeExpr.contentHash
-                    )
-
-                    var resultSubst = Substitution.single(variantType.variable, declaredVariant)
-
-                    val declaredPayload = constructors[constructorName]
-
-                    if (expectedPayloadType != null && declaredPayload != null) {
-                        val unifyResult = unify(expectedPayloadType, declaredPayload, registry)
-                        when (unifyResult) {
-                            is UnificationResult.Success -> {
-                                resultSubst = resultSubst.compose(unifyResult.substitution)
-                            }
-                            is UnificationResult.Failure -> {
-                                return ConstraintSolver.ConstraintResult.Failure(
-                                    "Constructor payload type mismatch for '$constructorName': ${unifyResult.message}"
-                                )
-                            }
-                        }
-                    } else if (expectedPayloadType == null && declaredPayload != null) {
-                        return ConstraintSolver.ConstraintResult.Failure(
-                            "Constructor '$constructorName' has a payload that must be destructured. " +
-                            "Use '$constructorName { ... }' to match the payload."
-                        )
-                    } else if (expectedPayloadType != null && declaredPayload == null) {
-                        return ConstraintSolver.ConstraintResult.Failure(
-                            "Constructor '$constructorName' has no payload, but pattern tries to destructure it. " +
-                            "Use '$constructorName' without '{ ... }'."
-                        )
-                    }
-
-                    return ConstraintSolver.ConstraintResult.Success(resultSubst)
+                    return resolveConstructorAgainstDecl(declaringTypeExpr, constructorName, expectedPayloadType, variantType.variable)
                 }
 
                 val elemTypeVar = MezzeType.VarType(TypeVar.fresh())
@@ -420,7 +326,7 @@ internal class VariantSolver(
                 val typeForConstructor = findTypeDeclarationForConstructor(constructorName)
 
                 if (typeForConstructor != null) {
-                    val variantDef = typeForConstructor.definition as com.mezze.language.parsedast.ParsedVariantDef
+                    val variantDef = typeForConstructor.definition as ParsedVariantDef
                     val constructorDef = variantDef.constructors.find { it.name == constructorName }
 
                     if (constructorDef != null) {
@@ -428,7 +334,7 @@ internal class VariantSolver(
 
                         if (declaredPayload != null && expectedPayloadType == null) {
                             val fieldNames = when (declaredPayload) {
-                                is com.mezze.language.parsedast.ParsedRecordType -> declaredPayload.entries.map { it.name }
+                                is ParsedRecordType -> declaredPayload.entries.map { it.name }
                                 else -> listOf("...")
                             }
                             val fieldList = fieldNames.joinToString(", ")
@@ -464,43 +370,7 @@ internal class VariantSolver(
                             }
                         }
 
-                        val typeParamMapping = typeForConstructor.typeParams.associate { param ->
-                            param to MezzeType.VarType(TypeVar.fresh())
-                        }
-
-                        val constructors = variantDef.constructors.associate { ctor ->
-                            val payloadType = ctor.dataType?.let { dataTypeAnnotation ->
-                                convertTypeAnnotation(dataTypeAnnotation, typeParamMapping)
-                            }
-                            ctor.name to payloadType
-                        }
-
-                        val declaredVariant = MezzeType.VariantType(
-                            constructors = constructors,
-                            rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
-                            typeName = typeForConstructor.name,
-                            typeArgs = typeParamMapping.values.toList(),
-                            typeHash = typeForConstructor.contentHash
-                        )
-
-                        var resultSubst = Substitution.single(variantType.variable, declaredVariant)
-
-                        val declaredCtorPayload = constructors[constructorName]
-                        if (expectedPayloadType != null && declaredCtorPayload != null) {
-                            val unifyResult = unify(expectedPayloadType, declaredCtorPayload, registry)
-                            when (unifyResult) {
-                                is UnificationResult.Success -> {
-                                    resultSubst = resultSubst.compose(unifyResult.substitution)
-                                }
-                                is UnificationResult.Failure -> {
-                                    return ConstraintSolver.ConstraintResult.Failure(
-                                        "Constructor '$constructorName' payload type mismatch: ${unifyResult.message}"
-                                    )
-                                }
-                            }
-                        }
-
-                        return ConstraintSolver.ConstraintResult.Success(resultSubst)
+                        return resolveConstructorAgainstDecl(typeForConstructor, constructorName, expectedPayloadType, variantType.variable)
                     }
                 }
             }
@@ -626,7 +496,7 @@ internal class VariantSolver(
                     }
 
                     val availableConstructors = variantType.constructors.keys.toList()
-                    val suggestion = com.mezze.language.typechecker.util.StringDistance.suggestOrList(
+                    val suggestion = StringDistance.suggestOrList(
                         constructorName,
                         availableConstructors,
                         "constructors"
@@ -724,7 +594,7 @@ internal class VariantSolver(
     private fun closeRowVarsInType(type: MezzeType, rowVarsToClose: Set<RowVar>): MezzeType {
         return when (type) {
             is MezzeType.VariantType -> {
-                val shouldClose = type.rowVar != null && rowVarsToClose.contains(type.rowVar)
+                val shouldClose = type.rowVar != null && type.rowVar in rowVarsToClose
                 val pinningInferred = shouldClose && type.typeName == null
                 MezzeType.VariantType(
                     constructors = type.constructors.mapValues { (_, payloadType) ->
@@ -776,7 +646,7 @@ internal class VariantSolver(
                 MezzeType.SortedSetType(closeRowVarsInType(type.elementType, rowVarsToClose))
             }
             is MezzeType.TypeApplication -> {
-                com.mezze.language.typechecker.util.WellKnownTypeApp.of(
+                WellKnownTypeApp.of(
                     constructor = type.constructor,
                     args = type.args.map { closeRowVarsInType(it, rowVarsToClose) },
                     typeHash = type.typeHash
@@ -808,133 +678,84 @@ internal class VariantSolver(
         }
     }
 
-    private fun findTypeDeclarationForConstructor(constructorName: String): com.mezze.language.parsedast.ParsedTypeDecl? {
-        for (typeDecl in registry.allTypeDecls) {
-            val definition = typeDecl.definition
-            if (definition is com.mezze.language.parsedast.ParsedVariantDef) {
-                val hasConstructor = definition.constructors.any { it.name == constructorName }
-                if (hasConstructor) {
-                    return typeDecl
-                }
-            }
+    private fun findTypeDeclarationForConstructor(constructorName: String): ParsedTypeDecl? {
+        return constructorIndex[constructorName]?.firstOrNull()?.first
+    }
+
+    private fun resolveConstructorAgainstDecl(
+        typeDecl: ParsedTypeDecl,
+        constructorName: String,
+        expectedPayloadType: MezzeType?,
+        bindTo: TypeVar?
+    ): ConstraintSolver.ConstraintResult {
+        val variantDef = typeDecl.definition as ParsedVariantDef
+
+        val typeParamMapping = typeDecl.typeParams.associate { param ->
+            param to MezzeType.VarType(TypeVar.fresh())
         }
-        return null
+
+        val constructors = variantDef.constructors.associate { ctor ->
+            val payloadType = ctor.dataType?.let { convertTypeAnnotation(it, typeParamMapping) }
+            ctor.name to payloadType
+        }
+
+        val declaredVariant = MezzeType.VariantType(
+            constructors = constructors,
+            rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
+            typeName = typeDecl.name,
+            typeArgs = typeParamMapping.values.toList(),
+            typeHash = typeDecl.contentHash
+        )
+
+        var resultSubst = if (bindTo != null) Substitution.single(bindTo, declaredVariant) else Substitution.empty
+        val declaredPayload = constructors[constructorName]
+
+        if (expectedPayloadType != null && declaredPayload != null) {
+            val unifyResult = unify(expectedPayloadType, declaredPayload, registry)
+            when (unifyResult) {
+                is UnificationResult.Success -> resultSubst = resultSubst.compose(unifyResult.substitution)
+                is UnificationResult.Failure -> return ConstraintSolver.ConstraintResult.Failure(
+                    "Constructor '$constructorName' payload type mismatch: ${unifyResult.message}"
+                )
+            }
+        } else if (expectedPayloadType == null && declaredPayload != null) {
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Constructor '$constructorName' has a payload that must be destructured. " +
+                "Use '$constructorName { ... }' to match the payload."
+            )
+        } else if (expectedPayloadType != null && declaredPayload == null) {
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Constructor '$constructorName' has no payload, but pattern tries to destructure it. " +
+                "Use '$constructorName' without '{ ... }'."
+            )
+        }
+
+        return ConstraintSolver.ConstraintResult.Success(resultSubst)
     }
 
     private fun convertTypeAnnotation(
-        annotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        annotation: ParsedTypeAnnotation,
         typeParamSubst: Map<String, MezzeType>
     ): MezzeType {
-        val config = com.mezze.language.typechecker.util.TypeAnnotationConverter.ConversionConfig(
+        val config = TypeAnnotationConverter.ConversionConfig(
             validateEffects = { ContextBuilder.validateHermeticEffects(it.allEffectNames) },
             honorOpenRowVars = true,
             typeParamSubst = typeParamSubst,
             resolveCollectionTypes = false,
         )
-        return com.mezze.language.typechecker.util.TypeAnnotationConverter.convertWith(annotation, config)
+        return TypeAnnotationConverter.convertWith(annotation, config)
     }
 
     private fun instantiateWithFreshVars(type: MezzeType): MezzeType {
         val typeVars = collectTypeVars(type)
-        val substitution = typeVars.associateWith { MezzeType.VarType(TypeVar.fresh()) }
-        return applyVarSubstitution(type, substitution)
+        val mapping = typeVars.associateWith { MezzeType.VarType(TypeVar.fresh()) as MezzeType }
+        return Substitution(mapping).apply(type)
     }
 
     private fun collectTypeVars(type: MezzeType): Set<TypeVar> {
-        return when (type) {
-            is MezzeType.VarType -> setOf(type.variable)
-            is MezzeType.FunctionType -> {
-                collectTypeVars(type.paramType) + collectTypeVars(type.returnType)
-            }
-            is MezzeType.RecordType -> {
-                type.fields.values.flatMap { collectTypeVars(it) }.toSet()
-            }
-            is MezzeType.VariantType -> {
-                type.constructors.values.filterNotNull().flatMap { collectTypeVars(it) }.toSet()
-            }
-            is MezzeType.TypeApplication -> {
-                type.args.flatMap { collectTypeVars(it) }.toSet()
-            }
-            is MezzeType.SeqType -> collectTypeVars(type.elementType)
-            is MezzeType.ListType -> collectTypeVars(type.elementType)
-            is MezzeType.SetType -> collectTypeVars(type.elementType)
-            is MezzeType.SortedMapType -> collectTypeVars(type.keyType) + collectTypeVars(type.valueType)
-            is MezzeType.SortedSetType -> collectTypeVars(type.elementType)
-            is MezzeType.MapType -> collectTypeVars(type.keyType) + collectTypeVars(type.valueType)
-            is MezzeType.SuspendedType -> collectTypeVars(type.valueType)
-            is MezzeType.NewtypeType -> collectTypeVars(type.wrappedType)
-            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-            is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
-            is MezzeType.CharType, is MezzeType.EffectRow -> emptySet()
-        }
+        val result = mutableSetOf<TypeVar>()
+        collectTypeVariables(type, result)
+        return result
     }
 
-    private fun applyVarSubstitution(type: MezzeType, substitution: Map<TypeVar, MezzeType>): MezzeType {
-        return when (type) {
-            is MezzeType.VarType -> {
-                substitution[type.variable] ?: type
-            }
-            is MezzeType.FunctionType -> MezzeType.FunctionType(
-                paramType = applyVarSubstitution(type.paramType, substitution),
-                returnType = applyVarSubstitution(type.returnType, substitution),
-                effects = type.effects,
-                abilityConstraints = type.abilityConstraints
-            )
-            is MezzeType.RecordType -> MezzeType.RecordType(
-                fields = type.fields.mapValues { (_, fieldType) ->
-                    applyVarSubstitution(fieldType, substitution)
-                },
-                rowVar = type.rowVar,
-                typeName = type.typeName,
-                typeHash = type.typeHash
-            )
-            is MezzeType.VariantType -> MezzeType.VariantType(
-                constructors = type.constructors.mapValues { (_, dataType) ->
-                    dataType?.let { applyVarSubstitution(it, substitution) }
-                },
-                rowVar = type.rowVar,
-                typeName = type.typeName,
-                typeHash = type.typeHash
-            )
-            is MezzeType.TypeApplication -> com.mezze.language.typechecker.util.WellKnownTypeApp.of(
-                constructor = type.constructor,
-                args = type.args.map { applyVarSubstitution(it, substitution) },
-                typeHash = type.typeHash
-            )
-            is MezzeType.SeqType -> MezzeType.SeqType(
-                elementType = applyVarSubstitution(type.elementType, substitution)
-            )
-            is MezzeType.ListType -> MezzeType.ListType(
-                elementType = applyVarSubstitution(type.elementType, substitution)
-            )
-            is MezzeType.SetType -> MezzeType.SetType(
-                elementType = applyVarSubstitution(type.elementType, substitution)
-            )
-            is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-                keyType = applyVarSubstitution(type.keyType, substitution),
-                valueType = applyVarSubstitution(type.valueType, substitution)
-            )
-            is MezzeType.SortedSetType -> MezzeType.SortedSetType(
-                elementType = applyVarSubstitution(type.elementType, substitution)
-            )
-            is MezzeType.MapType -> MezzeType.MapType(
-                keyType = applyVarSubstitution(type.keyType, substitution),
-                valueType = applyVarSubstitution(type.valueType, substitution)
-            )
-            is MezzeType.SuspendedType -> MezzeType.SuspendedType(
-                valueType = applyVarSubstitution(type.valueType, substitution),
-                effects = type.effects
-            )
-            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
-                type.name,
-                type.constructor,
-                applyVarSubstitution(type.wrappedType, substitution)
-            )
-            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-            is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
-            is MezzeType.CharType, is MezzeType.EffectRow -> type
-        }
-    }
 }

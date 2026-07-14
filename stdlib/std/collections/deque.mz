@@ -29,7 +29,7 @@ pub let empty : {} -> Deque 'a = {} -> __native_deque_empty {}
 pub let singleton : { x: 'a } -> Deque 'a = { x } -> __native_deque_singleton { x = x }
 
 ## Creates a deque from a List.
-pub let from_list = { xs } -> __native_deque_from_list { xs = xs }
+pub let from_list: { xs: List 'a } -> Deque 'a = { xs } -> __native_deque_from_list { xs = xs }
 
 ## Adds an element to the front. O(1) amortized.
 pub let push_front : { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } ->
@@ -60,13 +60,13 @@ pub let is_empty : { d: Deque 'a } -> Bool = { d } -> __native_deque_is_empty { 
 pub let size : { d: Deque 'a } -> Int = { d } -> __native_deque_size { d = d }
 
 ## Converts to a List.
-pub let to_list = { d } -> __native_deque_to_list { d = d }
+pub let to_list: { d: Deque 'a } -> List 'a = { d } -> __native_deque_to_list { d = d }
 
 ## Converts to a Seq.
 pub let to_seq : { d: Deque 'a } -> ['a] = { d } -> __native_deque_to_seq { d = d }
 
 ## Creates a deque from a Seq.
-pub let from_seq = { xs } -> __native_deque_from_seq { xs = xs }
+pub let from_seq: { xs: ['a] } -> Deque 'a = { xs } -> __native_deque_from_seq { xs = xs }
 
 ## Applies f to each element, returning a new deque.
 pub let map : { d: Deque 'a, f: { x: 'a } -> 'b <...> } -> Deque 'b <...> = { d, f } ->
@@ -106,82 +106,82 @@ pub let equals : { d1: Deque 'a, d2: Deque 'a } -> Bool = { d1, d2 } ->
   __native_deque_equals { d1 = d1, d2 = d2 }
 
 ## Returns the minimum element by a key function, or None.
-pub let min_by = { d, f } -> __native_deque_min_by { d = d, f = f }
+pub let min_by: { d: Deque 'a, f: { val: 'a } -> 'b <...> } -> Option 'a <...> = { d, f } -> __native_deque_min_by { d = d, f = f }
 
 ## Returns the maximum element by a key function, or None.
-pub let max_by = { d, f } -> __native_deque_max_by { d = d, f = f }
+pub let max_by: { d: Deque 'a, f: { val: 'a } -> 'b <...> } -> Option 'a <...> = { d, f } -> __native_deque_max_by { d = d, f = f }
 
 ## Returns the element at index i, or None.
-pub let get = { d, i } -> __native_deque_get { d = d, i = i }
+pub let get: { d: Deque 'a, i: Int } -> Option 'a = { d, i } -> __native_deque_get { d = d, i = i }
 
 ## Returns a slice from start (inclusive) to end (exclusive).
-pub let slice = { d, start, end } -> __native_deque_slice { d = d, start = start, end = end }
+pub let slice: { d: Deque 'a, start: Int, end: Int } -> Deque 'a = { d, start, end } -> __native_deque_slice { d = d, start = start, end = end }
 
 ## Returns the index of the first occurrence, or None.
-pub let index_of = { d, x } -> __native_deque_index_of { d = d, x = x }
+pub let index_of: { d: Deque 'a, x: 'a } -> Option Int = { d, x } -> __native_deque_index_of { d = d, x = x }
 
 ## Returns the index of the first element matching the predicate, or None.
-pub let find_index = { d, p } -> __native_deque_find_index { d = d, p = p }
+pub let find_index: { d: Deque 'a, p: { val: 'a } -> Bool <...> } -> Option Int <...> = { d, p } -> __native_deque_find_index { d = d, p = p }
 
 ## Takes elements from the front while the predicate holds.
-pub let take_while = { d, p } -> __native_deque_take_while { d = d, p = p }
+pub let take_while: { d: Deque 'a, p: { val: 'a } -> Bool <...> } -> Deque 'a <...> = { d, p } -> __native_deque_take_while { d = d, p = p }
 
 ## Drops elements from the front while the predicate holds.
-pub let drop_while = { d, p } -> __native_deque_drop_while { d = d, p = p }
+pub let drop_while: { d: Deque 'a, p: { val: 'a } -> Bool <...> } -> Deque 'a <...> = { d, p } -> __native_deque_drop_while { d = d, p = p }
 
 ## Splits at index i into {l, r}.
-pub let split_at = { d, i } -> __native_deque_split_at { d = d, i = i }
+pub let split_at: { d: Deque 'a, i: Int } -> { l: Deque 'a, r: Deque 'a } = { d, i } -> __native_deque_split_at { d = d, i = i }
 
 ## Splits into prefix where predicate holds and the rest.
-pub let span = { d, p } -> __native_deque_span { d = d, p = p }
+pub let span: { d: Deque 'a, p: { val: 'a } -> Bool <...> } -> { l: Deque 'a, r: Deque 'a } <...> = { d, p } -> __native_deque_span { d = d, p = p }
 
 ## Like fold, but returns all intermediate accumulator values.
-pub let scan = { d, init, f } -> __native_deque_scan { d = d, init = init, f = f }
+pub let scan: { d: Deque 'a, init: 'b, f: { acc: 'b, x: 'a } -> 'b <...> } -> Deque 'b <...> = { d, init, f } -> __native_deque_scan { d = d, init = init, f = f }
 
 ## Removes consecutive duplicate elements.
-pub let dedup = { d } -> __native_deque_dedup { d = d }
+pub let dedup: { d: Deque 'a } -> Deque 'a = { d } -> __native_deque_dedup { d = d }
 
 ## Removes consecutive duplicates by a key function.
-pub let dedup_by = { d, f } -> __native_deque_dedup_by { d = d, f = f }
+pub let dedup_by: { d: Deque 'a, f: { val: 'a } -> 'b <...> } -> Deque 'a <...> = { d, f } -> __native_deque_dedup_by { d = d, f = f }
 
 ## Inserts a separator between every pair of elements.
-pub let intersperse = { d, sep } -> __native_deque_intersperse { d = d, sep = sep }
+pub let intersperse: { d: Deque 'a, sep: 'a } -> Deque 'a = { d, sep } -> __native_deque_intersperse { d = d, sep = sep }
 
 ## Pairs elements from two deques into records of {fst, snd}.
-pub let zip = { d1, d2 } -> __native_deque_zip { d1 = d1, d2 = d2 }
+pub let zip: { d1: Deque 'a, d2: Deque 'b } -> Deque { fst: 'a, snd: 'b } = { d1, d2 } -> __native_deque_zip { d1 = d1, d2 = d2 }
 
 ## Pairs each element with its index.
-pub let zip_with_index = { d } -> __native_deque_zip_with_index { d = d }
+pub let zip_with_index: { d: Deque 'a } -> Deque { val: 'a, idx: Int } = { d } -> __native_deque_zip_with_index { d = d }
 
 ## Rotates elements left by n positions.
-pub let rotate_left = { d, n } -> __native_deque_rotate_left { d = d, n = n }
+pub let rotate_left: { d: Deque 'a, n: Int } -> Deque 'a = { d, n } -> __native_deque_rotate_left { d = d, n = n }
 
 ## Rotates elements right by n positions.
-pub let rotate_right = { d, n } -> __native_deque_rotate_right { d = d, n = n }
+pub let rotate_right: { d: Deque 'a, n: Int } -> Deque 'a = { d, n } -> __native_deque_rotate_right { d = d, n = n }
 
 ## Converts to a Set.
-pub let to_set = { d } -> __native_deque_to_set { d = d }
+pub let to_set: { d: Deque 'a } -> Set 'a = { d } -> __native_deque_to_set { d = d }
 
 ## Converts to a SortedSet.
-pub let to_sorted_set = { d } -> __native_deque_to_sorted_set { d = d }
+pub let to_sorted_set: { d: Deque 'a } -> SortedSet 'a = { d } -> __native_deque_to_sorted_set { d = d }
 
 ## Converts a deque of {key, value} records to a Map.
-pub let to_map = { d } -> __native_deque_to_map { d = d }
+pub let to_map: { d: Deque { k: 'k, v: 'v } } -> Map 'k 'v = { d } -> __native_deque_to_map { d = d }
 
 ## Converts a deque of {key, value} records to a SortedMap.
-pub let to_sorted_map = { d } -> __native_deque_to_sorted_map { d = d }
+pub let to_sorted_map: { d: Deque { k: 'k, v: 'v } } -> SortedMap 'k 'v = { d } -> __native_deque_to_sorted_map { d = d }
 
 ## Creates a deque from a Set.
-pub let from_set = { s } -> __native_deque_from_set { s = s }
+pub let from_set: { s: Set 'a } -> Deque 'a = { s } -> __native_deque_from_set { s = s }
 
 ## Creates a deque from a SortedSet (in sorted order).
-pub let from_sorted_set = { s } -> __native_deque_from_sorted_set { s = s }
+pub let from_sorted_set: { s: SortedSet 'a } -> Deque 'a = { s } -> __native_deque_from_sorted_set { s = s }
 
 ## Creates a deque from a Map (as {key, value} records).
-pub let from_map = { m } -> __native_deque_from_map { m = m }
+pub let from_map: { m: Map 'k 'v } -> Deque { k: 'k, v: 'v } = { m } -> __native_deque_from_map { m = m }
 
 ## Creates a deque from a SortedMap (as {key, value} records, in sorted key order).
-pub let from_sorted_map = { m } -> __native_deque_from_sorted_map { m = m }
+pub let from_sorted_map: { m: SortedMap 'k 'v } -> Deque { k: 'k, v: 'v } = { m } -> __native_deque_from_sorted_map { m = m }
 
 ## Takes the first n elements.
 pub let take : { d: Deque 'a, n: Int } -> Deque 'a = { d, n } ->

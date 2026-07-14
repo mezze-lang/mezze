@@ -1,23 +1,26 @@
 package com.mezze.language.typechecker.validation
 
 import com.mezze.language.ast.*
+import com.mezze.language.parsedast.*
+import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
+import com.mezze.language.typedast.Hash
 
 class PerformValidator(
-    private val typeDeclarations: Map<String, com.mezze.language.parsedast.ParsedTypeDecl>,
-    private val implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,
+    private val typeDeclarations: Map<String, ParsedTypeDecl>,
+    private val implDeclarations: Map<String, ParsedPerformerDecl>,
 ) {
 
     fun validatePerformExpressionsInExpression(
-        expr: com.mezze.language.parsedast.ParsedExpr,
-        implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,
-        effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
-        functionDefinitions: Map<String, com.mezze.language.parsedast.ParsedLambda>
+        expr: ParsedExpr,
+        implDeclarations: Map<String, ParsedPerformerDecl>,
+        effectDeclarations: Map<String, ParsedEffectDecl>,
+        functionDefinitions: Map<String, ParsedLambda>
     ): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
 
         when (expr) {
-            is com.mezze.language.parsedast.ParsedPerform -> {
+            is ParsedPerform -> {
                 val performErrors = validatePerformExpression(
                     expr,
                     implDeclarations,
@@ -35,16 +38,16 @@ class PerformValidator(
                 errors.addAll(innerErrors)
             }
 
-            is com.mezze.language.parsedast.ParsedDo -> {
+            is ParsedDo -> {
                 for (stmt in expr.statements) {
                     when (stmt) {
-                        is com.mezze.language.parsedast.ParsedStatement.Let -> {
+                        is ParsedStatement.Let -> {
                             errors.addAll(validatePerformExpressionsInExpression(stmt.value, implDeclarations, effectDeclarations, functionDefinitions))
                         }
-                        is com.mezze.language.parsedast.ParsedStatement.Expr -> {
+                        is ParsedStatement.Expr -> {
                             errors.addAll(validatePerformExpressionsInExpression(stmt.expr, implDeclarations, effectDeclarations, functionDefinitions))
                         }
-                        is com.mezze.language.parsedast.ParsedStatement.Bind -> {
+                        is ParsedStatement.Bind -> {
                             errors.addAll(validatePerformExpressionsInExpression(stmt.expr, implDeclarations, effectDeclarations, functionDefinitions))
                         }
                     }
@@ -52,37 +55,37 @@ class PerformValidator(
                 errors.addAll(validatePerformExpressionsInExpression(expr.result, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is com.mezze.language.parsedast.ParsedLambda -> {
+            is ParsedLambda -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.body, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is com.mezze.language.parsedast.ParsedIf -> {
+            is ParsedIf -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.condition, implDeclarations, effectDeclarations, functionDefinitions))
                 errors.addAll(validatePerformExpressionsInExpression(expr.thenBranch, implDeclarations, effectDeclarations, functionDefinitions))
                 errors.addAll(validatePerformExpressionsInExpression(expr.elseBranch, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is com.mezze.language.parsedast.ParsedFunctionCall -> {
+            is ParsedFunctionCall -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.function, implDeclarations, effectDeclarations, functionDefinitions))
                 errors.addAll(validatePerformExpressionsInExpression(expr.arguments, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is com.mezze.language.parsedast.ParsedRecordLit -> {
+            is ParsedRecordLit -> {
                 for (entry in expr.entries) {
                     when (entry) {
-                        is com.mezze.language.parsedast.ParsedRecordEntry.Field -> {
+                        is ParsedRecordEntry.Field -> {
                             entry.value?.let { value ->
                                 errors.addAll(validatePerformExpressionsInExpression(value, implDeclarations, effectDeclarations, functionDefinitions))
                             }
                         }
-                        is com.mezze.language.parsedast.ParsedRecordEntry.Spread -> {
+                        is ParsedRecordEntry.Spread -> {
                             errors.addAll(validatePerformExpressionsInExpression(entry.expr, implDeclarations, effectDeclarations, functionDefinitions))
                         }
                     }
                 }
             }
 
-            is com.mezze.language.parsedast.ParsedMatch -> {
+            is ParsedMatch -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.scrutinee, implDeclarations, effectDeclarations, functionDefinitions))
                 for (case in expr.cases) {
                     case.guard?.let { guard ->
@@ -92,60 +95,60 @@ class PerformValidator(
                 }
             }
 
-            is com.mezze.language.parsedast.ParsedVariantConstruct -> {
+            is ParsedVariantConstruct -> {
                 expr.value?.let { value ->
                     errors.addAll(validatePerformExpressionsInExpression(value, implDeclarations, effectDeclarations, functionDefinitions))
                 }
             }
 
-            is com.mezze.language.parsedast.ParsedMemberAccess -> {
+            is ParsedMemberAccess -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.receiver, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is com.mezze.language.parsedast.ParsedSeqLit -> {
+            is ParsedSeqLit -> {
                 for (element in expr.elements) {
                     val elementExpr = when (element) {
-                        is com.mezze.language.parsedast.ParsedSeqElement.Regular -> element.expr
-                        is com.mezze.language.parsedast.ParsedSeqElement.Spread -> element.expr
+                        is ParsedSeqElement.Regular -> element.expr
+                        is ParsedSeqElement.Spread -> element.expr
                     }
                     errors.addAll(validatePerformExpressionsInExpression(elementExpr, implDeclarations, effectDeclarations, functionDefinitions))
                 }
             }
 
-            is com.mezze.language.parsedast.ParsedStringLit -> {
+            is ParsedStringLit -> {
                 for (part in expr.parts) {
-                    if (part is com.mezze.language.parsedast.ParsedStringPart.Interpolation) {
+                    if (part is ParsedStringPart.Interpolation) {
                         errors.addAll(validatePerformExpressionsInExpression(part.expr, implDeclarations, effectDeclarations, functionDefinitions))
                     }
                 }
             }
 
-            is com.mezze.language.parsedast.ParsedPipe -> {
+            is ParsedPipe -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.left, implDeclarations, effectDeclarations, functionDefinitions))
                 errors.addAll(validatePerformExpressionsInExpression(expr.right, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is com.mezze.language.parsedast.ParsedParens -> {
+            is ParsedParens -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.expr, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is com.mezze.language.parsedast.ParsedBinaryOp -> {
+            is ParsedBinaryOp -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.left, implDeclarations, effectDeclarations, functionDefinitions))
                 errors.addAll(validatePerformExpressionsInExpression(expr.right, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is com.mezze.language.parsedast.ParsedUnaryOp -> {
+            is ParsedUnaryOp -> {
                 errors.addAll(validatePerformExpressionsInExpression(expr.operand, implDeclarations, effectDeclarations, functionDefinitions))
             }
 
-            is com.mezze.language.parsedast.ParsedIdentifier,
-            is com.mezze.language.parsedast.ParsedIntLit,
-            is com.mezze.language.parsedast.ParsedNatLit,
-            is com.mezze.language.parsedast.ParsedFloatLit,
-            is com.mezze.language.parsedast.ParsedFracLit,
-            is com.mezze.language.parsedast.ParsedCharLit,
-            is com.mezze.language.parsedast.ParsedPipePlaceholder,
-            is com.mezze.language.parsedast.ParsedEffectCall -> {
+            is ParsedIdentifier,
+            is ParsedIntLit,
+            is ParsedNatLit,
+            is ParsedFloatLit,
+            is ParsedFracLit,
+            is ParsedCharLit,
+            is ParsedPipePlaceholder,
+            is ParsedEffectCall -> {
             }
         }
 
@@ -153,10 +156,10 @@ class PerformValidator(
     }
 
     private fun validatePerformExpression(
-        expr: com.mezze.language.parsedast.ParsedPerform,
-        implDeclarations: Map<String, com.mezze.language.parsedast.ParsedPerformerDecl>,
-        effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
-        functionDefinitions: Map<String, com.mezze.language.parsedast.ParsedLambda>
+        expr: ParsedPerform,
+        implDeclarations: Map<String, ParsedPerformerDecl>,
+        effectDeclarations: Map<String, ParsedEffectDecl>,
+        functionDefinitions: Map<String, ParsedLambda>
     ): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
 
@@ -197,16 +200,16 @@ class PerformValidator(
     }
 
     private fun collectThrownErrorTypes(
-        expr: com.mezze.language.parsedast.ParsedExpr,
-        effectDeclarations: Map<String, com.mezze.language.parsedast.ParsedEffectDecl>,
-        functionDefinitions: Map<String, com.mezze.language.parsedast.ParsedLambda>
+        expr: ParsedExpr,
+        effectDeclarations: Map<String, ParsedEffectDecl>,
+        functionDefinitions: Map<String, ParsedLambda>
     ): Map<String, Map<String, MezzeType>> {
         val result = mutableMapOf<String, MutableMap<String, MezzeType>>()
         val visitedFunctions = mutableSetOf<String>()
 
-        fun traverse(e: com.mezze.language.parsedast.ParsedExpr) {
+        fun traverse(e: ParsedExpr) {
             when (e) {
-                is com.mezze.language.parsedast.ParsedEffectCall -> {
+                is ParsedEffectCall -> {
                     val effectName = e.operation.qualifier?.toString() ?: ""
                     val operationName = e.operation.localName
 
@@ -221,14 +224,14 @@ class PerformValidator(
                     }
                 }
 
-                is com.mezze.language.parsedast.ParsedFunctionCall -> {
-                    if (e.function is com.mezze.language.parsedast.ParsedMemberAccess) {
-                        val memberAccess = e.function as com.mezze.language.parsedast.ParsedMemberAccess
+                is ParsedFunctionCall -> {
+                    if (e.function is ParsedMemberAccess) {
+                        val memberAccess = e.function as ParsedMemberAccess
                         val operationName = memberAccess.member
 
                         val effectName = when (val receiver = memberAccess.receiver) {
-                            is com.mezze.language.parsedast.ParsedIdentifier -> receiver.localName
-                            is com.mezze.language.parsedast.ParsedVariantConstruct -> receiver.constructor
+                            is ParsedIdentifier -> receiver.localName
+                            is ParsedVariantConstruct -> receiver.constructor
                             else -> null
                         }
 
@@ -245,8 +248,8 @@ class PerformValidator(
                         }
                     }
 
-                    if (e.function is com.mezze.language.parsedast.ParsedIdentifier) {
-                        val funcName = (e.function as com.mezze.language.parsedast.ParsedIdentifier).localName
+                    if (e.function is ParsedIdentifier) {
+                        val funcName = (e.function as ParsedIdentifier).localName
                         if (!visitedFunctions.contains(funcName)) {
                             val funcDef = functionDefinitions[funcName]
                             if (funcDef != null) {
@@ -260,77 +263,77 @@ class PerformValidator(
                     traverse(e.arguments)
                 }
 
-                is com.mezze.language.parsedast.ParsedDo -> {
+                is ParsedDo -> {
                     for (stmt in e.statements) {
                         when (stmt) {
-                            is com.mezze.language.parsedast.ParsedStatement.Let -> traverse(stmt.value)
-                            is com.mezze.language.parsedast.ParsedStatement.Expr -> traverse(stmt.expr)
-                            is com.mezze.language.parsedast.ParsedStatement.Bind -> traverse(stmt.expr)
+                            is ParsedStatement.Let -> traverse(stmt.value)
+                            is ParsedStatement.Expr -> traverse(stmt.expr)
+                            is ParsedStatement.Bind -> traverse(stmt.expr)
                         }
                     }
                     traverse(e.result)
                 }
 
-                is com.mezze.language.parsedast.ParsedIf -> {
+                is ParsedIf -> {
                     traverse(e.condition)
                     traverse(e.thenBranch)
                     traverse(e.elseBranch)
                 }
 
-                is com.mezze.language.parsedast.ParsedMatch -> {
+                is ParsedMatch -> {
                     traverse(e.scrutinee)
                     for (case in e.cases) {
                         traverse(case.body)
                     }
                 }
 
-                is com.mezze.language.parsedast.ParsedLambda -> traverse(e.body)
+                is ParsedLambda -> traverse(e.body)
 
-                is com.mezze.language.parsedast.ParsedRecordLit -> {
+                is ParsedRecordLit -> {
                     for (entry in e.entries) {
                         when (entry) {
-                            is com.mezze.language.parsedast.ParsedRecordEntry.Field -> entry.value?.let { traverse(it) }
-                            is com.mezze.language.parsedast.ParsedRecordEntry.Spread -> traverse(entry.expr)
+                            is ParsedRecordEntry.Field -> entry.value?.let { traverse(it) }
+                            is ParsedRecordEntry.Spread -> traverse(entry.expr)
                         }
                     }
                 }
 
-                is com.mezze.language.parsedast.ParsedVariantConstruct -> e.value?.let { traverse(it) }
-                is com.mezze.language.parsedast.ParsedMemberAccess -> traverse(e.receiver)
-                is com.mezze.language.parsedast.ParsedSeqLit -> e.elements.forEach { element ->
+                is ParsedVariantConstruct -> e.value?.let { traverse(it) }
+                is ParsedMemberAccess -> traverse(e.receiver)
+                is ParsedSeqLit -> e.elements.forEach { element ->
                     when (element) {
-                        is com.mezze.language.parsedast.ParsedSeqElement.Regular -> traverse(element.expr)
-                        is com.mezze.language.parsedast.ParsedSeqElement.Spread -> traverse(element.expr)
+                        is ParsedSeqElement.Regular -> traverse(element.expr)
+                        is ParsedSeqElement.Spread -> traverse(element.expr)
                     }
                 }
-                is com.mezze.language.parsedast.ParsedStringLit -> {
+                is ParsedStringLit -> {
                     for (part in e.parts) {
-                        if (part is com.mezze.language.parsedast.ParsedStringPart.Interpolation) traverse(part.expr)
+                        if (part is ParsedStringPart.Interpolation) traverse(part.expr)
                     }
                 }
-                is com.mezze.language.parsedast.ParsedPerform -> {
+                is ParsedPerform -> {
                     // Do NOT traverse into nested perform expressions —
                     // the nested perform has its own handler that catches errors from its inner expression.
                 }
 
-                is com.mezze.language.parsedast.ParsedPipe -> {
+                is ParsedPipe -> {
                     traverse(e.left)
                     traverse(e.right)
                 }
 
-                is com.mezze.language.parsedast.ParsedParens -> traverse(e.expr)
+                is ParsedParens -> traverse(e.expr)
 
-                is com.mezze.language.parsedast.ParsedBinaryOp -> { traverse(e.left); traverse(e.right) }
-                is com.mezze.language.parsedast.ParsedUnaryOp -> traverse(e.operand)
+                is ParsedBinaryOp -> { traverse(e.left); traverse(e.right) }
+                is ParsedUnaryOp -> traverse(e.operand)
 
-                is com.mezze.language.parsedast.ParsedIdentifier,
-                is com.mezze.language.parsedast.ParsedIntLit,
-                is com.mezze.language.parsedast.ParsedNatLit,
-                is com.mezze.language.parsedast.ParsedFloatLit,
-                is com.mezze.language.parsedast.ParsedFracLit,
-                is com.mezze.language.parsedast.ParsedCharLit,
-                is com.mezze.language.parsedast.ParsedPipePlaceholder,
-                is com.mezze.language.parsedast.ParsedEffectCall -> { }
+                is ParsedIdentifier,
+                is ParsedIntLit,
+                is ParsedNatLit,
+                is ParsedFloatLit,
+                is ParsedFracLit,
+                is ParsedCharLit,
+                is ParsedPipePlaceholder,
+                is ParsedEffectCall -> { }
             }
         }
 
@@ -339,14 +342,14 @@ class PerformValidator(
     }
 
     private fun findAssociatedTypeFieldsV2(
-        typeAnnotation: com.mezze.language.parsedast.ParsedTypeAnnotation,
+        typeAnnotation: ParsedTypeAnnotation,
         associatedTypeNames: Set<String>
     ): Map<String, String> {
         val result = mutableMapOf<String, String>()
-        if (typeAnnotation is com.mezze.language.parsedast.ParsedRecordType) {
+        if (typeAnnotation is ParsedRecordType) {
             for (entry in typeAnnotation.entries) {
-                if (entry.type is com.mezze.language.parsedast.ParsedNamedType) {
-                    val typeName = (entry.type as com.mezze.language.parsedast.ParsedNamedType).name
+                if (entry.type is ParsedNamedType) {
+                    val typeName = (entry.type as ParsedNamedType).name
                     if (typeName in associatedTypeNames) result[entry.name] = typeName
                 }
             }
@@ -355,9 +358,9 @@ class PerformValidator(
     }
 
     private fun extractAssociatedTypeValuesV2(
-        effectDecl: com.mezze.language.parsedast.ParsedEffectDecl,
+        effectDecl: ParsedEffectDecl,
         operationName: String,
-        args: com.mezze.language.parsedast.ParsedExpr
+        args: ParsedExpr
     ): Map<String, MezzeType>? {
         val operation = effectDecl.operations.find { it.name == operationName } ?: return null
         val paramTypeAnnotation = operation.paramType
@@ -366,11 +369,11 @@ class PerformValidator(
 
         if (fieldToAssocType.isEmpty()) return null
 
-        if (args !is com.mezze.language.parsedast.ParsedRecordLit) return null
+        if (args !is ParsedRecordLit) return null
 
         val result = mutableMapOf<String, MezzeType>()
         for ((fieldName, assocTypeName) in fieldToAssocType) {
-            val fieldEntry = args.entries.filterIsInstance<com.mezze.language.parsedast.ParsedRecordEntry.Field>()
+            val fieldEntry = args.entries.filterIsInstance<ParsedRecordEntry.Field>()
                 .find { it.name == fieldName }
 
             val fieldValue = fieldEntry?.value ?: continue
@@ -383,12 +386,12 @@ class PerformValidator(
         return if (result.isNotEmpty()) result else null
     }
 
-    private fun constructTypeFromParsedExpression(expr: com.mezze.language.parsedast.ParsedExpr): MezzeType? {
+    private fun constructTypeFromParsedExpression(expr: ParsedExpr): MezzeType? {
         return when (expr) {
-            is com.mezze.language.parsedast.ParsedRecordLit -> {
+            is ParsedRecordLit -> {
                 val fields = mutableMapOf<String, MezzeType>()
                 for (entry in expr.entries) {
-                    if (entry is com.mezze.language.parsedast.ParsedRecordEntry.Field && entry.value != null) {
+                    if (entry is ParsedRecordEntry.Field && entry.value != null) {
                         val fieldType = constructTypeFromParsedExpression(entry.value!!)
                         if (fieldType != null) {
                             fields[entry.name] = fieldType
@@ -397,7 +400,7 @@ class PerformValidator(
                 }
                 MezzeType.RecordType(fields, null)
             }
-            is com.mezze.language.parsedast.ParsedVariantConstruct -> {
+            is ParsedVariantConstruct -> {
                 if (expr.constructor == "True" || expr.constructor == "False") {
                     MezzeType.BoolType
                 } else {
@@ -408,31 +411,31 @@ class PerformValidator(
                     )
                 }
             }
-            is com.mezze.language.parsedast.ParsedStringLit -> MezzeType.StringType
-            is com.mezze.language.parsedast.ParsedIntLit -> MezzeType.IntType
-            is com.mezze.language.parsedast.ParsedFloatLit -> MezzeType.FloatType
-            is com.mezze.language.parsedast.ParsedNatLit -> MezzeType.NatType
-            is com.mezze.language.parsedast.ParsedCharLit -> MezzeType.CharType
-            is com.mezze.language.parsedast.ParsedFracLit -> MezzeType.FracType
-            is com.mezze.language.parsedast.ParsedIdentifier -> null
+            is ParsedStringLit -> MezzeType.StringType
+            is ParsedIntLit -> MezzeType.IntType
+            is ParsedFloatLit -> MezzeType.FloatType
+            is ParsedNatLit -> MezzeType.NatType
+            is ParsedCharLit -> MezzeType.CharType
+            is ParsedFracLit -> MezzeType.FracType
+            is ParsedIdentifier -> null
             else -> null
         }
     }
 
-    private fun expandParsedTypeAnnotation(annotation: com.mezze.language.parsedast.ParsedTypeAnnotation): MezzeType {
+    private fun expandParsedTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
         return when (annotation) {
-            is com.mezze.language.parsedast.ParsedNamedType -> {
+            is ParsedNamedType -> {
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
                 val typeDecl = typeDeclarations[annotation.name]
                 if (typeDecl != null) when (val def = typeDecl.definition) {
-                    is com.mezze.language.parsedast.ParsedVariantDef -> MezzeType.VariantType(
+                    is ParsedVariantDef -> MezzeType.VariantType(
                         constructors = def.constructors.associate { it.name to it.dataType?.let { dt -> TypeAnnotationConverter.convert(dt) } },
                         rowVar = if (def.isOpen) RowVar.fresh() else null)
-                    is com.mezze.language.parsedast.ParsedRecordDef -> MezzeType.RecordType(fields = def.fields.associate { it.name to TypeAnnotationConverter.convert(it.type) })
-                    is com.mezze.language.parsedast.ParsedNewtypeDef -> TypeAnnotationConverter.convert(def.wrappedType)
+                    is ParsedRecordDef -> MezzeType.RecordType(fields = def.fields.associate { it.name to TypeAnnotationConverter.convert(it.type) })
+                    is ParsedNewtypeDef -> TypeAnnotationConverter.convert(def.wrappedType)
                 } else MezzeType.VarType(TypeVar.freshWithName(annotation.name))
             }
-            is com.mezze.language.parsedast.ParsedTypeApp -> {
+            is ParsedTypeApp -> {
                 TypeAnnotationConverter.convert(annotation)
             }
             else -> TypeAnnotationConverter.convert(annotation)

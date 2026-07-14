@@ -3,19 +3,6 @@ package com.mezze.language.typechecker.printing
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.PrimitiveTypes
 
-/**
- * Maps raw TypeVar names (fresh-counter generated, e.g. `'l1`, `'o297`)
- * onto stable, error-local names (`'a`, `'b`, ...).
- *
- * One renamer per error-message rendering. Calling it on the same raw
- * name returns the same stable name; first-seen names get the next free
- * letter. Names that don't start with `'` (e.g. concrete type names that
- * accidentally went through this path) pass through unchanged.
- *
- * Purpose: snapshot tests can pin error messages without flaking on the
- * global fresh-typevar counter (which depends on cross-test ordering).
- * For human readers, `'a` / `'b` is also easier to read than `'l1`.
- */
 open class TypeVarRenamer {
     private val mapping = mutableMapOf<String, String>()
 
@@ -23,7 +10,6 @@ open class TypeVarRenamer {
         if (!rawName.startsWith("'")) return rawName
         return mapping.getOrPut(rawName) {
             val idx = mapping.size
-            // 'a..'z, then 'a1..'z1, 'a2..'z2, ... (matches TypeVar.fresh)
             val letter = 'a' + (idx % 26)
             val suffix = if (idx >= 26) (idx / 26).toString() else ""
             "'${letter}$suffix"
@@ -31,51 +17,16 @@ open class TypeVarRenamer {
     }
 
     companion object {
-        /** Pass-through renamer — leaves names as-is. Used for the default
-         *  one-arg [TypeDiffPrinter.formatType] call site that doesn't
-         *  share a renamer across a pair of types. */
         val identity: TypeVarRenamer = object : TypeVarRenamer() {
             override fun invoke(rawName: String): String = rawName
         }
     }
 }
 
-/**
- * Pretty printer for type differences.
- *
- * Shows clear visual diffs between expected and actual types,
- * highlighting the specific differences to help users understand
- * type mismatches.
- *
- * Design:
- * - Pretty-print types with proper formatting
- * - Highlight differences between types
- * - Handle all MezzeType variants
- * - Show side-by-side comparison for complex types
- *
- * Usage:
- * ```kotlin
- * val diff = TypeDiffPrinter.formatDiff(expectedType, actualType)
- * println(diff)
- * ```
- */
 object TypeDiffPrinter {
-    /**
-     * Pretty-print a single type.
-     *
-     * This is the main type formatting function used everywhere.
-     */
-    fun formatType(type: MezzeType, indent: Int = 0): String = formatType(type, indent, TypeVarRenamer.identity)
+        fun formatType(type: MezzeType, indent: Int = 0): String = formatType(type, indent, TypeVarRenamer.identity)
 
-    /**
-     * Like [formatType] but with a [TypeVarRenamer] that maps the raw
-     * fresh-counter names (e.g. `'l1`, `'o297`) onto stable, error-local
-     * names (`'a`, `'b`, ...). Use this when formatting a related pair of
-     * types in a single message so cross-process counter drift doesn't
-     * leak into user-facing output.
-     */
-    fun formatType(type: MezzeType, indent: Int, rename: TypeVarRenamer): String {
-        // Use centralized registry for primitive types
+        fun formatType(type: MezzeType, indent: Int, rename: TypeVarRenamer): String {
         PrimitiveTypes.toName(type)?.let { return it }
 
         return when (type) {
@@ -100,23 +51,15 @@ object TypeDiffPrinter {
         val params = formatType(type.paramType, indent, rename)
         val result = formatType(type.returnType, indent, rename)
 
-        // Format effect row if present (including performed marker).
-        // Mezze surface syntax: `{p} -> Ret <Effect1, Effect2>`. The
-        // effect row sits AFTER the return type, not between `->` and
-        // the return — using the wrong order in error messages confuses
-        // users into thinking the type doesn't match what they wrote.
         val effectRow = type.effects
         val effects = if (effectRow != null && (effectRow.effects.isNotEmpty() || effectRow.rowVar != null || effectRow.performed)) {
             " ${formatEffectRow(effectRow)}"
         } else ""
 
-        // Format abilities if present
         val abilities = if (type.abilityConstraints.isNotEmpty()) {
             " [${type.abilityConstraints.joinToString { it.abilityName }}]"
         } else ""
 
-        // If the param is a record, its own formatter already emitted braces;
-        // don't double-wrap (`{{x: Int}}` → `{x: Int}`).
         val paramFmt = if (type.paramType is MezzeType.RecordType) params else "{$params}"
         return "$paramFmt -> $result$effects$abilities"
     }

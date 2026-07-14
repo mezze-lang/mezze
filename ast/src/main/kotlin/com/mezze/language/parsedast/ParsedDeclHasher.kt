@@ -74,10 +74,8 @@ object ParsedDeclHasher {
     }
 
     fun hashEffectDecl(decl: ParsedEffectDecl, @Suppress("UNUSED_PARAMETER") file: String): Hash? = hashEffectDecl(decl)
-    fun hashAbilityDecl(decl: ParsedAbilityDecl, @Suppress("UNUSED_PARAMETER") file: String): Hash? = hashAbilityDecl(decl)
     fun hashPerformerDecl(decl: ParsedPerformerDecl, @Suppress("UNUSED_PARAMETER") file: String): Hash? = hashPerformerDecl(decl)
     fun hashImplAbilityDecl(decl: ParsedImplAbilityDecl, @Suppress("UNUSED_PARAMETER") file: String): Hash? = hashImplAbilityDecl(decl)
-    fun hashTypeDecl(decl: ParsedTypeDecl, @Suppress("UNUSED_PARAMETER") file: String): Hash? = hashTypeDecl(decl)
 
     fun hashEffectDecl(decl: ParsedEffectDecl): Hash {
         val b = MezzeHashBuilder()

@@ -61,14 +61,6 @@ object BuiltinAbilities {
     /** All user-facing codec abilities (auto-derived by CodecGenerator) */
     val AUTO_DERIVE_CODEC_ABILITIES = setOf(ENCODE, ENCODE_REPR, DECODE, DECODE_REPR)
 
-    // All core built-in abilities (operators and basic operations)
-    val ALL = setOf(EQ, ORD, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD, LOGICAL_AND, LOGICAL_OR, LOGICAL_NOT, INSPECT, DEFAULT, NUM_ZERO, NUM_ONE, INTO, TRY_INTO)
-
-    /**
-     * Check if an ability name is a built-in ability
-     */
-    fun isBuiltin(abilityName: String): Boolean = abilityName in ALL
-
     /**
      * Automatic ability implementations for built-in types
      * Maps type to the set of abilities it automatically implements

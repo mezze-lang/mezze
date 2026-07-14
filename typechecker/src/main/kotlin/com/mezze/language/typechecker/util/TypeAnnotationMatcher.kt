@@ -3,29 +3,9 @@ package com.mezze.language.typechecker.util
 import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 
-/**
- * Shared utility for structural matching of [MezzeType] against [ParsedTypeAnnotation].
- *
- * Consolidates the duplicate `typeMatchesAnnotation`, `typeMatchesDeclaration`,
- * `inferTypeArgsFromVariant`, and `extractTypeParamMappings` functions from
- * AbilityResolver, TypeValidator, and ConstraintSolver.
- *
- * All three had the same signature and nearly identical logic. The ConstraintSolver
- * version was the most complete (handling Set/Map in TypeApp), so this implementation
- * is based on that.
- */
 object TypeAnnotationMatcher {
 
-    /**
-     * Check if a concrete [MezzeType] matches a [ParsedTypeAnnotation] structurally.
-     *
-     * @param type The concrete type to check.
-     * @param annotation The parsed type annotation to match against.
-     * @param typeDeclarations Type declarations available for lookup (e.g., for hash-based matching).
-     * @param typeVars Set of names that are type variables (should be bound, not matched structurally).
-     * @param typeVarBindings Mutable map tracking bindings for type variables encountered during matching.
-     */
-    fun typeMatchesAnnotation(
+        fun typeMatchesAnnotation(
         type: MezzeType,
         annotation: ParsedTypeAnnotation,
         typeDeclarations: Map<String, ParsedTypeDecl>,
@@ -115,10 +95,7 @@ object TypeAnnotationMatcher {
         }
     }
 
-    /**
-     * Check if a type matches a type declaration (for non-parametric types).
-     */
-    fun typeMatchesDeclaration(type: MezzeType, typeDecl: ParsedTypeDecl): Boolean {
+        fun typeMatchesDeclaration(type: MezzeType, typeDecl: ParsedTypeDecl): Boolean {
         if (type is MezzeType.TypeApplication) {
             val hashMatch = type.typeHash != null && typeDecl.contentHash != null && type.typeHash == typeDecl.contentHash
             return hashMatch || (type.constructor == typeDecl.name && type.args.isEmpty())
@@ -148,11 +125,7 @@ object TypeAnnotationMatcher {
         }
     }
 
-    /**
-     * Infer type arguments from a variant's concrete payload types by matching against
-     * the type declaration's constructor patterns.
-     */
-    fun inferTypeArgsFromVariant(
+        fun inferTypeArgsFromVariant(
         variantType: MezzeType.VariantType,
         typeDecl: ParsedTypeDecl,
         definition: ParsedVariantDef
@@ -173,10 +146,7 @@ object TypeAnnotationMatcher {
         }
     }
 
-    /**
-     * Extract type parameter mappings by comparing a type annotation with a concrete type.
-     */
-    fun extractTypeParamMappings(
+        fun extractTypeParamMappings(
         annotation: ParsedTypeAnnotation,
         concreteType: MezzeType,
         typeParams: List<String>,

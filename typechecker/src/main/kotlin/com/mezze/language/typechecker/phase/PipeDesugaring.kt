@@ -2,11 +2,6 @@ package com.mezze.language.typechecker.phase
 
 import com.mezze.language.parsedast.*
 
-/**
- * Pipe expression desugaring for ParsedModule (v2 pipeline).
- * Converts: x |> f { a = @ }  ->  f { a = x }
- * Recursively walks all expressions in declarations.
- */
 internal fun desugarPipesInParsedModule(module: ParsedModule): ParsedModule {
     // Quick check: does the module even contain pipes?
     fun hasPipes(expr: ParsedExpr): Boolean = when (expr) {
@@ -115,9 +110,6 @@ internal fun desugarPipesInParsedModule(module: ParsedModule): ParsedModule {
     })
 }
 
-/**
- * Replace ParsedPipePlaceholder (@) with the left-hand expression in a v2 AST tree.
- */
 private fun replaceParsedPlaceholder(expr: ParsedExpr, replacement: ParsedExpr): ParsedExpr = when (expr) {
     is ParsedPipePlaceholder -> replacement
     is ParsedFunctionCall -> expr.copy(

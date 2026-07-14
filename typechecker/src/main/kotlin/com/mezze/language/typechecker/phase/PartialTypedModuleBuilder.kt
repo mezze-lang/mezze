@@ -6,7 +6,11 @@ import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.module.ModuleImportContext
+import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.solving.Substitution
+import com.mezze.language.parsedast.*
+import com.mezze.language.typedast.*
+import com.mezze.language.typechecker.emit.TypedAstBuilder
 
 /**
  * Emit a best-effort partial TypedModule when global constraint solving
@@ -32,22 +36,22 @@ internal fun buildPartialTypedModule(
     buildResult: ContextBuilder.BuildResult,
     importContext: ModuleImportContext?,
     registry: DeclarationRegistry,
-    bindLetLocs: Set<com.mezze.language.parsedast.Loc> = emptySet(),
-): com.mezze.language.typedast.TypedModule? {
+    bindLetLocs: Set<Loc> = emptySet(),
+): TypedModule? {
     return try {
         val resolvedResults = constraintResults.mapValues { (_, r) ->
             r.copy(type = substitution.apply(r.type))
         }
         val methodCallResolutions = constraintResults.values
-            .fold(emptyMap<Pair<com.mezze.language.parsedast.Loc, String>, ConstraintResult.MethodCallInfo>()) { acc, r ->
+            .fold(emptyMap<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()) { acc, r ->
                 acc + r.methodCallResolutions
             }
         val callReturnTypes = constraintResults.values
-            .fold(emptyMap<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType>()) { acc, r ->
+            .fold(emptyMap<Loc, MezzeType>()) { acc, r ->
                 acc + r.callReturnTypes
             }
         val matchCaseBindings = constraintResults.values
-            .fold(emptyMap<com.mezze.language.parsedast.Loc, Map<String, com.mezze.language.ast.MezzeType>>()) { acc, r ->
+            .fold(emptyMap<Loc, Map<String, MezzeType>>()) { acc, r ->
                 acc + r.matchCaseBindings.mapValues { (_, bindings) ->
                     bindings.mapValues { (_, ty) -> substitution.apply(ty) }
                 }
@@ -56,7 +60,7 @@ internal fun buildPartialTypedModule(
             .flatMap { it.tailCalls }
             .filterNotNull()
             .toSet()
-        val builder = com.mezze.language.typechecker.emit.TypedAstBuilder(
+        val builder = TypedAstBuilder(
             substitution = substitution,
             constraintResults = resolvedResults,
             abilityImpls = context.getAllAbilityImpls(),
