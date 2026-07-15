@@ -1,0 +1,13 @@
+# Regression: #239 match-case lambda scope
+# lambdaParamScopes conflated lambda boundaries with match-case block scopes
+# causing slot-shift corruption when a lambda appeared inside a match case
+
+type Shape = | Circle { radius: Int }, Square { side: Int } |
+
+let area = {shape: Shape} -> match shape is
+  Circle { radius } -> radius * radius
+  Square { side } -> side * side
+
+let result = area { shape = Circle { radius = 5 } }
+
+result

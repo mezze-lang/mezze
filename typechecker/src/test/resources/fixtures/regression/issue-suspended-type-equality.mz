@@ -1,0 +1,9 @@
+# Regression: SuspendedType stripping in solveEquality
+# Effects are tracked separately in ConstraintResult, not in Equality constraints.
+# SuspendedType wrapping must be stripped during equality solving
+# so that Promise methods can unify correctly.
+
+let identity = {x} -> x
+let result = identity { x = 42 }
+
+result

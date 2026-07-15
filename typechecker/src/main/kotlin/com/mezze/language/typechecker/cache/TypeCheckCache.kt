@@ -98,7 +98,12 @@ object TypeCheckCache {
                 val effects = type.effects.sorted().joinToString(", ")
                 "EffectRow<{$effects}>"
             }
-            else -> type.toString()
+            is MezzeType.VarType -> type.toString()
+            is MezzeType.NewtypeType -> "Newtype<${typeToString(type.wrappedType)}>"
+            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
+            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+            is MezzeType.CharType -> type.toString()
         }
     }
 

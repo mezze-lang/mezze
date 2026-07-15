@@ -16,8 +16,10 @@ import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypeScheme
 import com.mezze.language.typechecker.context.TypingContext
+import com.mezze.language.typechecker.debug.ConstraintDumper
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.typechecker.debug.InvariantChecker
 import com.mezze.language.typechecker.desugar.DoBindDesugar
 import com.mezze.language.typechecker.hashing.ContentHashComputer
 import com.mezze.language.typechecker.module.*
@@ -189,40 +191,7 @@ class TypeChecker(
             listOf("abilityNames = $abilityNames", "effectNames = $effectNames")
         }
 
-        val transitiveEffects = mutableMapOf<String, ParsedEffectDecl>()
-        for ((_, mod) in loadedModules) {
-            mod.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach {
-                transitiveEffects[it.name] = it
-            }
-        }
-        for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
-            cached.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach {
-                transitiveEffects[it.name] = it
-            }
-        }
-        val allEffectDeclarations = transitiveEffects +
-            buildResult.registry.effectDeclarations +
-            (importContext?.importedEffects ?: emptyMap())
-        val allTypeDeclarations = buildResult.registry.typeDeclarations +
-            (importContext?.importedTypes ?: emptyMap())
-
-        val importedAbilities = importContext?.importedAbilities ?: emptyMap()
-        val transitiveAbilities = mutableMapOf<String, ParsedAbilityDecl>()
-        for ((_, mod) in loadedModules) {
-            mod.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.forEach {
-                transitiveAbilities[it.name] = it
-            }
-        }
-        for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
-            cached.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.forEach {
-                transitiveAbilities[it.name] = it
-            }
-        }
-        val allAbilityDeclarations = transitiveAbilities + buildResult.registry.abilityDeclarations + importedAbilities
-
-        val registry = DeclarationRegistry.from(
-            allTypeDeclarations, allAbilityDeclarations, allEffectDeclarations,
-        )
+        val registry = buildFullRegistry(loadedModules, buildResult, importContext)
 
         val constraintGenerator = ConstraintGenerator.create(
             registry = registry,
@@ -285,21 +254,11 @@ class TypeChecker(
             })
         }
 
-        val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
-            TypeCheckWarning(
-                message = "Unused variable '${unused.name}'. Prefix with '_' to suppress this warning.",
-                loc = unused.loc
-            )
-        }
-        val patternWarnings = constraintResults.values.flatMap { it.patternWarnings }.map { warningMsg ->
-            TypeCheckWarning(message = warningMsg, loc = null)
-        }
+        val constraintWarnings = collectConstraintWarnings(constraintResults)
+        val allConstraints = collectGlobalConstraints(constraintResults)
 
-        val allConstraints = constraintResults.values.flatMap { it.constraints }
-            .filter { constraint ->
-                constraint !is Constraint.HasConstructor && constraint !is Constraint.HasField
-            } + constraintResults.values.flatMap { it.abilityConstraints } +
-              constraintResults.values.flatMap { it.associatedTypeConstraints }
+        ConstraintDumper.dumpGeneratedConstraints(constraintResults)
+        ConstraintDumper.dumpSolverInput(allConstraints)
 
         val solver = ConstraintSolver(context, registry)
         val solveResult = withInScopeAliasNames(inScopeAliasNames) {
@@ -329,11 +288,13 @@ class TypeChecker(
             }
             is ConstraintSolver.SolveResult.Success -> {
                 val substitution = solveResult.substitution.compose(perBindingSubstitution)
+                InvariantChecker.checkSubstitution(substitution, "post-solve")
+                ConstraintDumper.dumpSolverResult(substitution)
+
                 val warnings = solveResult.warnings.map { msg ->
                     TypeCheckWarning(message = msg, loc = null)
                 }.toMutableList()
-                warnings.addAll(unusedVarWarnings)
-                warnings.addAll(patternWarnings)
+                warnings.addAll(constraintWarnings)
 
                 val mustBeOpenRowVars = solveResult.mustBeOpenRowVars + perBindingMustBeOpenRowVars
 
@@ -344,38 +305,13 @@ class TypeChecker(
                     result.copy(type = typeWithAbilities)
                 }
 
-                val tailCallLocations = constraintResults.values.flatMap { it.tailCalls }.filterNotNull().toSet()
-                val allMethodCallResolutions = constraintResults.values
-                    .fold(emptyMap<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()) { acc, r -> acc + r.methodCallResolutions }
-                val allCallReturnTypes = constraintResults.values
-                    .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.callReturnTypes }
-                val allMatchCaseBindings = constraintResults.values
-                    .fold(emptyMap<Loc, Map<String, MezzeType>>()) { acc, r ->
-                        acc + r.matchCaseBindings.mapValues { (_, bindings) ->
-                            bindings.mapValues { (_, ty) -> substitution.apply(ty) }
-                        }
-                    }
-                val allExpectedTypeAt = constraintResults.values
-                    .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.expectedTypeAt }
-                    .mapValues { (_, type) -> substitution.apply(type) }
+                InvariantChecker.checkConstraintResultsConsistent(globallyResolvedConstraintResults, "post-resolve")
+
+                val aggregated = aggregateConstraintResults(constraintResults, substitution)
 
                 val validator = TypeValidator(context, registry, buildResult.implDeclarations)
                 val constraintValidation = validator.validateConstraints(allConstraints, substitution)
-                when (constraintValidation) {
-                    is ValidationResult.Failure -> {
-                        collectedErrors.addAll(constraintValidation.errors.map { error ->
-                            TypeCheckError(
-                                phase = "Validation", message = error.message(), loc = error.location(),
-                                code = error.code, hints = error.hints, fixHints = error.fixHints,
-                            )
-                        })
-                    }
-                    is ValidationResult.Success -> {
-                        constraintValidation.warnings.forEach { msg ->
-                            warnings.add(TypeCheckWarning(message = msg, loc = null))
-                        }
-                    }
-                }
+                collectValidationResult(constraintValidation, collectedErrors, warnings)
 
                 val isStdlibModule = ModulePathConventions.isStdlib(currentModulePath)
                 val emitResult = emitTypedModuleAndLower(
@@ -385,44 +321,35 @@ class TypeChecker(
                     context = context, buildResult = buildResult,
                     importContext = importContext, registry = registry,
                     solver = solver, loadedModules = loadedModules,
-                    tailCallLocations = tailCallLocations,
+                    tailCallLocations = aggregated.tailCallLocations,
                     mustBeOpenRowVars = mustBeOpenRowVars,
-                    methodCallResolutions = allMethodCallResolutions,
-                    callReturnTypes = allCallReturnTypes,
-                    matchCaseBindings = allMatchCaseBindings,
+                    methodCallResolutions = aggregated.methodCallResolutions,
+                    callReturnTypes = aggregated.callReturnTypes,
+                    matchCaseBindings = aggregated.matchCaseBindings,
                     bindLetLocs = bindLetLocs,
                     isStdlibModule = isStdlibModule,
                     currentModulePath = currentModulePath,
                 )
 
                 val v2ValidationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution)
-                if (v2ValidationResult is ValidationResult.Failure) {
-                    collectedErrors.addAll(v2ValidationResult.errors.map { error ->
-                        TypeCheckError(
-                            phase = "Validation", message = error.message(), loc = error.location(),
-                            code = error.code, hints = error.hints, fixHints = error.fixHints,
-                        )
-                    })
-                }
+                val v2Warnings = mutableListOf<TypeCheckWarning>()
+                collectValidationResult(v2ValidationResult, collectedErrors, v2Warnings)
 
                 val typeContext = globallyResolvedConstraintResults.mapValues { (_, cr) ->
                     substitution.apply(cr.type)
                 }
-                val validationWarnings = if (v2ValidationResult is ValidationResult.Success) {
-                    v2ValidationResult.warnings.map { TypeCheckWarning(message = it, loc = null) }
-                } else emptyList()
 
                 if (collectedErrors.isNotEmpty()) {
                     val seen = mutableSetOf<Pair<Loc?, String>>()
                     val deduped = collectedErrors.filter { e -> seen.add(e.loc to e.message) }
                     return TypeCheckResult.Failure(
                         errors = deduped, typedModule = emitResult.typedModule,
-                        expectedTypeAt = allExpectedTypeAt,
+                        expectedTypeAt = aggregated.expectedTypeAt,
                     )
                 }
                 return TypeCheckResult.Success(
                     substitution = substitution, importContext = importContext,
-                    warnings = warnings + validationWarnings,
+                    warnings = warnings + v2Warnings,
                     loadedModules = loadedModules,
                     abilityImpls = context.getAllAbilityImpls(),
                     typedModule = emitResult.typedModule,
@@ -430,8 +357,131 @@ class TypeChecker(
                     loweredPerformers = emitResult.loweredPerformers,
                     typeContext = typeContext,
                     resolvedParsedModule = parsedModule,
-                    expectedTypeAt = allExpectedTypeAt,
+                    expectedTypeAt = aggregated.expectedTypeAt,
                 )
+            }
+        }
+    }
+
+    private class AggregatedConstraintResults(
+        val tailCallLocations: Set<Loc>,
+        val methodCallResolutions: Map<Pair<Loc, String>, ConstraintResult.MethodCallInfo>,
+        val callReturnTypes: Map<Loc, MezzeType>,
+        val matchCaseBindings: Map<Loc, Map<String, MezzeType>>,
+        val expectedTypeAt: Map<Loc, MezzeType>,
+    )
+
+    private fun aggregateConstraintResults(
+        constraintResults: Map<String, ConstraintResult>,
+        substitution: Substitution,
+    ): AggregatedConstraintResults {
+        val tailCallLocations = constraintResults.values.flatMap { it.tailCalls }.filterNotNull().toSet()
+        val methodCallResolutions = constraintResults.values
+            .fold(emptyMap<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()) { acc, r -> acc + r.methodCallResolutions }
+        val callReturnTypes = constraintResults.values
+            .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.callReturnTypes }
+        val matchCaseBindings = constraintResults.values
+            .fold(emptyMap<Loc, Map<String, MezzeType>>()) { acc, r ->
+                acc + r.matchCaseBindings.mapValues { (_, bindings) ->
+                    bindings.mapValues { (_, ty) -> substitution.apply(ty) }
+                }
+            }
+        val expectedTypeAt = constraintResults.values
+            .fold(emptyMap<Loc, MezzeType>()) { acc, r -> acc + r.expectedTypeAt }
+            .mapValues { (_, type) -> substitution.apply(type) }
+        return AggregatedConstraintResults(
+            tailCallLocations = tailCallLocations,
+            methodCallResolutions = methodCallResolutions,
+            callReturnTypes = callReturnTypes,
+            matchCaseBindings = matchCaseBindings,
+            expectedTypeAt = expectedTypeAt,
+        )
+    }
+
+    private fun buildFullRegistry(
+        loadedModules: Map<ModulePath, TypedModule>,
+        buildResult: ContextBuilder.BuildResult,
+        importContext: ModuleImportContext?,
+    ): DeclarationRegistry {
+        val transitiveEffects = mutableMapOf<String, ParsedEffectDecl>()
+        for ((_, mod) in loadedModules) {
+            mod.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach {
+                transitiveEffects[it.name] = it
+            }
+        }
+        for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
+            cached.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach {
+                transitiveEffects[it.name] = it
+            }
+        }
+        val allEffectDeclarations = transitiveEffects +
+            buildResult.registry.effectDeclarations +
+            (importContext?.importedEffects ?: emptyMap())
+        val allTypeDeclarations = buildResult.registry.typeDeclarations +
+            (importContext?.importedTypes ?: emptyMap())
+
+        val importedAbilities = importContext?.importedAbilities ?: emptyMap()
+        val transitiveAbilities = mutableMapOf<String, ParsedAbilityDecl>()
+        for ((_, mod) in loadedModules) {
+            mod.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.forEach {
+                transitiveAbilities[it.name] = it
+            }
+        }
+        for ((_, cached) in ModuleTypeChecker.getAllCachedModules()) {
+            cached.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.forEach {
+                transitiveAbilities[it.name] = it
+            }
+        }
+        val allAbilityDeclarations = transitiveAbilities + buildResult.registry.abilityDeclarations + importedAbilities
+
+        return DeclarationRegistry.from(
+            allTypeDeclarations, allAbilityDeclarations, allEffectDeclarations,
+        )
+    }
+
+    private fun collectConstraintWarnings(
+        constraintResults: Map<String, ConstraintResult>,
+    ): List<TypeCheckWarning> {
+        val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
+            TypeCheckWarning(
+                message = "Unused variable '${unused.name}'. Prefix with '_' to suppress this warning.",
+                loc = unused.loc
+            )
+        }
+        val patternWarnings = constraintResults.values.flatMap { it.patternWarnings }.map { warningMsg ->
+            TypeCheckWarning(message = warningMsg, loc = null)
+        }
+        return unusedVarWarnings + patternWarnings
+    }
+
+    private fun collectGlobalConstraints(
+        constraintResults: Map<String, ConstraintResult>,
+    ): List<Constraint> {
+        return constraintResults.values.flatMap { it.constraints }
+            .filter { constraint ->
+                constraint !is Constraint.HasConstructor && constraint !is Constraint.HasField
+            } + constraintResults.values.flatMap { it.abilityConstraints } +
+              constraintResults.values.flatMap { it.associatedTypeConstraints }
+    }
+
+    private fun collectValidationResult(
+        result: ValidationResult,
+        errors: MutableList<TypeCheckError>,
+        warnings: MutableList<TypeCheckWarning>,
+    ) {
+        when (result) {
+            is ValidationResult.Failure -> {
+                errors.addAll(result.errors.map { error ->
+                    TypeCheckError(
+                        phase = "Validation", message = error.message(), loc = error.location(),
+                        code = error.code, hints = error.hints, fixHints = error.fixHints,
+                    )
+                })
+            }
+            is ValidationResult.Success -> {
+                result.warnings.forEach { msg ->
+                    warnings.add(TypeCheckWarning(message = msg, loc = null))
+                }
             }
         }
     }

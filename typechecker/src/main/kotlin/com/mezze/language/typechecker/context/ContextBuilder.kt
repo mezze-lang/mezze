@@ -175,6 +175,55 @@ class ContextBuilder {
             ctx = addAbilityImpl(ctx, abilityImplDecl, allParsedAbilityDeclsForHash, importedAbilities, file)
         }
 
+        validateAbilities(
+            module, abilityDecls, abilityImplDecls,
+            typeDecls, importedTypes, importedAbilities,
+            effectDecls, currentModulePath
+        )
+
+        val performerAddedEffectsMap = (resolvedParsedPerformerDecls + importedImpls.values).associate { perf ->
+            perf.performerName to perf.operations.flatMap { op ->
+                op.effects?.effects ?: emptyList()
+            }.toSet()
+        }.filterValues { it.isNotEmpty() }
+
+        val implDeclarationsMap: Map<String, ParsedPerformerDecl> = resolvedParsedPerformerDecls.associateBy { it.performerName } +
+            importedImpls
+
+        val resolvedMod = if (convertedPerformerDecls.isEmpty()) {
+            module
+        } else {
+            val resolvedDecls = module.decls.map { decl ->
+                if (decl is ParsedPerformerDecl) {
+                    convertedPerformerDecls[decl] ?: decl
+                } else {
+                    decl
+                }
+            }
+            ParsedModule(module.path, resolvedDecls)
+        }
+
+        return BuildResult(
+            context = ctx,
+            registry = DeclarationRegistry.from(typeDecls, abilityDecls, effectDecls),
+            performerToEffect = performerToEffectMap,
+            performerToEffectHash = performerToEffectHashMap,
+            performerAddedEffects = performerAddedEffectsMap,
+            implDeclarations = implDeclarationsMap,
+            resolvedModule = resolvedMod,
+        )
+    }
+
+    private fun validateAbilities(
+        module: ParsedModule,
+        abilityDecls: Map<String, ParsedAbilityDecl>,
+        abilityImplDecls: List<ParsedImplAbilityDecl>,
+        typeDecls: Map<String, ParsedTypeDecl>,
+        importedTypes: Map<String, ParsedTypeDecl>,
+        importedAbilities: Map<String, ParsedAbilityDecl>,
+        effectDecls: Map<String, ParsedEffectDecl>,
+        currentModulePath: String?,
+    ) {
         val allParsedAbilityDecls = abilityDecls + importedAbilities
         val allParsedTypeDecls = typeDecls + importedTypes
 
@@ -211,38 +260,6 @@ class ContextBuilder {
                 importedTypeNames = importedTypeNames
             )
         }
-
-        val performerAddedEffectsMap = (resolvedParsedPerformerDecls + importedImpls.values).associate { perf ->
-            perf.performerName to perf.operations.flatMap { op ->
-                op.effects?.effects ?: emptyList()
-            }.toSet()
-        }.filterValues { it.isNotEmpty() }
-
-        val implDeclarationsMap: Map<String, ParsedPerformerDecl> = resolvedParsedPerformerDecls.associateBy { it.performerName } +
-            importedImpls
-
-        val resolvedMod = if (convertedPerformerDecls.isEmpty()) {
-            module
-        } else {
-            val resolvedDecls = module.decls.map { decl ->
-                if (decl is ParsedPerformerDecl) {
-                    convertedPerformerDecls[decl] ?: decl
-                } else {
-                    decl
-                }
-            }
-            ParsedModule(module.path, resolvedDecls)
-        }
-
-        return BuildResult(
-            context = ctx,
-            registry = DeclarationRegistry.from(typeDecls, abilityDecls, effectDecls),
-            performerToEffect = performerToEffectMap,
-            performerToEffectHash = performerToEffectHashMap,
-            performerAddedEffects = performerAddedEffectsMap,
-            implDeclarations = implDeclarationsMap,
-            resolvedModule = resolvedMod,
-        )
     }
 
     fun addParsedTypeConstructors(ctx: TypingContext, typeDecl: ParsedTypeDecl, isImported: Boolean = false): TypingContext {

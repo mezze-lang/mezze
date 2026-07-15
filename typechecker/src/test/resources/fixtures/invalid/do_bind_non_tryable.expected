@@ -1,0 +1,2 @@
+UNCATEGORIZED
+Cannot use `<-` on Int — no `Tryable` impl. `<-` works on `Option`, `Result`, or any type implementing `Tryable`. If you meant a plain binding, use `let x = ...` instead.

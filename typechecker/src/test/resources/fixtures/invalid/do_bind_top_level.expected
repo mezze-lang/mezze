@@ -1,0 +1,7 @@
+PARSE_ERROR
+Parse error: Expected 'effect' but got '<-'
+   --> do_bind_top_level.mz:4:3
+  |
+4 | x <- Some { val = 42 }
+  |   ^
+  |

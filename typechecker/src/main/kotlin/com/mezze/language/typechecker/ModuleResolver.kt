@@ -185,6 +185,7 @@ sealed class ModuleError(message: String) : Exception(message) {
         else
             "Module '$fromModule' cannot access internal module '$toModule'"
     ) {
+        override val code = ErrorCode.M0803_NOT_EXPORTED
         override val errorLoc get() = loc
     }
 
@@ -231,7 +232,9 @@ sealed class ModuleError(message: String) : Exception(message) {
     }
 
     data class DeprecatedCoreModule(val modulePath: String, val suggestion: String) :
-        ModuleError("Deprecated core module: $modulePath. $suggestion")
+        ModuleError("Deprecated core module: $modulePath. $suggestion") {
+        override val code = ErrorCode.M0801_MODULE_NOT_FOUND
+    }
 }
 
 private fun findProjectRoot(startPath: Path = Paths.get(".")): Path {

@@ -197,61 +197,7 @@ class ConstraintGenerator(
                             }
 
                             if (item.pattern is ParsedVariablePattern && preConvertedAnnotationType != null) {
-                                val annotation = item.typeAnnotation
-                                val varName = (item.pattern as ParsedVariablePattern).name
-
-                                val inferredTypeRaw = substitution.apply(result.type)
-                                val inferredTypeWithAbilities = addAbilityConstraintsToFunctionType(
-                                    inferredTypeRaw,
-                                    result.abilityConstraints,
-                                    substitution
-                                )
-
-                                if (annotation is ParsedFunctionType) {
-                                    val abilityConstrainedVars = result.abilityConstraints.map { it.typeVar }.toSet()
-                                    annotationValidator.validatePolymorphismPreserved(
-                                        preConvertedAnnotationType,
-                                        substitution,
-                                        varName,
-                                        item.value.loc,
-                                        abilityConstrainedVars
-                                    )
-                                }
-
-                                // doesn't carry. With #312's call-site closure-effect
-                                // harvest (in generateFunctionCall — when the callee's
-                                // effect row has a row var, effects from closure-typed
-                                // argument fields get unioned into propagatedEffects),
-                                // the inferred type now picks up effects passed via
-                                // HOFs like `Async.spawn { f = effectful_thing }`.
-                                if (annotation is ParsedFunctionType &&
-                                    annotation.effects != null &&
-                                    !bodyContainsNativeCall(item.value)) {
-                                    annotationValidator.validateEffectsNotOverpromised(
-                                        preConvertedAnnotationType,
-                                        inferredTypeWithAbilities,
-                                        varName,
-                                        item.value.loc
-                                    )
-                                }
-
-                                if (annotation is ParsedFunctionType && annotation.abilityConstraints.isNotEmpty()) {
-                                    val resolvedAbilityConstraints = result.abilityConstraints.map { constraint ->
-                                        val resolvedTypeVar = substitution.apply(MezzeType.VarType(constraint.typeVar))
-                                        if (resolvedTypeVar is MezzeType.VarType) {
-                                            constraint.copy(typeVar = resolvedTypeVar.variable)
-                                        } else {
-                                            constraint
-                                        }
-                                    }
-                                    annotationValidator.validateAbilityOnCorrectTypeVar(
-                                        preConvertedAnnotationType,
-                                        resolvedAbilityConstraints,
-                                        varName,
-                                        substitution,
-                                        item.value.loc
-                                    )
-                                }
+                                validateLetAnnotation(item, preConvertedAnnotationType, result, substitution)
                             }
 
                             val solvedBindings = if (item.pattern is ParsedVariablePattern && authoritativeType != substitution.apply(result.type)) {
@@ -303,102 +249,11 @@ class ConstraintGenerator(
 
                             val contextBindings = solvedBindingsWithEffects.map { (name, solvedType) ->
                                 val bindingKey = BindingKey.unqualified(name)
-                                bindingKey to run {
-                                val freeVars = collectFreeTypeVars(solvedType)
-
-                                val contextVars = getContextFreeVars(currentContext, excludeBindings = setOf(bindingKey))
-
-                                val quantifiableVars = freeVars - contextVars
-
-                                val hasExplicitAbilityConstraints = when (val annotation = item.typeAnnotation) {
-                                    is ParsedFunctionType -> annotation.abilityConstraints.isNotEmpty()
-                                    else -> false
-                                }
-
-                                val isLambdaBinding = item.value is ParsedLambda
-
-                                val hasUserDefinedAbilityConstraints = if (hasExplicitAbilityConstraints || isLambdaBinding) {
-                                    false
-                                } else {
-                                    result.abilityConstraints.any { constraint ->
-                                    val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(constraint.abilityName)
-
-                                    if (isBuiltInAbility) {
-                                        false
-                                    } else {
-                                        val resolvedType = substitution.apply(MezzeType.VarType(constraint.typeVar))
-                                        val resolvedTypeVar = if (resolvedType is MezzeType.VarType) {
-                                            resolvedType.variable
-                                        } else {
-                                            null
-                                        }
-                                        val mainVarIsQuantifiable = resolvedTypeVar != null && resolvedTypeVar in quantifiableVars
-
-                                        val typeArgsHaveQuantifiableVars = constraint.typeArgs.any { typeArg ->
-                                            val freeVars = collectFreeTypeVars(typeArg)
-                                            freeVars.any { freeVar ->
-                                                val resolved = substitution.apply(MezzeType.VarType(freeVar))
-                                                if (resolved is MezzeType.VarType) {
-                                                    resolved.variable in quantifiableVars
-                                                } else {
-                                                    false
-                                                }
-                                            }
-                                        }
-
-                                        mainVarIsQuantifiable || typeArgsHaveQuantifiableVars
-                                    }
-                                    }
-                                }
-
-                                if (quantifiableVars.isNotEmpty() && !hasUserDefinedAbilityConstraints) {
-
-                                    val abilityConstraints = if (hasExplicitAbilityConstraints && authoritativeType is MezzeType.FunctionType) {
-                                        val funcType = authoritativeType
-                                        funcType.abilityConstraints.mapNotNull { constraint ->
-                                            val typeVarArg = constraint.typeArgs.filterIsInstance<MezzeType.VarType>().firstOrNull()
-
-                                            if (typeVarArg != null) {
-                                                AbilityConstraint(
-                                                    abilityName = constraint.abilityName,
-                                                    typeParam = typeVarArg.variable.name,
-                                                    typeArgs = constraint.typeArgs
-                                                )
-                                            } else {
-                                                null
-                                            }
-                                        }
-                                    } else {
-                                        val quantifiableVarIds = quantifiableVars.map { it.id }.toSet()
-                                        result.abilityConstraints.mapNotNull { constraint ->
-                                            val resolvedConstraintVar = substitution.apply(MezzeType.VarType(constraint.typeVar))
-                                            val constraintVarId = if (resolvedConstraintVar is MezzeType.VarType) {
-                                                resolvedConstraintVar.variable.id
-                                            } else {
-                                                constraint.typeVar.id
-                                            }
-                                            if (constraintVarId in quantifiableVarIds) {
-                                                val quantVar = quantifiableVars.find { it.id == constraintVarId }
-                                                val resolvedTypeArgs = constraint.typeArgs.map { substitution.apply(it) }
-                                                AbilityConstraint(
-                                                    abilityName = constraint.abilityName,
-                                                    typeParam = quantVar?.name ?: constraint.typeVar.name,
-                                                    typeArgs = resolvedTypeArgs
-                                                )
-                                            } else null
-                                        }
-                                    }
-
-                                    val scheme = TypeScheme(
-                                        quantifiedVars = quantifiableVars.toList(),
-                                        constraints = abilityConstraints,
-                                        type = solvedType
-                                    )
-                                    TypingContext.Binding.Polymorphic(scheme, contentHash = null)
-                                } else {
-                                    TypingContext.Binding.Monomorphic(solvedType, contentHash = null)
-                                }
-                            }}.toMap()
+                                bindingKey to buildBindingForContext(
+                                    solvedType, bindingKey, currentContext, item, result,
+                                    substitution, authoritativeType
+                                )
+                            }.toMap()
 
                             currentContext = currentContext.extendAll(contextBindings)
 
@@ -427,163 +282,8 @@ class ConstraintGenerator(
                 }
                 is ParsedImplAbilityDecl -> try {
                     implValidator.validateAbilityImplementation(item, currentContext)
-
                     if (item.isInherent) {
-                        val targetTypeName = item.targetTypes.firstOrNull()?.let { ann ->
-                            when (ann) {
-                                is ParsedNamedType -> ann.name
-                                is ParsedTypeApp -> ann.constructor
-                                else -> null
-                            }
-                        }
-                        val targetTypeHash = targetTypeName?.let { registry.typeDeclarations[it]?.contentHash }
-
-                        for (op in item.operations) {
-                            val targetType = if (item.targetTypes.isNotEmpty()) {
-                                convertTypeAnnotation(item.targetTypes.first())
-                            } else {
-                                MezzeType.VarType(TypeVar.fresh())
-                            }
-
-                            if (op.implementation !is ParsedLambda) continue
-                            val lambda = op.implementation as ParsedLambda
-
-                            val methodInfo = if (targetTypeHash != null) {
-                                currentContext.findAnonymousMethodByHash(targetTypeHash, op.name)
-                                    ?: targetTypeName?.let { currentContext.findAnonymousMethod(it, op.name) }
-                            } else if (targetTypeName != null) {
-                                currentContext.findAnonymousMethod(targetTypeName, op.name)
-                            } else null
-
-                            val paramNames = when (val params = lambda.params) {
-                                is ParsedLambdaParams.Untyped -> params.names
-                                is ParsedLambdaParams.Typed -> params.fields.map { it.name }
-                            }
-
-                            val paramTypes = if (op.paramType != null) {
-                                val expectedParam = convertTypeAnnotation(op.paramType!!)
-                                if (expectedParam is MezzeType.RecordType) {
-                                    paramNames.associateWith { name ->
-                                        expectedParam.fields[name] ?: MezzeType.VarType(TypeVar.fresh())
-                                    }
-                                } else {
-                                    paramNames.associateWith { expectedParam }
-                                }
-                            } else {
-                                when (val params = lambda.params) {
-                                    is ParsedLambdaParams.Typed -> params.fields.associate { entry ->
-                                        entry.name to convertTypeAnnotation(entry.type)
-                                    }
-                                    else -> paramNames.associateWith { name ->
-                                        if (name == Keywords.IT) targetType
-                                        else MezzeType.VarType(TypeVar.fresh())
-                                    }
-                                }
-                            }
-
-                            var bodyContext = currentContext
-                            for ((name, type) in paramTypes) {
-                                bodyContext = bodyContext.extendMono(name, type)
-                            }
-
-                            val constraintContext = ConstraintContext(
-                                bodyContext,
-                                expectedType = null,
-                                performerToEffect = performerToEffect,
-                                performerAddedEffects = performerAddedEffects,
-                                abilityNames = abilityNames,
-                                effectNames = effectNames,
-                                effectDeclarations = registry.effectDeclarations,
-                                abilityDeclarations = registry.abilityDeclarations,
-                                typeDeclarations = registry.typeDeclarations
-                            )
-
-                            val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
-
-                            val constraints = bodyResult.constraints.toMutableList()
-
-                            val registeredMethodType = methodInfo?.methodType
-                            if (registeredMethodType is MezzeType.FunctionType) {
-                                constraints.add(Constraint.Equality(
-                                    left = registeredMethodType.returnType,
-                                    right = bodyResult.type,
-                                    context = "Inherent impl return type for ${op.name}",
-                                    loc = op.loc,
-                                ))
-                                val paramRecordType = MezzeType.RecordType(fields = paramTypes, rowVar = null)
-                                constraints.add(Constraint.Equality(
-                                    left = registeredMethodType.paramType,
-                                    right = paramRecordType,
-                                    context = "Inherent impl param type for ${op.name}",
-                                    loc = op.loc,
-                                ))
-                            }
-
-                            val opKey = "_inherent_${item.loc}_${op.name}"
-                            // #230. The body type alone (used by #213 for
-                            // returns) doesn't include the impl's lambda
-                            // param TypeVars, which the solver populated
-                            // when the body's usage sites constrained them.
-                            // #180: also include the body's inferred effect
-                            // row. Without this, an impl method whose body
-                            // performs an effect (e.g.
-                            //   send = { it } -> Http.request { ... }
-                            // ) is registered as a pure FunctionType. The
-                            // call site `r.send {}` then looks effect-free
-                            // and any surrounding perform-block complains
-                            // "Expression is pure". The body's effects are
-                            // already computed at this point (bodyResult.
-                            // effects / effectInstances) — thread them in.
-                            val implParamRecord = MezzeType.RecordType(fields = paramTypes, rowVar = null)
-                            val bodyEffectRow: MezzeType.EffectRow? =
-                                if (bodyResult.effects.isEmpty() && bodyResult.effectInstances.isEmpty()) {
-                                    null
-                                } else {
-                                    MezzeType.EffectRow.simple(
-                                        effects = bodyResult.effects,
-                                        rowVar = null,
-                                        performed = false
-                                    ).copy(effectInstances = bodyResult.effectInstances)
-                                }
-                            val implFunctionType = MezzeType.FunctionType(
-                                paramType = implParamRecord,
-                                returnType = bodyResult.type,
-                                effects = bodyEffectRow
-                            )
-                            // #180: refresh the registered InherentMethodInfo
-                            // with the body-derived FunctionType. The original
-                            // entry registered by ContextBuilder.addAnonymousImpl
-                            // was built before the body was constraint-generated,
-                            // so its methodType lacks the body's inferred effect
-                            // row. Subsequent call sites read methodInfo.methodType
-                            // → wrapCallResultWithEffects, so the effects must be
-                            // present here for `r.send {}` to look effectful.
-                            if (methodInfo != null && bodyEffectRow != null) {
-                                val refreshedInfo = methodInfo.copy(methodType = implFunctionType)
-                                currentContext = currentContext.extendWithAnonymousMethod(refreshedInfo)
-                            }
-                            results[opKey] = ConstraintResult(
-                                type = implFunctionType,
-                                constraints = constraints,
-                                effects = bodyResult.effects,
-                                effectInstances = bodyResult.effectInstances,
-                                abilityConstraints = bodyResult.abilityConstraints,
-                                associatedTypeConstraints = bodyResult.associatedTypeConstraints,
-                                undefinedVariables = emptyList(),
-                                usedVariables = bodyResult.usedVariables,
-                                // #182: propagate the body's per-loc inferred
-                                // types so TypedAstBuilder can recover post-
-                                // solve types for variant constructions and
-                                // calls inside the impl method body. Without
-                                // this, sibling no-payload variants in the
-                                // body (e.g. `{ method = Get, body = None }`)
-                                // collapse onto the shared default
-                                // `TypeVar("unknown", 0)` and lose their
-                                // resolved types.
-                                callReturnTypes = bodyResult.callReturnTypes,
-                                methodCallResolutions = bodyResult.methodCallResolutions
-                            )
-                        }
+                        currentContext = processInherentImpl(item, currentContext, results)
                     }
                 } catch (e: TypeCheckError) {
                     collectedTypeCheckErrors.add(if (e.loc == null) TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata, code = e.code, hints = e.hints, fixHints = e.fixHints) else e)
@@ -619,6 +319,275 @@ class ConstraintGenerator(
             perBindingSubstitution = perBindingSubstitution,
             collectedTypeCheckErrors = collectedTypeCheckErrors
         )
+    }
+
+    private fun validateLetAnnotation(
+        item: ParsedLetDecl,
+        preConvertedAnnotationType: MezzeType,
+        result: ConstraintResult,
+        substitution: Substitution,
+    ) {
+        val annotation = item.typeAnnotation
+        val varName = (item.pattern as ParsedVariablePattern).name
+
+        val inferredTypeRaw = substitution.apply(result.type)
+        val inferredTypeWithAbilities = addAbilityConstraintsToFunctionType(
+            inferredTypeRaw, result.abilityConstraints, substitution
+        )
+
+        if (annotation is ParsedFunctionType) {
+            val abilityConstrainedVars = result.abilityConstraints.map { it.typeVar }.toSet()
+            annotationValidator.validatePolymorphismPreserved(
+                preConvertedAnnotationType, substitution, varName,
+                item.value.loc, abilityConstrainedVars
+            )
+        }
+
+        if (annotation is ParsedFunctionType &&
+            annotation.effects != null &&
+            !bodyContainsNativeCall(item.value)) {
+            annotationValidator.validateEffectsNotOverpromised(
+                preConvertedAnnotationType, inferredTypeWithAbilities,
+                varName, item.value.loc
+            )
+        }
+
+        if (annotation is ParsedFunctionType && annotation.abilityConstraints.isNotEmpty()) {
+            val resolvedAbilityConstraints = result.abilityConstraints.map { constraint ->
+                val resolvedTypeVar = substitution.apply(MezzeType.VarType(constraint.typeVar))
+                if (resolvedTypeVar is MezzeType.VarType) {
+                    constraint.copy(typeVar = resolvedTypeVar.variable)
+                } else {
+                    constraint
+                }
+            }
+            annotationValidator.validateAbilityOnCorrectTypeVar(
+                preConvertedAnnotationType, resolvedAbilityConstraints,
+                varName, substitution, item.value.loc
+            )
+        }
+    }
+
+    private fun buildBindingForContext(
+        solvedType: MezzeType,
+        bindingKey: BindingKey,
+        currentContext: TypingContext,
+        item: ParsedLetDecl,
+        result: ConstraintResult,
+        substitution: Substitution,
+        authoritativeType: MezzeType,
+    ): TypingContext.Binding {
+        val freeVars = collectFreeTypeVars(solvedType)
+        val contextVars = getContextFreeVars(currentContext, excludeBindings = setOf(bindingKey))
+        val quantifiableVars = freeVars - contextVars
+
+        val hasExplicitAbilityConstraints = when (val annotation = item.typeAnnotation) {
+            is ParsedFunctionType -> annotation.abilityConstraints.isNotEmpty()
+            else -> false
+        }
+
+        val isLambdaBinding = item.value is ParsedLambda
+
+        val hasUserDefinedAbilityConstraints = if (hasExplicitAbilityConstraints || isLambdaBinding) {
+            false
+        } else {
+            result.abilityConstraints.any { constraint ->
+                val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(constraint.abilityName)
+                if (isBuiltInAbility) {
+                    false
+                } else {
+                    val resolvedType = substitution.apply(MezzeType.VarType(constraint.typeVar))
+                    val resolvedTypeVar = if (resolvedType is MezzeType.VarType) resolvedType.variable else null
+                    val mainVarIsQuantifiable = resolvedTypeVar != null && resolvedTypeVar in quantifiableVars
+
+                    val typeArgsHaveQuantifiableVars = constraint.typeArgs.any { typeArg ->
+                        collectFreeTypeVars(typeArg).any { freeVar ->
+                            val resolved = substitution.apply(MezzeType.VarType(freeVar))
+                            resolved is MezzeType.VarType && resolved.variable in quantifiableVars
+                        }
+                    }
+
+                    mainVarIsQuantifiable || typeArgsHaveQuantifiableVars
+                }
+            }
+        }
+
+        if (quantifiableVars.isNotEmpty() && !hasUserDefinedAbilityConstraints) {
+            val abilityConstraints = if (hasExplicitAbilityConstraints && authoritativeType is MezzeType.FunctionType) {
+                authoritativeType.abilityConstraints.mapNotNull { constraint ->
+                    val typeVarArg = constraint.typeArgs.filterIsInstance<MezzeType.VarType>().firstOrNull()
+                    if (typeVarArg != null) {
+                        AbilityConstraint(
+                            abilityName = constraint.abilityName,
+                            typeParam = typeVarArg.variable.name,
+                            typeArgs = constraint.typeArgs
+                        )
+                    } else null
+                }
+            } else {
+                val quantifiableVarIds = quantifiableVars.map { it.id }.toSet()
+                result.abilityConstraints.mapNotNull { constraint ->
+                    val resolvedConstraintVar = substitution.apply(MezzeType.VarType(constraint.typeVar))
+                    val constraintVarId = if (resolvedConstraintVar is MezzeType.VarType) {
+                        resolvedConstraintVar.variable.id
+                    } else {
+                        constraint.typeVar.id
+                    }
+                    if (constraintVarId in quantifiableVarIds) {
+                        val quantVar = quantifiableVars.find { it.id == constraintVarId }
+                        val resolvedTypeArgs = constraint.typeArgs.map { substitution.apply(it) }
+                        AbilityConstraint(
+                            abilityName = constraint.abilityName,
+                            typeParam = quantVar?.name ?: constraint.typeVar.name,
+                            typeArgs = resolvedTypeArgs
+                        )
+                    } else null
+                }
+            }
+
+            val scheme = TypeScheme(
+                quantifiedVars = quantifiableVars.toList(),
+                constraints = abilityConstraints,
+                type = solvedType
+            )
+            return TypingContext.Binding.Polymorphic(scheme, contentHash = null)
+        } else {
+            return TypingContext.Binding.Monomorphic(solvedType, contentHash = null)
+        }
+    }
+
+    private fun processInherentImpl(
+        item: ParsedImplAbilityDecl,
+        context: TypingContext,
+        results: MutableMap<String, ConstraintResult>,
+    ): TypingContext {
+        var currentContext = context
+        val targetTypeName = item.targetTypes.firstOrNull()?.let { ann ->
+            when (ann) {
+                is ParsedNamedType -> ann.name
+                is ParsedTypeApp -> ann.constructor
+                else -> null
+            }
+        }
+        val targetTypeHash = targetTypeName?.let { registry.typeDeclarations[it]?.contentHash }
+
+        for (op in item.operations) {
+            val targetType = if (item.targetTypes.isNotEmpty()) {
+                convertTypeAnnotation(item.targetTypes.first())
+            } else {
+                MezzeType.VarType(TypeVar.fresh())
+            }
+
+            if (op.implementation !is ParsedLambda) continue
+            val lambda = op.implementation as ParsedLambda
+
+            val methodInfo = if (targetTypeHash != null) {
+                currentContext.findAnonymousMethodByHash(targetTypeHash, op.name)
+                    ?: targetTypeName?.let { currentContext.findAnonymousMethod(it, op.name) }
+            } else if (targetTypeName != null) {
+                currentContext.findAnonymousMethod(targetTypeName, op.name)
+            } else null
+
+            val paramNames = when (val params = lambda.params) {
+                is ParsedLambdaParams.Untyped -> params.names
+                is ParsedLambdaParams.Typed -> params.fields.map { it.name }
+            }
+
+            val paramTypes = if (op.paramType != null) {
+                val expectedParam = convertTypeAnnotation(op.paramType!!)
+                if (expectedParam is MezzeType.RecordType) {
+                    paramNames.associateWith { name ->
+                        expectedParam.fields[name] ?: MezzeType.VarType(TypeVar.fresh())
+                    }
+                } else {
+                    paramNames.associateWith { expectedParam }
+                }
+            } else {
+                when (val params = lambda.params) {
+                    is ParsedLambdaParams.Typed -> params.fields.associate { entry ->
+                        entry.name to convertTypeAnnotation(entry.type)
+                    }
+                    else -> paramNames.associateWith { name ->
+                        if (name == Keywords.IT) targetType
+                        else MezzeType.VarType(TypeVar.fresh())
+                    }
+                }
+            }
+
+            var bodyContext = currentContext
+            for ((name, type) in paramTypes) {
+                bodyContext = bodyContext.extendMono(name, type)
+            }
+
+            val constraintContext = ConstraintContext(
+                bodyContext,
+                expectedType = null,
+                performerToEffect = performerToEffect,
+                performerAddedEffects = performerAddedEffects,
+                abilityNames = abilityNames,
+                effectNames = effectNames,
+                effectDeclarations = registry.effectDeclarations,
+                abilityDeclarations = registry.abilityDeclarations,
+                typeDeclarations = registry.typeDeclarations
+            )
+
+            val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
+
+            val constraints = bodyResult.constraints.toMutableList()
+
+            val registeredMethodType = methodInfo?.methodType
+            if (registeredMethodType is MezzeType.FunctionType) {
+                constraints.add(Constraint.Equality(
+                    left = registeredMethodType.returnType,
+                    right = bodyResult.type,
+                    context = "Inherent impl return type for ${op.name}",
+                    loc = op.loc,
+                ))
+                val paramRecordType = MezzeType.RecordType(fields = paramTypes, rowVar = null)
+                constraints.add(Constraint.Equality(
+                    left = registeredMethodType.paramType,
+                    right = paramRecordType,
+                    context = "Inherent impl param type for ${op.name}",
+                    loc = op.loc,
+                ))
+            }
+
+            val opKey = "_inherent_${item.loc}_${op.name}"
+            val implParamRecord = MezzeType.RecordType(fields = paramTypes, rowVar = null)
+            val bodyEffectRow: MezzeType.EffectRow? =
+                if (bodyResult.effects.isEmpty() && bodyResult.effectInstances.isEmpty()) {
+                    null
+                } else {
+                    MezzeType.EffectRow.simple(
+                        effects = bodyResult.effects,
+                        rowVar = null,
+                        performed = false
+                    ).copy(effectInstances = bodyResult.effectInstances)
+                }
+            val implFunctionType = MezzeType.FunctionType(
+                paramType = implParamRecord,
+                returnType = bodyResult.type,
+                effects = bodyEffectRow
+            )
+            // #180: refresh the registered InherentMethodInfo with the body-derived FunctionType
+            if (methodInfo != null && bodyEffectRow != null) {
+                val refreshedInfo = methodInfo.copy(methodType = implFunctionType)
+                currentContext = currentContext.extendWithAnonymousMethod(refreshedInfo)
+            }
+            results[opKey] = ConstraintResult(
+                type = implFunctionType,
+                constraints = constraints,
+                effects = bodyResult.effects,
+                effectInstances = bodyResult.effectInstances,
+                abilityConstraints = bodyResult.abilityConstraints,
+                associatedTypeConstraints = bodyResult.associatedTypeConstraints,
+                undefinedVariables = emptyList(),
+                usedVariables = bodyResult.usedVariables,
+                callReturnTypes = bodyResult.callReturnTypes,
+                methodCallResolutions = bodyResult.methodCallResolutions
+            )
+        }
+        return currentContext
     }
 
     private fun generateLetBinding(
@@ -807,35 +776,8 @@ class ConstraintGenerator(
         }
 
         val typeVars = mutableSetOf<TypeVar>()
-        fun collectTypeVars(t: MezzeType) {
-            when (t) {
-                is MezzeType.VarType -> typeVars.add(t.variable)
-                is MezzeType.RecordType -> t.fields.values.forEach { collectTypeVars(it) }
-                is MezzeType.FunctionType -> {
-                    collectTypeVars(t.paramType)
-                    collectTypeVars(t.returnType)
-                }
-                is MezzeType.TypeApplication -> t.args.forEach { collectTypeVars(it) }
-                is MezzeType.VariantType -> t.constructors.values.forEach { it?.let { collectTypeVars(it) } }
-                is MezzeType.ListType -> collectTypeVars(t.elementType)
-                is MezzeType.SeqType -> collectTypeVars(t.elementType)
-                is MezzeType.SetType -> collectTypeVars(t.elementType)
-                is MezzeType.SortedMapType -> {
-                    collectTypeVars(t.keyType)
-                    collectTypeVars(t.valueType)
-                }
-                is MezzeType.SortedSetType -> collectTypeVars(t.elementType)
-                is MezzeType.MapType -> {
-                    collectTypeVars(t.keyType)
-                    collectTypeVars(t.valueType)
-                }
-                is MezzeType.SuspendedType -> collectTypeVars(t.valueType)
-                else -> {}
-            }
-        }
-
-        collectTypeVars(type.paramType)
-        collectTypeVars(type.returnType)
+        collectTypeVariables(type.paramType, typeVars)
+        collectTypeVariables(type.returnType, typeVars)
 
         DebugLogger.debugSection(Category.ConstraintGenerator, "Collected type vars") {
             typeVars.map { "* ${it.name} (id=${it.id})" }

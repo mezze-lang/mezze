@@ -1,0 +1,2 @@
+T0210_ANNOTATION_VS_BODY_MISMATCH
+Type annotation mismatch for 'x': declared as Int but expression has type Str

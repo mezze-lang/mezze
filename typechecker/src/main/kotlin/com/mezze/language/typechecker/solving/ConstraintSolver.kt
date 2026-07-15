@@ -70,31 +70,78 @@ class ConstraintSolver(
         val resolvedAbilities = mutableSetOf<Constraint.AbilityRequired>()
 
         val (inferredEqualities, inferenceErrors) = variantSolver.inferVariantTypes(constraints)
-
-        if (inferenceErrors.isNotEmpty() && constraints.isNotEmpty()) {
-            val contextConstraint = constraints.first()
-            for (errorMsg in inferenceErrors) {
-                errors.add(
-                    ConstraintError(
-                        message = errorMsg,
-                        constraint = contextConstraint,
-                        context = "Variant type inference"
-                    )
-                )
-            }
-        }
+        collectInferenceErrors(inferenceErrors, constraints, errors)
 
         val allConstraints = constraints + inferredEqualities
-
         val (mustBeOpenConstraints, constraintsAfterOpen) = allConstraints.partition { it is Constraint.MustBeOpen }
         for (constraint in mustBeOpenConstraints) {
-            val result = solveConstraint(constraint, substitution)
+            solveConstraint(constraint, substitution)
         }
 
         val (abilityConstraints, nonAbilityConstraints) = constraintsAfterOpen.partition {
             it is Constraint.AbilityRequired || it is Constraint.AssociatedTypeResolution
         }
 
+        substitution = solveAbilityConstraints(abilityConstraints, substitution, warnings, errors, resolvedAbilities)
+
+        val hcResult = solveHasConstructorFixpoint(nonAbilityConstraints, substitution, warnings, errors)
+        substitution = hcResult.substitution
+        val remainingHasConstructors = hcResult.remaining
+        val otherConstraints = hcResult.other
+
+        resolveMustBeOpenRowVars(substitution)
+        DebugLogger.debugSection(Category.ConstraintSolver, "Row Variables") {
+            listOf(
+                "patternBasedRowVars = $patternBasedRowVars",
+                "mustBeOpenRowVars = $mustBeOpenRowVars"
+            )
+        }
+        substitution = variantSolver.closePatternBasedVariants(substitution)
+
+        substitution = solveMainWorklist(remainingHasConstructors + otherConstraints, substitution, warnings, errors)
+        substitution = finalizeDeferredAbilities(substitution, errors)
+        resolveMustBeOpenRowVars(substitution)
+
+        return if (errors.isEmpty()) {
+            SolveResult.Success(
+                substitution = substitution,
+                warnings = warnings,
+                resolvedAbilityConstraints = resolvedAbilities,
+                mustBeOpenTypes = mustBeOpenTypes.toSet(),
+                mustBeOpenRowVars = mustBeOpenRowVars.toSet(),
+                mustBeOpenBindings = mustBeOpenBindings.toSet(),
+                patternBasedRowVars = patternBasedRowVars.toSet()
+            )
+        } else {
+            SolveResult.Failure(errors)
+        }
+    }
+
+    private fun collectInferenceErrors(
+        inferenceErrors: List<String>,
+        constraints: List<Constraint>,
+        errors: MutableList<ConstraintError>
+    ) {
+        if (inferenceErrors.isNotEmpty() && constraints.isNotEmpty()) {
+            val contextConstraint = constraints.first()
+            for (errorMsg in inferenceErrors) {
+                errors.add(ConstraintError(
+                    message = errorMsg,
+                    constraint = contextConstraint,
+                    context = "Variant type inference"
+                ))
+            }
+        }
+    }
+
+    private fun solveAbilityConstraints(
+        abilityConstraints: List<Constraint>,
+        inputSubst: Substitution,
+        warnings: MutableList<String>,
+        errors: MutableList<ConstraintError>,
+        resolvedAbilities: MutableSet<Constraint.AbilityRequired>
+    ): Substitution {
+        var substitution = inputSubst
         for (constraint in abilityConstraints) {
             val appliedConstraint = applySubstitutionToConstraint(constraint, substitution)
             val result = solveConstraint(appliedConstraint, substitution)
@@ -103,7 +150,6 @@ class ConstraintSolver(
                 is ConstraintResult.Success -> {
                     substitution = result.substitution.compose(substitution)
                     warnings.addAll(result.warnings)
-
                     if (appliedConstraint is Constraint.AbilityRequired) {
                         if (result.warnings.none { it.contains("deferred") }) {
                             resolvedAbilities.add(appliedConstraint)
@@ -111,35 +157,46 @@ class ConstraintSolver(
                     }
                 }
                 is ConstraintResult.Failure -> {
-                    errors.add(
-                        ConstraintError(
-                            message = result.message,
-                            constraint = appliedConstraint,
-                            context = appliedConstraint.context
-                        )
-                    )
+                    errors.add(ConstraintError(
+                        message = result.message,
+                        constraint = appliedConstraint,
+                        context = appliedConstraint.context
+                    ))
                 }
-                is ConstraintResult.Deferred -> {
-                }
+                is ConstraintResult.Deferred -> {}
             }
         }
+        return substitution
+    }
 
+    private class HasConstructorResult(
+        val substitution: Substitution,
+        val remaining: List<Constraint.HasConstructor>,
+        val other: List<Constraint>
+    )
+
+    private fun solveHasConstructorFixpoint(
+        nonAbilityConstraints: List<Constraint>,
+        inputSubst: Substitution,
+        warnings: MutableList<String>,
+        errors: MutableList<ConstraintError>
+    ): HasConstructorResult {
         val hasConstructorConstraints = nonAbilityConstraints.filterIsInstance<Constraint.HasConstructor>()
         val otherConstraints = nonAbilityConstraints.filter { it !is Constraint.HasConstructor }
 
-        val hasConstructorWorklist = hasConstructorConstraints.toMutableList()
-        var hcMadeProgress = true
-        var hcIterationCount = 0
+        var substitution = inputSubst
+        val worklist = hasConstructorConstraints.toMutableList()
+        var madeProgress = true
+        var iterationCount = 0
 
-        while (hcMadeProgress && hasConstructorWorklist.isNotEmpty() && hcIterationCount < 50) {
-            hcMadeProgress = false
-            hcIterationCount++
+        while (madeProgress && worklist.isNotEmpty() && iterationCount < 50) {
+            madeProgress = false
+            iterationCount++
 
-            val iterator = hasConstructorWorklist.iterator()
+            val iterator = worklist.iterator()
             while (iterator.hasNext()) {
                 val constraint = iterator.next()
                 val appliedConstraint = applySubstitutionToConstraint(constraint, substitution) as Constraint.HasConstructor
-
                 val result = variantSolver.solveHasConstructor(appliedConstraint, substitution, constraint)
 
                 when (result) {
@@ -147,7 +204,7 @@ class ConstraintSolver(
                         val newSubst = result.substitution
                         if (newSubst.mappings.isNotEmpty()) {
                             substitution = newSubst.compose(substitution)
-                            hcMadeProgress = true
+                            madeProgress = true
                         }
                         warnings.addAll(result.warnings)
                         iterator.remove()
@@ -156,22 +213,23 @@ class ConstraintSolver(
                         val constraintType = appliedConstraint.variantType
                         if (constraintType is MezzeType.VarType && !result.terminal) {
                         } else {
-                            errors.add(
-                                ConstraintError(
-                                    message = result.message,
-                                    constraint = appliedConstraint,
-                                    context = appliedConstraint.context
-                                )
-                            )
+                            errors.add(ConstraintError(
+                                message = result.message,
+                                constraint = appliedConstraint,
+                                context = appliedConstraint.context
+                            ))
                             iterator.remove()
                         }
                     }
-                    is ConstraintResult.Deferred -> {
-                    }
+                    is ConstraintResult.Deferred -> {}
                 }
             }
         }
 
+        return HasConstructorResult(substitution, worklist, otherConstraints)
+    }
+
+    private fun resolveMustBeOpenRowVars(substitution: Substitution) {
         for (typeVar in mustBeOpenTypes) {
             val resolved = substitution.apply(MezzeType.VarType(typeVar))
             DebugLogger.debug(Category.ConstraintSolver) { "MustBeOpen typeVar=$typeVar resolved to $resolved" }
@@ -180,20 +238,65 @@ class ConstraintSolver(
                 DebugLogger.debug(Category.ConstraintSolver) { "Added rowVar=${resolved.rowVar} to mustBeOpenRowVars" }
             }
         }
+    }
 
-        DebugLogger.debugSection(Category.ConstraintSolver, "Row Variables") {
-            listOf(
-                "patternBasedRowVars = $patternBasedRowVars",
-                "mustBeOpenRowVars = $mustBeOpenRowVars"
-            )
+    private fun mergeVariantConstructors(
+        originalConstraint: Constraint.Equality,
+        appliedEq: Constraint.Equality,
+        leftType: MezzeType.VariantType,
+        rightType: MezzeType.VariantType,
+        substitution: Substitution
+    ): Substitution? {
+        val leftCtors = leftType.constructors.keys
+        val rightCtors = rightType.constructors.keys
+        if (leftCtors == rightCtors) return null
+
+        val isMatchContext = originalConstraint.isMatchCaseContext
+        val bothOpen = leftType.rowVar != null && rightType.rowVar != null
+        val eitherPatternBased = (leftType.rowVar != null && patternBasedRowVars.contains(leftType.rowVar)) ||
+                                 (rightType.rowVar != null && patternBasedRowVars.contains(rightType.rowVar))
+
+        if (!isMatchContext && !(bothOpen && !eitherPatternBased)) return null
+
+        val mergedConstructors = leftType.constructors.toMutableMap()
+        for ((name, dataType) in rightType.constructors) {
+            if (name !in mergedConstructors) {
+                mergedConstructors[name] = dataType
+            }
         }
 
-        substitution = variantSolver.closePatternBasedVariants(substitution)
+        val mergedVariant = MezzeType.VariantType(
+            constructors = mergedConstructors,
+            rowVar = leftType.rowVar ?: rightType.rowVar,
+            typeName = leftType.typeName ?: rightType.typeName,
+            typeHash = leftType.typeHash ?: rightType.typeHash
+        )
 
-        val allRemainingConstraints = hasConstructorWorklist + otherConstraints
-        val sortedConstraints = allRemainingConstraints.sortedBy { constraintPriority(it) }
+        val updatedMappings = mutableMapOf<TypeVar, MezzeType>()
+        if (originalConstraint.left is MezzeType.VarType) {
+            updatedMappings[(originalConstraint.left as MezzeType.VarType).variable] = mergedVariant
+        }
+        if (originalConstraint.right is MezzeType.VarType) {
+            updatedMappings[(originalConstraint.right as MezzeType.VarType).variable] = mergedVariant
+        }
+        for ((typeVar, mappedType) in substitution.mappings) {
+            if (mappedType == leftType || mappedType == rightType) {
+                updatedMappings[typeVar] = mergedVariant
+            }
+        }
+
+        return if (updatedMappings.isNotEmpty()) Substitution(substitution.mappings + updatedMappings) else null
+    }
+
+    private fun solveMainWorklist(
+        remainingConstraints: List<Constraint>,
+        inputSubst: Substitution,
+        warnings: MutableList<String>,
+        errors: MutableList<ConstraintError>
+    ): Substitution {
+        var substitution = inputSubst
+        val sortedConstraints = remainingConstraints.sortedBy { constraintPriority(it) }
         val constraintWorklist = sortedConstraints.toMutableList()
-        val processedInThisPass = mutableSetOf<Constraint>()
         var madeProgress = true
         var iterationCount = 0
         val maxIterations = 100
@@ -201,7 +304,6 @@ class ConstraintSolver(
         while (madeProgress && constraintWorklist.isNotEmpty() && iterationCount < maxIterations) {
             madeProgress = false
             iterationCount++
-            processedInThisPass.clear()
 
             DebugLogger.debug(Category.ConstraintSolver) {
                 "Worklist iteration $iterationCount, ${constraintWorklist.size} constraints remaining"
@@ -210,7 +312,6 @@ class ConstraintSolver(
             val iterator = constraintWorklist.iterator()
             while (iterator.hasNext()) {
                 val constraint = iterator.next()
-
                 val appliedConstraint = applySubstitutionToConstraint(constraint, substitution)
 
                 val result = when (constraint) {
@@ -228,64 +329,20 @@ class ConstraintSolver(
                         warnings.addAll(result.warnings)
 
                         if (constraint is Constraint.Equality) {
-                            val originalConstraint = constraint
                             val appliedEq = appliedConstraint as Constraint.Equality
                             val leftType = substitution.apply(appliedEq.left)
                             val rightType = substitution.apply(appliedEq.right)
 
                             if (leftType is MezzeType.VariantType && rightType is MezzeType.VariantType) {
-                                val leftCtors = leftType.constructors.keys
-                                val rightCtors = rightType.constructors.keys
-
-                                if (leftCtors != rightCtors) {
-                                    val isMatchContext = originalConstraint.isMatchCaseContext
-
-                                    val bothOpen = leftType.rowVar != null && rightType.rowVar != null
-                                    val eitherPatternBased = (leftType.rowVar != null && patternBasedRowVars.contains(leftType.rowVar)) ||
-                                                             (rightType.rowVar != null && patternBasedRowVars.contains(rightType.rowVar))
-
-                                    if (isMatchContext || (bothOpen && !eitherPatternBased)) {
-                                        val mergedConstructors = leftType.constructors.toMutableMap()
-                                        for ((name, dataType) in rightType.constructors) {
-                                            if (name !in mergedConstructors) {
-                                                mergedConstructors[name] = dataType
-                                            }
-                                        }
-
-                                        val mergedRowVar = leftType.rowVar ?: rightType.rowVar
-                                        val mergedVariant = MezzeType.VariantType(
-                                            constructors = mergedConstructors,
-                                            rowVar = mergedRowVar,
-                                            typeName = leftType.typeName ?: rightType.typeName,
-                                            typeHash = leftType.typeHash ?: rightType.typeHash
-                                        )
-
-                                        val updatedMappings = mutableMapOf<TypeVar, MezzeType>()
-                                        if (originalConstraint.left is MezzeType.VarType) {
-                                            updatedMappings[(originalConstraint.left as MezzeType.VarType).variable] = mergedVariant
-                                        }
-                                        if (originalConstraint.right is MezzeType.VarType) {
-                                            updatedMappings[(originalConstraint.right as MezzeType.VarType).variable] = mergedVariant
-                                        }
-
-                                        for ((typeVar, mappedType) in substitution.mappings) {
-                                            val resolved = substitution.apply(mappedType)
-                                            if (resolved == leftType || resolved == rightType) {
-                                                updatedMappings[typeVar] = mergedVariant
-                                            }
-                                        }
-
-                                        if (updatedMappings.isNotEmpty()) {
-                                            substitution = Substitution(substitution.mappings + updatedMappings)
-                                            madeProgress = true
-                                        }
-                                    }
+                                val merged = mergeVariantConstructors(constraint, appliedEq, leftType, rightType, substitution)
+                                if (merged != null) {
+                                    substitution = merged
+                                    madeProgress = true
                                 }
                             }
                         }
 
                         iterator.remove()
-                        processedInThisPass.add(constraint)
                     }
                     is ConstraintResult.Failure -> {
                         val constraintType = when (appliedConstraint) {
@@ -296,18 +353,15 @@ class ConstraintSolver(
 
                         if (constraintType is MezzeType.VarType) {
                         } else {
-                            errors.add(
-                                ConstraintError(
-                                    message = result.message,
-                                    constraint = appliedConstraint,
-                                    context = appliedConstraint.context
-                                )
-                            )
+                            errors.add(ConstraintError(
+                                message = result.message,
+                                constraint = appliedConstraint,
+                                context = appliedConstraint.context
+                            ))
                             iterator.remove()
                         }
                     }
-                    is ConstraintResult.Deferred -> {
-                    }
+                    is ConstraintResult.Deferred -> {}
                 }
             }
         }
@@ -319,26 +373,31 @@ class ConstraintSolver(
                 else -> solveConstraint(appliedConstraint, substitution)
             }
             if (result is ConstraintResult.Failure) {
-                errors.add(
-                    ConstraintError(
-                        message = result.message,
-                        constraint = appliedConstraint,
-                        context = appliedConstraint.context
-                    )
-                )
+                errors.add(ConstraintError(
+                    message = result.message,
+                    constraint = appliedConstraint,
+                    context = appliedConstraint.context
+                ))
             }
         }
+
+        return substitution
+    }
+
+    private fun finalizeDeferredAbilities(
+        inputSubst: Substitution,
+        errors: MutableList<ConstraintError>
+    ): Substitution {
+        var substitution = inputSubst
 
         val validationResult = abilityChecker.validateAbilityConstraints(substitution)
         if (validationResult != null) {
             val (validationError, errorLoc) = validationResult
-            errors.add(
-                ConstraintError(
-                    message = validationError,
-                    constraint = Constraint.Equality(MezzeType.IntType, MezzeType.IntType, loc = errorLoc),
-                    context = "ability constraint validation"
-                )
-            )
+            errors.add(ConstraintError(
+                message = validationError,
+                constraint = Constraint.Equality(MezzeType.IntType, MezzeType.IntType, loc = errorLoc),
+                context = "ability constraint validation"
+            ))
         }
 
         val deferredInference = abilityChecker.getDeferredInference()
@@ -370,40 +429,18 @@ class ConstraintSolver(
                         }
                     }
                     is ConstraintResult.Failure -> {
-                        errors.add(
-                            ConstraintError(
-                                message = result.message,
-                                constraint = constraint,
-                                context = constraint.context
-                            )
-                        )
+                        errors.add(ConstraintError(
+                            message = result.message,
+                            constraint = constraint,
+                            context = constraint.context
+                        ))
                     }
-                    is ConstraintResult.Deferred -> {
-                    }
+                    is ConstraintResult.Deferred -> {}
                 }
             }
         }
 
-        for (typeVar in mustBeOpenTypes) {
-            val resolvedType = substitution.apply(MezzeType.VarType(typeVar))
-            if (resolvedType is MezzeType.VariantType) {
-                resolvedType.rowVar?.let { mustBeOpenRowVars.add(it) }
-            }
-        }
-
-        return if (errors.isEmpty()) {
-            SolveResult.Success(
-                substitution = substitution,
-                warnings = warnings,
-                resolvedAbilityConstraints = resolvedAbilities,
-                mustBeOpenTypes = mustBeOpenTypes.toSet(),
-                mustBeOpenRowVars = mustBeOpenRowVars.toSet(),
-                mustBeOpenBindings = mustBeOpenBindings.toSet(),
-                patternBasedRowVars = patternBasedRowVars.toSet()
-            )
-        } else {
-            SolveResult.Failure(errors)
-        }
+        return substitution
     }
 
     internal sealed class ConstraintResult {
@@ -434,6 +471,10 @@ class ConstraintSolver(
     }
 
     private fun solveEquality(constraint: Constraint.Equality): ConstraintResult {
+        // SuspendedType wrappers are stripped because effects are tracked separately
+        // in ConstraintResult, not in the Equality constraint itself. The constraint
+        // generation may wrap types in SuspendedType to carry effect info, but by the
+        // time we unify, effect tracking has already been handled upstream.
         val left = if (constraint.left is MezzeType.SuspendedType) (constraint.left as MezzeType.SuspendedType).valueType else constraint.left
         val right = if (constraint.right is MezzeType.SuspendedType) (constraint.right as MezzeType.SuspendedType).valueType else constraint.right
 
@@ -462,7 +503,7 @@ class ConstraintSolver(
         return when (result) {
             is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
             is UnificationResult.Failure -> ConstraintResult.Failure(
-                "Subsumption failed: ${constraint.general} does not subsume ${constraint.specific}"
+                "Type ${prettyPrintType(constraint.specific)} is not compatible with ${prettyPrintType(constraint.general)}: ${result.message}"
             )
         }
     }
@@ -561,7 +602,7 @@ class ConstraintSolver(
                 }
                 is TypeExpansionResult.NotFound -> {
                     return ConstraintResult.Failure(
-                        "Cannot expand type application ${recordType.constructor} to check field '$fieldName'"
+                        "Cannot resolve type '${recordType.constructor}' to check for field '$fieldName'"
                     )
                 }
             }

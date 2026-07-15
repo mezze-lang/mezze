@@ -156,7 +156,7 @@ internal class AnnotationValidator(
             constraint.context == null || !constraint.context.startsWith("Type annotation on")
         }
 
-        fun areUnified(tv1: TypeVar, tv2: TypeVar): Boolean {
+        fun resolveToSameType(tv1: TypeVar, tv2: TypeVar): Boolean {
             if (tv1.id == tv2.id) return true
             val resolved1 = substitution.apply(MezzeType.VarType(tv1))
             val resolved2 = substitution.apply(MezzeType.VarType(tv2))
@@ -179,7 +179,7 @@ internal class AnnotationValidator(
                     matchingAnnotated.typeArgs.any { annotatedTypeArg ->
                         when {
                             annotatedTypeArg is MezzeType.VarType ->
-                                areUnified(usage.typeVar, annotatedTypeArg.variable)
+                                resolveToSameType(usage.typeVar, annotatedTypeArg.variable)
                             else -> resolvedUsageTypeVar == annotatedTypeArg
                         }
                     }
@@ -200,7 +200,7 @@ internal class AnnotationValidator(
                 }
             } else {
                 val isOnAnnotationTypeVar = annotationTypeVars.any { annotationVar ->
-                    areUnified(usage.typeVar, annotationVar)
+                    resolveToSameType(usage.typeVar, annotationVar)
                 }
                 if (isOnAnnotationTypeVar) {
                     throw TypeCheckError(
@@ -221,36 +221,10 @@ internal class AnnotationValidator(
         return result
     }
 
-    private fun containsConcreteTypes(type: MezzeType): Boolean {
-        return when (type) {
-            is MezzeType.VarType -> false
-            is MezzeType.FunctionType ->
-                containsConcreteTypes(type.paramType) || containsConcreteTypes(type.returnType)
-            is MezzeType.RecordType ->
-                type.fields.values.any { containsConcreteTypes(it) }
-            is MezzeType.VariantType -> {
-                type.constructors.isNotEmpty() || type.constructors.values.any { it != null && containsConcreteTypes(it) }
-            }
-            is MezzeType.TypeApplication ->
-                type.args.any { containsConcreteTypes(it) }
-            is MezzeType.SeqType ->
-                containsConcreteTypes(type.elementType)
-            is MezzeType.ListType ->
-                containsConcreteTypes(type.elementType)
-            is MezzeType.SetType ->
-                containsConcreteTypes(type.elementType)
-            is MezzeType.SortedMapType ->
-                containsConcreteTypes(type.keyType) || containsConcreteTypes(type.valueType)
-            is MezzeType.SortedSetType ->
-                containsConcreteTypes(type.elementType)
-            is MezzeType.MapType ->
-                containsConcreteTypes(type.keyType) || containsConcreteTypes(type.valueType)
-            is MezzeType.IntType,
-            is MezzeType.StringType,
-            is MezzeType.BoolType,
-            is MezzeType.FloatType -> true
-            else -> true
-        }
+    private fun containsConcreteTypes(type: MezzeType): Boolean = when (type) {
+        is MezzeType.VarType -> false
+        is MezzeType.VariantType -> type.constructors.isNotEmpty() || type.anyChild { containsConcreteTypes(it) }
+        else -> type.anyChild { containsConcreteTypes(it) } || !type.anyChild { true }
     }
 
     private fun resolveToRecordType(type: MezzeType): Pair<Set<String>, Boolean>? {

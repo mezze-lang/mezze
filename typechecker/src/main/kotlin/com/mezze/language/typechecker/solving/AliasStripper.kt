@@ -84,11 +84,20 @@ object AliasStripper {
         is MezzeType.SortedSetType -> MezzeType.SortedSetType(
             stripImpl(type.elementType, inScope, registry, recursionGuard)
         )
+        is MezzeType.ListType -> MezzeType.ListType(stripImpl(type.elementType, inScope, registry, recursionGuard))
+        is MezzeType.SetType -> MezzeType.SetType(stripImpl(type.elementType, inScope, registry, recursionGuard))
         is MezzeType.SuspendedType -> MezzeType.SuspendedType(
             valueType = stripImpl(type.valueType, inScope, registry, recursionGuard),
             effects = stripEffectRow(type.effects, inScope, registry, recursionGuard)
         )
-        else -> type
+        is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+            name = type.name, constructor = type.constructor,
+            wrappedType = stripImpl(type.wrappedType, inScope, registry, recursionGuard)
+        )
+        is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
+        is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
+        is MezzeType.FracType, is MezzeType.OrderingType, is MezzeType.BytesType,
+        is MezzeType.ByteBufferType, is MezzeType.CharType, is MezzeType.EffectRow -> type
     }
 
     private fun stripTypeApplication(

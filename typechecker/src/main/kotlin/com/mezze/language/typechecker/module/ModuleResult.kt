@@ -145,6 +145,7 @@ sealed class ModuleError(override val message: String) : Exception(message) {
         else
             "Module '$fromModule' cannot access internal module '$toModule'"
     ) {
+        override val code = ErrorCode.M0803_NOT_EXPORTED
         override val hints: List<String> = listOf(
             "internal modules can only be used by sibling modules inside the same package"
         )

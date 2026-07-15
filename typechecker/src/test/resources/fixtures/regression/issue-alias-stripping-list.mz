@@ -1,0 +1,10 @@
+# Regression: ListType/SetType children not alias-stripped
+# Fixed in this session — ListType and SetType elements were not
+# being recursively stripped by AliasStripper, so type aliases
+# inside list element types retained nominal walls when out of scope
+
+type Pair = { fst: Int, snd: Int }
+
+let pairs = [{ fst = 1, snd = 2 }, { fst = 3, snd = 4 }]
+
+pairs

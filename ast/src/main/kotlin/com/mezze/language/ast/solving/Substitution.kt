@@ -15,21 +15,19 @@ data class Substitution(
             return type
         }
 
-        return applyWithVisited(type, emptySet())
+        return applyWithVisited(type, mutableSetOf())
     }
 
     private fun isConcreteType(type: MezzeType): Boolean = when (type) {
-        is MezzeType.IntType,
-        is MezzeType.FloatType,
-        is MezzeType.StringType,
-        is MezzeType.BoolType,
-        is MezzeType.NatType,
-        is MezzeType.FracType,
-        is MezzeType.OrderingType,
-        is MezzeType.BytesType,
-        is MezzeType.ByteBufferType,
+        is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
+        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+        is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
         is MezzeType.CharType -> true
-        else -> false
+        is MezzeType.VarType, is MezzeType.FunctionType, is MezzeType.RecordType,
+        is MezzeType.VariantType, is MezzeType.TypeApplication, is MezzeType.ListType,
+        is MezzeType.MapType, is MezzeType.SetType, is MezzeType.SortedMapType,
+        is MezzeType.SortedSetType, is MezzeType.SeqType, is MezzeType.SuspendedType,
+        is MezzeType.NewtypeType, is MezzeType.EffectRow -> false
     }
 
     private fun needsSubstitution(type: MezzeType): Boolean {
@@ -82,8 +80,7 @@ data class Substitution(
         }
     }
 
-    // Tracks visited type variables to prevent infinite recursion from cyclic substitutions.
-    private fun applyWithVisited(type: MezzeType, visitedVars: Set<TypeVar>): MezzeType {
+    private fun applyWithVisited(type: MezzeType, visitedVars: MutableSet<TypeVar>): MezzeType {
         if (visitedVars.isEmpty() && !needsSubstitution(type)) {
             return type
         }
@@ -93,7 +90,10 @@ data class Substitution(
                 if (type.variable in visitedVars) return type
                 val substitutedType = mappings[type.variable]
                 if (substitutedType != null) {
-                    applyWithVisited(substitutedType, visitedVars + type.variable)
+                    visitedVars.add(type.variable)
+                    val result = applyWithVisited(substitutedType, visitedVars)
+                    visitedVars.remove(type.variable)
+                    result
                 } else {
                     type
                 }
@@ -191,7 +191,7 @@ data class Substitution(
         }
     }
 
-    private fun applyToEffectRowWithVisited(effectRow: MezzeType.EffectRow, visitedVars: Set<TypeVar>): MezzeType.EffectRow {
+    private fun applyToEffectRowWithVisited(effectRow: MezzeType.EffectRow, visitedVars: MutableSet<TypeVar>): MezzeType.EffectRow {
         if (effectRow.effectInstances.isEmpty()) {
             return effectRow
         }
@@ -314,7 +314,10 @@ fun closeGeneratedRowVars(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
         type.constructor,
         closeGeneratedRowVars(type.wrappedType, mustBeOpenRowVars)
     )
-    else -> type
+    is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
+    is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
+    is MezzeType.FracType, is MezzeType.OrderingType, is MezzeType.BytesType,
+    is MezzeType.ByteBufferType, is MezzeType.CharType, is MezzeType.EffectRow -> type
 }
 
 fun occursCheck(typeVar: TypeVar, type: MezzeType): Boolean {

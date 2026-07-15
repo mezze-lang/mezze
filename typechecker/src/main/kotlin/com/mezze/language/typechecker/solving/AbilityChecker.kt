@@ -374,20 +374,7 @@ internal class AbilityChecker(
     }
 
     internal fun containsVarType(type: MezzeType): Boolean {
-        return when (type) {
-            is MezzeType.VarType -> true
-            is MezzeType.RecordType -> type.fields.values.any { containsVarType(it) }
-            is MezzeType.VariantType -> type.constructors.values.any { it != null && containsVarType(it) }
-            is MezzeType.ListType -> containsVarType(type.elementType)
-            is MezzeType.SeqType -> containsVarType(type.elementType)
-            is MezzeType.SetType -> containsVarType(type.elementType)
-            is MezzeType.SortedSetType -> containsVarType(type.elementType)
-            is MezzeType.MapType -> containsVarType(type.keyType) || containsVarType(type.valueType)
-            is MezzeType.SortedMapType -> containsVarType(type.keyType) || containsVarType(type.valueType)
-            is MezzeType.TypeApplication -> type.args.any { containsVarType(it) }
-            is MezzeType.FunctionType -> containsVarType(type.paramType) || containsVarType(type.returnType)
-            else -> false
-        }
+        return type is MezzeType.VarType || type.anyChild { containsVarType(it) }
     }
 
     internal fun closeOpenRecordsForCodec(type: MezzeType): MezzeType {
@@ -483,31 +470,10 @@ internal class AbilityChecker(
 
     private fun needsClosingForCodec(type: MezzeType): Boolean {
         return when (type) {
-            is MezzeType.RecordType -> type.rowVar != null || type.fields.values.any { needsClosingForCodec(it) }
-            is MezzeType.VariantType -> type.rowVar != null || type.constructors.values.any { it != null && needsClosingForCodec(it) }
-            is MezzeType.TypeApplication -> type.args.any { needsClosingForCodec(it) }
-            is MezzeType.ListType -> needsClosingForCodec(type.elementType)
-            is MezzeType.SeqType -> needsClosingForCodec(type.elementType)
-            is MezzeType.SetType -> needsClosingForCodec(type.elementType)
-            is MezzeType.SortedSetType -> needsClosingForCodec(type.elementType)
-            is MezzeType.MapType -> needsClosingForCodec(type.keyType) || needsClosingForCodec(type.valueType)
-            is MezzeType.SortedMapType -> needsClosingForCodec(type.keyType) || needsClosingForCodec(type.valueType)
-            is MezzeType.FunctionType -> needsClosingForCodec(type.paramType) || needsClosingForCodec(type.returnType)
-            is MezzeType.SuspendedType -> needsClosingForCodec(type.valueType)
-            is MezzeType.VarType -> false
-            is MezzeType.EffectRow -> false
-            is MezzeType.IntType,
-            is MezzeType.FloatType,
-            is MezzeType.StringType,
-            is MezzeType.BoolType,
-            is MezzeType.NatType,
-            is MezzeType.FracType,
-            is MezzeType.CharType,
-            is MezzeType.OrderingType,
-            is MezzeType.BytesType,
-            is MezzeType.ByteBufferType -> false
-            is MezzeType.NewtypeType -> false
-        }
+            is MezzeType.RecordType -> type.rowVar != null
+            is MezzeType.VariantType -> type.rowVar != null
+            else -> false
+        } || type.anyChild { needsClosingForCodec(it) }
     }
 
     private fun canDeriveAbility(abilityName: String, type: MezzeType, abilityHash: Hash? = null): Boolean {
@@ -716,30 +682,10 @@ internal class AbilityChecker(
 
     internal fun isConcrete(type: MezzeType): Boolean {
         return when (type) {
-            is MezzeType.IntType,
-            is MezzeType.FloatType,
-            is MezzeType.StringType,
-            is MezzeType.BoolType,
-            is MezzeType.NatType,
-            is MezzeType.FracType,
-            is MezzeType.CharType,
-            is MezzeType.OrderingType,
-            is MezzeType.BytesType,
-            is MezzeType.ByteBufferType -> true
-            is MezzeType.VariantType -> type.rowVar == null && type.constructors.values.all { it == null || isConcrete(it) }
-            is MezzeType.RecordType -> type.rowVar == null && type.fields.values.all { isConcrete(it) }
-            is MezzeType.FunctionType -> isConcrete(type.paramType) && isConcrete(type.returnType)
-            is MezzeType.TypeApplication -> type.args.all { isConcrete(it) }
-            is MezzeType.SeqType -> isConcrete(type.elementType)
-            is MezzeType.ListType -> isConcrete(type.elementType)
-            is MezzeType.SetType -> isConcrete(type.elementType)
-            is MezzeType.SortedSetType -> isConcrete(type.elementType)
-            is MezzeType.MapType -> isConcrete(type.keyType) && isConcrete(type.valueType)
-            is MezzeType.SortedMapType -> isConcrete(type.keyType) && isConcrete(type.valueType)
-            is MezzeType.SuspendedType -> isConcrete(type.valueType)
-            is MezzeType.NewtypeType -> isConcrete(type.wrappedType)
-            is MezzeType.VarType -> false
-            is MezzeType.EffectRow -> false
+            is MezzeType.VarType, is MezzeType.EffectRow -> false
+            is MezzeType.RecordType -> type.rowVar == null && !type.anyChild { !isConcrete(it) }
+            is MezzeType.VariantType -> type.rowVar == null && !type.anyChild { !isConcrete(it) }
+            else -> !type.anyChild { !isConcrete(it) }
         }
     }
 

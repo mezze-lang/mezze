@@ -219,32 +219,10 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         type1 is MezzeType.SortedMapType && type2 is MezzeType.SortedMapType ->
             unifySortedMaps(type1, type2, registry)
 
-        type1 is MezzeType.SortedMapType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SORTED_MAP) && type2.args.size == 2 -> {
-            val keyResult = unify(type1.keyType, type2.args[0], registry)
-            when (keyResult) {
-                is UnificationResult.Success -> {
-                    val valueResult = unify(keyResult.substitution.apply(type1.valueType), keyResult.substitution.apply(type2.args[1]), registry)
-                    when (valueResult) {
-                        is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
-                        is UnificationResult.Failure -> valueResult
-                    }
-                }
-                is UnificationResult.Failure -> keyResult
-            }
-        }
-        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SORTED_MAP) && type1.args.size == 2 && type2 is MezzeType.SortedMapType -> {
-            val keyResult = unify(type1.args[0], type2.keyType, registry)
-            when (keyResult) {
-                is UnificationResult.Success -> {
-                    val valueResult = unify(keyResult.substitution.apply(type1.args[1]), keyResult.substitution.apply(type2.valueType), registry)
-                    when (valueResult) {
-                        is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
-                        is UnificationResult.Failure -> valueResult
-                    }
-                }
-                is UnificationResult.Failure -> keyResult
-            }
-        }
+        type1 is MezzeType.SortedMapType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.SORTED_MAP) && type2.args.size == 2 ->
+            unifyKeyValue(type1.keyType, type1.valueType, type2.args[0], type2.args[1], registry)
+        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.SORTED_MAP) && type1.args.size == 2 && type2 is MezzeType.SortedMapType ->
+            unifyKeyValue(type1.args[0], type1.args[1], type2.keyType, type2.valueType, registry)
 
         type1 is MezzeType.SortedSetType && type2 is MezzeType.SortedSetType ->
             unify(type1.elementType, type2.elementType, registry)
@@ -257,32 +235,10 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, registry: DeclarationR
         type1 is MezzeType.MapType && type2 is MezzeType.MapType ->
             unifyMaps(type1, type2, registry)
 
-        type1 is MezzeType.MapType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.MAP) && type2.args.size == 2 -> {
-            val keyResult = unify(type1.keyType, type2.args[0], registry)
-            when (keyResult) {
-                is UnificationResult.Success -> {
-                    val valueResult = unify(keyResult.substitution.apply(type1.valueType), keyResult.substitution.apply(type2.args[1]), registry)
-                    when (valueResult) {
-                        is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
-                        is UnificationResult.Failure -> valueResult
-                    }
-                }
-                is UnificationResult.Failure -> keyResult
-            }
-        }
-        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.MAP) && type1.args.size == 2 && type2 is MezzeType.MapType -> {
-            val keyResult = unify(type1.args[0], type2.keyType, registry)
-            when (keyResult) {
-                is UnificationResult.Success -> {
-                    val valueResult = unify(keyResult.substitution.apply(type1.args[1]), keyResult.substitution.apply(type2.valueType), registry)
-                    when (valueResult) {
-                        is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
-                        is UnificationResult.Failure -> valueResult
-                    }
-                }
-                is UnificationResult.Failure -> keyResult
-            }
-        }
+        type1 is MezzeType.MapType && type2 is MezzeType.TypeApplication && isBuiltinCollectionApp(type2, BuiltinTypes.MAP) && type2.args.size == 2 ->
+            unifyKeyValue(type1.keyType, type1.valueType, type2.args[0], type2.args[1], registry)
+        type1 is MezzeType.TypeApplication && isBuiltinCollectionApp(type1, BuiltinTypes.MAP) && type1.args.size == 2 && type2 is MezzeType.MapType ->
+            unifyKeyValue(type1.args[0], type1.args[1], type2.keyType, type2.valueType, registry)
 
         type1 is MezzeType.SuspendedType && type2 is MezzeType.SuspendedType ->
             unifySuspended(type1, type2, registry)
@@ -733,21 +689,11 @@ private fun unifyTypeApplications(app1: MezzeType.TypeApplication, app2: MezzeTy
     return UnificationResult.Success(substitution)
 }
 
-private fun unifyMaps(map1: MezzeType.MapType, map2: MezzeType.MapType, registry: DeclarationRegistry): UnificationResult {
-    val keySubst = unify(map1.keyType, map2.keyType, registry).getOrElse { return it }
-    val value1 = keySubst.apply(map1.valueType)
-    val value2 = keySubst.apply(map2.valueType)
-    val valueSubst = unify(value1, value2, registry).getOrElse { return it }
-    return UnificationResult.Success(valueSubst.compose(keySubst))
-}
+private fun unifyMaps(map1: MezzeType.MapType, map2: MezzeType.MapType, registry: DeclarationRegistry): UnificationResult =
+    unifyKeyValue(map1.keyType, map1.valueType, map2.keyType, map2.valueType, registry)
 
-private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.SortedMapType, registry: DeclarationRegistry): UnificationResult {
-    val keySubst = unify(map1.keyType, map2.keyType, registry).getOrElse { return it }
-    val value1 = keySubst.apply(map1.valueType)
-    val value2 = keySubst.apply(map2.valueType)
-    val valueSubst = unify(value1, value2, registry).getOrElse { return it }
-    return UnificationResult.Success(valueSubst.compose(keySubst))
-}
+private fun unifySortedMaps(map1: MezzeType.SortedMapType, map2: MezzeType.SortedMapType, registry: DeclarationRegistry): UnificationResult =
+    unifyKeyValue(map1.keyType, map1.valueType, map2.keyType, map2.valueType, registry)
 
 private fun unifySuspended(susp1: MezzeType.SuspendedType, susp2: MezzeType.SuspendedType, registry: DeclarationRegistry): UnificationResult {
     val valueSubst = unify(susp1.valueType, susp2.valueType, registry).getOrElse { return it }
@@ -827,6 +773,28 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
  */
 private val ORDERING_CONSTRUCTORS = setOf("LT", "EQ", "GT")
 
+private fun unifyKeyValue(
+    key1: MezzeType, val1: MezzeType,
+    key2: MezzeType, val2: MezzeType,
+    registry: DeclarationRegistry
+): UnificationResult {
+    val keyResult = unify(key1, key2, registry)
+    return when (keyResult) {
+        is UnificationResult.Success -> {
+            val valueResult = unify(
+                keyResult.substitution.apply(val1),
+                keyResult.substitution.apply(val2),
+                registry
+            )
+            when (valueResult) {
+                is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
+                is UnificationResult.Failure -> valueResult
+            }
+        }
+        is UnificationResult.Failure -> keyResult
+    }
+}
+
 private fun unifyOrderingWithVariant(variant: MezzeType.VariantType, type1: MezzeType, type2: MezzeType): UnificationResult {
     val exactMatch = variant.constructors.keys == ORDERING_CONSTRUCTORS &&
                    variant.constructors.all { (_, payload) -> payload == null } &&
@@ -902,7 +870,15 @@ private fun substituteTypeParamsByName(type: MezzeType, subst: Map<String, Mezze
             valueType = substituteTypeParamsByName(type.valueType, subst),
             effects = type.effects
         )
-        else -> type
+        is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+            type.name,
+            type.constructor,
+            substituteTypeParamsByName(type.wrappedType, subst)
+        )
+        is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
+        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+        is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+        is MezzeType.CharType, is MezzeType.EffectRow -> type
     }
 }
 

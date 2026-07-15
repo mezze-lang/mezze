@@ -1,0 +1,10 @@
+PARSE_ERROR
+Parse error: Expected `is` after the match expression. Mezze match syntax does NOT use `{ ... }` braces — write `match x is` and put each arm indented on its own line.
+   --> variant_constructor_mismatch.mz:2:43
+  |
+2 | let processColor = {color} -> match color {
+  |                                           ^
+  |
+  = hint: rewrite as: `match x is`
+  = hint:   Pattern1 -> result1
+  = hint:   Pattern2 -> result2

@@ -1,0 +1,2 @@
+V0601_NON_EXHAUSTIVE_MATCH
+This match expression doesn't handle all cases. Missing case: Green. Add the missing patterns or use `_ ->` as a catch-all.

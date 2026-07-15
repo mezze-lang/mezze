@@ -1,0 +1,2 @@
+T0201_TYPE_MISMATCH
+Field `x` expects Int but got Nat in call to `intFunction`

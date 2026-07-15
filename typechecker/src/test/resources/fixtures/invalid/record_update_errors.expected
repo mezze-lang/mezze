@@ -1,0 +1,2 @@
+FieldAdditionNotAllowed
+Cannot add new field 'salary' to record type. Only existing fields can be overridden. Available fields: name, age

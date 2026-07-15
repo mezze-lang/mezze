@@ -1,0 +1,2 @@
+T0201_TYPE_MISMATCH
+Type mismatch for argument 'user' in call to 'processUser': expected {user: {name: Str, age: Str, ...row_}} -> Str but got {user: {name: Str, age: Int, city: Str}} -> Str

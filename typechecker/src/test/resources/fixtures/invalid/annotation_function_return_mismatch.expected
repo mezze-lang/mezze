@@ -1,0 +1,2 @@
+T0210_ANNOTATION_VS_BODY_MISMATCH
+Type annotation mismatch for 'f': declared as {x: Int} -> Int but expression has type {x: Int} -> Str

@@ -44,18 +44,7 @@ internal fun classifyConstraintError(
                 "interpolated expressions must produce a `Str` (use `.to_str {}` or `.to_dbg_str {}`)"
             )
         is ErrorContext.Simple,
-        null -> {
-            val msg = error.message
-            when {
-                msg.startsWith("Infinite type: ") ->
-                    ErrorCode.T0207_INFINITE_TYPE to listOf(
-                        "this usually means a recursive let-binding is missing a type annotation"
-                    )
-                msg.startsWith("Field '") && msg.contains("type mismatch") ->
-                    ErrorCode.T0201_TYPE_MISMATCH to emptyList<String>()
-                else -> ErrorCode.UNCATEGORIZED to emptyList()
-            }
-        }
+        null -> classifyByConstraintAndMessage(constraint, error.message)
     }
 
     val solverFixHints: List<FixHint> =
@@ -78,6 +67,41 @@ internal fun classifyConstraintError(
         hints = hints,
         fixHints = solverFixHints,
     )
+}
+
+private fun classifyByConstraintAndMessage(
+    constraint: Constraint,
+    msg: String
+): Pair<ErrorCode, List<String>> = when {
+    msg.startsWith("Infinite type: ") ->
+        ErrorCode.T0207_INFINITE_TYPE to listOf(
+            "this usually means a recursive let-binding is missing a type annotation"
+        )
+    constraint is Constraint.HasField && msg.contains("does not have field") ->
+        ErrorCode.T0205_FIELD_NOT_FOUND to emptyList()
+    constraint is Constraint.HasField && msg.contains("type mismatch") ->
+        ErrorCode.T0201_TYPE_MISMATCH to emptyList()
+    constraint is Constraint.HasConstructor && msg.contains("does not have constructor") ->
+        ErrorCode.V0704_UNKNOWN_CONSTRUCTOR to emptyList()
+    constraint is Constraint.HasConstructor && msg.contains("payload type mismatch") ->
+        ErrorCode.T0201_TYPE_MISMATCH to emptyList()
+    constraint is Constraint.HasConstructor && msg.contains("does not take a payload") ->
+        ErrorCode.V0604_CONSTRUCTOR_NO_PAYLOAD to emptyList()
+    constraint is Constraint.HasConstructor && msg.contains("must be destructured") ->
+        ErrorCode.T0204_VARIANT_CONSTRUCTOR_ARITY to emptyList()
+    constraint is Constraint.AbilityRequired ->
+        ErrorCode.V0408_NO_IMPLEMENTATION to emptyList()
+    constraint is Constraint.RecordPatternExhaustive ->
+        ErrorCode.V0602_NON_EXHAUSTIVE_RECORD_PATTERN to emptyList()
+    constraint is Constraint.Subsumes ->
+        ErrorCode.T0201_TYPE_MISMATCH to emptyList()
+    msg.startsWith("Field '") && msg.contains("type mismatch") ->
+        ErrorCode.T0201_TYPE_MISMATCH to emptyList()
+    msg.contains("Cannot access field") ->
+        ErrorCode.T0205_FIELD_NOT_FOUND to emptyList()
+    msg.contains("Cannot use constructor") ->
+        ErrorCode.T0201_TYPE_MISMATCH to emptyList()
+    else -> ErrorCode.UNCATEGORIZED to emptyList()
 }
 
 private fun effectRowExtraEffects(

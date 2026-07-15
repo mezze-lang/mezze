@@ -1,0 +1,2 @@
+T0203_RECORD_EXTRA_FIELDS
+Extra field(s) 'z' in call to 'add'. Function expects fields: x, y

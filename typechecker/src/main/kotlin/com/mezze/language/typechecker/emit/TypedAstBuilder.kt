@@ -525,152 +525,7 @@ class TypedAstBuilder(
                     loc = loc
                 )
             }
-            is ParsedFunctionCall -> {
-                if (expr.function is ParsedMemberAccess) {
-                    val memberAccess = expr.function as ParsedMemberAccess
-                    val receiverName = when (val r = memberAccess.receiver) {
-                        is ParsedIdentifier -> r.localName
-                        is ParsedVariantConstruct -> r.constructor
-                        else -> null
-                    }
-                    if (receiverName != null) {
-                        val isEffect = registry.lookupEffect(receiverName) != null
-                            || importContext?.importedEffects?.containsKey(receiverName) == true
-                        if (isEffect) {
-                            val effectHash = resolveEffectHash(receiverName)
-                            val opName = memberAccess.member
-                            val argExpr = buildExpr(expr.arguments, file)
-                            val effectDecl = registry.lookupEffect(receiverName)
-                                ?: importContext?.importedEffects?.get(receiverName)
-                            val resolvedReturnType = effectDecl?.operations
-                                ?.firstOrNull { it.name == opName }
-                                ?.let { convertParsedTypeAnnotation(it.returnType) }
-                            val applied = substitution.apply(contextType)
-                            val finalType = if (applied is MezzeType.VarType && resolvedReturnType != null) {
-                                resolvedReturnType
-                            } else applied
-                            return TypedPerformOp(
-                                effectHash, opName, argExpr,
-                                finalType, loc
-                            )
-                        }
-                    }
-                }
-
-                val fnIsMemberAccess = expr.function is ParsedMemberAccess
-                val memberName = if (fnIsMemberAccess) (expr.function as ParsedMemberAccess).member else null
-                var methodInfo = if (memberName != null) methodCallResolutions[expr.loc to memberName] else null
-                if (methodInfo != null && fnIsMemberAccess) {
-                    val memberAccess = expr.function as ParsedMemberAccess
-                    val receiverExpr = buildExpr(memberAccess.receiver, file)
-                    val argExpr = buildExpr(expr.arguments, file)
-
-                    val solvedFnType = methodInfo.methodFunctionType?.let { substitution.apply(it) }
-
-                    val fn = if (methodInfo.methodHash != null) {
-                        val hash = methodInfo.methodHash!!
-                        TypedVar(
-                            name = methodInfo.methodName,
-                            binding = BindingRef.ByHash(hash),
-                            type = solvedFnType ?: substitution.apply(contextType),
-                            loc = memberAccess.loc
-                        )
-                    } else if (methodInfo.isInherentMethod && methodInfo.implContentHash != null) {
-                        val implHash = methodInfo.implContentHash
-                        val opHash = Hash.computeOpHash(implHash, methodInfo.methodName)
-                        TypedVar(
-                            name = methodInfo.methodName,
-                            binding = BindingRef.ByHash(opHash),
-                            type = solvedFnType ?: substitution.apply(contextType),
-                            loc = memberAccess.loc
-                        )
-                    } else {
-                        buildExpr(expr.function, file)
-                    }
-
-                    val receiverFieldName = methodInfo.receiverFieldName
-                    val receiverField = TypedRecordEntry.Field(receiverFieldName, receiverExpr, memberAccess.receiver.loc)
-
-                    val wrappedArg = when (argExpr) {
-                        is TypedRecord -> {
-                            val allEntries = listOf(receiverField) + argExpr.entries
-                            val allFieldTypes = mutableMapOf(receiverFieldName to receiverExpr.type)
-                            for (entry in argExpr.entries) {
-                                if (entry is TypedRecordEntry.Field) {
-                                    allFieldTypes[entry.name] = entry.value.type
-                                }
-                            }
-                            TypedRecord(allEntries, MezzeType.RecordType(allFieldTypes), argExpr.loc)
-                        }
-                        else -> {
-                            val entries = listOf(receiverField)
-                            TypedRecord(entries, MezzeType.RecordType(mapOf(receiverFieldName to receiverExpr.type)), loc)
-                        }
-                    }
-
-                    val callReturnType = when (val ft = substitution.apply(fn.type)) {
-                        is MezzeType.FunctionType -> substitution.apply(ft.returnType)
-                        else -> {
-                            val perCallSite = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
-                            perCallSite ?: substitution.apply(contextType)
-                        }
-                    }
-
-                    val isTailCall = isTailCallLocation(expr.loc)
-
-                    // #195 mono-fix #2: stamp TypedCall.instantiation from the
-                    // resolved MethodCallInfo so the monomorphizer's transitive
-                    // worklist (TypeSubstitution.collectByHashRefs) can enqueue
-                    // this call's specialization. Without it, every method call
-                    // inside a generic body silently drops out of mono.
-                    val typeArgsResolved = methodInfo.typeArgs.map { substitution.apply(it) }
-                    val abilityImplsResolved = methodInfo.abilityImpls.map { ref ->
-                        AbilityImplRef(
-                            abilityHash = ref.abilityHash,
-                            implHash = ref.implHash,
-                            targetType = substitution.apply(ref.targetType),
-                        )
-                    }
-                    val instantiation = if (typeArgsResolved.isEmpty() && abilityImplsResolved.isEmpty()) {
-                        null
-                    } else {
-                        TypeInstantiation(
-                            typeArgs = typeArgsResolved,
-                            abilityImpls = abilityImplsResolved,
-                        )
-                    }
-
-                    TypedCall(
-                        function = fn,
-                        arg = wrappedArg,
-                        instantiation = instantiation,
-                        isTailCall = isTailCall,
-                        type = callReturnType,
-                        loc = loc
-                    )
-                } else {
-                    val fn = buildExpr(expr.function, file)
-                    val argExpr = buildExpr(expr.arguments, file)
-
-                    val solvedReturn = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
-                    val callType = solvedReturn
-                        ?: when (val ft = substitution.apply(fn.type)) {
-                            is MezzeType.FunctionType -> substitution.apply(ft.returnType)
-                            else -> substitution.apply(contextType)
-                        }
-
-                    val isTailCall = isTailCallLocation(expr.loc)
-
-                    TypedCall(
-                        function = fn,
-                        arg = argExpr,
-                        instantiation = null,
-                        isTailCall = isTailCall,
-                        type = callType,
-                        loc = loc
-                    )
-                }
-            }
+            is ParsedFunctionCall -> buildFunctionCall(expr, file, contextType)
             is ParsedMemberAccess -> {
                 val receiver = buildExpr(expr.receiver, file)
                 val memberName = expr.member
@@ -749,91 +604,7 @@ class TypedAstBuilder(
                     TypedMatch(scrutinee, cases, resultType, loc)
                 }
             }
-            is ParsedDo -> {
-                val pushedBlockScope = lambdaParamScopes.isEmpty()
-                if (pushedBlockScope) {
-                    pushScope(mutableListOf(), isLambdaBoundary = false)
-                }
-                val stmts = mutableListOf<TypedStatement>()
-                for (stmt in expr.statements) {
-                    when (stmt) {
-                        is ParsedStatement.Let -> {
-                            val pattern = stmt.pattern
-                            if (pattern is ParsedRecordPattern) {
-                                val destrName = "__destr_${stmts.size}"
-                                val valueType = stmt.typeAnnotation
-                                    ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
-                                    ?: MezzeType.VarType(TypeVar.freshWithName("let_destr"))
-                                val value = buildExpr(stmt.value, file, valueType)
-                                val resolvedType = substitution.apply(value.type)
-                                identifierContext[destrName] = resolvedType
-                                if (lambdaParamScopes.isNotEmpty() && destrName !in lambdaParamScopes.last()) {
-                                    lambdaParamScopes.last().add(destrName)
-                                }
-                                val destrHash = ParsedDeclHasher.hashExpr(stmt.value)
-                                stmts.add(TypedStatement.Let(destrName, destrHash, resolvedType, value, stmt.loc))
-
-                                emitRecordDestructureFields(pattern.entries, destrName, resolvedType, stmt.loc, stmts)
-                            } else {
-                                val name = when (pattern) {
-                                    is ParsedVariablePattern -> pattern.name
-                                    else -> "__pattern__"
-                                }
-                                val valueType = stmt.typeAnnotation
-                                    ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
-                                    ?: MezzeType.VarType(TypeVar.freshWithName("let_$name"))
-
-                                val isLambdaValue = stmt.value is ParsedLambda &&
-                                                     pattern is ParsedVariablePattern
-                                if (isLambdaValue) {
-                                    identifierContext[name] = valueType
-                                    if (lambdaParamScopes.isNotEmpty()) {
-                                        val currentScope = lambdaParamScopes.last()
-                                        if (name !in currentScope) {
-                                            currentScope.add(name)
-                                        }
-                                    }
-                                }
-
-                                val value = buildExpr(stmt.value, file, valueType)
-                                val resolvedType = substitution.apply(value.type)
-
-                                val isRecursive = isLambdaValue && value is TypedLambda &&
-                                                   refsName(value.body, name)
-
-                                identifierContext[name] = resolvedType
-
-                                if (lambdaParamScopes.isNotEmpty()) {
-                                    val currentScope = lambdaParamScopes.last()
-                                    if (name !in currentScope) {
-                                        currentScope.add(name)
-                                    }
-                                }
-
-                                val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
-                                val contentHash = v1LetHash ?: ParsedDeclHasher.hashExpr(stmt.value)
-                                val isBind = stmt.loc in bindLetLocs
-                                stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc, isRecursive, isBind))
-                            }
-                        }
-                        is ParsedStatement.Expr -> {
-                            val exprTyped = buildExpr(stmt.expr, file)
-                            stmts.add(TypedStatement.Expr(exprTyped, stmt.loc))
-                        }
-                        is ParsedStatement.Bind -> {
-                            throw IllegalStateException(
-                                "ParsedStatement.Bind reached TypedAstBuilder at ${stmt.loc} — " +
-                                "DoBindDesugar must rewrite Bind statements to Let before this phase."
-                            )
-                        }
-                    }
-                }
-                val result = buildExpr(expr.result, file, contextType)
-                if (pushedBlockScope) {
-                    popScope()
-                }
-                TypedBlock(stmts, result, result.type, loc)
-            }
+            is ParsedDo -> buildDoBlock(expr, file, contextType)
             is ParsedSeqLit -> {
                 val elementContextType = when (val ct = substitution.apply(contextType)) {
                     is MezzeType.SeqType -> ct.elementType
@@ -909,6 +680,243 @@ class TypedAstBuilder(
                 TypedPerformOp(effectHash, opName, argExpr, substitution.apply(contextType), loc)
             }
         }
+    }
+
+    private fun buildFunctionCall(expr: ParsedFunctionCall, file: String, contextType: MezzeType): TypedExpr {
+        val loc = expr.loc
+
+        if (expr.function is ParsedMemberAccess) {
+            val memberAccess = expr.function as ParsedMemberAccess
+            val receiverName = when (val r = memberAccess.receiver) {
+                is ParsedIdentifier -> r.localName
+                is ParsedVariantConstruct -> r.constructor
+                else -> null
+            }
+            if (receiverName != null) {
+                val isEffect = registry.lookupEffect(receiverName) != null
+                    || importContext?.importedEffects?.containsKey(receiverName) == true
+                if (isEffect) {
+                    val effectHash = resolveEffectHash(receiverName)
+                    val opName = memberAccess.member
+                    val argExpr = buildExpr(expr.arguments, file)
+                    val effectDecl = registry.lookupEffect(receiverName)
+                        ?: importContext?.importedEffects?.get(receiverName)
+                    val resolvedReturnType = effectDecl?.operations
+                        ?.firstOrNull { it.name == opName }
+                        ?.let { convertParsedTypeAnnotation(it.returnType) }
+                    val applied = substitution.apply(contextType)
+                    val finalType = if (applied is MezzeType.VarType && resolvedReturnType != null) {
+                        resolvedReturnType
+                    } else applied
+                    return TypedPerformOp(effectHash, opName, argExpr, finalType, loc)
+                }
+            }
+        }
+
+        val fnIsMemberAccess = expr.function is ParsedMemberAccess
+        val memberName = if (fnIsMemberAccess) (expr.function as ParsedMemberAccess).member else null
+        val methodInfo = if (memberName != null) methodCallResolutions[expr.loc to memberName] else null
+        if (methodInfo != null && fnIsMemberAccess) {
+            return buildMethodCall(expr, methodInfo, file, contextType)
+        }
+
+        val fn = buildExpr(expr.function, file)
+        val argExpr = buildExpr(expr.arguments, file)
+
+        val solvedReturn = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
+        val callType = solvedReturn
+            ?: when (val ft = substitution.apply(fn.type)) {
+                is MezzeType.FunctionType -> substitution.apply(ft.returnType)
+                else -> substitution.apply(contextType)
+            }
+
+        val isTailCall = isTailCallLocation(expr.loc)
+
+        return TypedCall(
+            function = fn,
+            arg = argExpr,
+            instantiation = null,
+            isTailCall = isTailCall,
+            type = callType,
+            loc = loc
+        )
+    }
+
+    private fun buildMethodCall(
+        expr: ParsedFunctionCall,
+        methodInfo: ConstraintResult.MethodCallInfo,
+        file: String,
+        contextType: MezzeType,
+    ): TypedCall {
+        val loc = expr.loc
+        val memberAccess = expr.function as ParsedMemberAccess
+        val receiverExpr = buildExpr(memberAccess.receiver, file)
+        val argExpr = buildExpr(expr.arguments, file)
+
+        val solvedFnType = methodInfo.methodFunctionType?.let { substitution.apply(it) }
+
+        val fn = if (methodInfo.methodHash != null) {
+            val hash = methodInfo.methodHash!!
+            TypedVar(
+                name = methodInfo.methodName,
+                binding = BindingRef.ByHash(hash),
+                type = solvedFnType ?: substitution.apply(contextType),
+                loc = memberAccess.loc
+            )
+        } else if (methodInfo.isInherentMethod && methodInfo.implContentHash != null) {
+            val implHash = methodInfo.implContentHash
+            val opHash = Hash.computeOpHash(implHash, methodInfo.methodName)
+            TypedVar(
+                name = methodInfo.methodName,
+                binding = BindingRef.ByHash(opHash),
+                type = solvedFnType ?: substitution.apply(contextType),
+                loc = memberAccess.loc
+            )
+        } else {
+            buildExpr(expr.function, file)
+        }
+
+        val receiverFieldName = methodInfo.receiverFieldName
+        val receiverField = TypedRecordEntry.Field(receiverFieldName, receiverExpr, memberAccess.receiver.loc)
+
+        val wrappedArg = when (argExpr) {
+            is TypedRecord -> {
+                val allEntries = listOf(receiverField) + argExpr.entries
+                val allFieldTypes = mutableMapOf(receiverFieldName to receiverExpr.type)
+                for (entry in argExpr.entries) {
+                    if (entry is TypedRecordEntry.Field) {
+                        allFieldTypes[entry.name] = entry.value.type
+                    }
+                }
+                TypedRecord(allEntries, MezzeType.RecordType(allFieldTypes), argExpr.loc)
+            }
+            else -> {
+                val entries = listOf(receiverField)
+                TypedRecord(entries, MezzeType.RecordType(mapOf(receiverFieldName to receiverExpr.type)), loc)
+            }
+        }
+
+        val callReturnType = when (val ft = substitution.apply(fn.type)) {
+            is MezzeType.FunctionType -> substitution.apply(ft.returnType)
+            else -> {
+                val perCallSite = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
+                perCallSite ?: substitution.apply(contextType)
+            }
+        }
+
+        val isTailCall = isTailCallLocation(expr.loc)
+
+        val typeArgsResolved = methodInfo.typeArgs.map { substitution.apply(it) }
+        val abilityImplsResolved = methodInfo.abilityImpls.map { ref ->
+            AbilityImplRef(
+                abilityHash = ref.abilityHash,
+                implHash = ref.implHash,
+                targetType = substitution.apply(ref.targetType),
+            )
+        }
+        val instantiation = if (typeArgsResolved.isEmpty() && abilityImplsResolved.isEmpty()) {
+            null
+        } else {
+            TypeInstantiation(
+                typeArgs = typeArgsResolved,
+                abilityImpls = abilityImplsResolved,
+            )
+        }
+
+        return TypedCall(
+            function = fn,
+            arg = wrappedArg,
+            instantiation = instantiation,
+            isTailCall = isTailCall,
+            type = callReturnType,
+            loc = loc
+        )
+    }
+
+    private fun buildDoBlock(expr: ParsedDo, file: String, contextType: MezzeType): TypedBlock {
+        val pushedBlockScope = lambdaParamScopes.isEmpty()
+        if (pushedBlockScope) {
+            pushScope(mutableListOf(), isLambdaBoundary = false)
+        }
+        val stmts = mutableListOf<TypedStatement>()
+        for (stmt in expr.statements) {
+            when (stmt) {
+                is ParsedStatement.Let -> {
+                    val pattern = stmt.pattern
+                    if (pattern is ParsedRecordPattern) {
+                        val destrName = "__destr_${stmts.size}"
+                        val valueType = stmt.typeAnnotation
+                            ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
+                            ?: MezzeType.VarType(TypeVar.freshWithName("let_destr"))
+                        val value = buildExpr(stmt.value, file, valueType)
+                        val resolvedType = substitution.apply(value.type)
+                        identifierContext[destrName] = resolvedType
+                        if (lambdaParamScopes.isNotEmpty() && destrName !in lambdaParamScopes.last()) {
+                            lambdaParamScopes.last().add(destrName)
+                        }
+                        val destrHash = ParsedDeclHasher.hashExpr(stmt.value)
+                        stmts.add(TypedStatement.Let(destrName, destrHash, resolvedType, value, stmt.loc))
+
+                        emitRecordDestructureFields(pattern.entries, destrName, resolvedType, stmt.loc, stmts)
+                    } else {
+                        val name = when (pattern) {
+                            is ParsedVariablePattern -> pattern.name
+                            else -> "__pattern__"
+                        }
+                        val valueType = stmt.typeAnnotation
+                            ?.let { substitution.apply(convertParsedTypeAnnotation(it)) }
+                            ?: MezzeType.VarType(TypeVar.freshWithName("let_$name"))
+
+                        val isLambdaValue = stmt.value is ParsedLambda &&
+                                             pattern is ParsedVariablePattern
+                        if (isLambdaValue) {
+                            identifierContext[name] = valueType
+                            if (lambdaParamScopes.isNotEmpty()) {
+                                val currentScope = lambdaParamScopes.last()
+                                if (name !in currentScope) {
+                                    currentScope.add(name)
+                                }
+                            }
+                        }
+
+                        val value = buildExpr(stmt.value, file, valueType)
+                        val resolvedType = substitution.apply(value.type)
+
+                        val isRecursive = isLambdaValue && value is TypedLambda &&
+                                           refsName(value.body, name)
+
+                        identifierContext[name] = resolvedType
+
+                        if (lambdaParamScopes.isNotEmpty()) {
+                            val currentScope = lambdaParamScopes.last()
+                            if (name !in currentScope) {
+                                currentScope.add(name)
+                            }
+                        }
+
+                        val v1LetHash = identifierContentHashes[BindingKey.unqualified(name)]
+                        val contentHash = v1LetHash ?: ParsedDeclHasher.hashExpr(stmt.value)
+                        val isBind = stmt.loc in bindLetLocs
+                        stmts.add(TypedStatement.Let(name, contentHash, resolvedType, value, stmt.loc, isRecursive, isBind))
+                    }
+                }
+                is ParsedStatement.Expr -> {
+                    val exprTyped = buildExpr(stmt.expr, file)
+                    stmts.add(TypedStatement.Expr(exprTyped, stmt.loc))
+                }
+                is ParsedStatement.Bind -> {
+                    throw IllegalStateException(
+                        "ParsedStatement.Bind reached TypedAstBuilder at ${stmt.loc} — " +
+                        "DoBindDesugar must rewrite Bind statements to Let before this phase."
+                    )
+                }
+            }
+        }
+        val result = buildExpr(expr.result, file, contextType)
+        if (pushedBlockScope) {
+            popScope()
+        }
+        return TypedBlock(stmts, result, result.type, expr.loc)
     }
 
     private fun buildMatchCase(case: ParsedMatchCase, file: String, contextType: MezzeType): TypedCase {

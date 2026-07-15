@@ -50,6 +50,25 @@ sealed interface MezzeType {
         }
     }
 
+    fun anyChild(predicate: (MezzeType) -> Boolean): Boolean = when (this) {
+        is FunctionType -> predicate(paramType) || predicate(returnType) ||
+            abilityConstraints.any { c -> c.typeArgs.any(predicate) || c.associatedTypeBindings.values.any(predicate) }
+        is RecordType -> fields.values.any(predicate)
+        is VariantType -> constructors.values.any { it != null && predicate(it) }
+        is TypeApplication -> args.any(predicate)
+        is ListType -> predicate(elementType)
+        is MapType -> predicate(keyType) || predicate(valueType)
+        is SetType -> predicate(elementType)
+        is SortedMapType -> predicate(keyType) || predicate(valueType)
+        is SortedSetType -> predicate(elementType)
+        is SeqType -> predicate(elementType)
+        is SuspendedType -> predicate(valueType)
+        is NewtypeType -> predicate(wrappedType)
+        is VarType, is IntType, is FloatType, is StringType, is BoolType,
+        is NatType, is FracType, is OrderingType, is BytesType, is ByteBufferType,
+        is CharType, is EffectRow -> false
+    }
+
     fun transformChildren(f: (MezzeType) -> MezzeType): MezzeType = when (this) {
         is FunctionType -> copy(paramType = f(paramType), returnType = f(returnType),
             abilityConstraints = abilityConstraints.map { c -> c.copy(typeArgs = c.typeArgs.map(f), associatedTypeBindings = c.associatedTypeBindings.mapValues { (_, v) -> f(v) }) })

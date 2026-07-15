@@ -606,7 +606,14 @@ internal class ImplValidator(
                 valueType = substituteTypeParams(type.valueType, substitution),
                 effects = type.effects
             )
-            else -> type
+            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
+                name = type.name, constructor = type.constructor,
+                wrappedType = substituteTypeParams(type.wrappedType, substitution)
+            )
+            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
+            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+            is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+            is MezzeType.CharType, is MezzeType.EffectRow -> type
         }
     }
 

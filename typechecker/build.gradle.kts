@@ -62,22 +62,36 @@ tasks.named("compileKotlin") {
 }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags("benchmark")
+    }
 
-    // Add timeout to prevent tests from hanging indefinitely
     testLogging {
         events("passed", "skipped", "failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         showStandardStreams = false
     }
 
-    // Set max parallel forks to 1 to avoid test interference
     maxParallelForks = 1
 
-    // Set timeout for each test
     systemProperty("junit.jupiter.execution.timeout.default", "60s")
     systemProperty("junit.jupiter.execution.timeout.mode", "disabled_on_debug")
 
-    // Set mezze.project.root so tests can access stdlib modules
     systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
+}
+
+tasks.register<Test>("bench") {
+    description = "Typechecker performance benchmarks (excluded from :test)."
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform {
+        includeTags("benchmark")
+    }
+    testLogging {
+        events("passed", "skipped", "failed")
+        showStandardStreams = true
+    }
+    systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
+    outputs.upToDateWhen { false }
 }

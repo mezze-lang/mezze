@@ -195,8 +195,7 @@ internal class VariantSolver(
         if (variantType is MezzeType.SuspendedType) {
             return solveHasConstructor(
                 constraint.copy(variantType = variantType.valueType),
-                currentSubst,
-                originalConstraint ?: constraint
+                currentSubst, originalConstraint ?: constraint
             )
         }
 
@@ -205,375 +204,351 @@ internal class VariantSolver(
             if (expanded != null) {
                 return solveHasConstructor(
                     constraint.copy(variantType = expanded),
-                    currentSubst,
-                    originalConstraint ?: constraint
+                    currentSubst, originalConstraint ?: constraint
                 )
             } else {
                 return ConstraintSolver.ConstraintResult.Failure(
-                    "Cannot expand type application ${variantType.constructor} to check constructor '$constructorName'"
+                    "Cannot resolve type '${variantType.constructor}' to check for constructor '$constructorName'"
                 )
             }
         }
 
-        if (variantType is MezzeType.VarType) {
-            val isPatternContext = constraint.isPatternContext
+        return when (variantType) {
+            is MezzeType.VarType -> solveConstructorOnVar(
+                variantType, constructorName, expectedPayloadType,
+                constraint.isPatternContext, currentSubst
+            )
+            is MezzeType.BoolType -> solveBoolConstructor(constructorName, expectedPayloadType)
+            is MezzeType.OrderingType -> solveOrderingConstructor(constructorName, expectedPayloadType)
+            is MezzeType.VariantType -> solveConstructorOnVariant(
+                variantType, constructorName, expectedPayloadType,
+                currentSubst, originalConstraint
+            )
+            is MezzeType.ListType -> solveConstructorOnList(variantType, constructorName, expectedPayloadType)
+            else -> ConstraintSolver.ConstraintResult.Failure(
+                "Cannot use constructor '$constructorName' on non-variant type: ${prettyPrintType(variantType)}"
+            )
+        }
+    }
 
-            if (isPatternContext) {
-                if (constructorName == "True" || constructorName == "False") {
-                    if (expectedPayloadType != null) {
-                        return ConstraintSolver.ConstraintResult.Failure(
-                            "Constructor '$constructorName' does not take a payload. " +
-                            "Use '$constructorName' instead of '$constructorName { ... }'."
-                        )
-                    }
+    private fun solveBoolConstructor(
+        constructorName: String,
+        expectedPayloadType: MezzeType?
+    ): ConstraintSolver.ConstraintResult {
+        if (constructorName != "True" && constructorName != "False") {
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Bool type only has constructors 'True' and 'False', not '$constructorName'"
+            )
+        }
+        if (expectedPayloadType != null) {
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Constructor '$constructorName' does not have a payload"
+            )
+        }
+        return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
+    }
 
-                    val boolType = MezzeType.VariantType(
-                        constructors = mapOf(BuiltinTypes.TRUE to null, BuiltinTypes.FALSE to null),
-                        rowVar = null,
-                        typeName = "Bool"
-                    )
-                    return ConstraintSolver.ConstraintResult.Success(
-                        Substitution.single(variantType.variable, boolType)
-                    )
-                }
+    private fun solveBoolConstructorOnVar(
+        constructorName: String,
+        expectedPayloadType: MezzeType?,
+        typeVar: TypeVar
+    ): ConstraintSolver.ConstraintResult {
+        if (expectedPayloadType != null) {
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Constructor '$constructorName' does not take a payload. " +
+                "Use '$constructorName' instead of '$constructorName { ... }'."
+            )
+        }
+        val boolType = MezzeType.VariantType(
+            constructors = mapOf(BuiltinTypes.TRUE to null, BuiltinTypes.FALSE to null),
+            rowVar = null, typeName = "Bool"
+        )
+        return ConstraintSolver.ConstraintResult.Success(
+            Substitution.single(typeVar, boolType)
+        )
+    }
 
-                val declaringType = findTypeDeclarationForConstructor(constructorName)
+    private fun solveOrderingConstructor(
+        constructorName: String,
+        expectedPayloadType: MezzeType?
+    ): ConstraintSolver.ConstraintResult {
+        if (constructorName != "LT" && constructorName != "EQ" && constructorName != "GT") {
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Ordering type only has constructors 'LT', 'EQ', and 'GT', not '$constructorName'"
+            )
+        }
+        if (expectedPayloadType != null) {
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Constructor '$constructorName' does not have a payload"
+            )
+        }
+        return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
+    }
 
-                if (declaringType != null) {
-                    return resolveConstructorAgainstDecl(declaringType, constructorName, expectedPayloadType, variantType.variable)
-                }
+    private fun solveConsNilOnVar(
+        constructorName: String,
+        expectedPayloadType: MezzeType?,
+        typeVar: TypeVar,
+        context: String
+    ): ConstraintSolver.ConstraintResult {
+        val elemTypeVar = MezzeType.VarType(TypeVar.fresh())
+        val listType = MezzeType.ListType(elemTypeVar)
+        var resultSubst = Substitution.single(typeVar, listType)
 
-                if (constructorName == BuiltinTypes.CONS || constructorName == BuiltinTypes.NIL) {
-                    val elemTypeVar = MezzeType.VarType(TypeVar.fresh())
-                    val listType = MezzeType.ListType(elemTypeVar)
-
-                    var resultSubst = Substitution.single(variantType.variable, listType)
-
-                    if (constructorName == BuiltinTypes.CONS && expectedPayloadType != null) {
-                        val expectedConsPayload = MezzeType.RecordType(mapOf(
-                            "head" to elemTypeVar,
-                            "tail" to listType
-                        ))
-                        val unifyResult = unify(expectedPayloadType, expectedConsPayload, registry)
-                        when (unifyResult) {
-                            is UnificationResult.Success -> {
-                                resultSubst = resultSubst.compose(unifyResult.substitution)
-                            }
-                            is UnificationResult.Failure -> {
-                                return ConstraintSolver.ConstraintResult.Failure(
-                                    "Cons pattern payload type mismatch: ${unifyResult.message}"
-                                )
-                            }
-                        }
-                    }
-
-                    return ConstraintSolver.ConstraintResult.Success(resultSubst)
-                }
-            }
-
-            if (constructorName == "True" || constructorName == "False") {
-                if (expectedPayloadType != null) {
-                    return ConstraintSolver.ConstraintResult.Failure(
-                        "Constructor '$constructorName' does not take a payload. " +
-                        "Use '$constructorName' instead of '$constructorName { ... }'."
-                    )
-                }
-
-                val boolType = MezzeType.VariantType(
-                    constructors = mapOf(BuiltinTypes.TRUE to null, BuiltinTypes.FALSE to null),
-                    rowVar = null,
-                    typeName = "Bool"
+        if (constructorName == BuiltinTypes.CONS && expectedPayloadType != null) {
+            val expectedConsPayload = MezzeType.RecordType(mapOf(
+                "head" to elemTypeVar, "tail" to listType
+            ))
+            val unifyResult = unify(expectedPayloadType, expectedConsPayload, registry)
+            when (unifyResult) {
+                is UnificationResult.Success -> resultSubst = resultSubst.compose(unifyResult.substitution)
+                is UnificationResult.Failure -> return ConstraintSolver.ConstraintResult.Failure(
+                    "Cons $context payload type mismatch: ${unifyResult.message}"
                 )
-                return ConstraintSolver.ConstraintResult.Success(
-                    Substitution.single(variantType.variable, boolType)
-                )
             }
+        }
+        return ConstraintSolver.ConstraintResult.Success(resultSubst)
+    }
 
-            if (constructorName == BuiltinTypes.CONS || constructorName == BuiltinTypes.NIL) {
+    private fun solveConstructorOnVar(
+        variantType: MezzeType.VarType,
+        constructorName: String,
+        expectedPayloadType: MezzeType?,
+        isPatternContext: Boolean,
+        currentSubst: Substitution
+    ): ConstraintSolver.ConstraintResult {
+        if (constructorName == "True" || constructorName == "False") {
+            return solveBoolConstructorOnVar(constructorName, expectedPayloadType, variantType.variable)
+        }
+
+        if (isPatternContext) {
+            val declaringType = findTypeDeclarationForConstructor(constructorName)
+            if (declaringType != null) {
+                return resolveConstructorAgainstDecl(declaringType, constructorName, expectedPayloadType, variantType.variable)
+            }
+        }
+
+        if (constructorName == BuiltinTypes.CONS || constructorName == BuiltinTypes.NIL) {
+            if (!isPatternContext) {
                 val declaringTypeExpr = findTypeDeclarationForConstructor(constructorName)
-
                 if (declaringTypeExpr != null) {
                     return resolveConstructorAgainstDecl(declaringTypeExpr, constructorName, expectedPayloadType, variantType.variable)
                 }
-
-                val elemTypeVar = MezzeType.VarType(TypeVar.fresh())
-                val listType = MezzeType.ListType(elemTypeVar)
-
-                var resultSubst = Substitution.single(variantType.variable, listType)
-
-                if (constructorName == BuiltinTypes.CONS && expectedPayloadType != null) {
-                    val expectedConsPayload = MezzeType.RecordType(mapOf(
-                        "head" to elemTypeVar,
-                        "tail" to listType
-                    ))
-                    val unifyResult = unify(expectedPayloadType, expectedConsPayload, registry)
-                    when (unifyResult) {
-                        is UnificationResult.Success -> {
-                            resultSubst = resultSubst.compose(unifyResult.substitution)
-                        }
-                        is UnificationResult.Failure -> {
-                            return ConstraintSolver.ConstraintResult.Failure(
-                                "Cons constructor payload type mismatch: ${unifyResult.message}"
-                            )
-                        }
-                    }
-                }
-
-                return ConstraintSolver.ConstraintResult.Success(resultSubst)
             }
+            val context = if (isPatternContext) "pattern" else "constructor"
+            return solveConsNilOnVar(constructorName, expectedPayloadType, variantType.variable, context)
+        }
 
-            if (!isPatternContext) {
-                val typeForConstructor = findTypeDeclarationForConstructor(constructorName)
-
-                if (typeForConstructor != null) {
-                    val variantDef = typeForConstructor.definition as ParsedVariantDef
-                    val constructorDef = variantDef.constructors.find { it.name == constructorName }
-
-                    if (constructorDef != null) {
-                        val declaredPayload = constructorDef.dataType
-
-                        if (declaredPayload != null && expectedPayloadType == null) {
-                            val fieldNames = when (declaredPayload) {
-                                is ParsedRecordType -> declaredPayload.entries.map { it.name }
-                                else -> listOf("...")
-                            }
-                            val fieldList = fieldNames.joinToString(", ")
-                            return ConstraintSolver.ConstraintResult.Failure(
-                                "Constructor '$constructorName' from type '${typeForConstructor.name}' requires a payload. " +
-                                "Use '$constructorName { $fieldList }' instead of bare '$constructorName'.",
-                                terminal = true
-                            )
-                        }
-
-                        if (declaredPayload == null && expectedPayloadType != null) {
-                            return ConstraintSolver.ConstraintResult.Failure(
-                                "Constructor '$constructorName' from type '${typeForConstructor.name}' does not take a payload. " +
-                                "Use '$constructorName' without '{ ... }'.",
-                                terminal = true
-                            )
-                        }
-
-                        if (declaredPayload != null && expectedPayloadType != null) {
-                            val typeParamMapping = typeForConstructor.typeParams.associate { param ->
-                                param to MezzeType.VarType(TypeVar.fresh())
-                            }
-                            val declaredPayloadType = convertTypeAnnotation(declaredPayload, typeParamMapping)
-
-                            if (declaredPayloadType is MezzeType.RecordType && expectedPayloadType is MezzeType.RecordType) {
-                                val missingFields = declaredPayloadType.fields.keys - expectedPayloadType.fields.keys
-                                if (missingFields.isNotEmpty()) {
-                                    return ConstraintSolver.ConstraintResult.Failure(
-                                        "Constructor '$constructorName' payload is missing required fields: ${missingFields.joinToString(", ")}",
-                                        terminal = true
-                                    )
-                                }
-                            }
-                        }
-
-                        return resolveConstructorAgainstDecl(typeForConstructor, constructorName, expectedPayloadType, variantType.variable)
-                    }
-                }
-            }
-
-            if (isPatternContext) {
-                val newRowVar = RowVar.fresh()
-                val newVariant = MezzeType.VariantType(
-                    constructors = mapOf(constructorName to expectedPayloadType),
-                    rowVar = newRowVar
-                )
-
-                patternBasedRowVars.add(newRowVar)
-
-                return ConstraintSolver.ConstraintResult.Success(
-                    Substitution.single(variantType.variable, newVariant)
-                )
-            } else {
-                val newVariant = MezzeType.VariantType(
-                    constructors = mapOf(constructorName to expectedPayloadType),
-                    rowVar = null
-                )
-
-                return ConstraintSolver.ConstraintResult.Success(
-                    Substitution.single(variantType.variable, newVariant)
-                )
+        if (!isPatternContext) {
+            val typeForConstructor = findTypeDeclarationForConstructor(constructorName)
+            if (typeForConstructor != null) {
+                return solveConstructorFromDecl(typeForConstructor, constructorName, expectedPayloadType, variantType.variable)
             }
         }
 
-        if (variantType is MezzeType.BoolType) {
-            if (constructorName == "True" || constructorName == "False") {
-                if (expectedPayloadType != null) {
+        if (isPatternContext) {
+            val newRowVar = RowVar.fresh()
+            val newVariant = MezzeType.VariantType(
+                constructors = mapOf(constructorName to expectedPayloadType),
+                rowVar = newRowVar
+            )
+            patternBasedRowVars.add(newRowVar)
+            return ConstraintSolver.ConstraintResult.Success(
+                Substitution.single(variantType.variable, newVariant)
+            )
+        } else {
+            val newVariant = MezzeType.VariantType(
+                constructors = mapOf(constructorName to expectedPayloadType),
+                rowVar = null
+            )
+            return ConstraintSolver.ConstraintResult.Success(
+                Substitution.single(variantType.variable, newVariant)
+            )
+        }
+    }
+
+    private fun solveConstructorFromDecl(
+        typeDecl: ParsedTypeDecl,
+        constructorName: String,
+        expectedPayloadType: MezzeType?,
+        typeVar: TypeVar
+    ): ConstraintSolver.ConstraintResult {
+        val variantDef = typeDecl.definition as ParsedVariantDef
+        val constructorDef = variantDef.constructors.find { it.name == constructorName }
+            ?: return resolveConstructorAgainstDecl(typeDecl, constructorName, expectedPayloadType, typeVar)
+
+        val declaredPayload = constructorDef.dataType
+
+        if (declaredPayload != null && expectedPayloadType == null) {
+            val fieldNames = when (declaredPayload) {
+                is ParsedRecordType -> declaredPayload.entries.map { it.name }
+                else -> listOf("...")
+            }
+            val fieldList = fieldNames.joinToString(", ")
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Constructor '$constructorName' from type '${typeDecl.name}' requires a payload. " +
+                "Use '$constructorName { $fieldList }' instead of bare '$constructorName'.",
+                terminal = true
+            )
+        }
+
+        if (declaredPayload == null && expectedPayloadType != null) {
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Constructor '$constructorName' from type '${typeDecl.name}' does not take a payload. " +
+                "Use '$constructorName' without '{ ... }'.",
+                terminal = true
+            )
+        }
+
+        if (declaredPayload != null && expectedPayloadType != null) {
+            val typeParamMapping = typeDecl.typeParams.associate { param ->
+                param to MezzeType.VarType(TypeVar.fresh())
+            }
+            val declaredPayloadType = convertTypeAnnotation(declaredPayload, typeParamMapping)
+
+            if (declaredPayloadType is MezzeType.RecordType && expectedPayloadType is MezzeType.RecordType) {
+                val missingFields = declaredPayloadType.fields.keys - expectedPayloadType.fields.keys
+                if (missingFields.isNotEmpty()) {
                     return ConstraintSolver.ConstraintResult.Failure(
-                        "Constructor '$constructorName' does not have a payload"
+                        "Constructor '$constructorName' payload is missing required fields: ${missingFields.joinToString(", ")}",
+                        terminal = true
                     )
                 }
-                return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
-            } else {
-                return ConstraintSolver.ConstraintResult.Failure(
-                    "Bool type only has constructors 'True' and 'False', not '$constructorName'"
-                )
             }
         }
 
-        if (variantType is MezzeType.OrderingType) {
-            if (constructorName == "LT" || constructorName == "EQ" || constructorName == "GT") {
-                if (expectedPayloadType != null) {
-                    return ConstraintSolver.ConstraintResult.Failure(
-                        "Constructor '$constructorName' does not have a payload"
-                    )
-                }
-                return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
-            } else {
-                return ConstraintSolver.ConstraintResult.Failure(
-                    "Ordering type only has constructors 'LT', 'EQ', and 'GT', not '$constructorName'"
-                )
+        return resolveConstructorAgainstDecl(typeDecl, constructorName, expectedPayloadType, typeVar)
+    }
+
+    private fun findTypeVarForVariant(
+        variantType: MezzeType.VariantType,
+        currentSubst: Substitution
+    ): TypeVar? {
+        var directTypeVar: TypeVar? = null
+        var chainedTypeVar: TypeVar? = null
+        for ((typeVar, mappedType) in currentSubst.mappings) {
+            if (mappedType == variantType) {
+                directTypeVar = typeVar
+                break
+            }
+            val resolvedMappedType = currentSubst.apply(mappedType)
+            if (resolvedMappedType == variantType && chainedTypeVar == null) {
+                chainedTypeVar = typeVar
             }
         }
+        return directTypeVar ?: chainedTypeVar
+    }
 
-        if (variantType is MezzeType.VariantType) {
-            val actualPayloadType = variantType.constructors[constructorName]
+    private fun solveConstructorOnVariant(
+        variantType: MezzeType.VariantType,
+        constructorName: String,
+        expectedPayloadType: MezzeType?,
+        currentSubst: Substitution,
+        originalConstraint: Constraint.HasConstructor?
+    ): ConstraintSolver.ConstraintResult {
+        val actualPayloadType = variantType.constructors[constructorName]
 
-            if (!variantType.constructors.containsKey(constructorName)) {
-                if (variantType.rowVar != null) {
-                    val newConstructors = variantType.constructors + (constructorName to expectedPayloadType)
-                    val extendedVariant = MezzeType.VariantType(
-                        constructors = newConstructors,
-                        rowVar = variantType.rowVar,
-                        typeName = variantType.typeName
-                    )
-
-                    var directTypeVar: TypeVar? = null
-                    var chainedTypeVar: TypeVar? = null
-
-                    for ((typeVar, mappedType) in currentSubst.mappings) {
-                        if (mappedType == variantType) {
-                            directTypeVar = typeVar
-                            break
-                        }
-
-                        val resolvedMappedType = currentSubst.apply(mappedType)
-                        if (resolvedMappedType == variantType && chainedTypeVar == null) {
-                            chainedTypeVar = typeVar
-                        }
-                    }
-
-                    val targetTypeVar = directTypeVar ?: chainedTypeVar
-                    if (targetTypeVar != null) {
-                        return ConstraintSolver.ConstraintResult.Success(
-                            Substitution.single(targetTypeVar, extendedVariant)
-                        )
-                    }
-                    return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
+        if (!variantType.constructors.containsKey(constructorName)) {
+            if (variantType.rowVar != null) {
+                val extendedVariant = MezzeType.VariantType(
+                    constructors = variantType.constructors + (constructorName to expectedPayloadType),
+                    rowVar = variantType.rowVar, typeName = variantType.typeName
+                )
+                val targetTypeVar = findTypeVarForVariant(variantType, currentSubst)
+                return if (targetTypeVar != null) {
+                    ConstraintSolver.ConstraintResult.Success(Substitution.single(targetTypeVar, extendedVariant))
                 } else {
-                    val inScope = inScopeAliasNamesForSolverOrNull()
-                    val name = variantType.typeName
-                    val nameInScope = variantType.nominalWall ||
-                        (name != null && (inScope == null || name in inScope))
-                    if (!nameInScope) {
-                        val newConstructors = variantType.constructors + (constructorName to expectedPayloadType)
-                        val extendedVariant = MezzeType.VariantType(
-                            constructors = newConstructors,
-                            rowVar = null,
-                            typeName = null,
-                            typeHash = null
-                        )
-                        var directTypeVar: TypeVar? = null
-                        var chainedTypeVar: TypeVar? = null
-                        for ((typeVar, mappedType) in currentSubst.mappings) {
-                            if (mappedType == variantType) {
-                                directTypeVar = typeVar
-                                break
-                            }
-                            val resolvedMappedType = currentSubst.apply(mappedType)
-                            if (resolvedMappedType == variantType && chainedTypeVar == null) {
-                                chainedTypeVar = typeVar
-                            }
-                        }
-                        val targetTypeVar = directTypeVar ?: chainedTypeVar
-                        if (targetTypeVar != null) {
-                            return ConstraintSolver.ConstraintResult.Success(Substitution.single(targetTypeVar, extendedVariant))
-                        }
-                        return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
-                    }
-
-                    val availableConstructors = variantType.constructors.keys.toList()
-                    val suggestion = StringDistance.suggestOrList(
-                        constructorName,
-                        availableConstructors,
-                        "constructors"
-                    )
-                    return ConstraintSolver.ConstraintResult.Failure(
-                        "Variant type does not have constructor '$constructorName'. $suggestion"
-                    )
+                    ConstraintSolver.ConstraintResult.Success(Substitution.empty)
                 }
             }
 
-            if (expectedPayloadType != null && actualPayloadType != null) {
-                val payloadTypeToUnify = if (originalConstraint?.variantType is MezzeType.TypeApplication) {
-                    actualPayloadType
+            val inScope = inScopeAliasNamesForSolverOrNull()
+            val name = variantType.typeName
+            val nameInScope = variantType.nominalWall ||
+                (name != null && (inScope == null || name in inScope))
+            if (!nameInScope) {
+                val extendedVariant = MezzeType.VariantType(
+                    constructors = variantType.constructors + (constructorName to expectedPayloadType),
+                    rowVar = null, typeName = null, typeHash = null
+                )
+                val targetTypeVar = findTypeVarForVariant(variantType, currentSubst)
+                return if (targetTypeVar != null) {
+                    ConstraintSolver.ConstraintResult.Success(Substitution.single(targetTypeVar, extendedVariant))
                 } else {
-                    instantiateWithFreshVars(actualPayloadType)
+                    ConstraintSolver.ConstraintResult.Success(Substitution.empty)
                 }
+            }
 
-                val result = unify(payloadTypeToUnify, expectedPayloadType, registry)
+            val availableConstructors = variantType.constructors.keys.toList()
+            val suggestion = StringDistance.suggestOrList(constructorName, availableConstructors, "constructors")
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Variant type does not have constructor '$constructorName'. $suggestion"
+            )
+        }
+
+        if (expectedPayloadType != null && actualPayloadType != null) {
+            val payloadTypeToUnify = if (originalConstraint?.variantType is MezzeType.TypeApplication) {
+                actualPayloadType
+            } else {
+                instantiateWithFreshVars(actualPayloadType)
+            }
+            val result = unify(payloadTypeToUnify, expectedPayloadType, registry)
+            return when (result) {
+                is UnificationResult.Success -> ConstraintSolver.ConstraintResult.Success(result.substitution)
+                is UnificationResult.Failure -> ConstraintSolver.ConstraintResult.Failure(
+                    "Constructor '$constructorName' payload type mismatch: ${result.message}"
+                )
+            }
+        } else if (expectedPayloadType == null && actualPayloadType != null) {
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Constructor '$constructorName' has a payload that must be destructured. " +
+                "Use '$constructorName { ... }' to match the payload."
+            )
+        } else if (expectedPayloadType != null && actualPayloadType == null) {
+            return ConstraintSolver.ConstraintResult.Failure(
+                "Constructor '$constructorName' does not have a payload. " +
+                "Remove the pattern '{ ... }' after '$constructorName' since it's a unit variant."
+            )
+        } else {
+            return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
+        }
+    }
+
+    private fun solveConstructorOnList(
+        listType: MezzeType.ListType,
+        constructorName: String,
+        expectedPayloadType: MezzeType?
+    ): ConstraintSolver.ConstraintResult {
+        if (constructorName == BuiltinTypes.CONS) {
+            if (expectedPayloadType != null) {
+                val expectedConsPayload = MezzeType.RecordType(mapOf(
+                    "head" to listType.elementType, "tail" to listType
+                ))
+                val result = unify(expectedPayloadType, expectedConsPayload, registry)
                 return when (result) {
                     is UnificationResult.Success -> ConstraintSolver.ConstraintResult.Success(result.substitution)
                     is UnificationResult.Failure -> ConstraintSolver.ConstraintResult.Failure(
-                        "Constructor '$constructorName' payload type mismatch: ${result.message}"
+                        "Constructor 'Cons' payload type mismatch: ${result.message}"
                     )
                 }
-            } else if (expectedPayloadType == null && actualPayloadType != null) {
-                return ConstraintSolver.ConstraintResult.Failure(
-                    "Constructor '$constructorName' has a payload that must be destructured. " +
-                    "Use '$constructorName { ... }' to match the payload."
-                )
-            } else if (expectedPayloadType != null && actualPayloadType == null) {
-                return ConstraintSolver.ConstraintResult.Failure(
-                    "Constructor '$constructorName' does not have a payload. " +
-                    "Remove the pattern '{ ... }' after '$constructorName' since it's a unit variant."
-                )
-            } else {
-                return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
-            }
-        }
-
-        if (variantType is MezzeType.ListType) {
-            if (constructorName == BuiltinTypes.CONS) {
-                if (expectedPayloadType != null) {
-                    val elemType = variantType.elementType
-                    val expectedConsPayload = MezzeType.RecordType(mapOf(
-                        "head" to elemType,
-                        "tail" to variantType
-                    ))
-                    val result = unify(expectedPayloadType, expectedConsPayload, registry)
-                    return when (result) {
-                        is UnificationResult.Success -> ConstraintSolver.ConstraintResult.Success(result.substitution)
-                        is UnificationResult.Failure -> ConstraintSolver.ConstraintResult.Failure(
-                            "Constructor 'Cons' payload type mismatch: ${result.message}"
-                        )
-                    }
-                } else {
-                    return ConstraintSolver.ConstraintResult.Failure(
-                        "Constructor 'Cons' has a payload that must be destructured. " +
-                        "Use 'Cons { head, tail }' to match the payload."
-                    )
-                }
-            } else if (constructorName == BuiltinTypes.NIL) {
-                if (expectedPayloadType != null) {
-                    return ConstraintSolver.ConstraintResult.Failure(
-                        "Constructor 'Nil' does not have a payload"
-                    )
-                }
-                return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
             } else {
                 return ConstraintSolver.ConstraintResult.Failure(
-                    "List type only has constructors 'Cons' and 'Nil', not '$constructorName'"
+                    "Constructor 'Cons' has a payload that must be destructured. " +
+                    "Use 'Cons { head, tail }' to match the payload."
                 )
             }
+        } else if (constructorName == BuiltinTypes.NIL) {
+            if (expectedPayloadType != null) {
+                return ConstraintSolver.ConstraintResult.Failure(
+                    "Constructor 'Nil' does not have a payload"
+                )
+            }
+            return ConstraintSolver.ConstraintResult.Success(Substitution.empty)
+        } else {
+            return ConstraintSolver.ConstraintResult.Failure(
+                "List type only has constructors 'Cons' and 'Nil', not '$constructorName'"
+            )
         }
-
-        return ConstraintSolver.ConstraintResult.Failure(
-            "Cannot use constructor '$constructorName' on non-variant type: ${prettyPrintType(variantType)}"
-        )
     }
 
     fun closePatternBasedVariants(substitution: Substitution): Substitution {
