@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.solving
 
 import com.mezze.language.ast.*
 import com.mezze.language.ast.solving.Substitution
+import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
@@ -26,6 +27,52 @@ class ConstraintSolver(
         is Constraint.RecordPatternExhaustive -> 3
     }
 
+    // The "subject" type vars a constraint's failure is really about — the
+    // receiver whose wrong type triggers the error — read from the RAW
+    // (pre-substitution) constraint so the var survives resolution. A HasField
+    // failure is about the *record* var, not the fresh var invented for the
+    // field's type; keying on the subject lets repeated failures on the same
+    // wrongly-resolved receiver (n.foo, n.bar, ...) collapse to one root cause,
+    // while incidental result vars (which differ per access) don't defeat it.
+    private fun constraintOriginVars(constraint: Constraint): Set<TypeVar> {
+        val vars = LinkedHashSet<TypeVar>()
+        fun addVarsOf(type: MezzeType) = vars.addAll(collectFreeTypeVars(type))
+        when (constraint) {
+            // The record/variant being probed is the subject; the field/payload
+            // type is a fresh var per access and must NOT gate cascade detection.
+            is Constraint.HasField -> addVarsOf(constraint.recordType)
+            is Constraint.HasConstructor -> addVarsOf(constraint.variantType)
+            is Constraint.MustBeOpen -> addVarsOf(constraint.type)
+            is Constraint.RecordPatternExhaustive -> addVarsOf(constraint.recordType)
+            // Both sides of an equality/subsumption are equally the subject.
+            is Constraint.Equality -> { addVarsOf(constraint.left); addVarsOf(constraint.right) }
+            is Constraint.Subsumes -> { addVarsOf(constraint.general); addVarsOf(constraint.specific) }
+            is Constraint.AbilityRequired -> vars.add(constraint.typeVar)
+            is Constraint.AssociatedTypeResolution -> {
+                vars.add(constraint.primaryTypeVar)
+                vars.addAll(constraint.associatedTypeVars.values)
+            }
+        }
+        return vars
+    }
+
+    // A failed constraint whose every origin var is already poisoned reports the
+    // same underlying error as the failure that poisoned those vars, so it is a
+    // cascade we suppress. A failure that mentions at least one non-poisoned var
+    // is (potentially) a fresh, independent error and is kept. Pass the ORIGINAL
+    // (pre-substitution) constraint so origin vars survive substitution.
+    private fun isCascade(constraint: Constraint): Boolean {
+        val vars = constraintOriginVars(constraint)
+        return vars.isNotEmpty() && vars.all { it in poisonedVars }
+    }
+
+    // Record a just-reported failure's origin vars as poisoned so any downstream
+    // constraint depending solely on them is recognised as a cascade. Pass the
+    // ORIGINAL (pre-substitution) constraint.
+    private fun poison(constraint: Constraint) {
+        poisonedVars.addAll(constraintOriginVars(constraint))
+    }
+
     private val abilityChecker = AbilityChecker(context, registry)
 
     internal fun getGeneratedCodecImpls(): Collection<AbilityChecker.GeneratedCodecImpl> = abilityChecker.getGeneratedCodecImpls()
@@ -34,6 +81,14 @@ class ConstraintSolver(
     private val mustBeOpenRowVars = mutableSetOf<RowVar>()
     private val mustBeOpenBindings = mutableSetOf<String>()
     private val patternBasedRowVars = mutableSetOf<RowVar>()
+
+    // #61 error-recovery: type vars left unresolved by an already-reported
+    // failure. A later constraint that fails but depends only on poisoned vars
+    // is a cascade of the same root cause, so we suppress its (duplicate) error
+    // instead of drowning the real one. This is the "ErrorType sentinel" idea
+    // realised as a poisoned-TypeVar set — no new MezzeType variant, so it costs
+    // nothing in the exhaustive `when (type)` blocks across the codebase.
+    private val poisonedVars = mutableSetOf<TypeVar>()
 
     private val variantSolver = VariantSolver(registry, patternBasedRowVars, mustBeOpenRowVars)
 
@@ -64,6 +119,10 @@ class ConstraintSolver(
     )
 
     fun solve(constraints: List<Constraint>): SolveResult {
+        // #61: poison is scoped to a single solve() so a failure in one binding
+        // can't suppress an unrelated failure in the next (the solver instance is
+        // reused across per-binding solves).
+        poisonedVars.clear()
         var substitution = Substitution.empty
         val errors = mutableListOf<ConstraintError>()
         val warnings = mutableListOf<String>()
@@ -157,11 +216,16 @@ class ConstraintSolver(
                     }
                 }
                 is ConstraintResult.Failure -> {
-                    errors.add(ConstraintError(
-                        message = result.message,
-                        constraint = appliedConstraint,
-                        context = appliedConstraint.context
-                    ))
+                    if (!isCascade(constraint)) {
+                        errors.add(ConstraintError(
+                            message = result.message,
+                            constraint = appliedConstraint,
+                            context = appliedConstraint.context
+                        ))
+                        // Poison so later HasField/worklist constraints on the
+                        // same unresolved var don't re-report the same failure.
+                        poison(constraint)
+                    }
                 }
                 is ConstraintResult.Deferred -> {}
             }
@@ -213,11 +277,14 @@ class ConstraintSolver(
                         val constraintType = appliedConstraint.variantType
                         if (constraintType is MezzeType.VarType && !result.terminal) {
                         } else {
-                            errors.add(ConstraintError(
-                                message = result.message,
-                                constraint = appliedConstraint,
-                                context = appliedConstraint.context
-                            ))
+                            if (!isCascade(constraint)) {
+                                errors.add(ConstraintError(
+                                    message = result.message,
+                                    constraint = appliedConstraint,
+                                    context = appliedConstraint.context
+                                ))
+                                poison(constraint)
+                            }
                             iterator.remove()
                         }
                     }
@@ -353,11 +420,18 @@ class ConstraintSolver(
 
                         if (constraintType is MezzeType.VarType) {
                         } else {
-                            errors.add(ConstraintError(
-                                message = result.message,
-                                constraint = appliedConstraint,
-                                context = appliedConstraint.context
-                            ))
+                            // #61: suppress cascades — only the root failure (one
+                            // whose origin vars aren't all poisoned yet) is
+                            // reported; reporting a failure poisons its origin
+                            // vars so dependents are recognised as follow-on noise.
+                            if (!isCascade(constraint)) {
+                                errors.add(ConstraintError(
+                                    message = result.message,
+                                    constraint = appliedConstraint,
+                                    context = appliedConstraint.context
+                                ))
+                                poison(constraint)
+                            }
                             iterator.remove()
                         }
                     }
@@ -372,12 +446,13 @@ class ConstraintSolver(
                 is Constraint.HasConstructor -> variantSolver.solveHasConstructor(appliedConstraint as Constraint.HasConstructor, substitution, constraint)
                 else -> solveConstraint(appliedConstraint, substitution)
             }
-            if (result is ConstraintResult.Failure) {
+            if (result is ConstraintResult.Failure && !isCascade(constraint)) {
                 errors.add(ConstraintError(
                     message = result.message,
                     constraint = appliedConstraint,
                     context = appliedConstraint.context
                 ))
+                poison(constraint)
             }
         }
 
@@ -429,11 +504,14 @@ class ConstraintSolver(
                         }
                     }
                     is ConstraintResult.Failure -> {
-                        errors.add(ConstraintError(
-                            message = result.message,
-                            constraint = constraint,
-                            context = constraint.context
-                        ))
+                        if (!isCascade(constraint)) {
+                            errors.add(ConstraintError(
+                                message = result.message,
+                                constraint = constraint,
+                                context = constraint.context
+                            ))
+                            poison(constraint)
+                        }
                     }
                     is ConstraintResult.Deferred -> {}
                 }
