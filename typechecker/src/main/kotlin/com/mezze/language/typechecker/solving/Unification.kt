@@ -18,6 +18,14 @@ private val unificationCache = ThreadLocal.withInitial {
     HashMap<Pair<MezzeType, MezzeType>, UnificationResult>()
 }
 
+// Shared ContextBuilder for the type-application expand functions below. These
+// call only convertParsedTypeAnnotation, which resets typeVarCache/sharedRowVar
+// on each call and never touches the build()-populated decl maps (all empty
+// here), so a single instance is safe to reuse and avoids allocating a fresh
+// ContextBuilder on every expansion. Thread-local because ContextBuilder is not
+// thread-safe and unification runs concurrently.
+private val expandContextBuilder = ThreadLocal.withInitial { ContextBuilder() }
+
 fun clearUnificationCache() {
     unificationCache.get().clear()
 }
@@ -891,7 +899,7 @@ internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, r
         paramName to argType
     }
 
-    val contextBuilder = ContextBuilder()
+    val contextBuilder = expandContextBuilder.get()
 
     val fields = recordDef.fields.associate { field ->
         val convertedType = contextBuilder.convertParsedTypeAnnotation(field.type)
@@ -939,7 +947,7 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
         paramName to argType
     }
 
-    val contextBuilder = ContextBuilder()
+    val contextBuilder = expandContextBuilder.get()
 
     val constructors = variantDef.constructors.associate { constructor ->
         val dataType = constructor.dataType?.let { annotation ->

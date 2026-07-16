@@ -15,7 +15,57 @@ data class Substitution(
             return type
         }
 
-        return applyWithVisited(type, mutableSetOf())
+        return applyWithVisited(type, mutableSetOf(), HashMap())
+    }
+
+    // Resolve a variable chain (var -> var -> ... -> terminal) with path
+    // compression, union-find style. `chainCache` memoizes the terminal a
+    // variable resolves to *within a single apply() traversal*, so a type that
+    // mentions the same var many times (e.g. (a, a, a) -> a) walks each chain
+    // once instead of once per occurrence. Only pure variable hops are cached;
+    // once the chain reaches a non-var (or an unmapped/cyclic var) we hand off
+    // to applyWithVisited so compound terminals still recurse under the cycle
+    // guard. Returns the resolved MezzeType for `startVar`, or null if it maps
+    // to a non-variable that must be recursed by the caller.
+    private fun resolveVarChain(
+        startVar: TypeVar,
+        visitedVars: MutableSet<TypeVar>,
+        chainCache: MutableMap<TypeVar, MezzeType>
+    ): MezzeType? {
+        chainCache[startVar]?.let { return it }
+
+        var current = startVar
+        val hops = ArrayList<TypeVar>()
+        val hopSet = HashSet<TypeVar>()
+        while (true) {
+            if (current in visitedVars || current in hopSet) {
+                // Cyclic — either against the outer traversal's visitedVars, or
+                // a var-only cycle within this chain (a -> b -> a). Leave as the
+                // raw var. Do NOT cache: visitedVars membership is transient
+                // (added/removed around each recursion), so a hop's cyclic
+                // resolution here could be stale once the var leaves visitedVars.
+                return MezzeType.VarType(current)
+            }
+            val mapped = mappings[current]
+            if (mapped == null) {
+                // Unmapped terminal variable — resolves to itself, independent
+                // of visitedVars, so it (and every hop that led here) is safe to
+                // cache with path compression for the rest of this traversal.
+                val result = MezzeType.VarType(current)
+                chainCache[current] = result
+                for (v in hops) chainCache[v] = result
+                return result
+            }
+            if (mapped is MezzeType.VarType) {
+                hops.add(current)
+                hopSet.add(current)
+                current = mapped.variable
+                continue
+            }
+            // Non-variable terminal: caller must recurse it under the cycle
+            // guard, so we can't cache a finished value here.
+            return null
+        }
     }
 
     private fun isConcreteType(type: MezzeType): Boolean = when (type) {
@@ -80,7 +130,11 @@ data class Substitution(
         }
     }
 
-    private fun applyWithVisited(type: MezzeType, visitedVars: MutableSet<TypeVar>): MezzeType {
+    private fun applyWithVisited(
+        type: MezzeType,
+        visitedVars: MutableSet<TypeVar>,
+        chainCache: MutableMap<TypeVar, MezzeType>
+    ): MezzeType {
         if (visitedVars.isEmpty() && !needsSubstitution(type)) {
             return type
         }
@@ -88,10 +142,15 @@ data class Substitution(
         return when (type) {
             is MezzeType.VarType -> {
                 if (type.variable in visitedVars) return type
+                // Fast path: chase variable-only chains with path compression.
+                // Returns non-null when the chain terminates at a variable
+                // (mapped-to-nothing or cyclic); null means the chain ends at a
+                // compound type we must recurse into under the cycle guard.
+                resolveVarChain(type.variable, visitedVars, chainCache)?.let { return it }
                 val substitutedType = mappings[type.variable]
                 if (substitutedType != null) {
                     visitedVars.add(type.variable)
-                    val result = applyWithVisited(substitutedType, visitedVars)
+                    val result = applyWithVisited(substitutedType, visitedVars, chainCache)
                     visitedVars.remove(type.variable)
                     result
                 } else {
@@ -100,20 +159,20 @@ data class Substitution(
             }
 
             is MezzeType.FunctionType -> MezzeType.FunctionType(
-                paramType = applyWithVisited(type.paramType, visitedVars),
-                returnType = applyWithVisited(type.returnType, visitedVars),
-                effects = type.effects?.let { applyToEffectRowWithVisited(it, visitedVars) },
+                paramType = applyWithVisited(type.paramType, visitedVars, chainCache),
+                returnType = applyWithVisited(type.returnType, visitedVars, chainCache),
+                effects = type.effects?.let { applyToEffectRowWithVisited(it, visitedVars, chainCache) },
                 abilityConstraints = type.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = constraint.typeArgs.map { applyWithVisited(it, visitedVars) },
+                        typeArgs = constraint.typeArgs.map { applyWithVisited(it, visitedVars, chainCache) },
                         abilityHash = constraint.abilityHash
                     )
                 }
             )
 
             is MezzeType.RecordType -> MezzeType.RecordType(
-                fields = type.fields.mapValues { (_, fieldType) -> applyWithVisited(fieldType, visitedVars) },
+                fields = type.fields.mapValues { (_, fieldType) -> applyWithVisited(fieldType, visitedVars, chainCache) },
                 rowVar = type.rowVar,
                 typeName = type.typeName,
                 typeHash = type.typeHash
@@ -121,13 +180,13 @@ data class Substitution(
 
             is MezzeType.VariantType -> {
                 val appliedConstructors = type.constructors.mapValues { (_, dataType) ->
-                    dataType?.let { applyWithVisited(it, visitedVars) }
+                    dataType?.let { applyWithVisited(it, visitedVars, chainCache) }
                 }
                 MezzeType.VariantType(
                     constructors = appliedConstructors,
                     rowVar = type.rowVar,
                     typeName = type.typeName,
-                    typeArgs = type.typeArgs.map { applyWithVisited(it, visitedVars) },
+                    typeArgs = type.typeArgs.map { applyWithVisited(it, visitedVars, chainCache) },
                     typeHash = type.typeHash,
                     nominalWall = type.nominalWall
                 )
@@ -135,48 +194,48 @@ data class Substitution(
 
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 constructor = type.constructor,
-                args = type.args.map { applyWithVisited(it, visitedVars) },
+                args = type.args.map { applyWithVisited(it, visitedVars, chainCache) },
                 typeHash = type.typeHash
             )
 
             is MezzeType.SeqType -> MezzeType.SeqType(
-                elementType = applyWithVisited(type.elementType, visitedVars)
+                elementType = applyWithVisited(type.elementType, visitedVars, chainCache)
             )
 
             is MezzeType.ListType -> MezzeType.ListType(
-                elementType = applyWithVisited(type.elementType, visitedVars)
+                elementType = applyWithVisited(type.elementType, visitedVars, chainCache)
             )
 
             is MezzeType.SetType -> MezzeType.SetType(
-                elementType = applyWithVisited(type.elementType, visitedVars)
+                elementType = applyWithVisited(type.elementType, visitedVars, chainCache)
             )
 
             is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-                keyType = applyWithVisited(type.keyType, visitedVars),
-                valueType = applyWithVisited(type.valueType, visitedVars)
+                keyType = applyWithVisited(type.keyType, visitedVars, chainCache),
+                valueType = applyWithVisited(type.valueType, visitedVars, chainCache)
             )
 
             is MezzeType.SortedSetType -> MezzeType.SortedSetType(
-                elementType = applyWithVisited(type.elementType, visitedVars)
+                elementType = applyWithVisited(type.elementType, visitedVars, chainCache)
             )
 
             is MezzeType.MapType -> MezzeType.MapType(
-                keyType = applyWithVisited(type.keyType, visitedVars),
-                valueType = applyWithVisited(type.valueType, visitedVars)
+                keyType = applyWithVisited(type.keyType, visitedVars, chainCache),
+                valueType = applyWithVisited(type.valueType, visitedVars, chainCache)
             )
 
             is MezzeType.SuspendedType -> MezzeType.SuspendedType(
-                valueType = applyWithVisited(type.valueType, visitedVars),
-                effects = applyToEffectRowWithVisited(type.effects, visitedVars)
+                valueType = applyWithVisited(type.valueType, visitedVars, chainCache),
+                effects = applyToEffectRowWithVisited(type.effects, visitedVars, chainCache)
             )
 
             is MezzeType.NewtypeType -> MezzeType.NewtypeType(
                 type.name,
                 type.constructor,
-                applyWithVisited(type.wrappedType, visitedVars)
+                applyWithVisited(type.wrappedType, visitedVars, chainCache)
             )
 
-            is MezzeType.EffectRow -> applyToEffectRowWithVisited(type, visitedVars)
+            is MezzeType.EffectRow -> applyToEffectRowWithVisited(type, visitedVars, chainCache)
 
             is MezzeType.IntType,
             is MezzeType.FloatType,
@@ -191,7 +250,11 @@ data class Substitution(
         }
     }
 
-    private fun applyToEffectRowWithVisited(effectRow: MezzeType.EffectRow, visitedVars: MutableSet<TypeVar>): MezzeType.EffectRow {
+    private fun applyToEffectRowWithVisited(
+        effectRow: MezzeType.EffectRow,
+        visitedVars: MutableSet<TypeVar>,
+        chainCache: MutableMap<TypeVar, MezzeType>
+    ): MezzeType.EffectRow {
         if (effectRow.effectInstances.isEmpty()) {
             return effectRow
         }
@@ -207,7 +270,7 @@ data class Substitution(
                 } else {
                     anyChanged = true
                     val substitutedAssocTypes = instance.associatedTypes.mapValues { (_, type) ->
-                        applyWithVisited(type, visitedVars)
+                        applyWithVisited(type, visitedVars, chainCache)
                     }
                     MezzeType.EffectInstance(instance.name, substitutedAssocTypes)
                 }
