@@ -114,6 +114,41 @@ internal class AnnotationValidator(
                 }
             }
         }
+
+        // Skolem distinctness: distinct annotation variables (`'a`, `'b`) must
+        // stay distinct in the body. If two differently-named annotation vars
+        // resolve to the SAME variable, the body conflated them — e.g.
+        // `{ a: 'a, b: 'b } -> 'a` implemented as `{ a, b } -> b` really has type
+        // `-> 'b`, not `-> 'a`. Treating each quantified var as a rigid skolem,
+        // unifying two skolems is illegal; we detect it here by seeing two source
+        // names collapse onto one resolved var. Vars pinned by ability
+        // constraints are skipped (same as above).
+        val nameToResolved = mutableMapOf<String, TypeVar>()
+        for (typeVar in annotationTypeVars) {
+            if (abilityConstrainedTypeVars.any {
+                    it.name.removePrefix("'") == typeVar.name.removePrefix("'") || it.id == typeVar.id
+                }) {
+                continue
+            }
+            val sourceName = typeVar.name.removePrefix("'")
+            if (sourceName.isEmpty()) continue
+            val resolved = substitution.apply(MezzeType.VarType(typeVar))
+            if (resolved !is MezzeType.VarType) continue  // concrete case handled above
+            val resolvedVar = resolved.variable
+            for ((otherName, otherResolved) in nameToResolved) {
+                if (otherName != sourceName && otherResolved.id == resolvedVar.id) {
+                    throw TypeCheckError(
+                        "Type annotation mismatch for '$varName': Annotation declares distinct type " +
+                        "variables '$otherName' and '$sourceName', but the implementation forces them " +
+                        "to be the same type. Each must remain independent.",
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf("give the two positions the same variable in the annotation if they must match, or change the body so they stay independent"),
+                    )
+                }
+            }
+            nameToResolved[sourceName] = resolvedVar
+        }
     }
 
     fun validateEffectsNotOverpromised(
