@@ -118,7 +118,12 @@ class ConstraintSolver(
         val hints: List<String> = emptyList(),
     )
 
-    fun solve(constraints: List<Constraint>): SolveResult {
+    fun solve(rawConstraints: List<Constraint>): SolveResult {
+        // Pre-solve simplification: drop reflexive equalities and exact
+        // duplicates so the worklist below has fewer constraints to iterate.
+        // Provably meaning-preserving — same solution set (see ConstraintSimplifier).
+        val constraints = ConstraintSimplifier.simplify(rawConstraints)
+
         // #61: poison is scoped to a single solve() so a failure in one binding
         // can't suppress an unrelated failure in the next (the solver instance is
         // reused across per-binding solves).

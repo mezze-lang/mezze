@@ -138,7 +138,15 @@ sealed interface MezzeType {
         override fun toString(): String = safeToString(
             typeName ?: "RecordType",
             truncatedContent = { "${fields.size} fields" },
-            fullContent = { "${fields.keys.take(3)}${if (fields.size > 3) "..." else ""}" }
+            // Show field names WITH their types (was names only, so `{x: Int}` and
+            // `{x: Str}` printed identically). safeToString recurses/truncates the
+            // field types past TRUNCATE_DEPTH.
+            fullContent = {
+                val shown = fields.entries.take(3).joinToString(", ") { (k, v) -> "$k: $v" }
+                val more = if (fields.size > 3) ", ..." else ""
+                val open = if (rowVar != null) ", ..." else ""
+                "{$shown$more$open}"
+            }
         )
     }
 
@@ -226,7 +234,10 @@ sealed interface MezzeType {
         override fun toString(): String = safeToString(
             "TypeApplication",
             truncatedContent = { "$constructor, ${args.size} args" },
-            fullContent = { constructor }
+            // Include the args at shallow depth — `constructor` alone dropped
+            // them entirely, so `List Int` and `List Str` printed identically.
+            // safeToString still truncates the args recursively past TRUNCATE_DEPTH.
+            fullContent = { if (args.isEmpty()) constructor else "$constructor ${args.joinToString(" ")}" }
         )
     }
 
