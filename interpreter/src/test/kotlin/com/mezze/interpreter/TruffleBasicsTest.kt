@@ -188,6 +188,7 @@ class TruffleBasicsTest {
                 match x is
                     0 -> Red
                     1 -> Blue {val = 100}
+                    _ -> Red
 
             let result = getValue {x = 1}
             match result is

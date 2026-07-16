@@ -79,6 +79,11 @@ class MatchValidator(
                         else -> finalType
                     }
                     if (expanded is MezzeType.VariantType) return expanded
+                    // #83: also surface a non-enumerable primitive scrutinee (Int,
+                    // Str, ...) so validateParsedExhaustiveness can require a
+                    // catch-all. Only for literal-only matches (this path already
+                    // runs solely when there's no constructor pattern).
+                    if (isNonEnumerablePrimitive(expanded)) return expanded
                 }
             }
         }
@@ -89,6 +94,27 @@ class MatchValidator(
     private fun extractParamType(type: MezzeType, paramName: String): MezzeType? = when (type) {
         is MezzeType.FunctionType -> (type.paramType as? MezzeType.RecordType)?.fields?.get(paramName)
         else -> null
+    }
+
+    /** Primitive scalar types whose values can't be enumerated, so a match on
+     *  them is only exhaustive with a catch-all (`_`/variable). Bool is NOT here
+     *  — it's finite and handled by the variant path. */
+    private fun isNonEnumerablePrimitive(type: MezzeType): Boolean = when (type) {
+        is MezzeType.IntType, is MezzeType.NatType, is MezzeType.FloatType,
+        is MezzeType.FracType, is MezzeType.StringType, is MezzeType.CharType -> true
+        else -> false
+    }
+
+    /** A pattern that matches ANY value of a non-enumerable primitive — i.e. a
+     *  catch-all. Wildcard `_` and a bare variable bind anything. A string
+     *  interpolation pattern is a catch-all only when it's a *pure* whole-string
+     *  capture (`"$(all)"` — one Capture, no Literal parts); once it has literal
+     *  text (`"pre$(x)"`, `"$(a)-$(b)"`) it only matches some strings. */
+    private fun isCatchAllPattern(pattern: ParsedPattern): Boolean = when (pattern) {
+        is ParsedWildcardPattern, is ParsedVariablePattern -> true
+        is ParsedStringInterpPattern ->
+            pattern.parts.size == 1 && pattern.parts.single() is ParsedStringPatternPart.Capture
+        else -> false
     }
 
     private fun walkParsedExpr(expr: ParsedExpr, visitor: (ParsedExpr) -> Unit) {
@@ -144,7 +170,27 @@ class MatchValidator(
             else -> scrutineeType
         }
 
-        if (expandedType !is MezzeType.VariantType) return ValidationResult.Success()
+        // #83: a match on a NON-ENUMERABLE primitive (Int, Str, Float, ...) can
+        // never be exhaustive by listing literals — there's no finite constructor
+        // set — so it must have a catch-all (`_` or a variable arm). Without one,
+        // a value not covered by the literals hits no branch at runtime. Same
+        // exhaustiveness error as a variant missing a constructor.
+        if (expandedType !is MezzeType.VariantType) {
+            if (isNonEnumerablePrimitive(expandedType)) {
+                val hasCatchAll = matchExpr.cases.any { case ->
+                    case.guard == null && case.ifLetBindings.isEmpty() &&
+                        case.patterns.any { isCatchAllPattern(it) }
+                }
+                if (!hasCatchAll) {
+                    errors.add(ValidationError.NonExhaustiveMatch(
+                        coveredConstructors = emptyList(),
+                        missingConstructors = listOf("_ (a ${prettyPrintType(expandedType)} match cannot be exhaustive without a wildcard)"),
+                        loc = matchExpr.loc
+                    ))
+                }
+            }
+            return if (errors.isEmpty()) ValidationResult.Success() else ValidationResult.Failure(errors)
+        }
 
         val isOpenVariant = expandedType.rowVar != null
         val allConstructors = expandedType.constructors.keys
