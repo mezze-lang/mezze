@@ -61,10 +61,11 @@ object ErrorMessageBuilder {
                 val expected = TypeDiffPrinter.formatType(type2, 0, rename)
                 val actual = TypeDiffPrinter.formatType(type1, 0, rename)
 
+                val collectionHint = seqListMismatchHint(expected = type2, actual = type1)
                 return if (errorContext.isReturnType) {
-                    "Return type mismatch in '$bindingName': declared as $expected but returns $actual"
+                    "Return type mismatch in '$bindingName': declared as $expected but returns $actual$collectionHint"
                 } else {
-                    "Type annotation mismatch for '$bindingName': declared as $expected but expression has type $actual"
+                    "Type annotation mismatch for '$bindingName': declared as $expected but expression has type $actual$collectionHint"
                 }
             }
             is ErrorContext.FieldAccess -> {
@@ -189,6 +190,27 @@ object ErrorMessageBuilder {
             return null
         }
         return null
+    }
+
+    // `Seq` (written `['a]`, produced by the `[...]` literal) and `List 'a` are
+    // distinct data structures — an array-like sequence vs a cons-list — with no
+    // implicit coercion. Mixing them is a common mistake because `[...]` looks
+    // list-shaped, so when the mismatch is exactly Seq-vs-List we append a hint
+    // pointing at the explicit conversion.
+    private fun seqListMismatchHint(expected: MezzeType, actual: MezzeType): String {
+        fun isSeq(t: MezzeType) = t is MezzeType.SeqType
+        fun isList(t: MezzeType) = t is MezzeType.TypeApplication && t.constructor == "List"
+        return when {
+            // wrote a `[...]` sequence where a List was expected
+            isList(expected) && isSeq(actual) ->
+                "\n  hint: `[...]` builds a Seq (`['a]`), not a List. " +
+                "Convert with `list::from_seq { xs = [...] }`, or annotate the type as `['a]`."
+            // expected a sequence but produced a List
+            isSeq(expected) && isList(actual) ->
+                "\n  hint: this is a List, not a Seq (`['a]`). " +
+                "Convert with `list::to_seq { xs = ... }`, or annotate the type as `List 'a`."
+            else -> ""
+        }
     }
 
     private fun describeEffectRowDifference(actual: MezzeType, expected: MezzeType): String? {
