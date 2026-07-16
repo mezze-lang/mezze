@@ -849,6 +849,7 @@ class ConstraintGenerator(
             effectNames: Set<String> = emptySet(),
         ): ConstraintGenerator {
             val expressionGen = ExpressionConstraintGenerator()
+            expressionGen.registry = registry
             val patternGen = PatternConstraintGenerator()
 
             return ConstraintGenerator(

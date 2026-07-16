@@ -4,6 +4,7 @@ import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.context.ContextBuilder
+import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.dependencies.DefinitionRef
 import com.mezze.language.typechecker.TypeCheckError
@@ -24,6 +25,12 @@ class ExpressionConstraintGenerator {
     internal val typeVarMappingCache = mutableMapOf<Pair<Int, Int>, Map<TypeVar, TypeVar>>()
     internal val maxCacheSize = 1000
     val nestedBindingTypes = mutableMapOf<String, MezzeType>()
+
+    // Set by ConstraintGenerator.create so do-block let bindings can solve their
+    // own constraints inline and generalize the result (#76 let-polymorphism).
+    // Null in bare/test construction — generalization is then skipped and bindings
+    // stay monomorphic (safe fallback).
+    var registry: DeclarationRegistry? = null
 
     fun generate(expr: ParsedExpr, context: ConstraintContext): ConstraintResult {
         val raw = generateImpl(expr, context)

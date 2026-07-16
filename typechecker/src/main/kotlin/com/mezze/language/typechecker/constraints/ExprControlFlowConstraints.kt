@@ -8,6 +8,8 @@ import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.context.TypeScheme
+import com.mezze.language.typechecker.solving.ConstraintSolver
+import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 
 internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, context: ConstraintContext): ConstraintResult {
@@ -185,6 +187,108 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
     )
 }
 
+/**
+ * #76 let-polymorphism for do-block bindings. Generalizes an un-annotated
+ * do-block `let` the way a top-level binding does: solve the constraints
+ * accumulated so far (so the binding type is resolved), then quantify the type
+ * vars that are free in the solved binding type but NOT free in the outer
+ * context. Quantifying the *solved* type is what keeps this sound — a body that
+ * pins a param (`{x} -> x + 1`) resolves that var to a concrete type, so it is
+ * no longer free and is not quantified, leaving the binding monomorphic. Returns
+ * one binding per pattern var. Falls back to monomorphic bindings when no
+ * registry is wired (bare construction) or solving fails.
+ */
+private fun ExpressionConstraintGenerator.generalizeDoBlockBinding(
+    patternBindings: Map<String, MezzeType>,
+    accumulatedConstraints: List<Constraint>,
+    bindingAbilityConstraints: List<Constraint.AbilityRequired>,
+    outerContext: ConstraintContext,
+): Map<BindingKey, TypingContext.Binding> {
+    val reg = this.registry
+    val monomorphic = {
+        patternBindings.mapValues { (_, type) -> type }
+            .map { (name, type) -> BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type = type) as TypingContext.Binding }
+            .toMap()
+    }
+    if (reg == null) return monomorphic()
+
+    val solveResult = ConstraintSolver(outerContext.typingContext, reg).solve(accumulatedConstraints.toList())
+    // A failure here isn't ours to report — the global solve surfaces real errors
+    // later. We just can't generalize without a substitution, so stay monomorphic.
+    val substitution = when (solveResult) {
+        is ConstraintSolver.SolveResult.Success -> solveResult.substitution
+        is ConstraintSolver.SolveResult.Failure -> return monomorphic()
+    }
+
+    // Vars free in the outer context must never be quantified — they may be
+    // shared with the enclosing scope (e.g. a captured `n: 't`).
+    val contextVars = doBlockContextFreeVars(outerContext.typingContext)
+
+    return patternBindings.map { (name, rawType) ->
+        val solvedType = substitution.apply(rawType)
+        val quantifiable = collectFreeTypeVars(solvedType) - contextVars
+        val binding: TypingContext.Binding = if (quantifiable.isNotEmpty()) {
+            // Carry any ability constraint whose (resolved) type var is one we're
+            // quantifying — otherwise a generalized `{a, b} -> a + b` would lose its
+            // NumAdd requirement and unify against non-numeric args unsoundly.
+            // Mirrors ConstraintGenerator.buildBindingForContext.
+            val quantifiableIds = quantifiable.map { it.id }.toSet()
+            val carried = bindingAbilityConstraints.mapNotNull { c ->
+                val resolved = substitution.apply(MezzeType.VarType(c.typeVar))
+                val varId = if (resolved is MezzeType.VarType) resolved.variable.id else c.typeVar.id
+                if (varId in quantifiableIds) {
+                    val quantVar = quantifiable.find { it.id == varId }
+                    AbilityConstraint(
+                        abilityName = c.abilityName,
+                        typeParam = quantVar?.name ?: c.typeVar.name,
+                        typeArgs = c.typeArgs.map { substitution.apply(it) }
+                    )
+                } else null
+            }
+            TypingContext.Binding.Polymorphic(
+                TypeScheme(quantifiedVars = quantifiable.toList(), constraints = carried, type = solvedType)
+            )
+        } else {
+            TypingContext.Binding.Monomorphic(type = solvedType)
+        }
+        BindingKey.unqualified(name) to binding
+    }.toMap()
+}
+
+/** True if [lambda] captures a term variable from the enclosing scope — i.e. it
+ *  references a name (in [usedVariables]) that is not one of its own parameters
+ *  but is bound in [outerContext]. Such closures are left monomorphic (#76): the
+ *  captured value's monomorphization/lowering doesn't compose with generalizing
+ *  the closure. */
+private fun doBlockLambdaCaptures(
+    lambda: ParsedLambda,
+    usedVariables: Set<String>,
+    outerContext: ConstraintContext,
+): Boolean {
+    val paramNames = when (val params = lambda.params) {
+        is ParsedLambdaParams.Untyped -> params.names.toSet()
+        is ParsedLambdaParams.Typed -> params.fields.map { it.name }.toSet()
+    }
+    return usedVariables.any { name ->
+        name !in paramNames &&
+            outerContext.typingContext.lookup(BindingKey.unqualified(name)) is TypingContext.LookupResult.Found
+    }
+}
+
+/** Type vars free in the context's bindings (unquantified vars for polymorphic
+ *  schemes). Mirrors ConstraintGenerator.getContextFreeVars, which is private. */
+private fun doBlockContextFreeVars(context: TypingContext): Set<TypeVar> {
+    val freeVars = mutableSetOf<TypeVar>()
+    for ((_, binding) in context.getAllBindings()) {
+        when (binding) {
+            is TypingContext.Binding.Monomorphic -> freeVars.addAll(collectFreeTypeVars(binding.type))
+            is TypingContext.Binding.Polymorphic ->
+                freeVars.addAll(collectFreeTypeVars(binding.scheme.type) - binding.scheme.quantifiedVars.toSet())
+        }
+    }
+    return freeVars
+}
+
 internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: ConstraintContext): ConstraintResult {
 
     var currentContext = context.clearExpectedType().notInTailPosition()
@@ -304,6 +408,27 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                     patternResult.bindings.map { (name, _) ->
                         BindingKey.unqualified(name) to TypingContext.Binding.Polymorphic(scheme)
                     }.toMap()
+                } else if (stmt.pattern is ParsedVariablePattern && stmt.typeAnnotation == null &&
+                           stmt.value is ParsedLambda &&
+                           !doBlockLambdaCaptures(stmt.value as ParsedLambda, exprResult.usedVariables, currentContext)) {
+                    // #76: generalize an un-annotated do-block lambda the same way a
+                    // top-level binding does, so it can be used at several types
+                    // within the block. Restricted to lambda bindings that DON'T
+                    // capture an outer term variable — a closure that captures (e.g.
+                    // `{x} -> {sum = x + base}` capturing `base`) is left monomorphic
+                    // because generalizing it interacts badly with monomorphization
+                    // and lowering of the captured value. A non-lambda (`let x = 5`)
+                    // has a concrete type with nothing to quantify. We must solve
+                    // first (the binding type is still full of unsolved vars during
+                    // generation) to distinguish `{x} -> x` (quantify) from
+                    // `{x} -> x + 1` (var pinned to Int — must NOT quantify). Falls
+                    // back to monomorphic when no registry is wired or solving fails.
+                    generalizeDoBlockBinding(
+                        patternBindings = patternResult.bindings,
+                        accumulatedConstraints = collector.constraints,
+                        bindingAbilityConstraints = exprResult.abilityConstraints,
+                        outerContext = currentContext,
+                    )
                 } else {
                     patternResult.bindings.map { (name, type) ->
                         BindingKey.unqualified(name) to TypingContext.Binding.Monomorphic(type = type)
