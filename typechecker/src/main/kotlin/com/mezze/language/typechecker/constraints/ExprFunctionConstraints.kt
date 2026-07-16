@@ -545,7 +545,18 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     }
 
     val functionResult = generate(expr.function, context.notInTailPosition())
-    val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
+
+    // Bidirectional: the callee's type is known before its arguments are
+    // generated, so push its parameter type down as the expected type of the
+    // argument record. Because the argument is a record literal, generateRecordLiteral
+    // then fans each param field type into the matching argument field — a lambda
+    // argument gets its param/return types top-down instead of fresh vars. We only
+    // push when the callee is a concrete FunctionType with a RecordType parameter;
+    // otherwise (polymorphic/unresolved callee) we fall back to pure inference and
+    // let the post-hoc Equality constraints below reconcile types as before.
+    val calleeParamType = (functionResult.type as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType
+    val argContext = context.notInTailPosition()
+    val argumentResult = generateWithExpected(expr.arguments, calleeParamType, argContext)
 
     val isSelfTailCall = context.inTailPosition &&
         context.enclosingFunctionName != null &&

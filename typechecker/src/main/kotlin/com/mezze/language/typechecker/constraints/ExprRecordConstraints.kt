@@ -23,12 +23,18 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
     val explicitFieldTypes = mutableMapOf<String, MezzeType>()
 
     val fieldContext = context.clearExpectedType()
+    // Bidirectional: if we're checking this literal against a known record type,
+    // push each field's expected type down into its value expression (so e.g. a
+    // lambda field gets its param types top-down). Falls back to pure inference
+    // per field when the expected type isn't a record. The post-hoc checks below
+    // stay as the correctness backstop.
+    val expectedFields = expectedRecordFields(context.expectedType, context)
 
     for (entry in expr.entries) {
         when (entry) {
             is ParsedRecordEntry.Field -> {
                 val fieldValue = entry.value ?: ParsedIdentifier(localName = entry.name, loc = entry.loc)
-                val fieldResult = generate(fieldValue, fieldContext)
+                val fieldResult = generateWithExpected(fieldValue, expectedFields?.get(entry.name), fieldContext)
 
                 val fieldType = when (val t = fieldResult.type) {
                     is MezzeType.SuspendedType -> {

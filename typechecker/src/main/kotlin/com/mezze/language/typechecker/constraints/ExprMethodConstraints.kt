@@ -168,7 +168,11 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
 
     val receiverResult = generate(memberAccess.receiver, context.notInTailPosition())
 
-    val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
+    // Generated bottom-up first because method/ability dispatch below resolves on
+    // the argument's field names. Once strippedMethodType is known we re-generate
+    // with its param type pushed down (bidirectional) — but only when it changes
+    // anything (a lambda argument field). See pushParamTypeIntoArgs.
+    var argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
 
     val strippedMethodType: MezzeType.FunctionType
     val receiverConstraintType: MezzeType
@@ -342,6 +346,13 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         return null
     }
 
+    // Bidirectional: now that the method type is resolved, push its parameter
+    // type into a lambda argument so its params/return infer top-down. No-op for
+    // non-lambda args. The ability/associated-type constraints were already
+    // collected from the first pass above, so re-generation only refines the
+    // value constraints used below.
+    argumentResult = pushParamTypeIntoArgs(expr.arguments, argumentResult, strippedMethodType.paramType, context)
+
     val resultType = MezzeType.VarType(TypeVar.fresh())
     val constraints = mutableListOf<Constraint>()
     constraints.addAll(receiverResult.constraints)
@@ -469,7 +480,9 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     val methodName = memberAccess.member
 
     val receiverResult = generate(memberAccess.receiver, context.notInTailPosition())
-    val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
+    // Generated bottom-up first; re-generated with the resolved param type pushed
+    // down once the inherent method is picked (bidirectional, lambda args only).
+    var argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
 
     val receiverType: MezzeType
     val extraEffects: Set<String>
@@ -490,7 +503,6 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     val resultType = MezzeType.VarType(TypeVar.fresh())
     val constraints = mutableListOf<Constraint>()
     constraints.addAll(receiverResult.constraints)
-    constraints.addAll(argumentResult.constraints)
 
     val receiverTypeName = getReceiverTypeName(receiverType)
         ?: lookupConstructorTypeName(memberAccess.receiver, context)
@@ -516,6 +528,9 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
             val fullParams = (freshMethodType.paramType as? MezzeType.RecordType)?.fields ?: emptyMap()
             val strippedParams = fullParams.filterKeys { it != Keywords.IT }
             val strippedParamType = MezzeType.RecordType(fields = strippedParams, rowVar = null)
+
+            // Bidirectional push now that the param type is known (lambda args only).
+            argumentResult = pushParamTypeIntoArgs(expr.arguments, argumentResult, strippedParamType, context)
 
             if (methodInfo.isImported) {
                 val itType = fullParams[Keywords.IT]
@@ -544,6 +559,10 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
             ))
         }
     }
+
+    // Added here (not before resolution) so it reflects any bidirectional
+    // re-generation of argumentResult above.
+    constraints.addAll(argumentResult.constraints)
 
     // #217: stash the impl's `it`-slot TyVar (post fresh-instantiation for
     // imports) into typeArgs so mono can substitute the concrete receiver

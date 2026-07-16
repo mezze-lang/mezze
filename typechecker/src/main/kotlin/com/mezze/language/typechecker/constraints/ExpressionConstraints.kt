@@ -389,6 +389,80 @@ class ExpressionConstraintGenerator {
     internal fun convertParsedFieldType(annotation: ParsedTypeAnnotation): MezzeType =
         convertParsedTypeAnnotation(annotation)
 
+    /**
+     * Bidirectional helper: resolve an expected type to its record field→type
+     * map, or null if it isn't (or doesn't name) a record. Handles a direct
+     * [MezzeType.RecordType] and a [MezzeType.TypeApplication] that names a
+     * record type declaration. Shared by every site that wants to push expected
+     * field types down into subexpressions (record literals, call arguments),
+     * so the "what fields does this expected type have" logic lives in one place.
+     */
+    internal fun expectedRecordFields(
+        expectedType: MezzeType?,
+        context: ConstraintContext
+    ): Map<String, MezzeType>? = when (expectedType) {
+        is MezzeType.RecordType -> expectedType.fields
+        is MezzeType.TypeApplication -> {
+            val typeDecl = context.typeDeclarations[expectedType.constructor]
+            val def = typeDecl?.definition
+            if (def is ParsedRecordDef) {
+                def.fields.associate { it.name to convertParsedFieldType(it.type) }
+            } else null
+        }
+        else -> null
+    }
+
+    /**
+     * Bidirectional helper: generate [expr] with [expectedFieldType] pushed down
+     * as its expected type when non-null, otherwise generate it with the
+     * expected type cleared (pure inference). Centralises the "push if known,
+     * else clear" decision so all call sites behave identically.
+     */
+    internal fun generateWithExpected(
+        expr: ParsedExpr,
+        expectedFieldType: MezzeType?,
+        context: ConstraintContext
+    ): ConstraintResult {
+        val ctx = if (expectedFieldType != null) {
+            context.withExpectedType(expectedFieldType)
+        } else {
+            context.clearExpectedType()
+        }
+        return generate(expr, ctx)
+    }
+
+    /** True if this argument record literal has at least one lambda field —
+     *  the only case where re-generating with a pushed param type actually
+     *  changes anything (a lambda's params/return can be inferred top-down;
+     *  every other field value infers the same either way). */
+    private fun recordLiteralHasLambdaField(expr: ParsedExpr): Boolean =
+        expr is ParsedRecordLit && expr.entries.any {
+            it is ParsedRecordEntry.Field && it.value is ParsedLambda
+        }
+
+    /**
+     * Bidirectional helper for calls whose callee type is only known AFTER the
+     * arguments have been generated once (method/ability dispatch resolves on the
+     * argument's field names). Given the already-inferred [inferredArgResult] and
+     * the resolved parameter type [resolvedParamType], re-generate the argument
+     * record with each param field type pushed down — but ONLY when it can change
+     * the outcome (the arg is a record literal with a lambda field and the param
+     * type is a concrete record). Otherwise returns [inferredArgResult] unchanged,
+     * so the common case pays nothing. The caller uses the returned result for its
+     * final constraints; the post-hoc paramType/argType Equality stays the
+     * backstop either way.
+     */
+    internal fun pushParamTypeIntoArgs(
+        argExpr: ParsedExpr,
+        inferredArgResult: ConstraintResult,
+        resolvedParamType: MezzeType,
+        context: ConstraintContext
+    ): ConstraintResult {
+        if (resolvedParamType !is MezzeType.RecordType) return inferredArgResult
+        if (!recordLiteralHasLambdaField(argExpr)) return inferredArgResult
+        return generateWithExpected(argExpr, resolvedParamType, context.notInTailPosition())
+    }
+
     internal fun isRecordLiteralAccess(expr: ParsedExpr, context: ConstraintContext): Boolean {
         return when (expr) {
             is ParsedIdentifier -> {
