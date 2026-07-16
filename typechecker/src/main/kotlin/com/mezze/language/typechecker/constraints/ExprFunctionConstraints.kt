@@ -335,6 +335,15 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         abilityConstraints = abilityConstraints
     )
 
+    // #84 linter: a lambda parameter that the body never references is unused.
+    // `_`-prefixed names are intentionally ignored (the convention already used
+    // for match bindings), and are never flagged.
+    val unusedParams = paramNames.filter { name ->
+        !name.startsWith("_") && name !in bodyResult.usedVariables
+    }.map { name ->
+        ConstraintResult.UnusedVariable(name = name, loc = expr.loc)
+    }
+
     return ConstraintResult(
         type = functionType,
         constraints = bodyResult.constraints + effectAssociatedTypeConstraints + abilityAssociatedTypeConstraints + effectMergeConstraints,
@@ -342,7 +351,7 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         undefinedVariables = bodyResult.undefinedVariables,
         tailCalls = bodyResult.tailCalls,
         usedVariables = bodyResult.usedVariables,
-        unusedVariables = bodyResult.unusedVariables,
+        unusedVariables = bodyResult.unusedVariables + unusedParams,
         patternWarnings = bodyResult.patternWarnings,
         referencedBindings = bodyResult.referencedBindings,
         methodCallResolutions = bodyResult.methodCallResolutions,

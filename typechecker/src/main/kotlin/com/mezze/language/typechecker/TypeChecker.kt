@@ -446,7 +446,8 @@ class TypeChecker(
         val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
             TypeCheckWarning(
                 message = "Unused variable '${unused.name}'. Prefix with '_' to suppress this warning.",
-                loc = unused.loc
+                loc = unused.loc,
+                code = com.mezze.language.parsedast.diagnostics.WarningCode.W0101_UNUSED_VARIABLE
             )
         }
         val patternWarnings = constraintResults.values.flatMap { it.patternWarnings }.map { warningMsg ->

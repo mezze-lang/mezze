@@ -85,6 +85,12 @@ class ExpressionConstraintGenerator {
         val callReturnTypes = mutableMapOf<Loc, MezzeType>()
         val duplicateBindings = mutableListOf<ConstraintResult.DuplicateBinding>()
         val tailCalls = mutableSetOf<Loc>()
+        // #84 linter: unused bindings found in nested sub-expressions (match
+        // cases, do-block lets, lambda params). merge() propagates them so they
+        // survive up to the top-level per-decl ConstraintResult, where
+        // collectConstraintWarnings turns them into W0101 warnings. Without this,
+        // an unused binding inside a do-block was silently dropped.
+        val unusedVars = mutableListOf<ConstraintResult.UnusedVariable>()
 
         fun merge(result: ConstraintResult) {
             constraints.addAll(result.constraints)
@@ -100,6 +106,7 @@ class ExpressionConstraintGenerator {
             callReturnTypes.putAll(result.callReturnTypes)
             duplicateBindings.addAll(result.duplicateBindings)
             tailCalls.addAll(result.tailCalls)
+            unusedVars.addAll(result.unusedVariables)
         }
 
         fun toResult(type: MezzeType): ConstraintResult = ConstraintResult(
@@ -117,6 +124,7 @@ class ExpressionConstraintGenerator {
             callReturnTypes = callReturnTypes,
             duplicateBindings = duplicateBindings,
             tailCalls = tailCalls,
+            unusedVariables = unusedVars,
         )
     }
 

@@ -180,8 +180,10 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
         )
     }
 
+    // Add this match's own unused case bindings to the collector's set (which
+    // already holds any unused vars propagated up from nested sub-expressions).
+    collector.unusedVars.addAll(unusedVars)
     return collector.toResult(resultType).copy(
-        unusedVariables = unusedVars,
         patternWarnings = patternWarnings,
         matchCaseBindings = matchCaseBindings,
     )
@@ -295,6 +297,12 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
     val collector = ConstraintCollector()
 
     val patternGenerator = PatternConstraintGenerator()
+
+    // #84 linter: name + location of every do-block `let` binding, checked for
+    // use against the collector's accumulated used-set after all statements are
+    // processed (a name may be referenced by a *later* statement, so the check
+    // can only run once the whole block has been generated).
+    val letBindings = mutableListOf<Pair<String, Loc?>>()
 
     for (stmt in expr.statements) {
         when (stmt) {
@@ -442,6 +450,15 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                     val varName = (stmt.pattern as ParsedVariablePattern).name
                     currentContext = currentContext.withRecordLiteralBinding(varName)
                 }
+
+                // #84 linter: remember this let's bound names to check for use
+                // once the whole block is generated. Skip `_`-prefixed names
+                // (intentionally unused) here so they never warn.
+                for (varName in variableNames) {
+                    if (!varName.startsWith("_")) {
+                        letBindings.add(varName to (patternResult.bindingLocations[varName] ?: stmt.loc))
+                    }
+                }
             }
             is ParsedStatement.Expr -> {
                 val exprResult = generate(stmt.expr, currentContext)
@@ -477,6 +494,15 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
         }
     } else {
         resultResult.type
+    }
+
+    // #84 linter: a do-block `let` whose name is never referenced by any later
+    // statement, the block result, or its own value is unused. `collector.usedVars`
+    // has accumulated every referenced name across the whole block by now.
+    for ((varName, loc) in letBindings) {
+        if (varName !in collector.usedVars) {
+            collector.unusedVars.add(ConstraintResult.UnusedVariable(name = varName, loc = loc))
+        }
     }
 
     return collector.toResult(resultType)
