@@ -7,7 +7,7 @@
 ## `body.encode_repr { fmt = url_param_fmt, config = default_config }`.
 
 use std::codec::core::{
-  Format, DecodeFormat, EncodeError, DecodeError, CodecConfig
+  Format, DecodeFormat
 }
 use std::int
 use std::float

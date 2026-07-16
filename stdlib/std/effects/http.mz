@@ -1,6 +1,6 @@
-use std::codec::json::{ Json, JsonFmt, json_fmt, to_str, parse_str }
-use std::codec::core::{ EncodeRepr, Decode, DecodeError, EncodeError, CodecConfig, FieldTransform, default_config, Format, DecodeFormat }
-use std::codec::url::{ UrlParamFmt, url_param_fmt, url_encode_component }
+use std::codec::json::{ Json, to_str, parse_str }
+use std::codec::core::{ DecodeError, default_config }
+use std::codec::url::{ url_encode_component }
 use std::collections::map
 use std::collections::seq
 use std::collections::bytes
@@ -527,7 +527,7 @@ impl Client where {
   },
 }
 
-use std::effects::async::{ Async, AsyncError, par_map }
+use std::effects::async::{ Async, par_map }
 
 ## Internal: retry loop. Self-recursive — kept top-level because Mezze
 ## doesn't bind nested `let` names to themselves.

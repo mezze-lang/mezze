@@ -1,4 +1,4 @@
-use std::abilities::compare::{ Eq, Ord }
+use std::abilities::compare::{ Eq }
 use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
 use std::int

@@ -8,7 +8,7 @@ use std::float
 use std::int
 use std::char
 use std::nat
-use std::codec::core::{ Format, DecodeFormat, EncodeError, DecodeError, CodecConfig }
+use std::codec::core::{ Format, DecodeFormat }
 
 ## Marker type for JSON format.
 pub type JsonFmt = {}

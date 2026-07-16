@@ -50,8 +50,16 @@ internal class ImplValidator(
             val declOp = abilityDeclaration.operations.find { it.name == implOp.name }
                 ?: continue
 
-            val expectedParamType = substituteTypeParams(convertTypeAnnotation(declOp.paramType), typeParamSubstitution)
-            val expectedReturnType = substituteTypeParams(convertTypeAnnotation(declOp.returnType), typeParamSubstitution)
+            // #91: the ability op's declared types come from the ABILITY's
+            // module. A named type there (e.g. `config: Config`) may not be
+            // imported by name in THIS impl module, so the impl converter can't
+            // stamp its content hash — leaving a bare TypeApplication that a
+            // later HasField constraint (`config.name`) can't resolve without
+            // the import. Stamp hashes from the global type set so the type
+            // resolves by hash, keeping it closed/nominal without forcing an
+            // import the impl never textually needs.
+            val expectedParamType = stampTypeHashes(substituteTypeParams(convertTypeAnnotation(declOp.paramType), typeParamSubstitution))
+            val expectedReturnType = stampTypeHashes(substituteTypeParams(convertTypeAnnotation(declOp.returnType), typeParamSubstitution))
 
             if (implOp.implementation is ParsedLambda) {
                 validateImplOperationBody(
@@ -548,6 +556,21 @@ internal class ImplValidator(
                 )
             }
         }
+    }
+
+    /**
+     * #91: stamp a content hash onto every hash-less [MezzeType.TypeApplication]
+     * whose constructor name resolves in the global type set. Applied only to
+     * ability-op declared types flowing into an impl body, so a cross-module
+     * named type (e.g. `Config`) resolves by hash without being imported by
+     * name. A TypeApplication that already carries a hash, or whose name is a
+     * type variable / not a known type, is left untouched.
+     */
+    private fun stampTypeHashes(type: MezzeType): MezzeType {
+        val stamped = if (type is MezzeType.TypeApplication && type.typeHash == null) {
+            registry.typeHashFor(type.constructor)?.let { type.copy(typeHash = it) } ?: type
+        } else type
+        return stamped.transformChildren { stampTypeHashes(it) }
     }
 
     private fun substituteTypeParams(type: MezzeType, substitution: Map<String, MezzeType>): MezzeType {

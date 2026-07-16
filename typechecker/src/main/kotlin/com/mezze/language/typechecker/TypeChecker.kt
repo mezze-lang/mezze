@@ -429,6 +429,25 @@ class TypeChecker(
         val allEffectDeclarations = transitiveEffects +
             buildResult.registry.effectDeclarations +
             (importContext?.importedEffects ?: emptyMap())
+
+        // Types reachable BY NAME stay import-scoped (local + imported), so a
+        // user-written type reference still requires its import and name
+        // collisions across modules don't leak. But types from every loaded /
+        // cached module are also gathered for the registry's HASH map only
+        // (#91): an ability-op's declared param type (e.g. `config: Config`
+        // from another module) flows into an impl body as a hash-tagged
+        // TypeApplication, and expandTypeApplication resolves it by hash there
+        // — so the impl doesn't need `Config` imported by name just to check a
+        // field access on an un-annotated param.
+        // Restricted to modules actually loaded for THIS typecheck (not the
+        // shared getAllCachedModules() set), so unrelated modules can't leak in
+        // and shadow a same-named type/ability across independent typechecks.
+        val transitiveTypesByHash = mutableMapOf<String, ParsedTypeDecl>()
+        for ((_, mod) in loadedModules) {
+            mod.parsedModule?.decls?.filterIsInstance<ParsedTypeDecl>()?.forEach {
+                transitiveTypesByHash[it.name] = it
+            }
+        }
         val allTypeDeclarations = buildResult.registry.typeDeclarations +
             (importContext?.importedTypes ?: emptyMap())
 
@@ -448,6 +467,7 @@ class TypeChecker(
 
         return DeclarationRegistry.from(
             allTypeDeclarations, allAbilityDeclarations, allEffectDeclarations,
+            hashOnlyTypeDecls = transitiveTypesByHash.values,
         )
     }
 

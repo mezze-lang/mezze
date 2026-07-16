@@ -12,9 +12,19 @@ class DeclarationRegistry(
     private val abilitiesByHash: Map<Hash, ParsedAbilityDecl>,
     private val effectsByName: Map<String, ParsedEffectDecl>,
     private val effectsByHash: Map<Hash, ParsedEffectDecl>,
+    // #91: name → contentHash for EVERY loaded type (import-scoped + transitive).
+    // Used only to STAMP a hash onto a TypeApplication during conversion, never
+    // to make a name resolvable — so import-scoping for name references is
+    // unchanged, but a cross-module ability-op type can later resolve by hash.
+    private val allTypeHashesByName: Map<String, Hash> = emptyMap(),
 ) {
     fun lookupType(name: String, hash: Hash? = null): ParsedTypeDecl? =
         (hash?.let { typesByHash[it] }) ?: typesByName[name]
+
+    /** The content hash for a type by name, consulting local + imported +
+     *  transitive types. For hash-stamping only (see [allTypeHashesByName]). */
+    fun typeHashFor(name: String): Hash? =
+        typesByName[name]?.contentHash ?: allTypeHashesByName[name]
 
     fun lookupAbility(name: String, hash: Hash? = null): ParsedAbilityDecl? =
         (hash?.let { abilitiesByHash[it] }) ?: abilitiesByName[name]
@@ -42,13 +52,28 @@ class DeclarationRegistry(
             typeDecls: Map<String, ParsedTypeDecl>,
             abilityDecls: Map<String, ParsedAbilityDecl>,
             effectDecls: Map<String, ParsedEffectDecl>,
-        ) = DeclarationRegistry(
-            typesByName = typeDecls,
-            typesByHash = typeDecls.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap(),
-            abilitiesByName = abilityDecls,
-            abilitiesByHash = abilityDecls.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap(),
-            effectsByName = effectDecls,
-            effectsByHash = effectDecls.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap(),
-        )
+            // #91: extra type decls folded into typesByHash ONLY (not
+            // typesByName). Lets a hash-tagged TypeApplication for a
+            // cross-module type resolve by hash without making that type's name
+            // resolvable (keeps import-scoping + avoids name collisions).
+            hashOnlyTypeDecls: Collection<ParsedTypeDecl> = emptyList(),
+        ): DeclarationRegistry {
+            val byHash = LinkedHashMap<Hash, ParsedTypeDecl>()
+            val hashByName = LinkedHashMap<String, Hash>()
+            for (d in hashOnlyTypeDecls) d.contentHash?.let { byHash[it] = d; hashByName[d.name] = it }
+            // Locally-declared / imported types win over transitive ones on hash
+            // collision (same hash = same type, so order is immaterial, but keep
+            // it deterministic).
+            for (d in typeDecls.values) d.contentHash?.let { byHash[it] = d; hashByName[d.name] = it }
+            return DeclarationRegistry(
+                typesByName = typeDecls,
+                typesByHash = byHash,
+                abilitiesByName = abilityDecls,
+                abilitiesByHash = abilityDecls.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap(),
+                effectsByName = effectDecls,
+                effectsByHash = effectDecls.values.mapNotNull { d -> d.contentHash?.let { h -> h to d } }.toMap(),
+                allTypeHashesByName = hashByName,
+            )
+        }
     }
 }

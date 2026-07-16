@@ -2,7 +2,7 @@ use std::str
 use std::int
 use std::collections::seq
 use std::collections::bytes
-use std::abilities::convert::{ Into, TryInto }
+use std::abilities::convert::{ TryInto }
 
 ## Error returned when encoding fails.
 pub type EncodeError = { path: [Str], message: Str }
