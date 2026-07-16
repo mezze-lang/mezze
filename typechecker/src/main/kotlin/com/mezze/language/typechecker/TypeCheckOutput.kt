@@ -44,7 +44,9 @@ data class LoadedModuleSource(
 @Serializable
 data class TypeCheckWarning(
     val message: String,
-    val loc: Loc? = null
+    val loc: Loc? = null,
+    // Structured warning code (null for warnings not yet migrated to a code).
+    val code: com.mezze.language.parsedast.diagnostics.WarningCode? = null
 )
 
 @Serializable

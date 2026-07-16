@@ -84,7 +84,8 @@ class TypeChecker(
 
         data class TypeCheckWarning(
         val message: String,
-        val loc: Loc? = null
+        val loc: Loc? = null,
+        val code: com.mezze.language.parsedast.diagnostics.WarningCode? = null
     )
 
 
@@ -535,7 +536,7 @@ class TypeChecker(
             is TypeCheckResult.Success -> {
                 val resolvedImports = buildResolvedImports(result.importContext)
                 val structuredWarnings = result.warnings.map { warning ->
-                    OutputTypeCheckWarning(warning.message, warning.loc)
+                    OutputTypeCheckWarning(warning.message, warning.loc, warning.code)
                 }
                 OutputTypeCheckResult(
                     resolvedImports = resolvedImports,
