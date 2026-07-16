@@ -262,6 +262,11 @@ class MatchValidator(
     fun validateParsedUnreachablePatterns(matchExpr: ParsedMatch): ValidationResult {
         val errors = mutableListOf<ValidationError>()
         var isExhausted = false
+        // #80: literal values and bare constructor names already covered by an
+        // earlier arm. A later arm matching one of these can never execute — it's
+        // a duplicate/unreachable arm (almost always a typo), reported as an error
+        // just like the "after a catch-all" case below.
+        val coveredKeys = HashSet<String>()
 
         for (case in matchExpr.cases) {
             if (isExhausted) {
@@ -272,17 +277,43 @@ class MatchValidator(
                 ))
                 continue
             }
+            // A guard/if-let arm may not fire even when its shape repeats, so it
+            // neither closes off future arms nor counts as covering a key.
             if (case.guard == null && case.ifLetBindings.isEmpty()) {
                 for (pattern in case.patterns) {
+                    val key = duplicableKey(pattern)
+                    if (key != null && !coveredKeys.add(key)) {
+                        errors.add(ValidationError.UnreachablePattern(
+                            pattern = pattern,
+                            reason = "This case is already handled by an earlier arm; it will never execute.",
+                            loc = case.loc
+                        ))
+                    }
                     if (pattern is ParsedWildcardPattern || pattern is ParsedVariablePattern) {
                         isExhausted = true
-                        break
                     }
                 }
             }
         }
 
         return if (errors.isEmpty()) ValidationResult.Success() else ValidationResult.Failure(errors)
+    }
+
+    /** A stable key for a pattern that, if it appears twice unguarded, makes the
+     *  second arm unreachable: literal values and BARE constructor names. A
+     *  constructor pattern WITH a payload is skipped — two `Some {…}` arms may
+     *  destructure different sub-shapes, so repeating the name isn't necessarily a
+     *  duplicate. Wildcards/variables are handled by the exhaustion flag. */
+    private fun duplicableKey(pattern: ParsedPattern): String? = when (pattern) {
+        is ParsedLiteralPattern -> when (val v = pattern.value) {
+            is ParsedLiteralValue.IntValue -> "int:${v.value}"
+            is ParsedLiteralValue.NatValue -> "nat:${v.value}"
+            is ParsedLiteralValue.FloatValue -> "float:${v.value}"
+            is ParsedLiteralValue.StringValue -> "str:${v.value}"
+            is ParsedLiteralValue.BoolValue -> "bool:${v.value}"
+        }
+        is ParsedConstructorPattern -> if (pattern.payload == null) "ctor:${pattern.constructor}" else null
+        else -> null
     }
 
     fun inferParsedScrutineeTypeFromPatterns(
