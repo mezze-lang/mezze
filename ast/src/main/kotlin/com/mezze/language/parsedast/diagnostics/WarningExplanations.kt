@@ -10,11 +10,6 @@ fun WarningCode.explain(): String = when (this) {
         "An imported name is never referenced in this module. Remove it from the " +
         "`use` clause to keep imports tidy."
 
-    WarningCode.W0201_SHADOWED_BINDING ->
-        "An inner binding hides an outer one of the same name. This is legal, but " +
-        "often unintentional — the outer value is no longer reachable by that name. " +
-        "Rename one of them if the shadowing wasn't intended."
-
     WarningCode.W0301_DISCARDED_VALUE ->
         "A non-unit expression's result is computed and then thrown away (it's not " +
         "the last expression and isn't bound). This is usually a mistake — bind it " +

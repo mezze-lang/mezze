@@ -233,7 +233,17 @@ data class ConstraintContext(
     val enclosingFunctionName: String? = null,
     val inTailPosition: Boolean = false,
     // Empty set means no user-driven preference (#304).
-    val annotationAbilityNames: Set<String> = emptySet()
+    val annotationAbilityNames: Set<String> = emptySet(),
+    // #86 case-A shadowing: the enclosing lambda's PARAM names. A do-block `let`
+    // that reuses one of these is a same-scope re-bind of a param (hard error),
+    // the same class of mistake as a duplicate lambda param (#79). Reset at each
+    // lambda boundary (a new function scope opens), so shadowing an OUTER param
+    // — from an enclosing lambda — is NOT flagged (case B, a legal nested
+    // rebind). Do-blocks track their OWN lets locally (not here) so that a
+    // NESTED do-block reusing an outer block's let name stays legal too. Kept
+    // separate from typingContext, which is flat and can't tell a param from an
+    // outer-scope name.
+    val currentScopeBindings: Set<String> = emptySet(),
 ) {
     fun extend(name: String, type: MezzeType): ConstraintContext {
         return copy(typingContext = typingContext.extendMono(name, type))
@@ -257,5 +267,13 @@ data class ConstraintContext(
 
     fun notInTailPosition(): ConstraintContext {
         return copy(inTailPosition = false)
+    }
+
+    /** #86: open a fresh function scope (a lambda body), replacing the enclosing
+     *  lambda's params with this lambda's own. A do-block `let` that reuses one
+     *  of THESE param names is a same-scope error (case A); reusing an outer
+     *  param — now forgotten — is a legal nested rebind (case B). */
+    fun withFreshScope(paramNames: Set<String>): ConstraintContext {
+        return copy(currentScopeBindings = paramNames)
     }
 }

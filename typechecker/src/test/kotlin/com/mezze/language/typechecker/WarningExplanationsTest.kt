@@ -20,7 +20,7 @@ class WarningExplanationsTest {
     @Test
     fun `display returns the W-code prefix`() {
         assert(WarningCode.W0101_UNUSED_VARIABLE.display() == "W0101")
-        assert(WarningCode.W0201_SHADOWED_BINDING.display() == "W0201")
+        assert(WarningCode.W0102_UNUSED_IMPORT.display() == "W0102")
     }
 
     @Test
@@ -32,9 +32,9 @@ class WarningExplanationsTest {
 
     @Test
     fun `explainWarningCode finds by full name`() {
-        val r = explainWarningCode("W0201_SHADOWED_BINDING")
+        val r = explainWarningCode("W0102_UNUSED_IMPORT")
         assertNotNull(r)
-        assertContains(r, "W0201")
+        assertContains(r, "W0102")
     }
 
     @Test

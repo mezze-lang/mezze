@@ -7,6 +7,7 @@ import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.TypeCheckError
+import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.typechecker.context.TypeScheme
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.ast.solving.Substitution
@@ -304,6 +305,11 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
     // can only run once the whole block has been generated).
     val letBindings = mutableListOf<Pair<String, Loc?>>()
 
+    // #86 case-A shadowing: names bound by THIS do-block's own `let`s. Kept
+    // local (not in the context) so a NESTED do-block starts fresh — reusing an
+    // outer block's let name across the block boundary is legal (case B).
+    val blockLets = mutableSetOf<String>()
+
     for (stmt in expr.statements) {
         when (stmt) {
             is ParsedStatement.Let -> {
@@ -366,6 +372,29 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                 for (varName in variableNames) {
                     nestedBindingTypes[varName] = bindingType
                 }
+
+                // #86 case-A shadowing: a `let` that reuses a name already bound
+                // in THIS function scope — the enclosing lambda's param, or an
+                // earlier `let` in this same do-block — silently overwrites it.
+                // Reject it (T0306), the same class of mistake as a duplicate
+                // lambda param (#79). `_`-prefixed names opt out (a throwaway
+                // may legitimately repeat). Shadowing an outer param/global name
+                // is in neither set, so it stays legal (case B); a nested
+                // do-block's own lets are tracked in a fresh `blockLets`.
+                for (varName in variableNames) {
+                    if (varName.startsWith("_")) continue
+                    if (varName in currentContext.currentScopeBindings || varName in blockLets) {
+                        throw TypeCheckError(
+                            message = "'$varName' is already bound in this scope. This `let` " +
+                                "silently overwrites the earlier binding (a parameter or an " +
+                                "earlier `let` in the same block). Rename one of them.",
+                            loc = stmt.pattern.loc,
+                            errorType = ErrorType.TYPE_MISMATCH,
+                            code = ErrorCode.T0306_SHADOWED_BINDING_IN_SCOPE,
+                        )
+                    }
+                }
+                blockLets.addAll(variableNames)
 
                 val patternResult = patternGenerator.generate(
                     stmt.pattern,

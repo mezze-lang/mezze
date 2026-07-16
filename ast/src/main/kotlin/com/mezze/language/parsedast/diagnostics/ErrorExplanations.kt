@@ -173,6 +173,14 @@ fun ErrorCode.explain(): String = when (this) {
         "A lambda lists the same parameter name more than once, e.g. `{ x, x } -> x`. " +
         "Each parameter must have a distinct name."
 
+    ErrorCode.T0306_SHADOWED_BINDING_IN_SCOPE ->
+        "A `let` reuses a name that is already bound in the same function scope — " +
+        "either the enclosing lambda's parameter, or a name bound earlier in the same " +
+        "do-block (e.g. `{x} -> do { let x = 1; ... }`). This silently overwrites the " +
+        "earlier binding, which is almost always a mistake. Rename one of them. " +
+        "(Shadowing an OUTER/nested-scope name, like a top-level `let` or a name from " +
+        "an enclosing function, is still allowed.)"
+
     ErrorCode.V0401_ABILITY_NOT_DEFINED ->
         "Referenced an ability that doesn't exist. " +
         "Check the ability name and that it's imported."

@@ -12,16 +12,15 @@ package com.mezze.language.parsedast.diagnostics
  *
  * Category ranges:
  * - `W01xx` unused / dead bindings (unused var, unused import)
- * - `W02xx` shadowing
+ * - `W02xx` shadowing — reserved; same-scope shadowing is a hard error
+ *   (T0306), and cross-scope shadowing is intentionally allowed, so there is
+ *   no shadowing WARNING. Range kept reserved so codes stay stable.
  * - `W03xx` redundant / dead code (constant condition, discarded value, ...)
  */
 enum class WarningCode {
     // ─── Unused / dead bindings (W01xx) ──────────────────────────────────
     W0101_UNUSED_VARIABLE,   // a bound name (let / lambda param / match binding) is never used
     W0102_UNUSED_IMPORT,     // an imported name is never referenced
-
-    // ─── Shadowing (W02xx) ───────────────────────────────────────────────
-    W0201_SHADOWED_BINDING,  // an inner binding hides an outer one of the same name
 
     // ─── Redundant / dead code (W03xx) ───────────────────────────────────
     W0301_DISCARDED_VALUE,   // a non-unit expression's result is computed then thrown away

@@ -77,6 +77,7 @@ enum class ErrorCode {
     T0303_OPEN_RECORD_FIELD_MISSING,
     T0304_DUPLICATE_RECORD_FIELD, // `{ a = 1, a = 2 }` — a field name appears more than once
     T0305_DUPLICATE_LAMBDA_PARAM, // `{ x, x } -> x` — a lambda parameter name appears more than once
+    T0306_SHADOWED_BINDING_IN_SCOPE, // `{x} -> do { let x = 1; ... }` — a `let` reuses a name already bound in the same function scope
 
     // ─── Validator: abilities (V04xx) ────────────────────────────────────
     V0401_ABILITY_NOT_DEFINED,

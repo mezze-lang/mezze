@@ -215,6 +215,10 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
     val extendedContext = paramFields.entries.fold(context) { ctx, (name, type) ->
         ctx.extend(name, type)
     }
+        // #86: open a fresh function scope seeded with this lambda's params, so
+        // a do-block `let` in the body that reuses a param name is a same-scope
+        // re-bind (T0306), while shadowing an outer name stays legal.
+        .withFreshScope(paramNames.toSet())
 
     val bodyContext = if (expectedFunctionType != null) {
         extendedContext.withExpectedType(expectedFunctionType.returnType).inTailPosition()
