@@ -156,8 +156,20 @@ private fun replaceParsedPlaceholder(expr: ParsedExpr, replacement: ParsedExpr):
     is ParsedStringLit -> expr.copy(parts = expr.parts.map { part ->
         when (part) {
             is ParsedStringPart.Interpolation -> part.copy(expr = replaceParsedPlaceholder(part.expr, replacement))
-            else -> part
+            is ParsedStringPart.Literal -> part
         }
     })
-    else -> expr
+    is ParsedBinaryOp -> expr.copy(
+        left = replaceParsedPlaceholder(expr.left, replacement),
+        right = replaceParsedPlaceholder(expr.right, replacement)
+    )
+    is ParsedUnaryOp -> expr.copy(operand = replaceParsedPlaceholder(expr.operand, replacement))
+    is ParsedPipe -> expr.copy(
+        left = replaceParsedPlaceholder(expr.left, replacement),
+        right = replaceParsedPlaceholder(expr.right, replacement)
+    )
+    // Leaves — nothing to replace. Exhaustive (no `else`) so a new ParsedExpr
+    // variant that can contain `@` forces a compile error here.
+    is ParsedIntLit, is ParsedNatLit, is ParsedFloatLit, is ParsedFracLit,
+    is ParsedCharLit, is ParsedIdentifier, is ParsedPipePlaceholder -> expr
 }

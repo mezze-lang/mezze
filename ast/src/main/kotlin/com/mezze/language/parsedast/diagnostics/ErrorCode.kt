@@ -56,6 +56,7 @@ enum class ErrorCode {
     P0121_LAMBDA_BODY_BARE_LET, // `{p} -> let x = ...` — wrap in `do` to use let-bindings (#221)
     P0122_MATCH_NEEDS_IS, // `match x { case ... }` or `match x case ...` — Mezze uses `match x is` + indented arms
     P0123_LAMBDA_INLINE_RETURN_TYPE, // `{ p } -> Ret do body` — return-type annotation must go on the binding, not inline
+    P0124_PIPE_PLACEHOLDER_AS_RECEIVER, // `x |> @.method {}` — `@` may be an argument value, not a method/field receiver
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,

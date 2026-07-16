@@ -1710,7 +1710,18 @@ internal fun countPipePlaceholders(expr: ParsedExpr): Int {
         is ParsedVariantConstruct -> expr.value?.let { countPipePlaceholders(it) } ?: 0
         is ParsedParens -> countPipePlaceholders(expr.expr)
         is ParsedPipe -> countPipePlaceholders(expr.left) + countPipePlaceholders(expr.right)
-        else -> 0
+        is ParsedBinaryOp -> countPipePlaceholders(expr.left) + countPipePlaceholders(expr.right)
+        is ParsedUnaryOp -> countPipePlaceholders(expr.operand)
+        is ParsedEffectCall -> countPipePlaceholders(expr.arguments)
+        is ParsedStringLit -> expr.parts.sumOf { part ->
+            if (part is ParsedStringPart.Interpolation) countPipePlaceholders(part.expr) else 0
+        }
+        // Leaves carry no subexpression that could hold `@`. Listed explicitly
+        // (no `else`) so the `when` is exhaustive: adding a ParsedExpr variant
+        // that CAN contain `@` becomes a compile error instead of silently
+        // returning 0 and mis-reporting "missing placeholder".
+        is ParsedIntLit, is ParsedNatLit, is ParsedFloatLit, is ParsedFracLit,
+        is ParsedCharLit, is ParsedIdentifier -> 0
     }
 }
 
@@ -1750,8 +1761,69 @@ internal fun findPipePlaceholderLocations(expr: ParsedExpr): List<Loc> {
         is ParsedVariantConstruct -> expr.value?.let { findPipePlaceholderLocations(it) } ?: emptyList()
         is ParsedParens -> findPipePlaceholderLocations(expr.expr)
         is ParsedPipe -> findPipePlaceholderLocations(expr.left) + findPipePlaceholderLocations(expr.right)
-        else -> emptyList()
+        is ParsedBinaryOp -> findPipePlaceholderLocations(expr.left) + findPipePlaceholderLocations(expr.right)
+        is ParsedUnaryOp -> findPipePlaceholderLocations(expr.operand)
+        is ParsedEffectCall -> findPipePlaceholderLocations(expr.arguments)
+        is ParsedStringLit -> expr.parts.flatMap { part ->
+            if (part is ParsedStringPart.Interpolation) findPipePlaceholderLocations(part.expr) else emptyList()
+        }
+        // Leaves — exhaustive, no `else` (see countPipePlaceholders).
+        is ParsedIntLit, is ParsedNatLit, is ParsedFloatLit, is ParsedFracLit,
+        is ParsedCharLit, is ParsedIdentifier -> emptyList()
     }
+}
+
+// Returns the Loc of a pipe placeholder `@` that sits directly in a member-access
+// receiver position (`@.method`, `@.field`), or null if none. `@` may be an
+// argument value (`f { x = @ }`, `f { x = @ + 1 }`) but not a method/field
+// receiver — `x |> @.m {}` should be written `x.m {}` or `x |> f { arg = @ }`.
+internal fun pipePlaceholderInReceiverPosition(expr: ParsedExpr): Loc? = when (expr) {
+    is ParsedMemberAccess ->
+        if (expr.receiver is ParsedPipePlaceholder) expr.receiver.loc
+        else pipePlaceholderInReceiverPosition(expr.receiver)
+    is ParsedFunctionCall ->
+        pipePlaceholderInReceiverPosition(expr.function) ?: pipePlaceholderInReceiverPosition(expr.arguments)
+    is ParsedRecordLit -> expr.entries.firstNotNullOfOrNull { entry ->
+        when (entry) {
+            is ParsedRecordEntry.Field -> entry.value?.let { pipePlaceholderInReceiverPosition(it) }
+            is ParsedRecordEntry.Spread -> pipePlaceholderInReceiverPosition(entry.expr)
+        }
+    }
+    is ParsedIf -> pipePlaceholderInReceiverPosition(expr.condition)
+        ?: pipePlaceholderInReceiverPosition(expr.thenBranch)
+        ?: pipePlaceholderInReceiverPosition(expr.elseBranch)
+    is ParsedLambda -> pipePlaceholderInReceiverPosition(expr.body)
+    is ParsedMatch -> pipePlaceholderInReceiverPosition(expr.scrutinee)
+        ?: expr.cases.firstNotNullOfOrNull { c ->
+            pipePlaceholderInReceiverPosition(c.body) ?: c.guard?.let { pipePlaceholderInReceiverPosition(it) }
+        }
+    is ParsedDo -> expr.statements.firstNotNullOfOrNull { stmt ->
+        when (stmt) {
+            is ParsedStatement.Let -> pipePlaceholderInReceiverPosition(stmt.value)
+            is ParsedStatement.Expr -> pipePlaceholderInReceiverPosition(stmt.expr)
+            is ParsedStatement.Bind -> pipePlaceholderInReceiverPosition(stmt.expr)
+        }
+    } ?: pipePlaceholderInReceiverPosition(expr.result)
+    is ParsedSeqLit -> expr.elements.firstNotNullOfOrNull { element ->
+        when (element) {
+            is ParsedSeqElement.Regular -> pipePlaceholderInReceiverPosition(element.expr)
+            is ParsedSeqElement.Spread -> pipePlaceholderInReceiverPosition(element.expr)
+        }
+    }
+    is ParsedPerform -> pipePlaceholderInReceiverPosition(expr.body)
+    is ParsedVariantConstruct -> expr.value?.let { pipePlaceholderInReceiverPosition(it) }
+    is ParsedParens -> pipePlaceholderInReceiverPosition(expr.expr)
+    is ParsedPipe -> pipePlaceholderInReceiverPosition(expr.left) ?: pipePlaceholderInReceiverPosition(expr.right)
+    is ParsedBinaryOp -> pipePlaceholderInReceiverPosition(expr.left) ?: pipePlaceholderInReceiverPosition(expr.right)
+    is ParsedUnaryOp -> pipePlaceholderInReceiverPosition(expr.operand)
+    is ParsedEffectCall -> pipePlaceholderInReceiverPosition(expr.arguments)
+    is ParsedStringLit -> expr.parts.firstNotNullOfOrNull { part ->
+        if (part is ParsedStringPart.Interpolation) pipePlaceholderInReceiverPosition(part.expr) else null
+    }
+    // Leaves (including a bare `@`, which is a valid argument value, not a
+    // receiver) — exhaustive, no `else`.
+    is ParsedPipePlaceholder, is ParsedIntLit, is ParsedNatLit, is ParsedFloatLit,
+    is ParsedFracLit, is ParsedCharLit, is ParsedIdentifier -> null
 }
 
     // Pipe operator: |>
@@ -1823,8 +1895,24 @@ internal val MezzeParser.pipeExpression: Parser<ParsedExpr>
                                     hints = listOf("each pipe should have exactly one `@`; bind the value first if you need it in multiple places")
                                 )
                             }
+                            pipePlaceholderInReceiverPosition(right.value) != null -> {
+                                // `@` may be an argument value, not a method/field
+                                // receiver: `x |> @.m {}` is rejected.
+                                val recvLoc = pipePlaceholderInReceiverPosition(right.value)!!
+                                ParseResult.Failure(
+                                    "'@' cannot be used as a method or field receiver in a pipe",
+                                    right.remaining.getSourcePosition(),
+                                    recvLoc.startLine,
+                                    recvLoc.startCol,
+                                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0124_PIPE_PLACEHOLDER_AS_RECEIVER,
+                                    hints = listOf(
+                                        "call the method directly: `x.method {}`",
+                                        "or pipe into a function that takes the value: `x |> f { arg = @ }`"
+                                    )
+                                )
+                            }
                             else -> {
-                                // Valid: exactly one @
+                                // Valid: exactly one @, in an argument position
                                 ParseResult.Success(
                                     ParsedPipe(
                                         left = result.value,

@@ -455,7 +455,7 @@ class AbilityValidationTest {
             let noiseAdd = {x, y} -> do
               let sum = x + y
               let diff = x - y
-              diff |> @.show {}
+              diff.show {}
 
             noiseAdd {x = 5.0, y = 6.0}
         """.trimIndent()

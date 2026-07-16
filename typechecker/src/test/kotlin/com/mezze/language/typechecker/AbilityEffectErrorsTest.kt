@@ -63,9 +63,10 @@ class AbilityEffectErrorsTest {
 
     @Test
     fun `test undefined ability method in pipeline should error`() {
-        // Without Show in scope, @.show {} on Int fails as field access
+        // Without Show in scope, `.show {}` on Int fails as field access.
+        // (`@.show {}` in a pipe is now a parse error — @ can't be a receiver.)
         val source = """
-            let z = 5 |> @.show {}
+            let z = 5.show {}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")

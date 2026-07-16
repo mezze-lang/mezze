@@ -69,12 +69,17 @@ fun ErrorCode.explain(): String = when (this) {
         "A `do` block cannot be empty. It must contain at least one expression."
 
     ErrorCode.P0115_PIPE_MISSING_PLACEHOLDER ->
-        "A pipe expression `|>` requires a `_` placeholder in the right-hand side " +
-        "to mark where the piped value goes."
+        "A pipe expression `|>` requires a `@` placeholder in the right-hand side " +
+        "to mark where the piped value goes: `x |> f { arg = @ }`."
 
     ErrorCode.P0116_PIPE_MULTIPLE_PLACEHOLDERS ->
-        "A pipe expression can only have one `_` placeholder. " +
-        "Use an explicit lambda if you need the value in multiple positions."
+        "A pipe expression can only have one `@` placeholder. " +
+        "Bind the value first if you need it in multiple positions."
+
+    ErrorCode.P0124_PIPE_PLACEHOLDER_AS_RECEIVER ->
+        "`@` in a pipe may be an argument value (`x |> f { arg = @ }`) but not a " +
+        "method or field receiver. Write `x.method {}` directly, or pipe into a " +
+        "function that takes the value."
 
     ErrorCode.P0117_RECORD_FIELD_MISSING_TYPE ->
         "Record type fields must have type annotations: `{ name: Str, age: Int }`."
