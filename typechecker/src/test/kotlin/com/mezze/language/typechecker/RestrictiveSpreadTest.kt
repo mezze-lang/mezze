@@ -118,6 +118,47 @@ class RestrictiveSpreadTest {
         assertNotNull(result)
     }
 
+    @Test
+    fun `should reject field override with an incompatible type`() {
+        // #75 soundness fix: a spread update is type-preserving, so overriding an
+        // Int field with a Str must be a type error — previously the explicit
+        // type silently replaced the spread's field type.
+        val code = """
+            let person = {name = "Alice", age = 30}
+            let updated = {...person, age = "thirty"}
+        """.trimIndent()
+
+        assertThrows<TypeCheckError> { parseAndTypeCheck(code) }
+    }
+
+    @Test
+    fun `should reject override that leaks a wrong type to a later use`() {
+        // The original soundness hole: override x:Int with a Str, then read it
+        // back. Must not type-check.
+        val code = """
+            let base = {x = 1}
+            let updated = {...base, x = "s"}
+            let n: Int = updated.x
+        """.trimIndent()
+
+        assertThrows<TypeCheckError> { parseAndTypeCheck(code) }
+    }
+
+    @Test
+    fun `should allow nested record-update override`() {
+        // #75 regression guard: a record-valued field overridden with a nested
+        // spread-update is structurally compatible and must still type-check
+        // (the fix must not spuriously reject it as "missing <field>").
+        val code = """
+            let rec = {point = {x = 1, y = 2}, name = "p1"}
+            let updated = {...rec, point = {...rec.point, x = 10}}
+            let newY = updated.point.y
+        """.trimIndent()
+
+        val result = parseAndTypeCheck(code)
+        assertNotNull(result)
+    }
+
     // =========================================================================
     // TYPE ALIAS SPREAD TESTS
     // =========================================================================

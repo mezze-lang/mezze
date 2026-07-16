@@ -21,6 +21,10 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
         .toSet()
 
     val explicitFieldTypes = mutableMapOf<String, MezzeType>()
+    // #75: real field types contributed by a resolved spread source, keyed by
+    // field name. Used by the post-loop to constrain override values to the
+    // spread's field type (a spread update is type-preserving).
+    val spreadFieldTypes = mutableMapOf<String, MezzeType>()
 
     val fieldContext = context.clearExpectedType()
     // Bidirectional: if we're checking this literal against a known record type,
@@ -83,6 +87,13 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
                         }
 
                         for ((fieldName, fieldType) in resolvedSpreadType.fields) {
+                            // #75: record the spread's real field type. The post-loop
+                            // constrains any override value to it so a type-changing
+                            // update (`{...base, x = "s"}` with base.x:Int) fails —
+                            // a spread update is type-preserving (additions already
+                            // rejected above). Deferred to the post-loop because the
+                            // spread entry can precede the explicit field entries.
+                            spreadFieldTypes[fieldName] = fieldType
                             fields[fieldName] = explicitFieldTypes[fieldName] ?: fieldType
                         }
                     }
@@ -106,6 +117,31 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
                 }
             }
         }
+    }
+
+    // #75: enforce type-preservation for spread overrides. Emitted here (not in
+    // the loop) because the spread entry can precede the explicit field entries,
+    // so explicitFieldTypes isn't complete until every entry is walked. Only
+    // fields with a known spread type (the resolved-record branch) participate;
+    // the open-var branch keeps its original permissive shape.
+    for ((fieldName, explicitType) in explicitFieldTypes) {
+        val spreadType = spreadFieldTypes[fieldName] ?: continue
+        // Skip record-typed fields: an override there may legitimately be a
+        // row-open record-update whose result type isn't structurally identical
+        // to the (closed) spread field type, and the record-literal result is
+        // always closed (rowVar=null), so a plain Equality would spuriously
+        // report "missing <field>" on a nested update. The soundness hole this
+        // guards is primitive-vs-primitive (Int overridden with Str), so
+        // constraining non-record fields is enough to catch it.
+        if (spreadType is MezzeType.RecordType || explicitType is MezzeType.RecordType) continue
+        collector.constraints.add(
+            Constraint.Equality(
+                left = explicitType,
+                right = spreadType,
+                context = "Record update field '$fieldName' must keep its type",
+                loc = expr.loc
+            )
+        )
     }
 
     for ((fieldName, fieldType) in explicitFieldTypes) {
