@@ -120,16 +120,17 @@ internal class AnnotationValidator(
         // resolve to the SAME variable, the body conflated them — e.g.
         // `{ a: 'a, b: 'b } -> 'a` implemented as `{ a, b } -> b` really has type
         // `-> 'b`, not `-> 'a`. Treating each quantified var as a rigid skolem,
-        // unifying two skolems is illegal; we detect it here by seeing two source
-        // names collapse onto one resolved var. Vars pinned by ability
-        // constraints are skipped (same as above).
+        // unifying two skolems is illegal; we detect it by two source names
+        // collapsing onto one resolved var.
+        //
+        // Unlike the concrete-forcing check above, we do NOT skip ability-
+        // constrained vars here: `{ a: 'a, b: 'b } with Eq 'a, Eq 'b -> Bool`
+        // implemented as `a == b` conflates 'a and 'b (== compares two values of
+        // the SAME type), and both resolve to the same var — that's the bug this
+        // catches. A constraint on 'a is independent of a constraint on 'b; it
+        // does not license unifying them.
         val nameToResolved = mutableMapOf<String, TypeVar>()
         for (typeVar in annotationTypeVars) {
-            if (abilityConstrainedTypeVars.any {
-                    it.name.removePrefix("'") == typeVar.name.removePrefix("'") || it.id == typeVar.id
-                }) {
-                continue
-            }
             val sourceName = typeVar.name.removePrefix("'")
             if (sourceName.isEmpty()) continue
             val resolved = substitution.apply(MezzeType.VarType(typeVar))

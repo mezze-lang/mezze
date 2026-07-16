@@ -38,6 +38,13 @@ class SkolemDistinctnessTest {
         return r is TypeChecker.TypeCheckResult.Failure
     }
 
+    // Cases that need the prelude (ability method `==`).
+    private fun failsWithPrelude(src: String): Boolean {
+        val parsed = parser.parseParsedModule(src, "sk.mz")
+        val r = typeChecker.checkParsedModule(parsed, Paths.get("."), enablePrelude = true)
+        return r is TypeChecker.TypeCheckResult.Failure
+    }
+
     // ---- must FAIL: distinct vars conflated ----
 
     @Test
@@ -82,5 +89,36 @@ class SkolemDistinctnessTest {
     fun `returning the correct one of two distinct vars is accepted`() {
         // -> 'b returning b is correct.
         assertFalse(fails("let f: { a: 'a, b: 'b } -> 'b = { a, b } -> b\nf { a = 1, b = 2 }"))
+    }
+
+    // ---- constrained vars: distinctness still enforced (#85) ----
+
+    @Test
+    fun `two constrained distinct vars conflated by equality is rejected`() {
+        // `a == b` needs 'a = 'b (== compares two values of the same type), but
+        // the annotation declares them distinct with separate Eq constraints.
+        assertTrue(failsWithPrelude(
+            "let f: { a: 'a, b: 'b } with Eq 'a, Eq 'b -> Bool = { a, b } -> a == b\n" +
+            "f { a = 1, b = 2 }"
+        ))
+    }
+
+    @Test
+    fun `two constrained distinct vars kept distinct is accepted`() {
+        // Each var self-compared; 'a and 'b stay independent — must pass (guards
+        // against a false positive on legitimate constrained generics).
+        assertFalse(failsWithPrelude(
+            "let f: { a: 'a, b: 'b } with Eq 'a, Eq 'b -> Bool = { a, b } -> (a == a) && (b == b)\n" +
+            "f { a = 1, b = 2 }"
+        ))
+    }
+
+    @Test
+    fun `same constrained var for both fields is accepted`() {
+        // The correct way to write the comparison: one 'a, one Eq 'a.
+        assertFalse(failsWithPrelude(
+            "let f: { a: 'a, b: 'a } with Eq 'a -> Bool = { a, b } -> a == b\n" +
+            "f { a = 1, b = 2 }"
+        ))
     }
 }
