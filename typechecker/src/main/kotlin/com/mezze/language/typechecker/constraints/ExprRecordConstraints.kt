@@ -15,10 +15,24 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
     val fields = linkedMapOf<String, MezzeType>()
     val collector = ConstraintCollector()
 
-    val explicitFieldNames = expr.entries
-        .filterIsInstance<ParsedRecordEntry.Field>()
-        .map { it.name }
-        .toSet()
+    val explicitFieldEntries = expr.entries.filterIsInstance<ParsedRecordEntry.Field>()
+    val explicitFieldNames = explicitFieldEntries.map { it.name }.toSet()
+
+    // #78: reject a field name that appears more than once (`{ a = 1, a = 2 }`).
+    // Left unchecked, the map/set collapse silently keeps one value; with
+    // conflicting types (`{ a = 1, a = "s" }`) the wrong-typed field becomes
+    // readable — a soundness-adjacent hole. Report at the duplicate's location.
+    val seenFieldNames = HashSet<String>()
+    for (entry in explicitFieldEntries) {
+        if (!seenFieldNames.add(entry.name)) {
+            throw TypeCheckError(
+                message = "Duplicate field '${entry.name}' in record literal. Each field may appear at most once.",
+                loc = entry.loc,
+                errorType = ErrorType.TYPE_MISMATCH,
+                code = ErrorCode.T0304_DUPLICATE_RECORD_FIELD,
+            )
+        }
+    }
 
     val explicitFieldTypes = mutableMapOf<String, MezzeType>()
     // #75: real field types contributed by a resolved spread source, keyed by

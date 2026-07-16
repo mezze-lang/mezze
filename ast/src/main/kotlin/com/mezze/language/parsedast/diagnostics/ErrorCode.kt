@@ -57,6 +57,7 @@ enum class ErrorCode {
     P0122_MATCH_NEEDS_IS, // `match x { case ... }` or `match x case ...` — Mezze uses `match x is` + indented arms
     P0123_LAMBDA_INLINE_RETURN_TYPE, // `{ p } -> Ret do body` — return-type annotation must go on the binding, not inline
     P0124_PIPE_PLACEHOLDER_AS_RECEIVER, // `x |> @.method {}` — `@` may be an argument value, not a method/field receiver
+    P0125_INTEGER_LITERAL_OUT_OF_RANGE, // `9223372036854775808` — literal exceeds the 64-bit integer range
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,
@@ -74,6 +75,8 @@ enum class ErrorCode {
     T0301_UNBOUND_TYPE_VAR,
     T0302_CANNOT_APPLY_NON_FUNCTION,
     T0303_OPEN_RECORD_FIELD_MISSING,
+    T0304_DUPLICATE_RECORD_FIELD, // `{ a = 1, a = 2 }` — a field name appears more than once
+    T0305_DUPLICATE_LAMBDA_PARAM, // `{ x, x } -> x` — a lambda parameter name appears more than once
 
     // ─── Validator: abilities (V04xx) ────────────────────────────────────
     V0401_ABILITY_NOT_DEFINED,

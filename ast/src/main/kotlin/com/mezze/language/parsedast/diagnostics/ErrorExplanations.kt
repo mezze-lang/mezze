@@ -81,6 +81,10 @@ fun ErrorCode.explain(): String = when (this) {
         "method or field receiver. Write `x.method {}` directly, or pipe into a " +
         "function that takes the value."
 
+    ErrorCode.P0125_INTEGER_LITERAL_OUT_OF_RANGE ->
+        "An integer literal is larger than a 64-bit integer can hold " +
+        "(max 9223372036854775807, min -9223372036854775808)."
+
     ErrorCode.P0117_RECORD_FIELD_MISSING_TYPE ->
         "Record type fields must have type annotations: `{ name: Str, age: Int }`."
 
@@ -160,6 +164,14 @@ fun ErrorCode.explain(): String = when (this) {
     ErrorCode.T0303_OPEN_RECORD_FIELD_MISSING ->
         "Accessing a field on an open record that hasn't been constrained to have that field. " +
         "The record's row variable means it might not have this field."
+
+    ErrorCode.T0304_DUPLICATE_RECORD_FIELD ->
+        "A record literal lists the same field name more than once, e.g. `{ a = 1, a = 2 }`. " +
+        "Each field must appear at most once. Remove the duplicate or rename it."
+
+    ErrorCode.T0305_DUPLICATE_LAMBDA_PARAM ->
+        "A lambda lists the same parameter name more than once, e.g. `{ x, x } -> x`. " +
+        "Each parameter must have a distinct name."
 
     ErrorCode.V0401_ABILITY_NOT_DEFINED ->
         "Referenced an ability that doesn't exist. " +

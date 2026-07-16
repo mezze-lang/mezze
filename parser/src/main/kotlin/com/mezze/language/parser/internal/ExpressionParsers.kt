@@ -2480,17 +2480,35 @@ internal val MezzeParser.literalExpression: Parser<ParsedExpr>
         when (token?.type) {
             TokenType.INTEGER -> {
                 val loc = tokenLoc(token, file)
-                ParseResult.Success(
-                    ParsedIntLit(token.text.toLong(), loc),
-                    stream.advance()
-                )
+                val value = token.text.toLongOrNull()
+                if (value == null) {
+                    // Fatal: the token IS an integer, it's just out of range — no
+                    // other alternative would parse it, so short-circuit the
+                    // alternation with this targeted message instead of letting a
+                    // shallower "Expected an expression" win.
+                    ParseResult.Failure(
+                        "Integer literal '${token.text}' is out of range for a 64-bit integer (max 9223372036854775807).",
+                        stream.getSourcePosition(), stream.getSourceLine(), stream.getSourceColumn(),
+                        isFatal = true,
+                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0125_INTEGER_LITERAL_OUT_OF_RANGE,
+                    )
+                } else {
+                    ParseResult.Success(ParsedIntLit(value, loc), stream.advance())
+                }
             }
             TokenType.NAT -> {
                 val loc = tokenLoc(token, file)
-                ParseResult.Success(
-                    ParsedNatLit(token.text.toLong(), loc),
-                    stream.advance()
-                )
+                val value = token.text.toLongOrNull()
+                if (value == null) {
+                    ParseResult.Failure(
+                        "Natural-number literal '${token.text}n' is out of range for a 64-bit integer (max 9223372036854775807).",
+                        stream.getSourcePosition(), stream.getSourceLine(), stream.getSourceColumn(),
+                        isFatal = true,
+                        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0125_INTEGER_LITERAL_OUT_OF_RANGE,
+                    )
+                } else {
+                    ParseResult.Success(ParsedNatLit(value, loc), stream.advance())
+                }
             }
             TokenType.FLOAT -> {
                 val loc = tokenLoc(token, file)

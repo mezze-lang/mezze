@@ -187,6 +187,21 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         }
     }
 
+    // #79: reject a parameter name that appears more than once (`{ x, x } -> x`).
+    // Otherwise the associateWith/associate above silently collapses it and the
+    // binding is ambiguous.
+    val seenParams = HashSet<String>()
+    for (name in paramNames) {
+        if (!seenParams.add(name)) {
+            throw TypeCheckError(
+                message = "Duplicate parameter '$name' in lambda. Each parameter must have a distinct name.",
+                loc = expr.loc,
+                errorType = ErrorType.TYPE_MISMATCH,
+                code = ErrorCode.T0305_DUPLICATE_LAMBDA_PARAM,
+            )
+        }
+    }
+
     val rowVar = when {
         expectedParamType?.rowVar != null -> expectedParamType.rowVar
         isOpenPattern -> RowVar.fresh()
