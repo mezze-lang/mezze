@@ -155,7 +155,10 @@ internal fun ExpressionConstraintGenerator.generateVariantConstruction(expr: Par
 
 internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, context: ConstraintContext): ConstraintResult {
 
-    val expectedFunctionType = context.expectedType as? MezzeType.FunctionType
+    // unwrapExpected peels a SuspendedType wrapper so an effectful expected
+    // function type still drives the param/return push (otherwise the cast below
+    // would miss and silently fall back to bottom-up inference).
+    val expectedFunctionType = unwrapExpected(context.expectedType) as? MezzeType.FunctionType
     val expectedParamType = expectedFunctionType?.paramType as? MezzeType.RecordType
 
     val paramNames: List<String>
@@ -554,7 +557,7 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     // push when the callee is a concrete FunctionType with a RecordType parameter;
     // otherwise (polymorphic/unresolved callee) we fall back to pure inference and
     // let the post-hoc Equality constraints below reconcile types as before.
-    val calleeParamType = (functionResult.type as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType
+    val calleeParamType = (unwrapExpected(functionResult.type) as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType
     val argContext = context.notInTailPosition()
     val argumentResult = generateWithExpected(expr.arguments, calleeParamType, argContext)
 

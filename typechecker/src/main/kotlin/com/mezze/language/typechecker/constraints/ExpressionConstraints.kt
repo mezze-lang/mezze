@@ -390,20 +390,33 @@ class ExpressionConstraintGenerator {
         convertParsedTypeAnnotation(annotation)
 
     /**
+     * Peel a [MezzeType.SuspendedType] wrapper (which carries effects) off an
+     * expected type so bidirectional helpers see the underlying value type. An
+     * effectful function type is represented as `SuspendedType(FunctionType, …)`;
+     * without this, an `as? FunctionType` / record-field lookup on the expected
+     * type would silently miss and drop the push (falling back to post-hoc
+     * unification). Effects on an *expected* type don't affect what we push down,
+     * so discarding the wrapper here is safe.
+     */
+    internal fun unwrapExpected(type: MezzeType?): MezzeType? =
+        if (type is MezzeType.SuspendedType) type.valueType else type
+
+    /**
      * Bidirectional helper: resolve an expected type to its record field→type
      * map, or null if it isn't (or doesn't name) a record. Handles a direct
      * [MezzeType.RecordType] and a [MezzeType.TypeApplication] that names a
-     * record type declaration. Shared by every site that wants to push expected
-     * field types down into subexpressions (record literals, call arguments),
-     * so the "what fields does this expected type have" logic lives in one place.
+     * record type declaration, seeing through a [MezzeType.SuspendedType]
+     * wrapper. Shared by every site that wants to push expected field types down
+     * into subexpressions (record literals, call arguments), so the "what fields
+     * does this expected type have" logic lives in one place.
      */
     internal fun expectedRecordFields(
         expectedType: MezzeType?,
         context: ConstraintContext
-    ): Map<String, MezzeType>? = when (expectedType) {
-        is MezzeType.RecordType -> expectedType.fields
+    ): Map<String, MezzeType>? = when (val t = unwrapExpected(expectedType)) {
+        is MezzeType.RecordType -> t.fields
         is MezzeType.TypeApplication -> {
-            val typeDecl = context.typeDeclarations[expectedType.constructor]
+            val typeDecl = context.typeDeclarations[t.constructor]
             val def = typeDecl?.definition
             if (def is ParsedRecordDef) {
                 def.fields.associate { it.name to convertParsedFieldType(it.type) }
