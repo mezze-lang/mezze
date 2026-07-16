@@ -30,6 +30,7 @@ import com.mezze.language.typechecker.solving.clearUnificationCache
 import com.mezze.language.typechecker.solving.withInScopeAliasNames
 import com.mezze.language.typechecker.validation.TypeValidator
 import com.mezze.language.typechecker.validation.ValidationResult
+import com.mezze.language.typechecker.validation.DeadCodeLinter
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedModule as TypedAstModule
 import java.nio.file.Path
@@ -296,6 +297,11 @@ class TypeChecker(
                     TypeCheckWarning(message = msg, loc = null)
                 }.toMutableList()
                 warnings.addAll(constraintWarnings)
+                // #84 linter: purely-syntactic dead/redundant code warnings
+                // (discarded value, constant condition, redundant boolean).
+                warnings.addAll(DeadCodeLinter.lint(parsedModule).map {
+                    TypeCheckWarning(message = it.message, loc = it.loc, code = it.code)
+                })
 
                 val mustBeOpenRowVars = solveResult.mustBeOpenRowVars + perBindingMustBeOpenRowVars
 
