@@ -17,6 +17,7 @@ import com.mezze.language.truffleir.NodeIR;
 import com.mezze.language.truffleir.PatternIR;
 import com.mezze.language.truffleir.ReadFieldIR;
 import com.mezze.language.truffleir.ReadLocalIR;
+import com.mezze.language.truffleir.RecordUpdateIR;
 import com.mezze.language.truffleir.StmtIR;
 import com.mezze.language.truffleir.WriteLocalIR;
 import com.mezze.language.typedast.Hash;
@@ -56,6 +57,10 @@ import java.util.Map;
  *       {@link com.mezze.interpreter.values.MezzeRecord}, via the
  *       {@code ReadFieldByName} operation (PIC on Shape + megamorphic
  *       fallback)</li>
+ *   <li>{@link RecordUpdateIR} — {@code { ...r, x = 1 }} shape via the
+ *       {@code UpdateRecord} operation (boundary-fold to a new
+ *       all-object record, overrides existing names + extends the
+ *       shape with brand-new update names)</li>
  *   <li>{@link MakeVariantIR} — construct a variant, no-payload and
  *       single-payload forms via {@code MakeVariantNoPayload} and
  *       {@code MakeVariantSinglePayload}</li>
@@ -159,6 +164,14 @@ public final class BytecodeCompiler {
         }
         if (node instanceof ReadFieldIR r) {
             return supportsNode(r.getRecord(), paramCount);
+        }
+        if (node instanceof RecordUpdateIR ru) {
+            if (!supportsNode(ru.getRecord(), paramCount)) return false;
+            for (FieldIR f : ru.getUpdates()) {
+                if ("__spread__".equals(f.getName())) return false;
+                if (!supportsNode(f.getValue(), paramCount)) return false;
+            }
+            return true;
         }
         if (node instanceof MakeVariantIR mv) {
             NodeIR payload = mv.getPayload();
@@ -367,6 +380,19 @@ public final class BytecodeCompiler {
             b.beginReadFieldByName(r.getFieldName());
             emitNode(r.getRecord(), b, paramCount, localMap);
             b.endReadFieldByName();
+            return;
+        }
+        if (node instanceof RecordUpdateIR ru) {
+            String[] updateNames = new String[ru.getUpdates().size()];
+            for (int i = 0; i < ru.getUpdates().size(); i++) {
+                updateNames[i] = ru.getUpdates().get(i).getName();
+            }
+            b.beginUpdateRecord(updateNames);
+            emitNode(ru.getRecord(), b, paramCount, localMap);
+            for (FieldIR f : ru.getUpdates()) {
+                emitNode(f.getValue(), b, paramCount, localMap);
+            }
+            b.endUpdateRecord();
             return;
         }
         if (node instanceof MakeVariantIR mv) {

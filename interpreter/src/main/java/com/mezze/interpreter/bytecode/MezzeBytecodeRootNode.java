@@ -213,6 +213,27 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Update-form record spread: {@code { ...r, x = 1, y = 2 }}. Takes
+     * the source record from the stack and a compile-time array of
+     * update field names + their runtime values (variadic).
+     *
+     * <p>Lowers {@link com.mezze.language.truffleir.RecordUpdateIR}.
+     * Boundary-fold to a new {@link MezzeRecord}: copy every field of
+     * the source's shape into the result, then overlay the updates.
+     * All-object storage — matches {@code RecordSpreadNode.create}'s
+     * simplest path without the shape-cache PIC (that's a later
+     * optimization; correctness first).
+     */
+    @Operation
+    @ConstantOperand(type = String[].class)
+    public static final class UpdateRecord {
+        @Specialization
+        public static MezzeRecord doAllObjects(String[] updateNames, MezzeRecord source, @Variadic Object[] updateValues) {
+            return buildUpdatedRecord(source, updateNames, updateValues);
+        }
+    }
+
+    /**
      * Read a field by name from a {@link MezzeRecord}.
      *
      * <p>Lowers {@link com.mezze.language.truffleir.ReadFieldIR}.
@@ -350,6 +371,31 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static Object doVariant(MezzeVariant variant) {
             return variant.getPayloadValue();
         }
+    }
+
+    /**
+     * Boundary helper: apply update fields to a source record. Preserves
+     * the source record's field order + adds any brand-new update
+     * names at the tail, all in Object storage. Overrides for an
+     * existing name replace that field's value; new names extend the
+     * shape.
+     */
+    @TruffleBoundary
+    private static MezzeRecord buildUpdatedRecord(MezzeRecord source, String[] updateNames, Object[] updateValues) {
+        Shape srcShape = source.getShape();
+        int srcCount = srcShape.getFieldCount();
+        // Compute final field name list: source fields (in order), then
+        // any update names not already in source.
+        java.util.LinkedHashMap<String, Object> merged = new java.util.LinkedHashMap<>(srcCount + updateNames.length);
+        for (int i = 0; i < srcCount; i++) {
+            merged.put(srcShape.getFieldName(i), source.getField(srcShape.getFieldName(i)));
+        }
+        for (int i = 0; i < updateNames.length; i++) {
+            merged.put(updateNames[i], updateValues[i]);
+        }
+        String[] resultNames = merged.keySet().toArray(new String[0]);
+        Object[] resultValues = merged.values().toArray(new Object[0]);
+        return buildAllObjectRecord(resultNames, resultValues);
     }
 
     @TruffleBoundary
