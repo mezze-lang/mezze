@@ -147,23 +147,21 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
-     * Direct-call a fixed CallTarget with two positional arguments,
-     * push the result on the operand stack.
+     * Direct-call a fixed CallTarget with any number of positional
+     * arguments, push the result on the operand stack.
      *
-     * <p>Used to lower {@code CallDirectIR} for the Phase-1 subset (2-arg
-     * scalar-ABI calls into another compiled function). The callee's
-     * {@code CallTarget} is baked into the bytecode via
-     * {@link ConstantOperand} — no runtime dispatch overhead beyond a
-     * {@link DirectCallNode} invocation. Truffle's inline-cache path
-     * takes over once the interpreter warms up.
+     * <p>Used to lower {@code CallDirectIR} for the general case: any
+     * arity, scalar-ABI, non-tail-call. Callee's {@link CallTarget} is
+     * baked as a constant operand; the args come from the stack via
+     * {@link Variadic}, which BDSL packs into an {@code Object[]} that
+     * we forward straight to {@link DirectCallNode#call(Object...)}.
      *
-     * <p>Phase 2 will replace this with a variadic call operation. For
-     * now the hardcoded arity keeps the walking skeleton small; any
-     * arity-mismatch is caught in {@link BytecodeCompiler#supports}.
+     * <p>Phase 2 opened this up from the previous 2-arg hardcode. The
+     * cached path still gets Truffle inlining/splitting once warm.
      */
     @Operation
     @ConstantOperand(type = CallTarget.class)
-    public static final class CallDirect2 {
+    public static final class CallDirectN {
         /**
          * Cached path (steady-state): a {@link DirectCallNode} tied to
          * the compile-time CallTarget. Enables Truffle inlining +
@@ -172,10 +170,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization(guards = "callNode.getCallTarget() == target")
         public static Object doCached(
                 CallTarget target,
-                Object arg0,
-                Object arg1,
+                @Variadic Object[] args,
                 @Cached("create(target)") DirectCallNode callNode) {
-            return callNode.call(new Object[] { arg0, arg1 });
+            return callNode.call(args);
         }
 
         /**
@@ -186,10 +183,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization(replaces = "doCached")
         public static Object doIndirect(
                 CallTarget target,
-                Object arg0,
-                Object arg1,
+                @Variadic Object[] args,
                 @Cached IndirectCallNode indirectCallNode) {
-            return indirectCallNode.call(target, new Object[] { arg0, arg1 });
+            return indirectCallNode.call(target, args);
         }
     }
 

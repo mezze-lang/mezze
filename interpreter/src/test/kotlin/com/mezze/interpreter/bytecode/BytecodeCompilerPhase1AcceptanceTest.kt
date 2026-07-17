@@ -76,6 +76,76 @@ class BytecodeCompilerPhase1AcceptanceTest {
         sourceSection = src,
     )
 
+    /** Build `add3`: `{ a, b, c } -> a + b + c`. Exercises 3-arg CallDirectN. */
+    private fun buildAdd3(): FunctionIR = FunctionIR(
+        hash = Hash("e".repeat(64)),
+        name = "add3",
+        qualifiedName = "add3",
+        paramSlots = listOf(SlotKind.LONG, SlotKind.LONG, SlotKind.LONG),
+        paramNames = listOf("a", "b", "c"),
+        localSlots = emptyList(),
+        localNames = emptyList(),
+        captureSlots = emptyList(),
+        captureNames = emptyList(),
+        body = InlineBinaryOpIR(
+            op = InlineOp.ADD,
+            left = InlineBinaryOpIR(
+                op = InlineOp.ADD,
+                left = ReadLocalIR(slot = 0, kind = SlotKind.LONG, src = src),
+                right = ReadLocalIR(slot = 1, kind = SlotKind.LONG, src = src),
+                src = src,
+            ),
+            right = ReadLocalIR(slot = 2, kind = SlotKind.LONG, src = src),
+            src = src,
+        ),
+        sourceFile = "test.mz",
+        sourceSection = src,
+    )
+
+    /** Build the caller `main3`: `add3 { a=1, b=2, c=3 }`. */
+    private fun buildMain3(): FunctionIR = FunctionIR(
+        hash = Hash("f".repeat(64)),
+        name = "main3",
+        qualifiedName = "main3",
+        paramSlots = emptyList(),
+        paramNames = emptyList(),
+        localSlots = emptyList(),
+        localNames = emptyList(),
+        captureSlots = emptyList(),
+        captureNames = emptyList(),
+        body = CallDirectIR(
+            targetHash = Hash("e".repeat(64)),
+            args = listOf(LongLitIR(1L, src), LongLitIR(2L, src), LongLitIR(3L, src)),
+            isTailCall = false,
+            src = src,
+            isScalarABI = true,
+        ),
+        sourceFile = "test.mz",
+        sourceSection = src,
+    )
+
+    @Test
+    fun `let add3 a b c -- a + b + c -- add3 1 2 3 -- yields 6`() {
+        val context = Context.newBuilder("mezze")
+            .allowExperimentalOptions(true)
+            .allowAllAccess(true)
+            .build()
+        try {
+            context.enter()
+            try {
+                @Suppress("UNCHECKED_CAST")
+                val language: MezzeLanguage? = MezzeLanguage.get(null) as MezzeLanguage?
+                val compiler = BytecodeCompiler(language)
+                val roots = compiler.compileWithCallees(listOf(buildAdd3(), buildMain3()))
+                assertEquals(6L, roots[1].callTarget.call())
+            } finally {
+                context.leave()
+            }
+        } finally {
+            context.close()
+        }
+    }
+
     @Test
     fun `let add a b -- a + b -- add 1 2 -- yields 3`() {
         val context = Context.newBuilder("mezze")

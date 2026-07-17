@@ -47,8 +47,8 @@ import java.util.Map;
  *   <li>{@link WriteLocalIR} — local write</li>
  *   <li>{@link IfIR} — branching (via BDSL built-in {@code IfThenElse})</li>
  *   <li>{@link BlockIR} with {@link StmtIR.Let} + {@link StmtIR.Expr}</li>
- *   <li>{@link CallDirectIR} with EXACTLY 2 args, scalar-ABI, non-tail-call
- *       — via the {@code CallDirect2} custom operation</li>
+ *   <li>{@link CallDirectIR} with ANY arity, scalar-ABI, non-tail-call
+ *       — via the variadic {@code CallDirectN} custom operation</li>
  *   <li>{@link MakeRecordIR} — all-Object-storage record construction
  *       (rejects {@code __spread__} entries; those go through AST)
  *       via the {@code MakeRecord} variadic operation</li>
@@ -74,7 +74,7 @@ import java.util.Map;
  * <p>Multi-root strategy for calls: each callee is compiled to its own
  * standalone {@code BytecodeRootNodes}, we grab its
  * {@code getNode(0).getCallTarget()}, then pass that CallTarget as a
- * constant operand to {@code CallDirect2} in the caller. This means
+ * constant operand to {@code CallDirectN} in the caller. This means
  * mutual recursion isn't supported yet — a caller's compile requires
  * its callees to be compiled first. Phase 2+ will move to a shared
  * multi-root or lazy CallTarget resolution.
@@ -137,9 +137,9 @@ public final class BytecodeCompiler {
             return supportsNode(blk.getResult(), paramCount);
         }
         if (node instanceof CallDirectIR c) {
-            // Phase 1: only 2-arg scalar-ABI, non-tail-call, and the
-            // callee's CallTarget must already have been compiled.
-            if (c.getArgs().size() != 2) return false;
+            // Any arity accepted (variadic CallDirectN). Still requires
+            // scalar-ABI + non-tail-call, and the callee must already
+            // be compiled.
             if (c.isTailCall()) return false;
             if (!c.isScalarABI()) return false;
             if (!compiledCallTargets.containsKey(c.getTargetHash())) return false;
@@ -344,14 +344,11 @@ public final class BytecodeCompiler {
                     "CallDirectIR references unknown target hash "
                     + c.getTargetHash().getHex() + " — callee must be compiled first");
             }
-            if (c.getArgs().size() != 2) {
-                throw new UnsupportedOperationException(
-                    "Phase 1 CallDirect2 requires exactly 2 args, got " + c.getArgs().size());
+            b.beginCallDirectN(target);
+            for (NodeIR arg : c.getArgs()) {
+                emitNode(arg, b, paramCount, localMap);
             }
-            b.beginCallDirect2(target);
-            emitNode(c.getArgs().get(0), b, paramCount, localMap);
-            emitNode(c.getArgs().get(1), b, paramCount, localMap);
-            b.endCallDirect2();
+            b.endCallDirectN();
             return;
         }
         if (node instanceof MakeRecordIR m) {
