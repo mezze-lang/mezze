@@ -417,8 +417,7 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
 
                     val abilityConstraints = annotation.abilityConstraints.mapNotNull { constraint ->
                         val typeVarArg = constraint.typeArgs.find { arg ->
-                            arg is ParsedNamedType &&
-                            (arg.name.startsWith("'") || arg.name.first().isLowerCase())
+                            arg is ParsedNamedType && arg.name.isTypeVarName()
                         }
                         val typeParamName = when (typeVarArg) {
                             is ParsedNamedType -> typeVarArg.name

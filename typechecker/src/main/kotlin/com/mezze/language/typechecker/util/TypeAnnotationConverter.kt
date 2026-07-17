@@ -48,7 +48,7 @@ object TypeAnnotationConverter {
             is ParsedNamedType -> {
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
                 val name = annotation.name
-                if (name.first().isLowerCase() || name.startsWith("'")) {
+                if (name.isTypeVarName()) {
                     val varName = if (config.stripTickFromTypeVars) name.removePrefix("'") else name
                     config.typeParamSubst?.let { subst ->
                         subst[varName] ?: subst[name.removePrefix("'")] ?: subst["'" + name.removePrefix("'")]

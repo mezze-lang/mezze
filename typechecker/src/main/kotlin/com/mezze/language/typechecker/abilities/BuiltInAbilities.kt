@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.abilities
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.PrimitiveTypes
+import com.mezze.language.ast.isTypeVarName
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.ModuleResolver
@@ -89,7 +90,7 @@ object BuiltInAbilities {
         return when (annotation) {
             is ParsedNamedType -> {
                 PrimitiveTypes.fromName(annotation.name)
-                    ?: if (annotation.name.startsWith("'") || annotation.name.first().isLowerCase()) {
+                    ?: if (annotation.name.isTypeVarName()) {
                         typeVar
                     } else {
                         WellKnownTypeApp.of(annotation.name, emptyList())

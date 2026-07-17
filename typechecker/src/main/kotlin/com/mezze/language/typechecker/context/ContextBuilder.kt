@@ -269,7 +269,7 @@ class ContextBuilder {
                 for (constructor in definition.constructors) {
                     val constructorType = buildParsedConstructorType(typeDecl, constructor)
                     val typeVars = mutableSetOf<TypeVar>()
-                    collectTypeVarsFromType(constructorType, typeVars)
+                    collectTypeVariables(constructorType, typeVars)
                     val scheme = TypeScheme(typeVars.toList(), emptyList(), constructorType)
                     result = result.extendPoly(constructor.name, scheme)
                 }
@@ -285,7 +285,7 @@ class ContextBuilder {
                 val newtypeResult = WellKnownTypeApp.of(typeDecl.name, typeArgs)
                 val constructorType = MezzeType.FunctionType(paramType = wrappedMezzeType, returnType = newtypeResult)
                 val typeVars = mutableSetOf<TypeVar>()
-                collectTypeVarsFromType(constructorType, typeVars)
+                collectTypeVariables(constructorType, typeVars)
                 result = result.extendPoly(definition.constructor, TypeScheme(typeVars.toList(), emptyList(), constructorType))
             }
         }
@@ -713,10 +713,6 @@ class ContextBuilder {
         return TypeAnnotationConverter.convertWith(
             annotation, buildConversionConfig(), typeVarCache, sharedRowVar
         )
-    }
-
-    private fun collectTypeVarsFromType(type: MezzeType, typeVars: MutableSet<TypeVar>) {
-        collectTypeVariables(type, typeVars)
     }
 
     private fun addBuiltInParsedTypes(typeDecls: MutableMap<String, ParsedTypeDecl>) {

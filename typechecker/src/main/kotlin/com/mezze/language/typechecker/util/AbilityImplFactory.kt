@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.util
 
+import com.mezze.language.ast.isTypeVarName
 import com.mezze.language.parsedast.*
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typedast.Hash
@@ -64,7 +65,7 @@ internal object AbilityImplFactory {
             is ParsedNamedType -> annotation.name.removePrefix("'")
             is ParsedTypeApp -> {
                 val allArgsAreTypeVars = annotation.args.all { arg ->
-                    arg is ParsedNamedType && (arg.name.startsWith("'") || arg.name.first().isLowerCase())
+                    arg is ParsedNamedType && arg.name.isTypeVarName()
                 }
                 if (allArgsAreTypeVars) {
                     annotation.constructor

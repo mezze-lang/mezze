@@ -317,8 +317,7 @@ object AbilityValidator {
     private fun hasTypeVariables(annotation: ParsedTypeAnnotation, allowedVars: Set<String> = emptySet()): Boolean {
         return when (annotation) {
             is ParsedNamedType -> {
-                val isTypeVar = annotation.name.startsWith("'") || annotation.name.first().isLowerCase()
-                isTypeVar && annotation.name !in allowedVars
+                annotation.name.isTypeVarName() && annotation.name !in allowedVars
             }
             is ParsedFunctionType -> {
                 hasTypeVariables(annotation.paramType, allowedVars) || hasTypeVariables(annotation.returnType, allowedVars)

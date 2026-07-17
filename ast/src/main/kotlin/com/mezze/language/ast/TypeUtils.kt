@@ -29,6 +29,15 @@ private class IdentityBasedTypeVarMap(
         identityToValue.containsValue(value)
 }
 
+/**
+ * Is this name a type *variable* (as opposed to a concrete/nominal type)?
+ * Mezze's convention: a name that starts with a `'` (e.g. `'a`) or with a
+ * lowercase letter (e.g. `a`) is a type variable; anything else (uppercase,
+ * `Int`, `Option`) is a concrete type. Empty-safe.
+ */
+fun String.isTypeVarName(): Boolean =
+    startsWith("'") || (isNotEmpty() && this[0].isLowerCase())
+
 fun collectTypeVarsInOrder(type: MezzeType, sortFields: Boolean = true): List<TypeVar> {
     val result = mutableListOf<TypeVar>()
     collectTypeVarsRecursive(type, result, sortFields)

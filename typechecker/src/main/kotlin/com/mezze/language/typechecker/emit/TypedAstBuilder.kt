@@ -1288,7 +1288,7 @@ class TypedAstBuilder(
             is ParsedNamedType -> {
                 PrimitiveTypes.fromName(annotation.name)?.let { return it }
 
-                if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
+                if (annotation.name.isTypeVarName()) {
                     val typeVar = typeVarCache.getOrPut(annotation.name) {
                         TypeVar.freshWithName(annotation.name)
                     }
