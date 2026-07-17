@@ -131,6 +131,7 @@ class MezzeLanguageServer(
                 CodeActionKind.RefactorExtract,
                 CodeActionKind.RefactorInline,
                 CodeActionKind.RefactorRewrite,
+                CodeActionKind.SourceOrganizeImports,
             )))
 
             // Signature help

@@ -771,6 +771,64 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `organize imports sorts, dedups, and merges selective imports of the same module`() {
+        // #110: unsorted + duplicated + splittable imports get grouped by
+        // module, merged into a single selective import, deduped, and sorted.
+        val src = """
+            use std::seq::{map}
+            use std::int
+            use std::seq::{filter}
+            use std::int
+            let x = 1
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = Range(Position(0, 0), Position(0, 0))
+            context = CodeActionContext(emptyList(), listOf(CodeActionKind.SourceOrganizeImports))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val org = actions.mapNotNull { if (it.isRight) it.right else null }
+            .firstOrNull { it.title == "Organize imports" }
+            ?: fail("expected an 'Organize imports' action, got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        val edit = org.edit?.changes?.values?.flatten()?.firstOrNull()
+            ?: fail("organize action carried no edit")
+        val after = applyEdit(src, edit)
+
+        // `std::int` deduped to one line; the two `std::seq` selective imports
+        // merged into `{ filter, map }` (items sorted); `std::int` sorts before
+        // `std::seq`.
+        val expected = """
+            use std::int
+            use std::seq::{ filter, map }
+            let x = 1
+        """.trimIndent()
+        assertEquals(expected, after, "organized imports mismatch")
+    }
+
+    @Test
+    fun `organize imports is not offered when imports are already organized`() {
+        val src = """
+            use std::int
+            use std::seq::{ filter, map }
+            let x = 1
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = Range(Position(0, 0), Position(0, 0))
+            context = CodeActionContext(emptyList(), listOf(CodeActionKind.SourceOrganizeImports))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        assertTrue(
+            actions.none { it.isRight && it.right.title == "Organize imports" },
+            "should not offer organize-imports when nothing would change"
+        )
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"

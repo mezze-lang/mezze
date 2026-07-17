@@ -4426,6 +4426,16 @@ class MezzeTextDocumentService(
             // refactorings that make sense for whatever sits at that range.
             actions.addAll(buildRefactorActions(uri, state, params.range))
 
+            // Source action: organize imports. Offered whenever the client
+            // asks for source.organizeImports (or requests all kinds), and
+            // only when it would actually change something.
+            val only = params.context.only
+            val wantsOrganize = only == null || only.isEmpty() ||
+                only.any { CodeActionKind.SourceOrganizeImports.startsWith(it) || it.startsWith(CodeActionKind.SourceOrganizeImports) }
+            if (wantsOrganize) {
+                buildOrganizeImportsAction(uri, state)?.let { actions.add(Either.forRight(it)) }
+            }
+
             actions
         }
     }
@@ -4630,6 +4640,112 @@ class MezzeTextDocumentService(
         val addAnnotation = buildAddTypeAnnotationAction(uri, state, range)
         if (addAnnotation != null) out.add(Either.forRight(addAnnotation))
         return out
+    }
+
+    /**
+     * Build the "Organize imports" source action.
+     *
+     * Rebuilds the file's leading `use` block: groups by module path, merges
+     * selective imports of the same module (`use foo::a` + `use foo::b` →
+     * `use foo::{ a, b }`), drops exact duplicates, and sorts by path. Purely
+     * AST-driven — every `use` decl and its items come from the parsed module,
+     * never a text regex.
+     *
+     * Conservative: only touches a *contiguous* run of imports at the very top
+     * of the file (the common case). Aliased imports (`use x as y`) and
+     * `pub use` are preserved verbatim on their own lines rather than merged,
+     * since merging changes their meaning. Returns null when nothing would
+     * change (already organized, or fewer than the reorg threshold).
+     */
+    private fun buildOrganizeImportsAction(uri: String, state: DocumentState): CodeAction? {
+        val parsed = state.parsedModule ?: return null
+        val decls = parsed.decls
+
+        // The leading contiguous run of plain `use` decls. Stop at the first
+        // non-import (or a pub-use / aliased import, which we don't reorganize).
+        val block = decls.takeWhile { it is ParsedUseDecl }.filterIsInstance<ParsedUseDecl>()
+        if (block.size < 2) return null
+
+        // Merge: module path → sorted, deduped set of (name, alias) items, plus
+        // a flag for a bare `use module` (no selective list).
+        data class Group(var bareModule: Boolean = false, val items: LinkedHashSet<Pair<String, String?>> = LinkedHashSet())
+        val groups = linkedMapOf<String, Group>()
+        // Aliased whole-module imports (`use foo as f`) can't be merged — keep
+        // them verbatim, sorted, after the mergeable groups.
+        val aliased = mutableListOf<String>()
+
+        for (d in block) {
+            if (d.alias != null) {
+                aliased.add("use ${renderUsePath(d.path)} as ${d.alias}")
+                continue
+            }
+            when (val p = d.path) {
+                is ParsedUsePath.Module -> {
+                    val key = p.path.segments.joinToString("::")
+                    groups.getOrPut(key) { Group() }.bareModule = true
+                }
+                is ParsedUsePath.Selective -> {
+                    val key = p.modulePath.segments.joinToString("::")
+                    val g = groups.getOrPut(key) { Group() }
+                    for (item in p.items) g.items.add(item.name to item.alias)
+                }
+            }
+        }
+
+        // Render the organized block, sorted by module path.
+        val lines = mutableListOf<String>()
+        for (key in groups.keys.sorted()) {
+            val g = groups.getValue(key)
+            if (g.bareModule) lines.add("use $key")
+            if (g.items.isNotEmpty()) {
+                val items = g.items.sortedBy { it.first }.joinToString(", ") { (name, alias) ->
+                    if (alias != null) "$name as $alias" else name
+                }
+                lines.add("use $key::{ $items }")
+            }
+        }
+        lines.addAll(aliased.sorted())
+        val organized = lines.joinToString("\n") + "\n"
+
+        // The span to replace: from the first import's start to the line after
+        // the last import (whole lines, so we drop any now-merged blank gaps).
+        val firstLoc = block.first().loc
+        val lastLoc = block.last().loc
+        val replaceRange = Range(
+            Position(firstLoc.startLine - 1, 0),
+            Position(lastLoc.endLine, 0),
+        )
+
+        // No-op guard: if the current text already equals the organized block,
+        // don't offer the action.
+        val current = sliceRange(state.content, replaceRange)
+        if (current == organized) return null
+
+        return CodeAction("Organize imports").apply {
+            kind = CodeActionKind.SourceOrganizeImports
+            edit = WorkspaceEdit(mapOf(uri to listOf(TextEdit(replaceRange, organized))))
+        }
+    }
+
+    /** Render a [ParsedUsePath] back to source text (module or selective form). */
+    private fun renderUsePath(path: ParsedUsePath): String = when (path) {
+        is ParsedUsePath.Module -> path.path.segments.joinToString("::")
+        is ParsedUsePath.Selective -> {
+            val items = path.items.joinToString(", ") { item ->
+                if (item.alias != null) "${item.name} as ${item.alias}" else item.name
+            }
+            "${path.modulePath.segments.joinToString("::")}::{ $items }"
+        }
+    }
+
+    /** The substring of [content] covered by a whole-line LSP [range]. */
+    private fun sliceRange(content: String, range: Range): String {
+        val lines = content.split('\n')
+        val sb = StringBuilder()
+        for (ln in range.start.line until range.end.line) {
+            lines.getOrNull(ln)?.let { sb.append(it).append('\n') }
+        }
+        return sb.toString()
     }
 
     /**
