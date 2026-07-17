@@ -1,5 +1,6 @@
 package com.mezze.interpreter.bytecode;
 
+import com.mezze.interpreter.nodes.inline.DirectAddNode;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.bytecode.BytecodeRootNode;
@@ -7,6 +8,7 @@ import com.oracle.truffle.api.bytecode.ConstantOperand;
 import com.oracle.truffle.api.bytecode.ForceQuickening;
 import com.oracle.truffle.api.bytecode.GenerateBytecode;
 import com.oracle.truffle.api.bytecode.Operation;
+import com.oracle.truffle.api.bytecode.OperationProxy;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.FrameDescriptor;
@@ -77,6 +79,17 @@ import com.oracle.truffle.api.nodes.RootNode;
     enableSerialization = true,
     enableTagInstrumentation = true
 )
+/**
+ * PROXY PROBE (Phase 0 finding follow-up): {@code DirectAddNode} is
+ * our existing AST @Specialization-based add. Proxying it here
+ * generates a BDSL operation named "DirectAdd" that reuses its
+ * specialization logic (long+long, long+long overflow → double,
+ * double+double, string+string, fraction+fraction, suspended
+ * propagation, type-error fallback). If this works, most of Phase
+ * 2/3 becomes @OperationProxy annotations rather than hand-written
+ * ops — potentially weeks of work saved.
+ */
+@OperationProxy(value = DirectAddNode.class, name = "DirectAdd")
 public abstract class MezzeBytecodeRootNode extends RootNode implements BytecodeRootNode {
 
     protected MezzeBytecodeRootNode(MezzeLanguage language, FrameDescriptor frameDescriptor) {
