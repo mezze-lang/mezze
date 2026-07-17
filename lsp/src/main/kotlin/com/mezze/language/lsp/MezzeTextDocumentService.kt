@@ -18,6 +18,7 @@ import com.mezze.language.parser.ParseException
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.ErrorType
+import com.mezze.language.parsedast.diagnostics.WarningCode
 import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.jsonrpc.messages.Either
 import org.eclipse.lsp4j.jsonrpc.messages.Either3
@@ -426,14 +427,25 @@ class MezzeTextDocumentService(
                         val column = loc?.startCol?.minus(1) ?: 0
                         val endLine = loc?.endLine?.minus(1)
                         val endColumn = loc?.endCol
-                        diagnostics.add(createDiagnostic(
+                        // Unused var / unused import render as greyed-out
+                        // (DiagnosticTag.Unnecessary) at Hint severity, like most
+                        // editors do for dead code; everything else is a Warning.
+                        val code = warning.code
+                        val isUnused = code == WarningCode.W0101_UNUSED_VARIABLE ||
+                            code == WarningCode.W0102_UNUSED_IMPORT
+                        val diag = createDiagnostic(
                             message = warning.message,
-                            severity = DiagnosticSeverity.Warning,
+                            severity = if (isUnused) DiagnosticSeverity.Hint else DiagnosticSeverity.Warning,
                             line = line,
                             column = column,
                             endLine = endLine,
-                            endColumn = endColumn
-                        ))
+                            endColumn = endColumn,
+                            // Pass the stable WarningCode (W0101, W0102, …) so the
+                            // codeAction handler can offer a code-specific quick-fix.
+                            code = code?.display()
+                        )
+                        if (isUnused) diag.tags = listOf(DiagnosticTag.Unnecessary)
+                        diagnostics.add(diag)
                     }
 
                     typeCheckResult = TypeCheckResult(
@@ -447,23 +459,18 @@ class MezzeTextDocumentService(
                         typedModule = result.typedModule,
                         loweredFunctions = result.loweredFunctions ?: emptyList(),
                         warnings = result.warnings.map {
-                            com.mezze.language.typechecker.TypeCheckWarning(it.message, it.loc)
+                            com.mezze.language.typechecker.TypeCheckWarning(it.message, it.loc, it.code)
                         },
                         expectedTypeAt = result.expectedTypeAt,
                     )
                     lastSuccessfulResult[uri] = typeCheckResult!!
 
-                    // Unused-import diagnostics. We do this here (vs. in the
-                    // typechecker) because the typechecker treats imports as
-                    // additive context — it doesn't know whether a binding
-                    // got referenced. Walking the typed module gives us the
-                    // exact set of names the user mentioned.
-                    val typedForUnused = result.typedModule
-                    if (typedForUnused != null) {
-                        diagnostics.addAll(
-                            unusedImportDiagnostics(parsedModule, typedForUnused)
-                        )
-                    }
+                    // Unused-import diagnostics now come from the typechecker's
+                    // W0102 warning (UnusedImportLinter), published in the loop
+                    // above with a Hint severity + Unnecessary tag. The LSP used
+                    // to recompute them here — that produced duplicate
+                    // diagnostics and could drift from the compiler's own
+                    // unused-import rule. Removed.
 
                     // Deprecation diagnostics: mark deprecated declarations
                     diagnostics.addAll(deprecationDiagnostics(parsedModule))
@@ -511,7 +518,7 @@ class MezzeTextDocumentService(
                                 val publicResult = com.mezze.language.typechecker.TypeCheckResult(
                                     resolvedImports = buildResolvedImports(result.importContext),
                                     warnings = result.warnings.map {
-                                        com.mezze.language.typechecker.TypeCheckWarning(it.message, it.loc)
+                                        com.mezze.language.typechecker.TypeCheckWarning(it.message, it.loc, it.code)
                                     },
                                     importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
                                     importedEffects = result.importContext?.importedEffects ?: emptyMap(),
@@ -638,59 +645,6 @@ class MezzeTextDocumentService(
     }
 
     /**
-     * Compute unused-import diagnostics by diffing the parsed module's
-     * `use` decls against the set of names referenced by the typed module.
-     *
-     * For each `use` we determine the *local* name(s) it brings into scope:
-     *   - `use foo::bar`             → "bar"
-     *   - `use foo::bar as baz`      → "baz"
-     *   - `use foo::{a, b as c}`     → ["a", "c"]
-     *
-     * We then collect every name referenced anywhere in the typed module's
-     * decl bodies — TypedVar names and TypedQualifiedRef.localName matches.
-     * If a use's local name is missing from that set, it's unused.
-     *
-     * Returned diagnostics carry `DiagnosticTag.Unnecessary` so editors
-     * can render them dimmed instead of as bright errors.
-     */
-    private fun unusedImportDiagnostics(
-        parsed: com.mezze.language.parsedast.ParsedModule,
-        typed: com.mezze.language.typedast.TypedModule
-    ): List<Diagnostic> {
-        val referenced = collectReferencedNames(typed).toMutableSet()
-        // TypedVar drops the qualifier — `seq::filter` ends up as
-        // TypedVar(name = "filter"). The unused-import check then never
-        // sees `seq` as referenced, even though the user clearly is using
-        // the import. Walk the parsed AST to recover qualifier short
-        // names (the first segment of each `::`-qualified ref).
-        collectParsedQualifiers(parsed, referenced)
-        val out = mutableListOf<Diagnostic>()
-
-        for (decl in parsed.decls) {
-            if (decl !is com.mezze.language.parsedast.ParsedUseDecl) continue
-            val unusedItems = unusedItemsIn(decl, referenced)
-            if (unusedItems.isEmpty()) continue
-
-            val message = if (unusedItems.size == 1 && unusedItems.single() == localNameOf(decl)) {
-                "Unused import '${unusedItems.single()}'"
-            } else {
-                "Unused import: ${unusedItems.joinToString(", ") { "'$it'" }}"
-            }
-            val diag = createDiagnostic(
-                message = message,
-                severity = DiagnosticSeverity.Hint,
-                line = decl.loc.startLine - 1,
-                column = decl.loc.startCol - 1,
-                endLine = decl.loc.endLine - 1,
-                endColumn = decl.loc.endCol
-            )
-            diag.tags = listOf(DiagnosticTag.Unnecessary)
-            out.add(diag)
-        }
-        return out
-    }
-
-    /**
      * Generate diagnostics for declarations marked with `#{ deprecated: True }`.
      * The diagnostic uses DiagnosticTag.Deprecated so editors render strikethrough.
      */
@@ -727,186 +681,6 @@ class MezzeTextDocumentService(
             out.add(diag)
         }
         return out
-    }
-
-    /**
-     * For a `use` decl, return the subset of items that are unused.
-     * For a non-selective `use foo::bar` (one local name) returns either
-     * empty or a singleton.
-     */
-    private fun unusedItemsIn(
-        decl: com.mezze.language.parsedast.ParsedUseDecl,
-        referenced: Set<String>
-    ): List<String> {
-        return when (val path = decl.path) {
-            is com.mezze.language.parsedast.ParsedUsePath.Module -> {
-                val local = decl.alias ?: path.path.shortName
-                if (local in referenced) emptyList() else listOf(local)
-            }
-            is com.mezze.language.parsedast.ParsedUsePath.Selective -> {
-                path.items.mapNotNull { item ->
-                    val local = item.alias ?: item.name
-                    if (local in referenced) null else local
-                }
-            }
-        }
-    }
-
-    /**
-     * Walk the parsed module's let/expr trees collecting every qualifier's
-     * short name. For `seq::filter { ... }` the parsed identifier is
-     * `ParsedIdentifier(localName = "filter", qualifier = ["seq"])` —
-     * we add `"seq"` to the referenced set so a `use std::collections::seq`
-     * is correctly counted as used.
-     */
-    private fun collectParsedQualifiers(
-        parsed: com.mezze.language.parsedast.ParsedModule,
-        referenced: MutableSet<String>
-    ) {
-        fun walk(expr: com.mezze.language.parsedast.ParsedExpr) {
-            when (expr) {
-                is com.mezze.language.parsedast.ParsedIdentifier -> {
-                    expr.qualifier?.segments?.firstOrNull()?.let { referenced.add(it) }
-                }
-                is com.mezze.language.parsedast.ParsedFunctionCall -> {
-                    walk(expr.function); walk(expr.arguments)
-                }
-                is com.mezze.language.parsedast.ParsedLambda -> walk(expr.body)
-                is com.mezze.language.parsedast.ParsedRecordLit -> {
-                    for (entry in expr.entries) when (entry) {
-                        is com.mezze.language.parsedast.ParsedRecordEntry.Field -> entry.value?.let { walk(it) }
-                        is com.mezze.language.parsedast.ParsedRecordEntry.Spread -> walk(entry.expr)
-                    }
-                }
-                is com.mezze.language.parsedast.ParsedMemberAccess -> walk(expr.receiver)
-                is com.mezze.language.parsedast.ParsedPipe -> { walk(expr.left); walk(expr.right) }
-                is com.mezze.language.parsedast.ParsedIf -> {
-                    walk(expr.condition); walk(expr.thenBranch); walk(expr.elseBranch)
-                }
-                is com.mezze.language.parsedast.ParsedMatch -> {
-                    walk(expr.scrutinee)
-                    for (case in expr.cases) {
-                        case.guard?.let { walk(it) }
-                        walk(case.body)
-                    }
-                }
-                is com.mezze.language.parsedast.ParsedSeqLit -> for (e in expr.elements) when (e) {
-                    is com.mezze.language.parsedast.ParsedSeqElement.Regular -> walk(e.expr)
-                    is com.mezze.language.parsedast.ParsedSeqElement.Spread -> walk(e.expr)
-                }
-                is com.mezze.language.parsedast.ParsedDo -> walk(expr.result)
-                is com.mezze.language.parsedast.ParsedPerform -> walk(expr.body)
-                is com.mezze.language.parsedast.ParsedEffectCall -> walk(expr.arguments)
-                is com.mezze.language.parsedast.ParsedParens -> walk(expr.expr)
-                is com.mezze.language.parsedast.ParsedBinaryOp -> { walk(expr.left); walk(expr.right) }
-                is com.mezze.language.parsedast.ParsedUnaryOp -> walk(expr.operand)
-                is com.mezze.language.parsedast.ParsedVariantConstruct -> expr.value?.let { walk(it) }
-                else -> { /* literals + nodes that carry no Identifier */ }
-            }
-        }
-        for (decl in parsed.decls) {
-            if (decl is com.mezze.language.parsedast.ParsedLetDecl) walk(decl.value)
-        }
-    }
-
-    /** The single binding name of a non-selective `use`, else null. */
-    private fun localNameOf(decl: com.mezze.language.parsedast.ParsedUseDecl): String? =
-        when (val path = decl.path) {
-            is com.mezze.language.parsedast.ParsedUsePath.Module -> decl.alias ?: path.path.shortName
-            else -> null
-        }
-
-    /**
-     * Walk every typed decl, accumulating every name that could possibly
-     * resolve to an import. We're permissive on purpose — false negatives
-     * (failing to flag an unused import) are fine, false positives
-     * (flagging something that's actually used) are not.
-     */
-    private fun collectReferencedNames(typed: com.mezze.language.typedast.TypedModule): Set<String> {
-        val names = HashSet<String>()
-        for (decl in typed.decls) {
-            when (decl) {
-                is com.mezze.language.typedast.TypedLetDecl -> walkExpr(decl.value, names)
-                else -> { /* type/ability/effect decls — referenced names live in
-                            their parsed form via type annotations; we approximate
-                            by treating those decls as nothing-referenced. The
-                            TypedAst surface for type expressions doesn't currently
-                            carry resolved name strings we can scan, and false
-                            negatives are the safe direction here. */ }
-            }
-        }
-        return names
-    }
-
-    private fun walkExpr(expr: com.mezze.language.typedast.TypedExpr, into: MutableSet<String>) {
-        when (expr) {
-            is com.mezze.language.typedast.TypedVar -> into.add(expr.name)
-            is com.mezze.language.typedast.TypedCall -> {
-                walkExpr(expr.function, into); walkExpr(expr.arg, into)
-            }
-            is com.mezze.language.typedast.TypedLambda -> walkExpr(expr.body, into)
-            is com.mezze.language.typedast.TypedBlock -> {
-                for (stmt in expr.statements) when (stmt) {
-                    is com.mezze.language.typedast.TypedStatement.Let -> walkExpr(stmt.value, into)
-                    is com.mezze.language.typedast.TypedStatement.Expr -> walkExpr(stmt.expr, into)
-                }
-                walkExpr(expr.result, into)
-            }
-            is com.mezze.language.typedast.TypedIf -> {
-                walkExpr(expr.condition, into); walkExpr(expr.thenBranch, into); walkExpr(expr.elseBranch, into)
-            }
-            is com.mezze.language.typedast.TypedMatch -> {
-                walkExpr(expr.scrutinee, into)
-                for (case in expr.cases) {
-                    case.guard?.let { walkExpr(it, into) }
-                    walkExpr(case.body, into)
-                    for (b in case.ifLetBindings) walkExpr(b.expr, into)
-                }
-            }
-            is com.mezze.language.typedast.TypedRecord -> {
-                for (entry in expr.entries) when (entry) {
-                    is com.mezze.language.typedast.TypedRecordEntry.Field -> walkExpr(entry.value, into)
-                    is com.mezze.language.typedast.TypedRecordEntry.Spread -> walkExpr(entry.expr, into)
-                }
-            }
-            is com.mezze.language.typedast.TypedRecordUpdate -> {
-                walkExpr(expr.record, into)
-                for (entry in expr.updates) when (entry) {
-                    is com.mezze.language.typedast.TypedRecordEntry.Field -> walkExpr(entry.value, into)
-                    is com.mezze.language.typedast.TypedRecordEntry.Spread -> walkExpr(entry.expr, into)
-                }
-            }
-            is com.mezze.language.typedast.TypedFieldAccess -> walkExpr(expr.record, into)
-            is com.mezze.language.typedast.TypedSeq -> {
-                for (e in expr.elements) when (e) {
-                    is com.mezze.language.typedast.TypedSeqElement.Regular -> walkExpr(e.expr, into)
-                    is com.mezze.language.typedast.TypedSeqElement.Spread -> walkExpr(e.expr, into)
-                }
-            }
-            is com.mezze.language.typedast.TypedPipe -> {
-                walkExpr(expr.left, into); walkExpr(expr.right, into)
-            }
-            is com.mezze.language.typedast.TypedPerform -> {
-                walkExpr(expr.body, into)
-                for (h in expr.handlers) {
-                    into.add(h.performerName)
-                    h.params?.let { walkExpr(it, into) }
-                }
-            }
-            is com.mezze.language.typedast.TypedPerformOp -> {
-                walkExpr(expr.arg, into)
-                into.add(expr.operationName)
-            }
-            is com.mezze.language.typedast.TypedVariantConstruct -> expr.payload?.let { walkExpr(it, into) }
-            is com.mezze.language.typedast.TypedStringLit -> {
-                for (part in expr.parts) {
-                    if (part is com.mezze.language.typedast.TypedStringPart.Interpolation) {
-                        walkExpr(part.expr, into)
-                    }
-                }
-            }
-            else -> { /* literals + the rest carry no name references */ }
-        }
     }
 
     /**
