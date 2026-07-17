@@ -292,7 +292,19 @@ public final class BytecodeCompiler {
                 if (c.getGuard() != null) {
                     if (!supportsNode(c.getGuard(), argCount)) return false;
                 }
-                if (!c.getIfLetBindings().isEmpty()) return false;
+                for (var ilb : c.getIfLetBindings()) {
+                    if (!supportsNode(ilb.getExpr(), argCount)) return false;
+                    PatternIR ilpat = ilb.getPattern();
+                    if (ilpat instanceof PatternIR.Variant iv) {
+                        // Fine — variant iflet: match tag, extract fields.
+                    } else if (ilpat instanceof PatternIR.Record) {
+                        // Fine — unconditional bind.
+                    } else if (ilpat instanceof PatternIR.Wildcard) {
+                        // Fine — unconditional bind to fieldSlots[0] if present.
+                    } else {
+                        return false;
+                    }
+                }
                 PatternIR pat = c.getPattern();
                 boolean isLast = i == cases.size() - 1;
                 if (pat instanceof PatternIR.Variant v) {
@@ -702,23 +714,13 @@ public final class BytecodeCompiler {
             return;
         }
         if (pat instanceof PatternIR.Literal lit) {
-            // Conditional(PrimEquals(scrutinee, literalExpr), body?, else...)
-            // With guard: nest a second Conditional(guard, body, restChain)
-            // in the then-branch — same shape as the variant path.
+            // Conditional(PrimEquals(scrutinee, literalExpr), guarded-body-with-iflets, else...)
             b.beginConditional();
             b.beginPrimEquals();
             b.emitLoadLocal(scrutineeLocal);
             emitNode(lit.getValue(), b, argCount, localMap);
             b.endPrimEquals();
-            if (c.getGuard() != null) {
-                b.beginConditional();
-                emitNode(c.getGuard(), b, argCount, localMap);
-                emitNode(c.getBody(), b, argCount, localMap);
-                emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
-                b.endConditional();
-            } else {
-                emitNode(c.getBody(), b, argCount, localMap);
-            }
+            emitCaseGuardsAndBody(c, cases, idx, scrutineeLocal, b, argCount, localMap);
             emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
             b.endConditional();
             return;
@@ -755,23 +757,123 @@ public final class BytecodeCompiler {
                 b.endStoreLocal();
             }
         }
-        if (c.getGuard() != null) {
-            // Guard: Conditional(guard, body, restChain). If the guard
-            // is false we fall through by emitting the tail chain
-            // again — semantically correct but duplicates the tail
-            // once per guarded case. A shared-continuation lowering
-            // would be a Phase 3+ perf optimization.
-            b.beginConditional();
-            emitNode(c.getGuard(), b, argCount, localMap);
-            emitNode(c.getBody(), b, argCount, localMap);
-            emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
-            b.endConditional();
-        } else {
-            emitNode(c.getBody(), b, argCount, localMap);
-        }
+        emitCaseGuardsAndBody(c, cases, idx, scrutineeLocal, b, argCount, localMap);
         b.endBlock();
         // Else-branch (tag mismatch) — recurse.
         emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
         b.endConditional();
+    }
+
+    /**
+     * Emit a case's optional guard + iflet chain + body. Falls through
+     * to {@code emitMatchChain(cases, idx+1, ...)} whenever the guard
+     * or any variant-iflet doesn't match. Record and wildcard iflets
+     * always match — they just bind and continue.
+     */
+    private void emitCaseGuardsAndBody(CaseIR c, java.util.List<CaseIR> cases, int idx,
+                                       BytecodeLocal scrutineeLocal,
+                                       MezzeBytecodeRootNodeGen.Builder b,
+                                       int argCount, BytecodeLocal[] localMap) {
+        if (c.getGuard() != null) {
+            b.beginConditional();
+            emitNode(c.getGuard(), b, argCount, localMap);
+            emitIfLetChain(c, 0, cases, idx, scrutineeLocal, b, argCount, localMap);
+            emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
+            b.endConditional();
+        } else {
+            emitIfLetChain(c, 0, cases, idx, scrutineeLocal, b, argCount, localMap);
+        }
+    }
+
+    /**
+     * Recursively emit if-let bindings then the case body. Variant
+     * iflets act like nested Conditionals — mismatch falls through to
+     * {@code emitMatchChain(cases, idx+1, ...)}. Record/wildcard
+     * iflets bind fields into their target slots and drop through.
+     */
+    private void emitIfLetChain(CaseIR c, int iletIdx, java.util.List<CaseIR> cases, int caseIdx,
+                                BytecodeLocal scrutineeLocal,
+                                MezzeBytecodeRootNodeGen.Builder b,
+                                int argCount, BytecodeLocal[] localMap) {
+        if (iletIdx >= c.getIfLetBindings().size()) {
+            emitNode(c.getBody(), b, argCount, localMap);
+            return;
+        }
+        var ilb = c.getIfLetBindings().get(iletIdx);
+        PatternIR ilpat = ilb.getPattern();
+        if (ilpat instanceof PatternIR.Variant iv) {
+            // Store the iflet expression into a fresh local so we can
+            // both test its tag and later unwrap the payload.
+            BytecodeLocal tmp = b.createLocal();
+            b.beginBlock();
+            b.beginStoreLocal(tmp);
+            emitNode(ilb.getExpr(), b, argCount, localMap);
+            b.endStoreLocal();
+            b.beginConditional();
+            b.beginVariantTagEquals(iv.getTag());
+            b.emitLoadLocal(tmp);
+            b.endVariantTagEquals();
+            // Then: bind captured fields (via payload record) and continue.
+            b.beginBlock();
+            var names = iv.getFieldNames();
+            var slots = iv.getFieldSlots();
+            if (!names.isEmpty()) {
+                BytecodeLocal payloadLocal = b.createLocal();
+                b.beginStoreLocal(payloadLocal);
+                b.beginUnwrapSinglePayload();
+                b.emitLoadLocal(tmp);
+                b.endUnwrapSinglePayload();
+                b.endStoreLocal();
+                for (int i = 0; i < names.size(); i++) {
+                    BytecodeLocal target = localMap[slots.get(i) - argCount];
+                    b.beginStoreLocal(target);
+                    b.beginReadFieldByName(names.get(i));
+                    b.emitLoadLocal(payloadLocal);
+                    b.endReadFieldByName();
+                    b.endStoreLocal();
+                }
+            }
+            emitIfLetChain(c, iletIdx + 1, cases, caseIdx, scrutineeLocal, b, argCount, localMap);
+            b.endBlock();
+            // Else: iflet mismatch — fall through to the next case.
+            emitMatchChain(cases, caseIdx + 1, scrutineeLocal, b, argCount, localMap);
+            b.endConditional();
+            b.endBlock();
+            return;
+        }
+        if (ilpat instanceof PatternIR.Record rp) {
+            // Unconditional match — evaluate expr, then extract each
+            // captured field into its bound slot, continue.
+            b.beginBlock();
+            BytecodeLocal tmp = b.createLocal();
+            b.beginStoreLocal(tmp);
+            emitNode(ilb.getExpr(), b, argCount, localMap);
+            b.endStoreLocal();
+            for (int i = 0; i < rp.getFieldNames().size(); i++) {
+                BytecodeLocal target = localMap[rp.getFieldSlots().get(i) - argCount];
+                b.beginStoreLocal(target);
+                b.beginReadFieldByName(rp.getFieldNames().get(i));
+                b.emitLoadLocal(tmp);
+                b.endReadFieldByName();
+                b.endStoreLocal();
+            }
+            emitIfLetChain(c, iletIdx + 1, cases, caseIdx, scrutineeLocal, b, argCount, localMap);
+            b.endBlock();
+            return;
+        }
+        // Wildcard iflet: bind expr to fieldSlots[0] if present.
+        b.beginBlock();
+        int wcSlot = ilb.getFieldSlots().isEmpty() ? -1 : ilb.getFieldSlots().get(0);
+        if (wcSlot >= 0) {
+            BytecodeLocal target = localMap[wcSlot - argCount];
+            b.beginStoreLocal(target);
+            emitNode(ilb.getExpr(), b, argCount, localMap);
+            b.endStoreLocal();
+        } else {
+            // No binding — evaluate for side effects, drop.
+            emitNode(ilb.getExpr(), b, argCount, localMap);
+        }
+        emitIfLetChain(c, iletIdx + 1, cases, caseIdx, scrutineeLocal, b, argCount, localMap);
+        b.endBlock();
     }
 }
