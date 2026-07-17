@@ -335,6 +335,36 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * (mirrors the AST's fold at {@code RecordLiteralNode.allObjects}).
      */
     /**
+     * Call a function value (a {@link MezzeFunction}) with a variadic
+     * argument list. Prepends the function's {@code closureValues} to
+     * the arg list — matches the calling convention in
+     * {@link com.mezze.interpreter.nodes.function.MezzeFunctionRootNode}
+     * where args[0..closureCount-1] are closure values.
+     *
+     * <p>Lowers {@link com.mezze.language.truffleir.CallIndirectIR} and
+     * (eventually) {@link com.mezze.language.truffleir.CallIndirectScalarIR}'s
+     * general path.
+     */
+    @Operation
+    public static final class CallIndirect {
+        @Specialization
+        public static Object doInvoke(
+                MezzeFunction fn,
+                @Variadic Object[] args,
+                @Cached IndirectCallNode callNode) {
+            Object[] closureValues = fn.getClosureValues();
+            int closureLen = closureValues.length;
+            if (closureLen == 0) {
+                return callNode.call(fn.getCallTarget(), args);
+            }
+            Object[] combined = new Object[closureLen + args.length];
+            System.arraycopy(closureValues, 0, combined, 0, closureLen);
+            System.arraycopy(args, 0, combined, closureLen, args.length);
+            return callNode.call(fn.getCallTarget(), combined);
+        }
+    }
+
+    /**
      * Construct a {@link MezzeFunction} closure — takes a compile-time
      * {@link CallTarget} + function name, pops the capture values off
      * the stack (variadic), pushes a MezzeFunction wrapping them.

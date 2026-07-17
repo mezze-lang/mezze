@@ -6,6 +6,7 @@ import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.language.truffleir.BlockIR;
 import com.mezze.language.truffleir.BoolLitIR;
 import com.mezze.language.truffleir.CallDirectIR;
+import com.mezze.language.truffleir.CallIndirectIR;
 import com.mezze.language.truffleir.CallNativeIR;
 import com.mezze.language.truffleir.CharLitIR;
 import com.mezze.language.truffleir.DoubleLitIR;
@@ -80,6 +81,11 @@ import java.util.Map;
  *       {@code UnwrapSinglePayload} for single-payload bindings.
  *       No guards / if-lets / literal / record / seq / string-interp
  *       patterns yet.</li>
+ *   <li>{@link CallIndirectIR} — call a {@link MezzeFunction} value.
+ *       Function expr evaluated, arg expr (typically a MakeRecordIR)
+ *       evaluated, then the {@code CallIndirect} op prepends the
+ *       function's {@code closureValues} to the arg list before
+ *       invoking. No tail-call variant yet.</li>
  *   <li>{@link MakeLambdaIR} — closure construction. Captures are
  *       read from the caller's frame slots (LoadArgument for arg
  *       slots, LoadLocal for local slots) and packed into a
@@ -215,6 +221,11 @@ public final class BytecodeCompiler {
             // (they resolve to LoadArgument or LoadLocal at emit time).
             if (!compiledCallTargets.containsKey(ml.getFunctionHash())) return false;
             return true;
+        }
+        if (node instanceof CallIndirectIR ci) {
+            if (ci.isTailCall()) return false;
+            return supportsNode(ci.getFunction(), argCount)
+                && supportsNode(ci.getArg(), argCount);
         }
         if (node instanceof CallNativeIR cn) {
             // Phase 2: scalar-ABI natives only, and only handlers that
@@ -500,6 +511,13 @@ public final class BytecodeCompiler {
         }
         if (node instanceof MatchIR m) {
             emitMatch(m, b, argCount, localMap);
+            return;
+        }
+        if (node instanceof CallIndirectIR ci) {
+            b.beginCallIndirect();
+            emitNode(ci.getFunction(), b, argCount, localMap);
+            emitNode(ci.getArg(), b, argCount, localMap);
+            b.endCallIndirect();
             return;
         }
         if (node instanceof MakeLambdaIR ml) {

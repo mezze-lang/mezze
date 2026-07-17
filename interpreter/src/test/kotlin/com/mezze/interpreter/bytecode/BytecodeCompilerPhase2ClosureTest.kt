@@ -3,8 +3,11 @@ package com.mezze.interpreter.bytecode
 import com.mezze.interpreter.runtime.MezzeLanguage
 import com.mezze.interpreter.values.MezzeFunction
 import com.mezze.language.truffleir.BlockIR
+import com.mezze.language.truffleir.CallIndirectIR
 import com.mezze.language.truffleir.CaptureIR
+import com.mezze.language.truffleir.FieldIR
 import com.mezze.language.truffleir.FunctionIR
+import com.mezze.language.truffleir.MakeRecordIR
 import com.mezze.language.truffleir.InlineBinaryOpIR
 import com.mezze.language.truffleir.InlineOp
 import com.mezze.language.truffleir.LongLitIR
@@ -113,6 +116,106 @@ class BytecodeCompilerPhase2ClosureTest {
                 // Simulate the caller pushing captures first, then param:
                 // callTarget.call(n = 10, x = 5) -> 15.
                 assertEquals(15L, roots[0].callTarget.call(10L, 5L))
+            } finally {
+                context.leave()
+            }
+        } finally {
+            context.close()
+        }
+    }
+
+    /**
+     * inc_record: captures [n@LONG], one record param (`arg` at slot 1).
+     * body: n + arg.x. This matches what CallIndirect delivers — the
+     * single record arg lands in slot captureCount, and we extract `x`
+     * via ReadFieldByName.
+     */
+    private fun buildIncRecord(): FunctionIR = FunctionIR(
+        hash = Hash("ff".repeat(32)),
+        name = "inc_record",
+        qualifiedName = "inc_record",
+        paramSlots = listOf(SlotKind.OBJECT),
+        paramNames = listOf("arg"),
+        localSlots = emptyList(),
+        localNames = emptyList(),
+        captureSlots = listOf(SlotKind.LONG),
+        captureNames = listOf("n"),
+        body = InlineBinaryOpIR(
+            op = InlineOp.ADD,
+            left = ReadLocalIR(slot = 0, kind = SlotKind.LONG, src = src),
+            right = com.mezze.language.truffleir.ReadFieldIR(
+                record = ReadLocalIR(slot = 1, kind = SlotKind.OBJECT, src = src),
+                fieldName = "x",
+                fieldIndex = 0,
+                src = src,
+            ),
+            src = src,
+        ),
+        sourceFile = "test.mz",
+        sourceSection = src,
+    )
+
+    /**
+     * main_call: build inc_record closure with n captured from a
+     * literal (which we've already stored in a local first — the
+     * MakeLambda captures read from local slot 0), call it via
+     * CallIndirect with { x = 5 } as the arg record.
+     * Expected: 10 + 5 = 15.
+     */
+    private fun buildMainCall(): FunctionIR = FunctionIR(
+        hash = Hash("10".repeat(32)),
+        name = "main_call",
+        qualifiedName = "main_call",
+        paramSlots = emptyList(),
+        paramNames = emptyList(),
+        localSlots = listOf(SlotKind.LONG),
+        localNames = listOf("n"),
+        captureSlots = emptyList(),
+        captureNames = emptyList(),
+        body = BlockIR(
+            stmts = listOf(
+                StmtIR.Let(
+                    slot = 0,
+                    kind = SlotKind.LONG,
+                    name = "n",
+                    contentHash = Hash("0".repeat(64)),
+                    value = LongLitIR(10L, src),
+                    src = src,
+                ),
+            ),
+            result = CallIndirectIR(
+                function = MakeLambdaIR(
+                    functionHash = Hash("ff".repeat(32)),
+                    captures = listOf(CaptureIR(slot = 0, kind = SlotKind.LONG)),
+                    src = src,
+                ),
+                arg = MakeRecordIR(
+                    fields = listOf(FieldIR("x", LongLitIR(5L, src))),
+                    src = src,
+                ),
+                isTailCall = false,
+                src = src,
+            ),
+            src = src,
+        ),
+        sourceFile = "test.mz",
+        sourceSection = src,
+    )
+
+    @Test
+    fun `CallIndirect on a closure yields captured n plus arg x`() {
+        val context = Context.newBuilder("mezze")
+            .allowExperimentalOptions(true)
+            .allowAllAccess(true)
+            .build()
+        try {
+            context.enter()
+            try {
+                @Suppress("UNCHECKED_CAST")
+                val language: MezzeLanguage? = MezzeLanguage.get(null) as MezzeLanguage?
+                val compiler = BytecodeCompiler(language)
+                val roots = compiler.compileWithCallees(listOf(buildIncRecord(), buildMainCall()))
+                assertEquals(15L, roots[1].callTarget.call())
             } finally {
                 context.leave()
             }
