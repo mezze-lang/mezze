@@ -2150,6 +2150,11 @@ class MezzeTextDocumentService(
                 val item = CompletionItem(name).apply {
                     kind = CompletionItemKind.Function
                     detail = "from ${declRow.modulePath}"
+                    // The store row already has the doc-comment in hand, so
+                    // attach it eagerly (no resolve round-trip needed).
+                    declRow.doc?.takeIf { it.isNotBlank() }?.let {
+                        documentation = Either.forRight(MarkupContent(MarkupKind.MARKDOWN, it))
+                    }
                     // Slight ranking penalty so locally-visible bindings win.
                     sortText = "zz_$name"
                     // Insert the bare name at the cursor; let the user fill
@@ -3326,6 +3331,11 @@ class MezzeTextDocumentService(
                 items.add(CompletionItem(decl.name).apply {
                     kind = if (ty is MezzeType.FunctionType) CompletionItemKind.Function else CompletionItemKind.Variable
                     detail = prettyPrintTypeWithAliases(ty, state.typeAliases)
+                    // Resolve key: the client calls completionItem/resolve with
+                    // this back, and we look up the doc-comment lazily (see
+                    // resolveCompletionItem). Only local-file decls carry it —
+                    // stdlib items resolve by name via the store.
+                    data = completionResolveKey(state.uri, decl.name)
                     val snippet = callInsertSnippet(decl.name, ty)
                     if (snippet != null) {
                         insertText = snippet
@@ -3723,7 +3733,38 @@ class MezzeTextDocumentService(
         return items
     }
 
+    /** Build the data payload the client hands back to completionItem/resolve. */
+    private fun completionResolveKey(uri: String, name: String): Map<String, String> =
+        mapOf("uri" to uri, "name" to name)
+
+    /**
+     * Lazily fill in a completion item's documentation when the client asks for
+     * details. The item carries a resolve key (`{uri, name}`) in its `data`;
+     * we look the decl's doc-comment up in that document's parsed module (and
+     * fall back to the store), plus surface the type signature already in
+     * `detail` as a fenced code block. Items that already carry documentation
+     * (e.g. stdlib auto-import, which had the doc in hand) pass through
+     * untouched.
+     */
     override fun resolveCompletionItem(item: CompletionItem): CompletableFuture<CompletionItem> {
+        if (item.documentation != null) return CompletableFuture.completedFuture(item)
+        val data = dataAsMap(item.data) ?: return CompletableFuture.completedFuture(item)
+        val uri = data["uri"] as? String ?: return CompletableFuture.completedFuture(item)
+        val name = data["name"] as? String ?: return CompletableFuture.completedFuture(item)
+        val state = documents[uri] ?: return CompletableFuture.completedFuture(item)
+
+        val doc = findDocForDecl(state.parsedModule, name) ?: findDocFromStore(name)
+        val sig = item.detail?.takeIf { it.isNotBlank() && it != "type" && it != "effect" && it != "ability" }
+        val body = buildString {
+            if (sig != null) append("```mezze\n$name : $sig\n```")
+            if (doc != null) {
+                if (isNotEmpty()) append("\n\n")
+                append(doc)
+            }
+        }
+        if (body.isNotBlank()) {
+            item.documentation = Either.forRight(MarkupContent(MarkupKind.MARKDOWN, body))
+        }
         return CompletableFuture.completedFuture(item)
     }
 

@@ -938,6 +938,39 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `resolveCompletionItem attaches the doc-comment and signature lazily`() {
+        // #115: completion items carry only a type in `detail`; the doc-comment
+        // is filled in on demand via completionItem/resolve.
+        val (uri, _) = openSingleFile("""
+            ## Doubles its input.
+            let double = {x: Int} -> x + x
+            let other = doub
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        // Complete at the `doub` prefix on line 2.
+        val line = "let other = doub"
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(2, line.length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val item = comps.firstOrNull { it.label == "double" }
+            ?: fail("expected a `double` completion, got: ${comps.map { it.label }}")
+        // Pre-resolve: no documentation, just the type in detail.
+        assertNull(item.documentation, "documentation should be lazy (absent pre-resolve)")
+
+        val resolved = server.textDocumentService.resolveCompletionItem(item).get(5, TimeUnit.SECONDS)
+        val docText = resolved.documentation?.let { d ->
+            if (d.isRight) d.right.value else d.left
+        } ?: fail("expected documentation after resolve")
+        assertTrue(docText.contains("Doubles its input"),
+            "resolved doc should include the `##` comment, got: $docText")
+        assertTrue(docText.contains("Int"),
+            "resolved doc should include the type signature, got: $docText")
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"
