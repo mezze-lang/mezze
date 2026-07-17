@@ -258,6 +258,27 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * General record spread with interleaved sources and explicit
+     * fields: {@code { ...r, x = 1, ...s, y = 2 }}.
+     *
+     * <p>Takes a compile-time {@code entryNames} array whose entries
+     * are either a field name (regular field) or the literal string
+     * {@code "__spread__"} (spread source). Runtime values are pushed
+     * variadically in the same order. Boundary-fold merges each spread
+     * source's fields into a LinkedHashMap in insertion order, with
+     * regular fields overriding same-named entries, then hands off to
+     * {@link #buildAllObjectRecord(String[], Object[])}.
+     */
+    @Operation
+    @ConstantOperand(type = String[].class)
+    public static final class SpreadRecord {
+        @Specialization
+        public static MezzeRecord doSpread(String[] entryNames, @Variadic Object[] values) {
+            return buildSpreadRecord(entryNames, values);
+        }
+    }
+
+    /**
      * Update-form record spread: {@code { ...r, x = 1, y = 2 }}. Takes
      * the source record from the stack and a compile-time array of
      * update field names + their runtime values (variadic).
@@ -543,6 +564,37 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static Object doVariant(MezzeVariant variant) {
             return variant.getPayloadValue();
         }
+    }
+
+    /**
+     * Boundary helper: fold interleaved spread sources + explicit
+     * fields into a new MezzeRecord. Later entries in insertion order
+     * override same-named earlier ones — matches
+     * {@link com.mezze.interpreter.nodes.record.RecordSpreadNode}
+     * merge semantics.
+     */
+    @TruffleBoundary
+    private static MezzeRecord buildSpreadRecord(String[] entryNames, Object[] values) {
+        java.util.LinkedHashMap<String, Object> merged = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < entryNames.length; i++) {
+            String name = entryNames[i];
+            if ("__spread__".equals(name)) {
+                Object v = values[i];
+                if (!(v instanceof MezzeRecord src)) {
+                    throw new RuntimeException("Cannot spread non-record value");
+                }
+                Shape s = src.getShape();
+                for (int j = 0; j < s.getFieldCount(); j++) {
+                    String fieldName = s.getFieldName(j);
+                    merged.put(fieldName, src.getField(fieldName));
+                }
+            } else {
+                merged.put(name, values[i]);
+            }
+        }
+        String[] resultNames = merged.keySet().toArray(new String[0]);
+        Object[] resultValues = merged.values().toArray(new Object[0]);
+        return buildAllObjectRecord(resultNames, resultValues);
     }
 
     /**

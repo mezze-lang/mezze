@@ -197,10 +197,10 @@ public final class BytecodeCompiler {
             return true;
         }
         if (node instanceof MakeRecordIR m) {
-            // Phase 2 records: reject spread entries (compile via AST
-            // path if this program has record-spread — Phase 3+ work).
+            // Records support both the pure-fields case (MakeRecord op)
+            // and the spread case (SpreadRecord op — dispatched at emit
+            // time based on presence of __spread__ entries).
             for (FieldIR f : m.getFields()) {
-                if ("__spread__".equals(f.getName())) return false;
                 if (!supportsNode(f.getValue(), argCount)) return false;
             }
             return true;
@@ -481,15 +481,27 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof MakeRecordIR m) {
+            boolean hasSpread = false;
+            for (FieldIR f : m.getFields()) {
+                if ("__spread__".equals(f.getName())) { hasSpread = true; break; }
+            }
             String[] fieldNames = new String[m.getFields().size()];
             for (int i = 0; i < m.getFields().size(); i++) {
                 fieldNames[i] = m.getFields().get(i).getName();
             }
-            b.beginMakeRecord(fieldNames);
-            for (FieldIR f : m.getFields()) {
-                emitNode(f.getValue(), b, argCount, localMap);
+            if (hasSpread) {
+                b.beginSpreadRecord(fieldNames);
+                for (FieldIR f : m.getFields()) {
+                    emitNode(f.getValue(), b, argCount, localMap);
+                }
+                b.endSpreadRecord();
+            } else {
+                b.beginMakeRecord(fieldNames);
+                for (FieldIR f : m.getFields()) {
+                    emitNode(f.getValue(), b, argCount, localMap);
+                }
+                b.endMakeRecord();
             }
-            b.endMakeRecord();
             return;
         }
         if (node instanceof ReadFieldIR r) {
