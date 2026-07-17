@@ -3,6 +3,7 @@ package com.mezze.interpreter.bytecode;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.oracle.truffle.api.bytecode.BytecodeRootNode;
 import com.oracle.truffle.api.bytecode.ConstantOperand;
+import com.oracle.truffle.api.bytecode.ForceQuickening;
 import com.oracle.truffle.api.bytecode.GenerateBytecode;
 import com.oracle.truffle.api.bytecode.Operation;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -33,7 +34,45 @@ import com.oracle.truffle.api.nodes.RootNode;
  * {@code MezzeBytecodeRootNodeGen.create(...)} with a builder
  * callback that emits the operation sequence.
  */
-@GenerateBytecode(languageClass = MezzeLanguage.class)
+/**
+ * @GenerateBytecode flag settings — chosen after Phase 0 reading of the
+ * Truffle 25 BDSL user guide + Optimization guide + SimpleLanguage's
+ * production BDSL root. Rationale for each:
+ *
+ * <ul>
+ *   <li>{@code boxingEliminationTypes = long/double/boolean}: THE
+ *     setting that makes BDSL beat AST perf on numeric loops. Without
+ *     it primitive→object→primitive shuffles cost both the interpreter
+ *     and the JIT. Same three types our existing typed native bridges
+ *     already handle.
+ *   <li>{@code enableUncachedInterpreter = true}: docs "strongly
+ *     recommended". Executes without profiling overhead until
+ *     defaultUncachedThreshold, then transitions to cached. Great for
+ *     cold `mez exec` runs and tests.
+ *   <li>{@code enableQuickening = true}: underlying mechanism for
+ *     boxing elimination + typed hot paths. Requires per-op
+ *     {@code @ForceQuickening} to opt into type-specialized rewrites
+ *     (see AddLong below).
+ *   <li>{@code enableYield = true}: emits ContinuationResult/
+ *     ContinuationRootNode primitives that Phase 5 will build
+ *     algebraic-effect handlers on top of. Cheap to turn on now.
+ *   <li>{@code enableBlockScoping = true} (default): frame slots
+ *     inside blocks auto-recycle on block exit. Reduces frame size
+ *     for functions with branches — free win.
+ *   <li>{@code enableSerialization = true}: our stdlib snapshot may
+ *     want to serialize precompiled BDSL later.
+ *   <li>{@code enableTagInstrumentation = true}: LSP / debugger
+ *     tooling (chromeinspector, etc.) works out of the box.
+ * </ul>
+ */
+@GenerateBytecode(
+    languageClass = MezzeLanguage.class,
+    boxingEliminationTypes = {long.class, double.class, boolean.class},
+    enableUncachedInterpreter = true,
+    enableYield = true,
+    enableSerialization = true,
+    enableTagInstrumentation = true
+)
 public abstract class MezzeBytecodeRootNode extends RootNode implements BytecodeRootNode {
 
     protected MezzeBytecodeRootNode(MezzeLanguage language, FrameDescriptor frameDescriptor) {
@@ -67,7 +106,16 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     public static final class AddLong {
+        /**
+         * @ForceQuickening: opts this specialization into BDSL's
+         * quickening mechanism — the interpreter speculatively rewrites
+         * to a long-only bytecode after warmup, avoiding boxing +
+         * type-check overhead. Combined with
+         * {@code boxingEliminationTypes = long.class}, primitive-long
+         * arith chains stay unboxed end-to-end.
+         */
         @Specialization
+        @ForceQuickening
         public static long doLong(long left, long right) {
             return Math.addExact(left, right);
         }
