@@ -660,28 +660,89 @@ public final class BytecodeCompiler {
         if (node instanceof CallNativeIR cn) {
             // Typed fast paths — bypass Object[] alloc + PositionalArgs
             // + NativeHandler indirection when the signature matches
-            // one we registered typed via TypedNativeHandlers.
+            // one we registered typed via TypedNativeHandlers. Ordered
+            // by argument count so we short-circuit early.
             String name = cn.getName();
-            var typedLLL = TypedNativeHandlers.lookupLLL(name);
-            if (typedLLL != null && cn.getArgs().size() == 2) {
-                b.beginCallNativeLLL(typedLLL);
-                for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
-                b.endCallNativeLLL();
-                return;
-            }
-            var typedLLB = TypedNativeHandlers.lookupLLB(name);
-            if (typedLLB != null && cn.getArgs().size() == 2) {
-                b.beginCallNativeLLB(typedLLB);
-                for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
-                b.endCallNativeLLB();
-                return;
-            }
-            var typedLL = TypedNativeHandlers.lookupLL(name);
-            if (typedLL != null && cn.getArgs().size() == 1) {
-                b.beginCallNativeLL(typedLL);
-                for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
-                b.endCallNativeLL();
-                return;
+            int arity = cn.getArgs().size();
+            if (arity == 2) {
+                var typedLLL = TypedNativeHandlers.lookupLLL(name);
+                if (typedLLL != null) {
+                    b.beginCallNativeLLL(typedLLL);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeLLL();
+                    return;
+                }
+                var typedLLB = TypedNativeHandlers.lookupLLB(name);
+                if (typedLLB != null) {
+                    b.beginCallNativeLLB(typedLLB);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeLLB();
+                    return;
+                }
+                var typedDDD = TypedNativeHandlers.lookupDDD(name);
+                if (typedDDD != null) {
+                    b.beginCallNativeDDD(typedDDD);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeDDD();
+                    return;
+                }
+                var typedDDB = TypedNativeHandlers.lookupDDB(name);
+                if (typedDDB != null) {
+                    b.beginCallNativeDDB(typedDDB);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeDDB();
+                    return;
+                }
+                var typedBBB = TypedNativeHandlers.lookupBBB(name);
+                if (typedBBB != null) {
+                    b.beginCallNativeBBB(typedBBB);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeBBB();
+                    return;
+                }
+            } else if (arity == 1) {
+                var typedLL = TypedNativeHandlers.lookupLL(name);
+                if (typedLL != null) {
+                    b.beginCallNativeLL(typedLL);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeLL();
+                    return;
+                }
+                var typedDD = TypedNativeHandlers.lookupDD(name);
+                if (typedDD != null) {
+                    b.beginCallNativeDD(typedDD);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeDD();
+                    return;
+                }
+                var typedDB = TypedNativeHandlers.lookupDB(name);
+                if (typedDB != null) {
+                    b.beginCallNativeDB(typedDB);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeDB();
+                    return;
+                }
+                var typedLD = TypedNativeHandlers.lookupLD(name);
+                if (typedLD != null) {
+                    b.beginCallNativeLD(typedLD);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeLD();
+                    return;
+                }
+                var typedDL = TypedNativeHandlers.lookupDL(name);
+                if (typedDL != null) {
+                    b.beginCallNativeDL(typedDL);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeDL();
+                    return;
+                }
+                var typedBB = TypedNativeHandlers.lookupBB(name);
+                if (typedBB != null) {
+                    b.beginCallNativeBB(typedBB);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeBB();
+                    return;
+                }
             }
             // Untyped fallback.
             NativeHandler handler = NativeHandlers.INSTANCE.handlerOf(name);

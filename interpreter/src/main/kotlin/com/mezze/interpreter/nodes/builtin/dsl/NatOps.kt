@@ -93,4 +93,28 @@ object NatOps {
     private val TO_STR = NativeOp("__native_nat_to_str",
         listOf(Param("n", SlotKind.LONG)), SlotKind.OBJECT
     ) { args -> NatNatives.toString(args.long(0)) }
+
+    // ==================== typed registrations for BDSL ====================
+    init {
+        // (long, long) -> long: nat arith (nats are stored as longs).
+        TypedNativeHandlers.registerLLL("__native_nat_add", PrimitiveNatives::natAdd)
+        TypedNativeHandlers.registerLLL("__native_nat_multiply", PrimitiveNatives::natMultiply)
+        TypedNativeHandlers.registerLLL("__native_nat_divide", PrimitiveNatives::natDivide)
+        TypedNativeHandlers.registerLLL("__native_nat_modulo", PrimitiveNatives::natModulo)
+        TypedNativeHandlers.registerLLL("__native_nat_min", NatNatives::min)
+        TypedNativeHandlers.registerLLL("__native_nat_max", NatNatives::max)
+        TypedNativeHandlers.registerLLL("__native_nat_pow", NatNatives::pow)
+        TypedNativeHandlers.registerLLL("__native_nat_subtract_to_int", NatNatives::subtractToInt)
+
+        // (long, long) -> boolean: nat comparisons.
+        TypedNativeHandlers.registerLLB("__native_nat_eq", PrimitiveNatives::natEq)
+        TypedNativeHandlers.registerLLB("__native_nat_neq", PrimitiveNatives::natNeq)
+        TypedNativeHandlers.registerLLB("__native_nat_lt", PrimitiveNatives::natLt)
+        TypedNativeHandlers.registerLLB("__native_nat_le", PrimitiveNatives::natLte)
+        TypedNativeHandlers.registerLLB("__native_nat_gt", PrimitiveNatives::natGt)
+        TypedNativeHandlers.registerLLB("__native_nat_ge", PrimitiveNatives::natGte)
+
+        // (long) -> long: nat_to_int (nats stored as longs).
+        TypedNativeHandlers.registerLL("__native_nat_to_int", NatNatives::toInt)
+    }
 }

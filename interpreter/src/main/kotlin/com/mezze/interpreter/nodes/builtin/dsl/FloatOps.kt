@@ -219,4 +219,53 @@ object FloatOps {
     // MezzeVariant. Duplicating that helper here would silently diverge
     // if the slow path changed. The op is cold (parsing user input);
     // record-ABI dispatch cost is irrelevant.
+
+    // ==================== typed registrations for BDSL ====================
+    init {
+        // (double, double) -> double: float arith
+        TypedNativeHandlers.registerDDD("__native_float_add", PrimitiveNatives::floatAdd)
+        TypedNativeHandlers.registerDDD("__native_float_subtract", PrimitiveNatives::floatSubtract)
+        TypedNativeHandlers.registerDDD("__native_float_multiply", PrimitiveNatives::floatMultiply)
+        TypedNativeHandlers.registerDDD("__native_float_divide", PrimitiveNatives::floatDivide)
+        TypedNativeHandlers.registerDDD("__native_float_mod") { l, r -> l % r }
+        TypedNativeHandlers.registerDDD("__native_float_min", PrimitiveNatives::floatMin)
+        TypedNativeHandlers.registerDDD("__native_float_max", PrimitiveNatives::floatMax)
+        TypedNativeHandlers.registerDDD("__native_float_pow", PrimitiveNatives::floatPow)
+        TypedNativeHandlers.registerDDD("__native_float_atan2") { y, x -> Math.atan2(y, x) }
+
+        // (double) -> double: float unary
+        TypedNativeHandlers.registerDD("__native_float_abs", PrimitiveNatives::floatAbs)
+        TypedNativeHandlers.registerDD("__native_float_neg", PrimitiveNatives::floatNegate)
+        TypedNativeHandlers.registerDD("__native_float_sqrt", PrimitiveNatives::floatSqrt)
+        TypedNativeHandlers.registerDD("__native_float_floor", PrimitiveNatives::floatFloor)
+        TypedNativeHandlers.registerDD("__native_float_ceil", PrimitiveNatives::floatCeil)
+        TypedNativeHandlers.registerDD("__native_float_round") { n -> PrimitiveNatives.floatRound(n).toDouble() }
+        TypedNativeHandlers.registerDD("__native_float_sign") { n -> Math.signum(n) }
+        TypedNativeHandlers.registerDD("__native_float_sin", PrimitiveNatives::floatSin)
+        TypedNativeHandlers.registerDD("__native_float_cos", PrimitiveNatives::floatCos)
+        TypedNativeHandlers.registerDD("__native_float_tan", PrimitiveNatives::floatTan)
+        TypedNativeHandlers.registerDD("__native_float_asin") { n -> Math.asin(n) }
+        TypedNativeHandlers.registerDD("__native_float_acos") { n -> Math.acos(n) }
+        TypedNativeHandlers.registerDD("__native_float_atan") { n -> Math.atan(n) }
+        TypedNativeHandlers.registerDD("__native_float_ln") { n -> Math.log(n) }
+        TypedNativeHandlers.registerDD("__native_float_log10") { n -> Math.log10(n) }
+        TypedNativeHandlers.registerDD("__native_float_exp") { n -> Math.exp(n) }
+
+        // (double, double) -> boolean: float comparisons
+        TypedNativeHandlers.registerDDB("__native_float_eq", PrimitiveNatives::floatEq)
+        TypedNativeHandlers.registerDDB("__native_float_neq", PrimitiveNatives::floatNeq)
+        TypedNativeHandlers.registerDDB("__native_float_lt", PrimitiveNatives::floatLt)
+        TypedNativeHandlers.registerDDB("__native_float_le", PrimitiveNatives::floatLte)
+        TypedNativeHandlers.registerDDB("__native_float_gt", PrimitiveNatives::floatGt)
+        TypedNativeHandlers.registerDDB("__native_float_ge", PrimitiveNatives::floatGte)
+
+        // (double) -> boolean: float predicates
+        TypedNativeHandlers.registerDB("__native_float_is_nan") { n -> java.lang.Double.isNaN(n) }
+        TypedNativeHandlers.registerDB("__native_float_is_infinite") { n -> java.lang.Double.isInfinite(n) }
+        TypedNativeHandlers.registerDB("__native_float_is_finite") { n -> java.lang.Double.isFinite(n) }
+
+        // (long) -> double: conversions from int/nat to float
+        TypedNativeHandlers.registerLD("__native_float_from_int") { n -> n.toDouble() }
+        TypedNativeHandlers.registerLD("__native_float_from_nat") { n -> n.toDouble() }
+    }
 }

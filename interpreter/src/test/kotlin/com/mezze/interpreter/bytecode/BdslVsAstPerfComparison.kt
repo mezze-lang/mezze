@@ -6,7 +6,9 @@ import com.mezze.interpreter.values.MezzeFunction
 import com.mezze.language.truffleir.BindingIR
 import com.mezze.language.truffleir.BlockIR
 import com.mezze.language.truffleir.CallDirectIR
+import com.mezze.language.truffleir.BoolLitIR
 import com.mezze.language.truffleir.CallNativeIR
+import com.mezze.language.truffleir.DoubleLitIR
 import com.mezze.language.truffleir.CaseIR
 import com.mezze.language.truffleir.FieldIR
 import com.mezze.language.truffleir.FunctionIR
@@ -212,6 +214,74 @@ class BdslVsAstPerfComparison {
         sourceFile = "b.mz", sourceSection = src,
     )
 
+    /** Float native call: __native_float_add(1.5, 2.5). */
+    private fun buildFloatNativeAdd(): FunctionIR = FunctionIR(
+        hash = Hash("b7".repeat(32)),
+        name = "float_add", qualifiedName = "float_add",
+        paramSlots = emptyList(), paramNames = emptyList(),
+        localSlots = emptyList(), localNames = emptyList(),
+        captureSlots = emptyList(), captureNames = emptyList(),
+        body = CallNativeIR(
+            name = "__native_float_add",
+            arg = LongLitIR(0L, src),
+            src = src,
+            args = listOf(DoubleLitIR(1.5, src), DoubleLitIR(2.5, src)),
+            argKinds = listOf(SlotKind.DOUBLE, SlotKind.DOUBLE),
+        ),
+        sourceFile = "b.mz", sourceSection = src,
+    )
+
+    /** Float unary native: __native_float_sqrt(16.0). */
+    private fun buildFloatSqrt(): FunctionIR = FunctionIR(
+        hash = Hash("b8".repeat(32)),
+        name = "float_sqrt", qualifiedName = "float_sqrt",
+        paramSlots = emptyList(), paramNames = emptyList(),
+        localSlots = emptyList(), localNames = emptyList(),
+        captureSlots = emptyList(), captureNames = emptyList(),
+        body = CallNativeIR(
+            name = "__native_float_sqrt",
+            arg = LongLitIR(0L, src),
+            src = src,
+            args = listOf(DoubleLitIR(16.0, src)),
+            argKinds = listOf(SlotKind.DOUBLE),
+        ),
+        sourceFile = "b.mz", sourceSection = src,
+    )
+
+    /** Int comparison: __native_int_lt(3, 4). */
+    private fun buildIntLt(): FunctionIR = FunctionIR(
+        hash = Hash("b9".repeat(32)),
+        name = "int_lt", qualifiedName = "int_lt",
+        paramSlots = emptyList(), paramNames = emptyList(),
+        localSlots = emptyList(), localNames = emptyList(),
+        captureSlots = emptyList(), captureNames = emptyList(),
+        body = CallNativeIR(
+            name = "__native_int_lt",
+            arg = LongLitIR(0L, src),
+            src = src,
+            args = listOf(LongLitIR(3L, src), LongLitIR(4L, src)),
+            argKinds = listOf(SlotKind.LONG, SlotKind.LONG),
+        ),
+        sourceFile = "b.mz", sourceSection = src,
+    )
+
+    /** Bool native: __native_bool_and(true, true). */
+    private fun buildBoolAnd(): FunctionIR = FunctionIR(
+        hash = Hash("ba".repeat(32)),
+        name = "bool_and", qualifiedName = "bool_and",
+        paramSlots = emptyList(), paramNames = emptyList(),
+        localSlots = emptyList(), localNames = emptyList(),
+        captureSlots = emptyList(), captureNames = emptyList(),
+        body = CallNativeIR(
+            name = "__native_bool_and",
+            arg = LongLitIR(0L, src),
+            src = src,
+            args = listOf(BoolLitIR(true, src), BoolLitIR(true, src)),
+            argKinds = listOf(SlotKind.BOOLEAN, SlotKind.BOOLEAN),
+        ),
+        sourceFile = "b.mz", sourceSection = src,
+    )
+
     /** Cross-fn: main() calls add(3, 4). */
     private fun buildAddCaller(): FunctionIR = FunctionIR(
         hash = Hash("b3".repeat(32)),
@@ -265,9 +335,13 @@ class BdslVsAstPerfComparison {
             .build()
         try {
             context.eval("mezze", "1") // boot the language
-            // Force IntOps init so __native_int_add is registered.
+            // Force typed-native init so registrations happen before compile.
             @Suppress("UNUSED_EXPRESSION")
             com.mezze.interpreter.nodes.builtin.dsl.IntOps
+            @Suppress("UNUSED_EXPRESSION")
+            com.mezze.interpreter.nodes.builtin.dsl.FloatOps
+            @Suppress("UNUSED_EXPRESSION")
+            com.mezze.interpreter.nodes.builtin.dsl.BoolOps
             context.enter()
             try {
                 @Suppress("UNCHECKED_CAST")
@@ -283,6 +357,10 @@ class BdslVsAstPerfComparison {
                 val astRec = astCompiler.compile(buildRecordReadSum())
                 val astMatch = astCompiler.compile(buildMatchOption())
                 val astNative = astCompiler.compile(buildNativeCall())
+                val astFloatAdd = astCompiler.compile(buildFloatNativeAdd())
+                val astFloatSqrt = astCompiler.compile(buildFloatSqrt())
+                val astIntLt = astCompiler.compile(buildIntLt())
+                val astBoolAnd = astCompiler.compile(buildBoolAnd())
                 val astAdd2 = astCompiler.compile(buildAdd())  // second compile of add for cross-fn
                 val astCaller = astCompiler.compile(buildAddCaller())
 
@@ -293,6 +371,10 @@ class BdslVsAstPerfComparison {
                     "record_build_read" to bdslCompiler.compileWithCallees(listOf(buildRecordReadSum())),
                     "match_option"  to bdslCompiler.compileWithCallees(listOf(buildMatchOption())),
                     "native_int_add" to bdslCompiler.compileWithCallees(listOf(buildNativeCall())),
+                    "native_float_add" to bdslCompiler.compileWithCallees(listOf(buildFloatNativeAdd())),
+                    "native_float_sqrt" to bdslCompiler.compileWithCallees(listOf(buildFloatSqrt())),
+                    "native_int_lt" to bdslCompiler.compileWithCallees(listOf(buildIntLt())),
+                    "native_bool_and" to bdslCompiler.compileWithCallees(listOf(buildBoolAnd())),
                 )
                 // Cross-fn: BDSL bakes callee's CallTarget; AST looks up global by hash.
                 // Register add's AST target as a global MezzeFunction so
@@ -323,6 +405,14 @@ class BdslVsAstPerfComparison {
                     astMatch.callTarget, bdslPerCategory["match_option"]!![0].callTarget)
                 runOne("native_int_add", iters, emptyArray(),
                     astNative.callTarget, bdslPerCategory["native_int_add"]!![0].callTarget)
+                runOne("native_float_add", iters, emptyArray(),
+                    astFloatAdd.callTarget, bdslPerCategory["native_float_add"]!![0].callTarget)
+                runOne("native_float_sqrt", iters, emptyArray(),
+                    astFloatSqrt.callTarget, bdslPerCategory["native_float_sqrt"]!![0].callTarget)
+                runOne("native_int_lt", iters, emptyArray(),
+                    astIntLt.callTarget, bdslPerCategory["native_int_lt"]!![0].callTarget)
+                runOne("native_bool_and", iters, emptyArray(),
+                    astBoolAnd.callTarget, bdslPerCategory["native_bool_and"]!![0].callTarget)
                 runOne("cross_fn_call", iters, emptyArray(),
                     astCaller.callTarget, bdslCross[1].callTarget)
 

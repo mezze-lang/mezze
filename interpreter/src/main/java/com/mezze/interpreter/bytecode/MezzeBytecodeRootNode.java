@@ -520,6 +520,94 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /** Typed fast path for (double, double) -> double natives: float arith. */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.DDD.class)
+    public static final class CallNativeDDD {
+        @Specialization
+        @ForceQuickening
+        public static double doInvoke(TypedNativeHandlers.DDD handler, double a, double b) {
+            return handler.invoke(a, b);
+        }
+    }
+
+    /** Typed fast path for (double) -> double natives: float unary (sqrt/floor/trig/etc.). */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.DD.class)
+    public static final class CallNativeDD {
+        @Specialization
+        @ForceQuickening
+        public static double doInvoke(TypedNativeHandlers.DD handler, double a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /** Typed fast path for (double, double) -> boolean natives: float comparisons. */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.DDB.class)
+    public static final class CallNativeDDB {
+        @Specialization
+        @ForceQuickening
+        public static boolean doInvoke(TypedNativeHandlers.DDB handler, double a, double b) {
+            return handler.invoke(a, b);
+        }
+    }
+
+    /** Typed fast path for (double) -> boolean natives: is_nan / is_infinite / is_finite. */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.DB.class)
+    public static final class CallNativeDB {
+        @Specialization
+        @ForceQuickening
+        public static boolean doInvoke(TypedNativeHandlers.DB handler, double a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /** Typed fast path for (long) -> double natives: int→float conversion. */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.LD.class)
+    public static final class CallNativeLD {
+        @Specialization
+        @ForceQuickening
+        public static double doInvoke(TypedNativeHandlers.LD handler, long a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /** Typed fast path for (double) -> long natives: Math.round-style. */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.DL.class)
+    public static final class CallNativeDL {
+        @Specialization
+        @ForceQuickening
+        public static long doInvoke(TypedNativeHandlers.DL handler, double a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /** Typed fast path for (boolean) -> boolean natives: bool_not. */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.BB.class)
+    public static final class CallNativeBB {
+        @Specialization
+        @ForceQuickening
+        public static boolean doInvoke(TypedNativeHandlers.BB handler, boolean a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /** Typed fast path for (boolean, boolean) -> boolean natives: and/or/xor/eq/neq. */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.BBB.class)
+    public static final class CallNativeBBB {
+        @Specialization
+        @ForceQuickening
+        public static boolean doInvoke(TypedNativeHandlers.BBB handler, boolean a, boolean b) {
+            return handler.invoke(a, b);
+        }
+    }
+
     /**
      * Variant of {@link CallNativeScalar} for handlers registered as
      * {@code NativeOpWithNode} — Async ops (spawn/await/park), HOF

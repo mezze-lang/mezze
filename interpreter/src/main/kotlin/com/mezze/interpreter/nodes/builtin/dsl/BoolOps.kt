@@ -41,4 +41,17 @@ object BoolOps {
     private val TO_STR = NativeOp("__native_bool_to_str",
         listOf(Param("b", SlotKind.BOOLEAN)), SlotKind.OBJECT
     ) { args -> java.lang.Boolean.toString(args.bool(0)) }
+
+    // ==================== typed registrations for BDSL ====================
+    init {
+        // (boolean, boolean) -> boolean
+        TypedNativeHandlers.registerBBB("__native_bool_and", PrimitiveNatives::boolAnd)
+        TypedNativeHandlers.registerBBB("__native_bool_or", PrimitiveNatives::boolOr)
+        TypedNativeHandlers.registerBBB("__native_bool_xor", PrimitiveNatives::boolXor)
+        TypedNativeHandlers.registerBBB("__native_bool_eq", PrimitiveNatives::boolEq)
+        TypedNativeHandlers.registerBBB("__native_bool_neq", PrimitiveNatives::boolNeq)
+
+        // (boolean) -> boolean
+        TypedNativeHandlers.registerBB("__native_bool_not", PrimitiveNatives::boolNot)
+    }
 }
