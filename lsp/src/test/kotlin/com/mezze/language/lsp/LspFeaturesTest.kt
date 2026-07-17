@@ -1111,6 +1111,35 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `semanticTokensRange returns only tokens within the requested range`() {
+        // #122: viewport-only tokens — a subset of the full token stream.
+        val (uri, _) = openSingleFile("""
+            let a = 1
+            let b = 2
+            let c = 3
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        val full = server.textDocumentService.semanticTokensFull(SemanticTokensParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+        }).get(5, TimeUnit.SECONDS)
+        val fullCount = (full?.data?.size ?: 0) / 5
+
+        // Range covering only line 1 (`let b = 2`).
+        val ranged = server.textDocumentService.semanticTokensRange(SemanticTokensRangeParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = Range(Position(1, 0), Position(1, 100))
+        }).get(5, TimeUnit.SECONDS)
+        val rangedCount = (ranged?.data?.size ?: 0) / 5
+
+        assertTrue(fullCount >= 3, "expected a token per top-level binding name, got $fullCount")
+        assertTrue(rangedCount in 1 until fullCount,
+            "range for one line should return fewer tokens than the whole file (got $rangedCount of $fullCount)")
+        // First token in the ranged stream must sit on line 1 (delta-line from 0).
+        assertEquals(1, ranged!!.data[0], "first ranged token should be on line 1")
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"

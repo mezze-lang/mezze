@@ -206,6 +206,9 @@ class MezzeLanguageServer(
                     )
                 )
                 full = Either.forLeft(true)
+                // Viewport-only tokens — the editor requests just the visible
+                // range on scroll instead of re-tokenizing the whole file.
+                range = Either.forLeft(true)
             }
 
             // Workspace commands. Clients invoke via workspace/executeCommand.

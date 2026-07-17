@@ -6712,94 +6712,98 @@ class MezzeTextDocumentService(
 
     // ========== Semantic Tokens ==========
 
+    /** An absolute (0-indexed) semantic token before delta-encoding. */
+    private data class SemToken(val line: Int, val col: Int, val len: Int, val type: Int, val mods: Int)
+
+    /**
+     * Collect all semantic tokens for a document as absolute positions. Shared
+     * by semanticTokensFull and semanticTokensRange. Two passes:
+     *  1. the binding NAME of each top-level let (from the parsed pattern loc),
+     *  2. every variable reference + constructor in the typed AST, classified by
+     *     what it resolved to (BindingRef → param/local/function, variant ctor →
+     *     enum member). All locs are exact.
+     */
+    private fun collectSemanticTokens(state: DocumentState): List<SemToken> {
+        val parsedModule = state.parsedModule ?: return emptyList()
+        // Legend indices (must match the order in server capabilities).
+        val FUNCTION = 1; val VARIABLE = 2; val ENUM_MEMBER = 10; val PARAMETER = 9
+        val DEFINITION = 2  // modifier bit
+
+        val toks = mutableListOf<SemToken>()
+        fun emit(loc: com.mezze.language.parsedast.Loc, type: Int, mods: Int = 0) {
+            // Single-line spans only (length encoding can't cross lines).
+            if (loc.startLine != loc.endLine) return
+            val len = loc.endCol - (loc.startCol - 1)
+            if (len <= 0) return
+            toks.add(SemToken(loc.startLine - 1, loc.startCol - 1, len, type, mods))
+        }
+
+        for (decl in parsedModule.decls) {
+            if (decl is ParsedLetDecl) {
+                (decl.pattern as? ParsedVariablePattern)?.let { emit(it.loc, FUNCTION, DEFINITION) }
+            }
+        }
+
+        val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[state.uri])?.typedModule
+        if (typedModule != null) {
+            fun walk(e: com.mezze.language.typedast.TypedExpr) {
+                when (e) {
+                    is com.mezze.language.typedast.TypedVar -> {
+                        val type = when (e.binding) {
+                            is com.mezze.language.typedast.BindingRef.Param -> PARAMETER
+                            is com.mezze.language.typedast.BindingRef.ByHash,
+                            is com.mezze.language.typedast.BindingRef.Native -> FUNCTION
+                            else -> VARIABLE
+                        }
+                        emit(e.loc, type)
+                    }
+                    is com.mezze.language.typedast.TypedVariantConstruct -> emit(e.loc, ENUM_MEMBER)
+                    else -> {}
+                }
+                for (child in typedChildren(e)) walk(child)
+            }
+            for (d in typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
+                walk(d.value)
+            }
+        }
+        return toks
+    }
+
+    /** Sort + delta-encode absolute tokens into the flat 5-int LSP stream, deduping exact overlaps. */
+    private fun deltaEncodeSemanticTokens(toks: List<SemToken>): List<Int> {
+        val sorted = toks.sortedWith(compareBy({ it.line }, { it.col }))
+        val data = mutableListOf<Int>()
+        var prevLine = 0; var prevCol = 0; var lastLine = -1; var lastCol = -1
+        for (t in sorted) {
+            if (t.line == lastLine && t.col == lastCol) continue
+            val deltaLine = t.line - prevLine
+            val deltaCol = if (deltaLine == 0) t.col - prevCol else t.col
+            data.add(deltaLine); data.add(deltaCol); data.add(t.len); data.add(t.type); data.add(t.mods)
+            prevLine = t.line; prevCol = t.col; lastLine = t.line; lastCol = t.col
+        }
+        return data
+    }
+
     override fun semanticTokensFull(params: SemanticTokensParams): CompletableFuture<SemanticTokens> {
         return CompletableFuture.supplyAsync {
-            val uri = params.textDocument.uri
-            val state = documents[uri] ?: return@supplyAsync SemanticTokens(emptyList())
-            val parsedModule = state.parsedModule ?: return@supplyAsync SemanticTokens(emptyList())
+            val state = documents[params.textDocument.uri] ?: return@supplyAsync SemanticTokens(emptyList())
+            SemanticTokens(deltaEncodeSemanticTokens(collectSemanticTokens(state)))
+        }
+    }
 
-            // Token type indices (must match the legend order in server capabilities)
-            val FUNCTION = 1
-            val VARIABLE = 2
-            val ENUM_MEMBER = 10
-            val PARAMETER = 9
-
-            // Modifier bits.
-            val DEFINITION = 2
-
-            // Collect tokens as absolute (line, col, len, type, mods) first, then
-            // sort and delta-encode. Semantic tokens MUST be strictly ordered by
-            // position — collecting across two passes (decl keywords + typed-AST
-            // references) and sorting is the only way to keep that invariant when
-            // the passes interleave.
-            data class Tok(val line: Int, val col: Int, val len: Int, val type: Int, val mods: Int)
-            val toks = mutableListOf<Tok>()
-            fun emit(loc: com.mezze.language.parsedast.Loc, type: Int, mods: Int = 0) {
-                // Single-line spans only (the length encoding can't cross lines);
-                // skip anything that would wrap.
-                if (loc.startLine != loc.endLine) return
-                val len = loc.endCol - (loc.startCol - 1)
-                if (len <= 0) return
-                toks.add(Tok(loc.startLine - 1, loc.startCol - 1, len, type, mods))
+    /**
+     * #122: viewport-only semantic tokens. Same tokens as the full request,
+     * filtered to those starting within the requested range — the editor asks
+     * for this to avoid re-tokenizing the whole file on every scroll.
+     */
+    override fun semanticTokensRange(params: SemanticTokensRangeParams): CompletableFuture<SemanticTokens> {
+        return CompletableFuture.supplyAsync {
+            val state = documents[params.textDocument.uri] ?: return@supplyAsync SemanticTokens(emptyList())
+            val r = params.range
+            val inRange = collectSemanticTokens(state).filter { t ->
+                t.line >= r.start.line && t.line <= r.end.line
             }
-
-            // Pass 1 — the binding NAME of each top-level let, from the parsed
-            // decl's pattern loc (precise, no column arithmetic).
-            for (decl in parsedModule.decls) {
-                if (decl is ParsedLetDecl) {
-                    (decl.pattern as? ParsedVariablePattern)?.let { emit(it.loc, FUNCTION, DEFINITION) }
-                }
-            }
-
-            // Pass 2 — every variable REFERENCE and constructor in the typed AST,
-            // classified by what it actually resolved to. This is the
-            // typechecker-powered part: a `TypedVar`'s BindingRef tells us if it's
-            // a parameter, a local, or a reference to a top-level/native function,
-            // and a `TypedVariantConstruct` is unambiguously an enum member. All
-            // locs are exact (no "after let " guessing).
-            val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
-            if (typedModule != null) {
-                fun walk(e: com.mezze.language.typedast.TypedExpr) {
-                    when (e) {
-                        is com.mezze.language.typedast.TypedVar -> {
-                            val type = when (e.binding) {
-                                is com.mezze.language.typedast.BindingRef.Param -> PARAMETER
-                                is com.mezze.language.typedast.BindingRef.ByHash,
-                                is com.mezze.language.typedast.BindingRef.Native -> FUNCTION
-                                else -> VARIABLE  // Local / Capture
-                            }
-                            emit(e.loc, type)
-                        }
-                        is com.mezze.language.typedast.TypedVariantConstruct -> {
-                            emit(e.loc, ENUM_MEMBER)
-                        }
-                        else -> {}
-                    }
-                    for (child in typedChildren(e)) walk(child)
-                }
-                for (d in typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
-                    walk(d.value)
-                }
-            }
-
-            // Sort by position and delta-encode. Deduplicate exact-overlap tokens
-            // (pass 1's name vs a pass-2 self-reference) by keeping the first.
-            toks.sortWith(compareBy({ it.line }, { it.col }))
-            val data = mutableListOf<Int>()
-            var prevLine = 0
-            var prevCol = 0
-            var lastLine = -1
-            var lastCol = -1
-            for (t in toks) {
-                if (t.line == lastLine && t.col == lastCol) continue
-                val deltaLine = t.line - prevLine
-                val deltaCol = if (deltaLine == 0) t.col - prevCol else t.col
-                data.add(deltaLine); data.add(deltaCol); data.add(t.len); data.add(t.type); data.add(t.mods)
-                prevLine = t.line; prevCol = t.col
-                lastLine = t.line; lastCol = t.col
-            }
-
-            SemanticTokens(data)
+            SemanticTokens(deltaEncodeSemanticTokens(inRange))
         }
     }
 
