@@ -1,13 +1,17 @@
 package com.mezze.interpreter.bytecode;
 
 import com.mezze.interpreter.runtime.MezzeLanguage;
+import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.bytecode.BytecodeRootNode;
 import com.oracle.truffle.api.bytecode.ConstantOperand;
 import com.oracle.truffle.api.bytecode.ForceQuickening;
 import com.oracle.truffle.api.bytecode.GenerateBytecode;
 import com.oracle.truffle.api.bytecode.Operation;
+import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.FrameDescriptor;
+import com.oracle.truffle.api.nodes.DirectCallNode;
+import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.RootNode;
 
 /**
@@ -118,6 +122,53 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @ForceQuickening
         public static long doLong(long left, long right) {
             return Math.addExact(left, right);
+        }
+    }
+
+    /**
+     * Direct-call a fixed CallTarget with two positional arguments,
+     * push the result on the operand stack.
+     *
+     * <p>Used to lower {@code CallDirectIR} for the Phase-1 subset (2-arg
+     * scalar-ABI calls into another compiled function). The callee's
+     * {@code CallTarget} is baked into the bytecode via
+     * {@link ConstantOperand} — no runtime dispatch overhead beyond a
+     * {@link DirectCallNode} invocation. Truffle's inline-cache path
+     * takes over once the interpreter warms up.
+     *
+     * <p>Phase 2 will replace this with a variadic call operation. For
+     * now the hardcoded arity keeps the walking skeleton small; any
+     * arity-mismatch is caught in {@link BytecodeCompiler#supports}.
+     */
+    @Operation
+    @ConstantOperand(type = CallTarget.class)
+    public static final class CallDirect2 {
+        /**
+         * Cached path (steady-state): a {@link DirectCallNode} tied to
+         * the compile-time CallTarget. Enables Truffle inlining +
+         * splitting once the interpreter warms up.
+         */
+        @Specialization(guards = "callNode.getCallTarget() == target")
+        public static Object doCached(
+                CallTarget target,
+                Object arg0,
+                Object arg1,
+                @Cached("create(target)") DirectCallNode callNode) {
+            return callNode.call(new Object[] { arg0, arg1 });
+        }
+
+        /**
+         * Uncached path — the {@code enableUncachedInterpreter=true}
+         * flag requires every specialization to have an uncached
+         * alternative. Falls through to a shared IndirectCallNode.
+         */
+        @Specialization(replaces = "doCached")
+        public static Object doIndirect(
+                CallTarget target,
+                Object arg0,
+                Object arg1,
+                @Cached IndirectCallNode indirectCallNode) {
+            return indirectCallNode.call(target, new Object[] { arg0, arg1 });
         }
     }
 }
