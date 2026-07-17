@@ -4466,7 +4466,11 @@ class MezzeTextDocumentService(
      * via the shared [children]. Used to map a diagnostic's span back to the
      * exact AST node the linter flagged.
      */
-    private fun findParsedExprCovering(module: ParsedModule, range: Range): ParsedExpr? {
+    private fun findParsedExprCovering(
+        module: ParsedModule,
+        range: Range,
+        predicate: ((ParsedExpr) -> Boolean)? = null
+    ): ParsedExpr? {
         val rStartLine = range.start.line + 1
         val rStartCol = range.start.character + 1
         val rEndLine = range.end.line + 1
@@ -4480,7 +4484,7 @@ class MezzeTextDocumentService(
         }
         var best: ParsedExpr? = null
         fun visit(e: ParsedExpr) {
-            if (covers(e.loc)) best = e // smaller covering nodes overwrite larger ones
+            if (covers(e.loc) && (predicate == null || predicate(e))) best = e
             for (child in e.children()) visit(child)
         }
         for (decl in module.decls) {
@@ -4609,34 +4613,31 @@ class MezzeTextDocumentService(
     }
 
     /**
-     * Build the "Convert if to match" refactoring action.
+     * Build the "Convert if to match" refactoring action, AST-driven.
      *
-     * Fires when the cursor sits on a line that starts with `if`. Rewrites
-     * `if cond then a else b` (single-line) as
-     * `match cond is\n| True -> a\n| False -> b`. Multi-line if/else is
-     * punted because reliably finding the matching `else` requires real
-     * parsing of nested expressions.
+     * Finds the [ParsedIf] enclosing the cursor in state.parsedModule and
+     * rewrites `if c then t else e` as `match c is  True -> t  False -> e`,
+     * slicing each of c/t/e verbatim from its own loc — so nested and
+     * multi-line branches survive intact (the old text-regex version could
+     * only handle single-line).
      */
     private fun buildConvertIfToMatchAction(uri: String, state: DocumentState, range: Range): CodeAction? {
-        val lines = state.content.split('\n')
-        val li = range.start.line
-        val line = lines.getOrNull(li) ?: return null
-        val m = Regex("^(\\s*)if\\s+(.+?)\\s+then\\s+(.+?)\\s+else\\s+(.+?)\\s*$").matchEntire(line) ?: return null
-        val (indent, cond, thenBranch, elseBranch) = m.destructured
-        // Avoid converting if the user is mid-typing an incomplete form.
-        if (cond.isBlank() || thenBranch.isBlank() || elseBranch.isBlank()) return null
+        val parsed = state.parsedModule ?: return null
+        val node = findParsedExprCovering(parsed, range) { it is ParsedIf } as? ParsedIf ?: return null
+        val content = state.content
+        val indent = " ".repeat((node.loc.startCol - 1).coerceAtLeast(0))
+        val cond = sliceSource(content, node.condition.loc)
+        val thenBranch = sliceSource(content, node.thenBranch.loc)
+        val elseBranch = sliceSource(content, node.elseBranch.loc)
         val replacement = buildString {
-            append(indent); append("match "); append(cond); append(" is\n")
-            append(indent); append("| True -> "); append(thenBranch); append("\n")
-            append(indent); append("| False -> "); append(elseBranch)
+            append("match "); append(cond); append(" is\n")
+            append(indent); append("  True -> "); append(thenBranch); append("\n")
+            append(indent); append("  False -> "); append(elseBranch)
         }
         return CodeAction("Convert if to match").apply {
             kind = CodeActionKind.RefactorRewrite
             edit = WorkspaceEdit(mapOf(uri to listOf(
-                TextEdit(
-                    Range(Position(li, 0), Position(li, line.length)),
-                    replacement,
-                ),
+                TextEdit(locToRange(node.loc), replacement),
             )))
         }
     }

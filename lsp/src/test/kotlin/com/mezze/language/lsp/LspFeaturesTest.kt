@@ -464,6 +464,30 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `convert if to match works on a multi-line if (AST-driven, regex could not)`() {
+        val (uri, _) = openSingleFile("""
+            let f = {b: Bool} ->
+              if b
+                then 1
+                else 2
+        """.trimIndent())
+
+        // Cursor on the `if` line.
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = Range(Position(1, 2), Position(1, 2))
+            context = CodeActionContext(emptyList())
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val conv = actions.mapNotNull { if (it.isRight) it.right else null }
+            .firstOrNull { it.title == "Convert if to match" }
+            ?: fail("expected 'Convert if to match', got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        val newText = conv.edit?.changes?.values?.flatten()?.joinToString("") { it.newText } ?: ""
+        assertTrue(newText.contains("match b is") && newText.contains("True ->") && newText.contains("False ->"),
+            "expected a match rewrite, got: $newText")
+    }
+
+    @Test
     fun `redundant boolean x == True offers a Simplify quick-fix (AST-driven)`() {
         val (uri, _) = openSingleFile("""
             let f = {b: Bool} -> b == True
