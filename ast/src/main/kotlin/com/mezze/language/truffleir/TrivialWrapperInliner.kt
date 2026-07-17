@@ -142,12 +142,25 @@ object TrivialWrapperInliner {
         val paramStart = fn.captureSlots.size  // == 0 since captures is empty
         val paramEnd = paramStart + fn.paramSlots.size
 
-        // Body must be a single call whose args reference each param at
-        // most once and read no other slots.
+        // Body must be a pure expression tree whose leaves reference each
+        // param at most once and read no other slots. Accepted top-level
+        // shapes are single calls or expression-form control flow (`If`,
+        // `Block` without lets) that ultimately forwards to calls. The
+        // whole check delegates to [bodyParamsReadOnce] — the accepted
+        // node types are enumerated inside [countParamReads].
         val body = fn.body
         return when (body) {
             is CallNativeIR -> bodyParamsReadOnce(body, paramStart, paramEnd)
             is CallDirectIR -> body.isScalarABI &&
+                bodyParamsReadOnce(body, paramStart, paramEnd)
+            // If: pure control-flow expression, always safe to inline as
+            // long as leaves are pure. Common in stdlib predicates
+            // (`if x < 0 then -x else x`).
+            is IfIR -> bodyParamsReadOnce(body, paramStart, paramEnd)
+            // Block: only when statements are pure expressions (no lets).
+            // Lets would introduce new locals whose slot indices belong
+            // to the wrapper's frame, colliding on inline.
+            is BlockIR -> body.stmts.all { it is StmtIR.Expr } &&
                 bodyParamsReadOnce(body, paramStart, paramEnd)
             else -> false
         }
@@ -226,8 +239,30 @@ object TrivialWrapperInliner {
                 countParamReads(node.left, paramStart, paramEnd, counts) &&
                 countParamReads(node.right, paramStart, paramEnd, counts)
             }
-            // Everything else (Lambda, Block, Match, Perform, Handle, …)
-            // makes the body non-trivial. Conservative bail.
+            // If: descend into all three arms. Note that a param used in
+            // both then+else is currently counted twice (rejected by the
+            // ≤1 rule), which is stricter than semantically necessary —
+            // only one arm actually executes — but it keeps the pass
+            // simple and safe. Widening the rule to per-path counting is
+            // a future extension.
+            is IfIR -> {
+                countParamReads(node.cond, paramStart, paramEnd, counts) &&
+                countParamReads(node.thenBr, paramStart, paramEnd, counts) &&
+                countParamReads(node.elseBr, paramStart, paramEnd, counts)
+            }
+            // Block: only pure `Expr` statements are inlineable; a `Let`
+            // in the body would introduce a new local slot whose index
+            // belongs to the wrapper's frame layout and would collide on
+            // substitution. Descend into each expr and the final result.
+            is BlockIR -> {
+                for (s in node.stmts) {
+                    if (s !is StmtIR.Expr) return false
+                    if (!countParamReads(s.node, paramStart, paramEnd, counts)) return false
+                }
+                countParamReads(node.result, paramStart, paramEnd, counts)
+            }
+            // Everything else (Lambda, Match, Perform, Handle, …) makes
+            // the body non-trivial. Conservative bail.
             else -> false
         }
     }
