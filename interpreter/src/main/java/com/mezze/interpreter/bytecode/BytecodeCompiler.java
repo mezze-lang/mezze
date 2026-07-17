@@ -257,12 +257,11 @@ public final class BytecodeCompiler {
             return supportsNode(cl.getArg(), argCount);
         }
         if (node instanceof CallNativeIR cn) {
-            // Phase 2: scalar-ABI natives only, and only handlers that
-            // do NOT require a Node reference (needsNode=false). Ops
-            // needing a Node — Async, IndirectCallNode-consuming ops —
-            // are Phase 3.
+            // Scalar-ABI natives — both regular and needsNode variants
+            // (Async, HOF-callback consumers) are supported. The emit
+            // side dispatches to CallNativeScalar or
+            // CallNativeScalarWithNode based on needsNode.
             if (!cn.isScalarABI()) return false;
-            if (NativeHandlers.INSTANCE.needsNode(cn.getName())) return false;
             if (NativeHandlers.INSTANCE.handlerOf(cn.getName()) == null) return false;
             for (NodeIR arg : cn.getArgs()) {
                 if (!supportsNode(arg, argCount)) return false;
@@ -641,11 +640,20 @@ public final class BytecodeCompiler {
                     "CallNativeIR references unregistered native '" + cn.getName()
                     + "' — supports() should have rejected this");
             }
-            b.beginCallNativeScalar(handler);
-            for (NodeIR arg : cn.getArgs()) {
-                emitNode(arg, b, argCount, localMap);
+            boolean needsNode = NativeHandlers.INSTANCE.needsNode(cn.getName());
+            if (needsNode) {
+                b.beginCallNativeScalarWithNode(handler);
+                for (NodeIR arg : cn.getArgs()) {
+                    emitNode(arg, b, argCount, localMap);
+                }
+                b.endCallNativeScalarWithNode();
+            } else {
+                b.beginCallNativeScalar(handler);
+                for (NodeIR arg : cn.getArgs()) {
+                    emitNode(arg, b, argCount, localMap);
+                }
+                b.endCallNativeScalar();
             }
-            b.endCallNativeScalar();
             return;
         }
         throw new UnsupportedOperationException(

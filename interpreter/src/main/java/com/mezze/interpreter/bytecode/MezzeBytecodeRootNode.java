@@ -22,11 +22,13 @@ import com.oracle.truffle.api.bytecode.GenerateBytecode;
 import com.oracle.truffle.api.bytecode.Operation;
 import com.oracle.truffle.api.bytecode.OperationProxy;
 import com.oracle.truffle.api.bytecode.Variadic;
+import com.oracle.truffle.api.dsl.Bind;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
+import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.RootNode;
 
 /**
@@ -413,10 +415,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      *
      * <p>Lowers {@link com.mezze.language.truffleir.CallNativeIR} when
      * {@code isScalarABI == true} AND {@code NativeHandlers.needsNode(name)}
-     * is false. Node-needing ops (Async, IndirectCallNode-requiring
-     * handlers) are Phase 3 work — {@code needsNode} handlers require
-     * a {@link com.mezze.interpreter.nodes.MezzeNode} callerNode which
-     * BDSL ops don't naturally provide.
+     * is false. For {@code needsNode == true} ops (Async, HOF-callback
+     * consumers) the sibling {@link CallNativeScalarWithNode} op below
+     * threads an {@link IndirectCallNode} and a caller {@link Node} into
+     * the handler.
      *
      * <p>The handler is resolved once at build time via {@link Cached}.
      * If a name isn't registered, we look up eagerly at compile time
@@ -429,6 +431,31 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization
         public static Object doInvoke(NativeHandler handler, @Variadic Object[] args) {
             return handler.invoke(new PositionalArgs(args, null, null));
+        }
+    }
+
+    /**
+     * Variant of {@link CallNativeScalar} for handlers registered as
+     * {@code NativeOpWithNode} — Async ops (spawn/await/park), HOF
+     * callbacks that need a shared {@link IndirectCallNode}, and any op
+     * that reads {@code args.callerNode} for source-section lookup.
+     *
+     * <p>BDSL exposes the enclosing operation's {@link Node} via a
+     * {@code @Bind Node} parameter, and gives us a cached
+     * {@link IndirectCallNode} through {@code @Cached}. Both are
+     * threaded into the {@link PositionalArgs}, matching the AST-side
+     * {@code NativeDispatchScalarNode}'s slow path.
+     */
+    @Operation
+    @ConstantOperand(type = NativeHandler.class)
+    public static final class CallNativeScalarWithNode {
+        @Specialization
+        public static Object doInvoke(
+                NativeHandler handler,
+                @Variadic Object[] args,
+                @Cached IndirectCallNode callNode,
+                @Bind Node node) {
+            return handler.invoke(new PositionalArgs(args, callNode, (com.mezze.interpreter.nodes.MezzeNode) null));
         }
     }
 
