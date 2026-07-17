@@ -2898,7 +2898,21 @@ class MezzeTextDocumentService(
             server.logInfo("[dot-completion] unimported-ability scan failed: ${e.message}")
         }
 
-        // Filter by partial method name if the user already started typing
+        // Postfix completions: `x.some` → `Some { x }`, `x.ok` → `Ok { x }`,
+        // etc. Only for a named-identifier receiver (we need its source text to
+        // build the rewrite), and only when the partial matches a postfix
+        // trigger. Each item's textEdit replaces the whole `x.partial` span.
+        if (receiverName != null && identifierMatch != null) {
+            val startCol = position.character - identifierMatch.value.length
+            val replaceRange = Range(
+                Position(position.line, startCol.coerceAtLeast(0)),
+                Position(position.line, position.character),
+            )
+            items.addAll(postfixCompletions(receiverName, partialMethod, replaceRange))
+        }
+
+        // Filter by partial method name if the user already started typing.
+        // Postfix items carry their own textEdit, so match them by label too.
         val filtered = if (partialMethod.isNotEmpty()) {
             items.filter { it.label.startsWith(partialMethod, ignoreCase = true) }
         } else {
@@ -2922,6 +2936,39 @@ class MezzeTextDocumentService(
 
         server.logInfo("[dot-completion] returning ${rankedItems.size} method completions for type '${getTypeName(baseType) ?: baseType::class.simpleName}': ${rankedItems.take(20).map { it.label }}${if (rankedItems.size > 20) "..." else ""}")
         return rankedItems
+    }
+
+    /**
+     * Postfix-style completions on a named receiver: `x.some` → `Some { x }`.
+     * Each item's [TextEdit] replaces the whole `receiver.partial` span (passed
+     * as [replaceRange]) with the expansion, so accepting it rewrites the value
+     * in place. Snippet-form so the cursor lands at `$0`.
+     *
+     * The set is intentionally small and value-shaped (constructor wrapping,
+     * pattern-match scaffolding) — the things you reach for often enough that
+     * typing `x.` and picking is faster than wrapping by hand.
+     */
+    private fun postfixCompletions(receiver: String, partial: String, replaceRange: Range): List<CompletionItem> {
+        data class Pf(val trigger: String, val expansion: String, val detail: String)
+        val templates = listOf(
+            Pf("some", "Some { $receiver }", "wrap in Some"),
+            Pf("ok", "Ok { $receiver }", "wrap in Ok"),
+            Pf("err", "Err { error = $receiver }", "wrap in Err"),
+            Pf("match", "match $receiver is\n| \${1:pattern} -> \${2:result}", "match on this value"),
+            Pf("let", "let \${1:name} = $receiver", "bind to a let"),
+        )
+        return templates
+            .filter { partial.isEmpty() || it.trigger.startsWith(partial, ignoreCase = true) }
+            .map { pf ->
+                CompletionItem(pf.trigger).apply {
+                    kind = CompletionItemKind.Snippet
+                    detail = "postfix: ${pf.detail}"
+                    // Rank postfix below real methods sharing the prefix.
+                    sortText = "zzz_${pf.trigger}"
+                    insertTextFormat = InsertTextFormat.Snippet
+                    textEdit = org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(TextEdit(replaceRange, pf.expansion))
+                }
+            }
     }
 
     /**

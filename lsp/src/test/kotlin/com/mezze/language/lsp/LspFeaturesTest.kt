@@ -905,6 +905,34 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `postfix completion rewrites x dot some into Some wrapping x`() {
+        // #114: typing `x.some` offers a postfix `some` whose edit replaces the
+        // whole `x.some` span with `Some { x }`.
+        val (uri, _) = openSingleFile("""
+            let f = {x: Int} -> x.some
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        val line = "let f = {x: Int} -> x.some"
+        // Cursor at the end of `x.some`.
+        val col = line.length
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(0, col)
+        }).get(5, TimeUnit.SECONDS)
+
+        val comps = if (result.isLeft) result.left else result.right.items
+        val some = comps.firstOrNull { it.label == "some" && it.detail?.contains("postfix") == true }
+            ?: fail("expected a postfix `some` completion, got: ${comps.map { it.label to it.detail }}")
+        val te = some.textEdit?.left ?: fail("postfix item should carry a textEdit")
+        assertEquals("Some { x }", te.newText, "postfix `some` should wrap the receiver in Some")
+        // The edit replaces the whole `x.some` span, not just `.some`.
+        val startCol = line.indexOf("x.some")
+        assertEquals(startCol, te.range.start.character, "edit should start at the receiver `x`")
+        assertEquals(line.length, te.range.end.character, "edit should cover through the cursor")
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"
