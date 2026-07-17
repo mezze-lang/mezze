@@ -1140,6 +1140,38 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `doc comment renders as multi-block markdown with blank-line separation`() {
+        // #123: `##`-doc lines join with a single \n at parse time, but markdown
+        // needs blank lines between block elements. Hover output must separate a
+        // heading, a paragraph, and a list so they render (not run together).
+        val (uri, _) = openSingleFile("""
+            ## # Adder
+            ## Adds two integers.
+            ## - takes `a`
+            ## - takes `b`
+            let add = {a: Int, b: Int} -> a + b
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        // Hover on `add` (line 4, char 4).
+        val hover = hoverAt(uri, 4, 4) ?: fail("expected hover on `add`")
+        val text = hoverText(hover)
+
+        // The `# Adder` heading survives (## strips to # for markdown H1).
+        assertTrue(text.contains("# Adder"), "expected the `# Adder` heading, got: $text")
+        // Heading is followed by a blank line before the paragraph (markdown
+        // block separation) — i.e. `# Adder\n\n`.
+        assertTrue(text.contains("# Adder\n\nAdds two integers."),
+            "heading must be blank-line-separated from the paragraph, got: $text")
+        // The paragraph is blank-line-separated from the list's first item.
+        assertTrue(text.contains("Adds two integers.\n\n- takes"),
+            "paragraph must be blank-line-separated from the list, got: $text")
+        // Consecutive list items stay adjacent (single \n, not doubled).
+        assertTrue(text.contains("- takes `a`\n- takes `b`"),
+            "list items must stay adjacent, got: $text")
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"

@@ -1174,12 +1174,74 @@ class MezzeTextDocumentService(
             parts.add(deprecation)
         }
 
-        // Doc comment
+        // Doc comment — normalized so multi-block markdown (headings, lists,
+        // fenced code, tables) renders correctly in the client's renderer.
         if (!doc.isNullOrBlank()) {
-            parts.add(doc)
+            parts.add(renderDocMarkdown(doc))
         }
 
         return parts.joinToString("\n\n---\n\n")
+    }
+
+    /**
+     * Normalize a `##`-sourced doc comment (stored as `\n`-joined lines) into
+     * well-formed markdown. The parser joins doc lines with a single `\n`, but
+     * markdown needs a blank line between BLOCK elements — otherwise a heading
+     * runs into the following paragraph, a list glues to the text above it, and
+     * a fenced code block never opens. We insert `\n\n` at block boundaries
+     * while keeping consecutive lines of the SAME block (list items, code-fence
+     * interior, table rows, paragraph soft-wraps) together.
+     *
+     * Client-agnostic: emits standard CommonMark/GFM text, so it renders the
+     * same in VS Code (markdown-it), Zed, and any other LSP client.
+     */
+    private fun renderDocMarkdown(doc: String): String {
+        val lines = doc.split("\n")
+        val out = StringBuilder()
+        var inFence = false
+        var prevKind: DocLineKind? = null
+
+        for ((i, raw) in lines.withIndex()) {
+            val line = raw
+            val trimmed = line.trimStart()
+            val kind = classifyDocLine(trimmed, inFence)
+
+            // A fence toggles code-block mode; the toggle line itself is FENCE.
+            if (trimmed.startsWith("```")) inFence = !inFence
+
+            if (i > 0) {
+                // Blank line between two different block kinds, or when either
+                // side is a heading/fence/blockquote/table/hr boundary. Runs of
+                // the same block kind (LIST↔LIST, TEXT↔TEXT inside a paragraph,
+                // CODE↔CODE inside a fence) stay on adjacent lines.
+                val needBlank = when {
+                    inFence || prevKind == DocLineKind.CODE -> false        // inside a fence: keep verbatim
+                    kind == DocLineKind.BLANK || prevKind == DocLineKind.BLANK -> false // author already spaced it
+                    kind == prevKind && kind == DocLineKind.LIST -> false   // adjacent list items
+                    kind == prevKind && kind == DocLineKind.TABLE -> false  // adjacent table rows
+                    kind == prevKind && kind == DocLineKind.TEXT -> false   // paragraph soft-wrap
+                    else -> true
+                }
+                out.append(if (needBlank) "\n\n" else "\n")
+            }
+            out.append(line)
+            prevKind = kind
+        }
+        return out.toString()
+    }
+
+    private enum class DocLineKind { HEADING, LIST, FENCE, CODE, QUOTE, TABLE, HR, BLANK, TEXT }
+
+    private fun classifyDocLine(trimmed: String, inFence: Boolean): DocLineKind = when {
+        inFence -> DocLineKind.CODE
+        trimmed.isEmpty() -> DocLineKind.BLANK
+        trimmed.startsWith("```") -> DocLineKind.FENCE
+        trimmed.startsWith("#") -> DocLineKind.HEADING
+        trimmed.matches(Regex("""^([-*+]\s|\d+[.)]\s).*""")) -> DocLineKind.LIST
+        trimmed.startsWith(">") -> DocLineKind.QUOTE
+        trimmed.startsWith("|") -> DocLineKind.TABLE
+        trimmed.matches(Regex("""^(-{3,}|\*{3,}|_{3,})$""")) -> DocLineKind.HR
+        else -> DocLineKind.TEXT
     }
 
     /**
@@ -2158,7 +2220,7 @@ class MezzeTextDocumentService(
                     // The store row already has the doc-comment in hand, so
                     // attach it eagerly (no resolve round-trip needed).
                     declRow.doc?.takeIf { it.isNotBlank() }?.let {
-                        documentation = Either.forRight(MarkupContent(MarkupKind.MARKDOWN, it))
+                        documentation = Either.forRight(MarkupContent(MarkupKind.MARKDOWN, renderDocMarkdown(it)))
                     }
                     // Slight ranking penalty so locally-visible bindings win.
                     sortText = "zz_$name"
@@ -3764,7 +3826,7 @@ class MezzeTextDocumentService(
             if (sig != null) append("```mezze\n$name : $sig\n```")
             if (doc != null) {
                 if (isNotEmpty()) append("\n\n")
-                append(doc)
+                append(renderDocMarkdown(doc))
             }
         }
         if (body.isNotBlank()) {
