@@ -45,14 +45,14 @@ import com.mezze.language.typedast.Hash
  *      * `CallNativeIR` with legacy record-ABI shape AND arg shape
  *        `MakeRecordIR(fields = [name_i = ReadLocalIR(captures.size + i) for i])`
  *        — still inlineable, we just rewrite the field exprs.
- *  - **Each param read at most once in the body** — guarantees no
- *    duplication of argument evaluation. Most wrappers satisfy this
- *    trivially since the body is `__native_X { p1 = p1, p2 = p2, ... }`.
+ *  - **Each param read count is known**, but multi-read is allowed at
+ *    the call site iff the corresponding arg is cheap-to-duplicate
+ *    (literals, slot reads, global reads). This unlocks stdlib helpers
+ *    like `min { l, r }` and `sign { n }` when called with cheap args.
  *
- * Functions that take captures, have locals, perform effects, branch,
- * or use a param multiple times stay as separate CallTargets. This is
- * conservative — there's room to grow the eligible set later, but the
- * current rule already covers the vast majority of stdlib primitives.
+ * Functions that take captures, have locals, perform effects, branch
+ * with `Match`, use lambdas, or invoke a param through an indirect
+ * call still stay as separate CallTargets.
  */
 object TrivialWrapperInliner {
 
@@ -143,45 +143,93 @@ object TrivialWrapperInliner {
         val paramEnd = paramStart + fn.paramSlots.size
 
         // Body must be a pure expression tree whose leaves reference each
-        // param at most once and read no other slots. Accepted top-level
-        // shapes are single calls or expression-form control flow (`If`,
-        // `Block` without lets) that ultimately forwards to calls. The
-        // whole check delegates to [bodyParamsReadOnce] — the accepted
-        // node types are enumerated inside [countParamReads].
+        // param a known number of times and read no other slots. Accepted
+        // top-level shapes are single calls or expression-form control
+        // flow (`If`, `Block` without lets) that ultimately forwards to
+        // calls. The eligibility check now records per-param read counts
+        // instead of hard-rejecting on >1 reads; the substitution site
+        // (see [rewrite]) decides whether the caller's arg is cheap
+        // enough to duplicate.
         val body = fn.body
-        return when (body) {
-            is CallNativeIR -> bodyParamsReadOnce(body, paramStart, paramEnd)
-            is CallDirectIR -> body.isScalarABI &&
-                bodyParamsReadOnce(body, paramStart, paramEnd)
-            // If: pure control-flow expression, always safe to inline as
-            // long as leaves are pure. Common in stdlib predicates
-            // (`if x < 0 then -x else x`).
-            is IfIR -> bodyParamsReadOnce(body, paramStart, paramEnd)
-            // Block: only when statements are pure expressions (no lets).
-            // Lets would introduce new locals whose slot indices belong
-            // to the wrapper's frame, colliding on inline.
-            is BlockIR -> body.stmts.all { it is StmtIR.Expr } &&
-                bodyParamsReadOnce(body, paramStart, paramEnd)
+        val shapeOk = when (body) {
+            is CallNativeIR -> true
+            is CallDirectIR -> body.isScalarABI
+            is IfIR -> true
+            is BlockIR -> body.stmts.all { it is StmtIR.Expr }
             else -> false
         }
+        if (!shapeOk) return false
+        // Traverse the body to make sure no capture/local slots are
+        // read (only params, in-range). We discard the counts here;
+        // the same walk runs again at the call site to compute them.
+        val counts = IntArray(paramEnd - paramStart)
+        if (!countParamReads(body, paramStart, paramEnd, counts)) return false
+        // Recursion guard: a wrapper whose body calls itself would
+        // unfold forever at compile time. Once Phase B relaxed the
+        // "≤1 read" rule, `If`-shaped self-recursive functions like
+        // `gcd { a, b } -> if b == 0 then a else gcd { a = b, b = a % b }`
+        // pass the earlier gates — reject them here.
+        return !containsSelfCall(body, fn.hash)
     }
 
     /**
-     * Walk the call's arg expressions counting how many times each
-     * param slot is read. Returns true when every param is read at most
-     * once AND no slot outside the param range is read (which would
-     * indicate a capture / local that we said don't exist).
+     * True when [node] contains a direct call to [selfHash] anywhere
+     * in its tree. Used by [isTrivialWrapper] to reject self-recursive
+     * candidate wrappers.
+     *
+     * Only checks direct `CallDirectIR` targets — indirect calls
+     * cannot go through a specific hash statically, and the mutual-
+     * recursion case (A calls B calls A) is out of scope for a single-
+     * pass inliner.
      */
-    private fun bodyParamsReadOnce(
-        call: NodeIR,
+    private fun containsSelfCall(node: NodeIR, selfHash: Hash): Boolean {
+        if (node is CallDirectIR && node.targetHash == selfHash) return true
+        var found = false
+        recurseChildren(node) { child ->
+            if (!found && containsSelfCall(child, selfHash)) found = true
+            child
+        }
+        return found
+    }
+
+    /**
+     * Compute the per-param read counts for a body known to pass
+     * [isTrivialWrapper]. Returns null iff the body has a shape that
+     * would have failed eligibility (defensive — callers already gate).
+     */
+    private fun readCountsFor(
+        body: NodeIR,
         paramStart: Int,
         paramEnd: Int,
-    ): Boolean {
+    ): IntArray? {
         val counts = IntArray(paramEnd - paramStart)
-        val ok = countParamReads(call, paramStart, paramEnd, counts)
-        if (!ok) return false
-        for (c in counts) if (c > 1) return false
-        return true
+        return if (countParamReads(body, paramStart, paramEnd, counts)) counts else null
+    }
+
+    /**
+     * True when [node] is safe to duplicate — i.e. re-evaluating it on
+     * every read produces the same value and causes no side effect. Only
+     * these leaves are safe:
+     *   - Literals (long/double/bool/string/unit/char/frac).
+     *   - Slot reads (local, capture) — Mezze frame slots aren't racy
+     *     within a single fiber, so two reads observe the same value.
+     *   - Global by-hash reads — content-addressed, immutable.
+     *   - EffectBindingIR — resolved by the handler chain; reading it
+     *     twice is idempotent (returns the same handler snapshot).
+     *
+     * NOT safe: any call (`CallDirectIR`/`CallNativeIR`/…), any effect
+     * op, any allocation (`MakeRecordIR`, `MakeSeqIR`, …), any binary op
+     * whose operands aren't themselves cheap. Bail conservatively.
+     */
+    private fun isCheapToDuplicate(node: NodeIR): Boolean {
+        return when (node) {
+            is LongLitIR, is DoubleLitIR, is BoolLitIR, is StringLitIR,
+            is UnitLitIR, is CharLitIR, is FracLitIR,
+            is ReadLocalIR, is ReadCaptureIR,
+            is ReadGlobalByHashIR, is ReadGlobalFnByHashIR,
+            is EffectBindingIR -> true
+            else -> false
+        }
     }
 
     /**
@@ -239,12 +287,11 @@ object TrivialWrapperInliner {
                 countParamReads(node.left, paramStart, paramEnd, counts) &&
                 countParamReads(node.right, paramStart, paramEnd, counts)
             }
-            // If: descend into all three arms. Note that a param used in
-            // both then+else is currently counted twice (rejected by the
-            // ≤1 rule), which is stricter than semantically necessary —
-            // only one arm actually executes — but it keeps the pass
-            // simple and safe. Widening the rule to per-path counting is
-            // a future extension.
+            // If: descend into all three arms. A param used in both
+            // then+else counts twice here even though only one arm
+            // runs — that's fine now that the call site checks
+            // arg-cheapness before duplicating (per-path counting
+            // would be more precise but adds complexity for little gain).
             is IfIR -> {
                 countParamReads(node.cond, paramStart, paramEnd, counts) &&
                 countParamReads(node.thenBr, paramStart, paramEnd, counts) &&
@@ -281,10 +328,37 @@ object TrivialWrapperInliner {
                 // arguments may themselves contain wrappable calls), so
                 // we don't have to re-walk after substitution.
                 val rewrittenArgs = node.args.map { rewrite(it, wrappers) }
-                val substituted = substituteParams(wrapper.body, rewrittenArgs, wrapper.captureSlots.size)
-                // Recurse once more in case the wrapper body referenced
-                // another wrapper (chain of trivial forwarders).
-                return rewrite(substituted, wrappers)
+                // Multi-read gate: any param the wrapper reads more than
+                // once must have a cheap-to-duplicate arg here, because
+                // substitution will inline that arg AST at every read
+                // site. If any multi-read param sees a heavy arg, bail
+                // on inlining THIS call site — leave the CallDirectIR
+                // in place so the callee's CallTarget still handles it.
+                // Other call sites of the same wrapper may still inline.
+                val paramStart = wrapper.captureSlots.size
+                val paramEnd = paramStart + wrapper.paramSlots.size
+                val counts = readCountsFor(wrapper.body, paramStart, paramEnd)
+                if (counts != null) {
+                    var ok = true
+                    for (i in counts.indices) {
+                        if (counts[i] > 1 && !isCheapToDuplicate(rewrittenArgs[i])) {
+                            ok = false; break
+                        }
+                    }
+                    if (ok) {
+                        val substituted = substituteParams(
+                            wrapper.body, rewrittenArgs, wrapper.captureSlots.size)
+                        // Recurse in case the wrapper body referenced
+                        // another wrapper (chain of trivial forwarders).
+                        return rewrite(substituted, wrappers)
+                    }
+                }
+                // Fall through: leave the call alone, but keep the args
+                // rewritten (nested inlining still applies).
+                if (rewrittenArgs !== node.args) {
+                    return node.copy(args = rewrittenArgs)
+                }
+                return node
             }
         }
         return recurseChildren(node) { rewrite(it, wrappers) }
@@ -292,8 +366,11 @@ object TrivialWrapperInliner {
 
     /**
      * Substitute each `ReadLocalIR(slot=paramStart+i)` in [body] with
-     * `args[i]`. Since [isTrivialWrapper] guaranteed each param is read
-     * at most once, sharing the arg expression directly is safe.
+     * `args[i]`. For multi-read params, [rewrite] has already checked
+     * that `args[i]` is cheap-to-duplicate (see [isCheapToDuplicate]),
+     * so sharing the arg expression AST at multiple read sites is safe
+     * — every reference re-evaluates to the same value with no side
+     * effects.
      */
     private fun substituteParams(
         body: NodeIR,
