@@ -401,6 +401,40 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Structural / primitive equality between two operands. Used by
+     * literal patterns in match: {@code match x is 1 -> ... | _ -> ...}
+     * lowers to a {@code PrimEquals(scrutinee, literal)} inside a
+     * {@code Conditional} — same shape as variant-tag matching.
+     *
+     * <p>Specializes on {@code long==long}, {@code double==double},
+     * {@code boolean==boolean}, and falls through to
+     * {@link java.util.Objects#equals(Object, Object)} for reference
+     * comparison (strings, chars, unit).
+     */
+    @Operation
+    public static final class PrimEquals {
+        @Specialization
+        public static boolean doLong(long left, long right) {
+            return left == right;
+        }
+
+        @Specialization
+        public static boolean doDouble(double left, double right) {
+            return left == right;
+        }
+
+        @Specialization
+        public static boolean doBoolean(boolean left, boolean right) {
+            return left == right;
+        }
+
+        @Specialization(replaces = {"doLong", "doDouble", "doBoolean"})
+        public static boolean doObject(Object left, Object right) {
+            return java.util.Objects.equals(left, right);
+        }
+    }
+
+    /**
      * Compare a variant's tag against a compile-time int tag. Returns
      * true iff the operand is a {@link MezzeVariant} with matching tag.
      *

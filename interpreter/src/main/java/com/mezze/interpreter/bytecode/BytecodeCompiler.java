@@ -223,8 +223,12 @@ public final class BytecodeCompiler {
             // by-coverage matches without a wildcard until Phase 3.
             var cases = m.getCases();
             if (cases.isEmpty()) return false;
-            if (!(cases.get(cases.size() - 1).getPattern() instanceof PatternIR.Wildcard)) {
-                return false;
+            {
+                PatternIR lastPat = cases.get(cases.size() - 1).getPattern();
+                if (!(lastPat instanceof PatternIR.Wildcard)
+                    && !(lastPat instanceof PatternIR.Record)) {
+                    return false;
+                }
             }
             for (int i = 0; i < cases.size(); i++) {
                 CaseIR c = cases.get(i);
@@ -237,6 +241,15 @@ public final class BytecodeCompiler {
                     // a ReadFieldByName on the unwrapped payload record.
                     // supports() defers to the runtime for record-shape
                     // presence; missing fields ClassCast or throw.
+                } else if (pat instanceof PatternIR.Literal lit) {
+                    if (!supportsNode(lit.getValue(), paramCount)) return false;
+                } else if (pat instanceof PatternIR.Record) {
+                    // Record pattern is unconditional — must be the last
+                    // case (anything after it is dead). Its fields are
+                    // extracted directly from the scrutinee via
+                    // ReadFieldByName. isOpen doesn't change semantics
+                    // (typechecker guarantees shape compatibility).
+                    if (!isLast) return false;
                 } else if (pat instanceof PatternIR.Wildcard) {
                     if (!isLast) return false;
                 } else {
@@ -529,6 +542,36 @@ public final class BytecodeCompiler {
             }
             emitNode(c.getBody(), b, paramCount, localMap);
             b.endBlock();
+            return;
+        }
+        if (pat instanceof PatternIR.Record rp) {
+            // Record patterns are unconditional given the typechecker
+            // guarantees shape compatibility — read each captured field
+            // from the scrutinee and bind, then emit the body.
+            b.beginBlock();
+            for (int i = 0; i < rp.getFieldNames().size(); i++) {
+                int slot = rp.getFieldSlots().get(i);
+                BytecodeLocal target = localMap[slot - paramCount];
+                b.beginStoreLocal(target);
+                b.beginReadFieldByName(rp.getFieldNames().get(i));
+                b.emitLoadLocal(scrutineeLocal);
+                b.endReadFieldByName();
+                b.endStoreLocal();
+            }
+            emitNode(c.getBody(), b, paramCount, localMap);
+            b.endBlock();
+            return;
+        }
+        if (pat instanceof PatternIR.Literal lit) {
+            // Conditional(PrimEquals(scrutinee, literalExpr), body, else...)
+            b.beginConditional();
+            b.beginPrimEquals();
+            b.emitLoadLocal(scrutineeLocal);
+            emitNode(lit.getValue(), b, paramCount, localMap);
+            b.endPrimEquals();
+            emitNode(c.getBody(), b, paramCount, localMap);
+            emitMatchChain(cases, idx + 1, scrutineeLocal, b, paramCount, localMap);
+            b.endConditional();
             return;
         }
         PatternIR.Variant v = (PatternIR.Variant) pat;
