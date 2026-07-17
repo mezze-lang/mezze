@@ -694,8 +694,11 @@ class MezzeTextDocumentService(
      */
     private fun createDiagnosticFromRecoveryError(error: TypeChecker.TypeCheckError): Diagnostic {
         val loc = error.loc
+        // #98: append span-less advice strings (error.hints) to the message.
+        val message = if (error.hints.isEmpty()) error.message
+            else error.message + error.hints.joinToString("") { "\n  hint: $it" }
         val diag = createDiagnostic(
-            message = error.message,
+            message = message,
             severity = DiagnosticSeverity.Error,
             line = (loc?.startLine ?: 1) - 1,
             column = (loc?.startCol ?: 1) - 1,
@@ -808,8 +811,16 @@ class MezzeTextDocumentService(
      */
     private fun createDiagnosticFromTypeError(error: TypeCheckError): Diagnostic {
         val loc = error.loc
+        // #98: the typechecker computes advice strings (e.g. "Did you mean
+        // `x`?", "import it: `use …`") in error.hints. They carry no span, so
+        // RelatedInformation doesn't fit — append them to the message where the
+        // user actually reads them. fixHints (with edits) still drive the
+        // codeAction quick-fixes separately.
+        val baseMessage = error.message ?: "Type error"
+        val message = if (error.hints.isEmpty()) baseMessage
+            else baseMessage + error.hints.joinToString("") { "\n  hint: $it" }
         val diag = createDiagnostic(
-            message = error.message ?: "Type error",
+            message = message,
             severity = DiagnosticSeverity.Error,
             line = (loc?.startLine ?: 1) - 1,
             column = (loc?.startCol ?: 1) - 1,
