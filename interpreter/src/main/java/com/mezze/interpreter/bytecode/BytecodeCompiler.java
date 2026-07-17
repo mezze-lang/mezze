@@ -7,6 +7,7 @@ import com.mezze.language.truffleir.BlockIR;
 import com.mezze.language.truffleir.BoolLitIR;
 import com.mezze.language.truffleir.CallDirectIR;
 import com.mezze.language.truffleir.CallIndirectIR;
+import com.mezze.language.truffleir.CallLocalIR;
 import com.mezze.language.truffleir.CallNativeIR;
 import com.mezze.language.truffleir.CharLitIR;
 import com.mezze.language.truffleir.DoubleLitIR;
@@ -14,6 +15,8 @@ import com.mezze.language.truffleir.FieldIR;
 import com.mezze.language.truffleir.FunctionIR;
 import com.mezze.language.truffleir.IfIR;
 import com.mezze.language.truffleir.InlineBinaryOpIR;
+import com.mezze.language.truffleir.InterpolatedStringIR;
+import com.mezze.language.truffleir.StringPartIR;
 import com.mezze.language.truffleir.InlineOp;
 import com.mezze.language.truffleir.LongLitIR;
 import com.mezze.language.truffleir.CaseIR;
@@ -220,6 +223,14 @@ public final class BytecodeCompiler {
             NodeIR payload = mv.getPayload();
             return payload == null || supportsNode(payload, argCount);
         }
+        if (node instanceof InterpolatedStringIR is) {
+            for (StringPartIR p : is.getParts()) {
+                if (p instanceof StringPartIR.Expr e) {
+                    if (!supportsNode(e.getNode(), argCount)) return false;
+                }
+            }
+            return true;
+        }
         if (node instanceof MakeLambdaIR ml) {
             // Callee must already be compiled — same constraint as
             // CallDirectN. Captures are just slot reads in the caller's
@@ -240,6 +251,10 @@ public final class BytecodeCompiler {
             if (ci.isTailCall()) return false;
             return supportsNode(ci.getFunction(), argCount)
                 && supportsNode(ci.getArg(), argCount);
+        }
+        if (node instanceof CallLocalIR cl) {
+            if (cl.isTailCall()) return false;
+            return supportsNode(cl.getArg(), argCount);
         }
         if (node instanceof CallNativeIR cn) {
             // Phase 2: scalar-ABI natives only, and only handlers that
@@ -550,10 +565,39 @@ public final class BytecodeCompiler {
             b.endMakeSeq();
             return;
         }
+        if (node instanceof InterpolatedStringIR is) {
+            String[] parts = new String[is.getParts().size()];
+            for (int i = 0; i < is.getParts().size(); i++) {
+                StringPartIR p = is.getParts().get(i);
+                parts[i] = (p instanceof StringPartIR.Lit lit) ? lit.getValue() : null;
+            }
+            b.beginInterpolateString(parts);
+            for (StringPartIR p : is.getParts()) {
+                if (p instanceof StringPartIR.Expr e) {
+                    emitNode(e.getNode(), b, argCount, localMap);
+                }
+            }
+            b.endInterpolateString();
+            return;
+        }
         if (node instanceof CallIndirectIR ci) {
             b.beginCallIndirect();
             emitNode(ci.getFunction(), b, argCount, localMap);
             emitNode(ci.getArg(), b, argCount, localMap);
+            b.endCallIndirect();
+            return;
+        }
+        if (node instanceof CallLocalIR cl) {
+            // Sugar for CallIndirect(ReadLocal(slot), arg). Slot layout
+            // is the same as ReadLocalIR — argCount split point.
+            b.beginCallIndirect();
+            int slot = cl.getSlot();
+            if (slot < argCount) {
+                b.emitLoadArgument(slot);
+            } else {
+                b.emitLoadLocal(localMap[slot - argCount]);
+            }
+            emitNode(cl.getArg(), b, argCount, localMap);
             b.endCallIndirect();
             return;
         }

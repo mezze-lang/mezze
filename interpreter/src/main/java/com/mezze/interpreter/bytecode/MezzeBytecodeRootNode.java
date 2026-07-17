@@ -433,6 +433,27 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * String interpolation: {@code "hello $(name), you are $(age)"}.
+     *
+     * <p>{@code parts} is a compile-time {@code String[]} where a
+     * non-null entry is a literal chunk and a {@code null} entry marks
+     * an interpolated expression position. Variadic values fill only
+     * the expression positions in order.
+     *
+     * <p>Boundary-fold appends everything to a StringBuilder — matches
+     * the AST's {@code InterpolatedStringNode} semantics (which uses
+     * {@code String.valueOf} for non-string values).
+     */
+    @Operation
+    @ConstantOperand(type = String[].class)
+    public static final class InterpolateString {
+        @Specialization
+        public static String doInterpolate(String[] parts, @Variadic Object[] exprValues) {
+            return buildInterpolatedString(parts, exprValues);
+        }
+    }
+
+    /**
      * Construct a {@link MezzeSeq} from a variadic list of element
      * values. Lowers {@link com.mezze.language.truffleir.MakeSeqIR}
      * for the no-spread case ({@code [1, 2, 3]}); spread elements
@@ -564,6 +585,27 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static Object doVariant(MezzeVariant variant) {
             return variant.getPayloadValue();
         }
+    }
+
+    /**
+     * Boundary helper: fold an interleaved literal/expression parts
+     * array into a single String. Null entries in {@code parts} pull
+     * from {@code exprValues} in order; non-null entries are literal
+     * chunks. Non-string expression values go through
+     * {@link String#valueOf(Object)}.
+     */
+    @TruffleBoundary
+    private static String buildInterpolatedString(String[] parts, Object[] exprValues) {
+        StringBuilder sb = new StringBuilder();
+        int exprIdx = 0;
+        for (String p : parts) {
+            if (p == null) {
+                sb.append(String.valueOf(exprValues[exprIdx++]));
+            } else {
+                sb.append(p);
+            }
+        }
+        return sb.toString();
     }
 
     /**
