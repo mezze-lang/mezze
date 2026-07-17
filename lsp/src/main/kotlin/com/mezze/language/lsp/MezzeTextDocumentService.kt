@@ -4837,6 +4837,8 @@ class MezzeTextDocumentService(
         val out = mutableListOf<Either<Command, CodeAction>>()
         val extract = buildExtractToLetAction(uri, state, range)
         if (extract != null) out.add(Either.forRight(extract))
+        val extractFn = buildExtractToFunctionAction(uri, state, range)
+        if (extractFn != null) out.add(Either.forRight(extractFn))
         val inline = buildInlineBindingAction(uri, state, range)
         if (inline != null) out.add(Either.forRight(inline))
         val ifToMatch = buildConvertIfToMatchAction(uri, state, range)
@@ -5057,6 +5059,89 @@ class MezzeTextDocumentService(
             )))
         }
         return action
+    }
+
+    /**
+     * Build the "Extract to function" refactoring action.
+     *
+     * Lifts the selected expression into a new top-level
+     * `let extracted = { <free vars> } -> <slice>` and replaces the selection
+     * with a call `extracted { <free vars> }`. Free variables are the
+     * identifiers in the selection that are bound by an ENCLOSING lambda (its
+     * params) — those must become function parameters so the extracted function
+     * is self-contained. Top-level/stdlib references need no param.
+     *
+     * Single-line selections only for now (the slice is textual). Falls back to
+     * a zero-arg thunk `{} -> slice` when the selection captures no locals.
+     */
+    private fun buildExtractToFunctionAction(uri: String, state: DocumentState, range: Range): CodeAction? {
+        if (range.start == range.end || range.start.line != range.end.line) return null
+        val parsed = state.parsedModule ?: return null
+        val line = state.content.split('\n').getOrNull(range.start.line) ?: return null
+        val slice = line.substring(
+            range.start.character.coerceIn(0, line.length),
+            range.end.character.coerceIn(0, line.length),
+        )
+        if (slice.isBlank()) return null
+        // A bare identifier isn't worth extracting into a function.
+        if (slice.matches(Regex("\\s*\\w+\\s*"))) return null
+
+        // The parsed sub-expression covering the selection.
+        val covering = findParsedExprCovering(parsed, range) ?: return null
+
+        // Identifiers used inside the selection.
+        val used = LinkedHashSet<String>()
+        fun collectIds(e: ParsedExpr) {
+            if (e is ParsedIdentifier) used.add(e.localName)
+            for (c in e.children()) collectIds(c)
+        }
+        collectIds(covering)
+
+        // Params of any lambda whose body region contains the selection — these
+        // are the in-scope locals the slice may reference (its free vars).
+        val enclosingParams = LinkedHashSet<String>()
+        fun lambdaParamNames(l: ParsedLambda): List<String> = when (val p = l.params) {
+            is ParsedLambdaParams.Untyped -> p.names
+            is ParsedLambdaParams.Typed -> p.fields.map { it.name }
+        }
+        fun visitForEnclosing(e: ParsedExpr) {
+            if (e is ParsedLambda) {
+                val b = e.body.loc
+                val within = (b.startLine < range.start.line + 1 ||
+                    (b.startLine == range.start.line + 1 && b.startCol <= range.start.character + 1)) &&
+                    (b.endLine > range.end.line + 1 ||
+                        (b.endLine == range.end.line + 1 && b.endCol >= range.end.character))
+                if (within) enclosingParams.addAll(lambdaParamNames(e))
+            }
+            for (c in e.children()) visitForEnclosing(c)
+        }
+        for (decl in parsed.decls) {
+            when (decl) {
+                is ParsedLetDecl -> visitForEnclosing(decl.value)
+                is ParsedTopLevelExpr -> visitForEnclosing(decl.expression)
+                else -> {}
+            }
+        }
+
+        val freeVars = used.filter { it in enclosingParams }
+        val paramList = if (freeVars.isEmpty()) "{}" else "{ ${freeVars.joinToString(", ")} }"
+        val argList = if (freeVars.isEmpty()) "{}" else "{ ${freeVars.joinToString(", ") { "$it = $it" }} }"
+
+        // New top-level function inserted before the enclosing decl.
+        val enclosingDeclLine = parsed.decls.filterIsInstance<ParsedLetDecl>()
+            .firstOrNull { d ->
+                val l = d.loc
+                (l.startLine - 1) <= range.start.line && (l.endLine - 1) >= range.end.line
+            }?.loc?.startLine?.minus(1) ?: return null
+
+        val fnText = "let extracted = $paramList -> $slice\n\n"
+        return CodeAction("Extract to function").apply {
+            kind = CodeActionKind.RefactorExtract
+            edit = WorkspaceEdit(mapOf(uri to listOf(
+                TextEdit(Range(Position(enclosingDeclLine, 0), Position(enclosingDeclLine, 0)), fnText),
+                TextEdit(range, "extracted $argList"),
+            )))
+        }
     }
 
     /**

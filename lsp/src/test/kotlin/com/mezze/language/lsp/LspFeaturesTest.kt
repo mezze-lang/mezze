@@ -1000,6 +1000,36 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `extract to function lifts a selection into a top-level fn with free vars as params`() {
+        // #117: selecting `x + 1` in a lambda body extracts a top-level
+        // `let extracted = { x } -> x + 1` (x is the enclosing param → a
+        // function parameter) and replaces the selection with a call.
+        val src = "let f = {x: Int} -> x + 1"
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        // Select `x + 1` (from its `x` to end of line).
+        val start = src.indexOf("x + 1")
+        val range = Range(Position(0, start), Position(0, src.length))
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            this.range = range
+            context = CodeActionContext(emptyList())
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val extract = actions.mapNotNull { if (it.isRight) it.right else null }
+            .firstOrNull { it.title == "Extract to function" }
+            ?: fail("expected 'Extract to function', got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        val edits = extract.edit?.changes?.values?.flatten() ?: emptyList()
+        val newText = edits.joinToString("|") { it.newText }
+        // The new function captures `x` as a param, and the call passes it.
+        assertTrue(newText.contains("let extracted = { x } -> x + 1"),
+            "expected extracted fn with `x` param, got edits: $newText")
+        assertTrue(newText.contains("extracted { x = x }"),
+            "expected the selection replaced with a call passing `x`, got: $newText")
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"
