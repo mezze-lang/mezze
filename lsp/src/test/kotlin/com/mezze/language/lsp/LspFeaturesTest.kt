@@ -557,6 +557,53 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `add type annotation splices the inferred type after a top-level let name`() {
+        // #108: cursor on an un-annotated top-level `let`, the refactor reads
+        // the type the typechecker already inferred and writes it in.
+        val (uri, _) = openSingleFile("""
+            let answer = 42
+        """.trimIndent())
+        // Let the typecheck settle so the TypedModule is populated.
+        client.awaitDiagnostics(uri, 5_000)
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = Range(Position(0, 4), Position(0, 4)) // on `answer`
+            context = CodeActionContext(emptyList())
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val add = actions.mapNotNull { if (it.isRight) it.right else null }
+            .firstOrNull { it.title.startsWith("Add type annotation") }
+            ?: fail("expected an 'Add type annotation' action, got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        val edit = add.edit?.changes?.values?.flatten()?.firstOrNull()
+            ?: fail("add-annotation action carried no edit")
+        // The spliced text names the inferred `Int` type and slots in after the name.
+        assertTrue(edit.newText.contains("Int"), "expected `Int` in the annotation, got: ${edit.newText}")
+        val after = applyEdit("let answer = 42", edit)
+        assertEquals("let answer: Int = 42", after,
+            "annotation should splice `: Int` after the name, got: $after")
+    }
+
+    @Test
+    fun `add type annotation is not offered when the let is already annotated`() {
+        val (uri, _) = openSingleFile("""
+            let answer: Int = 42
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = Range(Position(0, 4), Position(0, 4))
+            context = CodeActionContext(emptyList())
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        assertTrue(
+            actions.none { it.isRight && it.right.title.startsWith("Add type annotation") },
+            "should not offer to annotate an already-annotated let"
+        )
+    }
+
+    @Test
     fun `redundant boolean x == True offers a Simplify quick-fix (AST-driven)`() {
         val (uri, _) = openSingleFile("""
             let f = {b: Bool} -> b == True

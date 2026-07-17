@@ -4587,7 +4587,52 @@ class MezzeTextDocumentService(
         if (inline != null) out.add(Either.forRight(inline))
         val ifToMatch = buildConvertIfToMatchAction(uri, state, range)
         if (ifToMatch != null) out.add(Either.forRight(ifToMatch))
+        val addAnnotation = buildAddTypeAnnotationAction(uri, state, range)
+        if (addAnnotation != null) out.add(Either.forRight(addAnnotation))
         return out
+    }
+
+    /**
+     * Build the "Add type annotation" refactoring action.
+     *
+     * Fires when the cursor sits on the name-line of a top-level
+     * `let <name> = <value>` that has no annotation yet. We take the type the
+     * typechecker already inferred (the matching TypedLetDecl's scheme) and
+     * splice it in as `let <name>: <Type> = …`. Purely typechecker-powered —
+     * the type is computed, we just surface it. Skipped when the type still
+     * contains an unresolved variable (renders as `'a`), since annotating with
+     * a bare tyvar rarely helps and can over-constrain.
+     */
+    private fun buildAddTypeAnnotationAction(uri: String, state: DocumentState, range: Range): CodeAction? {
+        val parsed = state.parsedModule ?: return null
+        val cursorLine = range.start.line + 1
+
+        // The top-level let under the cursor, without an existing annotation.
+        val decl = parsed.decls.filterIsInstance<ParsedLetDecl>().firstOrNull { d ->
+            d.typeAnnotation == null &&
+                (d.pattern as? ParsedVariablePattern)?.loc?.startLine == cursorLine
+        } ?: return null
+        val pat = decl.pattern as? ParsedVariablePattern ?: return null
+
+        val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule ?: return null
+        val typed = typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+            .firstOrNull { it.name == pat.name } ?: return null
+
+        val rendered = prettyPrintTypeWithAliases(typed.scheme.type, state.typeAliases)
+        // Don't offer an annotation we can't cleanly write: unresolved tyvars,
+        // or an error/suspended marker leaking through.
+        if (rendered.isBlank() || rendered.contains("'") || rendered.contains("?") ||
+            rendered.contains("<error") || rendered.contains("suspended")) return null
+
+        // Insert `: <Type>` right after the binding name. The name's loc ends at
+        // (endLine, endCol); LSP positions are 0-indexed.
+        val insertAt = Position(pat.loc.endLine - 1, pat.loc.endCol)
+        val edit = TextEdit(Range(insertAt, insertAt), ": $rendered")
+
+        return CodeAction("Add type annotation `: $rendered`").apply {
+            kind = CodeActionKind.RefactorRewrite
+            this.edit = WorkspaceEdit(mapOf(uri to listOf(edit)))
+        }
     }
 
     /**
