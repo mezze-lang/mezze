@@ -464,6 +464,46 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `redundant boolean x == True offers a Simplify quick-fix (AST-driven)`() {
+        val (uri, _) = openSingleFile("""
+            let f = {b: Bool} -> b == True
+        """.trimIndent())
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags)
+        val w = diags!!.diagnostics.firstOrNull { it.code?.left == "W0303" }
+            ?: fail("expected W0303 among ${diags.diagnostics.map { it.code?.left }}")
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = w.range
+            context = CodeActionContext(listOf(w))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+        val fix = actions.mapNotNull { if (it.isRight) it.right else null }.firstOrNull { it.title.startsWith("Simplify") }
+            ?: fail("expected a Simplify action, got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        val edit = fix.edit?.changes?.values?.flatten()?.firstOrNull()?.newText ?: ""
+        assertEquals("b", edit.trim(), "x == True should simplify to `b`, got `$edit`")
+    }
+
+    @Test
+    fun `redundant double negation offers a Simplify quick-fix (AST-driven, regex could not)`() {
+        val (uri, _) = openSingleFile("""
+            let f = {b: Bool} -> !(!b)
+        """.trimIndent())
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags)
+        val w = diags!!.diagnostics.firstOrNull { it.code?.left == "W0303" }
+            ?: fail("expected W0303 among ${diags.diagnostics.map { it.code?.left }}")
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = w.range
+            context = CodeActionContext(listOf(w))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+        val fix = actions.mapNotNull { if (it.isRight) it.right else null }.firstOrNull { it.title.startsWith("Simplify") }
+            ?: fail("expected a Simplify action for !(!b), got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        val edit = fix.edit?.changes?.values?.flatten()?.firstOrNull()?.newText ?: ""
+        assertEquals("b", edit.trim(), "!(!b) should simplify to `b`, got `$edit`")
+    }
+
+    @Test
     fun `non-exhaustive match offers a Fill-missing-arms quick-fix`() {
         // #105: V0601 carries the exact missing constructors as a FillMatchArms
         // FixHint; the LSP turns it into a one-click "Add missing match arms" fix.

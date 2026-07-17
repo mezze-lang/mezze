@@ -4366,8 +4366,131 @@ class MezzeTextDocumentService(
                 val delRange = Range(Position(startLine, 0), Position(startLine + 1, 0))
                 out.add(Either.forRight(quickFix("Remove unused import", listOf(TextEdit(delRange, "")))))
             }
+            WarningCode.W0301_DISCARDED_VALUE.display() -> {
+                // A bare, effect-free statement — remove its whole line.
+                val startLine = diagnostic.range.start.line
+                val delRange = Range(Position(startLine, 0), Position(startLine + 1, 0))
+                out.add(Either.forRight(quickFix("Remove discarded expression", listOf(TextEdit(delRange, "")))))
+            }
+            WarningCode.W0303_REDUNDANT_BOOLEAN.display() -> {
+                // Rewrite from the PARSED AST (never source-text regex): find the
+                // redundant-boolean node at the diagnostic loc and build the
+                // replacement from the real sub-expression's source slice.
+                val fix = simplifyRedundantBoolean(state, diagnostic.range)
+                if (fix != null) {
+                    out.add(Either.forRight(quickFix("Simplify to `${fix.second}`",
+                        listOf(TextEdit(fix.first, fix.second)))))
+                }
+            }
         }
         return out
+    }
+
+    /**
+     * #106: simplify a W0303 redundant-boolean expression using the PARSED AST
+     * the LSP already holds (no regex). Handles `!(!b)` -> `b`,
+     * `x == True`/`True == x` -> `x`, `x == False`/`False == x` -> `!(x)`, and
+     * `if b then True else False` -> `b`. Returns the (range, replacement) or
+     * null when the shape isn't one we rewrite. The inner sub-expression is
+     * copied verbatim from source via its own loc — so nested/multi-line
+     * expressions survive intact.
+     */
+    private fun simplifyRedundantBoolean(state: DocumentState, range: Range): Pair<Range, String>? {
+        val parsed = state.parsedModule ?: return null
+        // The W0303 diagnostic spans the WHOLE redundant expression, so find the
+        // node whose loc matches that span (not the innermost node at the start,
+        // which would be the left operand).
+        val node = findParsedExprCovering(parsed, range) ?: return null
+        val content = state.content
+
+        fun srcOf(loc: com.mezze.language.parsedast.Loc): String = sliceSource(content, loc)
+        fun isBoolLit(e: ParsedExpr, name: String) =
+            e is ParsedVariantConstruct && e.value == null && e.constructor == name
+
+        val replacement: String? = when (node) {
+            // !(!b) -> b   (unwrap parens around the inner)
+            is ParsedUnaryOp -> if (node.op == "!") {
+                val inner = unwrapParens(node.operand)
+                if (inner is ParsedUnaryOp && inner.op == "!") srcOf(unwrapParens(inner.operand).loc) else null
+            } else null
+
+            // x == True -> x ; x == False -> !(x)  (either side)
+            is ParsedBinaryOp -> if (node.op == "==") {
+                when {
+                    isBoolLit(node.right, "True") -> srcOf(node.left.loc)
+                    isBoolLit(node.left, "True") -> srcOf(node.right.loc)
+                    isBoolLit(node.right, "False") -> "!(${srcOf(node.left.loc)})"
+                    isBoolLit(node.left, "False") -> "!(${srcOf(node.right.loc)})"
+                    else -> null
+                }
+            } else null
+
+            // if b then True else False -> b
+            is ParsedIf -> if (isBoolLit(node.thenBranch, "True") && isBoolLit(node.elseBranch, "False"))
+                srcOf(node.condition.loc) else null
+
+            else -> null
+        }
+        if (replacement == null) return null
+        return locToRange(node.loc) to replacement
+    }
+
+    /** Verbatim source slice for a [Loc] (1-based lines/cols). */
+    private fun sliceSource(content: String, loc: com.mezze.language.parsedast.Loc): String {
+        val lines = content.split('\n')
+        if (loc.startLine == loc.endLine) {
+            val line = lines.getOrNull(loc.startLine - 1) ?: return ""
+            return line.substring(
+                (loc.startCol - 1).coerceIn(0, line.length),
+                (loc.endCol).coerceIn(0, line.length)
+            )
+        }
+        val sb = StringBuilder()
+        for (ln in loc.startLine..loc.endLine) {
+            val line = lines.getOrNull(ln - 1) ?: continue
+            when (ln) {
+                loc.startLine -> sb.append(line.substring((loc.startCol - 1).coerceIn(0, line.length)))
+                loc.endLine -> sb.append("\n").append(line.substring(0, loc.endCol.coerceIn(0, line.length)))
+                else -> sb.append("\n").append(line)
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun unwrapParens(e: ParsedExpr): ParsedExpr =
+        if (e is ParsedParens) unwrapParens(e.expr) else e
+
+    /**
+     * Find the SMALLEST [ParsedExpr] whose loc fully covers [range] (both sides
+     * 1-based-adjusted here). Walks the parsed module's decl bodies structurally
+     * via the shared [children]. Used to map a diagnostic's span back to the
+     * exact AST node the linter flagged.
+     */
+    private fun findParsedExprCovering(module: ParsedModule, range: Range): ParsedExpr? {
+        val rStartLine = range.start.line + 1
+        val rStartCol = range.start.character + 1
+        val rEndLine = range.end.line + 1
+        val rEndCol = range.end.character
+        fun covers(loc: com.mezze.language.parsedast.Loc): Boolean {
+            val startsBefore = loc.startLine < rStartLine ||
+                (loc.startLine == rStartLine && loc.startCol <= rStartCol)
+            val endsAfter = loc.endLine > rEndLine ||
+                (loc.endLine == rEndLine && loc.endCol >= rEndCol)
+            return startsBefore && endsAfter
+        }
+        var best: ParsedExpr? = null
+        fun visit(e: ParsedExpr) {
+            if (covers(e.loc)) best = e // smaller covering nodes overwrite larger ones
+            for (child in e.children()) visit(child)
+        }
+        for (decl in module.decls) {
+            when (decl) {
+                is ParsedLetDecl -> visit(decl.value)
+                is ParsedTopLevelExpr -> visit(decl.expression)
+                else -> {}
+            }
+        }
+        return best
     }
 
     /**

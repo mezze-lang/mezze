@@ -87,7 +87,7 @@ object DeadCodeLinter {
             else -> {}
         }
 
-        for (child in childExprs(expr)) walkExpr(child, findings)
+        for (child in expr.children()) walkExpr(child, findings)
     }
 
     private fun checkConstantCondition(expr: ParsedExpr, findings: MutableList<Finding>) {
@@ -134,44 +134,4 @@ object DeadCodeLinter {
     }
 
     private fun unwrap(e: ParsedExpr): ParsedExpr = if (e is ParsedParens) unwrap(e.expr) else e
-
-    /** Direct sub-expressions of [expr], for the recursive walk. Exhaustive over
-     *  every [ParsedExpr] variant so a new node type is a compile error here. */
-    private fun childExprs(expr: ParsedExpr): List<ParsedExpr> = when (expr) {
-        is ParsedIntLit, is ParsedNatLit, is ParsedFloatLit, is ParsedFracLit,
-        is ParsedStringLit, is ParsedCharLit, is ParsedIdentifier,
-        is ParsedPipePlaceholder -> emptyList()
-        is ParsedParens -> listOf(expr.expr)
-        is ParsedSeqLit -> expr.elements.map { el ->
-            when (el) {
-                is ParsedSeqElement.Regular -> el.expr
-                is ParsedSeqElement.Spread -> el.expr
-            }
-        }
-        is ParsedRecordLit -> expr.entries.flatMap { entry ->
-            when (entry) {
-                is ParsedRecordEntry.Field -> listOfNotNull(entry.value)
-                is ParsedRecordEntry.Spread -> listOf(entry.expr)
-            }
-        }
-        is ParsedMemberAccess -> listOf(expr.receiver)
-        is ParsedVariantConstruct -> listOfNotNull(expr.value)
-        is ParsedLambda -> listOf(expr.body)
-        is ParsedFunctionCall -> listOf(expr.function, expr.arguments)
-        is ParsedBinaryOp -> listOf(expr.left, expr.right)
-        is ParsedUnaryOp -> listOf(expr.operand)
-        is ParsedPipe -> listOf(expr.left, expr.right)
-        is ParsedIf -> listOf(expr.condition, expr.thenBranch, expr.elseBranch)
-        is ParsedMatch -> listOf(expr.scrutinee) +
-            expr.cases.flatMap { case -> listOfNotNull(case.guard) + case.body + case.ifLetBindings.map { it.expr } }
-        is ParsedDo -> expr.statements.mapNotNull { stmt ->
-            when (stmt) {
-                is ParsedStatement.Let -> stmt.value
-                is ParsedStatement.Expr -> stmt.expr
-                is ParsedStatement.Bind -> stmt.expr
-            }
-        } + expr.result
-        is ParsedPerform -> expr.handlers.mapNotNull { it.params } + expr.body
-        is ParsedEffectCall -> listOf(expr.arguments)
-    }
 }
