@@ -573,72 +573,18 @@ internal class ImplValidator(
         return stamped.transformChildren { stampTypeHashes(it) }
     }
 
-    private fun substituteTypeParams(type: MezzeType, substitution: Map<String, MezzeType>): MezzeType {
-        return when (type) {
-            is MezzeType.VarType -> {
-                substitution[type.variable.name] ?: type
-            }
-            is MezzeType.FunctionType -> MezzeType.FunctionType(
-                paramType = substituteTypeParams(type.paramType, substitution),
-                returnType = substituteTypeParams(type.returnType, substitution),
-                effects = type.effects,
-                abilityConstraints = type.abilityConstraints
-            )
-            is MezzeType.RecordType -> MezzeType.RecordType(
-                fields = type.fields.mapValues { (_, fieldType) ->
-                    substituteTypeParams(fieldType, substitution)
-                },
-                rowVar = type.rowVar,
-                typeName = type.typeName,
-                typeHash = type.typeHash
-            )
-            is MezzeType.VariantType -> MezzeType.VariantType(
-                constructors = type.constructors.mapValues { (_, payloadType) ->
-                    payloadType?.let { substituteTypeParams(it, substitution) }
-                },
-                rowVar = type.rowVar,
-                typeName = type.typeName,
-                typeHash = type.typeHash
-            )
+    private fun substituteTypeParams(type: MezzeType, substitution: Map<String, MezzeType>): MezzeType =
+        when (type) {
+            // A type var is replaced by its substitute (by name); everything else
+            // just recurses into its children. transformChildren rebuilds each
+            // node via copy(), preserving all non-child fields (typeName,
+            // typeHash, rowVar, effects). TypeApplication keeps its own case so
+            // WellKnownTypeApp.of still fills in a well-known hash when absent.
+            is MezzeType.VarType -> substitution[type.variable.name] ?: type
             is MezzeType.TypeApplication -> WellKnownTypeApp.of(
-                constructor = type.constructor,
-                args = type.args.map { substituteTypeParams(it, substitution) },
-                typeHash = type.typeHash
-            )
-            is MezzeType.ListType -> MezzeType.ListType(
-                elementType = substituteTypeParams(type.elementType, substitution)
-            )
-            is MezzeType.SeqType -> MezzeType.SeqType(
-                elementType = substituteTypeParams(type.elementType, substitution)
-            )
-            is MezzeType.SetType -> MezzeType.SetType(
-                elementType = substituteTypeParams(type.elementType, substitution)
-            )
-            is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-                keyType = substituteTypeParams(type.keyType, substitution),
-                valueType = substituteTypeParams(type.valueType, substitution)
-            )
-            is MezzeType.SortedSetType -> MezzeType.SortedSetType(
-                elementType = substituteTypeParams(type.elementType, substitution)
-            )
-            is MezzeType.MapType -> MezzeType.MapType(
-                keyType = substituteTypeParams(type.keyType, substitution),
-                valueType = substituteTypeParams(type.valueType, substitution)
-            )
-            is MezzeType.SuspendedType -> MezzeType.SuspendedType(
-                valueType = substituteTypeParams(type.valueType, substitution),
-                effects = type.effects
-            )
-            is MezzeType.NewtypeType -> MezzeType.NewtypeType(
-                name = type.name, constructor = type.constructor,
-                wrappedType = substituteTypeParams(type.wrappedType, substitution)
-            )
-            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-            is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
-            is MezzeType.CharType, is MezzeType.EffectRow -> type
+                type.constructor, type.args.map { substituteTypeParams(it, substitution) }, type.typeHash)
+            else -> type.transformChildren { substituteTypeParams(it, substitution) }
         }
-    }
 
     private fun isFunctionLike(type: MezzeType): Boolean {
         return when (type) {

@@ -836,58 +836,14 @@ private fun formatFieldMismatch(
 }
 
 private fun substituteTypeParamsByName(type: MezzeType, subst: Map<String, MezzeType>): MezzeType {
-    return when (type) {
-        is MezzeType.VarType -> {
-            val name = type.variable.name
-            subst[name] ?: subst["'$name"] ?: subst[name.removePrefix("'")] ?: type
-        }
-        is MezzeType.RecordType -> MezzeType.RecordType(
-            fields = type.fields.mapValues { (_, fieldType) -> substituteTypeParamsByName(fieldType, subst) },
-            rowVar = type.rowVar
-        )
-        is MezzeType.FunctionType -> MezzeType.FunctionType(
-            paramType = substituteTypeParamsByName(type.paramType, subst),
-            returnType = substituteTypeParamsByName(type.returnType, subst),
-            effects = type.effects,
-            abilityConstraints = type.abilityConstraints
-        )
-        is MezzeType.TypeApplication -> MezzeType.TypeApplication(
-            constructor = type.constructor,
-            args = type.args.map { substituteTypeParamsByName(it, subst) },
-            typeHash = type.typeHash
-        )
-        is MezzeType.SeqType -> MezzeType.SeqType(substituteTypeParamsByName(type.elementType, subst))
-        is MezzeType.ListType -> MezzeType.ListType(substituteTypeParamsByName(type.elementType, subst))
-        is MezzeType.SetType -> MezzeType.SetType(substituteTypeParamsByName(type.elementType, subst))
-        is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-            keyType = substituteTypeParamsByName(type.keyType, subst),
-            valueType = substituteTypeParamsByName(type.valueType, subst)
-        )
-        is MezzeType.SortedSetType -> MezzeType.SortedSetType(substituteTypeParamsByName(type.elementType, subst))
-        is MezzeType.MapType -> MezzeType.MapType(
-            keyType = substituteTypeParamsByName(type.keyType, subst),
-            valueType = substituteTypeParamsByName(type.valueType, subst)
-        )
-        is MezzeType.VariantType -> MezzeType.VariantType(
-            constructors = type.constructors.mapValues { (_, dataType) ->
-                dataType?.let { substituteTypeParamsByName(it, subst) }
-            },
-            rowVar = type.rowVar
-        )
-        is MezzeType.SuspendedType -> MezzeType.SuspendedType(
-            valueType = substituteTypeParamsByName(type.valueType, subst),
-            effects = type.effects
-        )
-        is MezzeType.NewtypeType -> MezzeType.NewtypeType(
-            type.name,
-            type.constructor,
-            substituteTypeParamsByName(type.wrappedType, subst)
-        )
-        is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
-        is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
-        is MezzeType.CharType, is MezzeType.EffectRow -> type
+    // Only a type var is replaced (by name, tolerating the `'` prefix either
+    // way); every other node just recurses via transformChildren, which
+    // rebuilds it with copy() and so preserves typeName/typeHash/rowVar/effects.
+    if (type is MezzeType.VarType) {
+        val name = type.variable.name
+        return subst[name] ?: subst["'$name"] ?: subst[name.removePrefix("'")] ?: type
     }
+    return type.transformChildren { substituteTypeParamsByName(it, subst) }
 }
 
 internal fun expandTypeApplicationToRecord(typeApp: MezzeType.TypeApplication, registry: DeclarationRegistry): MezzeType.RecordType? {
