@@ -344,6 +344,16 @@ public final class BytecodeCompiler {
     public java.util.List<RootNode> compileWithCallees(java.util.List<FunctionIR> functions) {
         var out = new java.util.ArrayList<RootNode>(functions.size());
         for (FunctionIR ir : functions) {
+            // Pre-register a placeholder trampoline ONLY when this
+            // function has a tail call in its body — that's the only case
+            // where the body can self-reference (via a self-tail-call whose
+            // CallDirectIR needs the target-hash resolved during
+            // supports()/emit()). Non-tail-calling functions can't
+            // self-reference in a way that needs pre-registration.
+            if (hasTailCall(ir.getBody())) {
+                compiledCallTargets.computeIfAbsent(ir.getHash(),
+                        h -> new BdslTrampolineRootNode(language, ir.getName()).getCallTarget());
+            }
             if (!supports(ir)) {
                 throw new IllegalArgumentException(
                     "BytecodeCompiler cannot lower FunctionIR '" + ir.getName()
@@ -369,6 +379,55 @@ public final class BytecodeCompiler {
         final int argCount = ir.getCaptureSlots().size() + ir.getParamSlots().size();
         final int localCount = ir.getLocalSlots().size();
 
+        // Fast-path: if the body has NO tail calls, the BDSL root never
+        // throws TailCallException, so the trampoline wrapper is dead
+        // weight (~15-20ns per call from the outer LoopNode + DirectCallNode
+        // indirection). Skip the wrapper and return the raw BDSL root.
+        final boolean needsTrampoline = hasTailCall(ir.getBody());
+
+        // Two-phase construction to support self-recursion:
+        //   1. Create (or reuse a pre-registered) trampoline WITHOUT its
+        //      inner, register its CallTarget under ir.getHash() so
+        //      self-tail-calls in the body resolve to it during BDSL
+        //      emission (baked as a ConstantOperand of TailCallDirectN).
+        //   2. Build the BDSL inner.
+        //   3. Wire the inner in via attachInner.
+        // The trampoline's TrampolineRepeatingNode redirects self-target
+        // TailCallExceptions to a DirectCallNode on the inner, so
+        // self-recursion stays stack-flat.
+        //
+        // Pre-registration: compileWithCallees may have already registered
+        // a placeholder trampoline before calling supports() so mutual /
+        // self references resolve. Reuse that trampoline here so the
+        // CallTarget baked into TailCallDirectN matches the one that will
+        // dispatch at runtime.
+        // If this function has tail calls, allocate the trampoline first
+        // and register its CallTarget under ir.getHash() so self-tail-calls
+        // in the body resolve to it during BDSL emission. Otherwise skip.
+        //
+        // Note: even if THIS function doesn't tail-call itself, callers
+        // of it may tail-call to it. Those callers throw TailCallException
+        // carrying THIS function's CallTarget, caught by the caller's own
+        // trampoline. So the "no tail call in body" fast path is safe —
+        // the caller's trampoline handles the cross-fn case regardless of
+        // whether the callee is trampolined.
+        BdslTrampolineRootNode trampoline = null;
+        if (needsTrampoline) {
+            CallTarget registered = compiledCallTargets.get(ir.getHash());
+            BdslTrampolineRootNode existing = null;
+            if (registered instanceof com.oracle.truffle.api.RootCallTarget rct
+                    && rct.getRootNode() instanceof BdslTrampolineRootNode t
+                    && t.getInnerTarget() == null) {
+                existing = t;
+            }
+            if (existing != null) {
+                trampoline = existing;
+            } else {
+                trampoline = new BdslTrampolineRootNode(language, ir.getName());
+                compiledCallTargets.put(ir.getHash(), trampoline.getCallTarget());
+            }
+        }
+
         var nodes = MezzeBytecodeRootNodeGen.create(language, BytecodeConfig.DEFAULT, b -> {
             b.beginRoot();
 
@@ -388,7 +447,93 @@ public final class BytecodeCompiler {
 
             b.endRoot();
         });
-        return nodes.getNode(0);
+        RootNode inner = nodes.getNode(0);
+        if (trampoline != null) {
+            trampoline.attachInner(inner);
+            return trampoline;
+        }
+        // No tail calls in body — return raw BDSL root, skip trampoline overhead.
+        return inner;
+    }
+
+    /**
+     * Static analysis: does the IR body contain any tail-call site
+     * (CallDirectIR with isTailCall=true or CallIndirectIR with
+     * isTailCall=true)? Only functions whose bodies produce
+     * TailCallException need the outer trampoline wrapper.
+     */
+    private boolean hasTailCall(NodeIR node) {
+        if (node == null) return false;
+        if (node instanceof CallDirectIR c) {
+            if (c.isTailCall()) return true;
+            for (NodeIR arg : c.getArgs()) if (hasTailCall(arg)) return true;
+            return false;
+        }
+        if (node instanceof CallIndirectIR ci) {
+            if (ci.isTailCall()) return true;
+            return hasTailCall(ci.getFunction()) || hasTailCall(ci.getArg());
+        }
+        if (node instanceof CallLocalIR cl) {
+            return hasTailCall(cl.getArg());
+        }
+        if (node instanceof CallNativeIR cn) {
+            for (NodeIR arg : cn.getArgs()) if (hasTailCall(arg)) return true;
+            return hasTailCall(cn.getArg());
+        }
+        if (node instanceof InlineBinaryOpIR bin) {
+            return hasTailCall(bin.getLeft()) || hasTailCall(bin.getRight());
+        }
+        if (node instanceof IfIR i) {
+            return hasTailCall(i.getCond()) || hasTailCall(i.getThenBr()) || hasTailCall(i.getElseBr());
+        }
+        if (node instanceof BlockIR blk) {
+            for (StmtIR s : blk.getStmts()) {
+                NodeIR child = (s instanceof StmtIR.Let l) ? l.getValue()
+                             : ((StmtIR.Expr) s).getNode();
+                if (hasTailCall(child)) return true;
+            }
+            return hasTailCall(blk.getResult());
+        }
+        if (node instanceof MakeRecordIR m) {
+            for (FieldIR f : m.getFields()) if (hasTailCall(f.getValue())) return true;
+            return false;
+        }
+        if (node instanceof ReadFieldIR r) return hasTailCall(r.getRecord());
+        if (node instanceof RecordUpdateIR ru) {
+            if (hasTailCall(ru.getRecord())) return true;
+            for (FieldIR f : ru.getUpdates()) if (hasTailCall(f.getValue())) return true;
+            return false;
+        }
+        if (node instanceof MakeVariantIR mv) {
+            return mv.getPayload() != null && hasTailCall(mv.getPayload());
+        }
+        if (node instanceof MakeSeqIR seq) {
+            for (SeqElementIR e : seq.getElements()) {
+                if (e instanceof SeqElementIR.Regular reg && hasTailCall(reg.getNode())) return true;
+            }
+            return false;
+        }
+        // MakeLambdaIR: captures are frame slot indices, no NodeIR children.
+        // (A tail call inside a lambda body sits in a different FunctionIR
+        // that we'll analyze separately when it's compiled.)
+        if (node instanceof MakeLambdaIR) return false;
+        if (node instanceof MatchIR m) {
+            if (hasTailCall(m.getScrutinee())) return true;
+            for (CaseIR c : m.getCases()) {
+                if (c.getGuard() != null && hasTailCall(c.getGuard())) return true;
+                if (hasTailCall(c.getBody())) return true;
+            }
+            return false;
+        }
+        if (node instanceof WriteLocalIR w) return hasTailCall(w.getValue());
+        if (node instanceof InterpolatedStringIR is) {
+            for (StringPartIR p : is.getParts()) {
+                if (p instanceof StringPartIR.Expr ep && hasTailCall(ep.getNode())) return true;
+            }
+            return false;
+        }
+        // Literals, ReadLocal, Unit — no children.
+        return false;
     }
 
     private void emitNode(NodeIR node, MezzeBytecodeRootNodeGen.Builder b,
