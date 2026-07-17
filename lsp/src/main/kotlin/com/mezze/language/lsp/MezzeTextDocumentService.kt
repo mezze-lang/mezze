@@ -1954,10 +1954,13 @@ class MezzeTextDocumentService(
         // Build a label → "is a match" lookup. Constructors that belong to
         // the expected variant family count; everything else gets the
         // default rank.
-        val knownVariants = mutableMapOf<String, String>()
-        knownVariants["True"] = "Bool"; knownVariants["False"] = "Bool"
-        knownVariants["Some"] = "Option"; knownVariants["None"] = "Option"
-        knownVariants["Ok"] = "Result"; knownVariants["Err"] = "Result"
+        // Core-variant constructor names come from ast/BuiltinTypes (single
+        // source of truth) so this can't drift from the compiler's own set.
+        val knownVariants = mutableMapOf(
+            BuiltinTypes.TRUE to "Bool", BuiltinTypes.FALSE to "Bool",
+            BuiltinTypes.SOME to "Option", BuiltinTypes.NONE to "Option",
+            BuiltinTypes.OK to "Result", BuiltinTypes.ERR to "Result",
+        )
         state.parsedModule?.decls?.filterIsInstance<ParsedTypeDecl>()?.forEach { td ->
             val def = td.definition
             if (def is com.mezze.language.parsedast.ParsedVariantDef) {
