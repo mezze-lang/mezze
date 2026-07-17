@@ -96,8 +96,19 @@ fun main(args: Array<String>) {
         com.mezze.language.truffleir.TrivialWrapperInliner.inline(mutErasedFunctions)
     }
 
+    // Rebuild the dependency graph from the post-inline function bodies.
+    // `PrecompiledStdlib.stdlibDependencyGraph` was computed from the raw
+    // pre-inline IR — after inlining removes the last direct caller of a
+    // wrapper, the pre-inline graph still lists that wrapper as
+    // reachable from the caller and every user binary keeps carrying it.
+    // Rebuilding here means downstream reachability BFS (mez build,
+    // mez build --native) correctly drops those orphaned wrappers.
+    val dependencyGraph = com.mezze.language.stdlib.FunctionIRReachability
+        .buildDependencyGraph(functions.values)
+
     val initTime = (System.nanoTime() - startTime) / 1_000_000
-    println("Stdlib compiled: ${functions.size} functions, ${performers.size} performers (${initTime}ms)")
+    println("Stdlib compiled: ${functions.size} functions, ${performers.size} performers, " +
+        "${dependencyGraph.size} nodes in dep graph (${initTime}ms)")
 
     // Eagerly typecheck every stdlib `.mz` file so its decls — especially
     // `effect` and `performer` declarations — show up in stdlib.sqlite's
@@ -216,8 +227,9 @@ fun main(args: Array<String>) {
                 }
             }
 
-            // Store dependency graph
-            for ((hash, deps) in precompiled.stdlibDependencyGraph) {
+            // Store dependency graph — computed from post-inline IR above,
+            // not `precompiled.stdlibDependencyGraph` (which is pre-inline).
+            for ((hash, deps) in dependencyGraph) {
                 if (deps.isNotEmpty()) {
                     store.setMetadata("deps:${hash.hex}", deps.joinToString(";") { it.hex })
                 }
@@ -271,7 +283,7 @@ fun main(args: Array<String>) {
         importContext = precompiled.preludeImportContext,
         functions = functions,
         performers = performers.map { it.toList() },
-        dependencyGraph = precompiled.stdlibDependencyGraph,
+        dependencyGraph = dependencyGraph,  // post-inline; see comment above
         abilityImpls = precompiled.stdlibAbilityImpls,
         declHashes = precompiled.stdlibDeclHashes,
         moduleHashes = precompiled.stdlibModuleHashes,

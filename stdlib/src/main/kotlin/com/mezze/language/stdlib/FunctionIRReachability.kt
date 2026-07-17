@@ -63,6 +63,39 @@ object FunctionIRReachability {
     }
 
     /**
+     * Build a `hash → set-of-directly-referenced-hashes` map for a set
+     * of `FunctionIR`s. Same shape as the precomputed
+     * `StdlibRuntimeData.dependencyGraph`, but built from whatever IR
+     * is passed in — critical for post-inlining recompute, where
+     * `TrivialWrapperInliner` may have removed the sole remaining
+     * caller of a wrapper. Using the pre-inline snapshot would keep
+     * the wrapper alive in every user binary even when nothing calls
+     * it any more.
+     *
+     * Output is a fresh `HashMap<Hash, Set<Hash>>`; the caller may
+     * cache it. Only edges present in the input are emitted (no
+     * transitive closure), matching the invariant of
+     * [collectReferencedHashes] which does its own BFS.
+     */
+    @JvmStatic
+    fun buildDependencyGraph(functions: Collection<FunctionIR>): Map<Hash, Set<Hash>> {
+        val out = HashMap<Hash, Set<Hash>>(functions.size)
+        val queue = ArrayDeque<Hash>()
+        for (fn in functions) {
+            queue.clear()
+            collectHashesFromNode(fn.body, queue)
+            if (queue.isNotEmpty()) {
+                val deps = HashSet<Hash>(queue.size)
+                deps.addAll(queue)
+                // Self-edges are noise for downstream reachability BFS.
+                deps.remove(fn.hash)
+                if (deps.isNotEmpty()) out[fn.hash] = deps
+            }
+        }
+        return out
+    }
+
+    /**
      * Walk a single [NodeIR] tree, adding every hash referenced by any
      * sub-node to [queue]. Used both internally by
      * [collectReferencedHashes] and by external callers (e.g. v2
