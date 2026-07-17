@@ -1056,6 +1056,38 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `effect inlay hint shows the inferred effect row on an effectful function`() {
+        // #119: a function that performs an effect carries an effect row in its
+        // inferred type — surface it inline as `<Logger>`. Uniquely-Mezze.
+        val src = """
+            effect Logger where {
+              log: { msg: Str } -> {}
+            }
+            let greet = {name: Str} -> Logger.log { msg = name }
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val hints = inlayHints(uri, src)
+        val labels = hints.map { labelText(it) }
+        assertTrue(labels.any { it.contains("<") && it.contains("Logger") },
+            "expected an effect-row hint `<Logger>` on `greet`, got: $labels")
+    }
+
+    @Test
+    fun `no effect inlay hint on a pure function`() {
+        val src = "let add = {a: Int, b: Int} -> a + b"
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val hints = inlayHints(uri, src)
+        val labels = hints.map { labelText(it) }
+        // A pure function must not get an effect-row hint (angle-bracket effect).
+        assertTrue(labels.none { it.trim().startsWith("<") && it.contains(">") },
+            "pure function should have no effect-row hint, got: $labels")
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"
