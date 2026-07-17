@@ -4018,6 +4018,35 @@ class MezzeTextDocumentService(
         }
     }
 
+    /**
+     * Linked editing: the same-file, same-symbol occurrence ranges of the
+     * identifier under the cursor, so the editor edits them all together as
+     * the user types (rename-as-you-type). Reuses the same scope-aware
+     * TypedVar walk documentHighlight uses. Returns null on a keyword or when
+     * there's nothing to link.
+     */
+    override fun linkedEditingRange(
+        params: LinkedEditingRangeParams
+    ): CompletableFuture<LinkedEditingRanges?> {
+        return CompletableFuture.supplyAsync {
+            val uri = params.textDocument.uri
+            val state = documents[uri] ?: return@supplyAsync null
+            val lines = state.content.lines()
+            if (params.position.line >= lines.size) return@supplyAsync null
+            val word = extractWordAt(lines[params.position.line], params.position.character)
+                ?: return@supplyAsync null
+            if (word in mezzeKeywordsForRenameGate) return@supplyAsync null
+            val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
+                ?: return@supplyAsync null
+
+            val locs = mutableListOf<Location>()
+            collectReferencesInModule(typedModule, word, uri, locs)
+            // Need at least the def + one use (or two occurrences) to be useful.
+            if (locs.size < 2) return@supplyAsync null
+            LinkedEditingRanges(locs.map { it.range })
+        }
+    }
+
     // ========== Selection Range ==========
 
     /**

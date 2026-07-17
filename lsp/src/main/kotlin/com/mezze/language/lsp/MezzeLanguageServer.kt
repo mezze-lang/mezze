@@ -100,6 +100,10 @@ class MezzeLanguageServer(
             // Document highlight (cursor-on-symbol same-file occurrence highlight)
             documentHighlightProvider = Either.forLeft(true)
 
+            // Linked editing (rename-as-you-type: edit all same-scope occurrences
+            // of the symbol under the cursor together, no explicit rename command)
+            linkedEditingRangeProvider = Either.forLeft(true)
+
             // Call hierarchy (incoming + outgoing call exploration via the v7 edges table)
             callHierarchyProvider = Either.forLeft(true)
 

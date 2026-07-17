@@ -1030,6 +1030,32 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `linkedEditingRange returns all same-symbol occurrence ranges`() {
+        // #118: cursor on a binding used more than once returns every
+        // occurrence range so the editor edits them together as you type.
+        val (uri, _) = openSingleFile("""
+            let f = {} -> do
+              let count = 5
+              count + count
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        // Cursor on the `count` definition (line 1, `  let count = 5`, char 6).
+        val ranges = server.textDocumentService.linkedEditingRange(LinkedEditingRangeParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(1, 6)
+        }).get(5, TimeUnit.SECONDS)
+            ?: fail("expected linked-editing ranges for `count`")
+
+        // def + two uses = at least 3 occurrences.
+        assertTrue(ranges.ranges.size >= 2,
+            "expected all `count` occurrences linked, got ${ranges.ranges.size}: ${ranges.ranges}")
+        // Every range should span 5 chars (`count`).
+        assertTrue(ranges.ranges.all { it.end.character - it.start.character == 5 || it.start.line != it.end.line },
+            "each linked range should cover `count` (5 chars), got: ${ranges.ranges}")
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"
