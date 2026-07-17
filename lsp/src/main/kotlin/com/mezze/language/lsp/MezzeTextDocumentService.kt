@@ -3598,6 +3598,25 @@ class MezzeTextDocumentService(
                     }
                 }
 
+            // Add type symbols from the parsed module, with record fields /
+            // variant constructors as CHILD symbols so the outline / breadcrumb
+            // shows the type's shape (#100).
+            state.parsedModule?.decls?.filterIsInstance<ParsedTypeDecl>()?.forEach { decl ->
+                val (kind, children) = when (val def = decl.definition) {
+                    is com.mezze.language.parsedast.ParsedRecordDef -> SymbolKind.Struct to
+                        def.fields.mapNotNull { f ->
+                            createDocumentSymbol(f.name, SymbolKind.Field, f.loc)
+                        }
+                    is com.mezze.language.parsedast.ParsedVariantDef -> SymbolKind.Enum to
+                        def.constructors.mapNotNull { c ->
+                            createDocumentSymbol(c.name, SymbolKind.EnumMember, c.loc)
+                        }
+                    is com.mezze.language.parsedast.ParsedNewtypeDef -> SymbolKind.Struct to emptyList()
+                }
+                val symbol = createDocumentSymbol(decl.name, kind, decl.loc, children = children)
+                if (symbol != null) symbols.add(Either.forRight(symbol))
+            }
+
             // Add effect symbols from parsed module
             state.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach { decl ->
                 val symbol = createDocumentSymbol(
@@ -3630,7 +3649,8 @@ class MezzeTextDocumentService(
         name: String,
         kind: SymbolKind,
         location: Loc?,
-        detail: String? = null
+        detail: String? = null,
+        children: List<DocumentSymbol> = emptyList()
     ): DocumentSymbol? {
         if (location == null) return null
 
@@ -3639,7 +3659,7 @@ class MezzeTextDocumentService(
             Position(location.startLine - 1, location.startCol + name.length - 1)
         )
 
-        return DocumentSymbol(name, kind, range, range, detail, emptyList())
+        return DocumentSymbol(name, kind, range, range, detail, children)
     }
 
     // ========== References ==========
@@ -5241,6 +5261,49 @@ class MezzeTextDocumentService(
      * Partial polymorphic types like `Option 'a` are still shown — the
      * constructor name is informative.
      */
+    /**
+     * #100: inlay `: T` hints on UN-annotated lambda parameters. For
+     * `{ a, b } -> …` we show each param's inferred type; a param already
+     * written as `a: Int` in source is skipped (checked by peeking at the char
+     * after the name, so no parsed/typed matching is needed).
+     */
+    private fun emitParamHints(
+        lambda: com.mezze.language.typedast.TypedLambda,
+        sourceLines: List<String>,
+        typeAliases: Map<String, TypeAliasInfo>,
+        hints: MutableList<InlayHint>
+    ) {
+        // If the param list is written with annotations (`{x: Int} -> …`), the
+        // whole list already has explicit types — don't hint any of its params.
+        // Detected by scanning the source of the lambda's opening line up to the
+        // arrow for a `:` (params rarely wrap across lines).
+        val headLineIdx = lambda.loc.startLine - 1
+        val headLine = sourceLines.getOrNull(headLineIdx) ?: return
+        val arrowAt = headLine.indexOf("->")
+        val paramRegion = if (arrowAt >= 0) headLine.substring(0, arrowAt) else headLine
+        if (paramRegion.contains(':')) return
+
+        for (param in lambda.params) {
+            if (param.name.startsWith("_")) continue // intentionally-ignored param
+            val typeStr = prettyPrintTypeWithAliases(param.type, typeAliases)
+            if (isUninformativeType(typeStr)) continue
+
+            if (param.loc.startLine != param.loc.endLine) continue
+            val lineIdx = param.loc.startLine - 1
+            // Anchor the hint right after the bare name (the param's whole span
+            // when untyped, which is the only case we reach here).
+            val anchorCol = param.loc.endCol
+            val hint = InlayHint()
+            hint.position = Position(lineIdx, anchorCol)
+            hint.setLabel(": $typeStr")
+            hint.kind = InlayHintKind.Type
+            hint.textEdits = listOf(
+                TextEdit(Range(Position(lineIdx, anchorCol), Position(lineIdx, anchorCol)), ": $typeStr")
+            )
+            hints.add(hint)
+        }
+    }
+
     private fun emitLetNameHint(
         name: String,
         type: com.mezze.language.ast.MezzeType,
@@ -5446,7 +5509,10 @@ class MezzeTextDocumentService(
                 }
             }
             is com.mezze.language.typedast.TypedFieldAccess -> collectPipeHints(expr.record, hints, typeAliases, sourceLines)
-            is com.mezze.language.typedast.TypedLambda -> collectPipeHints(expr.body, hints, typeAliases, sourceLines)
+            is com.mezze.language.typedast.TypedLambda -> {
+                if (sourceLines.isNotEmpty()) emitParamHints(expr, sourceLines, typeAliases, hints)
+                collectPipeHints(expr.body, hints, typeAliases, sourceLines)
+            }
             is com.mezze.language.typedast.TypedMatch -> {
                 collectPipeHints(expr.scrutinee, hints, typeAliases, sourceLines)
                 for (case in expr.cases) collectPipeHints(case.body, hints, typeAliases, sourceLines)

@@ -296,6 +296,35 @@ class LspFeaturesTest {
         )
     }
 
+    @Test
+    fun `inlay hints show inferred types on un-annotated lambda params`() {
+        // #100: `{x} -> x + 1` — x is inferred Int; the LSP emits a `: Int`
+        // param hint. An already-annotated param (`{y: Int}`) is not hinted.
+        val (uri, source) = openSingleFile("""
+            let inc = {x} -> x + 1
+        """.trimIndent())
+
+        val hints = inlayHints(uri, source)
+        assertTrue(
+            hints.any { it.kind == InlayHintKind.Type && labelText(it).contains("Int") },
+            "expected a `: Int` param hint, got: ${hints.map { it.kind to labelText(it) }}"
+        )
+    }
+
+    @Test
+    fun `no param hint on an already-annotated lambda param`() {
+        val (uri, source) = openSingleFile("""
+            let inc = {x: Int} -> x + 1
+        """.trimIndent())
+        val hints = inlayHints(uri, source)
+        // The annotated `x: Int` param must NOT get a duplicate `: Int` hint.
+        // (A trailing return-type hint may still appear, but not on the param.)
+        assertTrue(
+            hints.none { labelText(it) == ": Int" && it.position.line == 0 },
+            "annotated param should not be hinted, got: ${hints.map { labelText(it) to it.position.line }}"
+        )
+    }
+
     // ===== References / Document highlight =============================
 
     @Test
@@ -363,6 +392,26 @@ class LspFeaturesTest {
         }
         assertTrue(names.contains("alpha"), "expected `alpha` in outline, got: $names")
         assertTrue(names.contains("beta"), "expected `beta` in outline, got: $names")
+    }
+
+    @Test
+    fun `documentSymbol includes record type with its fields as children`() {
+        // #100: a `type Point = { x, y }` appears in the outline as a Struct
+        // whose children are its fields.
+        val (uri, _) = openSingleFile("""
+            type Point = { x: Int, y: Int }
+        """.trimIndent())
+
+        val symbols = server.textDocumentService.documentSymbol(DocumentSymbolParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+        }).get(5, TimeUnit.SECONDS)
+
+        val point = symbols.mapNotNull { e -> if (e.isRight) e.right else null }
+            .firstOrNull { it.name == "Point" }
+            ?: fail("expected a `Point` type symbol, got: ${symbols.map { if (it.isRight) it.right.name else it.left.name }}")
+        val childNames = point.children?.map { it.name } ?: emptyList()
+        assertTrue(childNames.containsAll(listOf("x", "y")),
+            "expected Point's fields x,y as children, got: $childNames")
     }
 
     // ===== Diagnostics =================================================
