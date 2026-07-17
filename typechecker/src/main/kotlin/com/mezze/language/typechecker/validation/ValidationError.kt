@@ -84,6 +84,16 @@ sealed interface ValidationError {
                 emptyList()
             }
 
+        // Only offer a "fill arms" fix when the missing entries are REAL
+        // constructor names — the open-variant / wildcard-required cases stash a
+        // descriptive placeholder (`_ (…)`) that isn't insertable as an arm.
+        override val fixHints: List<FixHint>
+            get() {
+                val real = missingConstructors.filter { !it.startsWith("_") && !it.contains("(") }
+                return if (loc != null && real.isNotEmpty())
+                    listOf(FixHint.FillMatchArms(loc, real)) else emptyList()
+            }
+
         override fun message(): String = buildString {
             append("This match expression doesn't handle all cases")
             if (missingConstructors.isNotEmpty()) {

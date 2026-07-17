@@ -771,6 +771,11 @@ class MezzeTextDocumentService(
                 "declModulePath" to hint.declModulePath,
                 "declName" to hint.declName,
             )
+            is com.mezze.language.parsedast.diagnostics.FixHint.FillMatchArms -> mapOf(
+                "kind" to "FillMatchArms",
+                "loc" to loc,
+                "missingConstructors" to hint.missingConstructors,
+            )
         }
     }
 
@@ -4296,6 +4301,18 @@ class MezzeTextDocumentService(
                             if (edit != null) action.edit = edit
                             actions.add(Either.forRight(action))
                         }
+                        is FixHintData.FillMatchArms -> {
+                            val edit = buildFillMatchArmsEdit(state, hint.loc, hint.missingConstructors)
+                            if (edit != null) {
+                                val n = hint.missingConstructors.size
+                                val action = CodeAction("Add missing match ${if (n == 1) "arm" else "arms"} (${hint.missingConstructors.joinToString(", ")})")
+                                action.kind = CodeActionKind.QuickFix
+                                action.isPreferred = true
+                                action.diagnostics = listOf(diagnostic)
+                                action.edit = WorkspaceEdit(mapOf(uri to listOf(edit)))
+                                actions.add(Either.forRight(action))
+                            }
+                        }
                     }
                 }
             }
@@ -4502,6 +4519,43 @@ class MezzeTextDocumentService(
     }
 
     /**
+     * #105: build the edit that appends a `<Ctor> -> ???` arm for each missing
+     * constructor to a non-exhaustive match. [matchLoc] is the whole match
+     * expression. Arms are indented to match the existing arms (detected from
+     * the first arm line, or match-indent + 2 as a fallback), inserted after the
+     * match's last line.
+     */
+    private fun buildFillMatchArmsEdit(
+        state: DocumentState,
+        matchLoc: Range,
+        missingConstructors: List<String>
+    ): TextEdit? {
+        if (missingConstructors.isEmpty()) return null
+        val lines = state.content.split('\n')
+        val startLineIdx = matchLoc.start.line
+        val endLineIdx = matchLoc.end.line
+        val matchLine = lines.getOrNull(startLineIdx) ?: return null
+        val matchIndent = matchLine.takeWhile { it == ' ' }.length
+
+        // Arm indent: from the first non-blank line after the `match … is` line
+        // that looks like an arm; else match-indent + 2.
+        val armIndent = ((startLineIdx + 1)..endLineIdx)
+            .asSequence()
+            .mapNotNull { lines.getOrNull(it) }
+            .firstOrNull { it.isNotBlank() }
+            ?.takeWhile { it == ' ' }?.length
+            ?: (matchIndent + 2)
+        val pad = " ".repeat(armIndent)
+
+        val newArms = missingConstructors.joinToString("") { ctor -> "\n$pad$ctor -> ???" }
+
+        // Insert at the end of the match's last line.
+        val lastLine = lines.getOrNull(endLineIdx) ?: return null
+        val at = Position(endLineIdx, lastLine.length)
+        return TextEdit(Range(at, at), newArms)
+    }
+
+    /**
      * Pull structured [FixHintData] entries out of the diagnostic's
      * `data` field. We put them there in publishDiagnostics by reading
      * `TypeCheckError.fixHints`. Returns null when the diagnostic has
@@ -4545,6 +4599,11 @@ class MezzeTextDocumentService(
                     val modulePath = entry["declModulePath"] as? String ?: return@mapNotNull null
                     val declName = entry["declName"] as? String ?: return@mapNotNull null
                     FixHintData.AddPub(loc, modulePath, declName)
+                }
+                "FillMatchArms" -> {
+                    val ctors = dataAsList(entry["missingConstructors"])?.mapNotNull { it as? String }
+                        ?: return@mapNotNull null
+                    FixHintData.FillMatchArms(loc, ctors)
                 }
                 else -> null
             }
@@ -4615,6 +4674,7 @@ class MezzeTextDocumentService(
         data class WrapInPerform(val loc: Range, val effectName: String, val candidatePerformers: List<String>) : FixHintData()
         data class AddEffectToAnnotation(val loc: Range, val effectName: String) : FixHintData()
         data class AddPub(val loc: Range, val declModulePath: String, val declName: String) : FixHintData()
+        data class FillMatchArms(val loc: Range, val missingConstructors: List<String>) : FixHintData()
     }
 
     /**

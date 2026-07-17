@@ -178,6 +178,7 @@ object JsonDiagnosticFormatter {
         is FixHint.WrapInPerform -> FixHintJson.WrapInPerform(loc.toJson(), effectName, candidatePerformers)
         is FixHint.AddEffectToAnnotation -> FixHintJson.AddEffectToAnnotation(loc.toJson(), effectName)
         is FixHint.AddPub -> FixHintJson.AddPub(loc.toJson(), declModulePath, declName)
+        is FixHint.FillMatchArms -> FixHintJson.FillMatchArms(loc.toJson(), missingConstructors)
     }
 
     /**
@@ -309,6 +310,13 @@ sealed class FixHintJson {
         override val loc: SourceLocationJson,
         val declModulePath: String,
         val declName: String,
+    ) : FixHintJson()
+
+    @Serializable
+    @SerialName("FillMatchArms")
+    data class FillMatchArms(
+        override val loc: SourceLocationJson,
+        val missingConstructors: List<String>,
     ) : FixHintJson()
 }
 

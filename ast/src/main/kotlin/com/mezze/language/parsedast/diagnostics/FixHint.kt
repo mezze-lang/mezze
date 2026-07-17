@@ -84,4 +84,15 @@ sealed class FixHint {
         val declModulePath: String,
         val declName: String,
     ) : FixHint()
+
+    /**
+     * Fill in the missing arms of a non-exhaustive `match` (V0601). The
+     * MatchValidator already computed [missingConstructors]; the client
+     * inserts a `<Ctor> -> ???` arm for each, indented to match the match.
+     * [loc] is the whole match expression (for range + indentation).
+     */
+    data class FillMatchArms(
+        override val loc: Loc,
+        val missingConstructors: List<String>,
+    ) : FixHint()
 }

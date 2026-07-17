@@ -464,6 +464,36 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `non-exhaustive match offers a Fill-missing-arms quick-fix`() {
+        // #105: V0601 carries the exact missing constructors as a FillMatchArms
+        // FixHint; the LSP turns it into a one-click "Add missing match arms" fix.
+        val (uri, _) = openSingleFile("""
+            type Color = | Red, Green, Blue |
+            let name = {c: Color} -> match c is
+              Red -> "r"
+              Green -> "g"
+        """.trimIndent())
+
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags, "expected publishDiagnostics for non-exhaustive match")
+        val exhDiag = diags!!.diagnostics.firstOrNull { it.code?.left == "V0601" }
+            ?: fail("expected a V0601 diagnostic among ${diags.diagnostics.map { it.code?.left to it.message }}")
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = exhDiag.range
+            context = CodeActionContext(listOf(exhDiag))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val fill = actions.mapNotNull { e -> if (e.isRight) e.right else null }
+            .firstOrNull { it.title.contains("Add missing match arm") }
+            ?: fail("expected a fill-arms code action, got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        // The inserted text should mention the missing `Blue` constructor.
+        val editText = fill.edit?.changes?.values?.flatten()?.joinToString("") { it.newText } ?: ""
+        assertTrue(editText.contains("Blue"), "expected inserted arm for `Blue`, got edit: $editText")
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"
