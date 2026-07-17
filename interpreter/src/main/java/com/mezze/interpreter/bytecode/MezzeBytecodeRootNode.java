@@ -3,6 +3,7 @@ package com.mezze.interpreter.bytecode;
 import com.mezze.interpreter.nodes.builtin.dsl.NativeHandler;
 import com.mezze.interpreter.nodes.builtin.dsl.NativeHandlers;
 import com.mezze.interpreter.nodes.builtin.dsl.PositionalArgs;
+import com.mezze.interpreter.nodes.builtin.dsl.TypedNativeHandlers;
 import com.mezze.interpreter.nodes.function.TailCallException;
 import com.mezze.interpreter.nodes.inline.DirectAddNode;
 import com.mezze.interpreter.runtime.MezzeLanguage;
@@ -473,6 +474,49 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization
         public static Object doInvoke(NativeHandler handler, @Variadic Object[] args) {
             return handler.invoke(new PositionalArgs(args, null, null));
+        }
+    }
+
+    /**
+     * Typed fast path for (long, long) -> long natives: int add, sub,
+     * mul, div, mod, min, max, pow, gcd, lcm. Handler is looked up
+     * once at BDSL build time from {@link TypedNativeHandlers} and
+     * baked as a constant; args come in unboxed and the return is
+     * unboxed too. No {@link PositionalArgs} alloc, no
+     * {@link NativeHandler} indirection.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.LLL.class)
+    public static final class CallNativeLLL {
+        @Specialization
+        @ForceQuickening
+        public static long doInvoke(TypedNativeHandlers.LLL handler, long a, long b) {
+            return handler.invoke(a, b);
+        }
+    }
+
+    /** Typed fast path for (long) -> long natives: int abs/neg/sign. */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.LL.class)
+    public static final class CallNativeLL {
+        @Specialization
+        @ForceQuickening
+        public static long doInvoke(TypedNativeHandlers.LL handler, long a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /**
+     * Typed fast path for (long, long) -> boolean natives: int
+     * comparisons (eq/neq/lt/le/gt/ge).
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.LLB.class)
+    public static final class CallNativeLLB {
+        @Specialization
+        @ForceQuickening
+        public static boolean doInvoke(TypedNativeHandlers.LLB handler, long a, long b) {
+            return handler.invoke(a, b);
         }
     }
 

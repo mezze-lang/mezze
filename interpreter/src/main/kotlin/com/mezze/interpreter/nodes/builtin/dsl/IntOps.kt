@@ -134,4 +134,33 @@ object IntOps {
         listOf(Param("n", SlotKind.LONG)), SlotKind.OBJECT
     ) { args -> PrimitiveNatives.intToString(args.long(0)) }
 
+    // ==================== typed registrations for BDSL ====================
+    // These bypass the untyped NativeHandler dispatch for the hot ops.
+    // See TypedNativeHandlers.java for the interface + registry.
+    init {
+        // (long, long) -> long
+        TypedNativeHandlers.registerLLL("__native_int_add", PrimitiveNatives::intAdd)
+        TypedNativeHandlers.registerLLL("__native_int_subtract", PrimitiveNatives::intSubtract)
+        TypedNativeHandlers.registerLLL("__native_int_multiply", PrimitiveNatives::intMultiply)
+        TypedNativeHandlers.registerLLL("__native_int_divide", PrimitiveNatives::intDivide)
+        TypedNativeHandlers.registerLLL("__native_int_modulo", PrimitiveNatives::intModulo)
+        TypedNativeHandlers.registerLLL("__native_int_min", PrimitiveNatives::intMin)
+        TypedNativeHandlers.registerLLL("__native_int_max", PrimitiveNatives::intMax)
+        TypedNativeHandlers.registerLLL("__native_int_pow", NativeHelpers::intPow)
+        TypedNativeHandlers.registerLLL("__native_int_gcd", NativeHelpers::intGcd)
+        TypedNativeHandlers.registerLLL("__native_int_lcm", NativeHelpers::intLcm)
+
+        // (long) -> long
+        TypedNativeHandlers.registerLL("__native_int_abs", PrimitiveNatives::intAbs)
+        TypedNativeHandlers.registerLL("__native_int_neg", PrimitiveNatives::intNegate)
+        TypedNativeHandlers.registerLL("__native_int_sign", PrimitiveNatives::intSign)
+
+        // (long, long) -> boolean
+        TypedNativeHandlers.registerLLB("__native_int_eq", PrimitiveNatives::intEq)
+        TypedNativeHandlers.registerLLB("__native_int_neq", PrimitiveNatives::intNeq)
+        TypedNativeHandlers.registerLLB("__native_int_lt", PrimitiveNatives::intLt)
+        TypedNativeHandlers.registerLLB("__native_int_le", PrimitiveNatives::intLte)
+        TypedNativeHandlers.registerLLB("__native_int_gt", PrimitiveNatives::intGt)
+        TypedNativeHandlers.registerLLB("__native_int_ge", PrimitiveNatives::intGte)
+    }
 }

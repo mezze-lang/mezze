@@ -2,6 +2,7 @@ package com.mezze.interpreter.bytecode;
 
 import com.mezze.interpreter.nodes.builtin.dsl.NativeHandler;
 import com.mezze.interpreter.nodes.builtin.dsl.NativeHandlers;
+import com.mezze.interpreter.nodes.builtin.dsl.TypedNativeHandlers;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.language.truffleir.BlockIR;
 import com.mezze.language.truffleir.BoolLitIR;
@@ -657,24 +658,46 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof CallNativeIR cn) {
-            NativeHandler handler = NativeHandlers.INSTANCE.handlerOf(cn.getName());
+            // Typed fast paths — bypass Object[] alloc + PositionalArgs
+            // + NativeHandler indirection when the signature matches
+            // one we registered typed via TypedNativeHandlers.
+            String name = cn.getName();
+            var typedLLL = TypedNativeHandlers.lookupLLL(name);
+            if (typedLLL != null && cn.getArgs().size() == 2) {
+                b.beginCallNativeLLL(typedLLL);
+                for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                b.endCallNativeLLL();
+                return;
+            }
+            var typedLLB = TypedNativeHandlers.lookupLLB(name);
+            if (typedLLB != null && cn.getArgs().size() == 2) {
+                b.beginCallNativeLLB(typedLLB);
+                for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                b.endCallNativeLLB();
+                return;
+            }
+            var typedLL = TypedNativeHandlers.lookupLL(name);
+            if (typedLL != null && cn.getArgs().size() == 1) {
+                b.beginCallNativeLL(typedLL);
+                for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                b.endCallNativeLL();
+                return;
+            }
+            // Untyped fallback.
+            NativeHandler handler = NativeHandlers.INSTANCE.handlerOf(name);
             if (handler == null) {
                 throw new IllegalStateException(
-                    "CallNativeIR references unregistered native '" + cn.getName()
+                    "CallNativeIR references unregistered native '" + name
                     + "' — supports() should have rejected this");
             }
-            boolean needsNode = NativeHandlers.INSTANCE.needsNode(cn.getName());
+            boolean needsNode = NativeHandlers.INSTANCE.needsNode(name);
             if (needsNode) {
                 b.beginCallNativeScalarWithNode(handler);
-                for (NodeIR arg : cn.getArgs()) {
-                    emitNode(arg, b, argCount, localMap);
-                }
+                for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
                 b.endCallNativeScalarWithNode();
             } else {
                 b.beginCallNativeScalar(handler);
-                for (NodeIR arg : cn.getArgs()) {
-                    emitNode(arg, b, argCount, localMap);
-                }
+                for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
                 b.endCallNativeScalar();
             }
             return;
