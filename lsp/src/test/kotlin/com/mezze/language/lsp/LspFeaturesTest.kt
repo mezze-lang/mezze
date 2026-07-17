@@ -808,6 +808,32 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `import-path completion suggests module paths when typing use`() {
+        // #111: typing `use std::` completes to registered module paths from
+        // the store (stdlib + workspace), not to bindings/keywords.
+        val (uri, _) = openSingleFile("""
+            use std::
+            let x = 1
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        // Cursor right after `use std::` on line 0 (col 9 = after the `::`).
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(0, 9)
+        }).get(5, TimeUnit.SECONDS)
+
+        val labels = (if (result.isLeft) result.left else result.right.items).map { it.label }
+        // Every suggestion should be a module path under `std::`, and at least
+        // one well-known stdlib module should be present.
+        assertTrue(labels.isNotEmpty(), "expected module-path completions after `use std::`")
+        assertTrue(labels.all { it.startsWith("std::") },
+            "import-path completion must only offer module paths, got: ${labels.take(10)}")
+        assertTrue(labels.any { it == "std::int" || it == "std::seq" || it.startsWith("std::") },
+            "expected a std:: module, got: ${labels.take(10)}")
+    }
+
+    @Test
     fun `organize imports is not offered when imports are already organized`() {
         val src = """
             use std::int

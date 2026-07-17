@@ -1860,6 +1860,17 @@ class MezzeTextDocumentService(
                 }
             }
 
+            // Import-path context: the cursor is inside a `use …` line, before
+            // any `::{ … }` selective block. Complete module paths from the
+            // store's registered modules. Checked before dot/keyword paths so
+            // typing `use std::se` never falls through to binding/keyword
+            // suggestions. Regex is on the half-typed *line buffer* (an
+            // incomplete import), not on committed code.
+            val useCompletions = if (state != null) getImportPathCompletions(state, position) else null
+            if (useCompletions != null) {
+                return@supplyAsync Either.forLeft<List<CompletionItem>, CompletionList>(useCompletions)
+            }
+
             val dotCompletions = if (state != null) {
                 getDotCompletions(state, position)
             } else {
@@ -2016,6 +2027,86 @@ class MezzeTextDocumentService(
      *  - Skip names that don't share a prefix with the user's token (a
      *    cheap filter so we don't ship the entire stdlib over the wire).
      */
+    /**
+     * Completions for module paths inside a `use …` line. Returns null when the
+     * cursor is NOT in an import-path context (so the caller falls through to
+     * ordinary completion); returns a (possibly empty) list when it is.
+     *
+     * Sourced from the store's registered modules ([MezzeStore.getAllModules]),
+     * which covers stdlib + workspace files. Handles the two shapes:
+     *  - `use std::se` → complete whole module paths starting with `std::se`.
+     *  - `use std::seq::{ ` (inside the selective block) → NOT an import-PATH
+     *    context; hand back null so the item-name completion path can run.
+     *
+     * The prefix is read from the half-typed line buffer (an incomplete import),
+     * which is the appropriate place for a text scan — it isn't committed code.
+     */
+    private fun getImportPathCompletions(state: DocumentState, position: Position): List<CompletionItem>? {
+        val line = state.content.lines().getOrNull(position.line) ?: return null
+        val before = line.substring(0, minOf(position.character, line.length))
+        // Match `use ` / `pub use ` then capture the partial path typed so far.
+        // Bail (return null) once a `::{` selective block has opened — that's
+        // item-name territory, handled elsewhere.
+        val m = Regex("""^\s*(?:pub\s+)?use\s+([\w:]*)$""").find(before) ?: return null
+        val typed = m.groupValues[1]   // e.g. "std::se" or "" or "std::"
+
+        // Module paths come from two sources, unioned so both worlds complete:
+        //  - the store's registered ModuleRows (workspace `.mz` files), and
+        //  - PrecompiledStdlib's typed modules (stdlib is hydrated in-memory and
+        //    never gets ModuleRows in the store).
+        val fromStore = try { projectStore?.getAllModules()?.map { it.path } ?: emptyList() } catch (_: Exception) { emptyList() }
+        // PrecompiledStdlib exposes each module's *file* path (e.g.
+        // `../stdlib/std/int.mz`); derive the dotted module path (`std::int`)
+        // by taking everything after the `stdlib/` root, dropping `.mz`, and
+        // joining segments with `::`.
+        val fromStdlib = try {
+            com.mezze.language.typechecker.PrecompiledStdlib.stdlibTypedModules.values
+                .mapNotNull { filePathToModulePath(it.path) }
+        } catch (_: Exception) { emptyList() }
+        val modules = (fromStore + fromStdlib).filter { it.isNotBlank() }.distinct()
+        if (modules.isEmpty()) return emptyList()
+
+        // The replacement covers just the already-typed path text, so accepting
+        // an item overwrites `std::se`, not the whole line.
+        val replaceStart = Position(position.line, position.character - typed.length)
+        val replaceRange = Range(replaceStart, position)
+
+        val items = modules.asSequence()
+            .filter { it.isNotBlank() && it.startsWith(typed) }
+            .distinct()
+            .sorted()
+            .take(50)
+            .map { path ->
+                CompletionItem(path).apply {
+                    kind = CompletionItemKind.Module
+                    detail = "module"
+                    textEdit = org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(TextEdit(replaceRange, path))
+                    // Sort by path so `std::int` precedes `std::seq`.
+                    sortText = path
+                }
+            }
+            .toList()
+        return items
+    }
+
+    /**
+     * Convert a module's *file* path to its dotted module path:
+     * `../stdlib/std/int.mz` → `std::int`, `src/foo/bar.mz` → `foo::bar`.
+     * Returns null for a path we can't confidently map (no `.mz`, or no
+     * recognizable `stdlib/` / `src/` root). The segment after the root
+     * anchor is where the module path begins.
+     */
+    private fun filePathToModulePath(filePath: String): String? {
+        if (!filePath.endsWith(".mz")) return null
+        val norm = filePath.replace('\\', '/')
+        val segments = norm.removeSuffix(".mz").split('/').filter { it.isNotBlank() && it != ".." && it != "." }
+        // Anchor on the last `stdlib` or `src` segment; the module path is
+        // everything after it.
+        val anchor = segments.indexOfLast { it == "stdlib" || it == "src" }
+        val relevant = if (anchor >= 0) segments.drop(anchor + 1) else segments
+        return if (relevant.isEmpty()) null else relevant.joinToString("::")
+    }
+
     private fun getStdlibAutoImportCompletions(
         state: DocumentState,
         position: Position,
