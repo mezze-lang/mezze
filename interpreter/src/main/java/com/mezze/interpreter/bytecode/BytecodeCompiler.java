@@ -274,7 +274,9 @@ public final class BytecodeCompiler {
             }
             for (int i = 0; i < cases.size(); i++) {
                 CaseIR c = cases.get(i);
-                if (c.getGuard() != null) return false;
+                if (c.getGuard() != null) {
+                    if (!supportsNode(c.getGuard(), argCount)) return false;
+                }
                 if (!c.getIfLetBindings().isEmpty()) return false;
                 PatternIR pat = c.getPattern();
                 boolean isLast = i == cases.size() - 1;
@@ -656,13 +658,23 @@ public final class BytecodeCompiler {
             return;
         }
         if (pat instanceof PatternIR.Literal lit) {
-            // Conditional(PrimEquals(scrutinee, literalExpr), body, else...)
+            // Conditional(PrimEquals(scrutinee, literalExpr), body?, else...)
+            // With guard: nest a second Conditional(guard, body, restChain)
+            // in the then-branch — same shape as the variant path.
             b.beginConditional();
             b.beginPrimEquals();
             b.emitLoadLocal(scrutineeLocal);
             emitNode(lit.getValue(), b, argCount, localMap);
             b.endPrimEquals();
-            emitNode(c.getBody(), b, argCount, localMap);
+            if (c.getGuard() != null) {
+                b.beginConditional();
+                emitNode(c.getGuard(), b, argCount, localMap);
+                emitNode(c.getBody(), b, argCount, localMap);
+                emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
+                b.endConditional();
+            } else {
+                emitNode(c.getBody(), b, argCount, localMap);
+            }
             emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
             b.endConditional();
             return;
@@ -699,9 +711,22 @@ public final class BytecodeCompiler {
                 b.endStoreLocal();
             }
         }
-        emitNode(c.getBody(), b, argCount, localMap);
+        if (c.getGuard() != null) {
+            // Guard: Conditional(guard, body, restChain). If the guard
+            // is false we fall through by emitting the tail chain
+            // again — semantically correct but duplicates the tail
+            // once per guarded case. A shared-continuation lowering
+            // would be a Phase 3+ perf optimization.
+            b.beginConditional();
+            emitNode(c.getGuard(), b, argCount, localMap);
+            emitNode(c.getBody(), b, argCount, localMap);
+            emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
+            b.endConditional();
+        } else {
+            emitNode(c.getBody(), b, argCount, localMap);
+        }
         b.endBlock();
-        // Else-branch — recurse.
+        // Else-branch (tag mismatch) — recurse.
         emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
         b.endConditional();
     }
