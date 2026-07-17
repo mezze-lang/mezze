@@ -94,7 +94,7 @@ object TrivialWrapperInliner {
         if (wrappers.isEmpty()) return functions
 
         val out = HashMap<Hash, FunctionIR>(functions.size)
-        var changed = 0
+        val stats = InlineStats()
         for ((hash, fn) in functions) {
             // Don't recursively inline a wrapper's body into itself —
             // the wrapper IS the trivial body. Other functions are fair
@@ -102,22 +102,33 @@ object TrivialWrapperInliner {
             val newBody = if (wrappers.containsKey(hash) && hash in functions) {
                 fn.body
             } else {
-                rewrite(fn.body, wrappers)
+                rewrite(fn.body, wrappers, stats)
             }
             if (newBody === fn.body) {
                 out[hash] = fn
             } else {
                 out[hash] = fn.copy(body = newBody)
-                changed++
+                stats.fnsChanged++
             }
         }
-        if (changed > 0 && System.getenv("MEZZE_DEBUG") != null) {
+        if (stats.fnsChanged > 0 && System.getenv("MEZZE_DEBUG") != null) {
             System.err.println(
-                "TrivialWrapperInliner: rewrote $changed of ${functions.size} functions " +
+                "TrivialWrapperInliner: ${stats.sitesInlined} call sites inlined " +
+                "(${stats.sitesSkippedHeavyArg} skipped: heavy multi-read arg) " +
+                "across ${stats.fnsChanged}/${functions.size} functions " +
                 "using ${wrappers.size} known wrappers"
             )
         }
         return out
+    }
+
+    /** Per-run counters — mutable, threaded through [rewrite] to make the
+     *  MEZZE_DEBUG line report actual work done rather than just "how many
+     *  functions had at least one rewrite". */
+    private class InlineStats {
+        var fnsChanged: Int = 0
+        var sitesInlined: Int = 0
+        var sitesSkippedHeavyArg: Int = 0
     }
 
     /**
@@ -383,7 +394,7 @@ object TrivialWrapperInliner {
      * inside it. Walks the whole tree (not just the top level) so calls
      * nested inside another non-trivial body still get the speedup.
      */
-    private fun rewrite(node: NodeIR, wrappers: Map<Hash, FunctionIR>): NodeIR {
+    private fun rewrite(node: NodeIR, wrappers: Map<Hash, FunctionIR>, stats: InlineStats): NodeIR {
         // Top-level case: this node is itself a wrappable call.
         if (node is CallDirectIR && node.isScalarABI) {
             val wrapper = wrappers[node.targetHash]
@@ -391,7 +402,7 @@ object TrivialWrapperInliner {
                 // Recursively rewrite the args first (the caller's
                 // arguments may themselves contain wrappable calls), so
                 // we don't have to re-walk after substitution.
-                val rewrittenArgs = node.args.map { rewrite(it, wrappers) }
+                val rewrittenArgs = node.args.map { rewrite(it, wrappers, stats) }
                 // Multi-read gate: any param the wrapper reads more than
                 // once must have a cheap-to-duplicate arg here, because
                 // substitution will inline that arg AST at every read
@@ -412,9 +423,12 @@ object TrivialWrapperInliner {
                     if (ok) {
                         val substituted = substituteParams(
                             wrapper.body, rewrittenArgs, wrapper.captureSlots.size)
+                        stats.sitesInlined++
                         // Recurse in case the wrapper body referenced
                         // another wrapper (chain of trivial forwarders).
-                        return rewrite(substituted, wrappers)
+                        return rewrite(substituted, wrappers, stats)
+                    } else {
+                        stats.sitesSkippedHeavyArg++
                     }
                 }
                 // Fall through: leave the call alone, but keep the args
@@ -425,7 +439,7 @@ object TrivialWrapperInliner {
                 return node
             }
         }
-        return recurseChildren(node) { rewrite(it, wrappers) }
+        return recurseChildren(node) { rewrite(it, wrappers, stats) }
     }
 
     /**
