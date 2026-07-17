@@ -1148,15 +1148,6 @@ class LspFeaturesTest {
             "go-to-type should land in types.mz where `Color` is declared, got: ${locs.first().uri}")
     }
 
-    @org.junit.jupiter.api.Disabled(
-        "Blocked: workspace ability/impl decls are not indexed for cross-file " +
-        "lookup in the LSP flow. getDeclsByKind(ABILITY/IMPL) returns 0 rows for " +
-        "a workspace module, and open documents' typeCheckResult.typedModule is " +
-        "null at request time, so a cross-module impl can't be surfaced. " +
-        "typeDefinition works because TYPE decls ARE store-indexed. The impl " +
-        "finder is correct once the data is present; needs the store-indexing " +
-        "pipeline to register ability/impl decls. See docs/issues/lsp-cross-module-impl-indexing.md."
-    )
     @Test
     fun `implementation finds an impl in another module`() {
         // #112: go-to-implementation on an ability method surfaces impls across
@@ -1167,8 +1158,9 @@ class LspFeaturesTest {
                 use shapes::Circle
                 let describe = {c: Circle} -> Show::show { it = c }
             """.trimIndent(),
+            // Abilities are public by default — `pub ability` is a parse error.
             "shapes.mz" to """
-                pub ability Show for 'a where {
+                ability Show for 'a where {
                   show: { it: 'a } -> Str
                 }
                 pub type Circle = | Circle |
