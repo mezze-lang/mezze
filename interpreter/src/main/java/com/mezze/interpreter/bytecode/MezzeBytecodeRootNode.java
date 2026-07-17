@@ -125,6 +125,46 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Push a compile-time double constant. Mirror of
+     * {@link LoadLongConstant} for {@link com.mezze.language.truffleir.DoubleLitIR}.
+     */
+    @Operation
+    @ConstantOperand(type = double.class)
+    public static final class LoadDoubleConstant {
+        @Specialization
+        public static double doDouble(double value) {
+            return value;
+        }
+    }
+
+    /**
+     * Push a compile-time boolean constant. Mirror for
+     * {@link com.mezze.language.truffleir.BoolLitIR}.
+     */
+    @Operation
+    @ConstantOperand(type = boolean.class)
+    public static final class LoadBooleanConstant {
+        @Specialization
+        public static boolean doBool(boolean value) {
+            return value;
+        }
+    }
+
+    /**
+     * Push a compile-time Object constant. Used for strings, chars, and
+     * any other reference-typed literals — anything that isn't captured
+     * by the boxing-elimination fast paths for long/double/boolean.
+     */
+    @Operation
+    @ConstantOperand(type = Object.class)
+    public static final class LoadObjectConstant {
+        @Specialization
+        public static Object doObject(Object value) {
+            return value;
+        }
+    }
+
+    /**
      * Pop two longs, push their overflow-checked sum.
      *
      * <p>Used to lower {@code InlineBinaryOpIR} with op = ADD when

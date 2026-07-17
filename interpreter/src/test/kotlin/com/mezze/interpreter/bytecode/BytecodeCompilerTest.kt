@@ -69,16 +69,18 @@ class BytecodeCompilerTest {
     }
 
     @Test
-    fun `supports rejects any node type outside phase 1 scope`() {
-        val doubleLit = com.mezze.language.truffleir.DoubleLitIR(1.5, srcInfo)
-        val body = InlineBinaryOpIR(
-            op = InlineOp.ADD,
-            left = LongLitIR(1L, srcInfo),
-            right = doubleLit,
+    fun `supports rejects unsupported node types`() {
+        // PartialApplyDirectIR is not yet supported (closures / partial-
+        // application are Phase 3+ scope). Ensures supports() correctly
+        // rejects trees containing it.
+        val partial = com.mezze.language.truffleir.PartialApplyDirectIR(
+            targetHash = com.mezze.language.typedast.Hash("0".repeat(64)),
+            partialFields = emptyList(),
+            isTailCall = false,
             src = srcInfo,
         )
         withContext { lang ->
-            assertFalse(BytecodeCompiler(lang).supports(makeFn(body)))
+            assertFalse(BytecodeCompiler(lang).supports(makeFn(partial)))
         }
     }
 

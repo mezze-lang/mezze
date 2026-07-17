@@ -4,8 +4,11 @@ import com.mezze.interpreter.nodes.builtin.dsl.NativeHandler;
 import com.mezze.interpreter.nodes.builtin.dsl.NativeHandlers;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.language.truffleir.BlockIR;
+import com.mezze.language.truffleir.BoolLitIR;
 import com.mezze.language.truffleir.CallDirectIR;
 import com.mezze.language.truffleir.CallNativeIR;
+import com.mezze.language.truffleir.CharLitIR;
+import com.mezze.language.truffleir.DoubleLitIR;
 import com.mezze.language.truffleir.FieldIR;
 import com.mezze.language.truffleir.FunctionIR;
 import com.mezze.language.truffleir.IfIR;
@@ -22,6 +25,8 @@ import com.mezze.language.truffleir.ReadFieldIR;
 import com.mezze.language.truffleir.ReadLocalIR;
 import com.mezze.language.truffleir.RecordUpdateIR;
 import com.mezze.language.truffleir.StmtIR;
+import com.mezze.language.truffleir.StringLitIR;
+import com.mezze.language.truffleir.UnitLitIR;
 import com.mezze.language.truffleir.WriteLocalIR;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CallTarget;
@@ -43,7 +48,9 @@ import java.util.Map;
  *
  * <p>Phase 1 supported IR subset:
  * <ul>
- *   <li>{@link LongLitIR} — long constant push</li>
+ *   <li>{@link LongLitIR}, {@link DoubleLitIR}, {@link BoolLitIR},
+ *       {@link StringLitIR}, {@link CharLitIR}, {@link UnitLitIR} —
+ *       primitive/object constant push</li>
  *   <li>{@link InlineBinaryOpIR} with {@code op = ADD} — long add</li>
  *   <li>{@link ReadLocalIR} — parameter or local read (uses IR slot
  *       layout {@code [captures..., params..., locals...]}; captures
@@ -129,6 +136,11 @@ public final class BytecodeCompiler {
 
     private boolean supportsNode(NodeIR node, int paramCount) {
         if (node instanceof LongLitIR) return true;
+        if (node instanceof DoubleLitIR) return true;
+        if (node instanceof BoolLitIR) return true;
+        if (node instanceof StringLitIR) return true;
+        if (node instanceof CharLitIR) return true;
+        if (node instanceof UnitLitIR) return true;
         if (node instanceof ReadLocalIR) return true;
         if (node instanceof WriteLocalIR w) {
             return supportsNode(w.getValue(), paramCount);
@@ -298,6 +310,28 @@ public final class BytecodeCompiler {
                           int paramCount, BytecodeLocal[] localMap) {
         if (node instanceof LongLitIR lit) {
             b.emitLoadLongConstant(lit.getValue());
+            return;
+        }
+        if (node instanceof DoubleLitIR lit) {
+            b.emitLoadDoubleConstant(lit.getValue());
+            return;
+        }
+        if (node instanceof BoolLitIR lit) {
+            b.emitLoadBooleanConstant(lit.getValue());
+            return;
+        }
+        if (node instanceof StringLitIR lit) {
+            b.emitLoadObjectConstant(lit.getValue());
+            return;
+        }
+        if (node instanceof CharLitIR lit) {
+            // Mezze chars box as Character; the runtime treats primitive
+            // Character values uniformly with unboxed comparisons.
+            b.emitLoadObjectConstant(Character.valueOf(lit.getValue()));
+            return;
+        }
+        if (node instanceof UnitLitIR) {
+            b.emitLoadObjectConstant(com.mezze.interpreter.values.MezzeUnit.INSTANCE);
             return;
         }
         if (node instanceof ReadLocalIR r) {
