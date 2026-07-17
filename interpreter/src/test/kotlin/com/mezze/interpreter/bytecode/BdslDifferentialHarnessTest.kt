@@ -53,6 +53,32 @@ class BdslDifferentialHarnessTest {
     }
 
     @Test
+    fun `record construct + field read — differential (Phase 2)`() {
+        // MakeRecord + ReadFieldByName + AddLong, all in BDSL.
+        BdslDifferentialHarness.assertEquivalentRequiringBdsl(
+            """
+            do
+              let r = { x = 10, y = 20 }
+              r.x + r.y
+            """.trimIndent(),
+            expected = 30L,
+        )
+    }
+
+    @Test
+    fun `nested record field read — differential (Phase 2)`() {
+        BdslDifferentialHarness.assertEquivalentRequiringBdsl(
+            """
+            do
+              let inner = { v = 7 }
+              let outer = { inner = inner, extra = 100 }
+              outer.inner.v + outer.extra
+            """.trimIndent(),
+            expected = 107L,
+        )
+    }
+
+    @Test
     fun `program using stdlib — falls back to AST-only`() {
         // std::int::to_str isn't in BDSL's Phase 1 subset (needs the
         // native-call op). The harness silently skips the BDSL side

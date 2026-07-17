@@ -222,6 +222,11 @@ object BdslDifferentialHarness {
             }
             is com.mezze.language.truffleir.WriteLocalIR ->
                 collectDirectCallees(node.value, known, into)
+            is com.mezze.language.truffleir.MakeRecordIR -> {
+                for (f in node.fields) collectDirectCallees(f.value, known, into)
+            }
+            is com.mezze.language.truffleir.ReadFieldIR ->
+                collectDirectCallees(node.record, known, into)
             else -> { /* leaves + unsupported: harness bails via supports() */ }
         }
     }

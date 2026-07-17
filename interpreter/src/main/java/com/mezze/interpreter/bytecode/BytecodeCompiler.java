@@ -3,12 +3,15 @@ package com.mezze.interpreter.bytecode;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.language.truffleir.BlockIR;
 import com.mezze.language.truffleir.CallDirectIR;
+import com.mezze.language.truffleir.FieldIR;
 import com.mezze.language.truffleir.FunctionIR;
 import com.mezze.language.truffleir.IfIR;
 import com.mezze.language.truffleir.InlineBinaryOpIR;
 import com.mezze.language.truffleir.InlineOp;
 import com.mezze.language.truffleir.LongLitIR;
+import com.mezze.language.truffleir.MakeRecordIR;
 import com.mezze.language.truffleir.NodeIR;
+import com.mezze.language.truffleir.ReadFieldIR;
 import com.mezze.language.truffleir.ReadLocalIR;
 import com.mezze.language.truffleir.StmtIR;
 import com.mezze.language.truffleir.WriteLocalIR;
@@ -42,6 +45,13 @@ import java.util.Map;
  *   <li>{@link BlockIR} with {@link StmtIR.Let} + {@link StmtIR.Expr}</li>
  *   <li>{@link CallDirectIR} with EXACTLY 2 args, scalar-ABI, non-tail-call
  *       — via the {@code CallDirect2} custom operation</li>
+ *   <li>{@link MakeRecordIR} — all-Object-storage record construction
+ *       (rejects {@code __spread__} entries; those go through AST)
+ *       via the {@code MakeRecord} variadic operation</li>
+ *   <li>{@link ReadFieldIR} — read a field by name from a
+ *       {@link com.mezze.interpreter.values.MezzeRecord}, via the
+ *       {@code ReadFieldByName} operation (PIC on Shape + megamorphic
+ *       fallback)</li>
  * </ul>
  *
  * <p>Anything else is rejected by {@link #supports}. Under the BDSL-only
@@ -125,6 +135,18 @@ public final class BytecodeCompiler {
                 if (!supportsNode(arg, paramCount)) return false;
             }
             return true;
+        }
+        if (node instanceof MakeRecordIR m) {
+            // Phase 2 records: reject spread entries (compile via AST
+            // path if this program has record-spread — Phase 3+ work).
+            for (FieldIR f : m.getFields()) {
+                if ("__spread__".equals(f.getName())) return false;
+                if (!supportsNode(f.getValue(), paramCount)) return false;
+            }
+            return true;
+        }
+        if (node instanceof ReadFieldIR r) {
+            return supportsNode(r.getRecord(), paramCount);
         }
         return false;
     }
@@ -277,6 +299,24 @@ public final class BytecodeCompiler {
             emitNode(c.getArgs().get(0), b, paramCount, localMap);
             emitNode(c.getArgs().get(1), b, paramCount, localMap);
             b.endCallDirect2();
+            return;
+        }
+        if (node instanceof MakeRecordIR m) {
+            String[] fieldNames = new String[m.getFields().size()];
+            for (int i = 0; i < m.getFields().size(); i++) {
+                fieldNames[i] = m.getFields().get(i).getName();
+            }
+            b.beginMakeRecord(fieldNames);
+            for (FieldIR f : m.getFields()) {
+                emitNode(f.getValue(), b, paramCount, localMap);
+            }
+            b.endMakeRecord();
+            return;
+        }
+        if (node instanceof ReadFieldIR r) {
+            b.beginReadFieldByName(r.getFieldName());
+            emitNode(r.getRecord(), b, paramCount, localMap);
+            b.endReadFieldByName();
             return;
         }
         throw new UnsupportedOperationException(

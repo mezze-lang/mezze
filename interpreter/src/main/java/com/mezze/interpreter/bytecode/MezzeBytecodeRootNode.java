@@ -2,13 +2,19 @@ package com.mezze.interpreter.bytecode;
 
 import com.mezze.interpreter.nodes.inline.DirectAddNode;
 import com.mezze.interpreter.runtime.MezzeLanguage;
+import com.mezze.interpreter.values.MezzeRecord;
+import com.mezze.interpreter.values.MezzeRecord.FieldLocation;
+import com.mezze.interpreter.values.MezzeRecord.FieldLocation.StorageType;
+import com.mezze.interpreter.values.MezzeRecord.Shape;
 import com.oracle.truffle.api.CallTarget;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.bytecode.BytecodeRootNode;
 import com.oracle.truffle.api.bytecode.ConstantOperand;
 import com.oracle.truffle.api.bytecode.ForceQuickening;
 import com.oracle.truffle.api.bytecode.GenerateBytecode;
 import com.oracle.truffle.api.bytecode.Operation;
 import com.oracle.truffle.api.bytecode.OperationProxy;
+import com.oracle.truffle.api.bytecode.Variadic;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.FrameDescriptor;
@@ -183,5 +189,99 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached IndirectCallNode indirectCallNode) {
             return indirectCallNode.call(target, new Object[] { arg0, arg1 });
         }
+    }
+
+    /**
+     * Construct a record from a compile-time array of field names and a
+     * runtime-variadic set of field values.
+     *
+     * <p>Lowers {@link com.mezze.language.truffleir.MakeRecordIR}. The
+     * field-name array is baked into the bytecode as a
+     * {@link ConstantOperand}; the values are pushed via
+     * {@link Variadic}, which BDSL packs into an {@code Object[]}
+     * automatically.
+     *
+     * <p>Phase 2 keeps the AST-side "all-object storage" strategy —
+     * matches {@code RecordLiteralNode.allObjects}. A later phase can
+     * specialize on shape stability for unboxed long/double storage.
+     */
+    @Operation
+    @ConstantOperand(type = String[].class)
+    public static final class MakeRecord {
+        @Specialization
+        public static MezzeRecord doAllObjects(String[] fieldNames, @Variadic Object[] values) {
+            return buildAllObjectRecord(fieldNames, values);
+        }
+    }
+
+    /**
+     * Read a field by name from a {@link MezzeRecord}.
+     *
+     * <p>Lowers {@link com.mezze.language.truffleir.ReadFieldIR}.
+     * Analog of {@code CachedFieldAccessNode} but without the typed
+     * primitive specializations — Phase 2 objective is functional
+     * parity; typed unboxed access lands in a later phase once we
+     * decide whether to proxy CachedFieldAccessNode (needs an
+     * instance-field → operand refactor) or hand-write typed variants.
+     *
+     * <p>Cached path: monomorphic on record Shape. Guards the cached
+     * shape and returns the pre-resolved field via {@link MezzeRecord#getObjectField}.
+     * Megamorphic fallback goes through {@link MezzeRecord#getField(String)}.
+     */
+    @Operation
+    @ConstantOperand(type = String.class)
+    public static final class ReadFieldByName {
+        @Specialization(guards = "record.getShape() == cachedShape", limit = "6")
+        public static Object doCached(
+                String fieldName,
+                MezzeRecord record,
+                @Cached("record.getShape()") Shape cachedShape,
+                @Cached("cachedShape.findFieldIndex(fieldName)") int fieldIndex,
+                @Cached("resolveLocationIndex(cachedShape, fieldIndex)") int locationIndex) {
+            if (fieldIndex < 0) {
+                return fallbackNotFound(record, fieldName);
+            }
+            return record.getObjectField(locationIndex);
+        }
+
+        @Specialization(replaces = "doCached")
+        public static Object doGeneric(String fieldName, MezzeRecord record) {
+            Object v = record.getField(fieldName);
+            if (v == null) {
+                return fallbackNotFound(record, fieldName);
+            }
+            return v;
+        }
+
+        protected static int resolveLocationIndex(Shape shape, int fieldIndex) {
+            if (fieldIndex < 0) return -1;
+            FieldLocation loc = shape.getFieldLocation(fieldIndex);
+            return loc.index;
+        }
+
+        @TruffleBoundary
+        private static Object fallbackNotFound(MezzeRecord record, String fieldName) {
+            throw new RuntimeException("Field not found: " + fieldName);
+        }
+    }
+
+    /**
+     * Boundary helper: build an all-Object-storage {@link MezzeRecord}
+     * from a fieldName array + values. Marked {@link TruffleBoundary}
+     * so the Shape constructor doesn't inline into every op call site
+     * (mirrors the AST's fold at {@code RecordLiteralNode.allObjects}).
+     */
+    @TruffleBoundary
+    private static MezzeRecord buildAllObjectRecord(String[] fieldNames, Object[] values) {
+        FieldLocation[] locations = new FieldLocation[fieldNames.length];
+        for (int i = 0; i < fieldNames.length; i++) {
+            locations[i] = new FieldLocation(StorageType.OBJECT, i);
+        }
+        Shape shape = new Shape(fieldNames, locations);
+        long[] longFields = new long[0];
+        double[] doubleFields = new double[0];
+        Object[] objectFields = new Object[fieldNames.length];
+        System.arraycopy(values, 0, objectFields, 0, fieldNames.length);
+        return new MezzeRecord(shape, longFields, doubleFields, objectFields);
     }
 }
