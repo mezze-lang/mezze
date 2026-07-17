@@ -4234,6 +4234,46 @@ class MezzeTextDocumentService(
         }
     }
 
+    /**
+     * The direct sub-expressions of a [TypedExpr] — the same recursion
+     * [collectReferencesInExpr] uses, factored out so semantic-token walking
+     * (and any future typed walk) can recurse without re-listing the cases.
+     * Conservative where the reference walker is: string-interpolation parts
+     * and match guards/if-let bindings are treated as leaves.
+     */
+    private fun typedChildren(expr: com.mezze.language.typedast.TypedExpr): List<com.mezze.language.typedast.TypedExpr> =
+        when (expr) {
+            is com.mezze.language.typedast.TypedCall -> listOf(expr.function, expr.arg)
+            is com.mezze.language.typedast.TypedLambda -> listOf(expr.body)
+            is com.mezze.language.typedast.TypedRecord -> expr.entries.map { entry ->
+                when (entry) {
+                    is com.mezze.language.typedast.TypedRecordEntry.Field -> entry.value
+                    is com.mezze.language.typedast.TypedRecordEntry.Spread -> entry.expr
+                }
+            }
+            is com.mezze.language.typedast.TypedFieldAccess -> listOf(expr.record)
+            is com.mezze.language.typedast.TypedBlock -> expr.statements.map { stmt ->
+                when (stmt) {
+                    is com.mezze.language.typedast.TypedStatement.Let -> stmt.value
+                    is com.mezze.language.typedast.TypedStatement.Expr -> stmt.expr
+                }
+            } + expr.result
+            is com.mezze.language.typedast.TypedMatch ->
+                listOf(expr.scrutinee) + expr.cases.map { it.body }
+            is com.mezze.language.typedast.TypedIf ->
+                listOf(expr.condition, expr.thenBranch, expr.elseBranch)
+            is com.mezze.language.typedast.TypedPipe -> listOf(expr.left, expr.right)
+            is com.mezze.language.typedast.TypedPerform -> listOf(expr.body)
+            is com.mezze.language.typedast.TypedVariantConstruct -> listOfNotNull(expr.payload)
+            is com.mezze.language.typedast.TypedSeq -> expr.elements.map { elem ->
+                when (elem) {
+                    is com.mezze.language.typedast.TypedSeqElement.Regular -> elem.expr
+                    is com.mezze.language.typedast.TypedSeqElement.Spread -> elem.expr
+                }
+            }
+            else -> emptyList()
+        }
+
     // ========== Folding Ranges ==========
 
     override fun foldingRange(params: FoldingRangeRequestParams): CompletableFuture<List<FoldingRange>> {
@@ -6032,80 +6072,87 @@ class MezzeTextDocumentService(
         return CompletableFuture.supplyAsync {
             val uri = params.textDocument.uri
             val state = documents[uri] ?: return@supplyAsync SemanticTokens(emptyList())
-
-            val data = mutableListOf<Int>()
             val parsedModule = state.parsedModule ?: return@supplyAsync SemanticTokens(emptyList())
 
             // Token type indices (must match the legend order in server capabilities)
-            val KEYWORD = 0
             val FUNCTION = 1
             val VARIABLE = 2
-            val TYPE = 3
-            val STRING = 4
-            val NUMBER = 5
-            val COMMENT = 6
-            val OPERATOR = 7
-            val PROPERTY = 8
-            val PARAMETER = 9
             val ENUM_MEMBER = 10
+            val PARAMETER = 9
 
-            // Modifier bits
-            val DECLARATION = 1
+            // Modifier bits.
             val DEFINITION = 2
 
-            var prevLine = 0
-            var prevCol = 0
-
-            // Helper to add a token (LSP semantic tokens are delta-encoded)
-            fun addToken(line: Int, col: Int, length: Int, tokenType: Int, modifiers: Int = 0) {
-                val deltaLine = line - prevLine
-                val deltaCol = if (deltaLine == 0) col - prevCol else col
-                data.add(deltaLine)
-                data.add(deltaCol)
-                data.add(length)
-                data.add(tokenType)
-                data.add(modifiers)
-                prevLine = line
-                prevCol = col
+            // Collect tokens as absolute (line, col, len, type, mods) first, then
+            // sort and delta-encode. Semantic tokens MUST be strictly ordered by
+            // position — collecting across two passes (decl keywords + typed-AST
+            // references) and sorting is the only way to keep that invariant when
+            // the passes interleave.
+            data class Tok(val line: Int, val col: Int, val len: Int, val type: Int, val mods: Int)
+            val toks = mutableListOf<Tok>()
+            fun emit(loc: com.mezze.language.parsedast.Loc, type: Int, mods: Int = 0) {
+                // Single-line spans only (the length encoding can't cross lines);
+                // skip anything that would wrap.
+                if (loc.startLine != loc.endLine) return
+                val len = loc.endCol - (loc.startCol - 1)
+                if (len <= 0) return
+                toks.add(Tok(loc.startLine - 1, loc.startCol - 1, len, type, mods))
             }
 
-            // Walk parsed module and emit tokens
+            // Pass 1 — the binding NAME of each top-level let, from the parsed
+            // decl's pattern loc (precise, no column arithmetic).
             for (decl in parsedModule.decls) {
-                // Comments
-                when (decl) {
-                    is ParsedLetDecl -> {
-                        for (comment in decl.leadingComments) {
-                            addToken(comment.loc.startLine - 1, comment.loc.startCol - 1,
-                                comment.loc.endCol - comment.loc.startCol + 1, COMMENT)
-                        }
-                        // "let" keyword
-                        addToken(decl.loc.startLine - 1, decl.loc.startCol - 1,
-                            if (decl.visibility == com.mezze.language.parsedast.Visibility.PUBLIC) 3 else 3, KEYWORD)
-                        // Binding name
-                        if (decl.isSimpleBinding) {
-                            val nameLen = decl.variableName.length
-                            // Approximate position: after "let " or "pub let "
-                            val nameCol = if (decl.visibility == com.mezze.language.parsedast.Visibility.PUBLIC)
-                                decl.loc.startCol + 7  // "pub let "
-                            else
-                                decl.loc.startCol + 3  // "let "
-                            addToken(decl.loc.startLine - 1, nameCol, nameLen, FUNCTION, DECLARATION or DEFINITION)
-                        }
-                    }
-                    is ParsedTypeDecl -> {
-                        addToken(decl.loc.startLine - 1, decl.loc.startCol - 1, 4, KEYWORD) // "type"
-                    }
-                    is ParsedEffectDecl -> {
-                        addToken(decl.loc.startLine - 1, decl.loc.startCol - 1, 6, KEYWORD) // "effect"
-                    }
-                    is ParsedAbilityDecl -> {
-                        addToken(decl.loc.startLine - 1, decl.loc.startCol - 1, 7, KEYWORD) // "ability"
-                    }
-                    is ParsedUseDecl -> {
-                        addToken(decl.loc.startLine - 1, decl.loc.startCol - 1, 3, KEYWORD) // "use"
-                    }
-                    else -> {}
+                if (decl is ParsedLetDecl) {
+                    (decl.pattern as? ParsedVariablePattern)?.let { emit(it.loc, FUNCTION, DEFINITION) }
                 }
+            }
+
+            // Pass 2 — every variable REFERENCE and constructor in the typed AST,
+            // classified by what it actually resolved to. This is the
+            // typechecker-powered part: a `TypedVar`'s BindingRef tells us if it's
+            // a parameter, a local, or a reference to a top-level/native function,
+            // and a `TypedVariantConstruct` is unambiguously an enum member. All
+            // locs are exact (no "after let " guessing).
+            val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
+            if (typedModule != null) {
+                fun walk(e: com.mezze.language.typedast.TypedExpr) {
+                    when (e) {
+                        is com.mezze.language.typedast.TypedVar -> {
+                            val type = when (e.binding) {
+                                is com.mezze.language.typedast.BindingRef.Param -> PARAMETER
+                                is com.mezze.language.typedast.BindingRef.ByHash,
+                                is com.mezze.language.typedast.BindingRef.Native -> FUNCTION
+                                else -> VARIABLE  // Local / Capture
+                            }
+                            emit(e.loc, type)
+                        }
+                        is com.mezze.language.typedast.TypedVariantConstruct -> {
+                            emit(e.loc, ENUM_MEMBER)
+                        }
+                        else -> {}
+                    }
+                    for (child in typedChildren(e)) walk(child)
+                }
+                for (d in typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
+                    walk(d.value)
+                }
+            }
+
+            // Sort by position and delta-encode. Deduplicate exact-overlap tokens
+            // (pass 1's name vs a pass-2 self-reference) by keeping the first.
+            toks.sortWith(compareBy({ it.line }, { it.col }))
+            val data = mutableListOf<Int>()
+            var prevLine = 0
+            var prevCol = 0
+            var lastLine = -1
+            var lastCol = -1
+            for (t in toks) {
+                if (t.line == lastLine && t.col == lastCol) continue
+                val deltaLine = t.line - prevLine
+                val deltaCol = if (deltaLine == 0) t.col - prevCol else t.col
+                data.add(deltaLine); data.add(deltaCol); data.add(t.len); data.add(t.type); data.add(t.mods)
+                prevLine = t.line; prevCol = t.col
+                lastLine = t.line; lastCol = t.col
             }
 
             SemanticTokens(data)

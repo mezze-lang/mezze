@@ -741,6 +741,36 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `semantic tokens classify params and variant constructors from the typed AST`() {
+        // #99: the token stream is built from the TypedModule, so a `TypedVar`
+        // resolving to a param becomes a PARAMETER token and a
+        // `TypedVariantConstruct` becomes an ENUM_MEMBER token — with exact
+        // locs, no "after let " column guessing.
+        val (uri, _) = openSingleFile("""
+            type Color = | Red, Green |
+            let pick = {c: Color} -> c
+            let red = {} -> Red
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        val tokens = server.textDocumentService.semanticTokensFull(SemanticTokensParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+        }).get(5, TimeUnit.SECONDS)
+        val types = decodeSemanticTokenTypes(tokens?.data ?: emptyList())
+
+        // Legend indices: FUNCTION = 1, VARIABLE = 2, ENUM_MEMBER = 10.
+        // The `Red` constructor is the headline typed-AST win — a lexer can't
+        // tell it apart from a type name, but TypedVariantConstruct can.
+        assertTrue(types.contains(10), "expected an ENUM_MEMBER token for the `Red` constructor, got type set: $types")
+        // A top-level binding name is a FUNCTION token.
+        assertTrue(types.contains(1), "expected a FUNCTION token for a top-level binding name, got type set: $types")
+        // The `c` reference in the body is classified as a value reference
+        // (VARIABLE/PARAMETER) from its BindingRef — either way, not a keyword.
+        assertTrue(types.contains(2) || types.contains(9),
+            "expected a value-reference token for the `c` use, got type set: $types")
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"
@@ -1165,6 +1195,14 @@ class LspFeaturesTest {
      * edit spans from start-line to end-line) so removal edits that swallow a
      * newline verify correctly.
      */
+    /** The set of token-type indices in a delta-encoded semantic-token stream (every 4th of each 5-int group). */
+    private fun decodeSemanticTokenTypes(data: List<Int>): Set<Int> {
+        val types = mutableSetOf<Int>()
+        var i = 0
+        while (i + 4 < data.size) { types.add(data[i + 3]); i += 5 }
+        return types
+    }
+
     private fun applyEdit(source: String, edit: TextEdit): String {
         val lines = source.split("\n")
         fun offset(p: Position): Int {
