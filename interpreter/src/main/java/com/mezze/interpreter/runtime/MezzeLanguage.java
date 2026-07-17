@@ -84,6 +84,123 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private final java.util.concurrent.ConcurrentHashMap<Hash, CallTarget> stdlibCallTargetCache =
         new java.util.concurrent.ConcurrentHashMap<>();
 
+    // BDSL routing (#284) — opt-in via MEZZE_BDSL env var. When on, every
+    // per-function compile tries BytecodeCompiler first; failure ⇒ falls back
+    // to TruffleCompiler. Off by default so existing paths are unaffected.
+    private static final boolean BDSL_ENABLED =
+            System.getenv("MEZZE_BDSL") != null
+                && !"0".equals(System.getenv("MEZZE_BDSL"))
+                && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL"));
+    private volatile com.mezze.interpreter.bytecode.BytecodeCompiler bdslCompiler;
+    private final java.util.concurrent.atomic.AtomicLong bdslHits = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong bdslMisses = new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * Compile one FunctionIR. When {@link #BDSL_ENABLED} is on, tries BDSL
+     * first ({@link com.mezze.interpreter.bytecode.BytecodeCompiler#supports})
+     * and falls back to the AST TruffleCompiler when unsupported. Off by
+     * default — the four legacy call sites in this file still invoke
+     * {@code TruffleCompiler.compile} directly through this helper.
+     *
+     * The BDSL compiler shares an external CallTarget resolver that looks
+     * into {@link #stdlibCallTargetCache} — so cross-fn calls to already-
+     * compiled targets resolve without duplicating them in BDSL's own map.
+     */
+    private com.oracle.truffle.api.nodes.RootNode compileOne(
+            com.mezze.interpreter.compiler.TruffleCompiler astCompiler,
+            com.mezze.language.truffleir.FunctionIR ir) {
+        if (BDSL_ENABLED && isBdslSafeCallee(ir)) {
+            com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
+            if (bdsl.supports(ir)) {
+                try {
+                    var root = bdsl.compile(ir);
+                    bdslHits.incrementAndGet();
+                    return root;
+                } catch (Throwable t) {
+                    // BDSL emit crash — fall through to AST. Log once at
+                    // debug level; individual crashes are already covered
+                    // by supports() but a bug there shouldn't kill the run.
+                    if (System.getenv("MEZZE_DEBUG") != null) {
+                        System.err.println("[BDSL] emit failed for " + ir.getName() + ": " + t);
+                    }
+                }
+            }
+            bdslMisses.incrementAndGet();
+        }
+        return astCompiler.compile(ir);
+    }
+
+    private com.mezze.interpreter.bytecode.BytecodeCompiler getOrCreateBdslCompiler() {
+        com.mezze.interpreter.bytecode.BytecodeCompiler c = bdslCompiler;
+        if (c == null) {
+            synchronized (this) {
+                c = bdslCompiler;
+                if (c == null) {
+                    // External resolver: on a supports()/emit callee-hash
+                    // check, BDSL asks the shared cache. Returns null if not
+                    // yet compiled — supports() then rejects, driving fallback.
+                    c = new com.mezze.interpreter.bytecode.BytecodeCompiler(
+                            this,
+                            (java.util.function.Function<Hash, CallTarget>) stdlibCallTargetCache::get);
+                    bdslCompiler = c;
+                }
+            }
+        }
+        return c;
+    }
+
+    /**
+     * A function is "BDSL-safe as callee" iff its calling convention won't
+     * be record-ABI at runtime. BDSL's LoadArgument(i) treats args[i]
+     * verbatim as slot[i] — it can't unpack a MezzeRecord by field name.
+     *
+     * <p>Conservative: bail on any function that has params. Rationale: at
+     * this wiring stage we can't tell whether callers of this function
+     * will invoke it under scalar ABI or record ABI (the AST caller decides
+     * based on the call site's argument shape). Parameter-less functions
+     * (mostly top-level lets and closures capturing state) are always
+     * scalar-safe — args[0..closureCount-1] are closure values,
+     * closureCount == args.length.
+     *
+     * <p>Also rejected: zero-param zero-capture "value thunk" functions
+     * (constants like {@code math::e}, {@code math::pi}, and any
+     * {@code let x = <expr>} at the top level). AST's
+     * {@code ReadGlobalByHashNode.autoEvaluateThunk} auto-evaluates these
+     * on first lookup, but its {@code root instanceof MezzeRootNode}
+     * check fails for BDSL roots — so the lookup returns the function
+     * object itself instead of the evaluated value. Until we teach
+     * autoEvaluateThunk about BDSL roots, keep thunks on the AST path.
+     *
+     * <p>Later steps: (1) BDSL root wraps execute() with record-ABI unpack,
+     * matching MezzeFunctionRootNode's discrimination logic; (2) tighten
+     * this predicate to accept scalar-only callees the type-checker can
+     * mark unambiguously; (3) allow record-ABI when the record field names
+     * match the paramNames in order (the same "unpackRecordFast" shape);
+     * (4) teach autoEvaluateThunk to also unwrap BDSL roots.
+     */
+    private static boolean isBdslSafeCallee(com.mezze.language.truffleir.FunctionIR ir) {
+        if (!ir.getParamSlots().isEmpty()) return false;
+        // Reject zero-param zero-capture thunks — AST auto-eval doesn't
+        // know how to look inside a BDSL root (yet).
+        if (ir.getCaptureSlots().isEmpty()) return false;
+        return true;
+    }
+
+    /** Test/telemetry: how many functions hit BDSL vs fell back to AST. */
+    public long getBdslHits() { return bdslHits.get(); }
+    public long getBdslMisses() { return bdslMisses.get(); }
+    public boolean isBdslEnabled() { return BDSL_ENABLED; }
+
+    /**
+     * Public wrapper so Kotlin callers (PipelineRunner) can route their
+     * eager per-function compilations through the BDSL fast path.
+     */
+    public com.oracle.truffle.api.nodes.RootNode compileOneJava(
+            com.mezze.interpreter.compiler.TruffleCompiler astCompiler,
+            com.mezze.language.truffleir.FunctionIR ir) {
+        return compileOne(astCompiler, ir);
+    }
+
     /**
      * Optional content-addressed store for resolving stdlib (and eventually
      * remote) hashes at runtime. When set, `getCachedStdlibCallTarget`
@@ -140,7 +257,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             if (ir != null) {
                 var compiler = new com.mezze.interpreter.compiler.TruffleCompiler(this);
                 compiler.registerFunctions(new java.util.ArrayList<>(ctx.getAllUserFunctionIRs()));
-                var rootNode = compiler.compile(ir);
+                var rootNode = compileOne(compiler, ir);
                 ct = rootNode.getCallTarget();
                 ctx.cacheUserCallTarget(hash, ct);
                 return ct;
@@ -151,7 +268,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         var stdlibIR = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE.getPreloweredFunctions().get(hash);
         if (stdlibIR != null) {
             var compiler = new com.mezze.interpreter.compiler.TruffleCompiler(this);
-            var rootNode = compiler.compile(stdlibIR);
+            var rootNode = compileOne(compiler, stdlibIR);
             ct = rootNode.getCallTarget();
             stdlibCallTargetCache.put(hash, ct);
             return ct;
@@ -169,7 +286,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 try {
                     var fnIR = com.mezze.language.store.StoreSerialization.INSTANCE.deserializeFunctionIR(irBytes);
                     var compiler = new com.mezze.interpreter.compiler.TruffleCompiler(this);
-                    var rootNode = compiler.compile(fnIR);
+                    var rootNode = compileOne(compiler, fnIR);
                     ct = rootNode.getCallTarget();
                     stdlibCallTargetCache.put(hash, ct);
                     return ct;
@@ -211,7 +328,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             if (!userHashes.contains(hash) && !stdlibCallTargetCache.containsKey(hash)) {
                 var ir = allFunctions.get(hash);
                 if (ir != null) {
-                    var rootNode = compiler.compile(ir);
+                    var rootNode = compileOne(compiler, ir);
                     stdlibCallTargetCache.put(hash, rootNode.getCallTarget());
                 }
             }

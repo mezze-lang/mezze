@@ -148,7 +148,7 @@ object PipelineRunner {
             // Parameterized performer factories — compile eagerly + cache the
             // CallTarget so ParameterizedHandlerLookupNode finds it.
             if (fn.hash in performerFactoryHashes && fn.paramSlots.isNotEmpty()) {
-                val rootNode = compiler.compile(fn)
+                val rootNode = language.compileOneJava(compiler, fn)
                 compiledFunctions[fn.hash] = rootNode.callTarget
                 language.getCachedStdlibCallTargetCache()[fn.hash] = rootNode.callTarget
             }
@@ -160,7 +160,7 @@ object PipelineRunner {
             // (or constructPerformerRecord skips publishing entirely under
             // our "write-once" rule).
             if (fn.hash in performerOpHashes) {
-                val rootNode = compiler.compile(fn)
+                val rootNode = language.compileOneJava(compiler, fn)
                 compiledFunctions[fn.hash] = rootNode.callTarget
                 language.getCachedStdlibCallTargetCache()[fn.hash] = rootNode.callTarget
             }

@@ -138,8 +138,38 @@ public final class BytecodeCompiler {
      */
     private final Map<Hash, CallTarget> compiledCallTargets = new HashMap<>();
 
+    /**
+     * Optional external CallTarget resolver — used when this compiler
+     * is invoked from the runtime path where callee CallTargets already
+     * live in {@link MezzeLanguage}'s shared stdlib cache rather than
+     * this compiler's local map. Set once at construction. Null means
+     * "only look at compiledCallTargets" (the test / standalone mode).
+     */
+    private final java.util.function.Function<Hash, CallTarget> externalResolver;
+
     public BytecodeCompiler(MezzeLanguage language) {
+        this(language, null);
+    }
+
+    public BytecodeCompiler(MezzeLanguage language,
+                            java.util.function.Function<Hash, CallTarget> externalResolver) {
         this.language = language;
+        this.externalResolver = externalResolver;
+    }
+
+    /** Look up a callee CallTarget: local map first, then external resolver. */
+    private CallTarget resolveCallTarget(Hash hash) {
+        CallTarget ct = compiledCallTargets.get(hash);
+        if (ct != null) return ct;
+        if (externalResolver != null) {
+            ct = externalResolver.apply(hash);
+            if (ct != null) {
+                // Cache locally so subsequent supports()/emit sees it
+                // without re-hitting the external resolver.
+                compiledCallTargets.put(hash, ct);
+            }
+        }
+        return ct;
     }
 
     /**
@@ -192,7 +222,7 @@ public final class BytecodeCompiler {
             // Any arity accepted (variadic CallDirectN). Tail-call
             // variant throws TailCallException for the trampoline.
             if (!c.isScalarABI()) return false;
-            if (!compiledCallTargets.containsKey(c.getTargetHash())) return false;
+            if (resolveCallTarget(c.getTargetHash()) == null) return false;
             for (NodeIR arg : c.getArgs()) {
                 if (!supportsNode(arg, argCount)) return false;
             }
@@ -235,7 +265,7 @@ public final class BytecodeCompiler {
             // CallDirectN. Captures are just slot reads in the caller's
             // frame; supports() lets them through unconditionally
             // (they resolve to LoadArgument or LoadLocal at emit time).
-            if (!compiledCallTargets.containsKey(ml.getFunctionHash())) return false;
+            if (resolveCallTarget(ml.getFunctionHash()) == null) return false;
             return true;
         }
         if (node instanceof MakeSeqIR ms) {
@@ -639,7 +669,7 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof CallDirectIR c) {
-            CallTarget target = compiledCallTargets.get(c.getTargetHash());
+            CallTarget target = resolveCallTarget(c.getTargetHash());
             if (target == null) {
                 throw new IllegalStateException(
                     "CallDirectIR references unknown target hash "
@@ -784,7 +814,7 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof MakeLambdaIR ml) {
-            CallTarget target = compiledCallTargets.get(ml.getFunctionHash());
+            CallTarget target = resolveCallTarget(ml.getFunctionHash());
             if (target == null) {
                 throw new IllegalStateException(
                     "MakeLambdaIR references unknown target hash "
