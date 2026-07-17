@@ -3905,6 +3905,19 @@ class MezzeTextDocumentService(
                     "mezze.showImplementations")
             }
 
+            // "N performers" over each effect declaration — the effect-graph
+            // navigation aid. Counts in-file performers (this module's
+            // performerDecls grouped by effectHash) unioned with the store's
+            // cross-module performer index.
+            val perfsByEffect = typedModule.performerDecls.groupingBy { it.effectHash }.eachCount()
+            for (effect in typedModule.effectDecls) {
+                val local = perfsByEffect[effect.hash] ?: 0
+                val cross = try { store?.getEffectPerformers(effect.hash)?.size ?: 0 } catch (_: Exception) { 0 }
+                val count = maxOf(local, cross)
+                lensAt(effect.loc, if (count == 1) "1 performer" else "$count performers",
+                    "mezze.showPerformers")
+            }
+
             lenses
         }
     }

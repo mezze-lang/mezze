@@ -459,6 +459,29 @@ class LspFeaturesTest {
             "Show has exactly 1 impl (Color), got: $implTitle")
     }
 
+    @Test
+    fun `code lens shows a performers lens over an effect declaration`() {
+        // #120: effect-graph navigation — count performers of an effect.
+        val (uri, _) = openSingleFile("""
+            effect Logger where {
+              log: { msg: Str } -> {}
+            }
+            type Console = | Console |
+            impl Logger for Console where {
+              log = { msg } -> {}
+            }
+        """.trimIndent())
+
+        val lenses = server.textDocumentService.codeLens(CodeLensParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val perfTitle = lenses.mapNotNull { it.command?.title }.firstOrNull { it.contains("performer") }
+            ?: fail("expected a performers lens over `Logger`, got: ${lenses.mapNotNull { it.command?.title }}")
+        assertTrue(perfTitle.startsWith("1 performer"),
+            "Logger has exactly 1 performer (Console), got: $perfTitle")
+    }
+
     // ===== Diagnostics =================================================
 
     @Test
