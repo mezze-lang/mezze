@@ -90,10 +90,21 @@ fun main(args: Array<String>) {
     //   float_inline:  ~200ms → ~145ms (~1.4× faster)
     // Disable with MEZZE_INLINE_WRAPPERS=0 for debugging. See
     // TrivialWrapperInliner for eligibility rules.
-    val functions = if (System.getenv("MEZZE_INLINE_WRAPPERS") == "0") {
+    val inlinedFunctions = if (System.getenv("MEZZE_INLINE_WRAPPERS") == "0") {
         mutErasedFunctions
     } else {
         com.mezze.language.truffleir.TrivialWrapperInliner.inline(mutErasedFunctions)
+    }
+    // Dead-let elimination is opt-in (MEZZE_DEAD_LET_ELIMINATION=1). The
+    // conservative purity check in DeadLetEliminator misclassified a
+    // number of value-producing patterns during first testing (HTTP
+    // handler tests, scope closures) — needs more design work on what
+    // "pure" means at this IR level (see notes in DeadLetEliminator).
+    // Keeping the pass gated so we can iterate without breaking mainline.
+    val functions = if (System.getenv("MEZZE_DEAD_LET_ELIMINATION") == "1") {
+        com.mezze.language.truffleir.DeadLetEliminator.eliminate(inlinedFunctions)
+    } else {
+        inlinedFunctions
     }
 
     // Rebuild the dependency graph from the post-inline function bodies.

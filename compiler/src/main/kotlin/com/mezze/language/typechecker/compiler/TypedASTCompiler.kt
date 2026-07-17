@@ -614,7 +614,13 @@ class TypedASTCompiler(
         // with MEZZE_INLINE_WRAPPERS=0. See TrivialWrapperInliner.
         val inlinedMap = if (System.getenv("MEZZE_INLINE_WRAPPERS") == "0") erasedMap
             else com.mezze.language.truffleir.TrivialWrapperInliner.inline(erasedMap)
-        val final = deduped.map { inlinedMap[it.hash] ?: it }
+        // Dead-let elimination is opt-in: MEZZE_DEAD_LET_ELIMINATION=1.
+        // The pass exists but its purity check needs work — see
+        // DeadLetEliminator's file comment for the design notes.
+        val cleanedMap = if (System.getenv("MEZZE_DEAD_LET_ELIMINATION") == "1")
+            com.mezze.language.truffleir.DeadLetEliminator.eliminate(inlinedMap)
+            else inlinedMap
+        val final = deduped.map { cleanedMap[it.hash] ?: it }
         return CompileResult(final, performerRecords.toList())
     }
 
