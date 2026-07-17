@@ -1009,7 +1009,14 @@ class MezzeTextDocumentService(
                 if (bindingType !is MezzeType.VarType) {
                     val doc = findDocForDecl(state.parsedModule, word)
                     val meta = findMetadataForDecl(state.parsedModule, word)
-                    return appendDoc(codeBlock("$word : ${formatType(bindingType)}"), doc, meta)
+                    // Surface the scheme's ability constraints (`with Eq 'a`) —
+                    // they're part of the signature but the bare type doesn't
+                    // show them. Only when we didn't fall back to the annotation
+                    // (which already carries any `with` clause verbatim).
+                    val constraints = if (annotated == null)
+                        renderSchemeConstraints(typedBinding.scheme, result.typedModule)
+                    else ""
+                    return appendDoc(codeBlock("$word : ${formatType(bindingType)}$constraints"), doc, meta)
                 }
             }
 
@@ -5482,15 +5489,77 @@ class MezzeTextDocumentService(
             val sigInfo = SignatureInformation("$funcName $paramStr -> $returnStr")
 
             // Add parameter info if param is a record
+            var paramCount = 0
             if (funcType.paramType is MezzeType.RecordType) {
                 val recordType = funcType.paramType as MezzeType.RecordType
                 sigInfo.parameters = recordType.fields.map { (name, type) ->
                     ParameterInformation("$name: ${prettyPrintTypeWithAliases(type, state.typeAliases)}")
                 }
+                paramCount = recordType.fields.size
             }
 
-            SignatureHelp(listOf(sigInfo), 0, 0)
+            // Which argument is the cursor in? Count top-level commas inside the
+            // `{ … }` call block before the cursor. `f { a = 1, b = |` → index 1.
+            // Commas nested in braces/brackets/parens don't advance the arg. The
+            // regex guaranteed no `}` between the call's `{` and the cursor, so
+            // the relevant opening brace is the last `{` before the cursor.
+            val activeParam = activeArgumentIndex(beforeCursor, beforeCursor.lastIndexOf('{'))
+                .coerceIn(0, maxOf(0, paramCount - 1))
+
+            SignatureHelp(listOf(sigInfo), 0, activeParam)
         }
+    }
+
+    /**
+     * The zero-based argument index the cursor is in, given the text up to the
+     * cursor and the offset of the call's opening `{`. Counts commas at
+     * brace-depth 1 (i.e. directly inside the call's record), ignoring commas
+     * nested one level deeper in `{}` / `[]` / `()`.
+     */
+    private fun activeArgumentIndex(beforeCursor: String, openBraceOffset: Int): Int {
+        var depth = 0
+        var commas = 0
+        var i = openBraceOffset
+        while (i < beforeCursor.length) {
+            when (beforeCursor[i]) {
+                '{', '[', '(' -> depth++
+                '}', ']', ')' -> depth--
+                ',' -> if (depth == 1) commas++
+            }
+            i++
+        }
+        return commas
+    }
+
+    /**
+     * Render a type scheme's ability constraints as a ` with Eq 'a, Ord 'b`
+     * suffix (empty string when there are none). Ability names come from the
+     * constraint's hash — resolved first against the current typed module's
+     * ability decls, then the store's ability index (covers stdlib). A
+     * constraint whose ability we can't name is skipped rather than shown as a
+     * raw hash.
+     */
+    private fun renderSchemeConstraints(
+        scheme: com.mezze.language.typedast.TypeScheme,
+        typedModule: com.mezze.language.typedast.TypedModule?,
+    ): String {
+        if (scheme.abilityConstraints.isEmpty()) return ""
+        val nameByHash = HashMap<Any, String>()
+        typedModule?.abilityDecls?.forEach { nameByHash[it.hash] = it.name }
+        try {
+            projectStore?.getDeclsByKind(com.mezze.language.store.DeclKind.ABILITY)?.forEach {
+                nameByHash.putIfAbsent(it.hash, it.declName)
+            }
+        } catch (_: Exception) {}
+
+        val rendered = scheme.abilityConstraints.mapNotNull { c ->
+            val name = nameByHash[c.abilityHash] ?: return@mapNotNull null
+            val args = if (c.typeArgs.isNotEmpty())
+                " " + c.typeArgs.joinToString(" ") { prettyPrintType(it) }
+            else ""
+            "$name$args"
+        }
+        return if (rendered.isEmpty()) "" else " with ${rendered.joinToString(", ")}"
     }
 
     /** Find a function's type by name from the type check result. */

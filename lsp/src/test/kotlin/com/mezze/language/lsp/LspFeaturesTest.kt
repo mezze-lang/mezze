@@ -855,6 +855,56 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `signature help highlights the active parameter as the cursor moves between fields`() {
+        // #113: `f { a = 1, b = ` puts the cursor in the second field, so
+        // activeParameter should be 1 (not the hardcoded 0).
+        val (uri, _) = openSingleFile("""
+            let f = {a: Int, b: Int} -> a + b
+            let g = {} -> f { a = 1, b = 2 }
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        // Line 1: `let g = {} -> f { a = 1, b = 2 }` — put the cursor just after
+        // `b = ` (inside the second field). Find that column dynamically.
+        val line = "let g = {} -> f { a = 1, b = 2 }"
+        val col = line.indexOf("b = ") + "b = ".length
+
+        val help = server.textDocumentService.signatureHelp(SignatureHelpParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(1, col)
+        }).get(5, TimeUnit.SECONDS)
+            ?: fail("expected signature help inside the call")
+
+        assertEquals(1, help.activeParameter,
+            "cursor in the 2nd field should make param `b` (index 1) active; sig=${help.signatures.firstOrNull()?.label}")
+
+        // And in the first field, index 0.
+        val col0 = line.indexOf("a = ") + "a = ".length
+        val help0 = server.textDocumentService.signatureHelp(SignatureHelpParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(1, col0)
+        }).get(5, TimeUnit.SECONDS) ?: fail("expected signature help in the 1st field")
+        assertEquals(0, help0.activeParameter, "cursor in the 1st field should make param `a` (index 0) active")
+    }
+
+    @Test
+    fun `hover on a polymorphic function shows its ability constraints`() {
+        // #113: a function polymorphic over a type it compares with `==` picks
+        // up an `Eq` ability constraint; hover surfaces it as `with Eq …`.
+        val (uri, _) = openSingleFile("""
+            let eq = {a: 'a, b: 'a} -> a == b
+            let use_it = {} -> eq { a = 1, b = 2 }
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        // Hover on the `eq` binding name (line 0, col 4).
+        val h = hoverAt(uri, 0, 4) ?: fail("expected hover on `eq`")
+        val text = hoverText(h)
+        assertTrue(text.contains("with ") && text.contains("Eq"),
+            "expected hover to show the `Eq` ability constraint, got: $text")
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"
