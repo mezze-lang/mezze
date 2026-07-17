@@ -321,6 +321,8 @@ public final class BytecodeCompiler {
                     // ReadFieldByName. isOpen doesn't change semantics
                     // (typechecker guarantees shape compatibility).
                     if (!isLast) return false;
+                } else if (pat instanceof PatternIR.Seq) {
+                    // Fine — length check + element extract, optional rest.
                 } else if (pat instanceof PatternIR.Wildcard) {
                     if (!isLast) return false;
                 } else {
@@ -711,6 +713,47 @@ public final class BytecodeCompiler {
             }
             emitNode(c.getBody(), b, argCount, localMap);
             b.endBlock();
+            return;
+        }
+        if (pat instanceof PatternIR.Seq sp) {
+            // Seq pattern: length check (== N if no rest, >= N with rest),
+            // then bind each element into elementSlots[i], plus the drop-N
+            // tail into restSlot if restSlot >= 0.
+            int elemCount = sp.getElementSlots().size();
+            boolean hasRest = sp.getRestSlot() >= 0;
+            b.beginConditional();
+            if (hasRest) {
+                b.beginSeqSizeAtLeast(elemCount);
+            } else {
+                b.beginSeqSizeEquals(elemCount);
+            }
+            b.emitLoadLocal(scrutineeLocal);
+            if (hasRest) {
+                b.endSeqSizeAtLeast();
+            } else {
+                b.endSeqSizeEquals();
+            }
+            b.beginBlock();
+            for (int i = 0; i < elemCount; i++) {
+                BytecodeLocal target = localMap[sp.getElementSlots().get(i) - argCount];
+                b.beginStoreLocal(target);
+                b.beginSeqGetAt(i);
+                b.emitLoadLocal(scrutineeLocal);
+                b.endSeqGetAt();
+                b.endStoreLocal();
+            }
+            if (hasRest) {
+                BytecodeLocal target = localMap[sp.getRestSlot() - argCount];
+                b.beginStoreLocal(target);
+                b.beginSeqDrop(elemCount);
+                b.emitLoadLocal(scrutineeLocal);
+                b.endSeqDrop();
+                b.endStoreLocal();
+            }
+            emitCaseGuardsAndBody(c, cases, idx, scrutineeLocal, b, argCount, localMap);
+            b.endBlock();
+            emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
+            b.endConditional();
             return;
         }
         if (pat instanceof PatternIR.Literal lit) {

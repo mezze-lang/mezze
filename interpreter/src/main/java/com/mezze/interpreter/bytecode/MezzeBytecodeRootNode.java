@@ -454,6 +454,52 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Seq size equals compile-time N. Used by Seq patterns without a
+     * rest — {@code [a, b, c]} matches only length-3 sequences.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)
+    public static final class SeqSizeEquals {
+        @Specialization
+        public static boolean doSeq(int expected, MezzeSeq<?> seq) {
+            return seq.size() == expected;
+        }
+    }
+
+    /**
+     * Seq size at least compile-time N. Used by Seq patterns with a
+     * rest — {@code [a, b, ...rest]} matches sequences of size >= 2.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)
+    public static final class SeqSizeAtLeast {
+        @Specialization
+        public static boolean doSeq(int min, MezzeSeq<?> seq) {
+            return seq.size() >= min;
+        }
+    }
+
+    /** Read seq element at a compile-time index. */
+    @Operation
+    @ConstantOperand(type = int.class)
+    public static final class SeqGetAt {
+        @Specialization
+        public static Object doSeq(int index, MezzeSeq<?> seq) {
+            return seq.get(index);
+        }
+    }
+
+    /** Drop N elements from the head of a seq, returning the tail. */
+    @Operation
+    @ConstantOperand(type = int.class)
+    public static final class SeqDrop {
+        @Specialization
+        public static MezzeSeq<?> doSeq(int n, MezzeSeq<?> seq) {
+            return seq.drop(n);
+        }
+    }
+
+    /**
      * Construct a {@link MezzeSeq} from a variadic list of element
      * values. Lowers {@link com.mezze.language.truffleir.MakeSeqIR}
      * for the no-spread case ({@code [1, 2, 3]}); spread elements
