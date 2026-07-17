@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.phase
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parsedast.diagnostics.FixHint
 import com.mezze.language.typechecker.TypeChecker
@@ -47,17 +48,21 @@ internal fun classifyConstraintError(
         null -> classifyByConstraintAndMessage(constraint, error.message)
     }
 
-    val solverFixHints: List<FixHint> =
-        if (ctx is ErrorContext.TypeAnnotation ||
-            ctx is ErrorContext.ReturnType) {
-            effectRowExtraEffects(constraint).let { extras ->
-                if (extras.isNotEmpty() && error.constraint.loc != null) {
-                    extras.map { effect ->
-                        FixHint.AddEffectToAnnotation(error.constraint.loc!!, effect)
-                    }
-                } else emptyList()
+    val solverFixHints: List<FixHint> = buildList {
+        if (ctx is ErrorContext.TypeAnnotation || ctx is ErrorContext.ReturnType) {
+            val loc = error.constraint.loc
+            if (loc != null) {
+                effectRowExtraEffects(constraint).forEach { effect ->
+                    add(FixHint.AddEffectToAnnotation(loc, effect))
+                }
             }
-        } else emptyList()
+        }
+        // Wrap-in-Ok/Some: the value's type matches the INNER type of an
+        // expected Result/Option — lift it into the wrapper. Offered on any
+        // mismatch context (annotation, return, argument), keyed off the
+        // Equality's two sides.
+        wrapConstructorHint(constraint)?.let { add(it) }
+    }
 
     return TypeChecker.TypeCheckError(
         phase = "Constraint Solving",
@@ -102,6 +107,41 @@ private fun classifyByConstraintAndMessage(
     msg.contains("Cannot use constructor") ->
         ErrorCode.T0201_TYPE_MISMATCH to emptyList()
     else -> ErrorCode.UNCATEGORIZED to emptyList()
+}
+
+/**
+ * When a mismatch is "value of type T vs. expected Result T E / Option T",
+ * offer to wrap the value in the matching constructor. We test both
+ * orientations of the Equality (either side may be the expected wrapper) and
+ * require the other side to structurally equal the wrapper's inner value type.
+ * Returns null when neither side is an Option/Result wrapper around the other.
+ */
+private fun wrapConstructorHint(constraint: Constraint): FixHint? {
+    val eq = constraint as? Constraint.Equality ?: return null
+    val loc = eq.loc ?: return null
+
+    // The wrapper's (constructor, innerValueType). Handles both shapes Mezze
+    // uses for Result/Option: an annotated `TypeApplication("Result", [v, e])`
+    // and an inferred `VariantType` with Ok/Err (or Some/None) constructors.
+    fun wrapperOf(t: MezzeType): Pair<String, MezzeType>? = when (t) {
+        is MezzeType.TypeApplication -> when (t.constructor) {
+            BuiltinTypes.RESULT -> t.args.getOrNull(0)?.let { BuiltinTypes.OK to it }
+            BuiltinTypes.OPTION -> t.args.getOrNull(0)?.let { BuiltinTypes.SOME to it }
+            else -> null
+        }
+        is MezzeType.VariantType -> {
+            BuiltinTypes.getResultTypes(t)?.let { (v, _) -> BuiltinTypes.OK to v }
+                ?: BuiltinTypes.getOptionValueType(t)?.let { BuiltinTypes.SOME to it }
+        }
+        else -> null
+    }
+
+    fun tryWrap(wrapper: MezzeType, inner: MezzeType): FixHint? {
+        val (ctor, valueType) = wrapperOf(wrapper) ?: return null
+        return if (valueType == inner) FixHint.WrapInConstructor(loc, ctor) else null
+    }
+
+    return tryWrap(eq.right, eq.left) ?: tryWrap(eq.left, eq.right)
 }
 
 private fun effectRowExtraEffects(

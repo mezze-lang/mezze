@@ -781,6 +781,11 @@ class MezzeTextDocumentService(
                 "loc" to loc,
                 "label" to hint.label,
             )
+            is com.mezze.language.parsedast.diagnostics.FixHint.WrapInConstructor -> mapOf(
+                "kind" to "WrapInConstructor",
+                "loc" to loc,
+                "constructor" to hint.constructor,
+            )
         }
     }
 
@@ -4602,6 +4607,19 @@ class MezzeTextDocumentService(
                             action.edit = WorkspaceEdit(mapOf(uri to listOf(edit)))
                             actions.add(Either.forRight(action))
                         }
+                        is FixHintData.WrapInConstructor -> {
+                            // Wrap the mismatched value: `expr` → `Ctor { expr }`.
+                            val inner = sliceLspRange(state.content, hint.loc)
+                            if (inner.isNotBlank()) {
+                                val edit = TextEdit(hint.loc, "${hint.constructor} { $inner }")
+                                val action = CodeAction("Wrap in `${hint.constructor}`")
+                                action.kind = CodeActionKind.QuickFix
+                                action.isPreferred = true
+                                action.diagnostics = listOf(diagnostic)
+                                action.edit = WorkspaceEdit(mapOf(uri to listOf(edit)))
+                                actions.add(Either.forRight(action))
+                            }
+                        }
                     }
                 }
             }
@@ -4930,6 +4948,32 @@ class MezzeTextDocumentService(
         val sb = StringBuilder()
         for (ln in range.start.line until range.end.line) {
             lines.getOrNull(ln)?.let { sb.append(it).append('\n') }
+        }
+        return sb.toString()
+    }
+
+    /**
+     * The exact text an LSP [range] (0-indexed, character-precise) covers,
+     * including the single-line case. Used to slice the inner expression when
+     * wrapping it in a constructor.
+     */
+    private fun sliceLspRange(content: String, range: Range): String {
+        val lines = content.split('\n')
+        if (range.start.line == range.end.line) {
+            val line = lines.getOrNull(range.start.line) ?: return ""
+            return line.substring(
+                range.start.character.coerceIn(0, line.length),
+                range.end.character.coerceIn(0, line.length),
+            )
+        }
+        val sb = StringBuilder()
+        for (ln in range.start.line..range.end.line) {
+            val line = lines.getOrNull(ln) ?: continue
+            when (ln) {
+                range.start.line -> sb.append(line.substring(range.start.character.coerceIn(0, line.length)))
+                range.end.line -> sb.append("\n").append(line.substring(0, range.end.character.coerceIn(0, line.length)))
+                else -> sb.append("\n").append(line)
+            }
         }
         return sb.toString()
     }
@@ -5267,6 +5311,10 @@ class MezzeTextDocumentService(
                     val label = entry["label"] as? String ?: return@mapNotNull null
                     FixHintData.RemoveRange(loc, label)
                 }
+                "WrapInConstructor" -> {
+                    val ctor = entry["constructor"] as? String ?: return@mapNotNull null
+                    FixHintData.WrapInConstructor(loc, ctor)
+                }
                 else -> null
             }
         }
@@ -5338,6 +5386,7 @@ class MezzeTextDocumentService(
         data class AddPub(val loc: Range, val declModulePath: String, val declName: String) : FixHintData()
         data class FillMatchArms(val loc: Range, val missingConstructors: List<String>) : FixHintData()
         data class RemoveRange(val loc: Range, val label: String) : FixHintData()
+        data class WrapInConstructor(val loc: Range, val constructor: String) : FixHintData()
     }
 
     /**

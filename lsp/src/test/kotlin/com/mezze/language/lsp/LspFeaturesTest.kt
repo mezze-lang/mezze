@@ -971,6 +971,35 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `value mismatching an expected Result offers a Wrap-in-Ok quick-fix`() {
+        // #116: `let x: Result Int Str = 5` — the value is an Int but the
+        // annotation wants Result Int Str, whose inner value type IS Int, so
+        // offer to wrap: `5` → `Ok { 5 }`.
+        val src = "let x: Result Int Str = 5"
+        val (uri, _) = openSingleFile(src)
+
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags, "expected a diagnostic for the Result mismatch")
+        val mismatch = diags!!.diagnostics.firstOrNull { it.code?.left == "T0210" || it.code?.left == "T0201" }
+            ?: fail("expected a type-mismatch diagnostic, got: ${diags.diagnostics.map { it.code?.left to it.message }}")
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = mismatch.range
+            context = CodeActionContext(listOf(mismatch))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val wrap = actions.mapNotNull { if (it.isRight) it.right else null }
+            .firstOrNull { it.title == "Wrap in `Ok`" }
+            ?: fail("expected a 'Wrap in `Ok`' action, got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}; " +
+                "diag.data=${mismatch.data}")
+        val edit = wrap.edit?.changes?.values?.flatten()?.firstOrNull() ?: fail("wrap action carried no edit")
+        val after = applyEdit(src, edit)
+        assertEquals("let x: Result Int Str = Ok { 5 }", after,
+            "wrap should produce `Ok { 5 }`, got: $after")
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"

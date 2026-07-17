@@ -109,4 +109,15 @@ sealed class FixHint {
         override val loc: Loc,
         val label: String,
     ) : FixHint()
+
+    /**
+     * Wrap the expression at [loc] in a constructor: `expr` → `Ok { expr }` /
+     * `Some { expr }`. Used when a value's type mismatches an expected
+     * `Result`/`Option` but matches its inner value type — the fix is to lift
+     * it into the expected wrapper. [constructor] is `Ok` or `Some`.
+     */
+    data class WrapInConstructor(
+        override val loc: Loc,
+        val constructor: String,
+    ) : FixHint()
 }
