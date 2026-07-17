@@ -188,10 +188,8 @@ public final class BytecodeCompiler {
             return supportsNode(blk.getResult(), argCount);
         }
         if (node instanceof CallDirectIR c) {
-            // Any arity accepted (variadic CallDirectN). Still requires
-            // scalar-ABI + non-tail-call, and the callee must already
-            // be compiled.
-            if (c.isTailCall()) return false;
+            // Any arity accepted (variadic CallDirectN). Tail-call
+            // variant throws TailCallException for the trampoline.
             if (!c.isScalarABI()) return false;
             if (!compiledCallTargets.containsKey(c.getTargetHash())) return false;
             for (NodeIR arg : c.getArgs()) {
@@ -248,12 +246,10 @@ public final class BytecodeCompiler {
             return true;
         }
         if (node instanceof CallIndirectIR ci) {
-            if (ci.isTailCall()) return false;
             return supportsNode(ci.getFunction(), argCount)
                 && supportsNode(ci.getArg(), argCount);
         }
         if (node instanceof CallLocalIR cl) {
-            if (cl.isTailCall()) return false;
             return supportsNode(cl.getArg(), argCount);
         }
         if (node instanceof CallNativeIR cn) {
@@ -503,11 +499,19 @@ public final class BytecodeCompiler {
                     "CallDirectIR references unknown target hash "
                     + c.getTargetHash().getHex() + " — callee must be compiled first");
             }
-            b.beginCallDirectN(target);
-            for (NodeIR arg : c.getArgs()) {
-                emitNode(arg, b, argCount, localMap);
+            if (c.isTailCall()) {
+                b.beginTailCallDirectN(target);
+                for (NodeIR arg : c.getArgs()) {
+                    emitNode(arg, b, argCount, localMap);
+                }
+                b.endTailCallDirectN();
+            } else {
+                b.beginCallDirectN(target);
+                for (NodeIR arg : c.getArgs()) {
+                    emitNode(arg, b, argCount, localMap);
+                }
+                b.endCallDirectN();
             }
-            b.endCallDirectN();
             return;
         }
         if (node instanceof MakeRecordIR m) {
@@ -594,24 +598,43 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof CallIndirectIR ci) {
-            b.beginCallIndirect();
-            emitNode(ci.getFunction(), b, argCount, localMap);
-            emitNode(ci.getArg(), b, argCount, localMap);
-            b.endCallIndirect();
+            if (ci.isTailCall()) {
+                b.beginTailCallIndirect();
+                emitNode(ci.getFunction(), b, argCount, localMap);
+                emitNode(ci.getArg(), b, argCount, localMap);
+                b.endTailCallIndirect();
+            } else {
+                b.beginCallIndirect();
+                emitNode(ci.getFunction(), b, argCount, localMap);
+                emitNode(ci.getArg(), b, argCount, localMap);
+                b.endCallIndirect();
+            }
             return;
         }
         if (node instanceof CallLocalIR cl) {
             // Sugar for CallIndirect(ReadLocal(slot), arg). Slot layout
             // is the same as ReadLocalIR — argCount split point.
-            b.beginCallIndirect();
-            int slot = cl.getSlot();
-            if (slot < argCount) {
-                b.emitLoadArgument(slot);
+            if (cl.isTailCall()) {
+                b.beginTailCallIndirect();
+                int slot = cl.getSlot();
+                if (slot < argCount) {
+                    b.emitLoadArgument(slot);
+                } else {
+                    b.emitLoadLocal(localMap[slot - argCount]);
+                }
+                emitNode(cl.getArg(), b, argCount, localMap);
+                b.endTailCallIndirect();
             } else {
-                b.emitLoadLocal(localMap[slot - argCount]);
+                b.beginCallIndirect();
+                int slot = cl.getSlot();
+                if (slot < argCount) {
+                    b.emitLoadArgument(slot);
+                } else {
+                    b.emitLoadLocal(localMap[slot - argCount]);
+                }
+                emitNode(cl.getArg(), b, argCount, localMap);
+                b.endCallIndirect();
             }
-            emitNode(cl.getArg(), b, argCount, localMap);
-            b.endCallIndirect();
             return;
         }
         if (node instanceof MakeLambdaIR ml) {

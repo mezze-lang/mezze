@@ -3,6 +3,7 @@ package com.mezze.interpreter.bytecode;
 import com.mezze.interpreter.nodes.builtin.dsl.NativeHandler;
 import com.mezze.interpreter.nodes.builtin.dsl.NativeHandlers;
 import com.mezze.interpreter.nodes.builtin.dsl.PositionalArgs;
+import com.mezze.interpreter.nodes.function.TailCallException;
 import com.mezze.interpreter.nodes.inline.DirectAddNode;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.datastructures.seq.MezzeSeq;
@@ -358,6 +359,47 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * so the Shape constructor doesn't inline into every op call site
      * (mirrors the AST's fold at {@code RecordLiteralNode.allObjects}).
      */
+    /**
+     * Tail-call variant of {@link CallDirectN}. Instead of invoking
+     * the callee and returning its result, throws a
+     * {@link TailCallException} carrying the CallTarget + args — the
+     * enclosing trampoline (BodyRepeatingNode / MezzeFunctionRootNode)
+     * catches it and re-drives the loop, keeping stack depth flat for
+     * deep tail-recursion.
+     */
+    @Operation
+    @ConstantOperand(type = CallTarget.class)
+    public static final class TailCallDirectN {
+        @Specialization
+        public static Object doThrow(CallTarget target, @Variadic Object[] args) {
+            throw new TailCallException(target, args);
+        }
+    }
+
+    /**
+     * Tail-call variant of {@link CallIndirect}. Reads the closure's
+     * CallTarget + closureValues, prepends closureValues to the args,
+     * and throws a {@link TailCallException} for the trampoline to
+     * re-drive.
+     */
+    @Operation
+    public static final class TailCallIndirect {
+        @Specialization
+        public static Object doThrow(MezzeFunction fn, @Variadic Object[] args) {
+            Object[] closureValues = fn.getClosureValues();
+            int closureLen = closureValues.length;
+            Object[] combined;
+            if (closureLen == 0) {
+                combined = args;
+            } else {
+                combined = new Object[closureLen + args.length];
+                System.arraycopy(closureValues, 0, combined, 0, closureLen);
+                System.arraycopy(args, 0, combined, closureLen, args.length);
+            }
+            throw new TailCallException(fn.getCallTarget(), combined);
+        }
+    }
+
     /**
      * Call a function value (a {@link MezzeFunction}) with a variadic
      * argument list. Prepends the function's {@code closureValues} to
