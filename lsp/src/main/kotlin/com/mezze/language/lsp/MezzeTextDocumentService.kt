@@ -776,6 +776,11 @@ class MezzeTextDocumentService(
                 "loc" to loc,
                 "missingConstructors" to hint.missingConstructors,
             )
+            is com.mezze.language.parsedast.diagnostics.FixHint.RemoveRange -> mapOf(
+                "kind" to "RemoveRange",
+                "loc" to loc,
+                "label" to hint.label,
+            )
         }
     }
 
@@ -4362,6 +4367,15 @@ class MezzeTextDocumentService(
                                 actions.add(Either.forRight(action))
                             }
                         }
+                        is FixHintData.RemoveRange -> {
+                            val edit = buildRemoveRangeEdit(state, hint.loc)
+                            val action = CodeAction(hint.label)
+                            action.kind = CodeActionKind.QuickFix
+                            action.isPreferred = true
+                            action.diagnostics = listOf(diagnostic)
+                            action.edit = WorkspaceEdit(mapOf(uri to listOf(edit)))
+                            actions.add(Either.forRight(action))
+                        }
                     }
                 }
             }
@@ -4760,6 +4774,59 @@ class MezzeTextDocumentService(
     }
 
     /**
+     * #107: build the edit that deletes the span at [loc] and its dangling
+     * separator, so the result stays well-formed. Two shapes:
+     *
+     *  - A record field (`{ a = 1, a = 2 }`): the field sits mid-line with
+     *    other text around it, so we widen to eat a trailing `, ` (or a
+     *    leading `, ` when it's the last field) and leave the rest of the
+     *    line intact.
+     *  - A match arm: nothing but indentation precedes it on its start line,
+     *    so we delete whole lines — from column 0 of the start line through
+     *    the start of the line *after* the end line — removing the arm and
+     *    its own newline.
+     */
+    private fun buildRemoveRangeEdit(state: DocumentState, loc: Range): TextEdit {
+        val lines = state.content.split('\n')
+        val startLine = lines.getOrNull(loc.start.line)
+        val precedingIsBlank = startLine != null &&
+            startLine.substring(0, loc.start.character.coerceAtMost(startLine.length)).isBlank()
+
+        // Arm shape: only whitespace before the span on its line → line delete.
+        if (precedingIsBlank) {
+            val delStart = Position(loc.start.line, 0)
+            // Delete through the start of the next line so the arm's newline
+            // goes too; if it's the last line, fall back to end-of-line.
+            val delEnd = if (loc.end.line + 1 < lines.size)
+                Position(loc.end.line + 1, 0)
+            else
+                Position(loc.end.line, (lines.getOrNull(loc.end.line)?.length ?: loc.end.character))
+            return TextEdit(Range(delStart, delEnd), "")
+        }
+
+        // Field shape: widen the end to swallow a trailing `,` + spaces.
+        val endLineText = lines.getOrNull(loc.end.line) ?: ""
+        var endCol = loc.end.character
+        while (endCol < endLineText.length && endLineText[endCol] == ' ') endCol++
+        if (endCol < endLineText.length && endLineText[endCol] == ',') {
+            endCol++
+            while (endCol < endLineText.length && endLineText[endCol] == ' ') endCol++
+            return TextEdit(Range(loc.start, Position(loc.end.line, endCol)), "")
+        }
+        // No trailing comma (last field) — eat a leading `, ` instead.
+        val startLineText = lines.getOrNull(loc.start.line) ?: ""
+        var startCol = loc.start.character
+        while (startCol > 0 && startLineText[startCol - 1] == ' ') startCol--
+        if (startCol > 0 && startLineText[startCol - 1] == ',') {
+            startCol--
+            while (startCol > 0 && startLineText[startCol - 1] == ' ') startCol--
+            return TextEdit(Range(Position(loc.start.line, startCol), loc.end), "")
+        }
+        // No separator either side — delete the span verbatim.
+        return TextEdit(loc, "")
+    }
+
+    /**
      * Pull structured [FixHintData] entries out of the diagnostic's
      * `data` field. We put them there in publishDiagnostics by reading
      * `TypeCheckError.fixHints`. Returns null when the diagnostic has
@@ -4808,6 +4875,10 @@ class MezzeTextDocumentService(
                     val ctors = dataAsList(entry["missingConstructors"])?.mapNotNull { it as? String }
                         ?: return@mapNotNull null
                     FixHintData.FillMatchArms(loc, ctors)
+                }
+                "RemoveRange" -> {
+                    val label = entry["label"] as? String ?: return@mapNotNull null
+                    FixHintData.RemoveRange(loc, label)
                 }
                 else -> null
             }
@@ -4879,6 +4950,7 @@ class MezzeTextDocumentService(
         data class AddEffectToAnnotation(val loc: Range, val effectName: String) : FixHintData()
         data class AddPub(val loc: Range, val declModulePath: String, val declName: String) : FixHintData()
         data class FillMatchArms(val loc: Range, val missingConstructors: List<String>) : FixHintData()
+        data class RemoveRange(val loc: Range, val label: String) : FixHintData()
     }
 
     /**

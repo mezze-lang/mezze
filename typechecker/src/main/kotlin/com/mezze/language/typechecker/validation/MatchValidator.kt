@@ -273,7 +273,8 @@ class MatchValidator(
                 errors.add(ValidationError.UnreachablePattern(
                     pattern = case.patterns.firstOrNull(),
                     reason = "Previous pattern already matches all cases",
-                    loc = case.loc
+                    loc = case.loc,
+                    removableArmLoc = case.loc
                 ))
                 continue
             }
@@ -286,7 +287,8 @@ class MatchValidator(
                         errors.add(ValidationError.UnreachablePattern(
                             pattern = pattern,
                             reason = "This case is already handled by an earlier arm; it will never execute.",
-                            loc = case.loc
+                            loc = case.loc,
+                            removableArmLoc = case.loc
                         ))
                     }
                     if (pattern is ParsedWildcardPattern || pattern is ParsedVariablePattern) {

@@ -95,4 +95,18 @@ sealed class FixHint {
         override val loc: Loc,
         val missingConstructors: List<String>,
     ) : FixHint()
+
+    /**
+     * Delete the text at [loc] outright. Used when the offending span is
+     * redundant or unreachable and the fix is simply to remove it:
+     * T0304 (a duplicate record field), V0603 (an unreachable match arm).
+     * [label] is the human-facing action title ("Remove duplicate field
+     * `a`"). The client widens the deletion to swallow a neighbouring
+     * separator (trailing comma / blank arm line) so the result stays
+     * well-formed.
+     */
+    data class RemoveRange(
+        override val loc: Loc,
+        val label: String,
+    ) : FixHint()
 }

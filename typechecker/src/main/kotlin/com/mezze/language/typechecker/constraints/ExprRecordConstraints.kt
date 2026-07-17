@@ -30,6 +30,7 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
                 loc = entry.loc,
                 errorType = ErrorType.TYPE_MISMATCH,
                 code = ErrorCode.T0304_DUPLICATE_RECORD_FIELD,
+                fixHints = listOf(FixHint.RemoveRange(entry.loc, "Remove duplicate field `${entry.name}`")),
             )
         }
     }

@@ -6,6 +6,7 @@ import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.ErrorType
 import com.mezze.language.ast.BuiltinTypes
 import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.parsedast.diagnostics.FixHint
 
 class PatternConstraintGenerator {
 
@@ -57,6 +58,9 @@ class PatternConstraintGenerator {
     ): PatternConstraintResult {
 
         val literalValue = pattern.value
+        // Point the diagnostic at the literal pattern itself, not the whole
+        // match (callers pass `expr.loc` as sourceLoc).
+        val patternLoc = pattern.loc
 
         if (scrutineeType is MezzeType.VariantType && literalValue !is ParsedLiteralValue.BoolValue) {
             val constructors = scrutineeType.constructors.keys.sorted()
@@ -66,10 +70,17 @@ class PatternConstraintGenerator {
                 "Cannot match variant type [${constructors.joinToString(", ")}] with $literalDesc. " +
                 "Use a constructor pattern like '$firstConstructor' instead, " +
                 "or use a variable pattern to catch all cases.",
-                sourceLoc,
+                patternLoc,
                 errorType = ErrorType.INVALID_PATTERN,
                 code = ErrorCode.T0208_LITERAL_PATTERN_ON_VARIANT,
                 hints = listOf("use a constructor pattern like `Some { ... }`"),
+                // Offer each real constructor of the scrutinee as a one-click
+                // replacement for the mistaken literal pattern (Rename replaces
+                // the pattern span with the candidate text). Bare constructor
+                // patterns like `Red` are valid Mezze. Only fires when the
+                // scrutinee type is already resolved to a variant at pattern-gen
+                // time; the unresolved-scrutinee case is reported by the solver.
+                fixHints = listOf(FixHint.Rename(patternLoc, constructors)),
             )
         }
 

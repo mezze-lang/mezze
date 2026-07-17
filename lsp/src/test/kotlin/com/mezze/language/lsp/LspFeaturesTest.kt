@@ -627,6 +627,73 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `duplicate record field offers a Remove quick-fix that drops the trailing comma`() {
+        // #107: T0304 carries a RemoveRange FixHint at the duplicate field; the
+        // LSP turns it into a "Remove duplicate field `a`" fix that also eats the
+        // following `, ` so the record literal stays well-formed.
+        val (uri, _) = openSingleFile("""
+            let r = {a = 1, a = 2, b = 3}
+        """.trimIndent())
+
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags, "expected publishDiagnostics for duplicate-field file")
+        val dupDiag = diags!!.diagnostics.firstOrNull { it.code?.left == "T0304" }
+            ?: fail("expected a T0304 diagnostic among ${diags.diagnostics.map { it.code?.left to it.message }}")
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = dupDiag.range
+            context = CodeActionContext(listOf(dupDiag))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val remove = actions.mapNotNull { e -> if (e.isRight) e.right else null }
+            .firstOrNull { it.title.contains("Remove duplicate field") }
+            ?: fail("expected a remove-field code action, got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        // The edit deletes the second `a = 2` entry AND its trailing `, ` — the
+        // deletion range must reach into the `,` that follows the field.
+        val edit = remove.edit?.changes?.values?.flatten()?.firstOrNull()
+            ?: fail("remove-field action carried no edit")
+        assertEquals("", edit.newText, "a removal is a pure deletion")
+        // Apply it and confirm the result parses to `{a = 1, b = 3}`.
+        val after = applyEdit("let r = {a = 1, a = 2, b = 3}", edit)
+        assertEquals("let r = {a = 1, b = 3}", after,
+            "removing the duplicate field should leave `{a = 1, b = 3}`, got: $after")
+    }
+
+    @Test
+    fun `unreachable match arm offers a Remove quick-fix that deletes the whole arm line`() {
+        // #107: V0603 carries a RemoveRange FixHint spanning the dead arm; the
+        // LSP deletes the whole arm line (indentation + newline) so nothing
+        // dangles.
+        val (uri, _) = openSingleFile("""
+            let f = {c: Bool} -> match c is
+              _ -> 1
+              True -> 2
+        """.trimIndent())
+
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags, "expected publishDiagnostics for unreachable-arm file")
+        val deadDiag = diags!!.diagnostics.firstOrNull { it.code?.left == "V0603" }
+            ?: fail("expected a V0603 diagnostic among ${diags.diagnostics.map { it.code?.left to it.message }}")
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = deadDiag.range
+            context = CodeActionContext(listOf(deadDiag))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val remove = actions.mapNotNull { e -> if (e.isRight) e.right else null }
+            .firstOrNull { it.title.contains("Remove unreachable arm") }
+            ?: fail("expected a remove-arm code action, got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        val edit = remove.edit?.changes?.values?.flatten()?.firstOrNull()
+            ?: fail("remove-arm action carried no edit")
+        assertEquals("", edit.newText, "a removal is a pure deletion")
+        // The deletion should start at column 0 (whole-line delete, swallowing indent).
+        assertEquals(0, edit.range.start.character,
+            "arm removal deletes from column 0 to swallow the indentation")
+    }
+
+    @Test
     fun `type-error diagnostic carries errorType code and metadata`() {
         // Regression for #313 step 7: the typechecker's rich errorType +
         // metadata (e.g. CLOSED_RECORD_FIELD_MISMATCH with "availableFields"
@@ -1044,6 +1111,23 @@ class LspFeaturesTest {
     private fun labelText(h: InlayHint): String {
         val l = h.label ?: return ""
         return if (l.isLeft) l.left else l.right.joinToString("") { it.value ?: "" }
+    }
+
+    /**
+     * Apply a single [TextEdit] to [source]. Handles the multi-line case (the
+     * edit spans from start-line to end-line) so removal edits that swallow a
+     * newline verify correctly.
+     */
+    private fun applyEdit(source: String, edit: TextEdit): String {
+        val lines = source.split("\n")
+        fun offset(p: Position): Int {
+            var o = 0
+            for (i in 0 until p.line) o += lines[i].length + 1  // +1 for the '\n'
+            return o + p.character
+        }
+        val start = offset(edit.range.start)
+        val end = offset(edit.range.end)
+        return source.substring(0, start) + edit.newText + source.substring(end)
     }
 
     /** Captures publishDiagnostics + log notifications for assertions. */

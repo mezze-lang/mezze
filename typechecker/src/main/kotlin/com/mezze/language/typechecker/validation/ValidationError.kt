@@ -109,11 +109,21 @@ sealed interface ValidationError {
         data class UnreachablePattern(
         val pattern: Any? = null,
         val reason: String,
-        val loc: Loc? = null
+        val loc: Loc? = null,
+        /**
+         * When set, the *whole arm* occupies this span and can be deleted
+         * outright — the "remove the dead arm" quick fix. Left null when
+         * [loc] only covers the pattern/body (deleting that would leave a
+         * malformed arm), so no removal fix is offered.
+         */
+        val removableArmLoc: Loc? = null
     ) : ValidationError {
         override val code: ErrorCode = ErrorCode.V0603_UNREACHABLE_PATTERN
         override val hints: List<String>
             get() = listOf("this pattern can never match because an earlier pattern already covers it")
+
+        override val fixHints: List<FixHint>
+            get() = removableArmLoc?.let { listOf(FixHint.RemoveRange(it, "Remove unreachable arm")) } ?: emptyList()
 
         override fun message(): String = buildString {
             append("Unreachable pattern")
