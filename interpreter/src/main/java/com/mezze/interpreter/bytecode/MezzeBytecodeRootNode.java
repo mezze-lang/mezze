@@ -5,6 +5,7 @@ import com.mezze.interpreter.nodes.builtin.dsl.NativeHandlers;
 import com.mezze.interpreter.nodes.builtin.dsl.PositionalArgs;
 import com.mezze.interpreter.nodes.inline.DirectAddNode;
 import com.mezze.interpreter.runtime.MezzeLanguage;
+import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeRecord.FieldLocation;
 import com.mezze.interpreter.values.MezzeRecord.FieldLocation.StorageType;
@@ -333,6 +334,26 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * so the Shape constructor doesn't inline into every op call site
      * (mirrors the AST's fold at {@code RecordLiteralNode.allObjects}).
      */
+    /**
+     * Construct a {@link MezzeFunction} closure — takes a compile-time
+     * {@link CallTarget} + function name, pops the capture values off
+     * the stack (variadic), pushes a MezzeFunction wrapping them.
+     *
+     * <p>Lowers {@link com.mezze.language.truffleir.MakeLambdaIR}. The
+     * closureValues array order matches the callee's captureSlots (so
+     * the callee's ReadLocalIR on capture slot i receives the same
+     * value the caller put at position i).
+     */
+    @Operation
+    @ConstantOperand(type = CallTarget.class)
+    @ConstantOperand(type = String.class)
+    public static final class MakeLambda {
+        @Specialization
+        public static MezzeFunction doMake(CallTarget target, String name, @Variadic Object[] captures) {
+            return new MezzeFunction(target, name, captures);
+        }
+    }
+
     /**
      * Call a scalar-ABI native op by name. Args are positional, packed
      * into an {@link PositionalArgs}, and passed to the registered

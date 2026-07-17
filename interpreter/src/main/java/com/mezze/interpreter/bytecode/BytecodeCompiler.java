@@ -16,6 +16,7 @@ import com.mezze.language.truffleir.InlineBinaryOpIR;
 import com.mezze.language.truffleir.InlineOp;
 import com.mezze.language.truffleir.LongLitIR;
 import com.mezze.language.truffleir.CaseIR;
+import com.mezze.language.truffleir.MakeLambdaIR;
 import com.mezze.language.truffleir.MakeRecordIR;
 import com.mezze.language.truffleir.MakeVariantIR;
 import com.mezze.language.truffleir.MatchIR;
@@ -79,6 +80,13 @@ import java.util.Map;
  *       {@code UnwrapSinglePayload} for single-payload bindings.
  *       No guards / if-lets / literal / record / seq / string-interp
  *       patterns yet.</li>
+ *   <li>{@link MakeLambdaIR} — closure construction. Captures are
+ *       read from the caller's frame slots (LoadArgument for arg
+ *       slots, LoadLocal for local slots) and packed into a
+ *       {@link com.mezze.interpreter.values.MezzeFunction}'s
+ *       {@code closureValues} array via the {@code MakeLambda} op.
+ *       The callee's CallTarget must already be compiled — same
+ *       constraint as {@link CallDirectIR}.</li>
  *   <li>{@link CallNativeIR} — scalar-ABI natives (positional typed
  *       args) whose handler doesn't need a Node reference. Handler
  *       resolved once at build time from
@@ -127,14 +135,15 @@ public final class BytecodeCompiler {
      * doesn't validate that.
      */
     public boolean supports(FunctionIR ir) {
-        if (!ir.getCaptureSlots().isEmpty()) {
-            // Phase 1 doesn't handle closures.
-            return false;
-        }
-        return supportsNode(ir.getBody(), ir.getParamSlots().size());
+        // Captures are laid out at the head of the argument list — see
+        // MezzeFunctionRootNode's convention: args[0..captureCount-1] are
+        // closure values, args[captureCount..] are user parameters. We
+        // treat both as LoadArgument slots at emit time.
+        int argCount = ir.getCaptureSlots().size() + ir.getParamSlots().size();
+        return supportsNode(ir.getBody(), argCount);
     }
 
-    private boolean supportsNode(NodeIR node, int paramCount) {
+    private boolean supportsNode(NodeIR node, int argCount) {
         if (node instanceof LongLitIR) return true;
         if (node instanceof DoubleLitIR) return true;
         if (node instanceof BoolLitIR) return true;
@@ -143,25 +152,25 @@ public final class BytecodeCompiler {
         if (node instanceof UnitLitIR) return true;
         if (node instanceof ReadLocalIR) return true;
         if (node instanceof WriteLocalIR w) {
-            return supportsNode(w.getValue(), paramCount);
+            return supportsNode(w.getValue(), argCount);
         }
         if (node instanceof InlineBinaryOpIR bin) {
             return bin.getOp() == InlineOp.ADD
-                && supportsNode(bin.getLeft(), paramCount)
-                && supportsNode(bin.getRight(), paramCount);
+                && supportsNode(bin.getLeft(), argCount)
+                && supportsNode(bin.getRight(), argCount);
         }
         if (node instanceof IfIR i) {
-            return supportsNode(i.getCond(), paramCount)
-                && supportsNode(i.getThenBr(), paramCount)
-                && supportsNode(i.getElseBr(), paramCount);
+            return supportsNode(i.getCond(), argCount)
+                && supportsNode(i.getThenBr(), argCount)
+                && supportsNode(i.getElseBr(), argCount);
         }
         if (node instanceof BlockIR blk) {
             for (StmtIR s : blk.getStmts()) {
                 NodeIR child = (s instanceof StmtIR.Let l) ? l.getValue()
                              : ((StmtIR.Expr) s).getNode();
-                if (!supportsNode(child, paramCount)) return false;
+                if (!supportsNode(child, argCount)) return false;
             }
-            return supportsNode(blk.getResult(), paramCount);
+            return supportsNode(blk.getResult(), argCount);
         }
         if (node instanceof CallDirectIR c) {
             // Any arity accepted (variadic CallDirectN). Still requires
@@ -171,7 +180,7 @@ public final class BytecodeCompiler {
             if (!c.isScalarABI()) return false;
             if (!compiledCallTargets.containsKey(c.getTargetHash())) return false;
             for (NodeIR arg : c.getArgs()) {
-                if (!supportsNode(arg, paramCount)) return false;
+                if (!supportsNode(arg, argCount)) return false;
             }
             return true;
         }
@@ -180,24 +189,32 @@ public final class BytecodeCompiler {
             // path if this program has record-spread — Phase 3+ work).
             for (FieldIR f : m.getFields()) {
                 if ("__spread__".equals(f.getName())) return false;
-                if (!supportsNode(f.getValue(), paramCount)) return false;
+                if (!supportsNode(f.getValue(), argCount)) return false;
             }
             return true;
         }
         if (node instanceof ReadFieldIR r) {
-            return supportsNode(r.getRecord(), paramCount);
+            return supportsNode(r.getRecord(), argCount);
         }
         if (node instanceof RecordUpdateIR ru) {
-            if (!supportsNode(ru.getRecord(), paramCount)) return false;
+            if (!supportsNode(ru.getRecord(), argCount)) return false;
             for (FieldIR f : ru.getUpdates()) {
                 if ("__spread__".equals(f.getName())) return false;
-                if (!supportsNode(f.getValue(), paramCount)) return false;
+                if (!supportsNode(f.getValue(), argCount)) return false;
             }
             return true;
         }
         if (node instanceof MakeVariantIR mv) {
             NodeIR payload = mv.getPayload();
-            return payload == null || supportsNode(payload, paramCount);
+            return payload == null || supportsNode(payload, argCount);
+        }
+        if (node instanceof MakeLambdaIR ml) {
+            // Callee must already be compiled — same constraint as
+            // CallDirectN. Captures are just slot reads in the caller's
+            // frame; supports() lets them through unconditionally
+            // (they resolve to LoadArgument or LoadLocal at emit time).
+            if (!compiledCallTargets.containsKey(ml.getFunctionHash())) return false;
+            return true;
         }
         if (node instanceof CallNativeIR cn) {
             // Phase 2: scalar-ABI natives only, and only handlers that
@@ -208,12 +225,12 @@ public final class BytecodeCompiler {
             if (NativeHandlers.INSTANCE.needsNode(cn.getName())) return false;
             if (NativeHandlers.INSTANCE.handlerOf(cn.getName()) == null) return false;
             for (NodeIR arg : cn.getArgs()) {
-                if (!supportsNode(arg, paramCount)) return false;
+                if (!supportsNode(arg, argCount)) return false;
             }
             return true;
         }
         if (node instanceof MatchIR m) {
-            if (!supportsNode(m.getScrutinee(), paramCount)) return false;
+            if (!supportsNode(m.getScrutinee(), argCount)) return false;
             // Phase 2 match subset: variant-tag + wildcard patterns
             // only, no guards, no if-let bindings, no record/literal/
             // seq/string-interp patterns. Wildcard is only allowed as
@@ -242,7 +259,7 @@ public final class BytecodeCompiler {
                     // supports() defers to the runtime for record-shape
                     // presence; missing fields ClassCast or throw.
                 } else if (pat instanceof PatternIR.Literal lit) {
-                    if (!supportsNode(lit.getValue(), paramCount)) return false;
+                    if (!supportsNode(lit.getValue(), argCount)) return false;
                 } else if (pat instanceof PatternIR.Record) {
                     // Record pattern is unconditional — must be the last
                     // case (anything after it is dead). Its fields are
@@ -255,7 +272,7 @@ public final class BytecodeCompiler {
                 } else {
                     return false;
                 }
-                if (!supportsNode(c.getBody(), paramCount)) return false;
+                if (!supportsNode(c.getBody(), argCount)) return false;
             }
             return true;
         }
@@ -294,7 +311,10 @@ public final class BytecodeCompiler {
      * {@link #compiledCallTargets}. Violating either throws.
      */
     public RootNode compile(FunctionIR ir) {
-        final int paramCount = ir.getParamSlots().size();
+        // Frame layout [captures..., params..., locals...] — captures
+        // and params both come from LoadArgument in the closure calling
+        // convention (see MezzeFunctionRootNode).
+        final int argCount = ir.getCaptureSlots().size() + ir.getParamSlots().size();
         final int localCount = ir.getLocalSlots().size();
 
         var nodes = MezzeBytecodeRootNodeGen.create(language, BytecodeConfig.DEFAULT, b -> {
@@ -311,7 +331,7 @@ public final class BytecodeCompiler {
             }
 
             b.beginReturn();
-            emitNode(ir.getBody(), b, paramCount, localMap);
+            emitNode(ir.getBody(), b, argCount, localMap);
             b.endReturn();
 
             b.endRoot();
@@ -320,7 +340,7 @@ public final class BytecodeCompiler {
     }
 
     private void emitNode(NodeIR node, MezzeBytecodeRootNodeGen.Builder b,
-                          int paramCount, BytecodeLocal[] localMap) {
+                          int argCount, BytecodeLocal[] localMap) {
         if (node instanceof LongLitIR lit) {
             b.emitLoadLongConstant(lit.getValue());
             return;
@@ -348,27 +368,28 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof ReadLocalIR r) {
-            // IR slot layout: [captures..., params..., locals...].
-            // Captures always empty in Phase 1, so slot < paramCount
-            // means a parameter (LoadArgument), slot >= paramCount
-            // means a local (LoadLocal).
+            // IR frame layout: [captures..., params..., locals...].
+            // Captures + params are both LoadArgument slots — see the
+            // caller convention in MezzeFunctionRootNode (arg[0..
+            // captureCount-1] = closure values, arg[captureCount..] =
+            // user params). Anything at or above argCount is a local.
             int slot = r.getSlot();
-            if (slot < paramCount) {
+            if (slot < argCount) {
                 b.emitLoadArgument(slot);
             } else {
-                b.emitLoadLocal(localMap[slot - paramCount]);
+                b.emitLoadLocal(localMap[slot - argCount]);
             }
             return;
         }
         if (node instanceof WriteLocalIR w) {
             int slot = w.getSlot();
-            if (slot < paramCount) {
+            if (slot < argCount) {
                 throw new UnsupportedOperationException(
-                    "Phase 1 doesn't support writing to a parameter slot "
-                    + "(WriteLocalIR to slot " + slot + " where paramCount=" + paramCount + ")");
+                    "Writing to an argument slot isn't supported "
+                    + "(WriteLocalIR to slot " + slot + " where argCount=" + argCount + ")");
             }
-            b.beginStoreLocal(localMap[slot - paramCount]);
-            emitNode(w.getValue(), b, paramCount, localMap);
+            b.beginStoreLocal(localMap[slot - argCount]);
+            emitNode(w.getValue(), b, argCount, localMap);
             b.endStoreLocal();
             return;
         }
@@ -378,8 +399,8 @@ public final class BytecodeCompiler {
                     "Phase 1 supports only InlineOp.ADD; got " + bin.getOp());
             }
             b.beginAddLong();
-            emitNode(bin.getLeft(), b, paramCount, localMap);
-            emitNode(bin.getRight(), b, paramCount, localMap);
+            emitNode(bin.getLeft(), b, argCount, localMap);
+            emitNode(bin.getRight(), b, argCount, localMap);
             b.endAddLong();
             return;
         }
@@ -388,9 +409,9 @@ public final class BytecodeCompiler {
             // BDSL treats both branches as value-producing (IfThenElse
             // would pop them as statements).
             b.beginConditional();
-            emitNode(i.getCond(), b, paramCount, localMap);
-            emitNode(i.getThenBr(), b, paramCount, localMap);
-            emitNode(i.getElseBr(), b, paramCount, localMap);
+            emitNode(i.getCond(), b, argCount, localMap);
+            emitNode(i.getThenBr(), b, argCount, localMap);
+            emitNode(i.getElseBr(), b, argCount, localMap);
             b.endConditional();
             return;
         }
@@ -402,8 +423,8 @@ public final class BytecodeCompiler {
                     // slot; the AST compiler models it that way too.
                     // Emit the write, discarding the pushed value
                     // isn't needed because StoreLocal already pops.
-                    b.beginStoreLocal(localMap[l.getSlot() - paramCount]);
-                    emitNode(l.getValue(), b, paramCount, localMap);
+                    b.beginStoreLocal(localMap[l.getSlot() - argCount]);
+                    emitNode(l.getValue(), b, argCount, localMap);
                     b.endStoreLocal();
                 } else if (s instanceof StmtIR.Expr e) {
                     // Bare expression statement — evaluate for side
@@ -413,10 +434,10 @@ public final class BytecodeCompiler {
                     // treated as a discarded expression by the DSL —
                     // its return value is popped implicitly at the
                     // next instruction.
-                    emitNode(e.getNode(), b, paramCount, localMap);
+                    emitNode(e.getNode(), b, argCount, localMap);
                 }
             }
-            emitNode(blk.getResult(), b, paramCount, localMap);
+            emitNode(blk.getResult(), b, argCount, localMap);
             b.endBlock();
             return;
         }
@@ -429,7 +450,7 @@ public final class BytecodeCompiler {
             }
             b.beginCallDirectN(target);
             for (NodeIR arg : c.getArgs()) {
-                emitNode(arg, b, paramCount, localMap);
+                emitNode(arg, b, argCount, localMap);
             }
             b.endCallDirectN();
             return;
@@ -441,14 +462,14 @@ public final class BytecodeCompiler {
             }
             b.beginMakeRecord(fieldNames);
             for (FieldIR f : m.getFields()) {
-                emitNode(f.getValue(), b, paramCount, localMap);
+                emitNode(f.getValue(), b, argCount, localMap);
             }
             b.endMakeRecord();
             return;
         }
         if (node instanceof ReadFieldIR r) {
             b.beginReadFieldByName(r.getFieldName());
-            emitNode(r.getRecord(), b, paramCount, localMap);
+            emitNode(r.getRecord(), b, argCount, localMap);
             b.endReadFieldByName();
             return;
         }
@@ -458,9 +479,9 @@ public final class BytecodeCompiler {
                 updateNames[i] = ru.getUpdates().get(i).getName();
             }
             b.beginUpdateRecord(updateNames);
-            emitNode(ru.getRecord(), b, paramCount, localMap);
+            emitNode(ru.getRecord(), b, argCount, localMap);
             for (FieldIR f : ru.getUpdates()) {
-                emitNode(f.getValue(), b, paramCount, localMap);
+                emitNode(f.getValue(), b, argCount, localMap);
             }
             b.endUpdateRecord();
             return;
@@ -472,13 +493,32 @@ public final class BytecodeCompiler {
                 b.emitMakeVariantNoPayload(mv.getTag(), mv.getTagName());
             } else {
                 b.beginMakeVariantSinglePayload(mv.getTag(), mv.getTagName());
-                emitNode(payload, b, paramCount, localMap);
+                emitNode(payload, b, argCount, localMap);
                 b.endMakeVariantSinglePayload();
             }
             return;
         }
         if (node instanceof MatchIR m) {
-            emitMatch(m, b, paramCount, localMap);
+            emitMatch(m, b, argCount, localMap);
+            return;
+        }
+        if (node instanceof MakeLambdaIR ml) {
+            CallTarget target = compiledCallTargets.get(ml.getFunctionHash());
+            if (target == null) {
+                throw new IllegalStateException(
+                    "MakeLambdaIR references unknown target hash "
+                    + ml.getFunctionHash().getHex() + " — callee must be compiled first");
+            }
+            b.beginMakeLambda(target, "lambda");
+            for (var cap : ml.getCaptures()) {
+                int slot = cap.getSlot();
+                if (slot < argCount) {
+                    b.emitLoadArgument(slot);
+                } else {
+                    b.emitLoadLocal(localMap[slot - argCount]);
+                }
+            }
+            b.endMakeLambda();
             return;
         }
         if (node instanceof CallNativeIR cn) {
@@ -490,7 +530,7 @@ public final class BytecodeCompiler {
             }
             b.beginCallNativeScalar(handler);
             for (NodeIR arg : cn.getArgs()) {
-                emitNode(arg, b, paramCount, localMap);
+                emitNode(arg, b, argCount, localMap);
             }
             b.endCallNativeScalar();
             return;
@@ -512,20 +552,20 @@ public final class BytecodeCompiler {
      * yield the case-body value.
      */
     private void emitMatch(MatchIR m, MezzeBytecodeRootNodeGen.Builder b,
-                           int paramCount, BytecodeLocal[] localMap) {
+                           int argCount, BytecodeLocal[] localMap) {
         b.beginBlock();
         BytecodeLocal scrutineeLocal = b.createLocal();
         b.beginStoreLocal(scrutineeLocal);
-        emitNode(m.getScrutinee(), b, paramCount, localMap);
+        emitNode(m.getScrutinee(), b, argCount, localMap);
         b.endStoreLocal();
-        emitMatchChain(m.getCases(), 0, scrutineeLocal, b, paramCount, localMap);
+        emitMatchChain(m.getCases(), 0, scrutineeLocal, b, argCount, localMap);
         b.endBlock();
     }
 
     private void emitMatchChain(java.util.List<CaseIR> cases, int idx,
                                 BytecodeLocal scrutineeLocal,
                                 MezzeBytecodeRootNodeGen.Builder b,
-                                int paramCount, BytecodeLocal[] localMap) {
+                                int argCount, BytecodeLocal[] localMap) {
         // supports() rejects matches without a trailing wildcard, so we
         // are guaranteed to hit the wildcard case before overflowing.
         CaseIR c = cases.get(idx);
@@ -535,12 +575,12 @@ public final class BytecodeCompiler {
             // wildcard slot if requested, then emit the body directly.
             b.beginBlock();
             if (w.getSlot() >= 0) {
-                BytecodeLocal target = localMap[w.getSlot() - paramCount];
+                BytecodeLocal target = localMap[w.getSlot() - argCount];
                 b.beginStoreLocal(target);
                 b.emitLoadLocal(scrutineeLocal);
                 b.endStoreLocal();
             }
-            emitNode(c.getBody(), b, paramCount, localMap);
+            emitNode(c.getBody(), b, argCount, localMap);
             b.endBlock();
             return;
         }
@@ -551,14 +591,14 @@ public final class BytecodeCompiler {
             b.beginBlock();
             for (int i = 0; i < rp.getFieldNames().size(); i++) {
                 int slot = rp.getFieldSlots().get(i);
-                BytecodeLocal target = localMap[slot - paramCount];
+                BytecodeLocal target = localMap[slot - argCount];
                 b.beginStoreLocal(target);
                 b.beginReadFieldByName(rp.getFieldNames().get(i));
                 b.emitLoadLocal(scrutineeLocal);
                 b.endReadFieldByName();
                 b.endStoreLocal();
             }
-            emitNode(c.getBody(), b, paramCount, localMap);
+            emitNode(c.getBody(), b, argCount, localMap);
             b.endBlock();
             return;
         }
@@ -567,10 +607,10 @@ public final class BytecodeCompiler {
             b.beginConditional();
             b.beginPrimEquals();
             b.emitLoadLocal(scrutineeLocal);
-            emitNode(lit.getValue(), b, paramCount, localMap);
+            emitNode(lit.getValue(), b, argCount, localMap);
             b.endPrimEquals();
-            emitNode(c.getBody(), b, paramCount, localMap);
-            emitMatchChain(cases, idx + 1, scrutineeLocal, b, paramCount, localMap);
+            emitNode(c.getBody(), b, argCount, localMap);
+            emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
             b.endConditional();
             return;
         }
@@ -598,7 +638,7 @@ public final class BytecodeCompiler {
             b.endUnwrapSinglePayload();
             b.endStoreLocal();
             for (int i = 0; i < names.size(); i++) {
-                BytecodeLocal target = localMap[slots.get(i) - paramCount];
+                BytecodeLocal target = localMap[slots.get(i) - argCount];
                 b.beginStoreLocal(target);
                 b.beginReadFieldByName(names.get(i));
                 b.emitLoadLocal(payloadLocal);
@@ -606,10 +646,10 @@ public final class BytecodeCompiler {
                 b.endStoreLocal();
             }
         }
-        emitNode(c.getBody(), b, paramCount, localMap);
+        emitNode(c.getBody(), b, argCount, localMap);
         b.endBlock();
         // Else-branch — recurse.
-        emitMatchChain(cases, idx + 1, scrutineeLocal, b, paramCount, localMap);
+        emitMatchChain(cases, idx + 1, scrutineeLocal, b, argCount, localMap);
         b.endConditional();
     }
 }
