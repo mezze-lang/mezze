@@ -1,8 +1,11 @@
 package com.mezze.interpreter.bytecode;
 
+import com.mezze.interpreter.nodes.builtin.dsl.NativeHandler;
+import com.mezze.interpreter.nodes.builtin.dsl.NativeHandlers;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.language.truffleir.BlockIR;
 import com.mezze.language.truffleir.CallDirectIR;
+import com.mezze.language.truffleir.CallNativeIR;
 import com.mezze.language.truffleir.FieldIR;
 import com.mezze.language.truffleir.FunctionIR;
 import com.mezze.language.truffleir.IfIR;
@@ -69,6 +72,13 @@ import java.util.Map;
  *       {@code UnwrapSinglePayload} for single-payload bindings.
  *       No guards / if-lets / literal / record / seq / string-interp
  *       patterns yet.</li>
+ *   <li>{@link CallNativeIR} — scalar-ABI natives (positional typed
+ *       args) whose handler doesn't need a Node reference. Handler
+ *       resolved once at build time from
+ *       {@link NativeHandlers#handlerOf(String)}, baked into the
+ *       bytecode as a constant operand via {@code CallNativeScalar}.
+ *       Ops requiring a Node (Async, IndirectCallNode-taking) are
+ *       Phase 3.</li>
  * </ul>
  *
  * <p>Anything else is rejected by {@link #supports}. Under the BDSL-only
@@ -176,6 +186,19 @@ public final class BytecodeCompiler {
         if (node instanceof MakeVariantIR mv) {
             NodeIR payload = mv.getPayload();
             return payload == null || supportsNode(payload, paramCount);
+        }
+        if (node instanceof CallNativeIR cn) {
+            // Phase 2: scalar-ABI natives only, and only handlers that
+            // do NOT require a Node reference (needsNode=false). Ops
+            // needing a Node — Async, IndirectCallNode-consuming ops —
+            // are Phase 3.
+            if (!cn.isScalarABI()) return false;
+            if (NativeHandlers.INSTANCE.needsNode(cn.getName())) return false;
+            if (NativeHandlers.INSTANCE.handlerOf(cn.getName()) == null) return false;
+            for (NodeIR arg : cn.getArgs()) {
+                if (!supportsNode(arg, paramCount)) return false;
+            }
+            return true;
         }
         if (node instanceof MatchIR m) {
             if (!supportsNode(m.getScrutinee(), paramCount)) return false;
@@ -409,6 +432,20 @@ public final class BytecodeCompiler {
         }
         if (node instanceof MatchIR m) {
             emitMatch(m, b, paramCount, localMap);
+            return;
+        }
+        if (node instanceof CallNativeIR cn) {
+            NativeHandler handler = NativeHandlers.INSTANCE.handlerOf(cn.getName());
+            if (handler == null) {
+                throw new IllegalStateException(
+                    "CallNativeIR references unregistered native '" + cn.getName()
+                    + "' — supports() should have rejected this");
+            }
+            b.beginCallNativeScalar(handler);
+            for (NodeIR arg : cn.getArgs()) {
+                emitNode(arg, b, paramCount, localMap);
+            }
+            b.endCallNativeScalar();
             return;
         }
         throw new UnsupportedOperationException(

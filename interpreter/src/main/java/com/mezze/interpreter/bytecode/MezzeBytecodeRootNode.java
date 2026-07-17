@@ -1,5 +1,8 @@
 package com.mezze.interpreter.bytecode;
 
+import com.mezze.interpreter.nodes.builtin.dsl.NativeHandler;
+import com.mezze.interpreter.nodes.builtin.dsl.NativeHandlers;
+import com.mezze.interpreter.nodes.builtin.dsl.PositionalArgs;
 import com.mezze.interpreter.nodes.inline.DirectAddNode;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeRecord;
@@ -290,6 +293,32 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * so the Shape constructor doesn't inline into every op call site
      * (mirrors the AST's fold at {@code RecordLiteralNode.allObjects}).
      */
+    /**
+     * Call a scalar-ABI native op by name. Args are positional, packed
+     * into an {@link PositionalArgs}, and passed to the registered
+     * {@link NativeHandler}.
+     *
+     * <p>Lowers {@link com.mezze.language.truffleir.CallNativeIR} when
+     * {@code isScalarABI == true} AND {@code NativeHandlers.needsNode(name)}
+     * is false. Node-needing ops (Async, IndirectCallNode-requiring
+     * handlers) are Phase 3 work — {@code needsNode} handlers require
+     * a {@link com.mezze.interpreter.nodes.MezzeNode} callerNode which
+     * BDSL ops don't naturally provide.
+     *
+     * <p>The handler is resolved once at build time via {@link Cached}.
+     * If a name isn't registered, we look up eagerly at compile time
+     * via {@link BytecodeCompiler#supports} — no runtime null-check
+     * overhead in the hot path.
+     */
+    @Operation
+    @ConstantOperand(type = NativeHandler.class)
+    public static final class CallNativeScalar {
+        @Specialization
+        public static Object doInvoke(NativeHandler handler, @Variadic Object[] args) {
+            return handler.invoke(new PositionalArgs(args, null, null));
+        }
+    }
+
     /**
      * Construct a variant with no payload (e.g. {@code None}, {@code True}).
      *

@@ -233,6 +233,9 @@ object BdslDifferentialHarness {
             }
             is com.mezze.language.truffleir.MakeVariantIR ->
                 node.payload?.let { collectDirectCallees(it, known, into) }
+            is com.mezze.language.truffleir.CallNativeIR -> {
+                for (a in node.args) collectDirectCallees(a, known, into)
+            }
             is com.mezze.language.truffleir.MatchIR -> {
                 collectDirectCallees(node.scrutinee, known, into)
                 for (c in node.cases) {
