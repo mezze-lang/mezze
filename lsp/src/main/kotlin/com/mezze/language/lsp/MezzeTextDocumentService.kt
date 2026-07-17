@@ -3667,6 +3667,55 @@ class MezzeTextDocumentService(
         return DocumentSymbol(name, kind, range, range, detail, children)
     }
 
+    // ========== Code Lens ==========
+
+    /**
+     * #109: code lenses over the typed decls.
+     *  - Each top-level function → "N references" (from the store's usages
+     *    index, keyed by the decl's content hash).
+     *  - Each ability declaration → "N implementations" (count of TypedAbilityImpl
+     *    whose abilityHash matches).
+     * Counts are cheap (one store query / a group-by), so computed eagerly here
+     * rather than deferred to codeLensResolve. Clicking a lens runs the standard
+     * find-references / go-to-implementation command with the decl's position.
+     */
+    override fun codeLens(params: CodeLensParams): CompletableFuture<List<CodeLens>> {
+        return CompletableFuture.supplyAsync {
+            val uri = params.textDocument.uri
+            val state = documents[uri] ?: return@supplyAsync emptyList()
+            val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
+                ?: return@supplyAsync emptyList()
+            val lenses = mutableListOf<CodeLens>()
+            val store = projectStore
+
+            fun lensAt(loc: com.mezze.language.parsedast.Loc, title: String, cmd: String) {
+                val pos = Position(loc.startLine - 1, loc.startCol - 1)
+                val range = Range(pos, pos)
+                lenses.add(CodeLens(range, Command(title, cmd, listOf(uri, pos)), null))
+            }
+
+            // "N references" over each top-level function.
+            for (decl in typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
+                val count = store?.getUsages(decl.hash)?.size ?: 0
+                lensAt(decl.loc, if (count == 1) "1 reference" else "$count references",
+                    "mezze.showReferences")
+            }
+
+            // "N implementations" over each ability declaration.
+            val implsByAbility = typedModule.abilityImpls.groupingBy { it.abilityHash }.eachCount()
+            for (ability in typedModule.abilityDecls) {
+                val count = implsByAbility[ability.hash] ?: 0
+                lensAt(ability.loc, if (count == 1) "1 implementation" else "$count implementations",
+                    "mezze.showImplementations")
+            }
+
+            lenses
+        }
+    }
+
+    override fun resolveCodeLens(unresolved: CodeLens): CompletableFuture<CodeLens> =
+        CompletableFuture.completedFuture(unresolved)
+
     // ========== References ==========
 
     override fun references(params: ReferenceParams): CompletableFuture<List<Location>> {

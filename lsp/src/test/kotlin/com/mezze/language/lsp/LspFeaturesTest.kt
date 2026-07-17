@@ -414,6 +414,46 @@ class LspFeaturesTest {
             "expected Point's fields x,y as children, got: $childNames")
     }
 
+    @Test
+    fun `code lens shows a references lens over each top-level function`() {
+        val (uri, _) = openSingleFile("""
+            let helper = {x: Int} -> x + 1
+            let other = {} -> 2
+        """.trimIndent())
+
+        val lenses = server.textDocumentService.codeLens(CodeLensParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val titles = lenses.mapNotNull { it.command?.title }
+        assertTrue(titles.any { it.contains("reference") },
+            "expected a references lens over a function, got: $titles")
+        // One lens per top-level let.
+        assertTrue(lenses.size >= 2, "expected a lens per top-level function, got ${lenses.size}: $titles")
+    }
+
+    @Test
+    fun `code lens shows an implementations lens over an ability`() {
+        val (uri, _) = openSingleFile("""
+            ability Show for 'a where {
+              show: { it: 'a } -> Str
+            }
+            type Color = | Red, Green |
+            impl Show for Color where {
+              show = { it } -> "c"
+            }
+        """.trimIndent())
+
+        val lenses = server.textDocumentService.codeLens(CodeLensParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val implTitle = lenses.mapNotNull { it.command?.title }.firstOrNull { it.contains("implementation") }
+            ?: fail("expected an implementations lens over `Show`, got: ${lenses.mapNotNull { it.command?.title }}")
+        assertTrue(implTitle.startsWith("1 implementation"),
+            "Show has exactly 1 impl (Color), got: $implTitle")
+    }
+
     // ===== Diagnostics =================================================
 
     @Test

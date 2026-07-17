@@ -112,6 +112,11 @@ class MezzeLanguageServer(
             // Document symbols (outline)
             documentSymbolProvider = Either.forLeft(true)
 
+            // Code lens: "N implementations" over ability/type decls,
+            // "N references" over top-level functions. resolveProvider = true
+            // so the counts are computed lazily in codeLensResolve.
+            codeLensProvider = CodeLensOptions().apply { resolveProvider = true }
+
             // Workspace symbols
             workspaceSymbolProvider = Either.forLeft(true)
 
