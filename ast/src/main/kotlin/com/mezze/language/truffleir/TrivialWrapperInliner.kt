@@ -144,32 +144,55 @@ object TrivialWrapperInliner {
 
         // Body must be a pure expression tree whose leaves reference each
         // param a known number of times and read no other slots. Accepted
-        // top-level shapes are single calls or expression-form control
-        // flow (`If`, `Block` without lets) that ultimately forwards to
-        // calls. The eligibility check now records per-param read counts
-        // instead of hard-rejecting on >1 reads; the substitution site
-        // (see [rewrite]) decides whether the caller's arg is cheap
-        // enough to duplicate.
+        // top-level shapes are single calls, expression-form control
+        // flow (`If`, `Block` without lets), or pure data construction /
+        // access (`MakeRecord`, `MakeVariant`, `RecordUpdate`, `MakeSeq`,
+        // `ReadField`, `SeqGet`, `InlineBinaryOp`). Whether the actual
+        // tree is inlineable is decided by [countParamReads] descending
+        // through it — nothing unsafe (Match, Perform, Lambda, indirect
+        // dispatch, WriteLocal, …) will pass that check.
         val body = fn.body
-        val shapeOk = when (body) {
-            is CallNativeIR -> true
-            is CallDirectIR -> body.isScalarABI
-            is IfIR -> true
-            is BlockIR -> body.stmts.all { it is StmtIR.Expr }
-            else -> false
-        }
-        if (!shapeOk) return false
-        // Traverse the body to make sure no capture/local slots are
-        // read (only params, in-range). We discard the counts here;
-        // the same walk runs again at the call site to compute them.
+        if (body is ReadCaptureIR || body is ReadArgIR) return false
         val counts = IntArray(paramEnd - paramStart)
         if (!countParamReads(body, paramStart, paramEnd, counts)) return false
+        // Non-scalar-ABI CallDirect is a legacy record-ABI receiver
+        // shape — safest to keep excluded, since Phase 0's constraint
+        // was already tighter here.
+        if (body is CallDirectIR && !body.isScalarABI) return false
         // Recursion guard: a wrapper whose body calls itself would
         // unfold forever at compile time. Once Phase B relaxed the
         // "≤1 read" rule, `If`-shaped self-recursive functions like
         // `gcd { a, b } -> if b == 0 then a else gcd { a = b, b = a % b }`
         // pass the earlier gates — reject them here.
-        return !containsSelfCall(body, fn.hash)
+        if (containsSelfCall(body, fn.hash)) return false
+        // Size budget (Phase C): don't inline bodies larger than
+        // [INLINE_SIZE_BUDGET] IR nodes. Prevents duplicating a big
+        // body across many call sites (code-size explosion) and keeps
+        // the CallTarget cache useful for genuinely-large functions.
+        return sizeOf(body) <= INLINE_SIZE_BUDGET
+    }
+
+    /** Max IR-node count for a body to be considered a "trivial" wrapper. */
+    private const val INLINE_SIZE_BUDGET: Int = 32
+
+    /**
+     * Count IR nodes in [node] up to a cap. Returns [INLINE_SIZE_BUDGET]+1
+     * as soon as the cap is exceeded so callers can short-circuit.
+     * A tight walker — no allocations, uses the existing
+     * [recurseChildren] structural traversal.
+     */
+    private fun sizeOf(node: NodeIR): Int {
+        var count = 0
+        fun walk(n: NodeIR) {
+            if (count > INLINE_SIZE_BUDGET) return
+            count++
+            recurseChildren(n) { child ->
+                if (count <= INLINE_SIZE_BUDGET) walk(child)
+                child
+            }
+        }
+        walk(node)
+        return count
     }
 
     /**
@@ -308,8 +331,49 @@ object TrivialWrapperInliner {
                 }
                 countParamReads(node.result, paramStart, paramEnd, counts)
             }
-            // Everything else (Lambda, Match, Perform, Handle, …) makes
-            // the body non-trivial. Conservative bail.
+            // Phase C: pure data-shape nodes. All are safe because they
+            // build new values (records, variants, seqs, updates) or
+            // do pure lookups (field/seq reads, string interp) with no
+            // slot writes, no calls, no effects.
+            is MakeVariantIR -> {
+                val payload = node.payload
+                payload == null || countParamReads(payload, paramStart, paramEnd, counts)
+            }
+            is ReadFieldIR -> countParamReads(node.record, paramStart, paramEnd, counts)
+            is RecordUpdateIR -> {
+                if (!countParamReads(node.record, paramStart, paramEnd, counts)) return false
+                for (u in node.updates) {
+                    if (!countParamReads(u.value, paramStart, paramEnd, counts)) return false
+                }
+                true
+            }
+            is MakeSeqIR -> {
+                for (el in node.elements) {
+                    val child = when (el) {
+                        is SeqElementIR.Regular -> el.node
+                        is SeqElementIR.Spread -> el.node
+                    }
+                    if (!countParamReads(child, paramStart, paramEnd, counts)) return false
+                }
+                true
+            }
+            is SeqGetIR -> {
+                countParamReads(node.seq, paramStart, paramEnd, counts) &&
+                countParamReads(node.index, paramStart, paramEnd, counts)
+            }
+            is InterpolatedStringIR -> {
+                for (p in node.parts) {
+                    when (p) {
+                        is StringPartIR.Lit -> {}
+                        is StringPartIR.Expr ->
+                            if (!countParamReads(p.node, paramStart, paramEnd, counts)) return false
+                    }
+                }
+                true
+            }
+            // Everything else (Lambda, Match, Perform, Handle, indirect
+            // calls, `WriteLocal`, `PartialApply`, `DictMethodCall`,
+            // `SpecializedCall`, `CallLocal`, `CallIndirect*`) still bails.
             else -> false
         }
     }
