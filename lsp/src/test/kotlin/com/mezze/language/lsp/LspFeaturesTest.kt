@@ -464,6 +464,35 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `inline binding replaces real uses only, not names in strings (AST-driven)`() {
+        // The old regex matched `\bx\b` everywhere — including inside the
+        // string "x here". The AST/typed-var walk only touches real uses.
+        val (uri, _) = openSingleFile("""
+            let f = {} -> do
+              let x = 5
+              let s = "x here"
+              x + 1
+        """.trimIndent())
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = Range(Position(1, 2), Position(1, 2)) // on `let x = 5`
+            context = CodeActionContext(emptyList())
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val inline = actions.mapNotNull { if (it.isRight) it.right else null }
+            .firstOrNull { it.title.startsWith("Inline binding") }
+            ?: fail("expected an Inline binding action, got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        val edits = inline.edit?.changes?.values?.flatten() ?: emptyList()
+        // One edit deletes the let line; the real use `x + 1` becomes `5 + 1`.
+        // The string literal `"x here"` must NOT be touched — no edit on line 2.
+        assertTrue(edits.none { it.range.start.line == 2 },
+            "must not edit the string-literal line, got edits on lines: ${edits.map { it.range.start.line }}")
+        assertTrue(edits.any { it.newText == "5" && it.range.start.line == 3 },
+            "expected the real use on line 3 replaced with `5`, got: ${edits.map { it.range.start.line to it.newText }}")
+    }
+
+    @Test
     fun `convert if to match works on a multi-line if (AST-driven, regex could not)`() {
         val (uri, _) = openSingleFile("""
             let f = {b: Bool} ->

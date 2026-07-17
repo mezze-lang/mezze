@@ -4575,41 +4575,72 @@ class MezzeTextDocumentService(
      * multiple lines or contains complex structure.
      */
     private fun buildInlineBindingAction(uri: String, state: DocumentState, range: Range): CodeAction? {
-        val lines = state.content.split('\n')
-        val cursorLine = range.start.line
-        val line = lines.getOrNull(cursorLine) ?: return null
-        // Match: optional indent, `let <name> = <value>` on a single line.
-        val m = Regex("^(\\s*)let\\s+(\\w+)\\s*=\\s*(.+?)\\s*$").matchEntire(line) ?: return null
-        val (indent, name, value) = m.destructured
-        // Don't try to inline values that look like function definitions or
-        // multi-line constructs — they need real AST extraction.
-        if (value.contains("->") || value.endsWith("{") || value.endsWith("do")) return null
+        // Find the do-block `let` binding under the cursor in the PARSED AST.
+        val parsed = state.parsedModule ?: return null
+        val (name, valueExpr, letLoc) = findLetBindingAt(parsed, range) ?: return null
+
+        // Only inline simple values — a lambda / block / record-literal value
+        // needs real substitution semantics beyond a textual splice.
+        if (valueExpr is ParsedLambda || valueExpr is ParsedDo || valueExpr is ParsedRecordLit) return null
+        val value = sliceSource(state.content, valueExpr.loc)
+
+        // Reference sites come from the TYPED AST (scope-aware TypedVar walk),
+        // not a text `\bname\b` regex that would also hit comments/strings and
+        // shadowed bindings.
+        val typedModule = state.typeCheckResult?.typedModule ?: return null
+        val refs = mutableListOf<Location>()
+        for (d in typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
+            collectReferencesInExpr(d.value, name, uri, refs)
+        }
+        // Only the uses (exclude the binding's own def-site range, and any hit
+        // that overlaps the let line itself).
+        val useEdits = refs
+            .filter { it.range.start.line != (letLoc.startLine - 1) }
+            .map { TextEdit(it.range, value) }
+        if (useEdits.isEmpty()) return null // never used → that's remove-dead-code, not inline
 
         val edits = mutableListOf<TextEdit>()
-        // Delete the let line including its trailing newline.
-        edits.add(TextEdit(
-            Range(Position(cursorLine, 0), Position(cursorLine + 1, 0)),
-            "",
-        ))
-        // Replace every other reference to `<name>` with the inlined value.
-        val pattern = Regex("\\b${Regex.escape(name)}\\b")
-        for ((li, content) in lines.withIndex()) {
-            if (li == cursorLine) continue
-            for (mm in pattern.findAll(content)) {
-                edits.add(TextEdit(
-                    Range(Position(li, mm.range.first), Position(li, mm.range.last + 1)),
-                    value,
-                ))
-            }
-        }
-        // Bail if nothing actually used the binding — inlining a never-used
-        // let would just delete dead code, which is a different refactoring.
-        if (edits.size == 1) return null
+        // Delete the whole let line (including trailing newline).
+        edits.add(TextEdit(Range(Position(letLoc.startLine - 1, 0), Position(letLoc.startLine, 0)), ""))
+        edits.addAll(useEdits)
 
         return CodeAction("Inline binding `$name`").apply {
             kind = CodeActionKind.RefactorInline
             edit = WorkspaceEdit(mapOf(uri to edits))
         }
+    }
+
+    /**
+     * Find the do-block `let <name> = <value>` binding whose line the cursor
+     * [range] sits on, in the parsed AST. Returns (name, valueExpr, letLoc).
+     */
+    private fun findLetBindingAt(
+        module: ParsedModule,
+        range: Range
+    ): Triple<String, ParsedExpr, com.mezze.language.parsedast.Loc>? {
+        val cursorLine = range.start.line + 1
+        var found: Triple<String, ParsedExpr, com.mezze.language.parsedast.Loc>? = null
+        fun visit(e: ParsedExpr) {
+            if (e is ParsedDo) {
+                for (stmt in e.statements) {
+                    if (stmt is ParsedStatement.Let) {
+                        val pat = stmt.pattern
+                        if (pat is ParsedVariablePattern && stmt.loc.startLine == cursorLine) {
+                            found = Triple(pat.name, stmt.value, stmt.loc)
+                        }
+                    }
+                }
+            }
+            for (child in e.children()) visit(child)
+        }
+        for (decl in module.decls) {
+            when (decl) {
+                is ParsedLetDecl -> visit(decl.value)
+                is ParsedTopLevelExpr -> visit(decl.expression)
+                else -> {}
+            }
+        }
+        return found
     }
 
     /**
