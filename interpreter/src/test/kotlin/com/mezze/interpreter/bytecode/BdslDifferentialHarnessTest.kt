@@ -78,6 +78,7 @@ class BdslDifferentialHarnessTest {
         )
     }
 
+
     @Test
     fun `program using stdlib — falls back to AST-only`() {
         // std::int::to_str isn't in BDSL's Phase 1 subset (needs the

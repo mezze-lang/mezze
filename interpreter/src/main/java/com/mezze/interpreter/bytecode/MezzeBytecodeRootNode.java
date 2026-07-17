@@ -6,6 +6,8 @@ import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeRecord.FieldLocation;
 import com.mezze.interpreter.values.MezzeRecord.FieldLocation.StorageType;
 import com.mezze.interpreter.values.MezzeRecord.Shape;
+import com.mezze.interpreter.values.MezzeVariant;
+import com.mezze.interpreter.values.MezzeVariant.TagRegistry;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.bytecode.BytecodeRootNode;
@@ -271,6 +273,89 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * so the Shape constructor doesn't inline into every op call site
      * (mirrors the AST's fold at {@code RecordLiteralNode.allObjects}).
      */
+    /**
+     * Construct a variant with no payload (e.g. {@code None}, {@code True}).
+     *
+     * <p>Lowers {@link com.mezze.language.truffleir.MakeVariantIR} when
+     * {@code payload == null}. Tag + tagName are baked as constant
+     * operands; the tag is (re)registered in the global
+     * {@link TagRegistry} at operation build time so downstream match
+     * ops see a consistent int→name mapping.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)
+    @ConstantOperand(type = String.class)
+    public static final class MakeVariantNoPayload {
+        @Specialization
+        public static MezzeVariant doNoPayload(int tag, String tagName) {
+            TagRegistry registry = TagRegistry.getGlobal();
+            registry.getOrCreateTag(tagName);
+            return MezzeVariant.noPayload(registry, tag);
+        }
+    }
+
+    /**
+     * Construct a variant with a single payload value (e.g.
+     * {@code Some(x)}, {@code Ok(v)}, {@code Err(e)}).
+     *
+     * <p>Lowers {@link com.mezze.language.truffleir.MakeVariantIR}
+     * when {@code payload != null}. Payload comes from the operand
+     * stack; tag + tagName are baked as constant operands.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)
+    @ConstantOperand(type = String.class)
+    public static final class MakeVariantSinglePayload {
+        @Specialization
+        public static MezzeVariant doSinglePayload(int tag, String tagName, Object payload) {
+            TagRegistry registry = TagRegistry.getGlobal();
+            registry.getOrCreateTag(tagName);
+            return MezzeVariant.singlePayload(registry, tag, payload);
+        }
+    }
+
+    /**
+     * Compare a variant's tag against a compile-time int tag. Returns
+     * true iff the operand is a {@link MezzeVariant} with matching tag.
+     *
+     * <p>Used to lower {@link com.mezze.language.truffleir.MatchIR}
+     * for {@link com.mezze.language.truffleir.PatternIR.Variant}
+     * cases — the compiler chains one of these per case guarded by an
+     * {@code IfThenElse}. Wildcard cases become the final {@code else}
+     * branch.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)
+    public static final class VariantTagEquals {
+        @Specialization
+        public static boolean doVariant(int expectedTag, MezzeVariant variant) {
+            return variant.getTag() == expectedTag;
+        }
+
+        @Specialization(guards = "!isVariant(other)")
+        public static boolean doNonVariant(int expectedTag, Object other) {
+            return false;
+        }
+
+        protected static boolean isVariant(Object obj) {
+            return obj instanceof MezzeVariant;
+        }
+    }
+
+    /**
+     * Read the single payload value from a {@link MezzeVariant}.
+     * Used for pattern-variant bindings that capture the payload:
+     * {@code Some(x) -> ...} lowers to a WriteLocal on {@code x} sourced
+     * from {@code UnwrapSinglePayload(scrutinee)}.
+     */
+    @Operation
+    public static final class UnwrapSinglePayload {
+        @Specialization
+        public static Object doVariant(MezzeVariant variant) {
+            return variant.getPayloadValue();
+        }
+    }
+
     @TruffleBoundary
     private static MezzeRecord buildAllObjectRecord(String[] fieldNames, Object[] values) {
         FieldLocation[] locations = new FieldLocation[fieldNames.length];

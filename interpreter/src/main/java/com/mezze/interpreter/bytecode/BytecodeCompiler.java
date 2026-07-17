@@ -9,8 +9,12 @@ import com.mezze.language.truffleir.IfIR;
 import com.mezze.language.truffleir.InlineBinaryOpIR;
 import com.mezze.language.truffleir.InlineOp;
 import com.mezze.language.truffleir.LongLitIR;
+import com.mezze.language.truffleir.CaseIR;
 import com.mezze.language.truffleir.MakeRecordIR;
+import com.mezze.language.truffleir.MakeVariantIR;
+import com.mezze.language.truffleir.MatchIR;
 import com.mezze.language.truffleir.NodeIR;
+import com.mezze.language.truffleir.PatternIR;
 import com.mezze.language.truffleir.ReadFieldIR;
 import com.mezze.language.truffleir.ReadLocalIR;
 import com.mezze.language.truffleir.StmtIR;
@@ -52,6 +56,14 @@ import java.util.Map;
  *       {@link com.mezze.interpreter.values.MezzeRecord}, via the
  *       {@code ReadFieldByName} operation (PIC on Shape + megamorphic
  *       fallback)</li>
+ *   <li>{@link MakeVariantIR} — construct a variant, no-payload and
+ *       single-payload forms via {@code MakeVariantNoPayload} and
+ *       {@code MakeVariantSinglePayload}</li>
+ *   <li>{@link MatchIR} — variant-tag + wildcard patterns only. Chain
+ *       of {@code IfThenElse} on {@code VariantTagEquals}, with
+ *       {@code UnwrapSinglePayload} for single-payload bindings.
+ *       No guards / if-lets / literal / record / seq / string-interp
+ *       patterns yet.</li>
  * </ul>
  *
  * <p>Anything else is rejected by {@link #supports}. Under the BDSL-only
@@ -147,6 +159,44 @@ public final class BytecodeCompiler {
         }
         if (node instanceof ReadFieldIR r) {
             return supportsNode(r.getRecord(), paramCount);
+        }
+        if (node instanceof MakeVariantIR mv) {
+            NodeIR payload = mv.getPayload();
+            return payload == null || supportsNode(payload, paramCount);
+        }
+        if (node instanceof MatchIR m) {
+            if (!supportsNode(m.getScrutinee(), paramCount)) return false;
+            // Phase 2 match subset: variant-tag + wildcard patterns
+            // only, no guards, no if-let bindings, no record/literal/
+            // seq/string-interp patterns. Wildcard is only allowed as
+            // the trailing case (canonical "match Some / None / _" shape),
+            // AND the trailing case MUST be a wildcard — no "throw on
+            // fall-through" op yet, so we can't compile exhaustive-
+            // by-coverage matches without a wildcard until Phase 3.
+            var cases = m.getCases();
+            if (cases.isEmpty()) return false;
+            if (!(cases.get(cases.size() - 1).getPattern() instanceof PatternIR.Wildcard)) {
+                return false;
+            }
+            for (int i = 0; i < cases.size(); i++) {
+                CaseIR c = cases.get(i);
+                if (c.getGuard() != null) return false;
+                if (!c.getIfLetBindings().isEmpty()) return false;
+                PatternIR pat = c.getPattern();
+                boolean isLast = i == cases.size() - 1;
+                if (pat instanceof PatternIR.Variant v) {
+                    // Supported: any number of fieldNames — each becomes
+                    // a ReadFieldByName on the unwrapped payload record.
+                    // supports() defers to the runtime for record-shape
+                    // presence; missing fields ClassCast or throw.
+                } else if (pat instanceof PatternIR.Wildcard) {
+                    if (!isLast) return false;
+                } else {
+                    return false;
+                }
+                if (!supportsNode(c.getBody(), paramCount)) return false;
+            }
+            return true;
         }
         return false;
     }
@@ -251,11 +301,14 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof IfIR i) {
-            b.beginIfThenElse();
+            // Mezze if-then-else is an expression — use Conditional so
+            // BDSL treats both branches as value-producing (IfThenElse
+            // would pop them as statements).
+            b.beginConditional();
             emitNode(i.getCond(), b, paramCount, localMap);
             emitNode(i.getThenBr(), b, paramCount, localMap);
             emitNode(i.getElseBr(), b, paramCount, localMap);
-            b.endIfThenElse();
+            b.endConditional();
             return;
         }
         if (node instanceof BlockIR blk) {
@@ -319,9 +372,107 @@ public final class BytecodeCompiler {
             b.endReadFieldByName();
             return;
         }
+        if (node instanceof MakeVariantIR mv) {
+            NodeIR payload = mv.getPayload();
+            if (payload == null) {
+                // No stack operands -> BDSL generates a single-shot emit*.
+                b.emitMakeVariantNoPayload(mv.getTag(), mv.getTagName());
+            } else {
+                b.beginMakeVariantSinglePayload(mv.getTag(), mv.getTagName());
+                emitNode(payload, b, paramCount, localMap);
+                b.endMakeVariantSinglePayload();
+            }
+            return;
+        }
+        if (node instanceof MatchIR m) {
+            emitMatch(m, b, paramCount, localMap);
+            return;
+        }
         throw new UnsupportedOperationException(
             "BytecodeCompiler Phase 1 doesn't support IR node "
             + node.getClass().getSimpleName()
             + ". Callers should check `supports(ir)` first.");
+    }
+
+    /**
+     * Lower a {@link MatchIR} — value-producing expression — to BDSL.
+     *
+     * <p>MatchIR is an expression: the case body's value is the value of
+     * the whole match. Encoding in BDSL: wrap the scrutinee-store and
+     * the IfThenElse chain in a Block; a Block's final child is its
+     * yielded value. The store is a void-returning side effect,
+     * followed by the chained IfThenElse whose then/else branches each
+     * yield the case-body value.
+     */
+    private void emitMatch(MatchIR m, MezzeBytecodeRootNodeGen.Builder b,
+                           int paramCount, BytecodeLocal[] localMap) {
+        b.beginBlock();
+        BytecodeLocal scrutineeLocal = b.createLocal();
+        b.beginStoreLocal(scrutineeLocal);
+        emitNode(m.getScrutinee(), b, paramCount, localMap);
+        b.endStoreLocal();
+        emitMatchChain(m.getCases(), 0, scrutineeLocal, b, paramCount, localMap);
+        b.endBlock();
+    }
+
+    private void emitMatchChain(java.util.List<CaseIR> cases, int idx,
+                                BytecodeLocal scrutineeLocal,
+                                MezzeBytecodeRootNodeGen.Builder b,
+                                int paramCount, BytecodeLocal[] localMap) {
+        // supports() rejects matches without a trailing wildcard, so we
+        // are guaranteed to hit the wildcard case before overflowing.
+        CaseIR c = cases.get(idx);
+        PatternIR pat = c.getPattern();
+        if (pat instanceof PatternIR.Wildcard w) {
+            // Wildcard body IS the else. Bind the scrutinee to the
+            // wildcard slot if requested, then emit the body directly.
+            b.beginBlock();
+            if (w.getSlot() >= 0) {
+                BytecodeLocal target = localMap[w.getSlot() - paramCount];
+                b.beginStoreLocal(target);
+                b.emitLoadLocal(scrutineeLocal);
+                b.endStoreLocal();
+            }
+            emitNode(c.getBody(), b, paramCount, localMap);
+            b.endBlock();
+            return;
+        }
+        PatternIR.Variant v = (PatternIR.Variant) pat;
+        b.beginConditional();
+        // Condition.
+        b.beginVariantTagEquals(v.getTag());
+        b.emitLoadLocal(scrutineeLocal);
+        b.endVariantTagEquals();
+        // Then-branch. Bind each captured field of the payload record:
+        // for a pattern like Some { value = v }, fieldNames=["value"],
+        // fieldSlots=[slot(v)]. Read v = payload.value. When the pattern
+        // is a bare payload variable Some v — no {} — fieldNames = [v]
+        // and the AST also does a record-field extraction; that same
+        // shape wouldn't typecheck without an actual record payload, so
+        // treat both identically.
+        b.beginBlock();
+        var names = v.getFieldNames();
+        var slots = v.getFieldSlots();
+        if (!names.isEmpty()) {
+            BytecodeLocal payloadLocal = b.createLocal();
+            b.beginStoreLocal(payloadLocal);
+            b.beginUnwrapSinglePayload();
+            b.emitLoadLocal(scrutineeLocal);
+            b.endUnwrapSinglePayload();
+            b.endStoreLocal();
+            for (int i = 0; i < names.size(); i++) {
+                BytecodeLocal target = localMap[slots.get(i) - paramCount];
+                b.beginStoreLocal(target);
+                b.beginReadFieldByName(names.get(i));
+                b.emitLoadLocal(payloadLocal);
+                b.endReadFieldByName();
+                b.endStoreLocal();
+            }
+        }
+        emitNode(c.getBody(), b, paramCount, localMap);
+        b.endBlock();
+        // Else-branch — recurse.
+        emitMatchChain(cases, idx + 1, scrutineeLocal, b, paramCount, localMap);
+        b.endConditional();
     }
 }
