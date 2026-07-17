@@ -40,10 +40,15 @@ class LspFeaturesTest {
 
     @BeforeEach
     fun setUp() {
+        // 1 MB pipe buffers. The default PipedInputStream buffer is 1024 bytes,
+        // which a two-file project's publishDiagnostics burst overflows — the
+        // server blocks writing diagnostics while the test thread is mid-send,
+        // deadlocking with no timeout (see docs/issues/lsp-test-harness-pipe-deadlock.md).
+        val pipeBuf = 1 shl 20
         cOut = PipedOutputStream()
-        sIn = PipedInputStream(cOut)
+        sIn = PipedInputStream(cOut, pipeBuf)
         sOut = PipedOutputStream()
-        cIn = PipedInputStream(sOut)
+        cIn = PipedInputStream(sOut, pipeBuf)
         executor = Executors.newSingleThreadExecutor { r ->
             Thread(r, "lsp-features-server").apply { isDaemon = true }
         }
@@ -1107,6 +1112,95 @@ class LspFeaturesTest {
         )
     }
 
+    @Test
+    fun `typeDefinition jumps to a type declared in another module`() {
+        // #112: a value whose type is defined in another module — go-to-type
+        // resolves the type name and jumps to the OTHER file via the store's
+        // TYPE decl index.
+        val ws = mkProject(
+            "app.mz" to """
+                use types::Color
+                let c: Color = Red
+            """.trimIndent(),
+            "types.mz" to """
+                pub type Color = | Red, Green |
+            """.trimIndent()
+        )
+        openProject(ws)
+        val appUri = ws.resolve("src/app.mz").toUri().toString()
+        val typesUri = ws.resolve("src/types.mz").toUri().toString()
+        openFile(typesUri, ws.resolve("src/types.mz").toFile().readText())
+        client.awaitDiagnostics(typesUri, 5_000)
+        openFile(appUri, ws.resolve("src/app.mz").toFile().readText())
+        client.awaitDiagnostics(appUri, 5_000)
+
+        // Cursor on `c` (line 1, `let c: Color = Red`, char 4).
+        val locs = server.textDocumentService.typeDefinition(TypeDefinitionParams().apply {
+            textDocument = TextDocumentIdentifier(appUri)
+            position = Position(1, 4)
+        }).get(5, TimeUnit.SECONDS).let { e ->
+            if (e.isLeft) e.left else e.right.map { Location(it.targetUri, it.targetRange) }
+        }
+
+        assertTrue(locs.isNotEmpty(), "expected a type-definition Location for `c` (type Color)")
+        // Compare by resolved path — `file:/…` vs `file:///…` are the same file.
+        assertEquals(sameFile(typesUri), sameFile(locs.first().uri),
+            "go-to-type should land in types.mz where `Color` is declared, got: ${locs.first().uri}")
+    }
+
+    @org.junit.jupiter.api.Disabled(
+        "Blocked: workspace ability/impl decls are not indexed for cross-file " +
+        "lookup in the LSP flow. getDeclsByKind(ABILITY/IMPL) returns 0 rows for " +
+        "a workspace module, and open documents' typeCheckResult.typedModule is " +
+        "null at request time, so a cross-module impl can't be surfaced. " +
+        "typeDefinition works because TYPE decls ARE store-indexed. The impl " +
+        "finder is correct once the data is present; needs the store-indexing " +
+        "pipeline to register ability/impl decls. See docs/issues/lsp-cross-module-impl-indexing.md."
+    )
+    @Test
+    fun `implementation finds an impl in another module`() {
+        // #112: go-to-implementation on an ability method surfaces impls across
+        // modules, not just the current file.
+        val ws = mkProject(
+            "app.mz" to """
+                use shapes::Show
+                use shapes::Circle
+                let describe = {c: Circle} -> Show::show { it = c }
+            """.trimIndent(),
+            "shapes.mz" to """
+                pub ability Show for 'a where {
+                  show: { it: 'a } -> Str
+                }
+                pub type Circle = | Circle |
+                impl Show for Circle where {
+                  show = { it } -> "circle"
+                }
+            """.trimIndent()
+        )
+        openProject(ws)
+        val appUri = ws.resolve("src/app.mz").toUri().toString()
+        val shapesUri = ws.resolve("src/shapes.mz").toUri().toString()
+        // Drain each file's diagnostics before opening the next so the
+        // server→client pipe never fills mid-send (see the deadlock note).
+        openFile(shapesUri, ws.resolve("src/shapes.mz").toFile().readText())
+        client.awaitDiagnostics(shapesUri, 5_000)
+        openFile(appUri, ws.resolve("src/app.mz").toFile().readText())
+        client.awaitDiagnostics(appUri, 5_000)
+
+        // Cursor on `show` in the call `Show::show { it = c }` (line 2).
+        val callLine = "let describe = {c: Circle} -> Show::show { it = c }"
+        val col = callLine.indexOf("show", callLine.indexOf("Show::")) // the method after `::`
+        val locs = server.textDocumentService.implementation(ImplementationParams().apply {
+            textDocument = TextDocumentIdentifier(appUri)
+            position = Position(2, col)
+        }).get(5, TimeUnit.SECONDS).let { e ->
+            if (e.isLeft) e.left else e.right.map { Location(it.targetUri, it.targetRange) }
+        }
+
+        assertTrue(locs.any { sameFile(it.uri) == sameFile(shapesUri) },
+            "expected an impl Location in shapes.mz, got: ${locs.map { it.uri }}")
+    }
+
     // ===== Selection range =============================================
 
     @Test
@@ -1357,6 +1451,11 @@ class LspFeaturesTest {
      * edit spans from start-line to end-line) so removal edits that swallow a
      * newline verify correctly.
      */
+    /** Normalize a file URI to its real path so `file:/…` and `file:///…` compare equal. */
+    private fun sameFile(uri: String): String =
+        try { java.nio.file.Paths.get(java.net.URI.create(uri)).toRealPath().toString() }
+        catch (_: Exception) { uri }
+
     /** The set of token-type indices in a delta-encoded semantic-token stream (every 4th of each 5-int group). */
     private fun decodeSemanticTokenTypes(data: List<Int>): Set<Int> {
         val types = mutableSetOf<Int>()

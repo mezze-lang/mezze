@@ -5874,14 +5874,31 @@ class MezzeTextDocumentService(
 
     /** Use the latest TypedAST to recover the *type name* of the symbol at the cursor. */
     private fun resolveTypeNameAt(state: DocumentState, pos: Position): String? {
-        val typed = (state.typeCheckResult ?: lastSuccessfulResult[state.uri])?.typedModule ?: return null
         val name = resolveIdentifierAt(state, pos) ?: return null
-        // Best-effort: scan top-level let decls for one whose name matches and
-        // pull its type's constructor name. Doesn't handle field access yet.
+
+        // Prefer the WRITTEN annotation: `let c: Color = …` names `Color`
+        // literally, whereas the inferred type is a nameless VariantType (the
+        // declared name isn't carried on MezzeType). Fall back to the inferred
+        // type's constructor for types that do carry a name (TypeApplication).
+        state.parsedModule?.decls?.filterIsInstance<ParsedLetDecl>()
+            ?.firstOrNull { it.isSimpleBinding && it.variableName == name }
+            ?.typeAnnotation
+            ?.let { annotationTypeName(it) }
+            ?.let { return it }
+
+        val typed = (state.typeCheckResult ?: lastSuccessfulResult[state.uri])?.typedModule ?: return null
         for (decl in typed.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
             if (decl.name == name) return typeConstructorName(decl.scheme.type)
         }
         return null
+    }
+
+    /** The head type NAME of a written annotation (`Color`, `Option`, qualified `codec::Entry`), or null. */
+    private fun annotationTypeName(ann: com.mezze.language.parsedast.ParsedTypeAnnotation): String? = when (ann) {
+        is com.mezze.language.parsedast.ParsedNamedType -> ann.name
+        is com.mezze.language.parsedast.ParsedTypeApp -> ann.constructor
+        is com.mezze.language.parsedast.ParsedQualifiedType -> ann.typeName
+        else -> null
     }
 
     private fun typeConstructorName(t: com.mezze.language.ast.MezzeType): String? = when (t) {
@@ -5900,20 +5917,57 @@ class MezzeTextDocumentService(
                 if (decl.name == typeName) return Location(state.uri, locToRange(decl.loc))
             }
         }
-        // TODO cross-module: look up via MezzeStore's decl index. For now,
-        // local scope is enough for the lightbulb to feel useful.
-        return null
+        // Cross-module: query the store's TYPE decl index (covers stdlib +
+        // any indexed workspace module) and resolve the owning module's file.
+        val store = projectStore ?: return null
+        val row = try {
+            store.getDeclsByKind(com.mezze.language.store.DeclKind.TYPE)
+                .firstOrNull { it.declName == typeName }
+        } catch (_: Exception) { null } ?: return null
+        val uri = resolveModulePathToUri(row.modulePath) ?: return null
+        return Location(uri, Range(
+            Position(row.startLine - 1, row.startCol - 1),
+            Position(row.endLine - 1, row.endCol),
+        ))
     }
 
     /** Surface impl blocks across the project that implement `methodName`. */
     private fun findImplementationsForMethod(state: DocumentState, methodName: String): List<Location> {
         val out = mutableListOf<Location>()
-        val localParsed = state.parsedModule ?: return out
-        for (impl in localParsed.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()) {
-            for (op in impl.operations) {
-                if (op.name == methodName) out.add(Location(state.uri, locToRange(op.loc)))
+        // Local file first — precise arm locs.
+        val localParsed = state.parsedModule
+        if (localParsed != null) {
+            for (impl in localParsed.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()) {
+                for (op in impl.operations) {
+                    if (op.name == methodName) out.add(Location(state.uri, locToRange(op.loc)))
+                }
             }
         }
+
+        // Cross-file: TypedAbilityImpl.operations is keyed by method name, so we
+        // match directly and jump to the impl's loc. Two sources, unioned:
+        //  - every OPEN document's typed module (covers workspace files the user
+        //    has open — these aren't in ModuleTypeChecker's global cache), and
+        //  - ModuleTypeChecker's cache (covers stdlib + transitively-typed deps).
+        // Each impl's owning file: the open document's own URI, or the module
+        // path resolved to a workspace/stdlib file.
+        fun scanImpls(typedModule: com.mezze.language.typedast.TypedModule?, ownerUri: String?) {
+            if (typedModule == null) return
+            for (impl in typedModule.abilityImpls) {
+                if (!impl.operations.containsKey(methodName)) continue
+                val uri = ownerUri ?: resolveModulePathToUri(typedModule.path) ?: continue
+                val loc = Location(uri, locToRange(impl.loc))
+                if (out.none { it.uri == loc.uri && it.range == loc.range }) out.add(loc)
+            }
+        }
+        try {
+            for ((docUri, docState) in documents) {
+                scanImpls((docState.typeCheckResult ?: lastSuccessfulResult[docUri])?.typedModule, docUri)
+            }
+            for ((modulePath, moduleResult) in com.mezze.language.typechecker.module.ModuleTypeChecker.getAllCachedModules()) {
+                scanImpls(moduleResult.typedModule, resolveModulePathToUri(modulePath))
+            }
+        } catch (_: Exception) { /* cache miss — return what we have */ }
         return out
     }
 
