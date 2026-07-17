@@ -5,6 +5,7 @@ import com.mezze.interpreter.nodes.builtin.dsl.NativeHandlers;
 import com.mezze.interpreter.nodes.builtin.dsl.PositionalArgs;
 import com.mezze.interpreter.nodes.inline.DirectAddNode;
 import com.mezze.interpreter.runtime.MezzeLanguage;
+import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeRecord.FieldLocation;
@@ -407,6 +408,23 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization
         public static Object doInvoke(NativeHandler handler, @Variadic Object[] args) {
             return handler.invoke(new PositionalArgs(args, null, null));
+        }
+    }
+
+    /**
+     * Construct a {@link MezzeSeq} from a variadic list of element
+     * values. Lowers {@link com.mezze.language.truffleir.MakeSeqIR}
+     * for the no-spread case ({@code [1, 2, 3]}); spread elements
+     * ({@code [x, ...rest]}) are Phase 3+.
+     */
+    @Operation
+    public static final class MakeSeq {
+        @Specialization
+        public static MezzeSeq<Object> doMake(@Variadic Object[] elements) {
+            if (elements.length == 0) {
+                return MezzeSeq.empty();
+            }
+            return MezzeSeq.of(elements);
         }
     }
 

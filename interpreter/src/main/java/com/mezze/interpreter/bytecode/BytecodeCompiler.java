@@ -19,7 +19,9 @@ import com.mezze.language.truffleir.LongLitIR;
 import com.mezze.language.truffleir.CaseIR;
 import com.mezze.language.truffleir.MakeLambdaIR;
 import com.mezze.language.truffleir.MakeRecordIR;
+import com.mezze.language.truffleir.MakeSeqIR;
 import com.mezze.language.truffleir.MakeVariantIR;
+import com.mezze.language.truffleir.SeqElementIR;
 import com.mezze.language.truffleir.MatchIR;
 import com.mezze.language.truffleir.NodeIR;
 import com.mezze.language.truffleir.PatternIR;
@@ -81,6 +83,10 @@ import java.util.Map;
  *       {@code UnwrapSinglePayload} for single-payload bindings.
  *       No guards / if-lets / literal / record / seq / string-interp
  *       patterns yet.</li>
+ *   <li>{@link MakeSeqIR} — build a {@link com.mezze.datastructures.seq.MezzeSeq}
+ *       from element values via the {@code MakeSeq} op. No-spread
+ *       only; {@code SeqElementIR.Spread} elements ({@code [x, ...rest]})
+ *       are Phase 3+.</li>
  *   <li>{@link CallIndirectIR} — call a {@link MezzeFunction} value.
  *       Function expr evaluated, arg expr (typically a MakeRecordIR)
  *       evaluated, then the {@code CallIndirect} op prepends the
@@ -220,6 +226,14 @@ public final class BytecodeCompiler {
             // frame; supports() lets them through unconditionally
             // (they resolve to LoadArgument or LoadLocal at emit time).
             if (!compiledCallTargets.containsKey(ml.getFunctionHash())) return false;
+            return true;
+        }
+        if (node instanceof MakeSeqIR ms) {
+            for (SeqElementIR el : ms.getElements()) {
+                if (el instanceof SeqElementIR.Spread) return false;
+                SeqElementIR.Regular reg = (SeqElementIR.Regular) el;
+                if (!supportsNode(reg.getNode(), argCount)) return false;
+            }
             return true;
         }
         if (node instanceof CallIndirectIR ci) {
@@ -511,6 +525,15 @@ public final class BytecodeCompiler {
         }
         if (node instanceof MatchIR m) {
             emitMatch(m, b, argCount, localMap);
+            return;
+        }
+        if (node instanceof MakeSeqIR ms) {
+            b.beginMakeSeq();
+            for (SeqElementIR el : ms.getElements()) {
+                SeqElementIR.Regular reg = (SeqElementIR.Regular) el;
+                emitNode(reg.getNode(), b, argCount, localMap);
+            }
+            b.endMakeSeq();
             return;
         }
         if (node instanceof CallIndirectIR ci) {
