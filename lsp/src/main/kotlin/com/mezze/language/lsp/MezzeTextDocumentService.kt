@@ -4185,6 +4185,12 @@ class MezzeTextDocumentService(
             val actions = mutableListOf<Either<Command, CodeAction>>()
 
             for (diagnostic in params.context.diagnostics) {
+                // #95: structured warning quick-fixes, dispatched on the stable
+                // WarningCode carried on the diagnostic. Runs first — these
+                // warnings carry no FixHint, so the `?: continue` below would
+                // otherwise skip them entirely.
+                actions.addAll(warningQuickFixes(uri, state, diagnostic))
+
                 // Structured FixHints come through the LSP via Diagnostic.data
                 // as a Map (lsp4j serializes it generically). We stored them
                 // under the "fixHints" key in publishDiagnostics — pull them
@@ -4268,6 +4274,49 @@ class MezzeTextDocumentService(
 
             actions
         }
+    }
+
+    /**
+     * #95: quick-fixes for the structured linter warnings, keyed off the
+     * WarningCode carried on the diagnostic. The diagnostic's own range already
+     * spans the offending token, so edits are computed from it — no message
+     * parsing, no AST re-walk.
+     *   - W0101 unused variable → "Prefix with `_`" (insert `_` at the name).
+     *   - W0102 unused import   → "Remove import" (delete the `use` line).
+     */
+    private fun warningQuickFixes(
+        uri: String,
+        state: DocumentState,
+        diagnostic: Diagnostic
+    ): List<Either<Command, CodeAction>> {
+        val codeEither = diagnostic.code
+        val code = if (codeEither != null && codeEither.isLeft) codeEither.left else return emptyList()
+        val out = mutableListOf<Either<Command, CodeAction>>()
+
+        fun quickFix(title: String, edits: List<TextEdit>): CodeAction {
+            val action = CodeAction(title)
+            action.kind = CodeActionKind.QuickFix
+            action.isPreferred = true
+            action.diagnostics = listOf(diagnostic)
+            action.edit = WorkspaceEdit(mapOf(uri to edits))
+            return action
+        }
+
+        when (code) {
+            WarningCode.W0101_UNUSED_VARIABLE.display() -> {
+                // Insert `_` at the start of the flagged name (zero-width edit).
+                val at = Range(diagnostic.range.start, diagnostic.range.start)
+                out.add(Either.forRight(quickFix("Prefix with `_`", listOf(TextEdit(at, "_")))))
+            }
+            WarningCode.W0102_UNUSED_IMPORT.display() -> {
+                // Delete the whole `use` line (start of its line through the
+                // start of the next), so no blank line is left behind.
+                val startLine = diagnostic.range.start.line
+                val delRange = Range(Position(startLine, 0), Position(startLine + 1, 0))
+                out.add(Either.forRight(quickFix("Remove unused import", listOf(TextEdit(delRange, "")))))
+            }
+        }
+        return out
     }
 
     /**

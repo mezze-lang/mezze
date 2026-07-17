@@ -505,6 +505,34 @@ class LspFeaturesTest {
         )
     }
 
+    @Test
+    fun `unused variable warning offers a Prefix-with-underscore quick-fix`() {
+        // #95: W0101 carries its WarningCode to the LSP, and the codeAction
+        // handler turns it into a one-click "Prefix with `_`" fix.
+        val (uri, _) = openSingleFile("""
+            let f = {} -> do
+              let x = 5
+              42
+        """.trimIndent())
+
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags, "expected publishDiagnostics")
+        val w0101 = diags!!.diagnostics.firstOrNull { it.code?.left == "W0101" }
+            ?: fail("expected a W0101 diagnostic among ${diags.diagnostics.map { it.code?.left to it.message }}")
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = w0101.range
+            context = CodeActionContext(listOf(w0101))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val titles = actions.mapNotNull { e -> if (e.isRight) e.right.title else null }
+        assertTrue(
+            titles.any { it.contains("Prefix with") && it.contains("_") },
+            "expected a 'Prefix with `_`' code action, got: $titles"
+        )
+    }
+
     // ===== Cross-module go-to-definition (in-memory fallback) =========
 
     // Disabled for the same reason as
