@@ -111,6 +111,17 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                     System.err.println("[BDSL] compile counts: " + h + " hits, " + m + " misses ("
                             + String.format("%.1f", 100.0 * h / t) + "% BDSL) — "
                             + "unsafe-callee=" + unsafe + " unsupported=" + unsup + " emit-crash=" + crash);
+                    if (unsup > 0) {
+                        var top = com.mezze.interpreter.bytecode.BytecodeCompiler.getRejectionCounts();
+                        int i = 0;
+                        System.err.print("[BDSL] top unsupported reasons: ");
+                        for (var e : top.entrySet()) {
+                            if (i++ >= 10) break;
+                            if (i > 1) System.err.print(", ");
+                            System.err.print(e.getKey() + "=" + e.getValue());
+                        }
+                        System.err.println();
+                    }
                 }
             }, "bdsl-stats"));
         }

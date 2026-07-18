@@ -213,7 +213,42 @@ public final class BytecodeCompiler {
         // closure values, args[captureCount..] are user parameters. We
         // treat both as LoadArgument slots at emit time.
         int argCount = ir.getCaptureSlots().size() + ir.getParamSlots().size();
-        return supportsNode(ir.getBody(), argCount);
+        boolean ok = supportsNode(ir.getBody(), argCount);
+        if (!ok && STATS_ENABLED) {
+            String key = LAST_REJECTION.get();
+            if (key == null) key = "<unknown>";
+            REJECTION_COUNTS.computeIfAbsent(key, k -> new java.util.concurrent.atomic.AtomicLong())
+                    .incrementAndGet();
+        }
+        LAST_REJECTION.remove();
+        return ok;
+    }
+
+    private static final boolean STATS_ENABLED =
+            System.getenv("MEZZE_BDSL_STATS") != null
+                && !"0".equals(System.getenv("MEZZE_BDSL_STATS"));
+    private static final ThreadLocal<String> LAST_REJECTION = new ThreadLocal<>();
+    private static final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>
+            REJECTION_COUNTS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static java.util.Map<String, Long> getRejectionCounts() {
+        var out = new java.util.LinkedHashMap<String, Long>();
+        REJECTION_COUNTS.entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue().get(), a.getValue().get()))
+                .forEach(e -> out.put(e.getKey(), e.getValue().get()));
+        return out;
+    }
+
+    private static void markReject(NodeIR node, String extra) {
+        if (!STATS_ENABLED) return;
+        // Only capture the FIRST (deepest) rejection so we know the actual
+        // blocking node type — outer wrappers set it too but we don't
+        // overwrite.
+        if (LAST_REJECTION.get() == null) {
+            String label = (node == null) ? "<null>" : node.getClass().getSimpleName();
+            if (extra != null) label += ":" + extra;
+            LAST_REJECTION.set(label);
+        }
     }
 
     private boolean supportsNode(NodeIR node, int argCount) {
@@ -258,8 +293,10 @@ public final class BytecodeCompiler {
         if (node instanceof CallDirectIR c) {
             // Any arity accepted (variadic CallDirectN). Tail-call
             // variant throws TailCallException for the trampoline.
-            if (!c.isScalarABI()) return false;
-            if (resolveCallTarget(c.getTargetHash()) == null) return false;
+            if (!c.isScalarABI()) { markReject(node, "record-ABI"); return false; }
+            if (resolveCallTarget(c.getTargetHash()) == null) {
+                markReject(node, "target-not-compiled"); return false;
+            }
             for (NodeIR arg : c.getArgs()) {
                 if (!supportsNode(arg, argCount)) return false;
             }
@@ -303,7 +340,9 @@ public final class BytecodeCompiler {
             // CallDirectN. Captures are just slot reads in the caller's
             // frame; supports() lets them through unconditionally
             // (they resolve to LoadArgument or LoadLocal at emit time).
-            if (resolveCallTarget(ml.getFunctionHash()) == null) return false;
+            if (resolveCallTarget(ml.getFunctionHash()) == null) {
+                markReject(node, "target-not-compiled"); return false;
+            }
             return true;
         }
         if (node instanceof MakeSeqIR ms) {
@@ -360,8 +399,10 @@ public final class BytecodeCompiler {
             // (Async, HOF-callback consumers) are supported. The emit
             // side dispatches to CallNativeScalar or
             // CallNativeScalarWithNode based on needsNode.
-            if (!cn.isScalarABI()) return false;
-            if (NativeHandlers.INSTANCE.handlerOf(cn.getName()) == null) return false;
+            if (!cn.isScalarABI()) { markReject(node, "record-ABI"); return false; }
+            if (NativeHandlers.INSTANCE.handlerOf(cn.getName()) == null) {
+                markReject(node, "no-handler:" + cn.getName()); return false;
+            }
             for (NodeIR arg : cn.getArgs()) {
                 if (!supportsNode(arg, argCount)) return false;
             }
@@ -430,6 +471,7 @@ public final class BytecodeCompiler {
             }
             return true;
         }
+        markReject(node, null);
         return false;
     }
 
