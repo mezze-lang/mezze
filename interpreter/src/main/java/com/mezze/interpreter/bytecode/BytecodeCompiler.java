@@ -29,6 +29,7 @@ import com.mezze.language.truffleir.SeqElementIR;
 import com.mezze.language.truffleir.MatchIR;
 import com.mezze.language.truffleir.NodeIR;
 import com.mezze.language.truffleir.PatternIR;
+import com.mezze.language.truffleir.CallIndirectScalarIR;
 import com.mezze.language.truffleir.DictMethodCallIR;
 import com.mezze.language.truffleir.FracLitIR;
 import com.mezze.language.truffleir.ReadArgIR;
@@ -316,6 +317,16 @@ public final class BytecodeCompiler {
             return supportsNode(ci.getFunction(), argCount)
                 && supportsNode(ci.getArg(), argCount);
         }
+        if (node instanceof CallIndirectScalarIR ci) {
+            // Synthesized as CallIndirect(function, MakeRecord(...)) —
+            // we lose the InvokeScalarNNode typed-payload fast path but
+            // gain BDSL routing (record-ABI dispatch remains correct).
+            if (!supportsNode(ci.getFunction(), argCount)) return false;
+            for (NodeIR arg : ci.getArgs()) {
+                if (!supportsNode(arg, argCount)) return false;
+            }
+            return true;
+        }
         if (node instanceof DictMethodCallIR dm) {
             // Dict method call = read impl fn from a slot, invoke with arg.
             // Synthesized at emit time as (LoadArgument/LoadLocal, arg,
@@ -560,6 +571,12 @@ public final class BytecodeCompiler {
         }
         if (node instanceof CallLocalIR cl) {
             return hasTailCall(cl.getArg());
+        }
+        if (node instanceof CallIndirectScalarIR ci) {
+            if (ci.isTailCall()) return true;
+            if (hasTailCall(ci.getFunction())) return true;
+            for (NodeIR arg : ci.getArgs()) if (hasTailCall(arg)) return true;
+            return false;
         }
         if (node instanceof DictMethodCallIR dm) {
             return hasTailCall(dm.getArg());
@@ -1055,6 +1072,33 @@ public final class BytecodeCompiler {
             }
             emitNode(dm.getArg(), b, argCount, localMap);
             b.endCallIndirect();
+            return;
+        }
+        if (node instanceof CallIndirectScalarIR ci) {
+            // Lower as CallIndirect(function, MakeRecord(argFieldNames, args)).
+            // This mirrors InvokeScalarNNode's fallback path when no
+            // typed-payload fast path applies — we get the record-ABI
+            // dispatch for free at the cost of one MezzeRecord allocation.
+            String[] fieldNames = ci.getArgFieldNames().toArray(new String[0]);
+            if (ci.isTailCall()) {
+                b.beginTailCallIndirect();
+                emitNode(ci.getFunction(), b, argCount, localMap);
+                b.beginMakeRecord(fieldNames);
+                for (NodeIR arg : ci.getArgs()) {
+                    emitNode(arg, b, argCount, localMap);
+                }
+                b.endMakeRecord();
+                b.endTailCallIndirect();
+            } else {
+                b.beginCallIndirect();
+                emitNode(ci.getFunction(), b, argCount, localMap);
+                b.beginMakeRecord(fieldNames);
+                for (NodeIR arg : ci.getArgs()) {
+                    emitNode(arg, b, argCount, localMap);
+                }
+                b.endMakeRecord();
+                b.endCallIndirect();
+            }
             return;
         }
         if (node instanceof CallLocalIR cl) {
