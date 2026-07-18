@@ -5,6 +5,9 @@ import com.mezze.interpreter.nodes.builtin.dsl.NativeHandlers;
 import com.mezze.interpreter.nodes.builtin.dsl.PositionalArgs;
 import com.mezze.interpreter.nodes.builtin.dsl.TypedNativeHandlers;
 import com.mezze.interpreter.nodes.function.TailCallException;
+import com.mezze.language.typedast.Hash;
+import com.mezze.interpreter.nodes.ReadGlobalByHashNode;
+import com.mezze.interpreter.nodes.ReadGlobalFnByHashNode;
 import com.mezze.interpreter.nodes.inline.DirectAddNode;
 import com.mezze.interpreter.nodes.inline.DirectAndNode;
 import com.mezze.interpreter.nodes.inline.DirectDivideNode;
@@ -195,6 +198,60 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization
         public static Object doObject(Object value) {
             return value;
+        }
+    }
+
+    /**
+     * Read a global definition by content hash from the current
+     * {@code MezzeContext}. Auto-evaluates zero-param zero-capture
+     * "value thunks" (constants like {@code math::pi}, top-level
+     * {@code let x = ...}). Mirrors the AST's
+     * {@link com.mezze.interpreter.nodes.ReadGlobalByHashNode}.
+     *
+     * <p>Used for {@link com.mezze.language.truffleir.ReadGlobalByHashIR}.
+     * The hash is baked at emit time as a ConstantOperand; the receive
+     * side delegates to a cached ReadGlobalByHashNode child so any
+     * IndirectCallNode / suspended-force logic lives in exactly one
+     * place.
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    public static final class ReadGlobalByHash {
+        @Specialization
+        public static Object doRead(
+                Hash hash,
+                @Cached(value = "createReader(hash)", allowUncached = true) ReadGlobalByHashNode reader) {
+            // The AST node's execute(frame) is frame-agnostic — it looks
+            // up its parent Node context, not the frame. Passing null is
+            // safe.
+            return reader.execute(null);
+        }
+
+        static ReadGlobalByHashNode createReader(Hash hash) {
+            return new ReadGlobalByHashNode(hash);
+        }
+    }
+
+    /**
+     * Read a function from the global registry WITHOUT auto-evaluating
+     * thunks. Mirrors {@link com.mezze.interpreter.nodes.ReadGlobalFnByHashNode};
+     * used for dictionary-passing paths (ability op function injection)
+     * where the raw MezzeFunction is required.
+     *
+     * <p>Used for {@link com.mezze.language.truffleir.ReadGlobalFnByHashIR}.
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    public static final class ReadGlobalFnByHash {
+        @Specialization
+        public static Object doRead(
+                Hash hash,
+                @Cached(value = "createReader(hash)", allowUncached = true) ReadGlobalFnByHashNode reader) {
+            return reader.execute(null);
+        }
+
+        static ReadGlobalFnByHashNode createReader(Hash hash) {
+            return new ReadGlobalFnByHashNode(hash);
         }
     }
 

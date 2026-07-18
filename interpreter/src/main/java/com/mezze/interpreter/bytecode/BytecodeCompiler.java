@@ -30,6 +30,8 @@ import com.mezze.language.truffleir.MatchIR;
 import com.mezze.language.truffleir.NodeIR;
 import com.mezze.language.truffleir.PatternIR;
 import com.mezze.language.truffleir.ReadFieldIR;
+import com.mezze.language.truffleir.ReadGlobalByHashIR;
+import com.mezze.language.truffleir.ReadGlobalFnByHashIR;
 import com.mezze.language.truffleir.ReadLocalIR;
 import com.mezze.language.truffleir.RecordUpdateIR;
 import com.mezze.language.truffleir.StmtIR;
@@ -216,6 +218,8 @@ public final class BytecodeCompiler {
         if (node instanceof CharLitIR) return true;
         if (node instanceof UnitLitIR) return true;
         if (node instanceof ReadLocalIR) return true;
+        if (node instanceof ReadGlobalByHashIR) return true;
+        if (node instanceof ReadGlobalFnByHashIR) return true;
         if (node instanceof WriteLocalIR w) {
             return supportsNode(w.getValue(), argCount);
         }
@@ -642,6 +646,14 @@ public final class BytecodeCompiler {
             } else {
                 b.emitLoadLocal(localMap[slot - argCount]);
             }
+            return;
+        }
+        if (node instanceof ReadGlobalByHashIR g) {
+            b.emitReadGlobalByHash(g.getHash());
+            return;
+        }
+        if (node instanceof ReadGlobalFnByHashIR g) {
+            b.emitReadGlobalFnByHash(g.getHash());
             return;
         }
         if (node instanceof WriteLocalIR w) {
