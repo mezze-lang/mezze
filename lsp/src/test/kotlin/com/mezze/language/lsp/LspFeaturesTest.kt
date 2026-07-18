@@ -529,6 +529,30 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `code lens omits a zero-reference lens and counts in-file uses`() {
+        // Regression (#128): the reference count was store-only, so in
+        // single-file mode every function showed a dead "0 references" lens
+        // (empty peek on click). Now: count reflects in-file uses (matching
+        // what clicking finds), and a genuinely-unused function gets no lens.
+        val (uri, _) = openSingleFile("""
+            let used = {} -> 1
+            let lonely = {} -> 2
+            let main = {} -> used {}
+        """.trimIndent())
+
+        val lenses = server.textDocumentService.codeLens(CodeLensParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val titles = lenses.mapNotNull { it.command?.title }
+        // `used` is referenced (by main) → gets a lens; `lonely` isn't → no lens.
+        assertTrue(titles.any { it.contains("reference") },
+            "expected a references lens for the used function, got: $titles")
+        assertFalse(titles.any { it == "0 references" },
+            "must not emit a `0 references` lens, got: $titles")
+    }
+
+    @Test
     fun `code lens shows an implementations lens over an ability`() {
         val (uri, _) = openSingleFile("""
             ability Show for 'a where {

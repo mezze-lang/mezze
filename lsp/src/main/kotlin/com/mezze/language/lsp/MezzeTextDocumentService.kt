@@ -3988,25 +3988,40 @@ class MezzeTextDocumentService(
             val lenses = mutableListOf<CodeLens>()
             val store = projectStore
 
-            fun lensAt(loc: com.mezze.language.parsedast.Loc, title: String, cmd: String) {
+            // Only emit a lens when the count is > 0 — a "0 references" lens
+            // is dead weight that opens an empty peek when clicked. This also
+            // naturally suppresses ALL reference lenses in single-file mode
+            // (no project store → count is always 0 → nothing to click into).
+            fun lensAt(loc: com.mezze.language.parsedast.Loc, count: Int, singular: String, plural: String, cmd: String) {
+                if (count <= 0) return
                 val pos = Position(loc.startLine - 1, loc.startCol - 1)
                 val range = Range(pos, pos)
+                val title = if (count == 1) "1 $singular" else "$count $plural"
                 lenses.add(CodeLens(range, Command(title, cmd, listOf(uri, pos)), null))
             }
 
-            // "N references" over each top-level function.
+            // "N references" over each top-level function. Count from the
+            // project store (cross-file) OR, when the store has nothing (no
+            // project / not yet indexed / single-file mode), fall back to an
+            // in-file TypedVar walk — the SAME source `references()` uses when
+            // clicked, so the count matches the peek. Previously the count was
+            // store-only, so single-file mode showed a misleading "0
+            // references" on functions that clicking would happily peek.
             for (decl in typedModule.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()) {
-                val count = store?.getUsages(decl.hash)?.size ?: 0
-                lensAt(decl.loc, if (count == 1) "1 reference" else "$count references",
-                    "mezze.showReferences")
+                val storeCount = store?.getUsages(decl.hash)?.size ?: 0
+                val count = if (storeCount > 0) storeCount else {
+                    val locs = mutableListOf<Location>()
+                    collectReferencesInModule(typedModule, decl.name, uri, locs)
+                    locs.size
+                }
+                lensAt(decl.loc, count, "reference", "references", "mezze.showReferences")
             }
 
             // "N implementations" over each ability declaration.
             val implsByAbility = typedModule.abilityImpls.groupingBy { it.abilityHash }.eachCount()
             for (ability in typedModule.abilityDecls) {
                 val count = implsByAbility[ability.hash] ?: 0
-                lensAt(ability.loc, if (count == 1) "1 implementation" else "$count implementations",
-                    "mezze.showImplementations")
+                lensAt(ability.loc, count, "implementation", "implementations", "mezze.showImplementations")
             }
 
             // "N performers" over each effect declaration — the effect-graph
@@ -4018,8 +4033,7 @@ class MezzeTextDocumentService(
                 val local = perfsByEffect[effect.hash] ?: 0
                 val cross = try { store?.getEffectPerformers(effect.hash)?.size ?: 0 } catch (_: Exception) { 0 }
                 val count = maxOf(local, cross)
-                lensAt(effect.loc, if (count == 1) "1 performer" else "$count performers",
-                    "mezze.showPerformers")
+                lensAt(effect.loc, count, "performer", "performers", "mezze.showPerformers")
             }
 
             lenses
