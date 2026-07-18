@@ -91,9 +91,10 @@ pub let map_ok : { p: Promise 'a, f: { val: 'a } -> 'b <...> } -> Promise 'b <As
 ## Recover from failure. f runs only on Err; Ok values pass through.
 ## Equivalent to Java's CompletableFuture.exceptionally / Scala's recover.
 pub let recover : { p: Promise 'a, f: { err: AsyncError } -> 'a <...> } -> Promise 'a <Async, ...> = { p, f } -> Async.spawn { f = {} ->
-    match Async.await { p = p } is
-      Ok  { val }       -> val
-      Err { error = e } -> f { err = e }
+    unwrap { result = match Async.await { p = p } is
+      Ok  { val }       -> Ok { val = val }
+      Err { error = e } -> Ok { val = f { err = e } }
+    }
   }
 
 ## Side-effecting observer that sees both branches. Returns a Promise
@@ -379,12 +380,12 @@ impl Async for CoopAsync where {
 ## Spawn and immediately await (synchronous helper).
 ## Returns the Result from `Async.await` — callers decide how to handle failure.
 pub let run : { f: {} -> 'a <...> } -> Result 'a AsyncError <Async, ...> = { f } -> do
-  let p = Async.spawn { f = f }
+  let p = Async.spawn { f = {} -> unwrap { result = Ok { val = f {} } } }
   Async.await { p = p }
 
 ## Spawn and detach (fire and forget).
 pub let go : { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
-  let _ = Async.spawn { f = f }
+  let _ = Async.spawn { f = {} -> unwrap { result = Ok { val = f {} } } }
   {}
 
 ## ==================================================================
@@ -425,15 +426,15 @@ pub let all : { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async, ...> = { ps
 ## Run two thunks concurrently, return both Results.
 pub let join : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: Result 'a AsyncError, r: Result 'b AsyncError } <Async, ...> =
   { l, r } -> do
-    let pl = Async.spawn { f = l }
-    let pr = Async.spawn { f = r }
+    let pl = Async.spawn { f = {} -> unwrap { result = Ok { val = l {} } } }
+    let pr = Async.spawn { f = {} -> unwrap { result = Ok { val = r {} } } }
     { l = Async.await { p = pl }, r = Async.await { p = pr } }
 
 ## Run three thunks concurrently, return all Results.
 pub let join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: Result 'a AsyncError, b: Result 'b AsyncError, c: Result 'c AsyncError } <Async, ...> = { a, b, c } -> do
-  let pa = Async.spawn { f = a }
-  let pb = Async.spawn { f = b }
-  let pc = Async.spawn { f = c }
+  let pa = Async.spawn { f = {} -> unwrap { result = Ok { val = a {} } } }
+  let pb = Async.spawn { f = {} -> unwrap { result = Ok { val = b {} } } }
+  let pc = Async.spawn { f = {} -> unwrap { result = Ok { val = c {} } } }
   { a = Async.await { p = pa }, b = Async.await { p = pb }, c = Async.await { p = pc } }
 
 ## Identical to `all` — kept under the `settle` name for callers that
@@ -446,7 +447,7 @@ pub let settle : { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async, ...> = {
 ## `try_par_map` if you want fail-fast + unwrap semantics.
 pub let par_map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> [Result 'b AsyncError] <Async, ...> =
   { xs, f } -> do
-    let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> f { x = x } } }
+    let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> unwrap { result = Ok { val = f { x = x } } } } }
     all { ps = ps }
 
 ## Run f over each element concurrently for side effects; per-element
@@ -481,7 +482,7 @@ pub let par_filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> [Result 'a Asyn
 ## or the sleeper settles. If the target wins, return its value; if the
 ## sleeper wins, cancel the target and return None.
 pub let with_timeout : { ms: Int, p: Promise 'a } -> Option 'a <Async, ...> = { ms, p } -> do
-  let sleeper = Async.spawn { f = {} -> Async.sleep { ms = ms } }
+  let sleeper = Async.spawn { f = {} -> unwrap { result = Ok { val = Async.sleep { ms = ms } } } }
   Async.park { predicate = {} -> is_done { p = p } || is_done { p = sleeper } }
   match is_done { p = p } is
     True -> do
@@ -553,8 +554,8 @@ pub let try_all : { ps: [Promise 'a] } -> Result ['a] AsyncError <Async, ...> = 
 ## sibling and return that error. Otherwise return both unwrapped values.
 pub let try_join : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> Result { l: 'a, r: 'b } AsyncError <Async, ...> =
   { l, r } -> do
-    let pl = Async.spawn { f = l }
-    let pr = Async.spawn { f = r }
+    let pl = Async.spawn { f = {} -> unwrap { result = Ok { val = l {} } } }
+    let pr = Async.spawn { f = {} -> unwrap { result = Ok { val = r {} } } }
     match Async.await { p = pl } is
       Err { error = e } -> do
         Async.cancel { p = pr, reason = SiblingFailed { at = 0 } }
@@ -568,9 +569,9 @@ pub let try_join : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> Result { l: 'a, r
 ## Run three thunks concurrently with fail-fast + auto-cancel semantics.
 pub let try_join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> Result { a: 'a, b: 'b, c: 'c } AsyncError <Async, ...> =
   { a, b, c } -> do
-    let pa = Async.spawn { f = a }
-    let pb = Async.spawn { f = b }
-    let pc = Async.spawn { f = c }
+    let pa = Async.spawn { f = {} -> unwrap { result = Ok { val = a {} } } }
+    let pb = Async.spawn { f = {} -> unwrap { result = Ok { val = b {} } } }
+    let pc = Async.spawn { f = {} -> unwrap { result = Ok { val = c {} } } }
     match Async.await { p = pa } is
       Err { error = e } -> do
         Async.cancel { p = pb, reason = SiblingFailed { at = 0 } }
@@ -594,7 +595,7 @@ pub let try_join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } 
 ## in input order.
 pub let try_par_map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> Result ['b] AsyncError <Async, ...> =
   { xs, f } -> do
-    let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> f { x = x } } }
+    let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> unwrap { result = Ok { val = f { x = x } } } } }
     try_all { ps = ps }
 
 ## Run f over each element concurrently; short-circuit on first error,
@@ -661,7 +662,7 @@ pub let scope_is_cancelled : { sc: Scope 'a } -> Bool <Async, ...> = { sc } ->
 ## #253: single-call deadline join over a Scope's spawned children.
 pub let scope_join_until : { sc: Scope 'a, ps: [Promise 'b], ms: Int } -> Bool <Async, ...> =
   { sc, ps, ms } -> do
-    let sleeper = Async.spawn { f = {} -> Async.sleep { ms = ms } }
+    let sleeper = Async.spawn { f = {} -> unwrap { result = Ok { val = Async.sleep { ms = ms } } } }
     Async.park { predicate = {} ->
       seq::all { xs = ps, p = { x } -> is_done { p = x } } || is_done { p = sleeper } }
     match seq::all { xs = ps, p = { x } -> is_done { p = x } } is

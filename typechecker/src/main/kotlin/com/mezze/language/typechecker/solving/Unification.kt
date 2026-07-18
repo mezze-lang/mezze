@@ -328,6 +328,13 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
     val hasConcrete1 = effects1 != null && (effects1.effects.isNotEmpty() || effects1.effectInstances.isNotEmpty())
     val hasConcrete2 = effects2 != null && (effects2.effects.isNotEmpty() || effects2.effectInstances.isNotEmpty())
 
+    // A declared callback row (has caughtByAncestor) must always be checked
+    // — even against a pure or polymorphic actual side — so the strict rule
+    // "declared effects must be performed" can fire. Route those through
+    // unifyEffectRows using an empty EffectRow for the pure side.
+    val declaredCallbackPresent = (effects1?.caughtByAncestor?.isNotEmpty() == true) ||
+        (effects2?.caughtByAncestor?.isNotEmpty() == true)
+
     val effectSubst = when {
         isPure1 && isPure2 -> Substitution.empty
 
@@ -335,10 +342,16 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
         isPolymorphic1 && isPure2 -> Substitution.empty
 
         // Pure vs. concrete effects — historically accepted (pure ⊆
-        // effectful subtyping). Annotation-body strictness is enforced
-        // elsewhere by validateLetAnnotation / TypeValidator.
-        isPure1 && hasConcrete2 -> Substitution.empty
-        isPure2 && hasConcrete1 -> Substitution.empty
+        // effectful subtyping). BUT: if the concrete side is a declared
+        // callback row (has caughtByAncestor), route through
+        // unifyEffectRows so the strict "declared must be performed"
+        // check fires.
+        isPure1 && hasConcrete2 -> if (declaredCallbackPresent) {
+            unifyEffectRows(effects1 ?: MezzeType.EffectRow(emptySet()), effects2!!).getOrElse { return it }
+        } else Substitution.empty
+        isPure2 && hasConcrete1 -> if (declaredCallbackPresent) {
+            unifyEffectRows(effects1!!, effects2 ?: MezzeType.EffectRow(emptySet())).getOrElse { return it }
+        } else Substitution.empty
 
         // Both polymorphic-only or polymorphic-vs-concrete: keep the row
         // var open. Eagerly binding here (via unifyEffectRows) would
@@ -774,14 +787,55 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
     // Row subtraction via `caughtByAncestor`: effects listed on a callback
     // row that don't appear on the enclosing function's return row are
     // HANDLED by the enclosing function (e.g., `spawn` catches Exception).
-    // We drop them from the extras that would otherwise bind the shared
-    // row var — that's how Exception gets caught by spawn.
-    // Callback-side row subtraction: caughtByAncestor lists effects
-    // declared on a callback row that the enclosing function catches.
-    // Filter these out before computing what needs to bind the row var.
+    // Filter these out from the ACTUAL side's extras (eff2Extra): the
+    // enclosing function catches them, so they should not bind the shared
+    // row var and thus should not surface to the caller.
+    //
+    // DECLARED-only extras (eff1Extra) are NOT filtered by caught. If
+    // spawn declares `<Exception, ρ>` on the callback but the actual
+    // lambda doesn't perform Exception, that's a type error — the
+    // callback promised to perform Exception and didn't. Row subtraction
+    // is about "spawn catches what the CALLBACK actually performs," not
+    // "spawn accepts pure callbacks that ignore the contract."
     val caught = eff1.caughtByAncestor + eff2.caughtByAncestor
     val eff2Extra = (allEffects2 - allEffects1) - caught
-    val eff1Extra = (allEffects1 - allEffects2) - caught
+    val eff1Extra = allEffects1 - allEffects2
+
+    // Strict declared-row check (position-symmetric):
+    // A row with non-empty caughtByAncestor is a DECLARED CALLBACK row
+    // (only such rows carry caughtByAncestor — set by stampCaughtOnCallbackRows).
+    // Effects listed on a declared callback row MUST be performed by the
+    // actual body. If declared has effects the actual doesn't perform,
+    // that's an error regardless of which side of the unification the
+    // declared row lands on.
+    if (eff1.caughtByAncestor.isNotEmpty()) {
+        // eff1 is declared, eff2 is actual.
+        val missing = allEffects1 - allEffects2
+        if (missing.isNotEmpty()) {
+            return UnificationResult.Failure(
+                message = "Effect row mismatch: callback declared row lists <${allEffects1.sorted().joinToString(", ")}> " +
+                    "but the actual body performs only <${allEffects2.sorted().joinToString(", ")}>. " +
+                    "Missing: <${missing.sorted().joinToString(", ")}>. " +
+                    "Every effect on a declared callback row must be performed by the body.",
+                type1 = eff1,
+                type2 = eff2
+            )
+        }
+    }
+    if (eff2.caughtByAncestor.isNotEmpty()) {
+        // eff2 is declared, eff1 is actual.
+        val missing = allEffects2 - allEffects1
+        if (missing.isNotEmpty()) {
+            return UnificationResult.Failure(
+                message = "Effect row mismatch: callback declared row lists <${allEffects2.sorted().joinToString(", ")}> " +
+                    "but the actual body performs only <${allEffects1.sorted().joinToString(", ")}>. " +
+                    "Missing: <${missing.sorted().joinToString(", ")}>. " +
+                    "Every effect on a declared callback row must be performed by the body.",
+                type1 = eff1,
+                type2 = eff2
+            )
+        }
+    }
 
     // Contravariant callback rows: if one side declares extras but the other
     // side's row is CLOSED (no row var), silently accept — the extras are
@@ -826,6 +880,18 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
                 performed = false
             )
             composedSubst = composedSubst.compose(Substitution.singleRow(eff2Row, binding))
+        } else {
+            // Declared side has effects the actual (closed) side doesn't
+            // perform. This is a real mismatch — the declaration is a
+            // promise, and the actual body isn't keeping it.
+            return UnificationResult.Failure(
+                message = "Effect row mismatch: declared effects <${allEffects1.sorted().joinToString(", ")}> " +
+                    "but actual performs only <${allEffects2.sorted().joinToString(", ")}>. " +
+                    "Missing: <${eff1Extra.sorted().joinToString(", ")}>. " +
+                    "The callback must perform every effect declared on its row.",
+                type1 = eff1,
+                type2 = eff2
+            )
         }
     }
 

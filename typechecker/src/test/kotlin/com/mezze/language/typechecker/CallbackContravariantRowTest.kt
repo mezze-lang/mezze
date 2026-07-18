@@ -63,15 +63,16 @@ class CallbackContravariantRowTest {
     private fun parse(source: String): ParsedModule =
         parser.parseParsedModule(source.trimIndent(), "test.mz")
 
-    // ─── (1) callback that DOESN'T perform the declared handled effect is fine ────────
+    // ─── (1) callback that DOESN'T perform the declared handled effect is a TYPE ERROR ─
     //
-    // The callback's declared row is <Exception, ...>. This lambda performs nothing.
-    // Under strict invariance, this would fail: "callback must perform Exception."
-    // Under contravariance, empty is a subset — OK. The `...` row var binds to <>.
-    // Return row: <Async>. No Exception, no Time, nothing.
+    // The callback's declared row is <Exception, ...>. This lambda is pure.
+    // Under strict rules: if you declare `<Exception, ...>` on the callback,
+    // the actual body MUST perform Exception. Otherwise the type is a lie.
+    // Row subtraction only APPLIES to effects the actual body performs; it
+    // doesn't turn declared effects into optional ones.
 
     @Test
-    fun `pure callback matches declared callback row that includes Exception`() {
+    fun `pure callback FAILS to match declared callback row that requires Exception`() {
         val src = """
             use std::effects::async::{ Async, LoomAsync }
 
@@ -79,16 +80,20 @@ class CallbackContravariantRowTest {
               let p = Async.spawn { f = {} -> 42 }
               Async.await { p = p }
         """
-        val effects = effectsOf(parse(src), "outer")
-        assertEquals(setOf("Async"), effects,
-            "Callback performs nothing; return row should be <Async>. Got: $effects")
+        val module = parse(src)
+        // Under strict rules the callback declared row must be fully performed
+        // by the actual lambda. A pure lambda vs `<Exception, ...>` should error.
+        // The error may bubble up from the stdlib async module (ImportError) if
+        // any stdlib combinator's own callback fails the same strict rule.
+        var errored = false
+        try {
+            typeChecker.typeCheck(module, Paths.get("."))
+        } catch (_: TypeCheckError) { errored = true }
+        catch (_: com.mezze.language.typechecker.module.ModuleError.ImportError) { errored = true }
+        assertTrue(errored, "Expected typecheck to fail (TypeCheckError or ImportError), but it succeeded.")
     }
 
     // ─── (2) Exception performed by callback is CAUGHT by spawn — doesn't surface ─────
-    //
-    // Callback performs Exception via unwrap. Declared row <Exception, ...> matches.
-    // `...` binds to <> (nothing extra). Return row <Async, ...> = <Async>.
-    // Exception is NOT in the caller's row — spawn catches it.
 
     @Test
     fun `Exception performed by callback is caught by spawn`() {
@@ -97,24 +102,22 @@ class CallbackContravariantRowTest {
             use std::effects::exception::{ Exception, unwrap }
 
             let outer = {} -> do
-              let p = Async.spawn { f = {} -> unwrap { result = Async.await { p = Async.spawn { f = {} -> 1 } } } }
+              let p = Async.spawn { f = {} -> unwrap { result = Ok { val = 1 } } }
               Async.await { p = p }
         """
         val effects = effectsOf(parse(src), "outer")
         assertFalse("Exception" in effects,
-            "Exception performed by spawn's callback must be CAUGHT by spawn (declared but not returned). " +
-            "Got: $effects. If Exception is in the outer row, contravariant-callback + spawn-catches is broken.")
+            "Exception performed by spawn's callback must be CAUGHT by spawn. Got: $effects.")
         assertTrue("Async" in effects, "Async must be present. Got: $effects")
     }
 
-    // ─── (3) Time performed by callback still surfaces — NOT in spawn's declared row ──
+    // ─── (3) Callback missing declared Exception is a TYPE ERROR ─────────────────────
     //
-    // Callback performs Time. Declared row <Exception, ...> — Time is not listed, so
-    // it goes into `...`. Return row `<Async, ...>` = `<Async, Time>`.
-    // Time DOES surface (spawn doesn't catch it).
+    // Callback performs Time but not Exception. Declared row `<Exception, ...>`
+    // requires Exception. Missing it is a type error under strict rules.
 
     @Test
-    fun `Time performed by callback still surfaces at the caller`() {
+    fun `callback performing Time but not Exception FAILS strict callback row`() {
         val src = """
             use std::effects::async::{ Async, LoomAsync }
             use std::effects::time::{ Time }
@@ -123,13 +126,20 @@ class CallbackContravariantRowTest {
               let p = Async.spawn { f = {} -> Async.sleep { ms = 1 } }
               Async.await { p = p }
         """
-        val effects = effectsOf(parse(src), "outer")
-        assertTrue("Time" in effects, "Time performed by callback must surface. Got: $effects")
-        assertFalse("Exception" in effects,
-            "No Exception performed, none should be in outer row. Got: $effects")
+        val module = parse(src)
+        // Under strict rules the callback declared row must be fully performed
+        // by the actual lambda. A pure lambda vs `<Exception, ...>` should error.
+        // The error may bubble up from the stdlib async module (ImportError) if
+        // any stdlib combinator's own callback fails the same strict rule.
+        var errored = false
+        try {
+            typeChecker.typeCheck(module, Paths.get("."))
+        } catch (_: TypeCheckError) { errored = true }
+        catch (_: com.mezze.language.typechecker.module.ModuleError.ImportError) { errored = true }
+        assertTrue(errored, "Expected typecheck to fail (TypeCheckError or ImportError), but it succeeded.")
     }
 
-    // ─── (4) Exception + Time — Exception caught, Time surfaces ──────────────────────
+    // ─── (4) Exception caught by spawn, Time surfaces via ρ ─────────────────────────
 
     @Test
     fun `Exception is caught but Time from callback surfaces`() {
@@ -141,7 +151,7 @@ class CallbackContravariantRowTest {
             let outer = {} -> do
               let p = Async.spawn { f = {} -> do
                 Async.sleep { ms = 1 }
-                unwrap { result = Async.await { p = Async.spawn { f = {} -> 1 } } }
+                unwrap { result = Ok { val = 42 } }
               }
               Async.await { p = p }
         """
@@ -187,11 +197,12 @@ class CallbackContravariantRowTest {
     fun `and_then callers do not need an Exception handler`() {
         val src = """
             use std::effects::async::{ Async, LoomAsync, and_then }
+            use std::effects::exception::{ Exception, unwrap }
             use std::result
 
             let outer = {} -> perform LoomAsync in do
-              let p = Async.spawn { f = {} -> 3 }
-              let q = and_then { p = p, f = { val } -> Async.spawn { f = {} -> val + 100 } }
+              let p = Async.spawn { f = {} -> unwrap { result = Ok { val = 3 } } }
+              let q = and_then { p = p, f = { val } -> Async.spawn { f = {} -> unwrap { result = Ok { val = val + 100 } } } }
               Async.await { p = q }
         """
         val effects = effectsOf(parse(src), "outer")

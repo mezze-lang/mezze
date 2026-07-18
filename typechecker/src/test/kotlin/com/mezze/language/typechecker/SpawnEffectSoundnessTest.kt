@@ -56,11 +56,12 @@ class SpawnEffectSoundnessTest {
         // Expected: outer row contains BOTH Async and Time.
         val src = """
             use std::effects::async::{ Async, LoomAsync }
+            use std::effects::exception::{ Exception, unwrap }
             use std::effects::time::{ Time, SystemTime }
             use std::result
 
             let outer = {} -> do
-              let p = Async.spawn { f = {} -> Async.sleep { ms = 1 } }
+              let p = Async.spawn { f = {} -> unwrap { result = Ok { val = Async.sleep { ms = 1 } } } }
               Async.await { p = p }
         """
         val effects = effectsOf(parse(src), "outer")
@@ -78,11 +79,12 @@ class SpawnEffectSoundnessTest {
     fun `handling SystemTime + LoomAsync removes both Async and Time from row`() {
         val src = """
             use std::effects::async::{ Async, LoomAsync }
+            use std::effects::exception::{ Exception, unwrap }
             use std::effects::time::{ Time, SystemTime }
             use std::result
 
             let outer = {} -> perform SystemTime in perform LoomAsync in do
-              let p = Async.spawn { f = {} -> Async.sleep { ms = 1 } }
+              let p = Async.spawn { f = {} -> unwrap { result = Ok { val = Async.sleep { ms = 1 } } } }
               Async.await { p = p }
         """
         val effects = effectsOf(parse(src), "outer")
@@ -96,11 +98,12 @@ class SpawnEffectSoundnessTest {
     fun `handling only LoomAsync leaves Time in outer row`() {
         val src = """
             use std::effects::async::{ Async, LoomAsync }
+            use std::effects::exception::{ Exception, unwrap }
             use std::effects::time::{ Time }
             use std::result
 
             let outer = {} -> perform LoomAsync in do
-              let p = Async.spawn { f = {} -> Async.sleep { ms = 1 } }
+              let p = Async.spawn { f = {} -> unwrap { result = Ok { val = Async.sleep { ms = 1 } } } }
               Async.await { p = p }
         """
         val effects = effectsOf(parse(src), "outer")
@@ -114,11 +117,12 @@ class SpawnEffectSoundnessTest {
     fun `handling only SystemTime leaves Async in outer row`() {
         val src = """
             use std::effects::async::{ Async }
+            use std::effects::exception::{ Exception, unwrap }
             use std::effects::time::{ Time, SystemTime }
             use std::result
 
             let outer = {} -> perform SystemTime in do
-              let p = Async.spawn { f = {} -> Async.sleep { ms = 1 } }
+              let p = Async.spawn { f = {} -> unwrap { result = Ok { val = Async.sleep { ms = 1 } } } }
               Async.await { p = p }
         """
         val effects = effectsOf(parse(src), "outer")
@@ -144,7 +148,7 @@ class SpawnEffectSoundnessTest {
 
             let outer = {} -> do
               let p = Async.spawn { f = {} -> do
-                let r = Async.await { p = Async.spawn { f = {} -> 1 } }
+                let r = Async.await { p = Async.spawn { f = {} -> unwrap { result = Ok { val = 1 } } } }
                 unwrap { result = r }
               }
               Async.await { p = p }
@@ -162,13 +166,14 @@ class SpawnEffectSoundnessTest {
     fun `deeply nested spawn callback effects surface at outermost caller`() {
         val src = """
             use std::effects::async::{ Async, LoomAsync }
+            use std::effects::exception::{ Exception, unwrap }
             use std::effects::time::{ Time }
             use std::result
 
             let outer = {} -> do
               let p = Async.spawn { f = {} -> do
-                let q = Async.spawn { f = {} -> Async.sleep { ms = 1 } }
-                Async.await { p = q }
+                let q = Async.spawn { f = {} -> unwrap { result = Ok { val = Async.sleep { ms = 1 } } } }
+                unwrap { result = Async.await { p = q } }
               }
               Async.await { p = p }
         """

@@ -147,7 +147,8 @@ class ExpressionConstraintGenerator {
 
     internal fun instantiateTypeWithFreshVars(type: MezzeType): MezzeType {
         val freeVars = getFreeTypeVariables(type)
-        if (freeVars.isEmpty()) return type
+        val hasRowVars = anyRowVarIn(type)
+        if (freeVars.isEmpty() && !hasRowVars) return type
 
         // #183: Use freshWithName for associated type vars (starting with ') so each
         // instantiation gets a unique id. Plain TypeVar(name) uses id=0 and data class
@@ -156,7 +157,71 @@ class ExpressionConstraintGenerator {
             if (oldVar.name.startsWith("'")) TypeVar.freshWithName(oldVar.name)
             else TypeVar.fresh()
         }
-        return applyTypeVarSubstitution(type, substitution)
+        val afterTypeVars = applyTypeVarSubstitution(type, substitution)
+        // Also freshen row vars: each instantiation of an effect op or
+        // polymorphic fn should get its OWN row var. Sharing the same row
+        // var across call sites means binding one locks the other. This
+        // walk gives every RowVar in `type` a fresh copy per instantiation.
+        return refreshRowVarsIn(afterTypeVars, mutableMapOf())
+    }
+
+    private fun anyRowVarIn(type: MezzeType): Boolean = when (type) {
+        is MezzeType.FunctionType -> (type.effects?.rowVar != null)
+            || anyRowVarIn(type.paramType) || anyRowVarIn(type.returnType)
+        is MezzeType.RecordType -> type.rowVar != null || type.fields.values.any { anyRowVarIn(it) }
+        is MezzeType.VariantType -> type.rowVar != null || type.constructors.values.any { it != null && anyRowVarIn(it) }
+        is MezzeType.TypeApplication -> type.args.any { anyRowVarIn(it) }
+        is MezzeType.SeqType -> anyRowVarIn(type.elementType)
+        is MezzeType.ListType -> anyRowVarIn(type.elementType)
+        is MezzeType.SetType -> anyRowVarIn(type.elementType)
+        is MezzeType.SortedSetType -> anyRowVarIn(type.elementType)
+        is MezzeType.MapType -> anyRowVarIn(type.keyType) || anyRowVarIn(type.valueType)
+        is MezzeType.SortedMapType -> anyRowVarIn(type.keyType) || anyRowVarIn(type.valueType)
+        is MezzeType.NewtypeType -> anyRowVarIn(type.wrappedType)
+        is MezzeType.SuspendedType -> type.effects.rowVar != null || anyRowVarIn(type.valueType)
+        else -> false
+    }
+
+    private fun refreshRowVarsIn(type: MezzeType, mapping: MutableMap<RowVar, RowVar>): MezzeType {
+        fun freshFor(rv: RowVar?): RowVar? {
+            if (rv == null) return null
+            return mapping.getOrPut(rv) { if (rv.isUserSpecified()) RowVar.userOpen() else RowVar.fresh() }
+        }
+        return when (type) {
+            is MezzeType.FunctionType -> {
+                val newEff = type.effects?.let { r -> r.copy(rowVar = freshFor(r.rowVar)) }
+                MezzeType.FunctionType(
+                    paramType = refreshRowVarsIn(type.paramType, mapping),
+                    returnType = refreshRowVarsIn(type.returnType, mapping),
+                    effects = newEff,
+                    abilityConstraints = type.abilityConstraints
+                )
+            }
+            is MezzeType.RecordType -> type.copy(
+                fields = type.fields.mapValues { (_, v) -> refreshRowVarsIn(v, mapping) },
+                rowVar = freshFor(type.rowVar)
+            )
+            is MezzeType.VariantType -> type.copy(
+                constructors = type.constructors.mapValues { (_, v) -> v?.let { refreshRowVarsIn(it, mapping) } },
+                rowVar = freshFor(type.rowVar)
+            )
+            is MezzeType.TypeApplication -> type.copy(args = type.args.map { refreshRowVarsIn(it, mapping) })
+            is MezzeType.SeqType -> type.copy(elementType = refreshRowVarsIn(type.elementType, mapping))
+            is MezzeType.ListType -> type.copy(elementType = refreshRowVarsIn(type.elementType, mapping))
+            is MezzeType.SetType -> type.copy(elementType = refreshRowVarsIn(type.elementType, mapping))
+            is MezzeType.SortedSetType -> type.copy(elementType = refreshRowVarsIn(type.elementType, mapping))
+            is MezzeType.MapType -> type.copy(
+                keyType = refreshRowVarsIn(type.keyType, mapping),
+                valueType = refreshRowVarsIn(type.valueType, mapping)
+            )
+            is MezzeType.SortedMapType -> type.copy(
+                keyType = refreshRowVarsIn(type.keyType, mapping),
+                valueType = refreshRowVarsIn(type.valueType, mapping)
+            )
+            is MezzeType.NewtypeType -> type.copy(wrappedType = refreshRowVarsIn(type.wrappedType, mapping))
+            is MezzeType.SuspendedType -> type.copy(effects = type.effects.copy(rowVar = freshFor(type.effects.rowVar)))
+            else -> type
+        }
     }
 
     internal fun instantiateTypeWithFreshVarsPreservingAssociatedWithMapping(
