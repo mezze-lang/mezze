@@ -56,13 +56,14 @@ class YieldNowTest {
         // atom. Under a cooperative scheduler, the yield gives the peer
         // a chance to run. Both should complete regardless of policy —
         // we mainly want to confirm yield doesn't get lost / deadlock.
+        // Use `swap` (atomic) rather than deref+reset (races).
         val source = """
             use std::effects::async::{Async, LoomAsync}
-            use std::effects::async::atom::{atom, deref, reset}
+            use std::effects::async::atom::{atom, deref, swap}
 
             let main = {} -> perform LoomAsync in do
               let counter = atom { val = 0 }
-              let bump = { n } -> reset { atom = counter, val = deref { atom = counter } + n }
+              let bump = { n } -> swap { atom = counter, f = { current } -> current + n }
               let p1 = Async.spawn { f = {} -> do
                 bump { n = 1 }
                 Async.yield_now {}
