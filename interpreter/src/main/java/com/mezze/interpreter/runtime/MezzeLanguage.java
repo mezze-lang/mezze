@@ -96,14 +96,21 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 && !"0".equals(System.getenv("MEZZE_BDSL_STATS"))
                 && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL_STATS"));
     private static final java.util.concurrent.atomic.AtomicLong GLOBAL_BDSL_HITS = new java.util.concurrent.atomic.AtomicLong();
-    private static final java.util.concurrent.atomic.AtomicLong GLOBAL_BDSL_MISSES = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong GLOBAL_BDSL_MISS_UNSAFE = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong GLOBAL_BDSL_MISS_UNSUPPORTED = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong GLOBAL_BDSL_MISS_CRASH = new java.util.concurrent.atomic.AtomicLong();
     static {
         if (BDSL_STATS) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                long h = GLOBAL_BDSL_HITS.get(), m = GLOBAL_BDSL_MISSES.get(), t = h + m;
+                long h = GLOBAL_BDSL_HITS.get();
+                long unsafe = GLOBAL_BDSL_MISS_UNSAFE.get();
+                long unsup = GLOBAL_BDSL_MISS_UNSUPPORTED.get();
+                long crash = GLOBAL_BDSL_MISS_CRASH.get();
+                long m = unsafe + unsup + crash, t = h + m;
                 if (t > 0) {
                     System.err.println("[BDSL] compile counts: " + h + " hits, " + m + " misses ("
-                            + String.format("%.1f", 100.0 * h / t) + "% BDSL)");
+                            + String.format("%.1f", 100.0 * h / t) + "% BDSL) — "
+                            + "unsafe-callee=" + unsafe + " unsupported=" + unsup + " emit-crash=" + crash);
                 }
             }, "bdsl-stats"));
         }
@@ -126,25 +133,30 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     private com.oracle.truffle.api.nodes.RootNode compileOne(
             com.mezze.interpreter.compiler.TruffleCompiler astCompiler,
             com.mezze.language.truffleir.FunctionIR ir) {
-        if (BDSL_ENABLED && isBdslSafeCallee(ir)) {
-            com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
-            if (bdsl.supports(ir)) {
-                try {
-                    var root = bdsl.compile(ir);
-                    bdslHits.incrementAndGet();
-                    if (BDSL_STATS) GLOBAL_BDSL_HITS.incrementAndGet();
-                    return root;
-                } catch (Throwable t) {
-                    // BDSL emit crash — fall through to AST. Log once at
-                    // debug level; individual crashes are already covered
-                    // by supports() but a bug there shouldn't kill the run.
-                    if (System.getenv("MEZZE_DEBUG") != null) {
-                        System.err.println("[BDSL] emit failed for " + ir.getName() + ": " + t);
-                    }
-                }
+        if (BDSL_ENABLED) {
+            if (!isBdslSafeCallee(ir)) {
+                bdslMisses.incrementAndGet();
+                if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSAFE.incrementAndGet();
+                return astCompiler.compile(ir);
             }
-            bdslMisses.incrementAndGet();
-            if (BDSL_STATS) GLOBAL_BDSL_MISSES.incrementAndGet();
+            com.mezze.interpreter.bytecode.BytecodeCompiler bdsl = getOrCreateBdslCompiler();
+            if (!bdsl.supports(ir)) {
+                bdslMisses.incrementAndGet();
+                if (BDSL_STATS) GLOBAL_BDSL_MISS_UNSUPPORTED.incrementAndGet();
+                return astCompiler.compile(ir);
+            }
+            try {
+                var root = bdsl.compile(ir);
+                bdslHits.incrementAndGet();
+                if (BDSL_STATS) GLOBAL_BDSL_HITS.incrementAndGet();
+                return root;
+            } catch (Throwable t) {
+                if (System.getenv("MEZZE_DEBUG") != null) {
+                    System.err.println("[BDSL] emit failed for " + ir.getName() + ": " + t);
+                }
+                bdslMisses.incrementAndGet();
+                if (BDSL_STATS) GLOBAL_BDSL_MISS_CRASH.incrementAndGet();
+            }
         }
         return astCompiler.compile(ir);
     }
