@@ -2,7 +2,7 @@
   "name": "mezze-language",
   "displayName": "Mezze Language Support",
   "description": "Full language support for Mezze: syntax highlighting, type information, diagnostics, go to definition, and more",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "mezze-lang",
   "icon": "icon.png",
   "engines": {

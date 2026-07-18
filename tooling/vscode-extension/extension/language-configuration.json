@@ -31,33 +31,29 @@
   },
   "wordPattern": "('?[a-zA-Z_][a-zA-Z0-9_]*)|(-?\\d*\\.\\d\\w*)",
   "indentationRules": {
-    "increaseIndentPattern": "^((?!#).)*(\\{[^}\"'`]*|\\([^)\"'`]*|\\[[^\\]\"'`]*|\\b(do|then|else|match|is|where)\\b.*)$",
+    "increaseIndentPattern": "^((?!#).)*(\\{[^}\"'`]*|\\([^)\"'`]*|\\[[^\\]\"'`]*|\\b(do|then|else|match|is|where)\\b.*|->)\\s*$",
     "decreaseIndentPattern": "^((?!.*?#).*)?\\s*[\\}\\]].*$|^\\s*\\b(else|is)\\b.*$"
   },
   "onEnterRules": [
     {
-      "beforeText": "\\{[^}\"'`]*$",
+      "beforeText": "^\\s*##\\s.*$",
       "action": {
-        "indent": "indent"
+        "indent": "none",
+        "appendText": "## "
       }
     },
     {
-      "beforeText": "^\\s*# ",
+      "beforeText": "^\\s*##$",
+      "action": {
+        "indent": "none",
+        "appendText": "## "
+      }
+    },
+    {
+      "beforeText": "^\\s*#(?!\\{)\\s.*$",
       "action": {
         "indent": "none",
         "appendText": "# "
-      }
-    },
-    {
-      "beforeText": "\\b(do|then|match)\\s*$",
-      "action": {
-        "indent": "indent"
-      }
-    },
-    {
-      "beforeText": "->\\s*$",
-      "action": {
-        "indent": "indent"
       }
     }
   ]
