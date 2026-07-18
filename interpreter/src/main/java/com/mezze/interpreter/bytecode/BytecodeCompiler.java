@@ -29,6 +29,7 @@ import com.mezze.language.truffleir.SeqElementIR;
 import com.mezze.language.truffleir.MatchIR;
 import com.mezze.language.truffleir.NodeIR;
 import com.mezze.language.truffleir.PatternIR;
+import com.mezze.language.truffleir.DictMethodCallIR;
 import com.mezze.language.truffleir.FracLitIR;
 import com.mezze.language.truffleir.ReadArgIR;
 import com.mezze.language.truffleir.ReadCaptureIR;
@@ -314,6 +315,12 @@ public final class BytecodeCompiler {
             return supportsNode(ci.getFunction(), argCount)
                 && supportsNode(ci.getArg(), argCount);
         }
+        if (node instanceof DictMethodCallIR dm) {
+            // Dict method call = read impl fn from a slot, invoke with arg.
+            // Synthesized at emit time as (LoadArgument/LoadLocal, arg,
+            // CallIndirect).
+            return supportsNode(dm.getArg(), argCount);
+        }
         if (node instanceof CallLocalIR cl) {
             return supportsNode(cl.getArg(), argCount);
         }
@@ -551,6 +558,9 @@ public final class BytecodeCompiler {
         }
         if (node instanceof CallLocalIR cl) {
             return hasTailCall(cl.getArg());
+        }
+        if (node instanceof DictMethodCallIR dm) {
+            return hasTailCall(dm.getArg());
         }
         if (node instanceof CallNativeIR cn) {
             for (NodeIR arg : cn.getArgs()) if (hasTailCall(arg)) return true;
@@ -1002,6 +1012,21 @@ public final class BytecodeCompiler {
                 emitNode(ci.getArg(), b, argCount, localMap);
                 b.endCallIndirect();
             }
+            return;
+        }
+        if (node instanceof DictMethodCallIR dm) {
+            // Dict method dispatch: read impl fn from a dictSlot, call
+            // it with the single record arg (the receiver is already
+            // injected into that record as "it" upstream).
+            b.beginCallIndirect();
+            int slot = dm.getDictSlot();
+            if (slot < argCount) {
+                b.emitLoadArgument(slot);
+            } else {
+                b.emitLoadLocal(localMap[slot - argCount]);
+            }
+            emitNode(dm.getArg(), b, argCount, localMap);
+            b.endCallIndirect();
             return;
         }
         if (node instanceof CallLocalIR cl) {
