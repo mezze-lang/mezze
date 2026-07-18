@@ -550,6 +550,19 @@ class LspFeaturesTest {
             "expected a references lens for the used function, got: $titles")
         assertFalse(titles.any { it == "0 references" },
             "must not emit a `0 references` lens, got: $titles")
+
+        // #128: the lens COMMAND position must point at the name (`used`), not
+        // the `let` keyword — otherwise the client's reference provider resolves
+        // no symbol and clicking opens an empty peek ("nothing happens").
+        // Source line 0 is `let used = {} -> 1`; `used` starts at column 4.
+        val usedLens = lenses.first { it.command?.title?.contains("reference") == true }
+        // The launcher serializes command args to JSON, so the Position comes
+        // back as a JsonObject — read its fields (the same shape the extension's
+        // toPosition() normalizes on the client).
+        val cmdPosJson = usedLens.command!!.arguments!![1] as com.google.gson.JsonObject
+        assertEquals(0, cmdPosJson.get("line").asInt)
+        assertEquals(4, cmdPosJson.get("character").asInt,
+            "command must anchor on `used` (col 4), not the `let` keyword")
     }
 
     @Test

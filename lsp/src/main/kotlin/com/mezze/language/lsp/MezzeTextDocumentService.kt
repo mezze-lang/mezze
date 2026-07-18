@@ -3987,17 +3987,47 @@ class MezzeTextDocumentService(
                 ?: return@supplyAsync emptyList()
             val lenses = mutableListOf<CodeLens>()
             val store = projectStore
+            val sourceLines = state.content.lines()
+
+            // The CodeLens command runs the client's reference/implementation
+            // provider AT the command's position, which resolves the symbol
+            // under that position. A decl's `loc` starts at the `let`/`ability`
+            // keyword — clicking there resolves no symbol, so the peek opened
+            // empty (looked like "nothing happens"). Anchor the lens at the
+            // NAME token instead: scan the decl's start line for the name.
+            fun anchorFor(loc: com.mezze.language.parsedast.Loc, name: String): Position {
+                val lineIdx = loc.startLine - 1
+                val line = sourceLines.getOrNull(lineIdx)
+                if (line != null) {
+                    // Find `name` as a whole word at/after the decl start column.
+                    val from = (loc.startCol - 1).coerceIn(0, line.length)
+                    var idx = line.indexOf(name, from)
+                    // Guard against matching a substring inside a longer ident.
+                    while (idx >= 0) {
+                        val before = if (idx == 0) ' ' else line[idx - 1]
+                        val after = line.getOrElse(idx + name.length) { ' ' }
+                        val isBoundary = !before.isLetterOrDigit() && before != '_' &&
+                                         !after.isLetterOrDigit() && after != '_'
+                        if (isBoundary) return Position(lineIdx, idx)
+                        idx = line.indexOf(name, idx + 1)
+                    }
+                }
+                return Position(lineIdx, (loc.startCol - 1).coerceAtLeast(0))
+            }
 
             // Only emit a lens when the count is > 0 — a "0 references" lens
             // is dead weight that opens an empty peek when clicked. This also
             // naturally suppresses ALL reference lenses in single-file mode
             // (no project store → count is always 0 → nothing to click into).
-            fun lensAt(loc: com.mezze.language.parsedast.Loc, count: Int, singular: String, plural: String, cmd: String) {
+            fun lensAt(loc: com.mezze.language.parsedast.Loc, name: String, count: Int, singular: String, plural: String, cmd: String) {
                 if (count <= 0) return
-                val pos = Position(loc.startLine - 1, loc.startCol - 1)
-                val range = Range(pos, pos)
+                val anchor = anchorFor(loc, name)
+                // The lens is DISPLAYED at the decl's start line, but its command
+                // points at the NAME position so the provider resolves.
+                val range = Range(Position(loc.startLine - 1, (loc.startCol - 1).coerceAtLeast(0)),
+                                  Position(loc.startLine - 1, (loc.startCol - 1).coerceAtLeast(0)))
                 val title = if (count == 1) "1 $singular" else "$count $plural"
-                lenses.add(CodeLens(range, Command(title, cmd, listOf(uri, pos)), null))
+                lenses.add(CodeLens(range, Command(title, cmd, listOf(uri, anchor)), null))
             }
 
             // "N references" over each top-level function. Count from the
@@ -4014,14 +4044,14 @@ class MezzeTextDocumentService(
                     collectReferencesInModule(typedModule, decl.name, uri, locs)
                     locs.size
                 }
-                lensAt(decl.loc, count, "reference", "references", "mezze.showReferences")
+                lensAt(decl.loc, decl.name, count, "reference", "references", "mezze.showReferences")
             }
 
             // "N implementations" over each ability declaration.
             val implsByAbility = typedModule.abilityImpls.groupingBy { it.abilityHash }.eachCount()
             for (ability in typedModule.abilityDecls) {
                 val count = implsByAbility[ability.hash] ?: 0
-                lensAt(ability.loc, count, "implementation", "implementations", "mezze.showImplementations")
+                lensAt(ability.loc, ability.name, count, "implementation", "implementations", "mezze.showImplementations")
             }
 
             // "N performers" over each effect declaration — the effect-graph
@@ -4033,7 +4063,7 @@ class MezzeTextDocumentService(
                 val local = perfsByEffect[effect.hash] ?: 0
                 val cross = try { store?.getEffectPerformers(effect.hash)?.size ?: 0 } catch (_: Exception) { 0 }
                 val count = maxOf(local, cross)
-                lensAt(effect.loc, count, "performer", "performers", "mezze.showPerformers")
+                lensAt(effect.loc, effect.name, count, "performer", "performers", "mezze.showPerformers")
             }
 
             lenses
