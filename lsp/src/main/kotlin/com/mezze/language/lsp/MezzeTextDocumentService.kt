@@ -924,6 +924,12 @@ class MezzeTextDocumentService(
         if (position.line >= lines.size) return null
 
         val line = lines[position.line]
+
+        // Don't hover inside a comment. `## # Heading` etc. is prose, not code —
+        // extracting a "word" there and resolving it as an identifier produced
+        // spurious type popups (e.g. `{} <Log>`) over comment text.
+        if (isInsideLineComment(line, position.character)) return null
+
         val word = extractWordAt(line, position.character)
         if (word.isNullOrEmpty()) return null
 
@@ -1517,6 +1523,28 @@ class MezzeTextDocumentService(
 
     private fun isIdentifierChar(c: Char): Boolean {
         return c.isLetterOrDigit() || c == '_' || c == '\''
+    }
+
+    /**
+     * True if `character` sits at or after the start of a line comment on
+     * `line`. Mezze line comments begin with `#` (covering `#`, `##` doc, and
+     * `#{ }` metadata). A `#` inside a double-quoted string doesn't start a
+     * comment, so we track string state while scanning. Used to suppress hover
+     * (and could gate other position features) over comment prose.
+     */
+    private fun isInsideLineComment(line: String, character: Int): Boolean {
+        var inString = false
+        var i = 0
+        while (i < line.length) {
+            val c = line[i]
+            when {
+                c == '\\' && inString -> { i++ }  // skip escaped char in a string
+                c == '"' -> inString = !inString
+                c == '#' && !inString -> return character >= i
+            }
+            i++
+        }
+        return false
     }
 
     // ========== Go to Definition ==========

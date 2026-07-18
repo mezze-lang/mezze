@@ -97,6 +97,35 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `hover inside a comment returns nothing`() {
+        // Regression (#128): hovering a word inside a comment (doc or regular)
+        // extracted it as an identifier and rendered a spurious type popup
+        // (e.g. `{} <Log>` over prose). Comments are not code — no hover.
+        val (uri, source) = openSingleFile("""
+            ## docs mention println here
+            # regular note about main
+            let main = {} -> 1
+        """.trimIndent())
+
+        // `println` inside the `##` line (line 0). Find its column.
+        val docLine = source.lines()[0]
+        val col = docLine.indexOf("println")
+        assertTrue(col > 0, "test source line 0 should contain `println`")
+        assertNull(hoverAt(uri, line = 0, character = col + 1),
+            "hover inside a `##` doc comment must return null")
+
+        // A word inside the regular `#` comment (line 1).
+        val regLine = source.lines()[1]
+        val col2 = regLine.indexOf("main")
+        assertNull(hoverAt(uri, line = 1, character = col2 + 1),
+            "hover inside a `#` comment must return null")
+
+        // Sanity: real code on line 2 still hovers.
+        assertNotNull(hoverAt(uri, line = 2, character = 4),
+            "hover on the actual `let main` must still work")
+    }
+
+    @Test
     fun `do-let bound to a FORWARD-referenced poly fn call shows the concrete type`() {
         // #126: a top-level polymorphic fn CALLED BEFORE it is DECLARED used to
         // resolve to a source-order monomorphic placeholder var, so the call
