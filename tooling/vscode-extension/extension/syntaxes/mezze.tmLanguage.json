@@ -271,6 +271,7 @@
           },
           "end": "(?=\\n(?!\\s)|^(?:pub\\s+)?(?:let|type|newtype|effect|ability|impl|use)\\b)",
           "patterns": [
+            { "include": "#comments" },
             { "include": "#record-pattern" },
             { "include": "#type-annotation" },
             { "include": "#expression" }
@@ -286,6 +287,7 @@
           },
           "end": "(?=\\n(?!\\s)|^(?:pub\\s+)?(?:let|type|newtype|effect|ability|impl|use)\\b)",
           "patterns": [
+            { "include": "#comments" },
             { "include": "#type-annotation" },
             { "include": "#expression" }
           ]
