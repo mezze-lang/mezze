@@ -474,7 +474,7 @@ pub let par_filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> [Result 'a Asyn
 ## becomes done after `ms` ms, then park until either the input promise
 ## or the sleeper settles. If the target wins, return its value; if the
 ## sleeper wins, cancel the target and return None.
-pub let with_timeout : { ms: Int, p: Promise 'a } -> Option 'a <Async, Time, ...> = { ms, p } -> do
+pub let with_timeout : { ms: Int, p: Promise 'a } -> Option 'a <Async, ...> = { ms, p } -> do
   let sleeper = Async.spawn { f = {} -> Async.sleep { ms = ms } }
   Async.park { predicate = {} -> is_done { p = p } || is_done { p = sleeper } }
   match is_done { p = p } is
@@ -653,7 +653,7 @@ pub let scope_is_cancelled : { sc: Scope 'a } -> Bool <Async, ...> = { sc } ->
 ## whichever comes first. Returns True if all settled in time; False if the
 ## deadline fired (and the scope is cancelled so remaining children unwind).
 ## #253: single-call deadline join over a Scope's spawned children.
-pub let scope_join_until : { sc: Scope 'a, ps: [Promise 'b], ms: Int } -> Bool <Async, Time, ...> =
+pub let scope_join_until : { sc: Scope 'a, ps: [Promise 'b], ms: Int } -> Bool <Async, ...> =
   { sc, ps, ms } -> do
     let sleeper = Async.spawn { f = {} -> Async.sleep { ms = ms } }
     Async.park { predicate = {} ->
