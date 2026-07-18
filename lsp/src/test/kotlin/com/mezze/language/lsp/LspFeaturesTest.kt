@@ -170,6 +170,41 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `hover surfaces doc on a decl that follows a do-block decl`() {
+        // Regression (#127): a `##` doc block on a decl declared AFTER a
+        // do-block-bodied decl was silently dropped. The do block's loc bled
+        // onto the following `##` line, and the top-level trailing-comment
+        // heuristic then mis-attached that `##` to the do-block decl (a `##`
+        // is never a trailing comment), stealing the next decl's doc. Mirrors
+        // exactly the reported `main` (perform … in do) + doc'd `help` file.
+        val (uri, source) = openSingleFile("""
+            use std::effects::log::{ println, Console }
+
+            let main = {} -> perform Console in do
+              let x = help { a = 5, b = 6 }
+              println { msg = "hi" }
+
+            ## This is a doc comment
+            ## # Heading
+            ## - a list item
+            let help = { a, b } -> a + b
+        """.trimIndent())
+
+        // Find the `let help` line robustly and hover its name (col 4).
+        val helpLine = source.lines().indexOfFirst { it.startsWith("let help") }
+        assertTrue(helpLine >= 0, "test source should contain `let help`")
+        val hover = hoverAt(uri, line = helpLine, character = 4)
+        assertNotNull(hover, "expected hover on `let help` after a do-block decl")
+        val content = hoverText(hover!!)
+        assertTrue(content.contains("This is a doc comment"),
+            "doc-comment text must survive after a do-block decl, got:\n$content")
+        assertTrue(content.contains("# Heading"),
+            "markdown heading must be preserved, got:\n$content")
+        assertTrue(content.contains("- a list item"),
+            "list item must be preserved, got:\n$content")
+    }
+
+    @Test
     fun `hover on use-site of doc-commented let surfaces the doc`() {
         // Regression for #300/#301: the use-site goes through a different
         // code path (TypedAstLookup → TypedVar) than the def-site. Both

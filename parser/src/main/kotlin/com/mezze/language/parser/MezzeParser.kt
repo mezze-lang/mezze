@@ -143,7 +143,15 @@ class MezzeParser {
 
                         val afterDecl = result.remaining
                         val nextToken = afterDecl.current()
-                        if (nextToken?.type == TokenType.COMMENT && nextToken.line == getLastDeclLine(decl)) {
+                        // Same-line comment right after the code is a trailing
+                        // comment — but ONLY a regular `#` one. A `##` doc block
+                        // is always the LEADING doc of the FOLLOWING decl, never
+                        // trailing; capturing it here (which mis-fired when a
+                        // do-block decl's loc bled onto the next line's `##`)
+                        // silently stole the next decl's doc comment.
+                        if (nextToken?.type == TokenType.COMMENT &&
+                            nextToken.line == getLastDeclLine(decl) &&
+                            !nextToken.text.startsWith("##")) {
                             val text = nextToken.text
                             val isDoc = text.startsWith("##")
                             val commentFile = currentFile ?: "<unknown>"
@@ -269,7 +277,11 @@ class MezzeParser {
 
                     val afterDecl = result.remaining
                     val nextToken = afterDecl.current()
-                    if (nextToken?.type == TokenType.COMMENT && nextToken.line == getLastDeclLine(decl)) {
+                    // Only a regular `#` same-line comment trails a decl; a `##`
+                    // doc block leads the NEXT decl (see the sibling site above).
+                    if (nextToken?.type == TokenType.COMMENT &&
+                        nextToken.line == getLastDeclLine(decl) &&
+                        !nextToken.text.startsWith("##")) {
                         val text = nextToken.text
                         val isDoc = text.startsWith("##")
                         val file = currentFile ?: "<unknown>"

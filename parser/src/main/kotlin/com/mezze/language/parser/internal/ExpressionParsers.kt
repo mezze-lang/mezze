@@ -953,11 +953,19 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                     // Collect any comments (`#`, `#{}`, `##`) sitting before the
                     // next statement so the formatter can round-trip them. They
                     // attach to whichever statement is parsed next.
+                    val beforeAnnotations = currentStream
                     val (afterAnnotations, stmtAnnotations) = skipNewlinesCollectAnnotations(currentStream)
                     currentStream = afterAnnotations
 
                     val currentToken = currentStream.current()
                     if (currentToken != null && doBlockColumn != null && currentToken.column < doBlockColumn && currentToken.type != TokenType.EOF) {
+                        // The next real token dedents out of the block. Any
+                        // comments we just consumed belong to the FOLLOWING
+                        // top-level decl (e.g. a `##` doc block above `let help`),
+                        // not to a phantom statement in this block — rewind so the
+                        // outer decl parser can attach them. Without this the doc
+                        // comment is silently eaten and never reaches the decl.
+                        currentStream = beforeAnnotations
                         break
                     }
 
@@ -1120,8 +1128,13 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                                     lastStatementWasLet = false
                                     lastLetName = null
                                 } else {
-                                    // Next token is outside do block or at EOF, this is the final result
-                                    finalResult = Pair(expr.value, streamAfterExpr)
+                                    // Next token is outside the do block or at EOF, so this
+                                    // expression is the block's final result. Return the stream
+                                    // positioned with comments PRESERVED (skipNewlinesOnly, not
+                                    // skipNewlines) so a `##` doc block sitting between the do
+                                    // block and the following top-level decl reaches that decl
+                                    // instead of being silently eaten here.
+                                    finalResult = Pair(expr.value, skipNewlinesOnly(expr.remaining))
                                 }
                             }
                             is ParseResult.Failure -> {
@@ -1135,8 +1148,20 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
 
                 // Use the final result expression we found
                 if (finalResult != null) {
+                    // Span the do block from `do` to the END OF THE RESULT
+                    // EXPRESSION, not to the trailing stream position — which
+                    // may sit on a following `##` doc block after a dedent.
+                    // Using the stream position bled the loc onto that comment,
+                    // making the top-level trailing-comment heuristic mis-attach
+                    // the next decl's doc block to this one (comment then lost).
+                    val resultLoc = finalResult.first.loc
+                    val doLoc = Loc(
+                        file = file,
+                        startLine = doTok.line, startCol = doTok.column,
+                        endLine = resultLoc.endLine, endCol = resultLoc.endCol,
+                    )
                     ParseResult.Success(
-                        ParsedDo(statements, finalResult.first, loc = spanLocTo(doTok, finalResult.second, file)),
+                        ParsedDo(statements, finalResult.first, loc = doLoc),
                         finalResult.second
                     )
                 } else if (fatalFailure != null) {
