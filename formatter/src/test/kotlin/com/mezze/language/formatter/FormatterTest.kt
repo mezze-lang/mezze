@@ -46,6 +46,33 @@ class FormatterTest {
     }
 
     @Test
+    fun `formatting preserves every comment kind after a do-block decl`() {
+        // Regression (#127): the do block's parse span bled onto the next
+        // decl's comment line, and the trailing-comment heuristic then stole
+        // it — dropping not just `##` docs but regular `#` comments and `#{}`
+        // metadata on the following decl too. All three must round-trip.
+        val input = """
+            let main = {} -> do
+              let x = 1
+              x
+
+            # a regular leading comment
+            ## a doc line
+            #{ deprecated: true }
+            let help = { a, b } -> a + b
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("# a regular leading comment"),
+            "regular `#` comment dropped:\n$output")
+        assertTrue(output.contains("## a doc line"),
+            "`##` doc dropped:\n$output")
+        assertTrue(output.contains("deprecated"),
+            "`#{}` metadata dropped:\n$output")
+        assertEquals(output, formatter.format(output),
+            "formatting is not idempotent for mixed comments")
+    }
+
+    @Test
     fun `format let binding with type annotation`() {
         val input = "let x: Int = 42"
         val output = formatter.format(input)

@@ -1130,11 +1130,14 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                                 } else {
                                     // Next token is outside the do block or at EOF, so this
                                     // expression is the block's final result. Return the stream
-                                    // positioned with comments PRESERVED (skipNewlinesOnly, not
-                                    // skipNewlines) so a `##` doc block sitting between the do
-                                    // block and the following top-level decl reaches that decl
-                                    // instead of being silently eaten here.
-                                    finalResult = Pair(expr.value, skipNewlinesOnly(expr.remaining))
+                                    // positioned RIGHT AFTER the result expression (no newline
+                                    // or comment skipping), so the enclosing decl's span ends at
+                                    // the result and every following comment — regular `#`,
+                                    // metadata `#{}`, or doc `##` — is left for the next
+                                    // top-level decl to attach as its leading block. Skipping
+                                    // here bled the decl loc onto the next line's comment, which
+                                    // the trailing-comment heuristic then mis-stole.
+                                    finalResult = Pair(expr.value, expr.remaining)
                                 }
                             }
                             is ParseResult.Failure -> {
