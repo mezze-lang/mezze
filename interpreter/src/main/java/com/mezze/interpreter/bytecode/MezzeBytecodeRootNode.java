@@ -42,6 +42,7 @@ import com.oracle.truffle.api.bytecode.Operation;
 import com.oracle.truffle.api.bytecode.OperationProxy;
 import com.oracle.truffle.api.bytecode.Variadic;
 import com.oracle.truffle.api.dsl.Bind;
+import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.FrameDescriptor;
@@ -405,8 +406,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = String.class)
     public static final class ReadFieldByName {
+        // Records: shape-cached PIC (up to 6 shapes) with location index
+        // pre-resolved. Common hot path — matches CachedFieldAccessNode.
         @Specialization(guards = "record.getShape() == cachedShape", limit = "6")
-        public static Object doCached(
+        public static Object doRecordCached(
                 String fieldName,
                 MezzeRecord record,
                 @Cached("record.getShape()") Shape cachedShape,
@@ -418,13 +421,60 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return record.getObjectField(locationIndex);
         }
 
-        @Specialization(replaces = "doCached")
-        public static Object doGeneric(String fieldName, MezzeRecord record) {
+        // Fallback for records with unfamiliar shapes.
+        @Specialization(replaces = "doRecordCached")
+        public static Object doRecordGeneric(String fieldName, MezzeRecord record) {
             Object v = record.getField(fieldName);
             if (v == null) {
                 return fallbackNotFound(record, fieldName);
             }
             return v;
+        }
+
+        // Boolean.not/.and/.or — ability method shortcut. Matches
+        // CachedFieldAccessNode.accessBooleanMethod so ability-op chains
+        // like `bool.and {r=...}` route through BDSL when possible.
+        @Specialization(guards = "isBooleanMethod(fieldName)")
+        public static Object doBoolean(String fieldName, boolean value) {
+            if ("not".equals(fieldName)) return !value;
+            // and/or short-circuit: return the receiver (matches
+            // CachedFieldAccessNode's behaviour — the record arg then
+            // decides the final value).
+            return value;
+        }
+
+        // MezzeVariant with a payload — unwrap to the payload record and
+        // read the field there. Matches AST's accessVariantPayload.
+        @Specialization(guards = "isVariantWithRecordPayload(receiver)")
+        public static Object doVariantPayload(
+                String fieldName,
+                com.mezze.interpreter.values.MezzeVariant receiver) {
+            Object payload = receiver.getPayloadValue();
+            if (payload instanceof MezzeRecord rec) {
+                Object v = rec.getField(fieldName);
+                if (v != null) return v;
+            }
+            return fallbackNotFound(receiver, fieldName);
+        }
+
+        // Everything else — mirror CachedFieldAccessNode.accessNotRecord.
+        // Ability-op chains where the receiver is a primitive Long/Double
+        // that happens NOT to match a specific method (like the failing
+        // `(x + y).add {...}` where AST also throws) hit this path.
+        @Fallback
+        public static Object doNotRecord(String fieldName, Object receiver) {
+            throw new RuntimeException("Expected record for field '" + fieldName + "', got: " +
+                (receiver == null ? "null" : receiver.getClass().getSimpleName()));
+        }
+
+        static boolean isBooleanMethod(String fieldName) {
+            return "not".equals(fieldName) || "and".equals(fieldName) || "or".equals(fieldName);
+        }
+
+        static boolean isVariantWithRecordPayload(Object obj) {
+            return obj instanceof com.mezze.interpreter.values.MezzeVariant v
+                    && v.hasPayload()
+                    && v.getPayloadValue() instanceof MezzeRecord;
         }
 
         protected static int resolveLocationIndex(Shape shape, int fieldIndex) {
@@ -434,7 +484,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
 
         @TruffleBoundary
-        private static Object fallbackNotFound(MezzeRecord record, String fieldName) {
+        private static Object fallbackNotFound(Object receiver, String fieldName) {
             throw new RuntimeException("Field not found: " + fieldName);
         }
     }

@@ -455,6 +455,7 @@ public final class BytecodeCompiler {
         final int argCount = ir.getCaptureSlots().size() + ir.getParamSlots().size();
         final int localCount = ir.getLocalSlots().size();
 
+
         // Wrap the raw BDSL root in a trampoline when EITHER:
         //   (a) the body has tail calls (need the LoopNode + catch loop),
         //   OR
