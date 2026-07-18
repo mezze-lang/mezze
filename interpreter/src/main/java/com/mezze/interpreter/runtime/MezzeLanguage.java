@@ -235,6 +235,24 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         return !hasReadField(ir.getBody());
     }
 
+    /**
+     * Kept in sync with BytecodeCompiler.inlineOpFor MINUS eq/neq —
+     * those are excluded because user newtype impls of Eq chain
+     * `.eq {r=r}.not {}` where the receiver is a Variant and the
+     * dispatch must go through dict-passing, not a peephole.
+     */
+    private static boolean isBdslFoldableOp(String name) {
+        switch (name) {
+            case "add": case "sub": case "mul": case "div": case "mod":
+            case "lt": case "le": case "gt": case "ge":
+            case "and": case "or":
+            case "neg": case "not":
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private static boolean hasReadField(com.mezze.language.truffleir.NodeIR node) {
         if (node == null) return false;
         if (node instanceof com.mezze.language.truffleir.ReadFieldIR) return true;
@@ -268,7 +286,19 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             return hasReadField(cn.getArg());
         }
         if (node instanceof com.mezze.language.truffleir.CallIndirectIR ci) {
-            return hasReadField(ci.getFunction()) || hasReadField(ci.getArg());
+            // Ability-method peephole: BDSL folds
+            //   CallIndirect(ReadField(x, foldable_op), MakeRecord({...}))
+            // into an InlineBinaryOp so the ReadField never runs at
+            // runtime. Treat the ReadField in the .function slot as
+            // safe for those foldable-op names, mirroring the emit
+            // logic in BytecodeCompiler.tryFoldInlineOp.
+            var fn = ci.getFunction();
+            if (fn instanceof com.mezze.language.truffleir.ReadFieldIR rf
+                    && ci.getArg() instanceof com.mezze.language.truffleir.MakeRecordIR
+                    && isBdslFoldableOp(rf.getFieldName())) {
+                return hasReadField(rf.getRecord()) || hasReadField(ci.getArg());
+            }
+            return hasReadField(fn) || hasReadField(ci.getArg());
         }
         if (node instanceof com.mezze.language.truffleir.CallLocalIR cl) {
             return hasReadField(cl.getArg());
