@@ -58,6 +58,43 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // CodeLens client commands. The server emits CodeLenses whose command is
+    // one of these with args [uriString, Position]; each opens VS Code's peek
+    // view over the relevant locations. Without these handlers, clicking a
+    // "N references" / "N implementations" / "N performers" lens fails with
+    // "command 'mezze.showReferences' not found".
+    //
+    // The server passes only (uri, position) — not the locations — so we run
+    // the corresponding provider here to gather them, then invoke the built-in
+    // peek command (editor.action.showReferences), which needs
+    // (uri, position, Location[]).
+    const toPosition = (p: any): vscode.Position =>
+        p instanceof vscode.Position ? p : new vscode.Position(p.line, p.character);
+
+    const peek = async (
+        uriArg: any,
+        posArg: any,
+        provider: string
+    ) => {
+        const uri = vscode.Uri.parse(String(uriArg));
+        const position = toPosition(posArg);
+        const locations = (await vscode.commands.executeCommand<vscode.Location[]>(
+            provider, uri, position
+        )) ?? [];
+        await vscode.commands.executeCommand(
+            'editor.action.showReferences', uri, position, locations
+        );
+    };
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('mezze.showReferences', (uri, pos) =>
+            peek(uri, pos, 'vscode.executeReferenceProvider')),
+        vscode.commands.registerCommand('mezze.showImplementations', (uri, pos) =>
+            peek(uri, pos, 'vscode.executeImplementationProvider')),
+        vscode.commands.registerCommand('mezze.showPerformers', (uri, pos) =>
+            peek(uri, pos, 'vscode.executeImplementationProvider'))
+    );
+
     // Start the client
     client.start().then(() => {
         console.log('Mezze Language Server started');
