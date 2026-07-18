@@ -85,6 +85,12 @@ fun ErrorCode.explain(): String = when (this) {
         "An integer literal is larger than a 64-bit integer can hold " +
         "(max 9223372036854775807, min -9223372036854775808)."
 
+    ErrorCode.P0126_DECL_NAME_ON_NEW_LINE ->
+        "A declaration's name must be on the same line as its keyword " +
+        "(`let name …`, `type Name …`, `pub let …`). A keyword left alone " +
+        "on a line is almost always a typo that would silently absorb the " +
+        "next line."
+
     ErrorCode.P0117_RECORD_FIELD_MISSING_TYPE ->
         "Record type fields must have type annotations: `{ name: Str, age: Int }`."
 

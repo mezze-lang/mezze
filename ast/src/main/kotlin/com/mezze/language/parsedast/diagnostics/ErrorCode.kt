@@ -58,6 +58,7 @@ enum class ErrorCode {
     P0123_LAMBDA_INLINE_RETURN_TYPE, // `{ p } -> Ret do body` — return-type annotation must go on the binding, not inline
     P0124_PIPE_PLACEHOLDER_AS_RECEIVER, // `x |> @.method {}` — `@` may be an argument value, not a method/field receiver
     P0125_INTEGER_LITERAL_OUT_OF_RANGE, // `9223372036854775808` — literal exceeds the 64-bit integer range
+    P0126_DECL_NAME_ON_NEW_LINE, // `let\nname` / `type\nName` — the name must be on the same line as the declaration keyword
 
     // ─── Typechecker: type mismatches (T02xx) ────────────────────────────
     T0201_TYPE_MISMATCH,

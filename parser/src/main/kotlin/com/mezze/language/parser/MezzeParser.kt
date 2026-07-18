@@ -392,6 +392,16 @@ class MezzeParser {
                 is ParseResult.Failure -> Triple(Visibility.PRIVATE, stream, null)
             }
 
+            // `pub` must sit on the same line as the decl it modifies —
+            // `pub\nlet` is a typo, same rule as `let\nname` (#P0126).
+            if (pubLocation != null && streamAfterPub.current()?.type == TokenType.NEWLINE) {
+                return@parsedTopLevelItem streamAfterPub.failure(
+                    "`pub` must be on the same line as the declaration it modifies.",
+                    code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0126_DECL_NAME_ON_NEW_LINE,
+                    hints = listOf("write `pub let …` / `pub type …` on one line"),
+                )
+            }
+
             val streamAfterPubSkipNl = skipNewlines(streamAfterPub)
 
             if (pubLocation != null) {

@@ -6,6 +6,28 @@ import com.mezze.language.parser.*
 import com.mezze.language.parser.internal.lib.*
 
 
+/**
+ * Guard: a declaration keyword (`let`, `type`, `effect`, …) must be followed by
+ * the name it introduces ON THE SAME LINE. `keywordRemaining` is the stream
+ * right after the keyword token — if it begins with a NEWLINE, the name has been
+ * pushed to a later line, which is almost always a typo (a stray keyword silently
+ * absorbing the next line). Returns a Failure to reject; null if it's fine.
+ *
+ * The rest of Mezze's newline-insensitivity (wrapping expressions, `=` on the
+ * next line) is untouched — this only forbids the keyword↔name gap.
+ */
+internal fun MezzeParser.declNameOnNewLineFailure(
+    keyword: String,
+    keywordRemaining: TokenStream,
+): ParseResult.Failure? {
+    if (keywordRemaining.current()?.type != TokenType.NEWLINE) return null
+    return keywordRemaining.failure(
+        "The name must be on the same line as `$keyword`.",
+        code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0126_DECL_NAME_ON_NEW_LINE,
+        hints = listOf("write the declaration on one line, e.g. `$keyword name …`"),
+    )
+}
+
 internal fun <T> MezzeParser.parseCommaSeparatedOps(
     stream: TokenStream,
     opParser: Parser<T>,
@@ -67,6 +89,7 @@ internal fun MezzeParser.parseLetBindingWithVisibility(stream: TokenStream, visi
         return when (letToken) {
             is ParseResult.Success -> {
                 val file = currentFile ?: "<unknown>"
+                declNameOnNewLineFailure("let", letToken.remaining)?.let { return it }
                 val stream1 = skipNewlines(letToken.remaining)
 
                 val patternResult = letBindingPattern(stream1)
@@ -207,6 +230,7 @@ internal fun MezzeParser.parseEffectDeclaration(stream: TokenStream): ParseResul
         val effectToken = tok(TokenType.EFFECT)(stream)
         return when (effectToken) {
             is ParseResult.Success -> {
+                declNameOnNewLineFailure("effect", effectToken.remaining)?.let { return it }
                 val stream1 = skipNewlines(effectToken.remaining)
                 val name = identifierParser(stream1)
 
@@ -399,6 +423,7 @@ internal fun MezzeParser.parseTypeDeclaration(stream: TokenStream, visibility: V
         val typeToken = tok(TokenType.TYPE)(stream)
         return when (typeToken) {
             is ParseResult.Success -> {
+                declNameOnNewLineFailure("type", typeToken.remaining)?.let { return it }
                 val stream1 = skipNewlines(typeToken.remaining)
                 val name = identifierParser(stream1)
 
@@ -459,6 +484,7 @@ internal fun MezzeParser.parseNewtypeDeclaration(stream: TokenStream, visibility
         val newtypeToken = tok(TokenType.NEWTYPE)(stream)
         return when (newtypeToken) {
             is ParseResult.Success -> {
+                declNameOnNewLineFailure("newtype", newtypeToken.remaining)?.let { return it }
                 val stream1 = skipNewlines(newtypeToken.remaining)
                 val typeName = identifierParser(stream1)
 
@@ -942,6 +968,7 @@ internal fun MezzeParser.parseAbilityDeclaration(stream: TokenStream): ParseResu
         val abilityToken = tok(TokenType.ABILITY)(stream)
         return when (abilityToken) {
             is ParseResult.Success -> {
+                declNameOnNewLineFailure("ability", abilityToken.remaining)?.let { return it }
                 val stream1 = skipNewlines(abilityToken.remaining)
                 val name = identifierParser(stream1)
 
