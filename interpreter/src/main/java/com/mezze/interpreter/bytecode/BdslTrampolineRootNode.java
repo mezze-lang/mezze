@@ -85,6 +85,18 @@ public final class BdslTrampolineRootNode extends RootNode {
     private final String[] parameterNames;
 
     /**
+     * True iff the inner body contains a tail-call site. Used by
+     * {@code BytecodeCompiler.CallDirectN emit} to decide whether a
+     * BDSL→BDSL call can bypass this trampoline and target the inner
+     * BDSL root directly (skipping the LoopNode + DirectCallNode wrap).
+     * When true, callers MUST target the trampoline so
+     * {@link TailCallException} thrown from a self-tail-call is caught
+     * and re-driven; skipping the trampoline would let the exception
+     * escape past the caller.
+     */
+    private boolean hasTailCalls;
+
+    /**
      * Cached record shape → field index array. Empty until the first
      * record-ABI unpack; when the record's shape matches the cached one,
      * lookup is O(1). Miss → recompute and re-cache (transferring to
@@ -147,12 +159,26 @@ public final class BdslTrampolineRootNode extends RootNode {
      * calling twice throws. Must be called before {@link #execute}.
      */
     public void attachInner(RootNode inner) {
+        attachInner(inner, false);
+    }
+
+    /**
+     * Wire the BDSL inner root and set the {@link #hasTailCalls} flag
+     * so callers can decide whether the trampoline is bypassable.
+     */
+    public void attachInner(RootNode inner, boolean hasTailCalls) {
         if (this.innerTarget != null) {
             throw new IllegalStateException("BdslTrampolineRootNode.attachInner already called");
         }
         this.innerTarget = inner.getCallTarget();
+        this.hasTailCalls = hasTailCalls;
         this.loop = insert(Truffle.getRuntime().createLoopNode(
                 new TrampolineRepeatingNode(this)));
+    }
+
+    /** True iff the inner body has tail-calls; see {@link #hasTailCalls} field. */
+    public boolean hasTailCalls() {
+        return hasTailCalls;
     }
 
     @Override

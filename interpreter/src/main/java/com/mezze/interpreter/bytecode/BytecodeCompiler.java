@@ -510,7 +510,7 @@ public final class BytecodeCompiler {
         });
         RootNode inner = nodes.getNode(0);
         if (trampoline != null) {
-            trampoline.attachInner(inner);
+            trampoline.attachInner(inner, hasTail);
             return trampoline;
         }
         // No tail calls in body — return raw BDSL root, skip trampoline overhead.
@@ -705,6 +705,28 @@ public final class BytecodeCompiler {
                 throw new IllegalStateException(
                     "CallDirectIR references unknown target hash "
                     + c.getTargetHash().getHex() + " — callee must be compiled first");
+            }
+            // Trampoline-bypass: when the callee is a BDSL trampoline whose
+            // inner body has NO tail-calls, the trampoline is a pure ABI
+            // shim for AST callers. A BDSL caller passes flat scalar args
+            // that skip normalizeArgs, so the LoopNode + DirectCallNode
+            // wrap costs ~13-15ns per call for nothing. Retarget the emit
+            // to the inner BDSL root; correctness is preserved because the
+            // inner uses the same flat layout BDSL emits.
+            //
+            // MUST NOT bypass when hasTailCalls is true — a self-tail-call
+            // throws TailCallException from inside the inner and the
+            // trampoline's catch is the only thing that keeps recursion
+            // stack-flat. Bypassing there means the exception escapes.
+            //
+            // Also MUST NOT bypass for tail-calls emitted here (the caller
+            // wants its own trampoline to catch, but the target still needs
+            // its trampoline reachable if it's the resume point).
+            if (target instanceof com.oracle.truffle.api.RootCallTarget rct
+                    && rct.getRootNode() instanceof BdslTrampolineRootNode tramp
+                    && !tramp.hasTailCalls()
+                    && !c.isTailCall()) {
+                target = tramp.getInnerTarget();
             }
             // Scalar-ABI callee-shape rule: paramCount==1 collides with
             // record ABI arity, so the caller MUST push ScalarABIMarker
