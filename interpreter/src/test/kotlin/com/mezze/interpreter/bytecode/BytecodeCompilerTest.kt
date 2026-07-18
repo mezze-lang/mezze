@@ -70,13 +70,13 @@ class BytecodeCompilerTest {
 
     @Test
     fun `supports rejects unsupported node types`() {
-        // PartialApplyDirectIR is not yet supported (closures / partial-
-        // application are Phase 3+ scope). Ensures supports() correctly
-        // rejects trees containing it.
+        // Tail-call PartialApplyDirectIR is still unsupported — BDSL's
+        // MonomorphicCall op does not yet participate in the trampoline.
+        // Non-tail partial applies now route through BDSL as of #296.
         val partial = com.mezze.language.truffleir.PartialApplyDirectIR(
             targetHash = com.mezze.language.typedast.Hash("0".repeat(64)),
             partialFields = emptyList(),
-            isTailCall = false,
+            isTailCall = true,
             src = srcInfo,
         )
         withContext { lang ->

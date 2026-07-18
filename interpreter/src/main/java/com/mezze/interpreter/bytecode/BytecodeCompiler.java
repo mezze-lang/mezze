@@ -31,6 +31,7 @@ import com.mezze.language.truffleir.NodeIR;
 import com.mezze.language.truffleir.PatternIR;
 import com.mezze.language.truffleir.CallIndirectScalarIR;
 import com.mezze.language.truffleir.DictMethodCallIR;
+import com.mezze.language.truffleir.PartialApplyDirectIR;
 import com.mezze.language.truffleir.FracLitIR;
 import com.mezze.language.truffleir.ReadArgIR;
 import com.mezze.language.truffleir.ReadCaptureIR;
@@ -333,6 +334,17 @@ public final class BytecodeCompiler {
             // CallIndirect).
             return supportsNode(dm.getArg(), argCount);
         }
+        if (node instanceof PartialApplyDirectIR pa) {
+            // Non-tail-call only: tail-call variants of partial-apply are
+            // niche and BDSL's MonomorphicCall op doesn't yet participate
+            // in the trampoline.
+            if (pa.isTailCall()) return false;
+            for (FieldIR f : pa.getPartialFields()) {
+                if ("__spread__".equals(f.getName())) return false;
+                if (!supportsNode(f.getValue(), argCount)) return false;
+            }
+            return true;
+        }
         if (node instanceof CallLocalIR cl) {
             return supportsNode(cl.getArg(), argCount);
         }
@@ -576,6 +588,11 @@ public final class BytecodeCompiler {
             if (ci.isTailCall()) return true;
             if (hasTailCall(ci.getFunction())) return true;
             for (NodeIR arg : ci.getArgs()) if (hasTailCall(arg)) return true;
+            return false;
+        }
+        if (node instanceof PartialApplyDirectIR pa) {
+            if (pa.isTailCall()) return true;
+            for (FieldIR f : pa.getPartialFields()) if (hasTailCall(f.getValue())) return true;
             return false;
         }
         if (node instanceof DictMethodCallIR dm) {
@@ -1072,6 +1089,25 @@ public final class BytecodeCompiler {
             }
             emitNode(dm.getArg(), b, argCount, localMap);
             b.endCallIndirect();
+            return;
+        }
+        if (node instanceof PartialApplyDirectIR pa) {
+            // Materialize the partial-fields record, then hand it to
+            // MonomorphicCall which does the has-all-parameters check
+            // and returns either a partially-applied MezzeFunction or
+            // the completed call's result. See MezzeBytecodeRootNode
+            // MonomorphicCall op.
+            String[] fieldNames = new String[pa.getPartialFields().size()];
+            for (int i = 0; i < pa.getPartialFields().size(); i++) {
+                fieldNames[i] = pa.getPartialFields().get(i).getName();
+            }
+            b.beginMonomorphicCall(pa.getTargetHash());
+            b.beginMakeRecord(fieldNames);
+            for (FieldIR f : pa.getPartialFields()) {
+                emitNode(f.getValue(), b, argCount, localMap);
+            }
+            b.endMakeRecord();
+            b.endMonomorphicCall();
             return;
         }
         if (node instanceof CallIndirectScalarIR ci) {

@@ -257,6 +257,35 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Call a target by content hash with a single record arg, handling
+     * partial application. Mirrors the AST's
+     * {@link com.mezze.interpreter.nodes.function.MonomorphicCallNode}:
+     * when the argument record lacks parameters, returns a partially-
+     * applied {@link com.mezze.interpreter.values.MezzeFunction};
+     * otherwise completes any prior partial args and calls the target.
+     *
+     * <p>Used for {@link com.mezze.language.truffleir.PartialApplyDirectIR}.
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    public static final class MonomorphicCall {
+        @Specialization
+        public static Object doCall(
+                Hash hash,
+                Object arg,
+                @Cached(value = "createCall(hash)", allowUncached = true)
+                    com.mezze.interpreter.nodes.function.MonomorphicCallNode callNode) {
+            return callNode.executeWith(arg);
+        }
+
+        static com.mezze.interpreter.nodes.function.MonomorphicCallNode createCall(Hash hash) {
+            return com.mezze.interpreter.nodes.function.MonomorphicCallNode.create(
+                    hash, hash.getHex(),
+                    new com.mezze.interpreter.nodes.literal.UnitLiteralNode());
+        }
+    }
+
+    /**
      * Pop two longs, push their overflow-checked sum.
      *
      * <p>Used to lower {@code InlineBinaryOpIR} with op = ADD when

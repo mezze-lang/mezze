@@ -239,6 +239,10 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             for (var a : ci.getArgs()) if (hasReadField(a)) return true;
             return false;
         }
+        if (node instanceof com.mezze.language.truffleir.PartialApplyDirectIR pa) {
+            for (var f : pa.getPartialFields()) if (hasReadField(f.getValue())) return true;
+            return false;
+        }
         if (node instanceof com.mezze.language.truffleir.MakeRecordIR m) {
             for (var f : m.getFields()) if (hasReadField(f.getValue())) return true;
             return false;

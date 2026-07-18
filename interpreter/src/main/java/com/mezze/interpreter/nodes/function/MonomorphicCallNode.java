@@ -89,6 +89,34 @@ public final class MonomorphicCallNode extends MezzeNode {
         return callWithClosure(arg);
     }
 
+    /**
+     * BDSL entry point: called with the record arg already on the stack.
+     * Same partial-application + closure-prepend logic as {@link #execute}
+     * but skips the child-node arg evaluation (the BDSL emit reads the arg
+     * from the operand stack).
+     */
+    public Object executeWith(Object arg) {
+        if (callNode == null && !isResolvedValue) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            resolveFunction();
+        }
+        if (isResolvedValue) {
+            return resolvedValue;
+        }
+        if (cachedFunction != null
+                && cachedFunction.getParameterNames().length > 0
+                && arg instanceof com.mezze.interpreter.values.MezzeRecord record) {
+            if (!cachedFunction.hasAllParameters(record)) {
+                return cachedFunction.withPartialArgs(record);
+            }
+            if (cachedFunction.hasPartialArgs() && cachedFunction.hasAllParameters(record)) {
+                com.mezze.interpreter.values.MezzeRecord completeRecord = cachedFunction.buildCompleteRecord(record);
+                return callWithClosure(completeRecord);
+            }
+        }
+        return callWithClosure(arg);
+    }
+
     @ExplodeLoop
     private Object callWithClosure(Object arg) {
         if (cachedClosureLength == 0) {
