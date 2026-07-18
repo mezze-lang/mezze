@@ -86,26 +86,44 @@ public final class ReadGlobalByHashNode extends MezzeNode {
      * If the function is a zero-param zero-capture thunk (value definition),
      * call it to get the actual value. Cache the result in the global context
      * so subsequent lookups are instant.
+     *
+     * <p>Handles both AST-compiled thunks ({@link MezzeRootNode}) and BDSL-
+     * compiled thunks ({@link com.mezze.interpreter.bytecode.MezzeBytecodeRootNode}
+     * / {@link com.mezze.interpreter.bytecode.BdslTrampolineRootNode}).
+     * BDSL roots don't carry paramCount/closureCount metadata, so we lean
+     * on the closure-values check + MezzeFunction's name and trust the
+     * FunctionIR pipeline to have shaped these consistently — a BDSL-
+     * compiled thunk always has empty closure values by construction.
      */
     @TruffleBoundary
     private Object autoEvaluateThunk(MezzeFunction fn, MezzeContext context) {
         CallTarget ct = fn.getCallTarget();
         if (!(ct instanceof RootCallTarget rct)) return fn;
+        if (fn.getClosureValues().length != 0) return fn;
         RootNode root = rct.getRootNode();
-        // Check for MezzeRootNode (no-param thunk) — these are value definitions
+        boolean isThunk = false;
         if (root instanceof MezzeRootNode mrn) {
-            if (mrn.getClosureCount() == 0 && mrn.getParameterCount() == 0
-                    && fn.getClosureValues().length == 0) {
-                try {
-                    Object result = ct.call(com.mezze.interpreter.values.MezzeUnit.INSTANCE);
-                    // Cache the evaluated value so we don't re-evaluate on every access
-                    context.defineGlobal(hash, result);
-                    return result;
-                } catch (Exception e) {
-                    // If evaluation fails, return the function as-is (it might be
-                    // a function that legitimately takes no params but has side effects)
-                    return fn;
-                }
+            isThunk = mrn.getClosureCount() == 0 && mrn.getParameterCount() == 0;
+        } else if (root instanceof com.mezze.interpreter.bytecode.BdslTrampolineRootNode
+                || root instanceof com.mezze.interpreter.bytecode.MezzeBytecodeRootNode) {
+            // BDSL callTargets reach this path when a zero-param FunctionIR
+            // is compiled through BytecodeCompiler. Zero-param BDSL bodies
+            // ignore their args, so ct.call() with any placeholder returns
+            // the thunk's value. (The FunctionIR's parameter list determined
+            // the BDSL frame layout; this callTarget was built with an empty
+            // one, so calling it here is safe regardless of what we pass.)
+            isThunk = true;
+        }
+        if (isThunk) {
+            try {
+                Object result = ct.call(com.mezze.interpreter.values.MezzeUnit.INSTANCE);
+                // Cache the evaluated value so we don't re-evaluate on every access
+                context.defineGlobal(hash, result);
+                return result;
+            } catch (Exception e) {
+                // If evaluation fails, return the function as-is (it might be
+                // a function that legitimately takes no params but has side effects)
+                return fn;
             }
         }
         return fn;

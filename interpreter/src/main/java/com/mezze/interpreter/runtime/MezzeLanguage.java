@@ -162,28 +162,100 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * scalar-safe — args[0..closureCount-1] are closure values,
      * closureCount == args.length.
      *
-     * <p>Also rejected: zero-param zero-capture "value thunk" functions
-     * (constants like {@code math::e}, {@code math::pi}, and any
-     * {@code let x = <expr>} at the top level). AST's
-     * {@code ReadGlobalByHashNode.autoEvaluateThunk} auto-evaluates these
-     * on first lookup, but its {@code root instanceof MezzeRootNode}
-     * check fails for BDSL roots — so the lookup returns the function
-     * object itself instead of the evaluated value. Until we teach
-     * autoEvaluateThunk about BDSL roots, keep thunks on the AST path.
-     *
      * <p>Later steps: (1) BDSL root wraps execute() with record-ABI unpack,
      * matching MezzeFunctionRootNode's discrimination logic; (2) tighten
      * this predicate to accept scalar-only callees the type-checker can
      * mark unambiguously; (3) allow record-ABI when the record field names
-     * match the paramNames in order (the same "unpackRecordFast" shape);
-     * (4) teach autoEvaluateThunk to also unwrap BDSL roots.
+     * match the paramNames in order (the same "unpackRecordFast" shape).
+     *
+     * <p>Zero-param zero-capture "value thunks" (constants like
+     * {@code math::e}, top-level {@code let x = ...}) are now safe —
+     * {@code ReadGlobalByHashNode.autoEvaluateThunk} recognises BDSL
+     * roots as thunk-eligible.
+     *
+     * <p>Excluded: bodies that contain a {@code ReadFieldIR} on any
+     * subtree. BDSL's ReadFieldByName op currently mishandles records
+     * carried through closure captures inside {@code do}-block
+     * destructuring (see DestructuringRenameIntegrationTest
+     * .testMultipleRenamesInDoBlock — the op receives {@code String, Long}
+     * instead of {@code MezzeRecord, String}). Skipping such thunks
+     * keeps them on the AST path until the BDSL emit for ReadField is
+     * fixed. Value-constants (numbers, strings, seq literals) are
+     * unaffected since they have no ReadFieldIR.
      */
     private static boolean isBdslSafeCallee(com.mezze.language.truffleir.FunctionIR ir) {
         if (!ir.getParamSlots().isEmpty()) return false;
-        // Reject zero-param zero-capture thunks — AST auto-eval doesn't
-        // know how to look inside a BDSL root (yet).
-        if (ir.getCaptureSlots().isEmpty()) return false;
-        return true;
+        return !hasReadField(ir.getBody());
+    }
+
+    private static boolean hasReadField(com.mezze.language.truffleir.NodeIR node) {
+        if (node == null) return false;
+        if (node instanceof com.mezze.language.truffleir.ReadFieldIR) return true;
+        // Walk the common composite shapes. This is intentionally
+        // conservative: any node with children needs a recursive check.
+        // Kept in sync with the shapes BDSL actually compiles today.
+        if (node instanceof com.mezze.language.truffleir.BlockIR blk) {
+            for (var s : blk.getStmts()) {
+                var child = (s instanceof com.mezze.language.truffleir.StmtIR.Let l)
+                        ? l.getValue()
+                        : ((com.mezze.language.truffleir.StmtIR.Expr) s).getNode();
+                if (hasReadField(child)) return true;
+            }
+            return hasReadField(blk.getResult());
+        }
+        if (node instanceof com.mezze.language.truffleir.IfIR i) {
+            return hasReadField(i.getCond()) || hasReadField(i.getThenBr()) || hasReadField(i.getElseBr());
+        }
+        if (node instanceof com.mezze.language.truffleir.WriteLocalIR w) {
+            return hasReadField(w.getValue());
+        }
+        if (node instanceof com.mezze.language.truffleir.InlineBinaryOpIR bin) {
+            return hasReadField(bin.getLeft()) || hasReadField(bin.getRight());
+        }
+        if (node instanceof com.mezze.language.truffleir.CallDirectIR c) {
+            for (var arg : c.getArgs()) if (hasReadField(arg)) return true;
+            return false;
+        }
+        if (node instanceof com.mezze.language.truffleir.CallNativeIR cn) {
+            for (var arg : cn.getArgs()) if (hasReadField(arg)) return true;
+            return hasReadField(cn.getArg());
+        }
+        if (node instanceof com.mezze.language.truffleir.CallIndirectIR ci) {
+            return hasReadField(ci.getFunction()) || hasReadField(ci.getArg());
+        }
+        if (node instanceof com.mezze.language.truffleir.CallLocalIR cl) {
+            return hasReadField(cl.getArg());
+        }
+        if (node instanceof com.mezze.language.truffleir.MakeRecordIR m) {
+            for (var f : m.getFields()) if (hasReadField(f.getValue())) return true;
+            return false;
+        }
+        if (node instanceof com.mezze.language.truffleir.RecordUpdateIR ru) {
+            if (hasReadField(ru.getRecord())) return true;
+            for (var f : ru.getUpdates()) if (hasReadField(f.getValue())) return true;
+            return false;
+        }
+        if (node instanceof com.mezze.language.truffleir.MakeVariantIR mv) {
+            return mv.getPayload() != null && hasReadField(mv.getPayload());
+        }
+        if (node instanceof com.mezze.language.truffleir.MakeSeqIR seq) {
+            for (var el : seq.getElements()) {
+                if (el instanceof com.mezze.language.truffleir.SeqElementIR.Regular reg
+                        && hasReadField(reg.getNode())) return true;
+            }
+            return false;
+        }
+        if (node instanceof com.mezze.language.truffleir.MatchIR m) {
+            if (hasReadField(m.getScrutinee())) return true;
+            for (var c : m.getCases()) {
+                if (c.getGuard() != null && hasReadField(c.getGuard())) return true;
+                if (hasReadField(c.getBody())) return true;
+            }
+            return false;
+        }
+        // Literals, ReadLocal, MakeLambda (captures are slot refs, not NodeIR),
+        // Unit — no ReadField reachable.
+        return false;
     }
 
     /** Test/telemetry: how many functions hit BDSL vs fell back to AST. */
