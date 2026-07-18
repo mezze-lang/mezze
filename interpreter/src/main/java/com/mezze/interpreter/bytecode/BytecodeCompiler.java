@@ -278,7 +278,8 @@ public final class BytecodeCompiler {
         if (node instanceof RecordUpdateIR ru) {
             if (!supportsNode(ru.getRecord(), argCount)) return false;
             for (FieldIR f : ru.getUpdates()) {
-                if ("__spread__".equals(f.getName())) return false;
+                // __spread__ entries now supported via SpreadRecord emit
+                // (mirrors MakeRecordIR's spread handling).
                 if (!supportsNode(f.getValue(), argCount)) return false;
             }
             return true;
@@ -948,6 +949,32 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof RecordUpdateIR ru) {
+            boolean hasSpread = false;
+            for (FieldIR f : ru.getUpdates()) {
+                if ("__spread__".equals(f.getName())) { hasSpread = true; break; }
+            }
+            if (hasSpread) {
+                // Update-with-spread lowers to SpreadRecord over
+                // (base-record + updates in order). The base record is
+                // pushed as a leading "__spread__" entry; each update
+                // keeps its original name (regular field or another
+                // "__spread__" nested spread). buildSpreadRecord merges
+                // in order, so later entries override earlier ones —
+                // matching update semantics.
+                int total = 1 + ru.getUpdates().size();
+                String[] entryNames = new String[total];
+                entryNames[0] = "__spread__";
+                for (int i = 0; i < ru.getUpdates().size(); i++) {
+                    entryNames[i + 1] = ru.getUpdates().get(i).getName();
+                }
+                b.beginSpreadRecord(entryNames);
+                emitNode(ru.getRecord(), b, argCount, localMap);
+                for (FieldIR f : ru.getUpdates()) {
+                    emitNode(f.getValue(), b, argCount, localMap);
+                }
+                b.endSpreadRecord();
+                return;
+            }
             String[] updateNames = new String[ru.getUpdates().size()];
             for (int i = 0; i < ru.getUpdates().size(); i++) {
                 updateNames[i] = ru.getUpdates().get(i).getName();
