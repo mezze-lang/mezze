@@ -114,6 +114,29 @@ export function activate(context: vscode.ExtensionContext) {
             peek(uri, pos, 'vscode.executeImplementationProvider', 'performers'))
     );
 
+    // Surface a server crash instead of silently losing all features. The
+    // client auto-restarts a few times by default; if it ends up Stopped,
+    // tell the user and offer a one-click restart. (Guarded so the normal
+    // Starting→Running transition and a user-initiated stop stay quiet.)
+    let sawRunning = false;
+    context.subscriptions.push(
+        client.onDidChangeState((e) => {
+            // State enum: Stopped=1, Starting=3, Running=2 (vscode-languageclient).
+            if (e.newState === 2 /* Running */) { sawRunning = true; return; }
+            if (e.newState === 1 /* Stopped */ && sawRunning) {
+                sawRunning = false;
+                vscode.window.showWarningMessage(
+                    'Mezze Language Server stopped. Language features are unavailable.',
+                    'Restart'
+                ).then((choice) => {
+                    if (choice === 'Restart') {
+                        vscode.commands.executeCommand('mezze.restartServer');
+                    }
+                });
+            }
+        })
+    );
+
     // Start the client
     client.start().then(() => {
         console.log('Mezze Language Server started');

@@ -990,6 +990,37 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `completion returns nothing inside a comment`() {
+        // #128 audit: completion suggested identifiers/keywords while typing
+        // inside a `#` note or `##` doc line (hover already guarded against
+        // this). Comments are prose — no code completion.
+        val (uri, source) = openSingleFile("""
+            ## docs about pri
+            # note about pri
+            let println_local = {} -> 1
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        // Inside the `##` doc line, right after `pri`.
+        val docLine = source.lines()[0]
+        val docCol = docLine.indexOf("pri") + 3
+        val inDoc = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri); position = Position(0, docCol)
+        }).get(5, TimeUnit.SECONDS)
+        val inDocItems = if (inDoc.isLeft) inDoc.left else inDoc.right.items
+        assertTrue(inDocItems.isEmpty(), "no completion inside a `##` doc comment, got: ${inDocItems.map { it.label }.take(5)}")
+
+        // Inside the regular `#` comment line.
+        val regLine = source.lines()[1]
+        val regCol = regLine.indexOf("pri") + 3
+        val inReg = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri); position = Position(1, regCol)
+        }).get(5, TimeUnit.SECONDS)
+        val inRegItems = if (inReg.isLeft) inReg.left else inReg.right.items
+        assertTrue(inRegItems.isEmpty(), "no completion inside a `#` comment, got: ${inRegItems.map { it.label }.take(5)}")
+    }
+
+    @Test
     fun `organize imports is not offered when imports are already organized`() {
         val src = """
             use std::int

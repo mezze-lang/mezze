@@ -1957,6 +1957,18 @@ class MezzeTextDocumentService(
 
             server.logInfo("[completion] request uri=${uri.substringAfterLast('/')} pos=${position.line}:${position.character} trigger='${params.context?.triggerCharacter}'")
 
+            // No code completion inside a comment — a `#` note or `##` doc line
+            // is prose, so suggesting identifiers/keywords there is noise. Mirror
+            // the hover guard (isInsideLineComment is string-aware, so `#` inside
+            // a string literal still completes).
+            if (state != null) {
+                val lines = state.content.lines()
+                val line = lines.getOrNull(position.line)
+                if (line != null && isInsideLineComment(line, position.character)) {
+                    return@supplyAsync Either.forLeft<List<CompletionItem>, CompletionList>(emptyList())
+                }
+            }
+
             val items = mutableListOf<CompletionItem>()
 
             // Detect dot-context BEFORE asking getDotCompletions, so we can
@@ -4411,16 +4423,45 @@ class MezzeTextDocumentService(
             Position(decl.startLine - 1, decl.startCol - 1),
             Position(decl.endLine - 1, decl.endCol)
         )
+        // selectionRange must be the NAME (editors reveal/select it and expect
+        // to land on the identifier), not the whole decl which starts at the
+        // `let`/`type` keyword — same anchor bug fixed for CodeLens (#128).
+        val selection = nameRangeOnDeclStartLine(filePath, decl.startLine, decl.startCol, decl.declName) ?: range
         val item = CallHierarchyItem(
             decl.declName,
             declKindToSymbolKindForCallHierarchy(decl.declKind),
             itemUri,
             range,
-            range
+            selection
         )
         item.detail = decl.modulePath
         item.data = hash.hex
         return item
+    }
+
+    /**
+     * Locate a decl's NAME token on its start line and return a Range covering
+     * just the name. `startLine`/`startCol` are 1-based (store convention).
+     * Reads the file line lazily; returns null on any I/O or not-found so
+     * callers fall back to the whole-decl range.
+     */
+    private fun nameRangeOnDeclStartLine(filePath: String, startLine: Int, startCol: Int, name: String): Range? {
+        return try {
+            val line = File(filePath).bufferedReader().useLines { seq ->
+                seq.drop(startLine - 1).firstOrNull()
+            } ?: return null
+            val from = (startCol - 1).coerceIn(0, line.length)
+            var idx = line.indexOf(name, from)
+            while (idx >= 0) {
+                val before = if (idx == 0) ' ' else line[idx - 1]
+                val after = line.getOrElse(idx + name.length) { ' ' }
+                if (!before.isLetterOrDigit() && before != '_' && !after.isLetterOrDigit() && after != '_') {
+                    return Range(Position(startLine - 1, idx), Position(startLine - 1, idx + name.length))
+                }
+                idx = line.indexOf(name, idx + 1)
+            }
+            null
+        } catch (_: Exception) { null }
     }
 
     private fun declKindToSymbolKindForCallHierarchy(kind: com.mezze.language.store.DeclKind): SymbolKind =
@@ -4539,12 +4580,13 @@ class MezzeTextDocumentService(
             Position(decl.startLine - 1, decl.startCol - 1),
             Position(decl.endLine - 1, decl.endCol)
         )
+        val selection = nameRangeOnDeclStartLine(filePath, decl.startLine, decl.startCol, decl.declName) ?: range
         val item = TypeHierarchyItem(
             decl.declName,
             declKindToSymbolKindForCallHierarchy(decl.declKind),
             itemUri,
             range,
-            range
+            selection
         )
         item.detail = decl.modulePath
         item.data = hash.hex
