@@ -91,6 +91,23 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             System.getenv("MEZZE_BDSL") != null
                 && !"0".equals(System.getenv("MEZZE_BDSL"))
                 && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL"));
+    private static final boolean BDSL_STATS =
+            System.getenv("MEZZE_BDSL_STATS") != null
+                && !"0".equals(System.getenv("MEZZE_BDSL_STATS"))
+                && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL_STATS"));
+    private static final java.util.concurrent.atomic.AtomicLong GLOBAL_BDSL_HITS = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong GLOBAL_BDSL_MISSES = new java.util.concurrent.atomic.AtomicLong();
+    static {
+        if (BDSL_STATS) {
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                long h = GLOBAL_BDSL_HITS.get(), m = GLOBAL_BDSL_MISSES.get(), t = h + m;
+                if (t > 0) {
+                    System.err.println("[BDSL] compile counts: " + h + " hits, " + m + " misses ("
+                            + String.format("%.1f", 100.0 * h / t) + "% BDSL)");
+                }
+            }, "bdsl-stats"));
+        }
+    }
     private volatile com.mezze.interpreter.bytecode.BytecodeCompiler bdslCompiler;
     private final java.util.concurrent.atomic.AtomicLong bdslHits = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong bdslMisses = new java.util.concurrent.atomic.AtomicLong();
@@ -115,6 +132,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 try {
                     var root = bdsl.compile(ir);
                     bdslHits.incrementAndGet();
+                    if (BDSL_STATS) GLOBAL_BDSL_HITS.incrementAndGet();
                     return root;
                 } catch (Throwable t) {
                     // BDSL emit crash — fall through to AST. Log once at
@@ -126,6 +144,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 }
             }
             bdslMisses.incrementAndGet();
+            if (BDSL_STATS) GLOBAL_BDSL_MISSES.incrementAndGet();
         }
         return astCompiler.compile(ir);
     }
