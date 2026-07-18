@@ -1154,6 +1154,18 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof CallIndirectIR ci) {
+            // Peephole: CallIndirect(ReadField(x, opName), MakeRecord({r=y}))
+            // is an inline binary op via ability method dispatch. Fold to
+            // InlineBinaryOp so the receiver is never read as a field —
+            // avoids "Expected record for field 'gt', got: Long" when x
+            // is a primitive. Mirrors TruffleCompiler.tryCompileInlineOp.
+            if (!ci.isTailCall()) {
+                InlineBinaryOpIR folded = tryFoldInlineOp(ci);
+                if (folded != null) {
+                    emitInlineBinaryOp(folded, b, argCount, localMap);
+                    return;
+                }
+            }
             if (ci.isTailCall()) {
                 b.beginTailCallIndirect();
                 emitNode(ci.getFunction(), b, argCount, localMap);
@@ -1393,6 +1405,60 @@ public final class BytecodeCompiler {
             "BytecodeCompiler Phase 1 doesn't support IR node "
             + node.getClass().getSimpleName()
             + ". Callers should check `supports(ir)` first.");
+    }
+
+    /**
+     * Try to fold {@code CallIndirect(ReadField(x, opName), MakeRecord({r=y}))}
+     * into an {@link InlineBinaryOpIR}. Returns null if the pattern doesn't
+     * match. Mirrors {@code TruffleCompiler.tryCompileInlineOp} — the AST
+     * peephole that keeps ability-method dispatch on primitives from
+     * hitting the ReadField crash ("Expected record for field 'gt', got:
+     * Long"). Without this fold, HOF callbacks like {@code p = {x} -> x > 10}
+     * would crash at runtime.
+     */
+    private InlineBinaryOpIR tryFoldInlineOp(CallIndirectIR ci) {
+        if (!(ci.getFunction() instanceof ReadFieldIR rf)) return null;
+        if (!(ci.getArg() instanceof MakeRecordIR mr)) return null;
+        InlineOp op = inlineOpFor(rf.getFieldName());
+        if (op == null) return null;
+        NodeIR left = rf.getRecord();
+        boolean unary = (op == InlineOp.NEG || op == InlineOp.NOT);
+        if (unary) {
+            return new InlineBinaryOpIR(op, left, left, ci.getSrc());
+        }
+        for (FieldIR f : mr.getFields()) {
+            if ("r".equals(f.getName())) {
+                return new InlineBinaryOpIR(op, left, f.getValue(), ci.getSrc());
+            }
+        }
+        return null;
+    }
+
+    private static InlineOp inlineOpFor(String opName) {
+        switch (opName) {
+            case "add": return InlineOp.ADD;
+            case "sub": return InlineOp.SUB;
+            case "mul": return InlineOp.MUL;
+            case "div": return InlineOp.DIV;
+            case "mod": return InlineOp.MOD;
+            case "eq":  return InlineOp.EQ;
+            case "neq": return InlineOp.NEQ;
+            case "lt":  return InlineOp.LT;
+            case "le":  return InlineOp.LE;
+            case "gt":  return InlineOp.GT;
+            case "ge":  return InlineOp.GE;
+            case "and": return InlineOp.AND;
+            case "or":  return InlineOp.OR;
+            case "neg": return InlineOp.NEG;
+            case "not": return InlineOp.NOT;
+            default: return null;
+        }
+    }
+
+    private void emitInlineBinaryOp(InlineBinaryOpIR bin,
+                                    MezzeBytecodeRootNodeGen.Builder b,
+                                    int argCount, BytecodeLocal[] localMap) {
+        emitNode(bin, b, argCount, localMap);
     }
 
     /**
