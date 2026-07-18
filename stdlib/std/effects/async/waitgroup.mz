@@ -33,8 +33,7 @@ pub let done : { wg: WaitGroup } -> {} <Async> = { wg } ->
 pub let wait : { wg: WaitGroup } -> {} <Async> = { wg } ->
   __native_waitgroup_wait { wg = wg }
 
-## Park-aware wait: routes through Async.park so the same code works
-## under LoomAsync and CoopAsync.
+## Park-aware wait: routes through Async.park.
 pub let wait_async : { wg: WaitGroup } -> {} <Async, ...> = { wg } ->
   Async.park { predicate = {} -> __native_waitgroup_get_count { wg = wg } == 0 }
 

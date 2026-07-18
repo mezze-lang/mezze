@@ -122,12 +122,12 @@ class SelectTest {
     }
 
     @Test
-    fun `select under CoopAsync`() {
+    fun `select under LoomAsync`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync, select}
+            use std::effects::async::{Async, LoomAsync, select}
             use std::option
 
-            perform CoopAsync in do
+            perform LoomAsync in do
               let r = select { branches = [
                 { when = {} -> False, run = {} -> 1 },
                 { when = {} -> True,  run = {} -> 2 },
@@ -138,13 +138,13 @@ class SelectTest {
     }
 
     @Test
-    fun `park_any under CoopAsync`() {
+    fun `park_any under LoomAsync`() {
         val source = """
-            use std::effects::async::{Async, CoopAsync, park_any}
+            use std::effects::async::{Async, LoomAsync, park_any}
             use std::effects::async::atom::{ atom, deref, reset }
             use std::option
 
-            perform CoopAsync in do
+            perform LoomAsync in do
               let flag = atom { val = 0 }
               let _ = Async.spawn { f = {} -> reset { atom = flag, val = 5 } }
               let r = park_any { predicates = [

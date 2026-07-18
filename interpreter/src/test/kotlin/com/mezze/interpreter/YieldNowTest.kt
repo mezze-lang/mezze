@@ -36,21 +36,6 @@ class YieldNowTest {
 
     @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
-    fun `yield_now under CoopAsync returns unit`() {
-        val source = """
-            use std::effects::async::{Async, CoopAsync}
-
-            let main = {} -> perform CoopAsync in do
-              Async.yield_now {}
-              42
-
-            main {}
-        """
-        assertEquals(42L, eval(source))
-    }
-
-    @Test
-    @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `yield_now interleaves cooperative tasks`() {
         // Two spawned tasks that each yield after writing to a shared
         // atom. Under a cooperative scheduler, the yield gives the peer

@@ -32,8 +32,7 @@ pub let acquire : { sem: Semaphore } -> {} <Async> = { sem } ->
 pub let acquire_n : { sem: Semaphore, permits: Int } -> {} <Async> = { sem, permits } ->
   __native_semaphore_acquire_n { sem = sem, permits = permits }
 
-## Park-aware acquire: routes through Async.park so the same code works
-## under LoomAsync and CoopAsync.
+## Park-aware acquire: routes through Async.park.
 pub let acquire_async : { sem: Semaphore } -> {} <Async, ...> = { sem } ->
   Async.park { predicate = {} -> __native_semaphore_try_acquire { sem = sem } }
 

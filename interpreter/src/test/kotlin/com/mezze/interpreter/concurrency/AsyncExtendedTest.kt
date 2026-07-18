@@ -106,12 +106,12 @@ class AsyncExtendedTest {
 
     @Test
     fun `test join3 with different types`() {
-        // Use CoopAsync for deterministic behavior (avoids Truffle thread issues)
+        // Use LoomAsync for deterministic behavior (avoids Truffle thread issues)
         val code = """
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
-            perform CoopAsync in do
+            perform LoomAsync in do
                 let r = join3 {
                     a = {} -> "first",
                     b = {} -> 2,
@@ -148,12 +148,12 @@ class AsyncExtendedTest {
 
     @Test
     fun `test map preserves order`() {
-        // Use CoopAsync for deterministic ordering
+        // Use LoomAsync for deterministic ordering
         val code = """
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
-            perform CoopAsync in do
+            perform LoomAsync in do
                 let xs = [5, 4, 3, 2, 1]
                 let result = result::get_or_else { result = try_par_map {xs = xs, f = {x} -> x + 10}, def = [] }
                 # Verify order is preserved by checking first element is 15
@@ -404,16 +404,16 @@ class AsyncExtendedTest {
     }
 
     // =============================================================================
-    // CoopAsync Tests (single-threaded cooperative scheduling)
+    // LoomAsync Tests (single-threaded cooperative scheduling)
     // =============================================================================
 
     @Test
-    fun `test CoopAsync join executes sequentially`() {
+    fun `test LoomAsync join executes sequentially`() {
         val code = """
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
-            perform CoopAsync in do
+            perform LoomAsync in do
                 let r = join {
                     l = {} -> 5,
                     r = {} -> 10
@@ -425,12 +425,12 @@ class AsyncExtendedTest {
     }
 
     @Test
-    fun `test CoopAsync map executes sequentially`() {
+    fun `test LoomAsync map executes sequentially`() {
         val code = """
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
-            perform CoopAsync in do
+            perform LoomAsync in do
                 let xs = [1, 2, 3]
                 let result = result::get_or_else { result = try_par_map {xs = xs, f = {x} -> x * 10}, def = [] }
                 match result is
@@ -442,12 +442,12 @@ class AsyncExtendedTest {
     }
 
     @Test
-    fun `test CoopAsync filter works correctly`() {
+    fun `test LoomAsync filter works correctly`() {
         val code = """
-            use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
             use std::result
 
-            perform CoopAsync in do
+            perform LoomAsync in do
                 let xs = [1, 2, 3, 4, 5]
                 let result = result::get_or_else { result = try_par_filter {xs = xs, f = {x} -> x > 2}, def = [] }
                 match result is

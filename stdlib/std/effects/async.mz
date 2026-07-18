@@ -256,8 +256,7 @@ effect Async where {
   ## `inspect`. Pick the category from `CancelReason` that best fits;
   ## use `Custom { tag, detail }` when nothing else matches.
   cancel: { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async>,
-  ## Sleep for the given milliseconds. Routes through Time under Loom
-  ## / OS impls; CoopAsync uses its scheduler's tick logic instead.
+  ## Sleep for the given milliseconds. Routes through Time.
   sleep: { ms: Int } -> {} <Async, Time>,
   ## Check if current computation was cancelled.
   is_cancelled: {} -> Bool <Async>,
@@ -344,30 +343,6 @@ impl Async for OSThreadAsyncWith { pool_size: Int } where {
   yield_now = {} -> __native_async_yield_now {},
   scoped = { f } -> __native_async_scoped { f = f },
   park = { predicate } -> __native_async_park_until { predicate = predicate },
-}
-
-## Cooperative single-threaded scheduler using continuations.
-## Tasks interleave at await points. Good for testing and deterministic execution.
-impl Async for CoopAsync where {
-  initialize_scope = {} -> __native_scheduler_new {},
-  finalize_scope = {} -> __native_scheduler_drain { sched = scope },
-  spawn = { f } -> Promise {
-    val = __native_scheduler_spawn { sched = scope, f = f },
-  },
-  ## CoopAsync's await routes through __native_scheduler_await_result,
-  ## which observes FAILED / CANCELLED state and returns Err — the
-  ## Result contract is honest under Coop just like under Loom.
-  await = { p } -> match p is
-    Promise { val = native_p } ->
-      __native_scheduler_await_result { sched = scope, p = native_p },
-  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
-  sleep = { ms } -> __native_scheduler_sleep { sched = scope, ms = ms },
-  is_cancelled = {} -> __native_scheduler_is_cancelled { sched = scope },
-  check = {} -> __native_scheduler_check { sched = scope },
-  yield_now = {} -> __native_scheduler_yield_now { sched = scope },
-  scoped = { f } -> f { sc = Scope { val = {} } },
-  ## Park: run ready tasks until predicate returns True.
-  park = { predicate } -> __native_scheduler_park_until { sched = scope, predicate = predicate },
 }
 
 ## Spawn and immediately await (synchronous helper).
@@ -629,9 +604,6 @@ pub let try_any : { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { 
           Err { error = e } -> Err { error = e }
           Ok  { val = _ }   -> Err { error = AsyncFailed { msg = "try_any: impossible" } }
         None -> Err { error = AsyncFailed { msg = "try_any: empty input" } }
-
-## Run a computation with cooperative scheduling.
-pub let run_coop : { computation: {} -> 'a <Async> } -> 'a = { computation } -> perform CoopAsync in computation {}
 
 ## Spawn a task within a structured concurrency scope.
 pub let scope_spawn : { sc: Scope 'a, f: {} -> 'b <...> } -> Promise 'b <Async, ...> = { sc, f } ->

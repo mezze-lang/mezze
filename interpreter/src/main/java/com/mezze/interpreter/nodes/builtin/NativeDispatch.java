@@ -2610,22 +2610,6 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_async_init_scope_os", (r, c) -> AsyncNatives.osInitScope(r));
         HANDLERS.put("__native_async_finalize_scope_os", (r, c) -> AsyncNatives.osFinalizeScope(r));
 
-        // === Cooperative Scheduler - real continuation-based coop async ===
-        HANDLERS.put("__native_scheduler_new", (r, c) -> SchedulerNatives.schedulerNew());
-        HANDLERS.put("__native_scheduler_spawn", (r, c) -> SchedulerNatives.schedulerSpawn(r, c));
-        HANDLERS.put("__native_scheduler_await", (r, c) -> SchedulerNatives.schedulerAwait(r, c));
-        HANDLERS.put("__native_scheduler_await_result", (r, c) -> SchedulerNatives.schedulerAwaitResult(r, c));
-        HANDLERS.put("__native_scheduler_drain", (r, c) -> SchedulerNatives.schedulerDrain(r, c));
-        HANDLERS.put("__native_scheduler_is_done", (r, c) -> SchedulerNatives.schedulerIsDone(r));
-        HANDLERS.put("__native_scheduler_pending_count", (r, c) -> SchedulerNatives.schedulerPendingCount(r));
-        HANDLERS.put("__native_scheduler_race", (r, c) -> SchedulerNatives.schedulerRace(r, c));
-        HANDLERS.put("__native_scheduler_all", (r, c) -> SchedulerNatives.schedulerAll(r, c));
-        HANDLERS.put("__native_scheduler_sleep", (r, c) -> SchedulerNatives.schedulerSleep(r, c));
-        HANDLERS.put("__native_scheduler_park_until", (r, c) -> SchedulerNatives.schedulerParkUntil(r, c));
-        HANDLERS.put("__native_scheduler_is_cancelled", (r, c) -> SchedulerNatives.schedulerIsCancelled(r));
-        HANDLERS.put("__native_scheduler_check", (r, c) -> SchedulerNatives.schedulerCheck(r));
-        HANDLERS.put("__native_scheduler_yield_now", (r, c) -> SchedulerNatives.schedulerYieldNow(r, c));
-
     }
 
     // ==================== Concurrency Primitives ====================

@@ -33,9 +33,6 @@ import java.util.concurrent.locks.LockSupport;
  * 1. LoomAsync - Virtual threads (Project Loom) - millions of concurrent tasks
  * 2. OSThreadAsync - Platform threads - true CPU parallelism
  *
- * Cooperative scheduling lives in CoopScheduler / SchedulerNatives and is
- * wired into stdlib via the __native_scheduler_* family.
- *
  * Performance optimizations:
  * - Lock-free promise state management via VarHandle
  * - Object pooling for MezzePromise to reduce GC pressure
@@ -1644,9 +1641,7 @@ public final class AsyncNatives {
     }
 
     // ========================================================================
-    // Result<'a, AsyncError> helpers exposed for CoopScheduler (#159 / #122c).
-    // Keep behavior identical to the private equivalents above so Loom and
-    // Coop produce the same Result shape for the same outcome.
+    // Result<'a, AsyncError> helpers.
     // ========================================================================
 
     static MezzeVariant asyncOkResult(Object value) {

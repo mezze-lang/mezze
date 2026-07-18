@@ -29,8 +29,7 @@ pub let count_down : { latch: Latch } -> {} <Async> = { latch } ->
 pub let await_latch : { latch: Latch } -> {} <Async> = { latch } ->
   __native_latch_await { latch = latch }
 
-## Park-aware await: routes through Async.park so the same code works
-## under LoomAsync and CoopAsync.
+## Park-aware await: routes through Async.park.
 pub let await_latch_async : { latch: Latch } -> {} <Async, ...> = { latch } ->
   Async.park { predicate = {} -> __native_latch_get_count { latch = latch } == 0 }
 

@@ -7,7 +7,7 @@ import org.junit.jupiter.api.BeforeEach
 
 /**
  * Tests for std/async module.
- * Tests asynchronous computation using CoopAsync (cooperative scheduling) for deterministic testing.
+ * Tests asynchronous computation using LoomAsync (cooperative scheduling) for deterministic testing.
  * Migrated from V1 to V2 with unboxed values.
  */
 class AsyncModuleTest {
@@ -20,20 +20,20 @@ class AsyncModuleTest {
 
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
-    // Helper to wrap code in CoopAsync handler
-    private fun withCoopAsync(body: String): String =
-        "use std::effects::async::{Async, CoopAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }\n" +
+    // Helper to wrap code in LoomAsync handler
+    private fun withLoomAsync(body: String): String =
+        "use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }\n" +
         "use std::collections::seq\n" +
         "use std::result\n" +
         "\n" +
-        "perform CoopAsync in do\n" +
+        "perform LoomAsync in do\n" +
         body.trimIndent().lines().joinToString("\n") { "    $it" }
 
-    // === CoopAsync Handler Tests ===
+    // === LoomAsync Handler Tests ===
 
     @Test
-    fun `test CoopAsync executes computation`() {
-        val result = eval(withCoopAsync("""
+    fun `test LoomAsync executes computation`() {
+        val result = eval(withLoomAsync("""
             let p = Async.spawn {f = {} -> 42}
             result::get_or_else { result = Async.await {p = p}, def = -1 }
         """))
@@ -44,7 +44,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test spawn and await returns result`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let p = Async.spawn {f = {} -> 42}
             result::get_or_else { result = Async.await {p = p}, def = -1 }
         """))
@@ -53,7 +53,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test spawn multiple tasks`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let p1 = Async.spawn {f = {} -> 10}
             let p2 = Async.spawn {f = {} -> 20}
             let r1 = result::get_or_else { result = Async.await {p = p1}, def = -1 }
@@ -67,7 +67,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test is_done on completed promise`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let p = Async.spawn {f = {} -> 42}
             let _ = result::get_or_else { result = Async.await {p = p}, def = -1 }
             is_done {p = p}
@@ -79,7 +79,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test all waits for all promises`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let p1 = Async.spawn {f = {} -> 1}
             let p2 = Async.spawn {f = {} -> 2}
             let p3 = Async.spawn {f = {} -> 3}
@@ -91,7 +91,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test all returns results in order`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let p1 = Async.spawn {f = {} -> 10}
             let p2 = Async.spawn {f = {} -> 20}
             let results = result::get_or_else { result = try_all {ps = [p1, p2]}, def = [] }
@@ -106,7 +106,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test race returns first completed`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let p1 = Async.spawn {f = {} -> 1}
             let p2 = Async.spawn {f = {} -> 2}
             match race {ps = [p1, p2]} is
@@ -121,7 +121,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test join runs two computations`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let r = join {
                 l = {} -> 10,
                 r = {} -> 20
@@ -135,7 +135,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test join3 runs three computations`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let r = join3 {
                 a = {} -> 1,
                 b = {} -> 2,
@@ -150,7 +150,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test map applies function concurrently`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let results = result::get_or_else { result = try_par_map {xs = [1, 2, 3], f = {x} -> x * 2}, def = [] }
             seq::size {xs = results}
         """))
@@ -159,7 +159,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test map preserves order`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let results = result::get_or_else { result = try_par_map {xs = [10, 20, 30], f = {x} -> x + 1}, def = [] }
             match seq::get {xs = results, i = 0} is
                 Some {val} -> val
@@ -172,7 +172,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test for_each returns unit`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             result::get_or_else { result = try_par_for_each {xs = [1, 2, 3], f = {x} -> {}}, def = {} }
             42
         """))
@@ -183,7 +183,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test filter keeps matching elements`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let results = result::get_or_else { result = try_par_filter {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}, def = [] }
             seq::size {xs = results}
         """))
@@ -194,7 +194,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test timeout returns Some when fast`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let p = Async.spawn {f = {} -> 42}
             match with_timeout {ms = 1000, p = p} is
                 Some {val} -> val
@@ -208,10 +208,10 @@ class AsyncModuleTest {
     @Test
     fun `test run helper spawns and awaits`() {
         val result = eval("""
-            use std::effects::async::{Async, CoopAsync, run, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
+            use std::effects::async::{Async, LoomAsync, run, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
             use std::result
 
-            perform CoopAsync in do
+            perform LoomAsync in do
                 result::get_or_else { result = run {f = {} -> 42}, def = -1 }
         """)
         assertEquals(42L, result)
@@ -222,9 +222,9 @@ class AsyncModuleTest {
     @Test
     fun `test go helper fires and forgets`() {
         val result = eval("""
-            use std::effects::async::{Async, CoopAsync, go, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
+            use std::effects::async::{Async, LoomAsync, go, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
 
-            perform CoopAsync in do
+            perform LoomAsync in do
                 go {f = {} -> 42}
                 100
         """)
@@ -279,7 +279,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test nested spawn and await`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let outer = Async.spawn {f = {} -> do
                 let inner = Async.spawn {f = {} -> 42}
                 result::get_or_else { result = Async.await {p = inner}, def = -1 }
@@ -293,7 +293,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test settle returns Results`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             let p1 = Async.spawn {f = {} -> 1}
             let p2 = Async.spawn {f = {} -> 2}
             let results = settle {ps = [p1, p2]}
@@ -306,7 +306,7 @@ class AsyncModuleTest {
 
     @Test
     fun `test complex async workflow`() {
-        val result = eval(withCoopAsync("""
+        val result = eval(withLoomAsync("""
             # Spawn multiple tasks
             let tasks = result::get_or_else { result = try_par_map {
                 xs = [1, 2, 3, 4, 5],

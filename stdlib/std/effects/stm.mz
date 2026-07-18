@@ -99,8 +99,8 @@ impl STM for SequentialSTM where {
 ## Run a transaction atomically with OptimisticSTM.
 pub let atomically : { f: {} -> 'a <STM> } -> 'a <Async, ...> = { f } -> do
   # STM.retry / STM.check-false abort the perform and set a flag; park
-  # via Async so the carrier yields to other tasks under CoopAsync, then
-  # re-run the whole transaction.
+  # via Async so the carrier yields to other tasks, then re-run the whole
+  # transaction.
   let result = perform OptimisticSTM in __native_stm_atomic { f = f }
   match __native_stm_check_and_clear_retry_flag {} is
     True -> do

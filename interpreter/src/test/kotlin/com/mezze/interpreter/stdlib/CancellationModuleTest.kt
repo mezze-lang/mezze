@@ -149,10 +149,10 @@ class CancellationModuleTest {
     @Test
     fun `test cancellation in async context`() {
         val result = eval("""
-            use std::effects::async::{Async, CoopAsync}
+            use std::effects::async::{Async, LoomAsync}
             use std::effects::async::{token, cancel_token, is_token_cancelled}
 
-            perform CoopAsync in do
+            perform LoomAsync in do
                 let ct = token {}
                 let p = Async.spawn {f = {} -> do
                     cancel_token {token = ct, reason = "from async"}

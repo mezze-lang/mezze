@@ -9,7 +9,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  * #92 — Composition tests between Async, Channel, STM, and std::concurrency primitives.
  *
  * Each composition pair runs under BOTH LoomAsync (real virtual threads, real parking)
- * and CoopAsync (single-threaded scheduler, cooperative parking via ready queue) to
+ * and LoomAsync (single-threaded scheduler, cooperative parking via ready queue) to
  * confirm the park-aware free functions behave identically under both handlers.
  *
  * Pairs covered:
@@ -61,11 +61,6 @@ class CrossEffectCompositionTest {
         assertEquals(23L, eval(asyncChannelStm("LoomAsync")))
     }
 
-    @Test
-    fun `Async + Channel + STM TVar aggregate under CoopAsync`() {
-        assertEquals(23L, eval(asyncChannelStm("CoopAsync")))
-    }
-
     // =========================================================================
     // Async + STM TQueue (cross-fiber queue, blocks on retry)
     // =========================================================================
@@ -100,11 +95,6 @@ class CrossEffectCompositionTest {
         assertEquals(6L, eval(asyncTQueue("LoomAsync")))
     }
 
-    @Test
-    fun `Async + STM TQueue cross-fiber under CoopAsync`() {
-        assertEquals(6L, eval(asyncTQueue("CoopAsync")))
-    }
-
     // =========================================================================
     // Async + STM TMVar (cross-fiber synchronization signal)
     // =========================================================================
@@ -126,11 +116,6 @@ class CrossEffectCompositionTest {
     @Test
     fun `Async + STM TMVar signal under LoomAsync`() {
         assertEquals(42L, eval(asyncTMVar("LoomAsync")))
-    }
-
-    @Test
-    fun `Async + STM TMVar signal under CoopAsync`() {
-        assertEquals(42L, eval(asyncTMVar("CoopAsync")))
     }
 
     // =========================================================================
@@ -161,11 +146,6 @@ class CrossEffectCompositionTest {
     @Test
     fun `Async + Mutex + STM bump under LoomAsync`() {
         assertEquals(3L, eval(asyncMutexStm("LoomAsync")))
-    }
-
-    @Test
-    fun `Async + Mutex + STM bump under CoopAsync`() {
-        assertEquals(3L, eval(asyncMutexStm("CoopAsync")))
     }
 
     // =========================================================================
@@ -205,11 +185,6 @@ class CrossEffectCompositionTest {
         assertEquals(9L, eval(asyncChannelMutex("LoomAsync")))
     }
 
-    @Test
-    fun `Async + Channel + Mutex contended producers under CoopAsync`() {
-        assertEquals(9L, eval(asyncChannelMutex("CoopAsync")))
-    }
-
     // =========================================================================
     // Async + WaitGroup + Channel (fan-out, fan-in)
     // =========================================================================
@@ -242,11 +217,6 @@ class CrossEffectCompositionTest {
     @Test
     fun `Async + WaitGroup + Channel fan-out fan-in under LoomAsync`() {
         assertEquals(60L, eval(asyncWaitGroupChannel("LoomAsync")))
-    }
-
-    @Test
-    fun `Async + WaitGroup + Channel fan-out fan-in under CoopAsync`() {
-        assertEquals(60L, eval(asyncWaitGroupChannel("CoopAsync")))
     }
 
     // =========================================================================
@@ -284,11 +254,6 @@ class CrossEffectCompositionTest {
         assertEquals(99L, eval(asyncStmCheckChannel("LoomAsync")))
     }
 
-    @Test
-    fun `Async + STM check + Channel sync under CoopAsync`() {
-        assertEquals(99L, eval(asyncStmCheckChannel("CoopAsync")))
-    }
-
     // =========================================================================
     // Async + Semaphore + Channel (rate-limited producers)
     // =========================================================================
@@ -320,11 +285,6 @@ class CrossEffectCompositionTest {
     @Test
     fun `Async + Semaphore + Channel rate-limited under LoomAsync`() {
         assertEquals(600L, eval(asyncSemaphoreChannel("LoomAsync")))
-    }
-
-    @Test
-    fun `Async + Semaphore + Channel rate-limited under CoopAsync`() {
-        assertEquals(600L, eval(asyncSemaphoreChannel("CoopAsync")))
     }
 
     // =========================================================================
@@ -370,8 +330,8 @@ class CrossEffectCompositionTest {
         assertOuterErrFromSpawn(eval(exceptionAsyncChannel("LoomAsync")))
     }
 
-    // CoopAsync cross-fiber exception re-raise isn't implemented yet — under
-    // CoopAsync the spawned task's exception stays trapped in the promise's
+    // LoomAsync cross-fiber exception re-raise isn't implemented yet — under
+    // LoomAsync the spawned task's exception stays trapped in the promise's
     // Err result and the outer ExceptionToResult sees Ok. LoomAsync provides
     // the documented re-raise semantics today.
 }
