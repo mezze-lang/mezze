@@ -520,6 +520,44 @@ class ExpressionConstraintGenerator {
         return effects
     }
 
+    /**
+     * Walk a MezzeType and collect the union of `caughtByAncestor` effect
+     * names on every reachable EffectRow. Used to know which effects an
+     * enclosing function catches, so they can be filtered from what flows
+     * out to the caller (row subtraction on callback rows).
+     */
+    internal fun collectCaughtByAncestor(type: MezzeType): Set<String> {
+        val out = mutableSetOf<String>()
+        collectCaughtByAncestorInto(type, out)
+        return out
+    }
+
+    private fun collectCaughtByAncestorInto(type: MezzeType, into: MutableSet<String>) {
+        when (type) {
+            is MezzeType.FunctionType -> {
+                type.effects?.let { into.addAll(it.caughtByAncestor) }
+                collectCaughtByAncestorInto(type.paramType, into)
+                collectCaughtByAncestorInto(type.returnType, into)
+            }
+            is MezzeType.RecordType -> type.fields.values.forEach { collectCaughtByAncestorInto(it, into) }
+            is MezzeType.VariantType -> type.constructors.values.forEach { it?.let { collectCaughtByAncestorInto(it, into) } }
+            is MezzeType.TypeApplication -> type.args.forEach { collectCaughtByAncestorInto(it, into) }
+            is MezzeType.SeqType -> collectCaughtByAncestorInto(type.elementType, into)
+            is MezzeType.ListType -> collectCaughtByAncestorInto(type.elementType, into)
+            is MezzeType.SetType -> collectCaughtByAncestorInto(type.elementType, into)
+            is MezzeType.SortedSetType -> collectCaughtByAncestorInto(type.elementType, into)
+            is MezzeType.MapType -> { collectCaughtByAncestorInto(type.keyType, into); collectCaughtByAncestorInto(type.valueType, into) }
+            is MezzeType.SortedMapType -> { collectCaughtByAncestorInto(type.keyType, into); collectCaughtByAncestorInto(type.valueType, into) }
+            is MezzeType.NewtypeType -> collectCaughtByAncestorInto(type.wrappedType, into)
+            is MezzeType.SuspendedType -> collectCaughtByAncestorInto(type.valueType, into)
+            is MezzeType.EffectRow -> into.addAll(type.caughtByAncestor)
+            is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
+            is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
+            is MezzeType.FracType, is MezzeType.OrderingType, is MezzeType.BytesType,
+            is MezzeType.ByteBufferType, is MezzeType.CharType -> {}
+        }
+    }
+
     internal fun extractArgumentName(expr: ParsedExpr): String? {
         return when (expr) {
             is ParsedRecordLit -> {

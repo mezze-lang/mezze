@@ -90,7 +90,6 @@ class CallbackContravariantRowTest {
     // `...` binds to <> (nothing extra). Return row <Async, ...> = <Async>.
     // Exception is NOT in the caller's row — spawn catches it.
 
-    @org.junit.jupiter.api.Disabled("WIP: row-subtraction via caughtByAncestor plumbed on callback side but doesn't propagate through shared row-var to return side yet. Design in place; needs completion.")
     @Test
     fun `Exception performed by callback is caught by spawn`() {
         val src = """
@@ -132,7 +131,6 @@ class CallbackContravariantRowTest {
 
     // ─── (4) Exception + Time — Exception caught, Time surfaces ──────────────────────
 
-    @org.junit.jupiter.api.Disabled("WIP: same root cause as `Exception performed by callback is caught by spawn`.")
     @Test
     fun `Exception is caught but Time from callback surfaces`() {
         val src = """
@@ -185,7 +183,6 @@ class CallbackContravariantRowTest {
     // updated signature, Exception is caught inside spawn. `and_then`'s type stays
     // `Promise 'b <Async, ...>` — no Exception at the caller.
 
-    @org.junit.jupiter.api.Disabled("WIP: builds on the spawn-catches-Exception mechanism which is still incomplete.")
     @Test
     fun `and_then callers do not need an Exception handler`() {
         val src = """

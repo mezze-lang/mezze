@@ -126,17 +126,17 @@ class SpawnEffectSoundnessTest {
             "With only SystemTime handled, Async must remain. Got: $effects")
     }
 
-    // ─── (5) Exception performed inside a spawn callback surfaces at the caller ───────
+    // ─── (5) Exception performed inside a spawn callback is CAUGHT by spawn ──────────
     //
-    // This is the load-bearing soundness test. Under the current stdlib, `and_then`
-    // uses `unwrap` inside its spawn'd callback. `unwrap` performs Exception. Under
-    // sound rules with shared `<...>`, that Exception MUST surface at any caller
-    // of `and_then` (unless spawn's signature explicitly catches Exception via row
-    // subtraction, which the stdlib does not today). Any implementation that
-    // silently hides Exception at the caller is unsound.
+    // spawn's declared signature is:
+    //   spawn : { f: {} -> 'a <Exception, ...> } -> Promise 'a <Async, ...>
+    // Exception appears on the callback row but NOT on the return row → spawn
+    // catches it (row subtraction). Exception must NOT surface at the caller,
+    // and the typechecker is sound about it: the "handles" is declared, not
+    // silently hidden by row-var independence.
 
     @Test
-    fun `Exception performed inside a spawn callback surfaces at caller`() {
+    fun `Exception performed inside a spawn callback is caught by spawn`() {
         val src = """
             use std::effects::async::{ Async, LoomAsync }
             use std::effects::exception::{ Exception, unwrap }
@@ -150,10 +150,10 @@ class SpawnEffectSoundnessTest {
               Async.await { p = p }
         """
         val effects = effectsOf(parse(src), "outer")
-        assertTrue("Exception" in effects,
-            "Exception performed inside spawn's callback must surface at caller. " +
-            "Got: $effects. If Exception is missing, the typechecker is hiding it " +
-            "through spawn without a proof that spawn handles Exception. Unsound.")
+        assertFalse("Exception" in effects,
+            "spawn declares <Exception, ...> on callback but not on return — spawn " +
+            "catches Exception. It must NOT surface at the caller. Got: $effects.")
+        assertTrue("Async" in effects, "Async must remain in outer row. Got: $effects")
     }
 
     // ─── (6) Nested spawn — deep child effects surface ───────────────────────────────

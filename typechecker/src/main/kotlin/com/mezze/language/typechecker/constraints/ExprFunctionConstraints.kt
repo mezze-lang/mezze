@@ -721,8 +721,15 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
             // as a *side-channel* read here (no Substitution involvement) because mixing
             // row var bindings into the substitution machinery interacts badly with type
             // var unification and broke 12 interp tests in the previous attempt.
+            //
+            // Row subtraction: effects on the DECLARED callback row that
+            // aren't on the outer op's return row are marked as
+            // caughtByAncestor. These are effects the enclosing function
+            // catches (e.g., spawn catches Exception). Filter them from
+            // the harvested effects — they should NOT flow to the caller.
+            val caughtByOp = collectCaughtByAncestor(functionType.paramType)
             val rowVarEffects: Set<String> = if (effectRow.rowVar != null) {
-                collectClosureArgEffects(argumentResult.type)
+                collectClosureArgEffects(argumentResult.type) - caughtByOp
             } else emptySet()
             collector.effects.addAll(effectRow.effects + rowVarEffects)
             collector.effectInstances.addAll(effectRow.effectInstances)
@@ -795,8 +802,15 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     // closure-typed argument fields here surfaces them at the call site
     // — `Async.spawn { f = effectful }` ends up performing `<Async, …f's effects>`.
     // Pure side-channel: argument types are inspected, no Substitution touched.
+    //
+    // Row subtraction: effects declared on the callback row but not on
+    // the outer op's return row are caught by the op (e.g., spawn catches
+    // Exception). Filter them out — they don't flow to the caller.
+    val caughtByOp2 = if (functionResult.type is MezzeType.FunctionType) {
+        collectCaughtByAncestor((functionResult.type as MezzeType.FunctionType).paramType)
+    } else emptySet()
     val rowVarEffects = if (functionResult.effects.isNotEmpty())
-        collectClosureArgEffects(argumentResult.type)
+        collectClosureArgEffects(argumentResult.type) - caughtByOp2
     else emptySet()
     if (functionResult.type is MezzeType.FunctionType) {
         val fnType = functionResult.type as MezzeType.FunctionType
