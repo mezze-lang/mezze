@@ -259,6 +259,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             for (var el : seq.getElements()) {
                 if (el instanceof com.mezze.language.truffleir.SeqElementIR.Regular reg
                         && hasReadField(reg.getNode())) return true;
+                if (el instanceof com.mezze.language.truffleir.SeqElementIR.Spread sp
+                        && hasReadField(sp.getNode())) return true;
             }
             return false;
         }

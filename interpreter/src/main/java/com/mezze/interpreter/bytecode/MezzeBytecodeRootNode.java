@@ -882,6 +882,42 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Build a {@link com.mezze.datastructures.seq.MezzeSeq} literal that
+     * contains one or more spread elements ({@code [a, ...xs, b]}).
+     *
+     * <p>Constant operand {@code isSpread} is a bit-packed per-slot flag
+     * — bit {@code i} set means values[i] is a MezzeSeq/Object[] whose
+     * elements flatten into the result; unset means values[i] contributes
+     * one element as-is. Stored as {@code long} (fits ≤63 elements) to
+     * keep the constant compact; larger literals fall back to a boolean[]
+     * variant not yet implemented (typechecker sizes aren't near 63).
+     */
+    @Operation
+    @ConstantOperand(type = long.class)
+    public static final class MakeSeqWithSpread {
+        @Specialization
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+        public static MezzeSeq<Object> doMake(long isSpreadBits, @Variadic Object[] elements) {
+            java.util.ArrayList<Object> result = new java.util.ArrayList<>();
+            for (int i = 0; i < elements.length; i++) {
+                if (((isSpreadBits >>> i) & 1L) != 0L) {
+                    Object v = elements[i];
+                    if (v instanceof MezzeSeq<?> seq) {
+                        for (int j = 0; j < seq.size(); j++) result.add(seq.get(j));
+                    } else if (v instanceof Object[] arr) {
+                        for (Object elem : arr) result.add(elem);
+                    } else {
+                        result.add(v);
+                    }
+                } else {
+                    result.add(elements[i]);
+                }
+            }
+            return MezzeSeq.of(result.toArray());
+        }
+    }
+
+    /**
      * Construct a variant with no payload (e.g. {@code None}, {@code True}).
      *
      * <p>Lowers {@link com.mezze.language.truffleir.MakeVariantIR} when

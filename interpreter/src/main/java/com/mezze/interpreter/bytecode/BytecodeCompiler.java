@@ -307,8 +307,15 @@ public final class BytecodeCompiler {
             return true;
         }
         if (node instanceof MakeSeqIR ms) {
+            // MakeSeqWithSpread packs isSpread as a 63-bit long; larger
+            // literals fall back to AST until a boolean[]-operand variant
+            // is added.
+            if (ms.getElements().size() > 63) return false;
             for (SeqElementIR el : ms.getElements()) {
-                if (el instanceof SeqElementIR.Spread) return false;
+                if (el instanceof SeqElementIR.Spread sp) {
+                    if (!supportsNode(sp.getNode(), argCount)) return false;
+                    continue;
+                }
                 SeqElementIR.Regular reg = (SeqElementIR.Regular) el;
                 if (!supportsNode(reg.getNode(), argCount)) return false;
             }
@@ -632,6 +639,7 @@ public final class BytecodeCompiler {
         if (node instanceof MakeSeqIR seq) {
             for (SeqElementIR e : seq.getElements()) {
                 if (e instanceof SeqElementIR.Regular reg && hasTailCall(reg.getNode())) return true;
+                if (e instanceof SeqElementIR.Spread sp && hasTailCall(sp.getNode())) return true;
             }
             return false;
         }
@@ -1039,12 +1047,29 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof MakeSeqIR ms) {
-            b.beginMakeSeq();
-            for (SeqElementIR el : ms.getElements()) {
-                SeqElementIR.Regular reg = (SeqElementIR.Regular) el;
-                emitNode(reg.getNode(), b, argCount, localMap);
+            long isSpreadBits = 0L;
+            for (int i = 0; i < ms.getElements().size(); i++) {
+                if (ms.getElements().get(i) instanceof SeqElementIR.Spread) {
+                    isSpreadBits |= (1L << i);
+                }
             }
-            b.endMakeSeq();
+            if (isSpreadBits == 0L) {
+                b.beginMakeSeq();
+                for (SeqElementIR el : ms.getElements()) {
+                    SeqElementIR.Regular reg = (SeqElementIR.Regular) el;
+                    emitNode(reg.getNode(), b, argCount, localMap);
+                }
+                b.endMakeSeq();
+            } else {
+                b.beginMakeSeqWithSpread(isSpreadBits);
+                for (SeqElementIR el : ms.getElements()) {
+                    NodeIR value = (el instanceof SeqElementIR.Spread sp)
+                            ? sp.getNode()
+                            : ((SeqElementIR.Regular) el).getNode();
+                    emitNode(value, b, argCount, localMap);
+                }
+                b.endMakeSeqWithSpread();
+            }
             return;
         }
         if (node instanceof InterpolatedStringIR is) {
