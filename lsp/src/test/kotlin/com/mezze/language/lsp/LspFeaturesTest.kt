@@ -97,6 +97,22 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `hover on a use-site appends a go-to-definition link`() {
+        // Tier-2: hovering a reference to a decl defined elsewhere in the file
+        // adds a "Go to definition" file link to the hover markdown.
+        val (uri, _) = openSingleFile("""
+            let helper = {} -> 1
+            let main = {} -> helper {}
+        """.trimIndent())
+        // `helper` use on line 1.
+        val hover = hoverAt(uri, line = 1, character = 17)
+        assertNotNull(hover, "expected hover on the `helper` use")
+        val content = hoverText(hover!!)
+        assertTrue(content.contains("Go to definition"),
+            "expected a go-to-definition link in hover, got:\n$content")
+    }
+
+    @Test
     fun `hover inside a comment returns nothing`() {
         // Regression (#128): hovering a word inside a comment (doc or regular)
         // extracted it as an identifier and rendered a spurious type popup
@@ -924,6 +940,23 @@ class LspFeaturesTest {
         // (VARIABLE/PARAMETER) from its BindingRef — either way, not a keyword.
         assertTrue(types.contains(2) || types.contains(9),
             "expected a value-reference token for the `c` use, got type set: $types")
+    }
+
+    @Test
+    fun `semantic tokens color module qualifiers as namespace`() {
+        // Tier-2: a qualified reference `std::int::add` colors the `std` and
+        // `int` module segments as Namespace (legend index 11).
+        val (uri, _) = openSingleFile("""
+            let n = std::int::add { l = 1, r = 2 }
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        val tokens = server.textDocumentService.semanticTokensFull(SemanticTokensParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+        }).get(5, TimeUnit.SECONDS)
+        val types = decodeSemanticTokenTypes(tokens?.data ?: emptyList())
+        assertTrue(types.contains(11),
+            "expected a NAMESPACE token (11) for the `std`/`int` module qualifiers, got type set: $types")
     }
 
     @Test

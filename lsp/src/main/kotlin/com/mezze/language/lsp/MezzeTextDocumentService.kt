@@ -158,6 +158,35 @@ class MezzeTextDocumentService(
         try { client.refreshSemanticTokens() } catch (_: Exception) {}
     }
 
+    private val progressCounter = java.util.concurrent.atomic.AtomicLong(0)
+
+    /**
+     * Run [body] with a `$/progress` spinner in the editor titled [title], so a
+     * multi-hundred-ms re-check doesn't look frozen. Best-effort: if the client
+     * isn't connected (tests) or progress fails, just run [body]. The Begin/End
+     * are always paired via try/finally.
+     */
+    private fun <T> withProgress(title: String, body: () -> T): T {
+        if (!::client.isInitialized) return body()
+        val token = Either.forRight<String, Int>((progressCounter.incrementAndGet()).toInt())
+        var created = false
+        try {
+            client.createProgress(WorkDoneProgressCreateParams(token)).get()
+            created = true
+            val begin = WorkDoneProgressBegin()
+            begin.title = title
+            begin.cancellable = false
+            client.notifyProgress(ProgressParams(token, Either.forLeft(begin)))
+        } catch (_: Exception) { /* progress unsupported — run without it */ }
+        try {
+            return body()
+        } finally {
+            if (created) {
+                try { client.notifyProgress(ProgressParams(token, Either.forLeft(WorkDoneProgressEnd()))) } catch (_: Exception) {}
+            }
+        }
+    }
+
     /**
      * Open the project store now that workspaceRoot is known. Idempotent —
      * second call is a no-op once the store is open.
@@ -338,7 +367,9 @@ class MezzeTextDocumentService(
                 // Skip the (expensive) re-check if the text is byte-identical to
                 // what we last analyzed — a no-op edit shouldn't re-solve.
                 if (lastAnalyzedContent[uri] == content) return@schedule
-                val state = analyzeDocument(uri, content, version, persistToStore = false)
+                val state = withProgress("Mezze: type-checking") {
+                    analyzeDocument(uri, content, version, persistToStore = false)
+                }
                 lastAnalyzedContent[uri] = content
                 documents[uri] = state
                 publishDiagnostics(uri, state.diagnostics)
@@ -945,12 +976,35 @@ class MezzeTextDocumentService(
             // Works even without type check result (shows basic info from AST)
             val hoverInfo = findHoverInfo(state, position)
             if (hoverInfo != null) {
-                val markdown = MarkupContent(MarkupKind.MARKDOWN, hoverInfo)
+                val markdown = MarkupContent(MarkupKind.MARKDOWN, withGoToDefLink(hoverInfo, state, position))
                 Hover(markdown)
             } else {
                 null
             }
         }
+    }
+
+    /**
+     * Append a "Go to definition →" link to the hover markdown when a real
+     * definition exists somewhere OTHER than the hovered position (so hovering
+     * a decl's own name doesn't show a self-link). Uses a plain `file://…#Ln`
+     * link (not a `command:` link) because LSP hover markdown is untrusted in
+     * VS Code and `command:` links wouldn't fire — file links do, and jump to
+     * the exact line. Best-effort: on any failure, return the hover unchanged.
+     */
+    private fun withGoToDefLink(hover: String, state: DocumentState, position: Position): String {
+        return try {
+            val defs = findDefinitions(state, position)
+            val target = defs.firstOrNull { loc ->
+                loc.uri != state.uri ||
+                    position.line < loc.range.start.line || position.line > loc.range.end.line ||
+                    position.character < loc.range.start.character || position.character > loc.range.end.character
+            } ?: return hover
+            // VS Code renders file links with a line fragment (#L<1-based>).
+            val line1 = target.range.start.line + 1
+            val col1 = target.range.start.character + 1
+            "$hover\n\n[Go to definition →](${target.uri}#L$line1,$col1)"
+        } catch (_: Exception) { hover }
     }
 
     /**
@@ -6108,9 +6162,10 @@ class MezzeTextDocumentService(
         val uri = params.textDocument.uri
         val state = documents[uri]
             ?: return CompletableFuture.completedFuture(emptyList())
-        // Only act on `}` for now — `\n` would re-format way too often and
-        // make the editor feel jumpy.
-        if (params.ch != "}") return CompletableFuture.completedFuture(emptyList())
+        // Act on `}` (block just closed) and `\n` (Enter). Both run the
+        // whole-file formatter, which no-ops when the buffer doesn't parse
+        // (the common mid-edit case), so incomplete lines don't reflow.
+        if (params.ch != "}" && params.ch != "\n") return CompletableFuture.completedFuture(emptyList())
         return CompletableFuture.supplyAsync {
             try {
                 val formatted = formatter.format(state.content)
@@ -6943,7 +6998,9 @@ class MezzeTextDocumentService(
         val parsedModule = state.parsedModule ?: return emptyList()
         // Legend indices (must match the order in server capabilities).
         val FUNCTION = 1; val VARIABLE = 2; val ENUM_MEMBER = 10; val PARAMETER = 9
+        val NAMESPACE = 11
         val DEFINITION = 2  // modifier bit
+        val srcLines = state.content.lines()
 
         val toks = mutableListOf<SemToken>()
         fun emit(loc: com.mezze.language.parsedast.Loc, type: Int, mods: Int = 0) {
@@ -6952,6 +7009,45 @@ class MezzeTextDocumentService(
             val len = loc.endCol - (loc.startCol - 1)
             if (len <= 0) return
             toks.add(SemToken(loc.startLine - 1, loc.startCol - 1, len, type, mods))
+        }
+
+        // A qualified var reference's loc spans the WHOLE `std::int::name`
+        // (the parser keeps the qualifier inside the loc). Scan across that span
+        // and color each `ident` that is immediately followed by `::` as a
+        // Namespace segment (the final `name` keeps its function/variable color
+        // from the main emit). Single-line only.
+        fun emitQualifierNamespaces(loc: com.mezze.language.parsedast.Loc) {
+            if (loc.startLine != loc.endLine) return
+            val line = srcLines.getOrNull(loc.startLine - 1) ?: return
+            val start = (loc.startCol - 1).coerceIn(0, line.length)
+            val end = (loc.endCol).coerceIn(start, line.length)      // exclusive
+            var i = start
+            while (i < end) {
+                if (!(line[i].isLetter() || line[i] == '_')) { i++; continue }
+                var j = i
+                while (j < end && (line[j].isLetterOrDigit() || line[j] == '_')) j++
+                // Namespace segment iff immediately followed by `::`.
+                if (j + 1 < line.length && line[j] == ':' && line[j + 1] == ':') {
+                    toks.add(SemToken(loc.startLine - 1, i, j - i, NAMESPACE, 0))
+                    i = j + 2
+                } else {
+                    i = j  // final segment — leave to the main emit
+                }
+            }
+        }
+
+        // The loc of just the last `::`-separated segment of a (possibly)
+        // qualified reference. For an unqualified name this is the loc itself.
+        fun lastSegmentLoc(loc: com.mezze.language.parsedast.Loc): com.mezze.language.parsedast.Loc {
+            if (loc.startLine != loc.endLine) return loc
+            val line = srcLines.getOrNull(loc.startLine - 1) ?: return loc
+            val start = (loc.startCol - 1).coerceIn(0, line.length)
+            val end = (loc.endCol).coerceIn(start, line.length)
+            val text = line.substring(start, end)
+            val lastSep = text.lastIndexOf("::")
+            if (lastSep < 0) return loc
+            val nameStart = start + lastSep + 2
+            return loc.copy(startCol = nameStart + 1)  // startCol is 1-based
         }
 
         for (decl in parsedModule.decls) {
@@ -6971,7 +7067,11 @@ class MezzeTextDocumentService(
                             is com.mezze.language.typedast.BindingRef.Native -> FUNCTION
                             else -> VARIABLE
                         }
-                        emit(e.loc, type)
+                        // For a qualified ref, color the module segments as
+                        // Namespace and only the FINAL name segment as its kind,
+                        // so the two token sets don't overlap.
+                        emitQualifierNamespaces(e.loc)
+                        emit(lastSegmentLoc(e.loc), type)
                     }
                     is com.mezze.language.typedast.TypedVariantConstruct -> emit(e.loc, ENUM_MEMBER)
                     else -> {}

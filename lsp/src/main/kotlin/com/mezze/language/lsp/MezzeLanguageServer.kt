@@ -177,9 +177,11 @@ class MezzeLanguageServer(
             // On-type formatting — fires when the user types `}`. Re-runs
             // the formatter on the whole file. Required by lsp4j: first-char
             // must be set; we leave `moreTriggerCharacter` empty so only `}`
-            // triggers (Enter / newline would format every line and feel
-            // jumpy).
-            documentOnTypeFormattingProvider = DocumentOnTypeFormattingOptions("}", emptyList())
+            // triggers. `}` re-flows a just-closed block; `\n` re-flows on
+            // Enter — but only when the whole file still parses (the handler
+            // bails on a mid-edit parse failure), so an incomplete line being
+            // typed doesn't cause a jumpy reformat.
+            documentOnTypeFormattingProvider = DocumentOnTypeFormattingOptions("}", listOf("\n"))
 
             // Semantic tokens (syntax highlighting)
             // Token types and modifiers are defined by the LSP spec:
@@ -187,17 +189,20 @@ class MezzeLanguageServer(
             semanticTokensProvider = SemanticTokensWithRegistrationOptions().apply {
                 legend = SemanticTokensLegend(
                     listOf(
-                        SemanticTokenTypes.Keyword,
-                        SemanticTokenTypes.Function,
-                        SemanticTokenTypes.Variable,
-                        SemanticTokenTypes.Type,
-                        SemanticTokenTypes.String,
-                        SemanticTokenTypes.Number,
-                        SemanticTokenTypes.Comment,
-                        SemanticTokenTypes.Operator,
-                        SemanticTokenTypes.Property,
-                        SemanticTokenTypes.Parameter,
-                        SemanticTokenTypes.EnumMember   // for variant constructors
+                        SemanticTokenTypes.Keyword,        // 0
+                        SemanticTokenTypes.Function,       // 1
+                        SemanticTokenTypes.Variable,       // 2
+                        SemanticTokenTypes.Type,           // 3
+                        SemanticTokenTypes.String,         // 4
+                        SemanticTokenTypes.Number,         // 5
+                        SemanticTokenTypes.Comment,        // 6
+                        SemanticTokenTypes.Operator,       // 7
+                        SemanticTokenTypes.Property,       // 8
+                        SemanticTokenTypes.Parameter,      // 9
+                        SemanticTokenTypes.EnumMember,     // 10 — variant constructors
+                        SemanticTokenTypes.Namespace,      // 11 — module qualifiers (std::int::…)
+                        SemanticTokenTypes.Method,         // 12 — ability-method calls
+                        SemanticTokenTypes.Struct          // 13 — record/type names (future)
                     ),
                     listOf(
                         SemanticTokenModifiers.Declaration,
