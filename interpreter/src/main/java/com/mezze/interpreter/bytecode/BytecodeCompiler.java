@@ -293,6 +293,10 @@ public final class BytecodeCompiler {
         if (node instanceof CallDirectIR c) {
             // Any arity accepted (variadic CallDirectN). Tail-call
             // variant throws TailCallException for the trampoline.
+            // Record-ABI CallDirectIR is rejected — the callee's arg
+            // layout collides with scalar-ABI for paramCount<=1 in
+            // non-trivial ways (needs marker suppression, needs the
+            // callee to know it's record). Handled via AST fallback.
             if (!c.isScalarABI()) { markReject(node, "record-ABI"); return false; }
             if (resolveCallTarget(c.getTargetHash()) == null) {
                 markReject(node, "target-not-compiled"); return false;
@@ -349,7 +353,7 @@ public final class BytecodeCompiler {
             // MakeSeqWithSpread packs isSpread as a 63-bit long; larger
             // literals fall back to AST until a boolean[]-operand variant
             // is added.
-            if (ms.getElements().size() > 63) return false;
+            if (ms.getElements().size() > 63) { markReject(node, "over-63"); return false; }
             for (SeqElementIR el : ms.getElements()) {
                 if (el instanceof SeqElementIR.Spread sp) {
                     if (!supportsNode(sp.getNode(), argCount)) return false;
@@ -384,9 +388,9 @@ public final class BytecodeCompiler {
             // Non-tail-call only: tail-call variants of partial-apply are
             // niche and BDSL's MonomorphicCall op doesn't yet participate
             // in the trampoline.
-            if (pa.isTailCall()) return false;
+            if (pa.isTailCall()) { markReject(node, "tail-call"); return false; }
             for (FieldIR f : pa.getPartialFields()) {
-                if ("__spread__".equals(f.getName())) return false;
+                if ("__spread__".equals(f.getName())) { markReject(node, "spread"); return false; }
                 if (!supportsNode(f.getValue(), argCount)) return false;
             }
             return true;
@@ -428,11 +432,19 @@ public final class BytecodeCompiler {
             // fall-through" op yet, so we can't compile exhaustive-
             // by-coverage matches without a wildcard until Phase 3.
             var cases = m.getCases();
-            if (cases.isEmpty()) return false;
+            if (cases.isEmpty()) { markReject(node, "empty-cases"); return false; }
+            // Trailing case: Wildcard/Record → truly unconditional. Variant/
+            // Literal/Seq → refutable, so we emit a NonExhaustiveMatch throw
+            // as the tail. StringInterp still rejected — needs its own
+            // fallthrough shape.
             {
                 PatternIR lastPat = cases.get(cases.size() - 1).getPattern();
                 if (!(lastPat instanceof PatternIR.Wildcard)
-                    && !(lastPat instanceof PatternIR.Record)) {
+                    && !(lastPat instanceof PatternIR.Record)
+                    && !(lastPat instanceof PatternIR.Variant)
+                    && !(lastPat instanceof PatternIR.Literal)
+                    && !(lastPat instanceof PatternIR.Seq)) {
+                    markReject(node, "non-terminal-last:" + lastPat.getClass().getSimpleName());
                     return false;
                 }
             }
@@ -451,6 +463,7 @@ public final class BytecodeCompiler {
                     } else if (ilpat instanceof PatternIR.Wildcard) {
                         // Fine — unconditional bind to fieldSlots[0] if present.
                     } else {
+                        markReject(node, "iflet:" + ilpat.getClass().getSimpleName());
                         return false;
                     }
                 }
@@ -469,12 +482,13 @@ public final class BytecodeCompiler {
                     // extracted directly from the scrutinee via
                     // ReadFieldByName. isOpen doesn't change semantics
                     // (typechecker guarantees shape compatibility).
-                    if (!isLast) return false;
+                    if (!isLast) { markReject(node, "record-pat-not-last"); return false; }
                 } else if (pat instanceof PatternIR.Seq) {
                     // Fine — length check + element extract, optional rest.
                 } else if (pat instanceof PatternIR.Wildcard) {
-                    if (!isLast) return false;
+                    if (!isLast) { markReject(node, "wildcard-not-last"); return false; }
                 } else {
+                    markReject(node, "pat:" + pat.getClass().getSimpleName());
                     return false;
                 }
                 if (!supportsNode(c.getBody(), argCount)) return false;
@@ -1406,8 +1420,15 @@ public final class BytecodeCompiler {
                                 BytecodeLocal scrutineeLocal,
                                 MezzeBytecodeRootNodeGen.Builder b,
                                 int argCount, BytecodeLocal[] localMap) {
-        // supports() rejects matches without a trailing wildcard, so we
-        // are guaranteed to hit the wildcard case before overflowing.
+        // Trailing fall-through: emit NonExhaustiveMatch when the caller
+        // ran off the end of a variant-typed match. supports() only
+        // accepts trailing Wildcard/Record/Variant/Literal/Seq — the
+        // wildcard/record shape never reaches this branch (its emit
+        // recurses without calling here); the refutable shapes do.
+        if (idx >= cases.size()) {
+            b.emitNonExhaustiveMatch();
+            return;
+        }
         CaseIR c = cases.get(idx);
         PatternIR pat = c.getPattern();
         if (pat instanceof PatternIR.Wildcard w) {

@@ -919,6 +919,25 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Emitted as the fall-through of a {@link com.mezze.language.truffleir.MatchIR}
+     * whose last case is a variant tag (or otherwise refutable). Reached
+     * only when every preceding case's tag mismatched — since the
+     * typechecker guarantees exhaustive coverage, this should be dead
+     * code at runtime. If a typechecker gap or unsound cast reaches it,
+     * throw a RuntimeException rather than falling through to whatever
+     * value the operand stack happens to hold.
+     */
+    @Operation
+    public static final class NonExhaustiveMatch {
+        @Specialization
+        public static Object doThrow() {
+            com.oracle.truffle.api.CompilerDirectives.transferToInterpreterAndInvalidate();
+            throw new RuntimeException("Non-exhaustive match: no variant tag matched — "
+                    + "typechecker exhaustiveness guarantee violated");
+        }
+    }
+
+    /**
      * Build a {@link com.mezze.datastructures.seq.MezzeSeq} literal that
      * contains one or more spread elements ({@code [a, ...xs, b]}).
      *
