@@ -41,9 +41,8 @@ class NewtypeImplTest {
         fun `Promise has Eq`() {
             checkPasses("""
                 use std::effects::async::{Async, LoomAsync, Promise}
-                use std::effects::exception::{Exception, unwrap}
                 let main = {} -> perform LoomAsync in do
-                    let p1 = Async.spawn {f = {} -> unwrap { result = Ok { val = 42 } }}
+                    let p1 = Async.spawn {f = {} -> 42}
                     let p2 = p1
                     let same = p1 == p2
                     Async.await {p = p1}
@@ -54,9 +53,8 @@ class NewtypeImplTest {
         fun `Promise await method`() {
             checkPasses("""
                 use std::effects::async::{Async, LoomAsync}
-                use std::effects::exception::{Exception, unwrap}
                 let main = {} -> perform LoomAsync in do
-                    let p = Async.spawn {f = {} -> unwrap { result = Ok { val = 42 } }}
+                    let p = Async.spawn {f = {} -> 42}
                     p.await {}
             """.trimIndent(), "Promise .await")
         }
@@ -65,9 +63,8 @@ class NewtypeImplTest {
         fun `Promise is_done method`() {
             checkPasses("""
                 use std::effects::async::{Async, LoomAsync}
-                use std::effects::exception::{Exception, unwrap}
                 let main = {} -> perform LoomAsync in do
-                    let p = Async.spawn {f = {} -> unwrap { result = Ok { val = 42 } }}
+                    let p = Async.spawn {f = {} -> 42}
                     let done = p.is_done {}
                     Async.await {p = p}
             """.trimIndent(), "Promise .is_done")
@@ -77,9 +74,8 @@ class NewtypeImplTest {
         fun `Promise cancel method`() {
             checkPasses("""
                 use std::effects::async::{Async, LoomAsync}
-                use std::effects::exception::{Exception, unwrap}
                 let main = {} -> perform LoomAsync in do
-                    let p = Async.spawn {f = {} -> unwrap { result = Ok { val = 42 } }}
+                    let p = Async.spawn {f = {} -> 42}
                     p.cancel { reason = UserRequested { msg = "test" } }
                     42
             """.trimIndent(), "Promise .cancel")

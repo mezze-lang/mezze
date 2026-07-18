@@ -731,6 +731,9 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
             val rowVarEffects: Set<String> = if (effectRow.rowVar != null) {
                 collectClosureArgEffects(argumentResult.type) - caughtByOp
             } else emptySet()
+            if (caughtByOp.isNotEmpty()) {
+                collector.effects.removeAll(caughtByOp)
+            }
             collector.effects.addAll(effectRow.effects + rowVarEffects)
             collector.effectInstances.addAll(effectRow.effectInstances)
             collector.performed = collector.performed || effectRow.performed
@@ -816,6 +819,11 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
         val fnType = functionResult.type as MezzeType.FunctionType
         collector.effects.addAll(fnType.effects?.effects ?: emptySet())
         collector.performed = collector.performed || (fnType.effects?.performed ?: false)
+    }
+    // Row subtraction extends to any effects that flowed up via
+    // collector.merge(argumentResult): caught effects must not reach caller.
+    if (caughtByOp2.isNotEmpty()) {
+        collector.effects.removeAll(caughtByOp2)
     }
     collector.effects.addAll(rowVarEffects)
 
