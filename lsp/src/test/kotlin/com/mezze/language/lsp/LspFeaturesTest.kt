@@ -97,6 +97,39 @@ class LspFeaturesTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled(
+        "Known typechecker bug (#126): a top-level polymorphic fn CALLED BEFORE " +
+        "it is DECLARED resolves to a source-order monomorphic placeholder var, " +
+        "not its scheme. The call constraint becomes FunctionType({args}) ~ " +
+        "'placeholder, which the solver binds whole without decomposing args↔" +
+        "params — so a polymorphic return never pins to the concrete arg type " +
+        "and the caller's `let` leaks 'a. Fix requires dependency-ordered decl " +
+        "inference (or a placeholder↔body reconciliation constraint); decl-order " +
+        "dependent, `perform` is NOT involved. Same family as #33."
+    )
+    fun `do-let bound to a FORWARD-referenced poly fn call shows the concrete type`() {
+        // `help` declared AFTER `main` — hovering `x` should still show Int
+        // (the 5,6 args pin the return). Currently leaks `x : 'a`. Reordering
+        // `help` before `main` makes this pass, which is the diagnostic tell.
+        val (uri, _) = openSingleFile("""
+            let main = {} -> do
+              let x = help { a = 5, b = 6 }
+              x
+
+            let help = { a, b } -> a + b
+        """.trimIndent())
+
+        // `let x = help {...}` is line 1; `x` at char 6 (2 indent + "let ").
+        val hover = hoverAt(uri, line = 1, character = 6)
+        assertNotNull(hover, "expected hover on the do-block `x` binding")
+        val content = hoverText(hover!!)
+        assertTrue(content.contains("Int"),
+            "expected `x : Int` (return pinned via forward-ref), got: $content")
+        assertFalse(content.contains("'a") || content.contains("'r"),
+            "hover must not leak an unresolved type var, got: $content")
+    }
+
+    @Test
     fun `hover on lambda param shows the parameter's type`() {
         val (uri, _) = openSingleFile("""
             let helper = {x: Int} -> x + 1
