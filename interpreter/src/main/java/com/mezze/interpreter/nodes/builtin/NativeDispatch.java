@@ -128,6 +128,22 @@ public final class NativeDispatch extends MezzeNode {
         return HANDLERS.containsKey(name) || HANDLERS_WITH_NODE.containsKey(name);
     }
 
+    /**
+     * BDSL entry point (used by CallNativeRecord op). Same logic as
+     * {@link #execute}: prefers with-node handlers, then plain handlers.
+     * The {@code node} parameter is the surrounding BDSL root — needed
+     * by async handlers that consult TruffleLanguage.Env.
+     */
+    public static Object dispatchByName(String name, MezzeRecord record,
+            IndirectCallNode callNode, MezzeNode node) {
+        NativeHandlerWithNode wn = HANDLERS_WITH_NODE.get(name);
+        if (wn != null) return wn.handle(record, callNode, node);
+        NativeHandler h = HANDLERS.get(name);
+        if (h != null) return h.handle(record, callNode);
+        CompilerDirectives.transferToInterpreterAndInvalidate();
+        throw new RuntimeException("Unknown native function: " + name);
+    }
+
     // ==================== Handler Registration ====================
 
     private static void initHandlers() {

@@ -399,7 +399,17 @@ public final class BytecodeCompiler {
             // (Async, HOF-callback consumers) are supported. The emit
             // side dispatches to CallNativeScalar or
             // CallNativeScalarWithNode based on needsNode.
-            if (!cn.isScalarABI()) { markReject(node, "record-ABI"); return false; }
+            if (!cn.isScalarABI()) {
+                // Record-ABI fallback path: any registered NativeDispatch
+                // handler is accepted. Body still runs through BDSL; the
+                // native call itself pays the record-unpack tax but
+                // dispatches via the same handler table as the AST.
+                if (!com.mezze.interpreter.nodes.builtin.NativeDispatch.isNativeFunction(cn.getName())) {
+                    markReject(node, "no-handler:" + cn.getName()); return false;
+                }
+                if (!supportsNode(cn.getArg(), argCount)) return false;
+                return true;
+            }
             if (NativeHandlers.INSTANCE.handlerOf(cn.getName()) == null) {
                 markReject(node, "no-handler:" + cn.getName()); return false;
             }
@@ -1250,6 +1260,16 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof CallNativeIR cn) {
+            // Record-ABI: single record arg on the stack; dispatch via
+            // NativeDispatch.HANDLERS by name. Slower than the scalar
+            // path (still allocs a MezzeRecord in the caller) but routes
+            // the surrounding function through BDSL.
+            if (!cn.isScalarABI()) {
+                b.beginCallNativeRecord(cn.getName());
+                emitNode(cn.getArg(), b, argCount, localMap);
+                b.endCallNativeRecord();
+                return;
+            }
             // Typed fast paths — bypass Object[] alloc + PositionalArgs
             // + NativeHandler indirection when the signature matches
             // one we registered typed via TypedNativeHandlers. Ordered

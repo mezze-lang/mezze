@@ -642,6 +642,43 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Legacy record-ABI native call: takes the native name as a constant
+     * operand and a MezzeRecord arg on the stack, delegates to
+     * {@link com.mezze.interpreter.nodes.builtin.NativeDispatch#dispatchByName}
+     * with a fresh IndirectCallNode + the surrounding
+     * {@link com.oracle.truffle.api.nodes.Node} passed in as {@code $node}
+     * (for async handlers that need TruffleLanguage.Env).
+     *
+     * Unlocks the 89% of misses that were CallNativeIR:record-ABI. Not
+     * as fast as CallNativeScalar (still allocates/unpacks a record per
+     * call) but routes the surrounding function through BDSL.
+     */
+    @Operation
+    @ConstantOperand(type = String.class)
+    public static final class CallNativeRecord {
+        @Specialization
+        public static Object doInvoke(String name, Object arg,
+                @Cached(value = "createIndirect()", allowUncached = true)
+                    com.oracle.truffle.api.nodes.IndirectCallNode callNode,
+                @Bind com.oracle.truffle.api.nodes.Node node) {
+            if (!(arg instanceof com.mezze.interpreter.values.MezzeRecord record)) {
+                com.oracle.truffle.api.CompilerDirectives.transferToInterpreterAndInvalidate();
+                throw new RuntimeException(name + " expects record argument, got: "
+                        + (arg == null ? "null" : arg.getClass().getName()));
+            }
+            // The BDSL node has no "MezzeNode" wrapper — pass null; the
+            // async handlers only use it to read the Env, which they can
+            // reach via TruffleLanguage.get(Node).
+            com.mezze.interpreter.nodes.MezzeNode mezzeNode = null;
+            return com.mezze.interpreter.nodes.builtin.NativeDispatch
+                    .dispatchByName(name, record, callNode, mezzeNode);
+        }
+        static com.oracle.truffle.api.nodes.IndirectCallNode createIndirect() {
+            return com.oracle.truffle.api.nodes.IndirectCallNode.create();
+        }
+    }
+
+    /**
      * Typed fast path for (long, long) -> long natives: int add, sub,
      * mul, div, mod, min, max, pow, gcd, lcm. Handler is looked up
      * once at BDSL build time from {@link TypedNativeHandlers} and
