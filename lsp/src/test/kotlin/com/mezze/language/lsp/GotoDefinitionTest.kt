@@ -93,6 +93,40 @@ class GotoDefinitionTest {
     }
 
     @Test
+    fun `cmd-click on forward-ref fn used in perform-do lands on its decl`() {
+        // Reproduces the reported file exactly: `help` is CALLED inside
+        // `perform Console in do` before it is DECLARED (with a doc comment).
+        // Verifies go-to-definition still resolves the call to help's decl.
+        val ws = mkWorkspace(
+            "app.mz" to """
+                use std::effects::log::{ println, Console }
+
+                let main = {} -> perform Console in do
+                  let x = help { a = 5, b = 6 }
+                  println { msg = "hi from mez exec" }
+
+                ## This is a doc comment
+                let help: { a: 'a, b: 'a } with NumAdd 'a -> 'a = { a, b } -> a + b
+            """.trimIndent()
+        )
+        openProject(ws)
+        val uri = ws.resolve("src/app.mz").toUri().toString()
+        val text = ws.resolve("src/app.mz").toFile().readText()
+        openFile(uri, text)
+
+        // Click `help` at the use site: `  let x = help { a = 5, b = 6 }`.
+        val lines = text.lines()
+        val useLine = lines.indexOfFirst { it.contains("= help {") }
+        val useCol = lines[useLine].indexOf("help")
+        val locs = definitionAt(uri, line = useLine, character = useCol + 1)
+        assertTrue(locs.isNotEmpty(),
+            "go-to-definition on `help` (used before declared, in perform-do) returned nothing")
+        val declLine = lines.indexOfFirst { it.startsWith("let help") }
+        assertEquals(declLine, locs.first().range.start.line,
+            "should land on the `let help` decl line; got ${locs.map { it.range.start.line }}")
+    }
+
+    @Test
     fun `cmd-click on lambda param lands on the param token`() {
         val ws = mkWorkspace(
             "app.mz" to """
