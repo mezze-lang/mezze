@@ -7,6 +7,7 @@ import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.bytecode.OperationProxy;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
 
 /**
@@ -19,6 +20,7 @@ import com.oracle.truffle.api.nodes.UnexpectedResultException;
 @NodeChild(value = "left", type = MezzeNode.class)
 @NodeChild(value = "right", type = MezzeNode.class)
 @NodeInfo(shortName = "direct-sub")
+@OperationProxy.Proxyable(allowUncached = true)
 public abstract class DirectSubtractNode extends MezzeNode {
 
     /** Typed execute methods so callers in tail-call hot loops can read
@@ -30,12 +32,12 @@ public abstract class DirectSubtractNode extends MezzeNode {
     public abstract double executeDouble(VirtualFrame frame) throws UnexpectedResultException;
 
     @Specialization(rewriteOn = ArithmeticException.class)
-    protected static long subLongs(long left, long right) {
+    public static long subLongs(long left, long right) {
         return Math.subtractExact(left, right);
     }
 
     @Specialization(replaces = "subLongs")
-    protected static double subLongsOverflow(long left, long right) {
+    public static double subLongsOverflow(long left, long right) {
         return (double) left - (double) right;
     }
 
@@ -43,21 +45,21 @@ public abstract class DirectSubtractNode extends MezzeNode {
      * Float subtraction. Also handles mixed types due to implicit widening.
      */
     @Specialization(replaces = "subLongsOverflow")
-    protected static double subDoubles(double left, double right) {
+    public static double subDoubles(double left, double right) {
         return left - right;
     }
 
     @Specialization(guards = {"isFrac(left)", "isFrac(right)"})
-    protected static MezzeRecord subFractions(MezzeRecord left, MezzeRecord right) {
+    public static MezzeRecord subFractions(MezzeRecord left, MezzeRecord right) {
         return FractionHelper.subtractFractions(left, right);
     }
 
-    protected static boolean isFrac(Object value) {
+    public static boolean isFrac(Object value) {
         return FractionHelper.isFraction(value);
     }
 
     @Fallback
-    protected static Object typeError(Object left, Object right) {
+    public static Object typeError(Object left, Object right) {
         throw new RuntimeException(
             "Cannot subtract " + (left == null ? "null" : left.getClass().getSimpleName()) +
             " and " + (right == null ? "null" : right.getClass().getSimpleName())

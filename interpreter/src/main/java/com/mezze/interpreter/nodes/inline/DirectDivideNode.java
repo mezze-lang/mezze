@@ -6,6 +6,7 @@ import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.bytecode.OperationProxy;
 
 /**
  * Direct division node that takes left and right operands directly.
@@ -17,10 +18,11 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 @NodeChild(value = "left", type = MezzeNode.class)
 @NodeChild(value = "right", type = MezzeNode.class)
 @NodeInfo(shortName = "direct-div")
+@OperationProxy.Proxyable(allowUncached = true)
 public abstract class DirectDivideNode extends MezzeNode {
 
     @Specialization
-    protected static long divLongs(long left, long right) {
+    public static long divLongs(long left, long right) {
         if (right == 0) {
             throw new ArithmeticException("Division by zero");
         }
@@ -31,21 +33,21 @@ public abstract class DirectDivideNode extends MezzeNode {
      * Float division. Also handles mixed types due to implicit widening.
      */
     @Specialization(replaces = "divLongs")
-    protected static double divDoubles(double left, double right) {
+    public static double divDoubles(double left, double right) {
         return left / right;
     }
 
     @Specialization(guards = {"isFrac(left)", "isFrac(right)"})
-    protected static MezzeRecord divFractions(MezzeRecord left, MezzeRecord right) {
+    public static MezzeRecord divFractions(MezzeRecord left, MezzeRecord right) {
         return FractionHelper.divideFractions(left, right);
     }
 
-    protected static boolean isFrac(Object value) {
+    public static boolean isFrac(Object value) {
         return FractionHelper.isFraction(value);
     }
 
     @Fallback
-    protected static Object typeError(Object left, Object right) {
+    public static Object typeError(Object left, Object right) {
         throw new RuntimeException(
             "Cannot divide " + (left == null ? "null" : left.getClass().getSimpleName()) +
             " by " + (right == null ? "null" : right.getClass().getSimpleName())

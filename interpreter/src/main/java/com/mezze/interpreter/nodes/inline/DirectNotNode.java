@@ -5,6 +5,7 @@ import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.bytecode.OperationProxy;
 
 /**
  * Direct logical NOT node that takes the operand directly.
@@ -12,15 +13,16 @@ import com.oracle.truffle.api.nodes.NodeInfo;
  */
 @NodeChild(value = "operand", type = MezzeNode.class)
 @NodeInfo(shortName = "direct-not")
+@OperationProxy.Proxyable(allowUncached = true)
 public abstract class DirectNotNode extends MezzeNode {
 
     @Specialization
-    protected static boolean notBoolean(boolean value) {
+    public static boolean notBoolean(boolean value) {
         return !value;
     }
 
     @Fallback
-    protected static Object typeError(Object value) {
+    public static Object typeError(Object value) {
         throw new RuntimeException(
             "Cannot apply ! to " + (value == null ? "null" : value.getClass().getSimpleName())
         );

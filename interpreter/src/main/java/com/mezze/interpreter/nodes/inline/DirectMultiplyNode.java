@@ -8,6 +8,7 @@ import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.bytecode.OperationProxy;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
 
 /**
@@ -20,6 +21,7 @@ import com.oracle.truffle.api.nodes.UnexpectedResultException;
 @NodeChild(value = "left", type = MezzeNode.class)
 @NodeChild(value = "right", type = MezzeNode.class)
 @NodeInfo(shortName = "direct-mul")
+@OperationProxy.Proxyable(allowUncached = true)
 public abstract class DirectMultiplyNode extends MezzeNode {
 
     /** Typed execute methods so callers in tail-call hot loops can read
@@ -31,12 +33,12 @@ public abstract class DirectMultiplyNode extends MezzeNode {
     public abstract double executeDouble(VirtualFrame frame) throws UnexpectedResultException;
 
     @Specialization(rewriteOn = ArithmeticException.class)
-    protected static long mulLongs(long left, long right) {
+    public static long mulLongs(long left, long right) {
         return Math.multiplyExact(left, right);
     }
 
     @Specialization(replaces = "mulLongs")
-    protected static double mulLongsOverflow(long left, long right) {
+    public static double mulLongsOverflow(long left, long right) {
         return (double) left * (double) right;
     }
 
@@ -44,16 +46,16 @@ public abstract class DirectMultiplyNode extends MezzeNode {
      * Float multiplication. Also handles mixed types due to implicit widening.
      */
     @Specialization(replaces = "mulLongsOverflow")
-    protected static double mulDoubles(double left, double right) {
+    public static double mulDoubles(double left, double right) {
         return left * right;
     }
 
     @Specialization(guards = {"isFrac(left)", "isFrac(right)"})
-    protected static MezzeRecord mulFractions(MezzeRecord left, MezzeRecord right) {
+    public static MezzeRecord mulFractions(MezzeRecord left, MezzeRecord right) {
         return FractionHelper.multiplyFractions(left, right);
     }
 
-    protected static boolean isFrac(Object value) {
+    public static boolean isFrac(Object value) {
         return FractionHelper.isFraction(value);
     }
 
@@ -61,21 +63,21 @@ public abstract class DirectMultiplyNode extends MezzeNode {
      * MezzeSuspended propagation: if either operand is suspended, propagate it.
      */
     @Specialization(guards = "isSuspended(left)")
-    protected static MezzeSuspended mulLeftSuspended(MezzeSuspended left, Object right) {
+    public static MezzeSuspended mulLeftSuspended(MezzeSuspended left, Object right) {
         return left;
     }
 
     @Specialization(guards = "isSuspended(right)")
-    protected static MezzeSuspended mulRightSuspended(Object left, MezzeSuspended right) {
+    public static MezzeSuspended mulRightSuspended(Object left, MezzeSuspended right) {
         return right;
     }
 
-    protected static boolean isSuspended(Object value) {
+    public static boolean isSuspended(Object value) {
         return value instanceof MezzeSuspended;
     }
 
     @Fallback
-    protected static Object typeError(Object left, Object right) {
+    public static Object typeError(Object left, Object right) {
         throw new RuntimeException(
             "Cannot multiply " + (left == null ? "null" : left.getClass().getSimpleName()) +
             " and " + (right == null ? "null" : right.getClass().getSimpleName())

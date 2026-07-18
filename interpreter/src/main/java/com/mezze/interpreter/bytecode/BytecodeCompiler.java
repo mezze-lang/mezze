@@ -220,9 +220,14 @@ public final class BytecodeCompiler {
             return supportsNode(w.getValue(), argCount);
         }
         if (node instanceof InlineBinaryOpIR bin) {
-            return bin.getOp() == InlineOp.ADD
-                && supportsNode(bin.getLeft(), argCount)
-                && supportsNode(bin.getRight(), argCount);
+            // All 15 InlineOps proxy through the AST's DirectXxxNode
+            // @Specialization logic — see @OperationProxy annotations
+            // on MezzeBytecodeRootNode.
+            InlineOp op = bin.getOp();
+            boolean unary = op == InlineOp.NEG || op == InlineOp.NOT;
+            if (!supportsNode(bin.getLeft(), argCount)) return false;
+            if (!unary && !supportsNode(bin.getRight(), argCount)) return false;
+            return true;
         }
         if (node instanceof IfIR i) {
             return supportsNode(i.getCond(), argCount)
@@ -652,14 +657,102 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof InlineBinaryOpIR bin) {
-            if (bin.getOp() != InlineOp.ADD) {
-                throw new IllegalArgumentException(
-                    "Phase 1 supports only InlineOp.ADD; got " + bin.getOp());
+            // Dispatch to a DirectXxx @OperationProxy for the callee's op.
+            // Each of these forwards to the AST's DirectXxxNode
+            // @Specialization logic (long/double/string/etc.). Unary ops
+            // (NEG, NOT) only emit the left child.
+            InlineOp op = bin.getOp();
+            switch (op) {
+                case ADD -> {
+                    b.beginDirectAdd();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectAdd();
+                }
+                case SUB -> {
+                    b.beginDirectSubtract();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectSubtract();
+                }
+                case MUL -> {
+                    b.beginDirectMultiply();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectMultiply();
+                }
+                case DIV -> {
+                    b.beginDirectDivide();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectDivide();
+                }
+                case MOD -> {
+                    b.beginDirectModulo();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectModulo();
+                }
+                case EQ -> {
+                    b.beginDirectEqual();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectEqual();
+                }
+                case NEQ -> {
+                    b.beginDirectNotEqual();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectNotEqual();
+                }
+                case LT -> {
+                    b.beginDirectLessThan();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectLessThan();
+                }
+                case LE -> {
+                    b.beginDirectLessThanOrEqual();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectLessThanOrEqual();
+                }
+                case GT -> {
+                    b.beginDirectGreaterThan();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectGreaterThan();
+                }
+                case GE -> {
+                    b.beginDirectGreaterThanOrEqual();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectGreaterThanOrEqual();
+                }
+                case AND -> {
+                    b.beginDirectAnd();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectAnd();
+                }
+                case OR -> {
+                    b.beginDirectOr();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    emitNode(bin.getRight(), b, argCount, localMap);
+                    b.endDirectOr();
+                }
+                case NEG -> {
+                    // Unary — rightIR is unused, per InlineOp comment.
+                    b.beginDirectNegate();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    b.endDirectNegate();
+                }
+                case NOT -> {
+                    b.beginDirectNot();
+                    emitNode(bin.getLeft(), b, argCount, localMap);
+                    b.endDirectNot();
+                }
             }
-            b.beginAddLong();
-            emitNode(bin.getLeft(), b, argCount, localMap);
-            emitNode(bin.getRight(), b, argCount, localMap);
-            b.endAddLong();
             return;
         }
         if (node instanceof IfIR i) {

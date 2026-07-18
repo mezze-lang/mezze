@@ -5,6 +5,7 @@ import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.bytecode.OperationProxy;
 
 /**
  * Direct logical OR node that takes left and right operands directly.
@@ -13,15 +14,16 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 @NodeChild(value = "left", type = MezzeNode.class)
 @NodeChild(value = "right", type = MezzeNode.class)
 @NodeInfo(shortName = "direct-or")
+@OperationProxy.Proxyable(allowUncached = true)
 public abstract class DirectOrNode extends MezzeNode {
 
     @Specialization
-    protected static boolean orBooleans(boolean left, boolean right) {
+    public static boolean orBooleans(boolean left, boolean right) {
         return left || right;
     }
 
     @Fallback
-    protected static Object typeError(Object left, Object right) {
+    public static Object typeError(Object left, Object right) {
         throw new RuntimeException(
             "Cannot apply || to " + (left == null ? "null" : left.getClass().getSimpleName()) +
             " and " + (right == null ? "null" : right.getClass().getSimpleName())

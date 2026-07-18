@@ -6,6 +6,20 @@ import com.mezze.interpreter.nodes.builtin.dsl.PositionalArgs;
 import com.mezze.interpreter.nodes.builtin.dsl.TypedNativeHandlers;
 import com.mezze.interpreter.nodes.function.TailCallException;
 import com.mezze.interpreter.nodes.inline.DirectAddNode;
+import com.mezze.interpreter.nodes.inline.DirectAndNode;
+import com.mezze.interpreter.nodes.inline.DirectDivideNode;
+import com.mezze.interpreter.nodes.inline.DirectEqualNode;
+import com.mezze.interpreter.nodes.inline.DirectGreaterThanNode;
+import com.mezze.interpreter.nodes.inline.DirectGreaterThanOrEqualNode;
+import com.mezze.interpreter.nodes.inline.DirectLessThanNode;
+import com.mezze.interpreter.nodes.inline.DirectLessThanOrEqualNode;
+import com.mezze.interpreter.nodes.inline.DirectModuloNode;
+import com.mezze.interpreter.nodes.inline.DirectMultiplyNode;
+import com.mezze.interpreter.nodes.inline.DirectNegateNode;
+import com.mezze.interpreter.nodes.inline.DirectNotEqualNode;
+import com.mezze.interpreter.nodes.inline.DirectNotNode;
+import com.mezze.interpreter.nodes.inline.DirectOrNode;
+import com.mezze.interpreter.nodes.inline.DirectSubtractNode;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.MezzeFunction;
@@ -107,6 +121,20 @@ import com.oracle.truffle.api.nodes.RootNode;
  * ops — potentially weeks of work saved.
  */
 @OperationProxy(value = DirectAddNode.class, name = "DirectAdd")
+@OperationProxy(value = DirectSubtractNode.class, name = "DirectSubtract")
+@OperationProxy(value = DirectMultiplyNode.class, name = "DirectMultiply")
+@OperationProxy(value = DirectDivideNode.class, name = "DirectDivide")
+@OperationProxy(value = DirectModuloNode.class, name = "DirectModulo")
+@OperationProxy(value = DirectEqualNode.class, name = "DirectEqual")
+@OperationProxy(value = DirectNotEqualNode.class, name = "DirectNotEqual")
+@OperationProxy(value = DirectLessThanNode.class, name = "DirectLessThan")
+@OperationProxy(value = DirectLessThanOrEqualNode.class, name = "DirectLessThanOrEqual")
+@OperationProxy(value = DirectGreaterThanNode.class, name = "DirectGreaterThan")
+@OperationProxy(value = DirectGreaterThanOrEqualNode.class, name = "DirectGreaterThanOrEqual")
+@OperationProxy(value = DirectAndNode.class, name = "DirectAnd")
+@OperationProxy(value = DirectOrNode.class, name = "DirectOr")
+@OperationProxy(value = DirectNegateNode.class, name = "DirectNegate")
+@OperationProxy(value = DirectNotNode.class, name = "DirectNot")
 public abstract class MezzeBytecodeRootNode extends RootNode implements BytecodeRootNode {
 
     protected MezzeBytecodeRootNode(MezzeLanguage language, FrameDescriptor frameDescriptor) {

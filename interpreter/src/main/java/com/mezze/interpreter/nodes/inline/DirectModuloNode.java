@@ -5,6 +5,7 @@ import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.bytecode.OperationProxy;
 
 /**
  * Direct modulo node that takes left and right operands directly.
@@ -16,10 +17,11 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 @NodeChild(value = "left", type = MezzeNode.class)
 @NodeChild(value = "right", type = MezzeNode.class)
 @NodeInfo(shortName = "direct-mod")
+@OperationProxy.Proxyable(allowUncached = true)
 public abstract class DirectModuloNode extends MezzeNode {
 
     @Specialization
-    protected static long modLongs(long left, long right) {
+    public static long modLongs(long left, long right) {
         if (right == 0) {
             throw new ArithmeticException("Modulo by zero");
         }
@@ -30,12 +32,12 @@ public abstract class DirectModuloNode extends MezzeNode {
      * Float modulo. Also handles mixed types due to implicit widening.
      */
     @Specialization(replaces = "modLongs")
-    protected static double modDoubles(double left, double right) {
+    public static double modDoubles(double left, double right) {
         return left % right;
     }
 
     @Fallback
-    protected static Object typeError(Object left, Object right) {
+    public static Object typeError(Object left, Object right) {
         throw new RuntimeException(
             "Cannot modulo " + (left == null ? "null" : left.getClass().getSimpleName()) +
             " by " + (right == null ? "null" : right.getClass().getSimpleName())

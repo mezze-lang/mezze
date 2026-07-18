@@ -7,6 +7,7 @@ import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.bytecode.OperationProxy;
 
 import java.util.Objects;
 
@@ -20,52 +21,53 @@ import java.util.Objects;
 @NodeChild(value = "left", type = MezzeNode.class)
 @NodeChild(value = "right", type = MezzeNode.class)
 @NodeInfo(shortName = "direct-neq")
+@OperationProxy.Proxyable(allowUncached = true)
 public abstract class DirectNotEqualNode extends MezzeNode {
 
     @Specialization
-    protected static boolean neqLongs(long left, long right) {
+    public static boolean neqLongs(long left, long right) {
         return left != right;
     }
 
     @Specialization
-    protected static boolean neqDoubles(double left, double right) {
+    public static boolean neqDoubles(double left, double right) {
         return left != right;
     }
 
     @Specialization
-    protected static boolean neqBooleans(boolean left, boolean right) {
+    public static boolean neqBooleans(boolean left, boolean right) {
         return left != right;
     }
 
     @Specialization
-    protected static boolean neqStrings(String left, String right) {
+    public static boolean neqStrings(String left, String right) {
         return !left.equals(right);
     }
 
     @Specialization(guards = {"isFrac(left)", "isFrac(right)"})
-    protected static boolean neqFractions(MezzeRecord left, MezzeRecord right) {
+    public static boolean neqFractions(MezzeRecord left, MezzeRecord right) {
         return !FractionHelper.equalFractions(left, right);
     }
 
     @Specialization(replaces = "neqFractions")
-    protected static boolean neqRecords(MezzeRecord left, MezzeRecord right) {
+    public static boolean neqRecords(MezzeRecord left, MezzeRecord right) {
         if (FractionHelper.isFraction(left) && FractionHelper.isFraction(right)) {
             return !FractionHelper.equalFractions(left, right);
         }
         return !left.equals(right);
     }
 
-    protected static boolean isFrac(Object value) {
+    public static boolean isFrac(Object value) {
         return FractionHelper.isFraction(value);
     }
 
     @Specialization
-    protected static boolean neqVariants(MezzeVariant left, MezzeVariant right) {
+    public static boolean neqVariants(MezzeVariant left, MezzeVariant right) {
         return !left.equals(right);
     }
 
     @Fallback
-    protected static boolean neqGeneric(Object left, Object right) {
+    public static boolean neqGeneric(Object left, Object right) {
         return !Objects.equals(left, right);
     }
 

@@ -6,6 +6,7 @@ import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.bytecode.OperationProxy;
 
 /**
  * Direct negation node that takes the operand directly.
@@ -16,34 +17,35 @@ import com.oracle.truffle.api.nodes.NodeInfo;
  */
 @NodeChild(value = "operand", type = MezzeNode.class)
 @NodeInfo(shortName = "direct-neg")
+@OperationProxy.Proxyable(allowUncached = true)
 public abstract class DirectNegateNode extends MezzeNode {
 
     @Specialization(rewriteOn = ArithmeticException.class)
-    protected static long negateLong(long value) {
+    public static long negateLong(long value) {
         return Math.negateExact(value);
     }
 
     @Specialization(replaces = "negateLong")
-    protected static double negateLongOverflow(long value) {
+    public static double negateLongOverflow(long value) {
         return -(double) value;
     }
 
     @Specialization
-    protected static double negateDouble(double value) {
+    public static double negateDouble(double value) {
         return -value;
     }
 
     @Specialization(guards = "isFrac(value)")
-    protected static MezzeRecord negateFraction(MezzeRecord value) {
+    public static MezzeRecord negateFraction(MezzeRecord value) {
         return FractionHelper.negateFraction(value);
     }
 
-    protected static boolean isFrac(Object value) {
+    public static boolean isFrac(Object value) {
         return FractionHelper.isFraction(value);
     }
 
     @Fallback
-    protected static Object typeError(Object value) {
+    public static Object typeError(Object value) {
         throw new RuntimeException(
             "Cannot negate " + (value == null ? "null" : value.getClass().getSimpleName())
         );

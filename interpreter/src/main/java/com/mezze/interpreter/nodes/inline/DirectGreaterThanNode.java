@@ -6,6 +6,7 @@ import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.bytecode.OperationProxy;
 
 /**
  * Direct greater-than node that takes left and right operands directly.
@@ -17,10 +18,11 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 @NodeChild(value = "left", type = MezzeNode.class)
 @NodeChild(value = "right", type = MezzeNode.class)
 @NodeInfo(shortName = "direct-gt")
+@OperationProxy.Proxyable(allowUncached = true)
 public abstract class DirectGreaterThanNode extends MezzeNode {
 
     @Specialization
-    protected static boolean gtLongs(long left, long right) {
+    public static boolean gtLongs(long left, long right) {
         return left > right;
     }
 
@@ -28,26 +30,26 @@ public abstract class DirectGreaterThanNode extends MezzeNode {
      * Float comparison. Also handles mixed types due to implicit widening.
      */
     @Specialization(replaces = "gtLongs")
-    protected static boolean gtDoubles(double left, double right) {
+    public static boolean gtDoubles(double left, double right) {
         return left > right;
     }
 
     @Specialization
-    protected static boolean gtStrings(String left, String right) {
+    public static boolean gtStrings(String left, String right) {
         return left.compareTo(right) > 0;
     }
 
     @Specialization(guards = {"isFrac(left)", "isFrac(right)"})
-    protected static boolean gtFractions(MezzeRecord left, MezzeRecord right) {
+    public static boolean gtFractions(MezzeRecord left, MezzeRecord right) {
         return FractionHelper.compareFractions(left, right) > 0;
     }
 
-    protected static boolean isFrac(Object value) {
+    public static boolean isFrac(Object value) {
         return FractionHelper.isFraction(value);
     }
 
     @Fallback
-    protected static Object typeError(Object left, Object right) {
+    public static Object typeError(Object left, Object right) {
         throw new RuntimeException(
             "Cannot compare " + (left == null ? "null" : left.getClass().getSimpleName()) +
             " > " + (right == null ? "null" : right.getClass().getSimpleName())
