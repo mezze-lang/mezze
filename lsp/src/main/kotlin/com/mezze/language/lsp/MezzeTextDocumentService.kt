@@ -86,11 +86,13 @@ class MezzeTextDocumentService(
         Thread(r, "mezze-lsp-analysis").apply { isDaemon = true }
     }
     private val pendingAnalysis = ConcurrentHashMap<String, ScheduledFuture<*>>()
-    // Debounce after the last keystroke before re-analyzing. A full re-check
-    // (constraint solve + imports) costs O(100s of ms) even for a small file,
-    // so a longer window keeps active typing smooth; diagnostics still land a
-    // beat after you pause. (Cheap mitigation ahead of #59 incremental caching.)
-    private val DEBOUNCE_MS: Long = 400
+    // Debounce after the last keystroke before re-analyzing. Balances two
+    // costs: a full re-check (constraint solve + imports) is O(100s of ms) so
+    // too-frequent is laggy, but a long window leaves position-bearing features
+    // (CodeLens, inlay hints) anchored to the PRE-edit AST and visibly out of
+    // sync until the re-check + refreshPositionFeatures() fires. 250ms is a
+    // middle ground; the skip-unchanged guard keeps no-op edits free.
+    private val DEBOUNCE_MS: Long = 250
     // Content last handed to analyzeDocument per URI — lets the debounce skip a
     // redundant re-check when an edit round-trips to identical text (VS Code
     // sometimes emits didChange for no textual change, e.g. some cursor ops).
@@ -139,6 +141,21 @@ class MezzeTextDocumentService(
      */
     fun connect(client: LanguageClient) {
         this.client = client
+    }
+
+    /**
+     * Ask the editor to re-pull the position-bearing, whole-document features
+     * (CodeLens, inlay hints, semantic tokens) after a re-analysis. Their
+     * anchors come from the typed AST; when the AST is refreshed post-edit the
+     * editor must re-request them or it keeps rendering pre-edit positions.
+     * No-op / best-effort if the client isn't connected (tests) or doesn't
+     * support a given refresh.
+     */
+    private fun refreshPositionFeatures() {
+        if (!::client.isInitialized) return
+        try { client.refreshCodeLenses() } catch (_: Exception) {}
+        try { client.refreshInlayHints() } catch (_: Exception) {}
+        try { client.refreshSemanticTokens() } catch (_: Exception) {}
     }
 
     /**
@@ -325,6 +342,13 @@ class MezzeTextDocumentService(
                 lastAnalyzedContent[uri] = content
                 documents[uri] = state
                 publishDiagnostics(uri, state.diagnostics)
+                // The re-check produced a fresh typed AST with up-to-date
+                // positions. Tell the editor to re-request the position-bearing
+                // features so their anchors don't drift against edited text —
+                // without this, CodeLens/inlay-hints kept showing stale
+                // positions (from the pre-edit AST) until an incidental
+                // re-request, which read as "references go out of sync".
+                refreshPositionFeatures()
             } finally {
                 pendingAnalysis.remove(uri, taskRef)
             }
@@ -366,7 +390,9 @@ class MezzeTextDocumentService(
             if (state != null) {
                 val newState = analyzeDocument(uri, content, state.version, persistToStore = true)
                 documents[uri] = newState
+                lastAnalyzedContent[uri] = content
                 publishDiagnostics(uri, newState.diagnostics)
+                refreshPositionFeatures()
             }
         }
     }
