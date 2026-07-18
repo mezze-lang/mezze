@@ -218,7 +218,13 @@ data class ParsedMatchCase(
     val guard: ParsedExpr? = null,
     val ifLetBindings: List<ParsedIfLetGuard> = emptyList(),
     val body: ParsedExpr,
-    val loc: Loc
+    val loc: Loc,
+    // Comments preserved for the formatter — same semantics as ParsedStatement.
+    // Hash-excluded (match cases hash by pattern/guard/body only).
+    val leadingComments: List<ParsedComment> = emptyList(),
+    val trailingComment: ParsedComment? = null,
+    val docComment: String? = null,
+    val metadata: ParsedMetadata? = null,
 )
 
 /**
@@ -248,18 +254,40 @@ data class ParsedDo(
 sealed interface ParsedStatement {
     val loc: Loc
 
+    /**
+     * Comments preserved for the formatter (round-trip), mirroring the fields
+     * on [ParsedDecl]. `leadingComments` = regular `#` lines above the
+     * statement; `trailingComment` = a `#` on the same line after it;
+     * `docComment` = merged `##` lines; `metadata` = a `#{…}` block. None of
+     * these affect the content hash (see ParsedDeclHasher — statements are
+     * hashed by structure only). In-block `##` doc comments are preserved as
+     * text but do NOT become an LSP doc (there's no decl to attach to).
+     */
+    val leadingComments: List<ParsedComment>
+    val trailingComment: ParsedComment?
+    val docComment: String?
+    val metadata: ParsedMetadata?
+
     @Serializable
     data class Let(
         val pattern: ParsedPattern,
         val typeAnnotation: ParsedTypeAnnotation? = null,
         val value: ParsedExpr,
-        override val loc: Loc
+        override val loc: Loc,
+        override val leadingComments: List<ParsedComment> = emptyList(),
+        override val trailingComment: ParsedComment? = null,
+        override val docComment: String? = null,
+        override val metadata: ParsedMetadata? = null,
     ) : ParsedStatement
 
     @Serializable
     data class Expr(
         val expr: ParsedExpr,
-        override val loc: Loc
+        override val loc: Loc,
+        override val leadingComments: List<ParsedComment> = emptyList(),
+        override val trailingComment: ParsedComment? = null,
+        override val docComment: String? = null,
+        override val metadata: ParsedMetadata? = null,
     ) : ParsedStatement
 
     /**
@@ -280,7 +308,11 @@ sealed interface ParsedStatement {
     data class Bind(
         val pattern: ParsedPattern,
         val expr: ParsedExpr,
-        override val loc: Loc
+        override val loc: Loc,
+        override val leadingComments: List<ParsedComment> = emptyList(),
+        override val trailingComment: ParsedComment? = null,
+        override val docComment: String? = null,
+        override val metadata: ParsedMetadata? = null,
     ) : ParsedStatement
 }
 

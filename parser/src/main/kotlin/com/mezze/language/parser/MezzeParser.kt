@@ -458,6 +458,25 @@ class MezzeParser {
         return current
     }
 
+    /**
+     * Like [skipNewlines] but does NOT consume COMMENT tokens — it stops at the
+     * first comment so a following collector ([skipNewlinesCollectAnnotations])
+     * can capture it. Used between in-block statements/arms so comments there
+     * survive to the formatter instead of being silently dropped.
+     */
+    internal fun skipNewlinesOnly(stream: TokenStream): TokenStream {
+        var current = stream
+        while (true) {
+            val token = current.current() ?: break
+            when (token.type) {
+                TokenType.NEWLINE -> current = current.advance()
+                TokenType.ERROR -> current = current.advance()
+                else -> break
+            }
+        }
+        return current
+    }
+
     internal data class AnnotationBlock(
         val regularComments: List<ParsedComment>,
         val docComment: String?,

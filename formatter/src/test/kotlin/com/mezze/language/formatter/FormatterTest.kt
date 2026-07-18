@@ -1323,4 +1323,102 @@ class FormatterTest {
         val second = formatter.format(first)
         assertEquals(first, second, "with-clause formatting should be idempotent")
     }
+
+    // =========================================================================
+    // IN-BLOCK COMMENT PRESERVATION (#124)
+    // =========================================================================
+
+    @Test
+    fun `regular comment inside a do block is preserved`() {
+        val input = """
+            let f = {} -> do
+              # a comment inside the block
+              let y = 2
+              y + 1
+        """.trimIndent()
+        val out = formatter.format(input)
+        assertTrue(out.contains("# a comment inside the block"),
+            "in-block regular comment must survive formatting, got:\n$out")
+    }
+
+    @Test
+    fun `doc and metadata comments inside a do block are preserved`() {
+        val input = """
+            let f = {} -> do
+              ## a doc comment on a statement
+              #{ tag: "x" }
+              let y = 2
+              y + 1
+        """.trimIndent()
+        val out = formatter.format(input)
+        assertTrue(out.contains("## a doc comment on a statement"),
+            "in-block `##` doc must survive, got:\n$out")
+        assertTrue(out.contains("#{ tag:") && out.contains("\"x\"") ,
+            "in-block `#{}` metadata must survive, got:\n$out")
+    }
+
+    @Test
+    fun `comment before a match arm is preserved`() {
+        val input = """
+            let f = {x: Bool} -> match x is
+              # the true case
+              True -> 1
+              ## doc for false
+              False -> 2
+        """.trimIndent()
+        val out = formatter.format(input)
+        assertTrue(out.contains("# the true case"),
+            "in-block match-arm regular comment must survive, got:\n$out")
+        assertTrue(out.contains("## doc for false"),
+            "in-block match-arm `##` doc must survive, got:\n$out")
+        // Idempotent.
+        assertEquals(out, formatter.format(out), "match-arm comment formatting must be idempotent")
+    }
+
+    @Test
+    fun `comment between record fields is preserved on a multi-line record`() {
+        val input = """
+            let r = {
+              a = 1,
+              # comment between fields
+              b = 2,
+            }
+        """.trimIndent()
+        val out = formatter.format(input)
+        assertTrue(out.contains("# comment between fields"),
+            "in-record comment must survive, got:\n$out")
+        // Presence of a comment must force the record to stay multi-line.
+        assertTrue(out.contains("\n"), "record with a comment must not collapse to one line, got:\n$out")
+        assertEquals(out, formatter.format(out), "record-comment formatting must be idempotent")
+    }
+
+    @Test
+    fun `record without comments still collapses to one line`() {
+        val input = """
+            let r = {
+              a = 1,
+              b = 2,
+            }
+        """.trimIndent()
+        val out = formatter.format(input)
+        assertEquals("let r = { a = 1, b = 2 }\n", out,
+            "a small comment-free record should still collapse, got:\n$out")
+    }
+
+    @Test
+    fun `formatting a do block with comments is idempotent`() {
+        val input = """
+            let f = {} -> do
+              # first
+              let a = 1
+              ## doc
+              let b = 2
+              a + b
+        """.trimIndent()
+        val first = formatter.format(input)
+        val second = formatter.format(first)
+        assertEquals(first, second, "in-block comment formatting must be idempotent")
+        assertTrue(first.contains("# first") && first.contains("## doc"),
+            "both comments must survive, got:\n$first")
+    }
 }

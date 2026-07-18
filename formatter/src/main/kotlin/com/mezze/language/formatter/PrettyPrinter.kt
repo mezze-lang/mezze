@@ -486,8 +486,11 @@ class PrettyPrinter {
     private fun printRecordLit(expr: ParsedRecordLit) {
         if (expr.entries.isEmpty()) { append("{}"); return }
 
+        // A comment anywhere in the record forces multi-line — a comment can't
+        // ride on a collapsed one-liner.
+        val hasComments = expr.entries.any { entryComments(it).let { c -> c.first.isNotEmpty() || c.second != null } }
         val width = estimateRecordLitWidth(expr)
-        if (width <= config.RECORD_SINGLE_LINE_THRESHOLD) {
+        if (!hasComments && width <= config.RECORD_SINGLE_LINE_THRESHOLD) {
             append("{ ")
             var first = true
             for (entry in expr.entries) {
@@ -501,15 +504,24 @@ class PrettyPrinter {
             newLine()
             indent {
                 for ((i, entry) in expr.entries.withIndex()) {
+                    val (leading, trailing) = entryComments(entry)
+                    for (c in leading) { printIndent(); append(c.text); newLine() }
                     printIndent()
                     printRecordEntry(entry)
                     if (config.TRAILING_COMMA_IN_MULTILINE || i < expr.entries.size - 1) append(",")
+                    trailing?.let { append("  "); append(it.text) }
                     newLine()
                 }
             }
             printIndent()
             append("}")
         }
+    }
+
+    /** (leadingComments, trailingComment) for a record entry, regardless of variant. */
+    private fun entryComments(entry: ParsedRecordEntry): Pair<List<ParsedComment>, ParsedComment?> = when (entry) {
+        is ParsedRecordEntry.Field -> entry.leadingComments to entry.trailingComment
+        is ParsedRecordEntry.Spread -> entry.leadingComments to entry.trailingComment
     }
 
     private fun printRecordEntry(entry: ParsedRecordEntry) {
@@ -737,6 +749,7 @@ class PrettyPrinter {
         newLine()
         indent {
             for (case in expr.cases) {
+                printInBlockComments(case.leadingComments, case.docComment, case.metadata)
                 printIndent()
                 case.patterns.forEachIndexed { i, p ->
                     if (i > 0) append(" | ")
@@ -762,12 +775,48 @@ class PrettyPrinter {
         newLine()
         indent {
             for (stmt in expr.statements) {
+                printStatementComments(stmt)
                 printIndent()
                 printStatement(stmt)
+                stmt.trailingComment?.let { append("  "); append(it.text) }
                 newLine()
             }
             printIndent()
             printExpr(expr.result)
+        }
+    }
+
+    private fun printStatementComments(stmt: ParsedStatement) =
+        printInBlockComments(stmt.leadingComments, stmt.docComment, stmt.metadata)
+
+    /**
+     * Emit an in-block node's preserved comments (do-block statement, match arm,
+     * record entry) in source order: `##` doc lines, then `#{}` metadata, then
+     * regular `#` comments — each on its own indented line, mirroring how
+     * declarations print theirs.
+     */
+    private fun printInBlockComments(
+        leadingComments: List<ParsedComment>,
+        docComment: String?,
+        metadata: ParsedMetadata?,
+    ) {
+        docComment?.let { doc ->
+            for (line in doc.split("\n")) {
+                printIndent()
+                if (line.isEmpty()) append("##") else append("## $line")
+                newLine()
+            }
+        }
+        metadata?.let { meta ->
+            printIndent()
+            val content = formatMetadataFields(meta.fields)
+            append(if (content.isEmpty()) "#{}" else "#{ $content }")
+            newLine()
+        }
+        for (comment in leadingComments) {
+            printIndent()
+            append(comment.text)
+            newLine()
         }
     }
 

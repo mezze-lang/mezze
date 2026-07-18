@@ -119,7 +119,10 @@ sealed interface ParsedRecordEntry {
     data class Field(
         val name: String,
         val value: ParsedExpr?,
-        val loc: Loc
+        val loc: Loc,
+        // Comments preserved for the formatter on multi-line records. Hash-excluded.
+        val leadingComments: List<ParsedComment> = emptyList(),
+        val trailingComment: ParsedComment? = null,
     ) : ParsedRecordEntry
 
     /**
@@ -128,7 +131,9 @@ sealed interface ParsedRecordEntry {
     @Serializable
     data class Spread(
         val expr: ParsedExpr,
-        val loc: Loc
+        val loc: Loc,
+        val leadingComments: List<ParsedComment> = emptyList(),
+        val trailingComment: ParsedComment? = null,
     ) : ParsedRecordEntry
 }
 

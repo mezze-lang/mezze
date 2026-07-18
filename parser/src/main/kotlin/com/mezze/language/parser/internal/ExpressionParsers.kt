@@ -415,38 +415,64 @@ internal val MezzeParser.recordLiteral: Parser<ParsedExpr>
             is ParseResult.Success -> {
                 val file = currentFile ?: "<unknown>"
                 val recordStartToken = lbrace.value
-                val stream1 = skipNewlines(lbrace.remaining)
 
-                val entries = sepEndByWithNewlines(
-                    recordLiteralEntryParser,
-                    tok(TokenType.COMMA)
-                )(stream1)
+                // Explicit entry loop (instead of the shared sepEndBy combinator)
+                // so comments between fields survive: collect an annotation block
+                // before each entry and attach it. Bails to the combinator's
+                // behaviour on the empty/spread/close cases.
+                val collectedEntries = mutableListOf<ParsedRecordEntry>()
+                var cur = skipNewlinesOnly(lbrace.remaining)
+                var recordFailure: ParseResult.Failure? = null
+                while (true) {
+                    val (afterAnn, ann) = skipNewlinesCollectAnnotations(cur)
+                    cur = afterAnn
+                    val here = cur.current()
+                    // Stop at `}`. A trailing `...` with a `}` right after is the
+                    // open-record marker (handled below); a `...expr` spread is a
+                    // real entry, so only bail on a bare `... }`.
+                    if (here == null || here.type == TokenType.RBRACE) break
+                    if (here.type == TokenType.ELLIPSIS && cur.advance().current()?.type == TokenType.RBRACE) break
 
-                when (entries) {
-                    is ParseResult.Success -> {
-                        val stream2 = skipNewlines(entries.remaining)
-
-                        var streamAfterEllipsis = stream2
-
-                        val ellipsisCheck = tok(TokenType.ELLIPSIS)(stream2)
-                        if (ellipsisCheck is ParseResult.Success) {
-                            streamAfterEllipsis = skipNewlines(ellipsisCheck.remaining)
-                        }
-
-                        val rbrace = tok(TokenType.RBRACE)(streamAfterEllipsis)
-
-                        when (rbrace) {
-                            is ParseResult.Success -> {
-                                val loc = spanLoc(recordStartToken, rbrace.value, file)
-                                ParseResult.Success(
-                                    ParsedRecordLit(entries.value, loc),
-                                    rbrace.remaining
-                                )
-                            }
-                            is ParseResult.Failure -> rbrace
-                        }
+                    val entryResult = recordLiteralEntryParser(cur)
+                    if (entryResult !is ParseResult.Success) {
+                        recordFailure = entryResult as? ParseResult.Failure
+                        break
                     }
-                    is ParseResult.Failure -> entries
+                    val entry = when (val e = entryResult.value) {
+                        is ParsedRecordEntry.Field -> e.copy(
+                            leadingComments = ann.regularComments + (if (ann.docComment != null)
+                                listOf(com.mezze.language.parsedast.ParsedComment("## ${ann.docComment}", true, e.loc)) else emptyList())
+                        )
+                        is ParsedRecordEntry.Spread -> e.copy(leadingComments = ann.regularComments)
+                    }
+                    collectedEntries.add(entry)
+                    cur = skipNewlinesOnly(entryResult.remaining)
+                    // Optional trailing comma; skip it (and following newlines).
+                    val comma = tok(TokenType.COMMA)(cur)
+                    if (comma is ParseResult.Success) {
+                        cur = skipNewlinesOnly(comma.remaining)
+                    } else {
+                        break
+                    }
+                }
+
+                if (recordFailure != null) {
+                    recordFailure
+                } else {
+                    // Trailing comments before `}` / `...` (skip; rare).
+                    var stream2 = skipNewlines(cur)
+                    val ellipsisCheck = tok(TokenType.ELLIPSIS)(stream2)
+                    if (ellipsisCheck is ParseResult.Success) {
+                        stream2 = skipNewlines(ellipsisCheck.remaining)
+                    }
+                    val rbrace = tok(TokenType.RBRACE)(stream2)
+                    when (rbrace) {
+                        is ParseResult.Success -> {
+                            val loc = spanLoc(recordStartToken, rbrace.value, file)
+                            ParseResult.Success(ParsedRecordLit(collectedEntries, loc), rbrace.remaining)
+                        }
+                        is ParseResult.Failure -> rbrace
+                    }
                 }
             }
             is ParseResult.Failure -> lbrace
@@ -884,7 +910,9 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
         when (doToken) {
             is ParseResult.Success -> {
                 val doTok = doToken.value
-                val stream1 = skipNewlines(doToken.remaining)
+                // Skip newlines only (not comments) so a comment before the
+                // first statement survives to the loop's annotation collector.
+                val stream1 = skipNewlinesOnly(doToken.remaining)
 
                 val statements = mutableListOf<ParsedStatement>()
                 var currentStream = stream1
@@ -913,10 +941,19 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                     }
                 }
 
-                // Track the column of the first token in the do block to determine scope
-                val doBlockColumn = stream1.current()?.column
+                // Track the column of the first *code* token in the do block to
+                // determine scope — skip past any leading comments (which the
+                // loop's collector will pick up) so the column reflects the
+                // first statement's indentation, not a comment's.
+                val doBlockColumn = skipNewlines(stream1).current()?.column
 
                 while (finalResult == null) {
+                    // Collect any comments (`#`, `#{}`, `##`) sitting before the
+                    // next statement so the formatter can round-trip them. They
+                    // attach to whichever statement is parsed next.
+                    val (afterAnnotations, stmtAnnotations) = skipNewlinesCollectAnnotations(currentStream)
+                    currentStream = afterAnnotations
+
                     val currentToken = currentStream.current()
                     if (currentToken != null && doBlockColumn != null && currentToken.column < doBlockColumn && currentToken.type != TokenType.EOF) {
                         break
@@ -971,10 +1008,13 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                                                         pattern,
                                                         typeAnnotation,
                                                         expr.value,
-                                                        stmtLoc
+                                                        stmtLoc,
+                                                        leadingComments = stmtAnnotations.regularComments,
+                                                        docComment = stmtAnnotations.docComment,
+                                                        metadata = stmtAnnotations.metadata,
                                                     )
                                                 )
-                                                currentStream = skipNewlines(expr.remaining)
+                                                currentStream = skipNewlinesOnly(expr.remaining)
                                                 lastStatementWasLet = true
                                                 lastLetName = when (pattern) {
                                                     is ParsedVariablePattern -> pattern.name
@@ -1029,10 +1069,13 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                                         ParsedStatement.Bind(
                                             pattern = pattern,
                                             expr = rhs.value,
-                                            loc = stmtLoc
+                                            loc = stmtLoc,
+                                            leadingComments = stmtAnnotations.regularComments,
+                                            docComment = stmtAnnotations.docComment,
+                                            metadata = stmtAnnotations.metadata,
                                         )
                                     )
-                                    currentStream = skipNewlines(rhs.remaining)
+                                    currentStream = skipNewlinesOnly(rhs.remaining)
                                     lastStatementWasLet = false
                                     lastLetName = null
                                     continue
@@ -1063,8 +1106,15 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                                 if (nextToken != null && nextToken.type != TokenType.EOF && doBlockColumn != null && nextToken.column >= doBlockColumn && !isTerminatingToken) {
                                     // Next token is still inside the do block, so current expression is a statement
                                     val stmtLoc = expr.value.loc
-                                    statements.add(ParsedStatement.Expr(expr.value, stmtLoc))
-                                    currentStream = streamAfterExpr
+                                    statements.add(ParsedStatement.Expr(
+                                        expr.value, stmtLoc,
+                                        leadingComments = stmtAnnotations.regularComments,
+                                        docComment = stmtAnnotations.docComment,
+                                        metadata = stmtAnnotations.metadata,
+                                    ))
+                                    // Advance past newlines only (not comments) so a comment on
+                                    // the following line is captured by the next iteration.
+                                    currentStream = skipNewlinesOnly(expr.remaining)
                                     lastStatementWasLet = false
                                     lastLetName = null
                                 } else {
@@ -1197,19 +1247,29 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
 
                         when (isToken) {
                             is ParseResult.Success -> {
-                                val stream3 = skipNewlines(isToken.remaining)
+                                // Skip newlines only so a comment before the first
+                                // arm survives; collect it into the arm's fields.
+                                val stream3 = skipNewlinesOnly(isToken.remaining)
 
-                                // Track the column of the first match case to determine scope
-                                val firstCaseColumn = stream3.current()?.column
+                                // First-arm column = first *code* token (past comments).
+                                val firstCaseColumn = skipNewlines(stream3).current()?.column
 
-                                val firstCase = matchCase(stream3)
+                                val (afterFirstAnn, firstAnn) = skipNewlinesCollectAnnotations(stream3)
+                                val firstCase = matchCase(afterFirstAnn)
 
                                 when (firstCase) {
                                     is ParseResult.Success -> {
-                                        val cases = mutableListOf(firstCase.value)
-                                        var currentStream = skipNewlines(firstCase.remaining)
+                                        val cases = mutableListOf(firstCase.value.copy(
+                                            leadingComments = firstAnn.regularComments,
+                                            docComment = firstAnn.docComment,
+                                            metadata = firstAnn.metadata,
+                                        ))
+                                        var currentStream = skipNewlinesOnly(firstCase.remaining)
 
                                         while (true) {
+                                            // Collect comments before the next arm.
+                                            val (afterAnn, armAnn) = skipNewlinesCollectAnnotations(currentStream)
+                                            currentStream = afterAnn
                                             val currentToken = currentStream.current()
 
                                             // Stop if:
@@ -1225,8 +1285,12 @@ internal val MezzeParser.matchExpression: Parser<ParsedExpr>
                                             val nextCase = matchCase(currentStream)
                                             when (nextCase) {
                                                 is ParseResult.Success -> {
-                                                    cases.add(nextCase.value)
-                                                    currentStream = skipNewlines(nextCase.remaining)
+                                                    cases.add(nextCase.value.copy(
+                                                        leadingComments = armAnn.regularComments,
+                                                        docComment = armAnn.docComment,
+                                                        metadata = armAnn.metadata,
+                                                    ))
+                                                    currentStream = skipNewlinesOnly(nextCase.remaining)
                                                 }
                                                 is ParseResult.Failure -> {
                                                     // Can't parse another case, we're done
