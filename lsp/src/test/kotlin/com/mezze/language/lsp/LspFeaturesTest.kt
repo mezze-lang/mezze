@@ -97,20 +97,14 @@ class LspFeaturesTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled(
-        "Known typechecker bug (#126): a top-level polymorphic fn CALLED BEFORE " +
-        "it is DECLARED resolves to a source-order monomorphic placeholder var, " +
-        "not its scheme. The call constraint becomes FunctionType({args}) ~ " +
-        "'placeholder, which the solver binds whole without decomposing args↔" +
-        "params — so a polymorphic return never pins to the concrete arg type " +
-        "and the caller's `let` leaks 'a. Fix requires dependency-ordered decl " +
-        "inference (or a placeholder↔body reconciliation constraint); decl-order " +
-        "dependent, `perform` is NOT involved. Same family as #33."
-    )
     fun `do-let bound to a FORWARD-referenced poly fn call shows the concrete type`() {
-        // `help` declared AFTER `main` — hovering `x` should still show Int
-        // (the 5,6 args pin the return). Currently leaks `x : 'a`. Reordering
-        // `help` before `main` makes this pass, which is the diagnostic tell.
+        // #126: a top-level polymorphic fn CALLED BEFORE it is DECLARED used to
+        // resolve to a source-order monomorphic placeholder var, so the call
+        // constraint FunctionType({args}) ~ 'placeholder bound the var whole
+        // without decomposing args↔params — the polymorphic return never pinned
+        // and the caller's `let` leaked `'a`. Fixed by inferring the callee
+        // before the caller (dependency-ordered decls). `help` here is declared
+        // AFTER `main`; hovering `x` must show Int, not a leaked type var.
         val (uri, _) = openSingleFile("""
             let main = {} -> do
               let x = help { a = 5, b = 6 }

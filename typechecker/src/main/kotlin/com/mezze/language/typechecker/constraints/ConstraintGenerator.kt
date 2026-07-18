@@ -123,7 +123,19 @@ class ConstraintGenerator(
             }
         }
 
-        for (item in module.decls) {
+        // Process decls so a callee is inferred before its caller whenever
+        // that ordering is unambiguous (acyclic). Without this, a call to a
+        // source-order-LATER top-level `let f = { ... }` sees only f's fresh
+        // monomorphic placeholder var (registered above), so the call
+        // constraint `FunctionType({args}) ~ 'placeholder` binds the var whole
+        // and never decomposes args against params — a polymorphic return then
+        // never pins to the concrete arg type and the caller's binding leaks
+        // `'a` (#126). Inferring f first registers its real Polymorphic scheme,
+        // so the call instantiates the true function type (the working
+        // "declared-before-use" path). Cycles (mutual recursion) keep source
+        // order — placeholder behaviour, no worse than before.
+        val orderedDecls = dependencyOrderedDecls(module.decls)
+        for (item in orderedDecls) {
             when (item) {
                 is ParsedLetDecl -> try {
                     val preConvertedAnnotationType = annotationTypes[item]
@@ -831,6 +843,128 @@ class ConstraintGenerator(
             is ParsedLiteralPattern -> "_literal"
             else -> "_pattern"
         }
+
+    /**
+     * Reorder decls so a top-level `let` callee is inferred before a caller
+     * that references it, when the dependency is acyclic. Only reorders `let`
+     * bindings relative to each other; every non-`let` decl keeps its original
+     * index, and lets are placed by a STABLE topological sort so unrelated
+     * bindings and cycles preserve source order (the previous behaviour). This
+     * makes a forward reference to a polymorphic fn resolve to its real scheme
+     * instead of a monomorphic placeholder var (#126).
+     *
+     * Edges: `let a` depends on `let b` iff a's body references the name `b`
+     * (b bound by another top-level `let`). Self-references and cycles are
+     * broken by falling back to source order — safe because that reproduces
+     * today's placeholder path, which is already correct for direct/mutual
+     * recursion (the callee is in scope via its own placeholder).
+     */
+    private fun dependencyOrderedDecls(decls: List<ParsedDecl>): List<ParsedDecl> {
+        val lets = decls.filterIsInstance<ParsedLetDecl>()
+        if (lets.size < 2) return decls  // nothing to reorder
+
+        val letByName: Map<String, ParsedLetDecl> = lets
+            .filter { it.isSimpleBinding }
+            .associateBy { it.variableName }
+        if (letByName.isEmpty()) return decls
+
+        // Dependencies: name -> set of top-level let names its body references.
+        val deps: Map<ParsedLetDecl, Set<ParsedLetDecl>> = lets.associateWith { d ->
+            val referenced = mutableSetOf<String>()
+            collectReferencedNames(d.value, referenced)
+            referenced.mapNotNull { name ->
+                letByName[name]?.takeIf { it !== d }  // ignore self-reference
+            }.toSet()
+        }
+
+        // Stable DFS post-order → callee-before-caller. Cycles: a node already
+        // on the stack is skipped (edge dropped), so the cycle keeps the order
+        // its members are first visited in, i.e. source order.
+        val sortedLets = ArrayList<ParsedLetDecl>(lets.size)
+        val visited = HashSet<ParsedLetDecl>()
+        val onStack = HashSet<ParsedLetDecl>()
+        fun visit(d: ParsedLetDecl) {
+            if (d in visited) return
+            onStack.add(d)
+            for (dep in deps[d].orEmpty()) {
+                if (dep !in onStack) visit(dep)
+            }
+            onStack.remove(d)
+            visited.add(d)
+            sortedLets.add(d)
+        }
+        for (d in lets) visit(d)  // source order drives the outer walk → stable
+
+        // If the topo order equals source order (no forward references to
+        // reorder — the overwhelmingly common case), return the original list
+        // unchanged so this pass is a guaranteed no-op. Compare by identity so
+        // destructuring lets (record patterns, no `variableName`) are safe.
+        if (sortedLets.zip(lets).all { (a, b) -> a === b }) return decls
+
+        // Weave the sorted lets back into the original decl stream, keeping
+        // every non-let decl at its original position.
+        val letQueue = ArrayDeque(sortedLets)
+        return decls.map { decl ->
+            if (decl is ParsedLetDecl) letQueue.removeFirst() else decl
+        }
+    }
+
+    /**
+     * Collect FREE identifier names referenced inside an expr — names that
+     * resolve to an enclosing/top-level binding, not to a local one. Must be
+     * scope-aware: a lambda param / do-let / match-binding named `x` shadows a
+     * top-level `x`, so a reference under that binder is NOT a dependency on the
+     * top-level `x`. Ignoring this created false edges (and false cycles, e.g.
+     * `let f = {x} -> x` "depending on" a top-level `x`) that mis-reordered
+     * unrelated bindings. `bound` is the set of names shadowed at this point.
+     */
+    private fun collectReferencedNames(
+        expr: ParsedExpr,
+        out: MutableSet<String>,
+        bound: Set<String> = emptySet(),
+    ) {
+        when (expr) {
+            is ParsedIdentifier ->
+                if (expr.qualifier == null && expr.localName !in bound) out.add(expr.localName)
+            is ParsedLambda -> {
+                val params = when (val p = expr.params) {
+                    is ParsedLambdaParams.Untyped -> p.names
+                    is ParsedLambdaParams.Typed -> p.fields.map { it.name }
+                }
+                collectReferencedNames(expr.body, out, bound + params)
+            }
+            is ParsedDo -> {
+                // A do-block's `let`/`bind` names scope over later statements
+                // and the result; accumulate them left-to-right.
+                var scope = bound
+                for (stmt in expr.statements) {
+                    when (stmt) {
+                        is ParsedStatement.Let -> {
+                            collectReferencedNames(stmt.value, out, scope)
+                            scope = scope + stmt.pattern.extractBindings()
+                        }
+                        is ParsedStatement.Bind -> {
+                            collectReferencedNames(stmt.expr, out, scope)
+                            scope = scope + stmt.pattern.extractBindings()
+                        }
+                        is ParsedStatement.Expr -> collectReferencedNames(stmt.expr, out, scope)
+                    }
+                }
+                collectReferencedNames(expr.result, out, scope)
+            }
+            is ParsedMatch -> {
+                collectReferencedNames(expr.scrutinee, out, bound)
+                for (case in expr.cases) {
+                    val caseBound = bound + case.patterns.flatMap { it.extractBindings() } +
+                        case.ifLetBindings.flatMap { it.pattern.extractBindings() }
+                    case.guard?.let { collectReferencedNames(it, out, caseBound) }
+                    case.ifLetBindings.forEach { collectReferencedNames(it.expr, out, caseBound) }
+                    collectReferencedNames(case.body, out, caseBound)
+                }
+            }
+            else -> for (child in expr.children()) collectReferencedNames(child, out, bound)
+        }
+    }
 
     private fun convertTypeAnnotation(annotation: ParsedTypeAnnotation): MezzeType {
         typeVarCache.clear()

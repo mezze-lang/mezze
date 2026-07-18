@@ -427,11 +427,13 @@ internal val MezzeParser.recordLiteral: Parser<ParsedExpr>
                     val (afterAnn, ann) = skipNewlinesCollectAnnotations(cur)
                     cur = afterAnn
                     val here = cur.current()
-                    // Stop at `}`. A trailing `...` with a `}` right after is the
-                    // open-record marker (handled below); a `...expr` spread is a
-                    // real entry, so only bail on a bare `... }`.
+                    // Stop at `}`. A trailing `...` with a `}` after it (possibly
+                    // across newlines, for a multi-line record) is the open-record
+                    // marker (handled below); a `...expr` spread is a real entry,
+                    // so only bail on a bare `...` that closes the record.
                     if (here == null || here.type == TokenType.RBRACE) break
-                    if (here.type == TokenType.ELLIPSIS && cur.advance().current()?.type == TokenType.RBRACE) break
+                    if (here.type == TokenType.ELLIPSIS &&
+                        skipNewlinesOnly(cur.advance()).current()?.type == TokenType.RBRACE) break
 
                     val entryResult = recordLiteralEntryParser(cur)
                     if (entryResult !is ParseResult.Success) {
