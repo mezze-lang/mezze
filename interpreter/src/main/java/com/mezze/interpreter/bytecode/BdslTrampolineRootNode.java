@@ -66,6 +66,35 @@ public final class BdslTrampolineRootNode extends RootNode {
     private RootCallTarget innerTarget;
     private final String name;
 
+    /**
+     * ABI-unpack metadata. When {@code parameterCount == 0} and
+     * {@code closureCount == 0} the trampoline just forwards args
+     * verbatim — same behaviour as before the record-ABI work landed.
+     *
+     * <p>When {@code parameterCount > 0}, {@link #execute} rewrites the
+     * incoming {@code Object[]} into the flat scalar layout the BDSL
+     * bytecode expects: {@code [closureValues..., paramValues...]}.
+     * Record ABI callers pass a single {@link com.mezze.interpreter.values.MezzeRecord}
+     * (or empty record); scalar callers pass values positionally with a
+     * marker in the arity-1 case. This mirrors
+     * {@code MezzeFunctionRootNode.execute}'s discrimination.
+     */
+    private final int closureCount;
+    private final int parameterCount;
+    @CompilerDirectives.CompilationFinal(dimensions = 1)
+    private final String[] parameterNames;
+
+    /**
+     * Cached record shape → field index array. Empty until the first
+     * record-ABI unpack; when the record's shape matches the cached one,
+     * lookup is O(1). Miss → recompute and re-cache (transferring to
+     * interpreter). Same pattern as {@code MezzeFunctionRootNode}.
+     */
+    @CompilerDirectives.CompilationFinal
+    private Object cachedShape;
+    @CompilerDirectives.CompilationFinal(dimensions = 1)
+    private int[] cachedFieldIndices;
+
     @Child
     private LoopNode loop;
 
@@ -79,19 +108,31 @@ public final class BdslTrampolineRootNode extends RootNode {
         attachInner(inner);
     }
 
-    /**
-     * Two-phase constructor: create the trampoline first, register its
-     * CallTarget under the function's hash, then compile the inner BDSL
-     * root (which sees this trampoline as its own callee for
-     * self-tail-calls), then call {@link #attachInner}.
-     */
+    /** Legacy two-phase constructor used by pre-registration paths that don't yet know ABI metadata. */
     public BdslTrampolineRootNode(MezzeLanguage language, String name) {
+        this(language, name, 0, 0, EMPTY_STRINGS);
+    }
+
+    /**
+     * Two-phase constructor with ABI metadata: create the trampoline
+     * first, register its CallTarget under the function's hash, then
+     * compile the inner BDSL root (which sees this trampoline as its
+     * own callee for self-tail-calls), then call {@link #attachInner}.
+     */
+    public BdslTrampolineRootNode(MezzeLanguage language, String name,
+                                  int closureCount, int parameterCount,
+                                  String[] parameterNames) {
         super(language, makeDescriptor());
         this.name = name;
+        this.closureCount = closureCount;
+        this.parameterCount = parameterCount;
+        this.parameterNames = parameterNames != null ? parameterNames : EMPTY_STRINGS;
         this.argsSlot = 0;
         this.targetSlot = 1;
         this.resultSlot = 2;
     }
+
+    private static final String[] EMPTY_STRINGS = new String[0];
 
     private static FrameDescriptor makeDescriptor() {
         FrameDescriptor.Builder b = FrameDescriptor.newBuilder();
@@ -111,8 +152,7 @@ public final class BdslTrampolineRootNode extends RootNode {
         }
         this.innerTarget = inner.getCallTarget();
         this.loop = insert(Truffle.getRuntime().createLoopNode(
-                new TrampolineRepeatingNode(getCallTarget(), innerTarget,
-                        argsSlot, targetSlot, resultSlot)));
+                new TrampolineRepeatingNode(this)));
     }
 
     @Override
@@ -122,10 +162,106 @@ public final class BdslTrampolineRootNode extends RootNode {
             throw new IllegalStateException(
                     "BdslTrampolineRootNode[" + name + "] executed before attachInner");
         }
-        frame.setObject(argsSlot, frame.getArguments());
+        Object[] rawArgs = frame.getArguments();
+        Object[] flatArgs = parameterCount == 0
+                ? rawArgs
+                : normalizeArgs(rawArgs);
+        frame.setObject(argsSlot, flatArgs);
         frame.setObject(targetSlot, innerTarget);
         loop.execute(frame);
         return frame.getObject(resultSlot);
+    }
+
+    /** Package-private hook for the repeating node to re-normalise args on tail-call resume. */
+    Object[] normalizeIfNeeded(Object[] args) {
+        return parameterCount == 0 ? args : normalizeArgs(args);
+    }
+
+    /**
+     * Rewrite the incoming arg array into BDSL's flat scalar layout
+     * {@code [closureValues..., paramValues...]}. Mirrors the ABI
+     * discrimination in {@code MezzeFunctionRootNode.execute}:
+     * <ul>
+     *   <li>{@code paramCount == 1}: scalar caller writes
+     *       {@code ScalarABIMarker.INSTANCE} before the value; record
+     *       caller writes the record directly.</li>
+     *   <li>{@code paramCount >= 2}: scalar layout is
+     *       {@code args.length == closureCount + paramCount}; record
+     *       layout is {@code args.length == closureCount + 1}.</li>
+     *   <li>{@code paramCount == 0}: handled by the fast path above.</li>
+     * </ul>
+     *
+     * <p>Typed payloads (LONG / DOUBLE / MIXED markers) are not yet
+     * handled here — the caller falls back to the record/scalar
+     * discrimination. Adding them would let numeric hot loops through
+     * BDSL avoid the boxing round-trip. Deferred until we measure need.
+     */
+    private Object[] normalizeArgs(Object[] args) {
+        // Scalar ABI marker for the 1-param collision case.
+        if (parameterCount == 1
+                && args.length > closureCount
+                && args[closureCount] == com.mezze.interpreter.nodes.function.ScalarABIMarker.INSTANCE) {
+            // Scalar layout is [closures..., MARKER, value]. Flatten to
+            // [closures..., value].
+            Object[] flat = new Object[closureCount + 1];
+            System.arraycopy(args, 0, flat, 0, closureCount);
+            if (args.length > closureCount + 1) {
+                flat[closureCount] = args[closureCount + 1];
+            }
+            return flat;
+        }
+        if (parameterCount >= 2) {
+            // 2+ params: disambiguate by arity. Scalar layout is
+            // args.length == closureCount + parameterCount; record
+            // layout is args.length == closureCount + 1.
+            int scalarArity = closureCount + parameterCount;
+            if (args.length == scalarArity) {
+                return args; // already flat
+            }
+        }
+        // Record ABI: args[closureCount] holds the MezzeRecord to unpack.
+        if (args.length > closureCount
+                && args[closureCount] instanceof com.mezze.interpreter.values.MezzeRecord rec) {
+            // Edge case (paramCount==1 only): the callee's paramName
+            // might not correspond to a field in the record — meaning
+            // the callee expects the RAW record as its single arg (its
+            // body reads .field via ReadFieldIR). Detect by probing the
+            // record for the paramName; if absent, pass the record
+            // verbatim.
+            if (parameterCount == 1
+                    && rec.getFieldIndex(parameterNames[0]) < 0) {
+                return args;
+            }
+            Object[] flat = new Object[closureCount + parameterCount];
+            for (int i = 0; i < closureCount; i++) flat[i] = args[i];
+            unpackRecord(rec, flat);
+            return flat;
+        }
+        // No record present and not a recognised scalar shape — pass
+        // through and let BDSL's LoadArgument throw a clearer error if
+        // a param slot is missing.
+        return args;
+    }
+
+    private void unpackRecord(com.mezze.interpreter.values.MezzeRecord rec, Object[] flat) {
+        Object shape = rec.getShape();
+        int[] indices = cachedFieldIndices;
+        if (shape == cachedShape && indices != null) {
+            for (int i = 0; i < parameterCount; i++) {
+                int fi = indices[i];
+                if (fi >= 0) flat[closureCount + i] = rec.getField(fi);
+            }
+            return;
+        }
+        CompilerDirectives.transferToInterpreterAndInvalidate();
+        int[] fresh = new int[parameterCount];
+        for (int i = 0; i < parameterCount; i++) {
+            int fi = rec.getFieldIndex(parameterNames[i]);
+            fresh[i] = fi;
+            if (fi >= 0) flat[closureCount + i] = rec.getField(fi);
+        }
+        this.cachedFieldIndices = fresh;
+        this.cachedShape = shape;
     }
 
     @Override
@@ -152,6 +288,7 @@ public final class BdslTrampolineRootNode extends RootNode {
      */
     private static final class TrampolineRepeatingNode extends Node implements RepeatingNode {
 
+        private final BdslTrampolineRootNode owner;
         private final CallTarget outerTarget;
         private final RootCallTarget innerTarget;
         private final int argsSlot;
@@ -164,13 +301,13 @@ public final class BdslTrampolineRootNode extends RootNode {
         @Child
         private IndirectCallNode crossCall;
 
-        TrampolineRepeatingNode(CallTarget outerTarget, RootCallTarget innerTarget,
-                                int argsSlot, int targetSlot, int resultSlot) {
-            this.outerTarget = outerTarget;
-            this.innerTarget = innerTarget;
-            this.argsSlot = argsSlot;
-            this.targetSlot = targetSlot;
-            this.resultSlot = resultSlot;
+        TrampolineRepeatingNode(BdslTrampolineRootNode owner) {
+            this.owner = owner;
+            this.outerTarget = owner.getCallTarget();
+            this.innerTarget = owner.innerTarget;
+            this.argsSlot = owner.argsSlot;
+            this.targetSlot = owner.targetSlot;
+            this.resultSlot = owner.resultSlot;
             this.selfCall = DirectCallNode.create(innerTarget);
             this.crossCall = IndirectCallNode.create();
         }
@@ -195,8 +332,20 @@ public final class BdslTrampolineRootNode extends RootNode {
                     result = crossCall.call(target, args);
                 }
             } catch (TailCallException tce) {
+                // Tail-call resume: normalise the new args in case they
+                // still carry a caller-side ScalarABIMarker or record.
+                // The tail-caller doesn't know whether the target is BDSL
+                // (which wants flat args) or AST (which wants scalar/
+                // record shape). Since we're about to re-enter innerTarget
+                // (or another trampolined target of the same shape), the
+                // owner's paramCount + closureCount govern.
                 frame.setObject(targetSlot, tce.getCallTarget());
-                frame.setObject(argsSlot, tce.getArguments());
+                Object[] rawArgs = tce.getArguments();
+                if (tce.getCallTarget() == outerTarget
+                        || tce.getCallTarget() == innerTarget) {
+                    rawArgs = owner.normalizeIfNeeded(rawArgs);
+                }
+                frame.setObject(argsSlot, rawArgs);
                 return true;
             }
             frame.setObject(resultSlot, result);

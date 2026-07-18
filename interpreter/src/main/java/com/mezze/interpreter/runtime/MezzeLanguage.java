@@ -169,22 +169,27 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      * match the paramNames in order (the same "unpackRecordFast" shape).
      *
      * <p>Zero-param zero-capture "value thunks" (constants like
-     * {@code math::e}, top-level {@code let x = ...}) are now safe —
+     * {@code math::e}, top-level {@code let x = ...}) are safe because
      * {@code ReadGlobalByHashNode.autoEvaluateThunk} recognises BDSL
      * roots as thunk-eligible.
+     *
+     * <p>Non-zero-param callees are safe because
+     * {@link com.mezze.interpreter.bytecode.BdslTrampolineRootNode#execute}
+     * normalises record ABI into the flat scalar layout BDSL's
+     * {@code LoadArgument(i)} expects (see
+     * {@link com.mezze.interpreter.bytecode.BdslTrampolineRootNode#normalizeArgs}).
      *
      * <p>Excluded: bodies that contain a {@code ReadFieldIR} on any
      * subtree. BDSL's ReadFieldByName op currently mishandles records
      * carried through closure captures inside {@code do}-block
      * destructuring (see DestructuringRenameIntegrationTest
      * .testMultipleRenamesInDoBlock — the op receives {@code String, Long}
-     * instead of {@code MezzeRecord, String}). Skipping such thunks
+     * instead of {@code MezzeRecord, String}). Skipping such bodies
      * keeps them on the AST path until the BDSL emit for ReadField is
      * fixed. Value-constants (numbers, strings, seq literals) are
      * unaffected since they have no ReadFieldIR.
      */
     private static boolean isBdslSafeCallee(com.mezze.language.truffleir.FunctionIR ir) {
-        if (!ir.getParamSlots().isEmpty()) return false;
         return !hasReadField(ir.getBody());
     }
 

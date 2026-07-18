@@ -381,8 +381,12 @@ public final class BytecodeCompiler {
             // supports()/emit()). Non-tail-calling functions can't
             // self-reference in a way that needs pre-registration.
             if (hasTailCall(ir.getBody())) {
+                final int cc = ir.getCaptureSlots().size();
+                final int pc = ir.getParamSlots().size();
+                final String[] pn = ir.getParamNames().toArray(new String[0]);
                 compiledCallTargets.computeIfAbsent(ir.getHash(),
-                        h -> new BdslTrampolineRootNode(language, ir.getName()).getCallTarget());
+                        h -> new BdslTrampolineRootNode(
+                                language, ir.getName(), cc, pc, pn).getCallTarget());
             }
             if (!supports(ir)) {
                 throw new IllegalArgumentException(
@@ -409,11 +413,17 @@ public final class BytecodeCompiler {
         final int argCount = ir.getCaptureSlots().size() + ir.getParamSlots().size();
         final int localCount = ir.getLocalSlots().size();
 
-        // Fast-path: if the body has NO tail calls, the BDSL root never
-        // throws TailCallException, so the trampoline wrapper is dead
-        // weight (~15-20ns per call from the outer LoopNode + DirectCallNode
-        // indirection). Skip the wrapper and return the raw BDSL root.
-        final boolean needsTrampoline = hasTailCall(ir.getBody());
+        // Wrap the raw BDSL root in a trampoline when EITHER:
+        //   (a) the body has tail calls (need the LoopNode + catch loop),
+        //   OR
+        //   (b) the function has parameters (need the outer node to
+        //       normalise record ABI into the flat scalar layout BDSL
+        //       expects — see BdslTrampolineRootNode.normalizeArgs).
+        // Zero-param zero-tail-call bodies skip the wrapper entirely.
+        final boolean hasTail = hasTailCall(ir.getBody());
+        final int captureCount = ir.getCaptureSlots().size();
+        final int paramCount = ir.getParamSlots().size();
+        final boolean needsTrampoline = hasTail || paramCount > 0;
 
         // Two-phase construction to support self-recursion:
         //   1. Create (or reuse a pre-registered) trampoline WITHOUT its
@@ -450,10 +460,12 @@ public final class BytecodeCompiler {
                     && t.getInnerTarget() == null) {
                 existing = t;
             }
+            String[] paramNames = ir.getParamNames().toArray(new String[0]);
             if (existing != null) {
                 trampoline = existing;
             } else {
-                trampoline = new BdslTrampolineRootNode(language, ir.getName());
+                trampoline = new BdslTrampolineRootNode(
+                        language, ir.getName(), captureCount, paramCount, paramNames);
                 compiledCallTargets.put(ir.getHash(), trampoline.getCallTarget());
             }
         }
@@ -675,14 +687,35 @@ public final class BytecodeCompiler {
                     "CallDirectIR references unknown target hash "
                     + c.getTargetHash().getHex() + " — callee must be compiled first");
             }
+            // Scalar-ABI callee-shape rule: paramCount==1 collides with
+            // record ABI arity, so the caller MUST push ScalarABIMarker
+            // before the value. AST callers do this in DirectCallScalar*.
+            // BDSL's CallDirectN passes args verbatim to the callee's
+            // CallTarget; without the marker the AST callee (via
+            // MezzeFunctionRootNode.execute) misreads args and throws
+            // "Expected record argument". BDSL sees paramCount==1
+            // scalar-ABI calls from CallDirectIR.
+            //
+            // See MezzeFunctionRootNode's disambiguation for the full
+            // discipline; paramCount==0 (empty args) and paramCount>=2
+            // (arity distinct from record) don't need the marker.
+            boolean needsScalarMarker = c.getArgs().size() == 1;
             if (c.isTailCall()) {
                 b.beginTailCallDirectN(target);
+                if (needsScalarMarker) {
+                    b.emitLoadObjectConstant(
+                            com.mezze.interpreter.nodes.function.ScalarABIMarker.INSTANCE);
+                }
                 for (NodeIR arg : c.getArgs()) {
                     emitNode(arg, b, argCount, localMap);
                 }
                 b.endTailCallDirectN();
             } else {
                 b.beginCallDirectN(target);
+                if (needsScalarMarker) {
+                    b.emitLoadObjectConstant(
+                            com.mezze.interpreter.nodes.function.ScalarABIMarker.INSTANCE);
+                }
                 for (NodeIR arg : c.getArgs()) {
                     emitNode(arg, b, argCount, localMap);
                 }
