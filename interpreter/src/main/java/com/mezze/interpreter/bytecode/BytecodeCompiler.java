@@ -29,6 +29,9 @@ import com.mezze.language.truffleir.SeqElementIR;
 import com.mezze.language.truffleir.MatchIR;
 import com.mezze.language.truffleir.NodeIR;
 import com.mezze.language.truffleir.PatternIR;
+import com.mezze.language.truffleir.FracLitIR;
+import com.mezze.language.truffleir.ReadArgIR;
+import com.mezze.language.truffleir.ReadCaptureIR;
 import com.mezze.language.truffleir.ReadFieldIR;
 import com.mezze.language.truffleir.ReadGlobalByHashIR;
 import com.mezze.language.truffleir.ReadGlobalFnByHashIR;
@@ -220,6 +223,9 @@ public final class BytecodeCompiler {
         if (node instanceof ReadLocalIR) return true;
         if (node instanceof ReadGlobalByHashIR) return true;
         if (node instanceof ReadGlobalFnByHashIR) return true;
+        if (node instanceof FracLitIR) return true;
+        if (node instanceof ReadArgIR) return true;
+        if (node instanceof ReadCaptureIR) return true;
         if (node instanceof WriteLocalIR w) {
             return supportsNode(w.getValue(), argCount);
         }
@@ -654,6 +660,30 @@ public final class BytecodeCompiler {
         }
         if (node instanceof ReadGlobalFnByHashIR g) {
             b.emitReadGlobalFnByHash(g.getHash());
+            return;
+        }
+        if (node instanceof ReadArgIR r) {
+            // ReadArgIR reads a captured/param slot by raw arg index.
+            // The BDSL layout puts captures + params at args[0..argCount).
+            b.emitLoadArgument(r.getIndex());
+            return;
+        }
+        if (node instanceof ReadCaptureIR r) {
+            // ReadCaptureIR reads a capture at args[index] — captures
+            // are laid out at the head of the argument list.
+            b.emitLoadArgument(r.getIndex());
+            return;
+        }
+        if (node instanceof FracLitIR f) {
+            // Build the {numerator, denominator} record at emit time and
+            // bake it as an object constant. This matches
+            // FracLiteralNode.execute which caches on first call — we
+            // avoid the runtime cache-check for a smaller hot path.
+            String[] fields = new String[]{"numerator", "denominator"};
+            com.mezze.interpreter.values.MezzeRecord frac =
+                com.mezze.interpreter.values.MezzeRecord.fromFields(
+                    fields, new Object[]{f.getNumerator(), f.getDenominator()});
+            b.emitLoadObjectConstant(frac);
             return;
         }
         if (node instanceof WriteLocalIR w) {
