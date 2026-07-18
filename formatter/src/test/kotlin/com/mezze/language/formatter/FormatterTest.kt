@@ -18,6 +18,34 @@ class FormatterTest {
     }
 
     @Test
+    fun `formatting preserves a multi-line doc comment after a do-block decl`() {
+        // Regression (#127): the parser used to drop the `##` doc block on a
+        // decl declared after a do-block decl, so the formatter had nothing to
+        // print and appeared to "remove" the doc. Formatting must round-trip
+        // the whole multi-line markdown doc.
+        val input = """
+            let main = {} -> do
+              let x = 1
+              x
+
+            ## This is a doc comment
+            ## # Heading
+            ## - a list item
+            let help = { a, b } -> a + b
+        """.trimIndent()
+        val output = formatter.format(input)
+        assertTrue(output.contains("## This is a doc comment"),
+            "doc line dropped by formatter:\n$output")
+        assertTrue(output.contains("## # Heading"),
+            "markdown heading dropped:\n$output")
+        assertTrue(output.contains("## - a list item"),
+            "list item dropped:\n$output")
+        // Idempotent: formatting the output again is a fixed point.
+        assertEquals(output, formatter.format(output),
+            "formatting is not idempotent for doc comments")
+    }
+
+    @Test
     fun `format let binding with type annotation`() {
         val input = "let x: Int = 42"
         val output = formatter.format(input)
