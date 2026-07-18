@@ -65,15 +65,47 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     val hasUndefinedVariables = exprResult.undefinedVariables.isNotEmpty()
     val bodyHasNativeCall = bodyContainsNativeCall(expr.body)
     val shouldValidate = (!isNestedPerform || canValidateNestedPerform) && !hasPolymorphicEffects && !hasUndefinedVariables && !bodyHasNativeCall
-    // V0508/V0509/V0510 relaxed 2026-07 for #274. Installing a handler
-    // for an effect the body doesn't visibly perform is a runtime no-op
-    // as far as the typechecker can see — but it's often load-bearing
-    // for spawned children (Async.spawn snapshots the handler chain at
-    // spawn time; those handlers need to be available even though the
-    // parent's effect row shows no direct use). Kept as suppressed dead
-    // code for reference. Reach for a lint pass (W0xxx) if we want to
-    // warn on truly-unnecessary handlers with better ergonomics.
-    @Suppress("UNUSED_VARIABLE") val _unusedHandlerChecksDeferred = shouldValidate
+
+    // V0510: installing a handler for an effect the body doesn't perform
+    // is a bug. Spawn is now effect-transparent (`<...>` on both sides), so
+    // effects from spawned children DO surface in the parent's row —
+    // meaning we can honestly check "is this handler's effect actually in
+    // the body's row?" without false positives around spawn.
+    //
+    // Skip when:
+    //   - body's effect row is polymorphic (a row var could pick anything)
+    //   - body has native call (opaque)
+    //   - body has undefined vars (constraint gen incomplete)
+    //   - a nested perform whose inner body isn't yet analyzed
+    // V0510: installing a handler for an effect the body doesn't perform
+    // is a bug. Fire only when we can be CONFIDENT the handler is dead:
+    // the body's inferred row is empty (no effects at all) AND no
+    // performerAddedEffects tell us the handler chain would transitively
+    // require it. This rejects `perform Console in 1 + 2` cleanly while
+    // staying permissive around code that calls other functions or
+    // handlers whose transitive effect chain we can't fully see.
+    if (shouldValidate && !isNestedPerform && allEffects.isEmpty()) {
+        val transitivelyNeeded = expr.handlers
+            .flatMap { context.performerAddedEffects[it.performer.localName] ?: emptySet() }
+            .toSet()
+        val effectivelyPerformed = allEffects + transitivelyNeeded
+
+        for ((handlerName, effectName) in handlerEffects) {
+            if (effectName !in effectivelyPerformed) {
+                throw TypeCheckError(
+                    message = "Handler '$handlerName' handles effect '$effectName', but the body " +
+                        "performs nothing. Remove the handler, or add an op of '$effectName' " +
+                        "inside the `perform` body.",
+                    loc = expr.loc,
+                    errorType = ErrorType.CONSTRAINT_VIOLATION,
+                    code = ErrorCode.V0510_HANDLER_UNNECESSARY,
+                    hints = listOf(
+                        "if you meant to handle a different effect, change the handler",
+                    ),
+                )
+            }
+        }
+    }
 
     DebugLogger.debugSection(Category.ExpressionConstraints, "generatePerform") {
         listOf(
