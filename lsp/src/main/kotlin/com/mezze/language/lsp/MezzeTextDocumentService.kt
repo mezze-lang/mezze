@@ -86,7 +86,15 @@ class MezzeTextDocumentService(
         Thread(r, "mezze-lsp-analysis").apply { isDaemon = true }
     }
     private val pendingAnalysis = ConcurrentHashMap<String, ScheduledFuture<*>>()
-    private val DEBOUNCE_MS: Long = 150
+    // Debounce after the last keystroke before re-analyzing. A full re-check
+    // (constraint solve + imports) costs O(100s of ms) even for a small file,
+    // so a longer window keeps active typing smooth; diagnostics still land a
+    // beat after you pause. (Cheap mitigation ahead of #59 incremental caching.)
+    private val DEBOUNCE_MS: Long = 400
+    // Content last handed to analyzeDocument per URI — lets the debounce skip a
+    // redundant re-check when an edit round-trips to identical text (VS Code
+    // sometimes emits didChange for no textual change, e.g. some cursor ops).
+    private val lastAnalyzedContent = ConcurrentHashMap<String, String>()
 
     // Store for project mode (will be rebuilt in LSP task #106)
     private var projectStore: MezzeStore? = null
@@ -274,6 +282,7 @@ class MezzeTextDocumentService(
         // it), so persisting matches the "cache reflects files" rule.
         val state = analyzeDocument(uri, content, version, persistToStore = true)
         documents[uri] = state
+        lastAnalyzedContent[uri] = content
 
         // Publish diagnostics
         publishDiagnostics(uri, state.diagnostics)
@@ -309,7 +318,11 @@ class MezzeTextDocumentService(
         lateinit var taskRef: ScheduledFuture<*>
         taskRef = analysisScheduler.schedule({
             try {
+                // Skip the (expensive) re-check if the text is byte-identical to
+                // what we last analyzed — a no-op edit shouldn't re-solve.
+                if (lastAnalyzedContent[uri] == content) return@schedule
                 val state = analyzeDocument(uri, content, version, persistToStore = false)
+                lastAnalyzedContent[uri] = content
                 documents[uri] = state
                 publishDiagnostics(uri, state.diagnostics)
             } finally {
@@ -335,6 +348,7 @@ class MezzeTextDocumentService(
         // the largest source of LSP-side memory growth across long
         // editing sessions.
         lastSuccessfulResult.remove(uri)
+        lastAnalyzedContent.remove(uri)
 
         // Clear diagnostics
         publishDiagnostics(uri, emptyList())
