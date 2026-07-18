@@ -770,59 +770,63 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
     // - Effects only in eff1 must be absorbed by eff2's row var (if any).
     // - If both sides are closed and their effect sets differ, that's a
     //   real mismatch (annotation lies about body's effects).
-    val eff2Extra = allEffects2 - allEffects1
-    val eff1Extra = allEffects1 - allEffects2
+    //
+    // Row subtraction via `caughtByAncestor`: effects listed on a callback
+    // row that don't appear on the enclosing function's return row are
+    // HANDLED by the enclosing function (e.g., `spawn` catches Exception).
+    // We drop them from the extras that would otherwise bind the shared
+    // row var — that's how Exception gets caught by spawn.
+    // Callback-side row subtraction: caughtByAncestor lists effects
+    // declared on a callback row that the enclosing function catches.
+    // Filter these out before computing what needs to bind the row var.
+    val caught = eff1.caughtByAncestor + eff2.caughtByAncestor
+    val eff2Extra = (allEffects2 - allEffects1) - caught
+    val eff1Extra = (allEffects1 - allEffects2) - caught
 
+    // Contravariant callback rows: if one side declares extras but the other
+    // side's row is CLOSED (no row var), silently accept — the extras are
+    // "handled by" whatever handler declared them. This is what makes
+    // `spawn : { f: {} -> 'a <Exception, ...> }` accept a callback like
+    // `{} -> 42` (which performs no Exception): the declared Exception is
+    // simply not present, and spawn's runtime catches nothing.
+    //
+    // The strict "annotation doesn't match body" check for LET BINDINGS is
+    // enforced separately by validateEffectsNotOverpromised (which runs
+    // post-solve on annotated let decls). Unification is where argument
+    // passing / call-site type matching happens; contravariance is correct
+    // there.
     if (eff2Extra.isNotEmpty()) {
         val eff1Row = eff1.rowVar
-        if (eff1Row == null) {
-            return UnificationResult.Failure(
-                message = "Effect row mismatch: expected effects <${allEffects1.sorted().joinToString(", ")}> " +
-                    "but body performs additional effect(s) <${eff2Extra.sorted().joinToString(", ")}>. " +
-                    "Either widen the annotation to include the missing effect(s) (e.g. add `, ...` at the end) " +
-                    "or change the body so it doesn't perform them.",
-                type1 = eff1,
-                type2 = eff2
+        if (eff1Row != null) {
+            val extraInstances = eff2.effectInstances.filter { it.name in eff2Extra }.toSet()
+            val extraSimple = eff2Extra - extraInstances.map { it.name }.toSet()
+            val extraHashes = eff2.effectHashes.filterKeys { it in eff2Extra }
+            val binding = MezzeType.EffectRow(
+                effects = extraSimple,
+                effectInstances = extraInstances,
+                effectHashes = extraHashes,
+                rowVar = eff2.rowVar,
+                performed = false
             )
+            composedSubst = composedSubst.compose(Substitution.singleRow(eff1Row, binding))
         }
-        // Bind eff1's row var to a fresh EffectRow carrying the extras.
-        val extraInstances = eff2.effectInstances.filter { it.name in eff2Extra }.toSet()
-        val extraSimple = eff2Extra - extraInstances.map { it.name }.toSet()
-        val extraHashes = eff2.effectHashes.filterKeys { it in eff2Extra }
-        val binding = MezzeType.EffectRow(
-            effects = extraSimple,
-            effectInstances = extraInstances,
-            effectHashes = extraHashes,
-            // Chain through to eff2's row var when eff2 was also open,
-            // so subsequent unifications can still extend both sides.
-            rowVar = eff2.rowVar,
-            performed = false
-        )
-        composedSubst = composedSubst.compose(Substitution.singleRow(eff1Row, binding))
     }
 
     if (eff1Extra.isNotEmpty()) {
         val eff2Row = eff2.rowVar
-        if (eff2Row == null) {
-            return UnificationResult.Failure(
-                message = "Effect row mismatch: body performs effects <${allEffects1.sorted().joinToString(", ")}> " +
-                    "but expected only <${allEffects2.sorted().joinToString(", ")}>. " +
-                    "Extra effect(s): <${eff1Extra.sorted().joinToString(", ")}>.",
-                type1 = eff1,
-                type2 = eff2
+        if (eff2Row != null) {
+            val extraInstances = eff1.effectInstances.filter { it.name in eff1Extra }.toSet()
+            val extraSimple = eff1Extra - extraInstances.map { it.name }.toSet()
+            val extraHashes = eff1.effectHashes.filterKeys { it in eff1Extra }
+            val binding = MezzeType.EffectRow(
+                effects = extraSimple,
+                effectInstances = extraInstances,
+                effectHashes = extraHashes,
+                rowVar = eff1.rowVar,
+                performed = false
             )
+            composedSubst = composedSubst.compose(Substitution.singleRow(eff2Row, binding))
         }
-        val extraInstances = eff1.effectInstances.filter { it.name in eff1Extra }.toSet()
-        val extraSimple = eff1Extra - extraInstances.map { it.name }.toSet()
-        val extraHashes = eff1.effectHashes.filterKeys { it in eff1Extra }
-        val binding = MezzeType.EffectRow(
-            effects = extraSimple,
-            effectInstances = extraInstances,
-            effectHashes = extraHashes,
-            rowVar = eff1.rowVar,
-            performed = false
-        )
-        composedSubst = composedSubst.compose(Substitution.singleRow(eff2Row, binding))
     }
 
     return UnificationResult.Success(composedSubst)

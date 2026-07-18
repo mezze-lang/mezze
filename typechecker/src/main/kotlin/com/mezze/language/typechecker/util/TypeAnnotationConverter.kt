@@ -61,17 +61,10 @@ object TypeAnnotationConverter {
             }
 
             is ParsedFunctionType -> {
-                // #274-B: give each FunctionType its own SharedRowVar
-                // scope, so nested `<...>` rows (e.g. on a callback param)
-                // don't share a row var with the outer signature's row.
-                // Otherwise binding the outer row to the body's extra
-                // effects would leak into the callback's expected row too.
-                val innerSharedRowVar = SharedRowVar()
-                fun recurseInner(ann: ParsedTypeAnnotation) = convertInternal(ann, config, typeVarCache, innerSharedRowVar)
                 val effectRow = annotation.effects?.let { parsedRow ->
                     config.validateEffects?.invoke(parsedRow)
                     val rowVar = if (parsedRow.isPolymorphic) {
-                        innerSharedRowVar.getOrCreate()
+                        sharedRowVar.getOrCreate()
                     } else null
                     val hashes = config.resolveEffectHashes(parsedRow.effects.toSet())
                     if (config.convertEffectAnnotations && parsedRow.effectAnnotations.isNotEmpty()) {
@@ -100,9 +93,21 @@ object TypeAnnotationConverter {
                         abilityHash = config.resolveAbilityHash(constraint.abilityName)
                     )
                 }
+                val convertedParam = recurse(annotation.paramType)
+                val convertedReturn = recurse(annotation.returnType)
+                // Row subtraction on nested callback effect rows:
+                // Effects declared on a callback's row that DO NOT appear
+                // on this function's return row are handled by this
+                // function. Mark them on the callback's row so unification
+                // absorbs them without propagating through the shared row
+                // var. Example: `spawn : {f: {} -> 'a <Exception, ...>} ->
+                // Promise 'a <Async, ...>` — Exception is on the callback
+                // row but not the return, so it's caught by spawn.
+                val outerReturnEffectNames = effectRow?.allEffectNames ?: emptySet()
+                val paramWithCaughtStamped = stampCaughtOnCallbackRows(convertedParam, outerReturnEffectNames)
                 MezzeType.FunctionType(
-                    paramType = recurseInner(annotation.paramType),
-                    returnType = recurseInner(annotation.returnType),
+                    paramType = paramWithCaughtStamped,
+                    returnType = convertedReturn,
                     effects = effectRow,
                     abilityConstraints = abilityConstraints
                 )
@@ -298,5 +303,151 @@ object TypeAnnotationConverter {
             hints = hints,
             fixHints = fixHints,
         )
+    }
+
+    fun stampCaughtOnCallbackRowsPublic(
+        type: MezzeType,
+        outerReturnEffectNames: Set<String>
+    ): MezzeType = stampCaughtOnCallbackRows(type, outerReturnEffectNames)
+
+    /**
+     * Collect ALL `caughtByAncestor` effect names accumulated on any
+     * EffectRow reachable from `type` (used to pick up the union of
+     * caught effects from all nested callback rows).
+     */
+    fun collectCaughtByAncestorFromType(type: MezzeType): Set<String> {
+        val out = HashSet<String>()
+        collectCaughtByAncestorInto(type, out)
+        return out
+    }
+
+    private fun collectCaughtByAncestorInto(type: MezzeType, into: MutableSet<String>) {
+        when (type) {
+            is MezzeType.FunctionType -> {
+                type.effects?.let { into.addAll(it.caughtByAncestor) }
+                collectCaughtByAncestorInto(type.paramType, into)
+                collectCaughtByAncestorInto(type.returnType, into)
+            }
+            is MezzeType.RecordType -> type.fields.values.forEach { collectCaughtByAncestorInto(it, into) }
+            is MezzeType.VariantType -> type.constructors.values.forEach { it?.let { collectCaughtByAncestorInto(it, into) } }
+            is MezzeType.TypeApplication -> type.args.forEach { collectCaughtByAncestorInto(it, into) }
+            is MezzeType.SeqType -> collectCaughtByAncestorInto(type.elementType, into)
+            is MezzeType.ListType -> collectCaughtByAncestorInto(type.elementType, into)
+            is MezzeType.SetType -> collectCaughtByAncestorInto(type.elementType, into)
+            is MezzeType.SortedSetType -> collectCaughtByAncestorInto(type.elementType, into)
+            is MezzeType.MapType -> { collectCaughtByAncestorInto(type.keyType, into); collectCaughtByAncestorInto(type.valueType, into) }
+            is MezzeType.SortedMapType -> { collectCaughtByAncestorInto(type.keyType, into); collectCaughtByAncestorInto(type.valueType, into) }
+            is MezzeType.NewtypeType -> collectCaughtByAncestorInto(type.wrappedType, into)
+            is MezzeType.SuspendedType -> collectCaughtByAncestorInto(type.valueType, into)
+            is MezzeType.EffectRow -> into.addAll(type.caughtByAncestor)
+            is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
+            is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
+            is MezzeType.FracType, is MezzeType.OrderingType, is MezzeType.BytesType,
+            is MezzeType.ByteBufferType, is MezzeType.CharType -> {}
+        }
+    }
+
+    /**
+     * Stamp `caughtByAncestor` on ALL EffectRows reachable from `type`.
+     * Used on the return type of an op to propagate caught info to any
+     * nested effect rows (e.g., when the return is a function type with
+     * its own effect row that shares the outer row var).
+     */
+    fun stampCaughtOnAllEffectRowsPublic(type: MezzeType, caught: Set<String>): MezzeType =
+        stampCaughtOnAllEffectRows(type, caught)
+
+    private fun stampCaughtOnAllEffectRows(type: MezzeType, caught: Set<String>): MezzeType {
+        if (caught.isEmpty()) return type
+        return when (type) {
+            is MezzeType.FunctionType -> type.copy(
+                paramType = stampCaughtOnAllEffectRows(type.paramType, caught),
+                returnType = stampCaughtOnAllEffectRows(type.returnType, caught),
+                effects = type.effects?.copy(caughtByAncestor = type.effects!!.caughtByAncestor + caught)
+            )
+            is MezzeType.RecordType -> type.copy(
+                fields = type.fields.mapValues { (_, v) -> stampCaughtOnAllEffectRows(v, caught) }
+            )
+            is MezzeType.VariantType -> type.copy(
+                constructors = type.constructors.mapValues { (_, v) -> v?.let { stampCaughtOnAllEffectRows(it, caught) } }
+            )
+            is MezzeType.TypeApplication -> type.copy(args = type.args.map { stampCaughtOnAllEffectRows(it, caught) })
+            is MezzeType.SeqType -> type.copy(elementType = stampCaughtOnAllEffectRows(type.elementType, caught))
+            is MezzeType.ListType -> type.copy(elementType = stampCaughtOnAllEffectRows(type.elementType, caught))
+            is MezzeType.SetType -> type.copy(elementType = stampCaughtOnAllEffectRows(type.elementType, caught))
+            is MezzeType.SortedSetType -> type.copy(elementType = stampCaughtOnAllEffectRows(type.elementType, caught))
+            is MezzeType.MapType -> type.copy(
+                keyType = stampCaughtOnAllEffectRows(type.keyType, caught),
+                valueType = stampCaughtOnAllEffectRows(type.valueType, caught)
+            )
+            is MezzeType.SortedMapType -> type.copy(
+                keyType = stampCaughtOnAllEffectRows(type.keyType, caught),
+                valueType = stampCaughtOnAllEffectRows(type.valueType, caught)
+            )
+            is MezzeType.NewtypeType -> type.copy(wrappedType = stampCaughtOnAllEffectRows(type.wrappedType, caught))
+            is MezzeType.SuspendedType -> type
+            is MezzeType.EffectRow -> type.copy(caughtByAncestor = type.caughtByAncestor + caught)
+            is MezzeType.VarType, is MezzeType.IntType, is MezzeType.FloatType,
+            is MezzeType.StringType, is MezzeType.BoolType, is MezzeType.NatType,
+            is MezzeType.FracType, is MezzeType.OrderingType, is MezzeType.BytesType,
+            is MezzeType.ByteBufferType, is MezzeType.CharType -> type
+        }
+    }
+
+    /**
+     * Walk a MezzeType looking for nested FunctionTypes and stamp their
+     * effect rows with `caughtByAncestor` = (callback effects − outer
+     * return effects). This encodes "effects declared on the callback
+     * but not on the return are handled here" so unification can absorb
+     * them without propagating through the shared row var.
+     */
+    private fun stampCaughtOnCallbackRows(
+        type: MezzeType,
+        outerReturnEffectNames: Set<String>
+    ): MezzeType = when (type) {
+        is MezzeType.FunctionType -> {
+            val cbEffects = type.effects
+            val newCbEffects = if (cbEffects != null) {
+                val extras = cbEffects.allEffectNames - outerReturnEffectNames
+                if (extras.isNotEmpty()) {
+                    cbEffects.copy(caughtByAncestor = cbEffects.caughtByAncestor + extras)
+                } else cbEffects
+            } else null
+            // Recurse into this nested function's own params and returns
+            // in case there are further nested callbacks.
+            val newReturnEffectNames = newCbEffects?.allEffectNames ?: emptySet()
+            type.copy(
+                paramType = stampCaughtOnCallbackRows(type.paramType, newReturnEffectNames),
+                returnType = stampCaughtOnCallbackRows(type.returnType, outerReturnEffectNames),
+                effects = newCbEffects
+            )
+        }
+        is MezzeType.RecordType -> type.copy(
+            fields = type.fields.mapValues { (_, v) -> stampCaughtOnCallbackRows(v, outerReturnEffectNames) }
+        )
+        is MezzeType.VariantType -> type.copy(
+            constructors = type.constructors.mapValues { (_, v) -> v?.let { stampCaughtOnCallbackRows(it, outerReturnEffectNames) } }
+        )
+        is MezzeType.TypeApplication -> type.copy(
+            args = type.args.map { stampCaughtOnCallbackRows(it, outerReturnEffectNames) }
+        )
+        is MezzeType.SeqType -> type.copy(elementType = stampCaughtOnCallbackRows(type.elementType, outerReturnEffectNames))
+        is MezzeType.ListType -> type.copy(elementType = stampCaughtOnCallbackRows(type.elementType, outerReturnEffectNames))
+        is MezzeType.SetType -> type.copy(elementType = stampCaughtOnCallbackRows(type.elementType, outerReturnEffectNames))
+        is MezzeType.SortedSetType -> type.copy(elementType = stampCaughtOnCallbackRows(type.elementType, outerReturnEffectNames))
+        is MezzeType.MapType -> type.copy(
+            keyType = stampCaughtOnCallbackRows(type.keyType, outerReturnEffectNames),
+            valueType = stampCaughtOnCallbackRows(type.valueType, outerReturnEffectNames)
+        )
+        is MezzeType.SortedMapType -> type.copy(
+            keyType = stampCaughtOnCallbackRows(type.keyType, outerReturnEffectNames),
+            valueType = stampCaughtOnCallbackRows(type.valueType, outerReturnEffectNames)
+        )
+        is MezzeType.NewtypeType -> type.copy(wrappedType = stampCaughtOnCallbackRows(type.wrappedType, outerReturnEffectNames))
+        is MezzeType.SuspendedType -> type // leave as-is
+        is MezzeType.EffectRow, is MezzeType.VarType,
+        is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
+        is MezzeType.BoolType, is MezzeType.NatType, is MezzeType.FracType,
+        is MezzeType.OrderingType, is MezzeType.BytesType, is MezzeType.ByteBufferType,
+        is MezzeType.CharType -> type
     }
 }

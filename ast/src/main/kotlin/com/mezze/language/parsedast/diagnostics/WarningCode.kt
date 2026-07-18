@@ -16,6 +16,7 @@ package com.mezze.language.parsedast.diagnostics
  *   (T0306), and cross-scope shadowing is intentionally allowed, so there is
  *   no shadowing WARNING. Range kept reserved so codes stay stable.
  * - `W03xx` redundant / dead code (constant condition, discarded value, ...)
+ * - `W04xx` effect / handler hygiene (unused handler, ...)
  */
 enum class WarningCode {
     // ─── Unused / dead bindings (W01xx) ──────────────────────────────────
@@ -25,7 +26,10 @@ enum class WarningCode {
     // ─── Redundant / dead code (W03xx) ───────────────────────────────────
     W0301_DISCARDED_VALUE,   // a non-unit expression's result is computed then thrown away
     W0302_CONSTANT_CONDITION, // `if True/False then ...` — one branch is dead
-    W0303_REDUNDANT_BOOLEAN;  // `!(!b)`, `x == True`, `if b then True else False`
+    W0303_REDUNDANT_BOOLEAN,  // `!(!b)`, `x == True`, `if b then True else False`
+
+    // ─── Effect / handler hygiene (W04xx) ────────────────────────────────
+    W0401_UNUSED_HANDLER;    // `perform Handler in body` where body performs no op of the handler's effect
 
     /** The wire code, e.g. "W0101". */
     fun display(): String = name.substringBefore('_')

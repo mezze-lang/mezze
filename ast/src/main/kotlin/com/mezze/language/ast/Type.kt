@@ -320,7 +320,15 @@ sealed interface MezzeType {
         val effectInstances: Set<EffectInstance> = emptySet(), // Effects with associated type info
         val effectHashes: Map<String, com.mezze.language.typedast.Hash> = emptyMap(),  // effectName → effectDeclHash
         val rowVar: RowVar? = null, // null = closed, non-null = open
-        val performed: Boolean = false // true = effects have been performed via 'perform'
+        val performed: Boolean = false, // true = effects have been performed via 'perform'
+        // Effects declared on this callback row that are HANDLED by the
+        // enclosing function (i.e., appear in the callback row but not in
+        // the return row). Unification silently absorbs these from the
+        // actual callback's row without propagating through the shared
+        // row var. Example: in `spawn : {f: {} -> 'a <Exception, ...>} ->
+        // Promise 'a <Async, ...>`, the callback row's `caughtByAncestor`
+        // is `{Exception}` — spawn catches Exception at runtime.
+        val caughtByAncestor: Set<String> = emptySet()
     ) : MezzeType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null

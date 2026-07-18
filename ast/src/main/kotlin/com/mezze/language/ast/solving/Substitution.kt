@@ -301,12 +301,20 @@ data class Substitution(
         if (rowVar != null && rowVar in rowVarMappings) {
             // Recursively apply so chains of row vars resolve.
             val target = applyToEffectRowWithVisited(rowVarMappings[rowVar]!!, visitedVars, chainCache)
+            // Callback-side row subtraction: effects in `caughtByAncestor`
+            // are handled by the enclosing function and MUST NOT be
+            // absorbed from the row var binding into the return row.
+            val caught = current.caughtByAncestor
+            val targetEffects = target.effects - caught
+            val targetInstances = target.effectInstances.filter { it.name !in caught }.toSet()
+            val targetHashes = target.effectHashes.filterKeys { it !in caught }
             current = MezzeType.EffectRow(
-                effects = current.effects + target.effects,
-                effectInstances = current.effectInstances + target.effectInstances,
-                effectHashes = current.effectHashes + target.effectHashes,
+                effects = current.effects + targetEffects,
+                effectInstances = current.effectInstances + targetInstances,
+                effectHashes = current.effectHashes + targetHashes,
                 rowVar = target.rowVar,
-                performed = current.performed || target.performed
+                performed = current.performed || target.performed,
+                caughtByAncestor = current.caughtByAncestor + target.caughtByAncestor
             )
         }
         return current

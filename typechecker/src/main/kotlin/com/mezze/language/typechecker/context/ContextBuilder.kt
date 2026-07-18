@@ -352,8 +352,19 @@ class ContextBuilder {
                         performed = effectRow.isPerformed, effectHashes = hashes
                     )
                 }
+                // Row subtraction on nested callback rows: any effect
+                // declared on a callback's row that ISN'T declared on the
+                // enclosing op's return row is HANDLED by the op (e.g.,
+                // `spawn : {f: {} -> 'a <Exception, ...>} -> Promise 'a
+                // <Async, ...>` — Exception is caught by spawn).
+                val outerReturnEffectNames = opEffects?.allEffectNames ?: emptySet()
+                val rawConvertedParam = convertParsedTypeAnnotationInternal(op.paramType)
+                val convertedParam = TypeAnnotationConverter.stampCaughtOnCallbackRowsPublic(
+                    rawConvertedParam,
+                    outerReturnEffectNames
+                )
                 op.name to MezzeType.FunctionType(
-                    paramType = convertParsedTypeAnnotationInternal(op.paramType),
+                    paramType = convertedParam,
                     returnType = convertParsedTypeAnnotationInternal(op.returnType),
                     effects = opEffects, abilityConstraints = constraints
                 )
@@ -366,9 +377,29 @@ class ContextBuilder {
         typeVarCache.clear()
         val effectRecordType = MezzeType.RecordType(
             fields = effectDecl.operations.associate { op ->
+                // Row subtraction: compute callback rows' extras that are
+                // NOT on this op's outer return row — they're "handled"
+                // by this op. Stamp caughtByAncestor on all nested
+                // callback rows to encode this.
+                val outerReturnEffectNames = op.effects.toSet()
+                val rawConvertedParam = convertParsedTypeAnnotationInternal(op.paramType)
+                val convertedParam = TypeAnnotationConverter.stampCaughtOnCallbackRowsPublic(
+                    rawConvertedParam,
+                    outerReturnEffectNames
+                )
+                // Collect caught effects from all nested callback rows —
+                // these are what this op catches. Stamp caughtByAncestor
+                // on any FunctionType's effect row in the return type
+                // (needed when the return is itself a function returning
+                // a Promise or similar with its own effect row).
+                val caughtEffects = TypeAnnotationConverter.collectCaughtByAncestorFromType(convertedParam)
+                val rawConvertedReturn = convertParsedTypeAnnotationInternal(op.returnType)
+                val convertedReturn = TypeAnnotationConverter.stampCaughtOnAllEffectRowsPublic(
+                    rawConvertedReturn, caughtEffects
+                )
                 op.name to MezzeType.FunctionType(
-                    paramType = convertParsedTypeAnnotationInternal(op.paramType),
-                    returnType = convertParsedTypeAnnotationInternal(op.returnType),
+                    paramType = convertedParam,
+                    returnType = convertedReturn,
                     effects = null
                 )
             }

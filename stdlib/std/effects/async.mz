@@ -1,7 +1,7 @@
 use std::collections::seq
 use std::abilities::compare::{ Eq }
 use std::result
-use std::effects::exception::{ unwrap }
+use std::effects::exception::{ Exception, unwrap }
 use std::effects::time::{ Time }
 use std::int
 
@@ -234,7 +234,13 @@ pub type JoinOutcome 'a = |
 ## below — each is expressible in terms of these primitives.
 effect Async where {
   ## Spawn a computation, returning a Promise immediately.
-  spawn: { f: {} -> 'a <...> } -> Promise 'a <Async, ...>,
+  ##
+  ## The callback's effect row includes `Exception` — spawn CATCHES Exception
+  ## thrown by the callback at runtime and turns it into a failed Promise.
+  ## Because Exception appears in the callback row but not in the return row,
+  ## the typechecker enforces this: any Exception the callback throws is
+  ## handled by spawn and does not surface at the caller.
+  spawn: { f: {} -> 'a <Exception, ...> } -> Promise 'a <Async, ...>,
   ## Await a Promise. Returns `Result 'a AsyncError`:
   ##   Ok { val }                  — the spawned task produced a value.
   ##   Err { error = AsyncCancelled { reason } }

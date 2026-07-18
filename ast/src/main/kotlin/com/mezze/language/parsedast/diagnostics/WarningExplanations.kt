@@ -22,6 +22,11 @@ fun WarningCode.explain(): String = when (this) {
     WarningCode.W0303_REDUNDANT_BOOLEAN ->
         "A boolean expression can be simplified — e.g. `!(!b)` is `b`, " +
         "`if b then True else False` is `b`, and `x == True` is `x`."
+
+    WarningCode.W0401_UNUSED_HANDLER ->
+        "A `perform Handler in body` handles an effect that the body doesn't " +
+        "perform. The handler is dead — remove it from the `perform` clause, " +
+        "or add an op that uses it."
 }
 
 /** Look up a warning explanation by its display code ("W0101") or full name. */
