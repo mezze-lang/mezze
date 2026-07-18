@@ -140,8 +140,9 @@ public class AsyncInterpreterTest {
     void testLoomSleep() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, is_done }
+            use std::effects::time::{Time, SystemTime}
 
-            perform LoomAsync {} in do
+            perform SystemTime in perform LoomAsync {} in do
                 Async.sleep {ms = 10}
                 42
         """);
@@ -184,8 +185,9 @@ public class AsyncInterpreterTest {
     void testOsSleep() {
         Object result = MezzeTestHelper.run("""
             use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3, is_done }
+            use std::effects::time::{Time, SystemTime}
 
-            perform OSThreadAsync {} in do
+            perform SystemTime in perform OSThreadAsync {} in do
                 Async.sleep {ms = 10}
                 42
         """);

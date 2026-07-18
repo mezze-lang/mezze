@@ -117,7 +117,7 @@ class PromiseMethodsTest {
               let p = Async.spawn { f = {} -> crash { msg = "boom" } }
               let q = p.recover { f = { err } -> match err is
                   AsyncFailed { msg = _ }    -> 999
-                  AsyncCancelled             -> 0
+                  AsyncCancelled { reason = _ } -> 0
                   AsyncTimedOut { ms = _ }   -> 0
               }
               let r = Async.await { p = q }

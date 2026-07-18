@@ -124,30 +124,45 @@ public final class TimeNatives {
 
     @TruffleBoundary
     public static MezzeUnit sleep(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            // Restore the interrupt flag so any outer Java code observes
-            // it, AND surface the interrupt to Mezze. Matches
-            // AsyncNatives.loomSleep — throws CancellationException so the
-            // surrounding runPromiseTask marks the task CANCELLED and the
-            // awaiter sees Err { error = AsyncCancelled }.
-            Thread.currentThread().interrupt();
-            throw new CancellationException("Sleep cancelled");
+        // #251: deadline-based re-block so that inside an uninterruptible
+        // region we continue sleeping for the remaining time when a
+        // cancel arrives.
+        final long deadlineNanos = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(millis);
+        while (true) {
+            long remainingMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                Math.max(0L, deadlineNanos - System.nanoTime()));
+            if (remainingMs == 0L) return MezzeUnit.INSTANCE;
+            try {
+                Thread.sleep(remainingMs);
+                return MezzeUnit.INSTANCE;
+            } catch (InterruptedException e) {
+                if (com.mezze.interpreter.nodes.builtin.effects.AsyncNatives.deferInterruptIfInRegion()) {
+                    continue;
+                }
+                Thread.currentThread().interrupt();
+                throw new CancellationException("Sleep cancelled");
+            }
         }
-        return MezzeUnit.INSTANCE;
     }
 
     @TruffleBoundary
     public static MezzeUnit sleepNanos(long nanos) {
-        try {
-            long millis = nanos / 1_000_000;
-            int remainingNanos = (int) (nanos % 1_000_000);
-            Thread.sleep(millis, remainingNanos);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new CancellationException("Sleep cancelled");
+        final long deadlineNanos = System.nanoTime() + nanos;
+        while (true) {
+            long remainingNanos = Math.max(0L, deadlineNanos - System.nanoTime());
+            if (remainingNanos == 0L) return MezzeUnit.INSTANCE;
+            try {
+                long millis = remainingNanos / 1_000_000;
+                int subNanos = (int) (remainingNanos % 1_000_000);
+                Thread.sleep(millis, subNanos);
+                return MezzeUnit.INSTANCE;
+            } catch (InterruptedException e) {
+                if (com.mezze.interpreter.nodes.builtin.effects.AsyncNatives.deferInterruptIfInRegion()) {
+                    continue;
+                }
+                Thread.currentThread().interrupt();
+                throw new CancellationException("Sleep cancelled");
+            }
         }
-        return MezzeUnit.INSTANCE;
     }
 }

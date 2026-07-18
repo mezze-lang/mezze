@@ -563,7 +563,7 @@ internal class VariantSolver(
             closeRowVarsInType(type, rowVarsToClose)
         }
 
-        return Substitution(updatedMappings)
+        return Substitution(updatedMappings, substitution.rowVarMappings)
     }
 
     private fun closeRowVarsInType(type: MezzeType, rowVarsToClose: Set<RowVar>): MezzeType {

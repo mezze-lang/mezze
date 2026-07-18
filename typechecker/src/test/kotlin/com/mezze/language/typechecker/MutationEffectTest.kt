@@ -804,6 +804,7 @@ class MutationEffectTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("#274 relaxed V0509 — wrong-performer-for-effect is a runtime no-op.")
     fun `test wrong performer type causes error`() {
         val source = """
             effect Mut where {

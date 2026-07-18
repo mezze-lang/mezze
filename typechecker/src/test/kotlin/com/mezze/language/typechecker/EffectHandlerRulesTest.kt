@@ -249,6 +249,7 @@ class EffectHandlerRulesTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("#274 relaxed V0508 — perform on pure body is a runtime no-op, not an error.")
     fun `test perform on pure function should fail`() {
         // Define effect and impl inline instead of using stdlib imports
         val source = """
@@ -273,6 +274,7 @@ class EffectHandlerRulesTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("#274 relaxed V0509/V0510 — wrong-effect handler is a runtime no-op.")
     fun `test wrong effect handler should fail`() {
         val source = """
             effect Log where {

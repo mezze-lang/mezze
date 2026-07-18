@@ -159,8 +159,8 @@ internal class AnnotationValidator(
         sourceLoc: Loc? = null
     ) {
         if (annotationType is MezzeType.FunctionType && inferredType is MezzeType.FunctionType) {
-            val annotatedEffects = annotationType.effects?.effects ?: emptySet()
-            val inferredEffects = inferredType.effects?.effects ?: emptySet()
+            val annotatedEffects = annotationType.effects?.allEffectNames ?: emptySet()
+            val inferredEffects = inferredType.effects?.allEffectNames ?: emptySet()
 
             val isPolymorphic = annotationType.effects?.isOpen == true
             val overpromisedEffects = annotatedEffects - inferredEffects
@@ -172,6 +172,27 @@ internal class AnnotationValidator(
                     code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
                     hints = listOf("either change the annotation to match the body, or change the body to produce the annotated type"),
                 )
+            }
+
+            // #274-B: Under-promise — closed annotation missing effects
+            // the body actually performs. `<...>` (open) absorbs extras
+            // via row-var propagation, so this only fires for CLOSED
+            // annotations.
+            if (!isPolymorphic) {
+                val underpromised = inferredEffects - annotatedEffects
+                if (underpromised.isNotEmpty()) {
+                    throw TypeCheckError(
+                        "Type annotation for '$varName' doesn't match inferred type: " +
+                        "annotation is missing effects ${underpromised.joinToString(", ")} " +
+                        "performed by the body.",
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf(
+                            "add the missing effects to the annotation, or use `<...>` to allow the body to perform additional effects",
+                            "e.g. `<${(annotatedEffects + underpromised).joinToString(", ")}>`"
+                        )
+                    )
+                }
             }
         }
     }

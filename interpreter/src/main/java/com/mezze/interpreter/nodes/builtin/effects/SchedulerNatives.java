@@ -103,6 +103,16 @@ public final class SchedulerNatives {
     }
 
     /**
+     * #254 — CoopAsync.yield_now binding. Hands control back to the
+     * scheduler for one tick so any other ready task can run.
+     */
+    public static MezzeUnit schedulerYieldNow(MezzeRecord args, IndirectCallNode callNode) {
+        CoopScheduler scheduler = getScheduler(args, "sched");
+        scheduler.yieldNow(callNode);
+        return MezzeUnit.INSTANCE;
+    }
+
+    /**
      * Race multiple promises.
      */
     @TruffleBoundary

@@ -144,6 +144,13 @@ public final class WriteLocalWithContextNode extends MezzeNode {
 
     @TruffleBoundary
     private void registerGlobal(Object value) {
+        // The value can legitimately be null in edge cases (a suspended
+        // effect that resolves to no value, a match branch that binds an
+        // expression whose runtime value is null). Never let a null
+        // reach ConcurrentHashMap.put — it NPEs. Skip both global maps
+        // when the value is null; the frame slot already has whatever
+        // representation it needs. #250-followup / join_on_failure NPE.
+        if (value == null) return;
         MezzeContext context = MezzeContext.get(this);
         if (contentHash != null) {
             context.defineGlobal(contentHash, value);

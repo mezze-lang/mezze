@@ -34,9 +34,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 # Channel was created successfully if we can try_send
                 try_send { ch = ch, val = 42 }
         """)
@@ -48,9 +49,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan_bounded, send, recv, try_send, try_recv, close, is_closed}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan_bounded { cap = 10 }
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 # Channel was created successfully if we can try_send
                 try_send { ch = ch, val = 42 }
         """)
@@ -66,9 +68,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 send { ch = ch, val = 42 }
                 recv { ch = ch }
         """)
@@ -80,9 +83,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 send { ch = ch, val = 1 }
                 send { ch = ch, val = 2 }
                 send { ch = ch, val = 3 }
@@ -106,9 +110,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 close { ch = ch }
                 # try_send should return false on closed channel
                 try_send { ch = ch, val = 42 }
@@ -125,9 +130,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 try_send { ch = ch, val = 42 }
         """)
         assertEquals(true, result)
@@ -138,9 +144,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 close { ch = ch }
                 try_send { ch = ch, val = 42 }
         """)
@@ -152,9 +159,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 send { ch = ch, val = 42 }
                 match try_recv { ch = ch } is
                     Some { val } -> val
@@ -168,9 +176,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 match try_recv { ch = ch } is
                     Some { val } -> False
                     None -> True
@@ -187,9 +196,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 let before = is_closed { ch = ch }
                 close { ch = ch }
                 let after = is_closed { ch = ch }
@@ -205,9 +215,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 let before = is_closed { ch = ch }
                 close { ch = ch }
                 let after = is_closed { ch = ch }
@@ -223,9 +234,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 close { ch = ch }
                 close { ch = ch }
                 close { ch = ch }
@@ -239,9 +251,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 send { ch = ch, val = 1 }
                 send { ch = ch, val = 2 }
                 close { ch = ch }
@@ -263,10 +276,11 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch1 = chan {}
             let ch2 = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 # Send to second channel only
                 send { ch = ch2, val = 42 }
 
@@ -282,10 +296,11 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch1 = chan {}
             let ch2 = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 # Send to both channels
                 send { ch = ch1, val = 1 }
                 send { ch = ch2, val = 2 }
@@ -303,10 +318,11 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch1 = chan {}
             let ch2 = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 # Both channels empty, should timeout
                 match recv_any_timeout { channels = [ch1, ch2], ms = 50 } is
                     Some { val } -> False
@@ -320,10 +336,11 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch1 = chan {}
             let ch2 = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 send { ch = ch2, val = 99 }
 
                 match recv_any_timeout { channels = [ch1, ch2], ms = 1000 } is
@@ -342,9 +359,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 send { ch = ch, val = 42 }
                 recv { ch = ch }
         """)
@@ -356,10 +374,11 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch1 = chan {}
             let ch2 = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 match recv_any_timeout { channels = [ch1, ch2], ms = 100 } is
                     Some { val } -> False
                     None -> True
@@ -376,9 +395,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                     # Producer sends 10 values
                     let producer = Async.spawn { f = {} -> do
                         send { ch = ch, val = 1 }
@@ -419,9 +439,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                     # Producer 1 sends 1, 2
                     let p1 = Async.spawn { f = {} -> do
                         send { ch = ch, val = 1 }
@@ -466,9 +487,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                     # Spawn sender
                     let p = Async.spawn { f = {} -> do
                         send { ch = ch, val = 42 }
@@ -489,9 +511,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                     # Spawn sender that delays then sends
                     let sender = Async.spawn { f = {} -> do
                         Async.sleep { ms = 50 }
@@ -516,9 +539,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 send { ch = ch, val = "hello" }
                 recv { ch = ch }
         """)
@@ -530,9 +554,10 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 send { ch = ch, val = { x = 10, y = 20 } }
                 let point = recv { ch = ch }
                 point.x + point.y
@@ -545,11 +570,12 @@ class ChannelTest {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             type Message = | Ping, Pong { value: Int } |
 
             let ch = chan {}
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
                 send { ch = ch, val = Pong { value = 42 } }
                 match recv { ch = ch } is
                     Ping -> 0

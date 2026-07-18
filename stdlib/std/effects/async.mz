@@ -2,6 +2,7 @@ use std::collections::seq
 use std::abilities::compare::{ Eq }
 use std::result
 use std::effects::exception::{ unwrap }
+use std::effects::time::{ Time }
 use std::int
 
 ## Opaque promise representing an asynchronous computation.
@@ -57,12 +58,17 @@ pub let is_failed : { p: Promise 'a } -> Bool = { p } ->
 
 pub let is_cancelled : { p: Promise 'a } -> Bool = { p } ->
   match __native_promise_inspect { p = p } is
-    Failed { err = AsyncCancelled } -> True
+    Failed { err = AsyncCancelled { reason = _ } } -> True
     _ -> False
 
-## Request cancellation; returns the actual outcome.
-pub let cancel : { p: Promise 'a } -> CancelOutcome <Async> = { p } ->
-  Async.cancel { p = p }
+## Request cancellation. `reason` is mandatory — every cancel names why.
+##
+## The reason is propagated into the cancelled Promise's error state as
+## `AsyncCancelled { reason }`, visible to awaiters and `inspect`
+## observers. If you don't have a natural category, pass
+## `Custom { tag = "...", detail = "..." }`.
+pub let cancel : { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async> = { p, reason } ->
+  Async.cancel { p = p, reason = reason }
 
 ## Chain another async step. Runs f only if p succeeded; on upstream Err
 ## the new Promise fails with AsyncFailed (the specific AsyncError variant
@@ -112,7 +118,7 @@ impl Promise 'a where {
   is_pending   = { it } -> is_pending   { p = it },
   is_failed    = { it } -> is_failed    { p = it },
   is_cancelled = { it } -> is_cancelled { p = it },
-  cancel       = { it } -> cancel       { p = it },
+  cancel       = { it, reason } -> cancel { p = it, reason = reason },
   and_then     = { it, f } -> and_then    { p = it, f = f },
   map_ok       = { it, f } -> map_ok      { p = it, f = f },
   recover      = { it, f } -> recover     { p = it, f = f },
@@ -120,10 +126,61 @@ impl Promise 'a where {
   try_await    = { it } -> try_await { p = it },
 }
 
+## Method surface for a seq of promises. Mirrors the top-level
+## combinators so user code can write `ps.race {}`, `ps.all {}`, etc.
+## instead of the prefix form `race { ps }`. Lives here because Promise
+## is declared in this module — the impl-locality rule allows an
+## inherent impl on a parametric container as long as some nominal type
+## in the receiver tree is local.
+impl [Promise 'a] where {
+  race    = { it } -> race    { ps = it },
+  await_all    = { it } -> all     { ps = it },
+  await_settle = { it } -> settle  { ps = it },
+  try_all = { it } -> try_all { ps = it },
+}
+
+## Why a cancellation happened. Every cancel path names a category —
+## there is no "no reason" case. Consumers pattern-match on the variant.
+##
+## - `UserRequested`   — direct caller cancel with a human message.
+## - `Timeout`         — a deadline elapsed (with_timeout, scope_join_until).
+## - `ScopeTeardown`   — implicit propagation from a closing scope
+##                       (scope_cancel_all, exit-on-failure paths).
+## - `SiblingFailed`   — a peer under a join policy failed and dragged
+##                       this task down. `at` is the failed peer's index
+##                       in the input order.
+## - `LostRace`        — a peer settled first under `race` / `OnSuccess`
+##                       / `OnFirst` and the losers are being torn down.
+##                       The winner's index is not tracked to keep the
+##                       combinator's inner loop cheap; if you need it,
+##                       reconstruct via `inspect` on all siblings.
+## - `ExternalInterrupt` — the underlying thread was interrupted by a
+##                       source Mezze doesn't own (Ctrl-C, JVM shutdown,
+##                       native code Thread.interrupt).
+## - `Custom`          — escape hatch for application-defined reasons
+##                       that don't fit the above. Both `tag` and
+##                       `detail` are load-bearing — pick a stable tag
+##                       for programmatic matching, put the specifics in
+##                       detail.
+pub type CancelReason = |
+  UserRequested     { msg: Str },
+  Timeout           { deadline_ms: Int },
+  ScopeTeardown,
+  SiblingFailed     { at: Int },
+  LostRace,
+  ExternalInterrupt,
+  Custom            { tag: Str, detail: Str },
+|
+
 ## Error type for async operations.
+##
+## `AsyncCancelled.reason` is mandatory — every cancel path names why.
+## No `Option` here: if you don't have a category to pass, use
+## `Custom { tag = "…", detail = "…" }`. Awaiters and `inspect` observers
+## see the reason via `AsyncCancelled { reason }`.
 pub type AsyncError = |
   AsyncFailed { msg: Str },
-  AsyncCancelled,
+  AsyncCancelled { reason: CancelReason },
   AsyncTimedOut { ms: Int },
 |
 
@@ -180,7 +237,9 @@ effect Async where {
   spawn: { f: {} -> 'a <...> } -> Promise 'a <Async, ...>,
   ## Await a Promise. Returns `Result 'a AsyncError`:
   ##   Ok { val }                  — the spawned task produced a value.
-  ##   Err { error = AsyncCancelled }      — the promise was cancelled.
+  ##   Err { error = AsyncCancelled { reason } }
+  ##     — the promise was cancelled; `reason` names the category (see
+  ##       `CancelReason`).
   ##   Err { error = AsyncTimedOut { ms }} — only if the await itself
   ##                                         was bounded; not used by
   ##                                         the bare effect op.
@@ -191,13 +250,26 @@ effect Async where {
   ## what actually happened (Cancelled, AlreadyCompleted, AlreadyFailed,
   ## NotCancellable). Cancellation is effectful: it can interrupt
   ## in-flight I/O in the spawned task.
-  cancel: { p: Promise 'a } -> CancelOutcome <Async>,
-  ## Sleep for the given milliseconds.
-  sleep: { ms: Int } -> {} <Async>,
+  ##
+  ## `reason` is mandatory. It propagates into the cancelled Promise's
+  ## error state as `AsyncCancelled { reason }`, visible to awaiters and
+  ## `inspect`. Pick the category from `CancelReason` that best fits;
+  ## use `Custom { tag, detail }` when nothing else matches.
+  cancel: { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async>,
+  ## Sleep for the given milliseconds. Routes through Time under Loom
+  ## / OS impls; CoopAsync uses its scheduler's tick logic instead.
+  sleep: { ms: Int } -> {} <Async, Time>,
   ## Check if current computation was cancelled.
   is_cancelled: {} -> Bool <Async>,
   ## Cancellation checkpoint -- throws if cancelled.
   check: {} -> {} <Async>,
+  ## Voluntarily yield the current task's execution slot. Under a
+  ## cooperative scheduler this hands control back to the scheduler
+  ## so other ready tasks can run. Under Loom (virtual threads) this
+  ## delegates to Thread.yield() — cheap on the JVM, still a hint to
+  ## the OS scheduler. Useful in tight loops that would otherwise
+  ## starve peers or delay cancel-delivery.
+  yield_now: {} -> {} <Async>,
   ## Run f within a structured concurrency scope. The Scope's phantom
   ## type 'a is independent of the body's return type 'b — the body can
   ## return any value, not just the Scope's phantom. (#239: needed so
@@ -215,10 +287,11 @@ impl Async for LoomAsync where {
   finalize_scope = {} -> __native_async_finalize_scope { tracker = scope },
   spawn = { f } -> __native_async_spawn_tracked { f = f, max_concurrent = 0, tracker = scope },
   await = { p } -> __native_promise_await_result { p = p },
-  cancel = { p } -> __native_promise_cancel { p = p },
-  sleep = { ms } -> __native_async_sleep { ms = ms },
+  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
+  sleep = { ms } -> Time.sleep { millis = ms },
   is_cancelled = {} -> __native_async_is_cancelled {},
   check = {} -> __native_async_check {},
+  yield_now = {} -> __native_async_yield_now {},
   scoped = { f } -> __native_async_scoped { f = f },
   park = { predicate } -> __native_async_park_until { predicate = predicate },
 }
@@ -234,10 +307,11 @@ impl Async for LoomAsyncWith { max_concurrent: Int } where {
       tracker = scope,
     },
   await = { p } -> __native_promise_await_result { p = p },
-  cancel = { p } -> __native_promise_cancel { p = p },
-  sleep = { ms } -> __native_async_sleep { ms = ms },
+  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
+  sleep = { ms } -> Time.sleep { millis = ms },
   is_cancelled = {} -> __native_async_is_cancelled {},
   check = {} -> __native_async_check {},
+  yield_now = {} -> __native_async_yield_now {},
   scoped = { f } -> __native_async_scoped { f = f },
   park = { predicate } -> __native_async_park_until { predicate = predicate },
 }
@@ -248,10 +322,11 @@ impl Async for OSThreadAsync where {
   finalize_scope = {} -> __native_async_finalize_scope_os { tracker = scope },
   spawn = { f } -> __native_async_spawn_tracked_os { f = f, pool_size = 0, tracker = scope },
   await = { p } -> __native_promise_await_result { p = p },
-  cancel = { p } -> __native_promise_cancel { p = p },
-  sleep = { ms } -> __native_async_sleep { ms = ms },
+  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
+  sleep = { ms } -> Time.sleep { millis = ms },
   is_cancelled = {} -> __native_async_is_cancelled {},
   check = {} -> __native_async_check {},
+  yield_now = {} -> __native_async_yield_now {},
   scoped = { f } -> __native_async_scoped { f = f },
   park = { predicate } -> __native_async_park_until { predicate = predicate },
 }
@@ -262,10 +337,11 @@ impl Async for OSThreadAsyncWith { pool_size: Int } where {
   finalize_scope = {} -> __native_async_finalize_scope_os { tracker = scope },
   spawn = { f } -> __native_async_spawn_tracked_os { f = f, pool_size = pool_size, tracker = scope },
   await = { p } -> __native_promise_await_result { p = p },
-  cancel = { p } -> __native_promise_cancel { p = p },
-  sleep = { ms } -> __native_async_sleep { ms = ms },
+  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
+  sleep = { ms } -> Time.sleep { millis = ms },
   is_cancelled = {} -> __native_async_is_cancelled {},
   check = {} -> __native_async_check {},
+  yield_now = {} -> __native_async_yield_now {},
   scoped = { f } -> __native_async_scoped { f = f },
   park = { predicate } -> __native_async_park_until { predicate = predicate },
 }
@@ -284,10 +360,11 @@ impl Async for CoopAsync where {
   await = { p } -> match p is
     Promise { val = native_p } ->
       __native_scheduler_await_result { sched = scope, p = native_p },
-  cancel = { p } -> __native_promise_cancel { p = p },
+  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
   sleep = { ms } -> __native_scheduler_sleep { sched = scope, ms = ms },
   is_cancelled = {} -> __native_scheduler_is_cancelled { sched = scope },
   check = {} -> __native_scheduler_check { sched = scope },
+  yield_now = {} -> __native_scheduler_yield_now { sched = scope },
   scoped = { f } -> f { sc = Scope { val = {} } },
   ## Park: run ready tasks until predicate returns True.
   park = { predicate } -> __native_scheduler_park_until { sched = scope, predicate = predicate },
@@ -326,7 +403,7 @@ pub let race : { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps 
         match is_done { p = x } is
           True -> {}
           False -> do
-            Async.cancel { p = x }
+            Async.cancel { p = x, reason = LostRace }
             {}
       }
       match inspect { p = winner } is
@@ -397,18 +474,44 @@ pub let par_filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> [Result 'a Asyn
 ## becomes done after `ms` ms, then park until either the input promise
 ## or the sleeper settles. If the target wins, return its value; if the
 ## sleeper wins, cancel the target and return None.
-pub let with_timeout : { ms: Int, p: Promise 'a } -> Option 'a <Async, ...> = { ms, p } -> do
+pub let with_timeout : { ms: Int, p: Promise 'a } -> Option 'a <Async, Time, ...> = { ms, p } -> do
   let sleeper = Async.spawn { f = {} -> Async.sleep { ms = ms } }
   Async.park { predicate = {} -> is_done { p = p } || is_done { p = sleeper } }
   match is_done { p = p } is
     True -> do
-      Async.cancel { p = sleeper }
+      Async.cancel { p = sleeper, reason = LostRace }
       match inspect { p = p } is
         Completed { val = v } -> Some { val = v }
         _                     -> None
     False -> do
-      Async.cancel { p = p }
+      Async.cancel { p = p, reason = Timeout { deadline_ms = ms } }
       None
+
+## Run `f` in an uninterruptible region — cancellation delivery is
+## deferred until `f` returns. Use for short critical sections that
+## must run to completion: releasing a mutex, closing a channel,
+## finalizing state, etc.
+##
+## Inside the region:
+##   - `Async.check` is a no-op — never throws even if the task was
+##     cancelled while inside.
+##   - Blocking natives (`sleep`, `park`, `mutex.lock`, `channel.recv`,
+##     etc.) that catch `InterruptedException` re-block for the
+##     remaining time / re-poll their predicates rather than surfacing
+##     `AsyncCancelled`.
+##   - `is_cancelled` still reports truth — the region defers *delivery*
+##     of cancel, not observation of state.
+##
+## After `f` returns (normally or via a raised effect), if a cancel
+## request landed during the region, the next blocking op / `check`
+## observes it immediately (Thread.interrupt is re-set on exit).
+##
+## Nested regions stack via a depth counter — inner exit doesn't clear
+## the flag while the outer region is still active. Spawns started
+## inside the region do NOT inherit uninterruptibility; the region is
+## per-thread. #251.
+pub let uninterruptible : { f: {} -> 'a <...> } -> 'a <Async, ...> = { f } ->
+  __native_async_uninterruptible_run { f = f }
 
 ## ==================================================================
 ## try_* — fail-fast variants. On first Err, cancel the rest and
@@ -448,7 +551,7 @@ pub let try_join : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> Result { l: 'a, r
     let pr = Async.spawn { f = r }
     match Async.await { p = pl } is
       Err { error = e } -> do
-        Async.cancel { p = pr }
+        Async.cancel { p = pr, reason = SiblingFailed { at = 0 } }
         Async.await { p = pr }
         Err { error = e }
       Ok { val = vl } ->
@@ -464,15 +567,15 @@ pub let try_join3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } 
     let pc = Async.spawn { f = c }
     match Async.await { p = pa } is
       Err { error = e } -> do
-        Async.cancel { p = pb }
-        Async.cancel { p = pc }
+        Async.cancel { p = pb, reason = SiblingFailed { at = 0 } }
+        Async.cancel { p = pc, reason = SiblingFailed { at = 0 } }
         Async.await { p = pb }
         Async.await { p = pc }
         Err { error = e }
       Ok { val = va } ->
         match Async.await { p = pb } is
           Err { error = e } -> do
-            Async.cancel { p = pc }
+            Async.cancel { p = pc, reason = SiblingFailed { at = 1 } }
             Async.await { p = pc }
             Err { error = e }
           Ok { val = vb } ->
@@ -531,37 +634,48 @@ pub let try_any : { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { 
 pub let run_coop : { computation: {} -> 'a <Async> } -> 'a = { computation } -> perform CoopAsync in computation {}
 
 ## Spawn a task within a structured concurrency scope.
-pub let scope_spawn : { sc: Scope 'a, f: {} -> 'b <...> } -> Promise 'b = { sc, f } ->
+pub let scope_spawn : { sc: Scope 'a, f: {} -> 'b <...> } -> Promise 'b <Async, ...> = { sc, f } ->
   __native_async_scope_spawn { sc = sc, f = f }
 
 ## Cancel all tasks in a scope.
-pub let scope_cancel_all : { sc: Scope 'a } -> {} = { sc } ->
+pub let scope_cancel_all : { sc: Scope 'a } -> {} <Async, ...> = { sc } ->
   __native_async_scope_cancel_all { sc = sc }
 
 ## Get the CancellationToken for a scope.
-pub let scope_get_token : { sc: Scope 'a } -> CancellationToken = { sc } ->
+pub let scope_get_token : { sc: Scope 'a } -> CancellationToken <Async, ...> = { sc } ->
   __native_async_scope_get_token { sc = sc }
 
 ## Check if a scope has been cancelled.
-pub let scope_is_cancelled : { sc: Scope 'a } -> Bool = { sc } ->
+pub let scope_is_cancelled : { sc: Scope 'a } -> Bool <Async, ...> = { sc } ->
   __native_async_scope_is_cancelled { sc = sc }
 
 ## Wait for every Promise in `ps` to settle, or `ms` milliseconds to elapse —
 ## whichever comes first. Returns True if all settled in time; False if the
 ## deadline fired (and the scope is cancelled so remaining children unwind).
 ## #253: single-call deadline join over a Scope's spawned children.
-pub let scope_join_until : { sc: Scope 'a, ps: [Promise 'b], ms: Int } -> Bool <Async, ...> =
+pub let scope_join_until : { sc: Scope 'a, ps: [Promise 'b], ms: Int } -> Bool <Async, Time, ...> =
   { sc, ps, ms } -> do
     let sleeper = Async.spawn { f = {} -> Async.sleep { ms = ms } }
     Async.park { predicate = {} ->
       seq::all { xs = ps, p = { x } -> is_done { p = x } } || is_done { p = sleeper } }
     match seq::all { xs = ps, p = { x } -> is_done { p = x } } is
       True -> do
-        Async.cancel { p = sleeper }
+        Async.cancel { p = sleeper, reason = LostRace }
         True
       False -> do
         scope_cancel_all { sc = sc }
         False
+
+## Method surface for Scope. Mirrors the `scope_*` free functions so
+## user code can write `sc.spawn { f }` / `sc.cancel_all {}` / etc.
+## instead of the prefixed forms.
+impl Scope 'a where {
+  spawn        = { it, f }      -> scope_spawn        { sc = it, f = f },
+  cancel_all   = { it }         -> scope_cancel_all   { sc = it },
+  is_cancelled = { it }         -> scope_is_cancelled { sc = it },
+  get_token    = { it }         -> scope_get_token    { sc = it },
+  join_until   = { it, ps, ms } -> scope_join_until   { sc = it, ps = ps, ms = ms },
+}
 
 # ============================================================================
 # scoped_with — policy-driven structured concurrency over Async.scoped

@@ -402,7 +402,18 @@ class TypeValidator(
 
     private fun effectsMatch(e1: MezzeType.EffectRow?, e2: MezzeType.EffectRow?): Boolean = when {
         e1 == null && e2 == null -> true
-        e1 != null && e2 != null -> e1.effects == e2.effects
+        e1 != null && e2 != null -> {
+            // #274-B: With `<...>` (row var) either row is open — an open
+            // annotation is compatible with any superset of its declared
+            // effects that the body actually performs.
+            val bothClosed = e1.rowVar == null && e2.rowVar == null
+            if (bothClosed) e1.effects == e2.effects
+            else {
+                // Open side must be a subset of the other's effects.
+                val (open, other) = if (e1.rowVar != null) e1 to e2 else e2 to e1
+                open.effects.all { it in other.effects }
+            }
+        }
         else -> false
     }
 

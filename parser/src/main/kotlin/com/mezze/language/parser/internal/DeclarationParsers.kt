@@ -1254,6 +1254,34 @@ internal fun MezzeParser.parseImplAbilityDeclaration(stream: TokenStream): Parse
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(implToken.remaining)
 
+                // Anonymous inherent impl on a structural receiver:
+                //   impl [T] where { ... }
+                // The parseQualifiedRef path below requires an identifier
+                // at the receiver, so [T] must dispatch here first. Once
+                // implTargetTypeAnnotation consumes the [T], we expect
+                // `where` and thread through the same operations-block
+                // parser as the identifier form. #impl-list-inherent.
+                if (stream1.current()?.type == TokenType.LBRACKET) {
+                    val typeResult = implTargetTypeAnnotation(stream1)
+                    when (typeResult) {
+                        is ParseResult.Success -> {
+                            val afterType = skipNewlines(typeResult.remaining)
+                            val whereForList = tok(TokenType.WHERE)(afterType)
+                            return when (whereForList) {
+                                is ParseResult.Success -> {
+                                    parseImplAbilityOperationsBlock(
+                                        implToken, null,
+                                        listOf(typeResult.value),
+                                        emptyMap(), whereForList
+                                    )
+                                }
+                                is ParseResult.Failure -> whereForList
+                            }
+                        }
+                        is ParseResult.Failure -> return typeResult
+                    }
+                }
+
                 val firstRefResult = parseQualifiedRef(stream1)
 
                 when (firstRefResult) {

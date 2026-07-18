@@ -32,8 +32,9 @@ class AutoCancelSiblingsTest {
         val source = """
             use std::effects::async::{ Async, LoomAsync, race, with_timeout, join, join3 }
             use std::effects::async::atom::{ atom, deref, reset }
+            use std::effects::time::{ Time, SystemTime }
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let counter = atom { val = 0 }
               let fast = {} -> 42
               let slow = {} -> do
@@ -100,8 +101,9 @@ class AutoCancelSiblingsTest {
         val source = """
             use std::effects::async::{ Async, LoomAsync, try_join }
             use std::effects::async::atom::{ atom, deref, reset }
+            use std::effects::time::{ Time, SystemTime }
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let counter = atom { val = 0 }
               let failer = {} -> crash { msg = "boom" }
               let slow = {} -> do
@@ -149,8 +151,9 @@ class AutoCancelSiblingsTest {
         val source = """
             use std::effects::async::{ Async, LoomAsync, race, with_timeout, join, join3 }
             use std::effects::async::atom::{ atom, deref, swap }
+            use std::effects::time::{ Time, SystemTime }
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let counter = atom { val = 0 }
               let bump = {} -> do
                 let _ = swap { atom = counter, f = { current } -> current + 1 }
@@ -188,8 +191,9 @@ class AutoCancelSiblingsTest {
         val source = """
             use std::effects::async::{ Async, LoomAsync, try_join3 }
             use std::effects::async::atom::{ atom, deref, swap }
+            use std::effects::time::{ Time, SystemTime }
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let counter = atom { val = 0 }
               let failer = {} -> crash { msg = "boom" }
               let slow1 = {} -> do
@@ -242,8 +246,9 @@ class AutoCancelSiblingsTest {
         val source = """
             use std::effects::async::{ Async, LoomAsync, join3 }
             use std::effects::async::atom::{ atom, deref, swap }
+            use std::effects::time::{ Time, SystemTime }
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let counter = atom { val = 0 }
               let bump = {} -> do
                 let _ = swap { atom = counter, f = { current } -> current + 1 }

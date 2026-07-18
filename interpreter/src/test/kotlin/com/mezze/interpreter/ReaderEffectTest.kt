@@ -187,10 +187,11 @@ class ReaderEffectTest {
     fun `spawn inherits parent's binding`() {
         val source = """
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::reader::{Reader, WithReader}
             use std::result
 
-            perform LoomAsync in perform WithReader { val = "req-7" } in do
+            perform SystemTime in perform LoomAsync in perform WithReader { val = "req-7" } in do
               let p = Async.spawn { f = {} -> Reader.ask {} }
               result::get_or_else { result = Async.await { p = p }, def = "missing" }
         """
@@ -201,10 +202,11 @@ class ReaderEffectTest {
     fun `spawn from inner block captures inner value`() {
         val source = """
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::reader::{Reader, WithReader}
             use std::result
 
-            perform LoomAsync in perform WithReader { val = "outer" } in do
+            perform SystemTime in perform LoomAsync in perform WithReader { val = "outer" } in do
               let p_outer = Async.spawn { f = {} -> Reader.ask {} }
               let p_inner = perform WithReader { val = "inner" } in do
                 Async.spawn { f = {} -> Reader.ask {} }
@@ -219,10 +221,11 @@ class ReaderEffectTest {
     fun `spawn outlives bind via snapshot capture`() {
         val source = """
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::reader::{Reader, WithReader}
             use std::result
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let p = perform WithReader { val = "captured" } in do
                 Async.spawn { f = {} -> do
                   Async.sleep { ms = 20 }
@@ -238,10 +241,11 @@ class ReaderEffectTest {
         // The spawn doesn't disturb the parent's view of its own binding.
         val source = """
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::reader::{Reader, WithReader}
             use std::result
 
-            perform LoomAsync in perform WithReader { val = "shared" } in do
+            perform SystemTime in perform LoomAsync in perform WithReader { val = "shared" } in do
               let p = Async.spawn { f = {} -> Reader.ask {} }
               let parent_view_before_await = Reader.ask {}
               let child_view = result::get_or_else { result = Async.await { p = p }, def = "missing" }
@@ -257,11 +261,12 @@ class ReaderEffectTest {
         // all should see the same value.
         val source = """
             use std::effects::async::{Async, LoomAsync, all}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::reader::{Reader, WithReader}
             use std::result
             use std::collections::seq
 
-            perform LoomAsync in perform WithReader { val = "shared" } in do
+            perform SystemTime in perform LoomAsync in perform WithReader { val = "shared" } in do
               let promises = seq::map {
                 xs = [1, 2, 3, 4, 5],
                 f = { x } -> Async.spawn { f = {} -> Reader.ask {} },
@@ -288,14 +293,15 @@ class ReaderEffectTest {
     fun `Reader composes with Async row entries`() {
         val source = """
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::reader::{Reader, WithReader}
             use std::result
 
-            let task : {} -> Str <Reader, Async> = {} -> do
+            let task : {} -> Str <Reader, Async, Time> = {} -> do
               Async.sleep { ms = 5 }
               Reader.ask {}
 
-            perform LoomAsync in perform WithReader { val = "mixed" } in do
+            perform SystemTime in perform LoomAsync in perform WithReader { val = "mixed" } in do
               let p = Async.spawn { f = task }
               result::get_or_else { result = Async.await { p = p }, def = "missing" }
         """
@@ -312,6 +318,7 @@ class ReaderEffectTest {
     fun `REPRO 284 — named-fn nested spawn`() {
         val source = """
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
             use std::result
 
             let grandchild : {} -> Str = {} -> "ok"
@@ -322,7 +329,7 @@ class ReaderEffectTest {
                 def = "child-miss",
               }
 
-            perform LoomAsync in
+            perform SystemTime in perform LoomAsync in
               result::get_or_else {
                 result = Async.await { p = Async.spawn { f = child } },
                 def = "root-miss",
@@ -338,9 +345,10 @@ class ReaderEffectTest {
     fun `PROBE — inline-lambda nested spawn`() {
         val source = """
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
             use std::result
 
-            perform LoomAsync in
+            perform SystemTime in perform LoomAsync in
               result::get_or_else {
                 result = Async.await { p = Async.spawn { f = {} ->
                   result::get_or_else {
@@ -366,25 +374,26 @@ class ReaderEffectTest {
         // value bound at the root, never having been threaded explicitly.
         val source = """
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::reader::{Reader, WithReader}
             use std::result
 
-            let great_grandchild : {} -> Str <Reader, Async> = {} -> do
+            let great_grandchild : {} -> Str <Reader, Async, Time> = {} -> do
               Async.sleep { ms = 2 }
               let here = Reader.ask {}
               here
 
-            let grandchild : {} -> Str <Reader, Async> = {} -> do
+            let grandchild : {} -> Str <Reader, Async, Time> = {} -> do
               Async.sleep { ms = 2 }
               let p = Async.spawn { f = great_grandchild }
               result::get_or_else { result = Async.await { p = p }, def = "missing" }
 
-            let child : {} -> Str <Reader, Async> = {} -> do
+            let child : {} -> Str <Reader, Async, Time> = {} -> do
               Async.sleep { ms = 2 }
               let p = Async.spawn { f = grandchild }
               result::get_or_else { result = Async.await { p = p }, def = "missing" }
 
-            perform LoomAsync in perform WithReader { val = "deep-root" } in do
+            perform SystemTime in perform LoomAsync in perform WithReader { val = "deep-root" } in do
               let p = Async.spawn { f = child }
               result::get_or_else { result = Async.await { p = p }, def = "missing" }
         """
@@ -401,6 +410,7 @@ class ReaderEffectTest {
         // Confirms each spawn snapshots the chain it was spawned under.
         val source = """
             use std::effects::async::{Async, LoomAsync}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::reader::{Reader, WithReader}
             use std::result
 
@@ -432,7 +442,7 @@ class ReaderEffectTest {
               let sub = result::get_or_else { result = Async.await { p = p }, def = "missing" }
               "$(here)/$(sub)"
 
-            perform LoomAsync in perform WithReader { val = "ROOT" } in do
+            perform SystemTime in perform LoomAsync in perform WithReader { val = "ROOT" } in do
               let p = Async.spawn { f = layer1 }
               result::get_or_else { result = Async.await { p = p }, def = "missing" }
         """
@@ -451,6 +461,7 @@ class ReaderEffectTest {
         // 10 leaves, all should see the root binding. Tests breadth.
         val source = """
             use std::effects::async::{Async, LoomAsync, all}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::reader::{Reader, WithReader}
             use std::result
             use std::collections::seq
@@ -465,7 +476,7 @@ class ReaderEffectTest {
               let r2 = result::get_or_else { result = Async.await { p = p2 }, def = "miss" }
               "$(r1)+$(r2)"
 
-            perform LoomAsync in perform WithReader { val = "root" } in do
+            perform SystemTime in perform LoomAsync in perform WithReader { val = "root" } in do
               let promises = seq::map {
                 xs = [1, 2, 3, 4, 5],
                 f = { x } -> Async.spawn { f = child },

@@ -45,8 +45,9 @@ class SynchronizationPointsTest {
         }
         use std::effects::async::{ Async, LoomAsync }
         use std::effects::exception::{ Exception, CrashException, unwrap }
+        use std::effects::time::{ Time, SystemTime }
 
-        perform LoomAsync in do
+        perform SystemTime in perform LoomAsync in do
     """.trimIndent()
 
     private val atomSetup = ""

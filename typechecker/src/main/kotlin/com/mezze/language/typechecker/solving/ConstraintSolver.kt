@@ -271,7 +271,7 @@ class ConstraintSolver(
                 when (result) {
                     is ConstraintResult.Success -> {
                         val newSubst = result.substitution
-                        if (newSubst.mappings.isNotEmpty()) {
+                        if (newSubst.mappings.isNotEmpty() || newSubst.rowVarMappings.isNotEmpty()) {
                             substitution = newSubst.compose(substitution)
                             madeProgress = true
                         }
@@ -357,7 +357,7 @@ class ConstraintSolver(
             }
         }
 
-        return if (updatedMappings.isNotEmpty()) Substitution(substitution.mappings + updatedMappings) else null
+        return if (updatedMappings.isNotEmpty()) Substitution(substitution.mappings + updatedMappings, substitution.rowVarMappings) else null
     }
 
     private fun solveMainWorklist(
@@ -394,7 +394,7 @@ class ConstraintSolver(
                 when (result) {
                     is ConstraintResult.Success -> {
                         val newSubst = result.substitution
-                        if (newSubst.mappings.isNotEmpty()) {
+                        if (newSubst.mappings.isNotEmpty() || newSubst.rowVarMappings.isNotEmpty()) {
                             substitution = newSubst.compose(substitution)
                             madeProgress = true
                         }

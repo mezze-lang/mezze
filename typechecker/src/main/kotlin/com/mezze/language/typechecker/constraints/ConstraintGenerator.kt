@@ -355,9 +355,10 @@ class ConstraintGenerator(
             )
         }
 
-        if (annotation is ParsedFunctionType &&
-            annotation.effects != null &&
-            !bodyContainsNativeCall(item.value)) {
+        // #274-B: run even when annotation.effects is null (annotation
+        // implicitly promises pure). Missing rows = "pure", still a
+        // constraint the body must satisfy.
+        if (annotation is ParsedFunctionType && !bodyContainsNativeCall(item.value)) {
             annotationValidator.validateEffectsNotOverpromised(
                 preConvertedAnnotationType, inferredTypeWithAbilities,
                 varName, item.value.loc

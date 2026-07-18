@@ -362,6 +362,7 @@ class AbilityEffectErrorsTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("#274 relaxed V0508 — installing a handler on a pure body is now a runtime no-op, not an error. Handlers may be preemptively installed for spawn snapshots.")
     fun `test perform with pure expression should error`() {
         val source = """
             effect Log where {
@@ -388,6 +389,7 @@ class AbilityEffectErrorsTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("#274 relaxed V0509/V0510 — wrong-handler for effect is a runtime no-op (op becomes MezzeSuspended), not a typecheck error.")
     fun `test perform handler for wrong effect should error`() {
         val source = """
             effect Log where {

@@ -65,61 +65,15 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     val hasUndefinedVariables = exprResult.undefinedVariables.isNotEmpty()
     val bodyHasNativeCall = bodyContainsNativeCall(expr.body)
     val shouldValidate = (!isNestedPerform || canValidateNestedPerform) && !hasPolymorphicEffects && !hasUndefinedVariables && !bodyHasNativeCall
-    if (shouldValidate) {
-        if (handlerEffects.isNotEmpty() && allEffects.isEmpty()) {
-            val pairs = handlerEffects.joinToString(", ") { (handler, effect) ->
-                "`$handler` (handles `$effect`)"
-            }
-            val effectList = handlerEffects.map { it.second }.distinct().joinToString(", ") { "`$it`" }
-            throw TypeCheckError(
-                message = "This `perform` provides $pairs, but the body has no unhandled $effectList effect. " +
-                    "Either the body is pure, or that effect was already handled by an inner `perform`.",
-                loc = expr.loc,
-                errorType = ErrorType.CONSTRAINT_VIOLATION,
-                code = ErrorCode.V0508_HANDLER_ON_PURE_EXPR,
-                hints = listOf(
-                    "drop this `perform` wrapper if the body really has no effect to handle",
-                    "if you intended to override an inner handler, restructure so only one `perform` handles the effect — Mezze only allows one handler per effect in scope at a time",
-                ),
-            )
-        }
-
-        if (allEffects.isNotEmpty() && handlerEffects.isNotEmpty()) {
-            val handlersHandleUsedEffects = handlerEffects.any { (_, effectName) ->
-                effectName in allEffects
-            }
-            if (!handlersHandleUsedEffects) {
-                val handlersList = handlerEffects.map { (name, effect) -> "$name (handles $effect)" }.joinToString(", ")
-                throw TypeCheckError(
-                    message = "None of the provided handlers handle effects used by the expression. " +
-                        "Expression uses: ${allEffects.joinToString(", ")}. " +
-                        "Handlers provided: $handlersList",
-                    loc = expr.loc,
-                    errorType = ErrorType.CONSTRAINT_VIOLATION,
-                    code = ErrorCode.V0509_HANDLER_EFFECT_MISMATCH,
-                    hints = listOf(
-                        "add a handler for one of: ${allEffects.joinToString(", ")}",
-                        "or remove handlers that don't match",
-                    ),
-                )
-            }
-
-            if (handlerEffects.size == 1) {
-                val (handlerName, effectName) = handlerEffects[0]
-                if (effectName !in allEffects) {
-                    throw TypeCheckError(
-                        message = "Handler '$handlerName' handles effect '$effectName', but the expression doesn't use this effect. " +
-                            "Expression uses: ${allEffects.joinToString(", ")}. " +
-                            "Remove the unnecessary handler.",
-                        loc = expr.loc,
-                        errorType = ErrorType.CONSTRAINT_VIOLATION,
-                        code = ErrorCode.V0510_HANDLER_UNNECESSARY,
-                        hints = listOf("remove the handler — no matching effect is performed"),
-                    )
-                }
-            }
-        }
-    }
+    // V0508/V0509/V0510 relaxed 2026-07 for #274. Installing a handler
+    // for an effect the body doesn't visibly perform is a runtime no-op
+    // as far as the typechecker can see — but it's often load-bearing
+    // for spawned children (Async.spawn snapshots the handler chain at
+    // spawn time; those handlers need to be available even though the
+    // parent's effect row shows no direct use). Kept as suppressed dead
+    // code for reference. Reach for a lint pass (W0xxx) if we want to
+    // warn on truly-unnecessary handlers with better ergonomics.
+    @Suppress("UNUSED_VARIABLE") val _unusedHandlerChecksDeferred = shouldValidate
 
     DebugLogger.debugSection(Category.ExpressionConstraints, "generatePerform") {
         listOf(

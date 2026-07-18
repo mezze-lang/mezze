@@ -126,6 +126,32 @@ public final class AsyncNatives {
         // the parent's handler chain can dispatch it.
         private volatile OpCall unhandledOpCall;
 
+        // Set by cancel(reason) at the moment the CAS to CANCELLED wins.
+        // Read by every path that reconstructs an AsyncCancelled variant
+        // for a downstream observer (inspect, await, is_cancelled).
+        //
+        // Stored as a raw Object because it's a Mezze CancelReason variant
+        // (constructed on the caller side and passed through). Null means
+        // "no reason was passed in" — the createAsyncCancelled path
+        // substitutes ExternalInterrupt as a fallback.
+        //
+        // Volatile: cancel-side writer and await/inspect readers are on
+        // different threads. The STATE CAS to CANCELLED is the release
+        // fence — any read that sees CANCELLED must also see the
+        // cancelReason that was stored *before* the CAS. #250.
+        private volatile Object cancelReason;
+
+        // Set by an EXTERNAL parent-side cancel that DID NOT immediately
+        // transition state. The child thread will observe this on its
+        // next check/blocking-op-catch and either finalize the cancel
+        // (if not in a region) or continue deferring (if still in a
+        // region). Discarded if the child body completes normally —
+        // uninterruptible protected it. #251.
+        //
+        // Distinct from cancelReason (which is set BEFORE the CAS wins)
+        // because pendingCancelReason may be set but never observed.
+        private volatile Object pendingCancelReason;
+
         public MezzePromise(Thread executingThread, Semaphore semaphore) {
             this.executingThread = executingThread;
             this.semaphore = semaphore;
@@ -171,6 +197,26 @@ public final class AsyncNatives {
         }
 
         public boolean cancel() {
+            return cancel(null);
+        }
+
+        /**
+         * Cancel with a caller-supplied reason.
+         *
+         * `reason` is a Mezze CancelReason variant (opaque Object here —
+         * this native code just stores and re-emits it). Null means the
+         * caller didn't supply one; downstream construction of
+         * AsyncCancelled substitutes ExternalInterrupt as the fallback.
+         *
+         * The reason MUST be stored BEFORE the CAS to CANCELLED so any
+         * reader that sees CANCELLED (via the CAS's release fence) will
+         * also see the stored reason. Losing racers still return false;
+         * only the winning cancel's reason survives.
+         */
+        public boolean cancel(Object reason) {
+            if (reason != null) {
+                this.cancelReason = reason;
+            }
             if (STATE.compareAndSet(this, PENDING, CANCELLED)) {
                 if (executingThread != null) {
                     executingThread.interrupt();
@@ -180,6 +226,15 @@ public final class AsyncNatives {
             }
             return false;
         }
+
+        /**
+         * Snapshot the reason captured by whoever won the cancel CAS.
+         * Null when the Promise wasn't cancelled or the winner passed
+         * no reason. Callers converting to AsyncCancelled pass this
+         * through {@link #createAsyncCancelled(Object)}, which
+         * substitutes ExternalInterrupt when this is null.
+         */
+        public Object getCancelReason() { return cancelReason; }
 
         // Outcome codes for cancelOutcome() — mapped 1:1 to the Mezze
         // CancelOutcome ADT constructors. See AsyncNatives.promiseCancel.
@@ -191,6 +246,79 @@ public final class AsyncNatives {
         /** Like cancel() but reports what actually happened. Returns one
          *  of the CANCEL_* codes. */
         public int cancelOutcome() {
+            return cancelOutcome(null);
+        }
+
+        /**
+         * Parent-side cancel request.
+         *
+         * Two paths depending on whether the promise has a distinct
+         * child thread (Loom-style spawn) or not (Coop, or synthetic
+         * promises created via promiseSucceed / promiseFail):
+         *
+         * 1. Distinct child thread (executingThread != null): defer
+         *    state transition. Records the reason as pendingCancelReason,
+         *    interrupts the child. The child's next observation
+         *    (check outside region, blocking-op catch outside region)
+         *    finalizes via {@link #finalizePendingCancel}. This is what
+         *    lets `uninterruptible { }` regions actually protect their
+         *    bodies.
+         *
+         * 2. No distinct child thread (executingThread == null): fall
+         *    back to immediate CAS. Coop's scheduler runs tasks turn-
+         *    by-turn on a single thread; there's no thread-interrupt
+         *    observation cycle, so deferring would just lose the cancel.
+         *
+         * Returns a CANCEL_* code describing what happened FROM THE
+         * PARENT'S PERSPECTIVE at request time.
+         */
+        public int requestCancelOutcome(Object reason) {
+            if (executingThread == null) {
+                // Coop or synthetic promise — no child observation cycle.
+                // Fall back to immediate CAS via cancelOutcome path.
+                return cancelOutcome(reason);
+            }
+            if (reason != null) {
+                this.pendingCancelReason = reason;
+            }
+            int s = state;
+            if (s == PENDING) {
+                executingThread.interrupt();
+                return CANCEL_DID_CANCEL;
+            }
+            return switch (s) {
+                case COMPLETED -> CANCEL_ALREADY_COMPLETED;
+                case FAILED    -> CANCEL_ALREADY_FAILED;
+                case CANCELLED -> CANCEL_DID_CANCEL;
+                default        -> CANCEL_NOT_CANCELLABLE;
+            };
+        }
+
+        /**
+         * Child-side observation of a deferred cancel. Called from
+         * {@link #runPromiseTask}'s CancellationException catch (after
+         * the child throws out of a blocking op that surfaced the
+         * interrupt) — finalizes state to CANCELLED using the reason
+         * the parent stored. If no pendingCancelReason was recorded
+         * (e.g. interrupt from a source other than Async.cancel),
+         * falls back to null → createAsyncCancelled maps to
+         * ExternalInterrupt.
+         */
+        public void finalizePendingCancel() {
+            cancel(pendingCancelReason);
+        }
+
+        /** True if a parent-side cancel request was recorded but
+         *  state hasn't transitioned yet. Used by check() outside a
+         *  region to decide whether to throw. */
+        public boolean hasPendingCancel() {
+            return pendingCancelReason != null;
+        }
+
+        public int cancelOutcome(Object reason) {
+            if (reason != null) {
+                this.cancelReason = reason;
+            }
             if (STATE.compareAndSet(this, PENDING, CANCELLED)) {
                 if (executingThread != null) {
                     executingThread.interrupt();
@@ -409,6 +537,137 @@ public final class AsyncNatives {
      * an outer scope adopts that outer scope as parent.
      */
     private static final ThreadLocal<MezzeScope> CURRENT_SCOPE = new ThreadLocal<>();
+
+    // ==================== Uninterruptible region (#251) ====================
+    //
+    // Per-thread depth counter for `uninterruptible { f = ... }` regions.
+    // While depth > 0, blocking natives that catch InterruptedException
+    // re-block instead of surfacing AsyncCancelled, and Async.check is a
+    // no-op. The cancel itself still latches (Promise.state → CANCELLED,
+    // is_cancelled returns true) — only *delivery* to blocking sites and
+    // check is deferred until depth returns to 0.
+    //
+    // int-array-of-1 wrapper instead of Integer so increment/decrement
+    // doesn't allocate a boxed Integer on every enter/exit. The array is
+    // per-thread, so there's no contention. INT_ZERO is the shared
+    // "never entered" reader path — most threads never enter a region
+    // and see the initialValue.
+
+    private static final ThreadLocal<int[]> UNINTERRUPTIBLE_DEPTH =
+        ThreadLocal.withInitial(() -> new int[]{0});
+
+    // Per-thread flag: was the interrupt latched while we were inside a
+    // region and deferred? On exit, if this is true we re-set
+    // Thread.interrupt() so the next blocking op immediately surfaces
+    // AsyncCancelled — matches the "cancel is remembered" semantics.
+    private static final ThreadLocal<boolean[]> INTERRUPT_PENDING =
+        ThreadLocal.withInitial(() -> new boolean[]{false});
+
+    /** True if the calling thread is currently inside an
+     *  `uninterruptible { … }` region (depth > 0). Cheap ThreadLocal
+     *  read; called from every blocking-native catch site. */
+    public static boolean isInUninterruptibleRegion() {
+        return UNINTERRUPTIBLE_DEPTH.get()[0] > 0;
+    }
+
+    /**
+     * Called by blocking natives when they've caught InterruptedException
+     * and want to know whether to re-block instead of surfacing
+     * AsyncCancelled.
+     *
+     * If we're in an uninterruptible region:
+     *   - Records that an interrupt happened (INTERRUPT_PENDING = true)
+     *     so exit() can re-set the interrupt flag when the region ends.
+     *   - Clears the Thread's interrupt bit (so the next blocking-op
+     *     call inside the region can park cleanly again).
+     *   - Returns true — caller should re-block for the remaining time
+     *     / re-poll the predicate / re-attempt the acquire.
+     *
+     * If we're NOT in a region, returns false — caller falls through to
+     * the existing AsyncCancelled path.
+     */
+    public static boolean deferInterruptIfInRegion() {
+        if (UNINTERRUPTIBLE_DEPTH.get()[0] <= 0) return false;
+        INTERRUPT_PENDING.get()[0] = true;
+        // Thread.interrupted() clears the interrupt bit as a side effect.
+        // We already know it was set (the caller just caught InterruptedException).
+        Thread.interrupted();
+        return true;
+    }
+
+    /** Enter an uninterruptible region. Increment depth. Idempotent
+     *  under nesting — inner enter/exit pairs don't clear the flag
+     *  for the outer region.
+     *
+     *  Exposed as a native primarily for symmetry and debugging; the
+     *  stdlib `uninterruptible { f }` free function calls the paired
+     *  `run` native below so exit is guaranteed to fire even if the
+     *  body raises. */
+    @TruffleBoundary
+    public static MezzeUnit loomUninterruptibleEnter(MezzeRecord args) {
+        UNINTERRUPTIBLE_DEPTH.get()[0]++;
+        return MezzeUnit.INSTANCE;
+    }
+
+    /**
+     * Run a Mezze thunk inside an uninterruptible region.
+     *
+     * The pair-with-exit shape (enter, call f, finally exit) has to be
+     * guaranteed in Java because Mezze has no try/finally primitive at
+     * the source level. Doing it here means the depth counter is always
+     * balanced even if `f` raises, times out, or does anything else the
+     * body-runner could dream up. Users only ever see a well-formed
+     * region.
+     *
+     * Returns whatever `f` returns.
+     */
+    @TruffleBoundary
+    public static Object loomUninterruptibleRun(MezzeRecord args, IndirectCallNode callNode) {
+        MezzeFunction f = getFunction(args, "f");
+        int[] depth = UNINTERRUPTIBLE_DEPTH.get();
+        depth[0]++;
+        try {
+            return callThunkFunction(f, callNode);
+        } finally {
+            depth[0]--;
+            if (depth[0] < 0) depth[0] = 0;
+            if (depth[0] == 0) {
+                boolean[] pending = INTERRUPT_PENDING.get();
+                if (pending[0]) {
+                    pending[0] = false;
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
+    }
+
+    /**
+     * Exit an uninterruptible region. Decrement depth. If this is the
+     * outermost exit (depth returns to 0) AND an interrupt was deferred
+     * while inside, re-set the thread's interrupt bit so the next
+     * blocking op immediately surfaces AsyncCancelled. This preserves
+     * "cancel was requested during region → observed after region"
+     * semantics.
+     */
+    @TruffleBoundary
+    public static MezzeUnit loomUninterruptibleExit(MezzeRecord args) {
+        int[] depth = UNINTERRUPTIBLE_DEPTH.get();
+        depth[0]--;
+        if (depth[0] < 0) {
+            // Defensive: shouldn't happen if enter/exit pairs are balanced
+            // (stdlib wraps them in do { enter; body; exit }), but reset
+            // rather than propagate a negative depth.
+            depth[0] = 0;
+        }
+        if (depth[0] == 0) {
+            boolean[] pending = INTERRUPT_PENDING.get();
+            if (pending[0]) {
+                pending[0] = false;
+                Thread.currentThread().interrupt();
+            }
+        }
+        return MezzeUnit.INSTANCE;
+    }
 
     // ==================== Promise Tracker (for scoped effects) ====================
 
@@ -711,13 +970,25 @@ public final class AsyncNatives {
     @TruffleBoundary
     public static MezzeUnit loomSleep(MezzeRecord args) {
         long ms = getLong(args, "ms");
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new CancellationException("Sleep cancelled");
+        // #251: track a deadline so re-block inside an uninterruptible
+        // region continues sleeping for the remaining time, not the
+        // full original duration.
+        final long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ms);
+        while (true) {
+            long remainingMs = TimeUnit.NANOSECONDS.toMillis(
+                Math.max(0L, deadlineNanos - System.nanoTime()));
+            if (remainingMs == 0L) return MezzeUnit.INSTANCE;
+            try {
+                Thread.sleep(remainingMs);
+                return MezzeUnit.INSTANCE;
+            } catch (InterruptedException e) {
+                if (deferInterruptIfInRegion()) {
+                    continue;
+                }
+                Thread.currentThread().interrupt();
+                throw new CancellationException("Sleep cancelled");
+            }
         }
-        return MezzeUnit.INSTANCE;
     }
 
     // OPTIMIZATION 5: No @TruffleBoundary - simple thread state check
@@ -727,9 +998,26 @@ public final class AsyncNatives {
 
     // OPTIMIZATION 5: No @TruffleBoundary - simple check + throw
     public static MezzeUnit loomCheck(MezzeRecord args) {
-        if (Thread.currentThread().isInterrupted()) {
+        // #251: inside an uninterruptible region, check() is a no-op —
+        // delivery of cancellation is deferred until the region exits.
+        // is_cancelled continues to report truth; only the *throwing*
+        // side is suppressed.
+        if (Thread.currentThread().isInterrupted() && !isInUninterruptibleRegion()) {
             throw new CancellationException("Task was cancelled");
         }
+        return MezzeUnit.INSTANCE;
+    }
+
+    /**
+     * #254 — voluntarily yield the current task's slot back to the
+     * scheduler / OS. On virtual threads, Thread.yield() is a hint to
+     * the JDK scheduler to reschedule; still cheap. Useful in
+     * user-written tight loops that want to be cooperative under a
+     * single-threaded scheduler and want to give cancel-delivery a
+     * chance to land under Loom.
+     */
+    public static MezzeUnit loomYieldNow(MezzeRecord args) {
+        Thread.yield();
         return MezzeUnit.INSTANCE;
     }
 
@@ -750,8 +1038,17 @@ public final class AsyncNatives {
             if (result instanceof Boolean b && b) return MezzeUnit.INSTANCE;
             LockSupport.parkNanos(backoffNanos);
             if (Thread.interrupted()) {
-                Thread.currentThread().interrupt();
-                throw new CancellationException("Park cancelled");
+                // #251: inside an uninterruptible region, latch the
+                // interrupt and keep polling the predicate.
+                // Thread.interrupted() already cleared the bit; the
+                // helper below records that a cancel was requested so
+                // exit() re-arms it.
+                if (isInUninterruptibleRegion()) {
+                    INTERRUPT_PENDING.get()[0] = true;
+                } else {
+                    Thread.currentThread().interrupt();
+                    throw new CancellationException("Park cancelled");
+                }
             }
             backoffNanos = Math.min(backoffNanos * 2, maxBackoffNanos);
         }
@@ -783,7 +1080,17 @@ public final class AsyncNatives {
                 new String[]{"sc"},
                 new Object[]{scope}
             );
-            Object result = callNode.call(f.getCallTarget(), appendArg(f.getClosureValues(), scopeArg));
+            // Clear CURRENT fiber around the callback so op-calls inside
+            // f route through chain dispatch instead of suspending the
+            // outer perform's fiber (whose continuation is yielded
+            // several layers deep on the driver stack). Without this,
+            // nested op-calls in f — e.g. Async.spawn or a routed
+            // Time.sleep — bubble as MezzeSuspended from the outer
+            // driver instead of dispatching to the installed handler.
+            // #274.
+            Object result = EffectFiber.runDetached(() ->
+                callNode.call(f.getCallTarget(), appendArg(f.getClosureValues(), scopeArg))
+            );
 
             // Wait for all children
             scope.awaitAll();
@@ -848,6 +1155,15 @@ public final class AsyncNatives {
             } catch (TaskUnhandledOpException tue) {
                 promise.setUnhandledOpCall(tue.opCall);
                 promise.complete(null);
+            } catch (CancellationException ce) {
+                // Cancel arrived while the body was blocked in a native
+                // op (sleep, park, mutex, etc.); the op translated its
+                // InterruptedException to CancellationException so we
+                // could finalize here as CANCELLED (not FAILED). Use the
+                // parent's pending reason if any — otherwise null which
+                // maps to ExternalInterrupt inside AsyncCancelled. #251
+                // parity with runPromiseTask.
+                promise.finalizePendingCancel();
             } catch (Throwable e) {
                 promise.fail(e);
             } finally {
@@ -890,9 +1206,35 @@ public final class AsyncNatives {
 
     // ==================== AsyncError / PromiseState / CancelOutcome Helpers ====================
 
-    private static MezzeVariant createAsyncCancelled() {
+    /**
+     * Build an `AsyncCancelled { reason: CancelReason }` variant.
+     *
+     * `reason` is the raw CancelReason variant supplied by the caller,
+     * or null when no reason was available at the cancel site (e.g. a
+     * cancel driven by native Thread.interrupt from outside Mezze).
+     * Null substitutes {@link #EXTERNAL_INTERRUPT_REASON} — the Mezze
+     * ADT has no "no reason" case; every path names why.
+     */
+    static MezzeVariant createAsyncCancelled(Object reason) {
         int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("AsyncCancelled");
-        return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+        Object r = reason != null ? reason : externalInterruptReason();
+        MezzeRecord errRec = MezzeRecord.fromFields(
+            new String[]{"reason"},
+            new Object[]{r}
+        );
+        return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, errRec);
+    }
+
+    // Cached ExternalInterrupt singleton — no-payload variant, so we can
+    // reuse it across every native path that needs a fallback reason.
+    private static volatile MezzeVariant EXTERNAL_INTERRUPT_REASON = null;
+    private static MezzeVariant externalInterruptReason() {
+        MezzeVariant v = EXTERNAL_INTERRUPT_REASON;
+        if (v != null) return v;
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("ExternalInterrupt");
+        v = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+        EXTERNAL_INTERRUPT_REASON = v;
+        return v;
     }
 
     private static MezzeVariant createAsyncFailed(String msg) {
@@ -990,16 +1332,28 @@ public final class AsyncNatives {
             case MezzePromise.PENDING   -> promiseStatePending();
             case MezzePromise.COMPLETED -> promiseStateCompleted(p.snapshotResult());
             case MezzePromise.FAILED    -> promiseStateFailed(asyncErrorFromResult(p.snapshotResult()));
-            case MezzePromise.CANCELLED -> promiseStateFailed(createAsyncCancelled());
+            case MezzePromise.CANCELLED -> promiseStateFailed(createAsyncCancelled(p.getCancelReason()));
             default -> throw new RuntimeException("MezzePromise: unknown state " + state);
         };
     }
 
-    /** Cancel the Promise and return a CancelOutcome variant. */
+    /** Cancel the Promise from the parent side (i.e. the caller of
+     *  Async.cancel). Records the reason as pending and interrupts the
+     *  child thread. State transition is deferred to the child's next
+     *  observation point — the child decides whether to finalize (via
+     *  runPromiseTask's CancellationException catch) or continue
+     *  deferring (uninterruptible region). #251.
+     *
+     *  From the parent's perspective, the outcome is Cancelled if the
+     *  request was accepted (state was PENDING); the awaiter sees the
+     *  actual outcome via await(). If the region held and the task
+     *  ran to completion, the awaiter gets Ok despite parent seeing
+     *  Cancelled. */
     @TruffleBoundary
     public static MezzeVariant promiseCancel(MezzeRecord args) {
         MezzePromise p = getPromise(args, "p");
-        int outcome = p.cancelOutcome();
+        Object reason = getFieldValueOrNull(args, "reason");
+        int outcome = p.requestCancelOutcome(reason);
         return cancelOutcomeFor(outcome);
     }
 
@@ -1031,13 +1385,13 @@ public final class AsyncNatives {
             value = p.await();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return MezzeVariant.err(createAsyncCancelled());
+            return MezzeVariant.err(createAsyncCancelled(p.getCancelReason()));
         } catch (RuntimeException e) {
             // p.await() throws on FAILED / CANCELLED via getResultOrThrow.
             // Classify by the promise's final state and return Result Err.
             int state = p.snapshotState();
             if (state == MezzePromise.CANCELLED) {
-                return MezzeVariant.err(createAsyncCancelled());
+                return MezzeVariant.err(createAsyncCancelled(p.getCancelReason()));
             }
             if (state == MezzePromise.FAILED) {
                 return MezzeVariant.err(asyncErrorFromResult(p.snapshotResult()));
@@ -1072,7 +1426,7 @@ public final class AsyncNatives {
         return switch (state) {
             case MezzePromise.COMPLETED -> MezzeVariant.ok(value);
             case MezzePromise.FAILED    -> MezzeVariant.err(asyncErrorFromResult(value));
-            case MezzePromise.CANCELLED -> MezzeVariant.err(createAsyncCancelled());
+            case MezzePromise.CANCELLED -> MezzeVariant.err(createAsyncCancelled(p.getCancelReason()));
             default -> MezzeVariant.err(createAsyncFailed(
                 "promise.await returned with unexpected state " + state));
         };
@@ -1127,9 +1481,10 @@ public final class AsyncNatives {
             // Native blocking ops translate InterruptedException to
             // CancellationException so cancel-during-blocking surfaces as
             // a typed AsyncCancelled result on await rather than a generic
-            // task-failed runtime error. Mark the promise CANCELLED so
-            // awaiters return Err { error = AsyncCancelled }.
-            promise.cancel();
+            // task-failed runtime error. Finalize using the parent's
+            // pending reason if any — otherwise create with null (which
+            // maps to ExternalInterrupt in the AsyncCancelled ADT). #251.
+            promise.finalizePendingCancel();
         } catch (Throwable e) {
             promise.fail(e);
         } finally {
@@ -1192,6 +1547,19 @@ public final class AsyncNatives {
         System.arraycopy(closure, 0, result, 0, closure.length);
         result[closure.length] = arg;
         return result;
+    }
+
+    /**
+     * Read a field by name, returning null if absent. Used for optional
+     * native arguments — currently `reason` on __native_promise_cancel,
+     * where the ADT itself has no "no reason" case but the *native shim
+     * layer* allows the field to be omitted (older callers, test
+     * harnesses that construct the record dynamically).
+     */
+    private static Object getFieldValueOrNull(MezzeRecord r, String name) {
+        int idx = r.getFieldIndex(name);
+        if (idx < 0) return null;
+        return r.getField(idx);
     }
 
     private static Object getFieldValue(MezzeRecord r, String name) {
@@ -1286,13 +1654,21 @@ public final class AsyncNatives {
     }
 
     /**
-     * Build a `Result _ AsyncError = Err { error = AsyncCancelled }` variant.
-     * Coop callers were returning the raw AsyncError variant — wrong; users
-     * pattern-match `Err { error = AsyncCancelled }` and saw a tag mismatch.
-     * Matches Loom's promiseAwaitResult line 988 / 1023.
+     * Build a `Result _ AsyncError = Err { error = AsyncCancelled { reason } }`
+     * variant. Coop callers were returning the raw AsyncError variant —
+     * wrong; users pattern-match `Err { error = AsyncCancelled { reason = _ } }`
+     * and saw a tag mismatch. Matches Loom's promiseAwaitResult.
+     *
+     * `reason` is a CancelReason variant (from the cancelled promise's
+     * stored reason). Null falls back to ExternalInterrupt inside
+     * createAsyncCancelled.
      */
     static MezzeVariant asyncCancelledResult() {
-        return MezzeVariant.err(createAsyncCancelled());
+        return asyncCancelledResult(null);
+    }
+
+    static MezzeVariant asyncCancelledResult(Object reason) {
+        return MezzeVariant.err(createAsyncCancelled(reason));
     }
 
     static MezzeVariant asyncFailedResult(String msg) {

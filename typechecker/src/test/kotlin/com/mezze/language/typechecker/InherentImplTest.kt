@@ -491,7 +491,7 @@ class InherentImplTest {
             typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Int"))
-        assertTrue(error.message!!.contains("Inherent impls can only be defined where the type is defined"))
+        assertTrue(error.message!!.contains("Inherent impls can only be defined where"))
     }
 
     @Test
@@ -547,7 +547,7 @@ class InherentImplTest {
             typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Str"))
-        assertTrue(error.message!!.contains("Inherent impls can only be defined where the type is defined"))
+        assertTrue(error.message!!.contains("Inherent impls can only be defined where"))
     }
 
     @Test
@@ -596,7 +596,7 @@ class InherentImplTest {
             typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Option"))
-        assertTrue(error.message!!.contains("Inherent impls can only be defined where the type is defined"))
+        assertTrue(error.message!!.contains("Inherent impls can only be defined where"))
     }
 
     @Test

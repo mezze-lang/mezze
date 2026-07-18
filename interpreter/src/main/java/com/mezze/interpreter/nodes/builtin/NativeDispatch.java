@@ -2581,6 +2581,10 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_async_sleep", (r, c) -> AsyncNatives.loomSleep(r));
         HANDLERS.put("__native_async_is_cancelled", (r, c) -> AsyncNatives.loomIsCancelled(r));
         HANDLERS.put("__native_async_check", (r, c) -> AsyncNatives.loomCheck(r));
+        HANDLERS.put("__native_async_yield_now", (r, c) -> AsyncNatives.loomYieldNow(r));
+        HANDLERS.put("__native_async_uninterruptible_enter", (r, c) -> AsyncNatives.loomUninterruptibleEnter(r));
+        HANDLERS.put("__native_async_uninterruptible_exit",  (r, c) -> AsyncNatives.loomUninterruptibleExit(r));
+        HANDLERS.put("__native_async_uninterruptible_run",   (r, c) -> AsyncNatives.loomUninterruptibleRun(r, c));
         HANDLERS.put("__native_async_park_until", (r, c) -> AsyncNatives.loomParkUntil(r, c));
         HANDLERS.put("__native_async_scope_cancel_all", (r, c) -> AsyncNatives.loomScopeCancelAll(r));
         HANDLERS.put("__native_async_scope_is_cancelled", (r, c) -> AsyncNatives.loomScopeIsCancelled(r));
@@ -2620,6 +2624,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_scheduler_park_until", (r, c) -> SchedulerNatives.schedulerParkUntil(r, c));
         HANDLERS.put("__native_scheduler_is_cancelled", (r, c) -> SchedulerNatives.schedulerIsCancelled(r));
         HANDLERS.put("__native_scheduler_check", (r, c) -> SchedulerNatives.schedulerCheck(r));
+        HANDLERS.put("__native_scheduler_yield_now", (r, c) -> SchedulerNatives.schedulerYieldNow(r, c));
 
     }
 

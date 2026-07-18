@@ -288,6 +288,7 @@ class HttpStageDTest {
         val result = eval("""
             use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request, retry}
             use std::effects::async::{LoomAsync}
+            use std::effects::time::{Time, SystemTime}
             use std::collections::map
             use std::collections::bytes
 
@@ -298,7 +299,7 @@ class HttpStageDTest {
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
             ]
-            perform LoomAsync in
+            perform SystemTime in perform LoomAsync in
               perform MockHttpClient { rules = rules } in do
                 let req = request { url = "http://test.com/x" }
                 let resp = retry { req = req, max_attempts = 3, backoff_ms = 0 }
@@ -314,11 +315,12 @@ class HttpStageDTest {
         val result = eval("""
             use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, retry}
             use std::effects::async::{LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Err { error = InvalidUrl { url = "x", reason = "bad" } } }
             ]
-            perform LoomAsync in
+            perform SystemTime in perform LoomAsync in
               perform MockHttpClient { rules = rules } in do
                 let req = request { url = "http://test.com/x" }
                 let resp = retry { req = req, max_attempts = 5, backoff_ms = 0 }
@@ -336,11 +338,12 @@ class HttpStageDTest {
         val result = eval("""
             use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, retry}
             use std::effects::async::{LoomAsync}
+            use std::effects::time::{Time, SystemTime}
 
             let rules: [MockRule] = [
                 { methods = [], url = Glob { pattern = "**" }, response = Err { error = Timeout { url = "x", ms = 100 } } }
             ]
-            perform LoomAsync in
+            perform SystemTime in perform LoomAsync in
               perform MockHttpClient { rules = rules } in do
                 let req = request { url = "http://test.com/x" }
                 let resp = retry { req = req, max_attempts = 3, backoff_ms = 0 }

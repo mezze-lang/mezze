@@ -52,9 +52,10 @@ class ParallelErrorPropagationTest {
             is_done, is_pending, is_failed, is_cancelled, inspect
         }
         use std::effects::exception::{ Exception, CrashException, unwrap }
+        use std::effects::time::{ Time, SystemTime }
         use std::collections::seq
 
-        perform LoomAsync in do
+        perform SystemTime in perform LoomAsync in do
     """.trimIndent()
 
     // Atom primitives for shared state
@@ -199,7 +200,7 @@ class ParallelErrorPropagationTest {
                     Ok { val = _ } -> "unexpected success"
                     Err { error } -> match error is
                         AsyncFailed {msg} -> msg
-                        AsyncCancelled -> "cancelled"
+                        AsyncCancelled { reason = _ } -> "cancelled"
                         AsyncTimedOut {ms} -> "timed out"
                 None -> "missing index"
         """
@@ -248,7 +249,7 @@ class ParallelErrorPropagationTest {
             }
 
             # Cancel the slow operation
-            let _ = Async.cancel {p = slow_op}
+            let _ = Async.cancel {p = slow_op, reason = UserRequested { msg = "test" }}
 
             # Use settle to see the cancelled state
             let results = settle {ps = [slow_op]}
@@ -301,7 +302,7 @@ class ParallelErrorPropagationTest {
             }
 
             # Cancel before it completes
-            let _ = Async.cancel {p = op}
+            let _ = Async.cancel {p = op, reason = UserRequested { msg = "test" }}
 
             let _ = Async.sleep {ms = 50}
 
@@ -327,7 +328,7 @@ class ParallelErrorPropagationTest {
             }
 
             # Cancel immediately
-            let _ = Async.cancel {p = op}
+            let _ = Async.cancel {p = op, reason = UserRequested { msg = "test" }}
 
             # Wait a bit to ensure operation would have run if not cancelled
             let _ = Async.sleep {ms = 100}
@@ -500,7 +501,7 @@ class ParallelErrorPropagationTest {
                     Ok { val = _ } -> "unexpected success"
                     Err { error } -> match error is
                         AsyncFailed {msg} -> msg
-                        AsyncCancelled -> "cancelled"
+                        AsyncCancelled { reason = _ } -> "cancelled"
                         AsyncTimedOut {ms} -> "timed out"
                 None -> "missing index"
         """

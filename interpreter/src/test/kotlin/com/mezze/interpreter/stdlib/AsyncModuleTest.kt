@@ -253,9 +253,9 @@ class AsyncModuleTest {
             use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
             use std::result
 
-            let err: AsyncError = AsyncCancelled
+            let err: AsyncError = AsyncCancelled { reason = UserRequested { msg = "test" } }
             match err is
-                AsyncCancelled -> True
+                AsyncCancelled { reason = _ } -> True
                 _ -> False
         """)
         assertEquals(true, result)

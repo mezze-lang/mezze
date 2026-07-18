@@ -30,16 +30,17 @@ class CancelDuringBlockingTest {
     private fun cancelDuringBlock(blockingExpr: String): String {
         val source = """
             use std::effects::async::{Async, LoomAsync, AsyncError}
+            use std::effects::time::{Time, SystemTime}
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let child = Async.spawn { f = {} -> do
                 $blockingExpr
                 "should-not-reach"
               }
               Async.sleep { ms = 50 }
-              Async.cancel { p = child }
+              Async.cancel { p = child, reason = UserRequested { msg = "cancel test" } }
               match Async.await { p = child } is
-                Err { error = AsyncCancelled }       -> "cancelled"
+                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
                 Ok  { val = _ }                      -> "wrong-ok"
@@ -64,9 +65,10 @@ class CancelDuringBlockingTest {
     fun `cancel-during-mutex-lock returns AsyncCancelled`() {
         val source = """
             use std::effects::async::{Async, LoomAsync, AsyncError}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::async::mutex::{mutex, with_lock}
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let m = mutex {}
               # Holder task acquires the lock and sleeps forever.
               let holder = Async.spawn { f = {} -> with_lock {
@@ -83,13 +85,13 @@ class CancelDuringBlockingTest {
                 f = {} -> "ran"
               } }
               Async.sleep { ms = 50 }
-              Async.cancel { p = waiter }
+              Async.cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
               let waiter_result = Async.await { p = waiter }
               # Clean up holder.
-              Async.cancel { p = holder }
+              Async.cancel { p = holder, reason = UserRequested { msg = "cancel test" } }
               Async.await { p = holder }
               match waiter_result is
-                Err { error = AsyncCancelled }       -> "cancelled"
+                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
                 Ok  { val = _ }                      -> "wrong-ok"
@@ -101,9 +103,10 @@ class CancelDuringBlockingTest {
     fun `cancel-during-semaphore-acquire returns AsyncCancelled`() {
         val source = """
             use std::effects::async::{Async, LoomAsync, AsyncError}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::async::semaphore::{semaphore, acquire}
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               # Semaphore with 1 permit, immediately consumed.
               let s = semaphore { permits = 1 }
               acquire { sem = s }
@@ -113,9 +116,9 @@ class CancelDuringBlockingTest {
                 "ran"
               }
               Async.sleep { ms = 50 }
-              Async.cancel { p = waiter }
+              Async.cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
               match Async.await { p = waiter } is
-                Err { error = AsyncCancelled }       -> "cancelled"
+                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
                 Ok  { val = _ }                      -> "wrong-ok"
@@ -127,18 +130,19 @@ class CancelDuringBlockingTest {
     fun `cancel-during-channel-recv returns AsyncCancelled`() {
         val source = """
             use std::effects::async::{Async, LoomAsync, AsyncError}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::async::channel::{chan, recv}
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let c = chan {}
               let waiter = Async.spawn { f = {} -> do
                 let _ = recv { ch = c }
                 "ran"
               }
               Async.sleep { ms = 50 }
-              Async.cancel { p = waiter }
+              Async.cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
               match Async.await { p = waiter } is
-                Err { error = AsyncCancelled }       -> "cancelled"
+                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
                 Ok  { val = _ }                      -> "wrong-ok"
@@ -150,9 +154,10 @@ class CancelDuringBlockingTest {
     fun `cancel-during-latch-await returns AsyncCancelled`() {
         val source = """
             use std::effects::async::{Async, LoomAsync, AsyncError}
+            use std::effects::time::{Time, SystemTime}
             use std::effects::async::latch::{latch, await_latch}
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               # Latch that never counts down.
               let l = latch { count = 1 }
               let waiter = Async.spawn { f = {} -> do
@@ -160,9 +165,9 @@ class CancelDuringBlockingTest {
                 "ran"
               }
               Async.sleep { ms = 50 }
-              Async.cancel { p = waiter }
+              Async.cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
               match Async.await { p = waiter } is
-                Err { error = AsyncCancelled }       -> "cancelled"
+                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
                 Ok  { val = _ }                      -> "wrong-ok"

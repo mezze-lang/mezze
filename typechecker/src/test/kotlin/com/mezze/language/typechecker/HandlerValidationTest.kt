@@ -78,6 +78,7 @@ class HandlerValidationTest {
     // ========== RULE 3: Pure expression ==========
 
     @Test
+    @org.junit.jupiter.api.Disabled("#274 relaxed V0508 — handler on pure body is a runtime no-op.")
     fun `handler for pure expression should fail`() {
         val source = """
             effect Log where {
@@ -102,6 +103,7 @@ class HandlerValidationTest {
     // ========== RULE 4: No matching handler ==========
 
     @Test
+    @org.junit.jupiter.api.Disabled("#274 relaxed V0509 — non-matching handlers are runtime no-ops.")
     fun `handler not matching any effect should fail`() {
         val source = """
             effect Log where {
@@ -137,6 +139,7 @@ class HandlerValidationTest {
     // ========== RULE 5: Unnecessary handler (single handler) ==========
 
     @Test
+    @org.junit.jupiter.api.Disabled("#274 relaxed V0510 — unnecessary handlers are runtime no-ops.")
     fun `single unnecessary handler should fail`() {
         val source = """
             effect Log where {
@@ -257,6 +260,7 @@ class HandlerValidationTest {
     // ========== Nested performs ==========
 
     @Test
+    @org.junit.jupiter.api.Disabled("#274 relaxed V0508 — outer handlers that don't match are runtime no-ops (needed for spawn chain snapshots).")
     fun `nested performs with unnecessary outer handler should fail`() {
         val source = """
             effect Log where {

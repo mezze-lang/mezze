@@ -5,13 +5,21 @@ import com.mezze.language.ast.RowVar
 import com.mezze.language.ast.TypeVar
 
 data class Substitution(
-    val mappings: Map<TypeVar, MezzeType> = emptyMap()
+    val mappings: Map<TypeVar, MezzeType> = emptyMap(),
+    // #274-B: Row-var bindings for effect rows. When an EffectRow's
+    // rowVar is bound here, applying the substitution replaces the row
+    // var with the target effects (merged with the row's own effects).
+    // Distinct from `mappings`: row vars are a separate namespace from
+    // type vars, and the value is always an EffectRow (never an
+    // arbitrary MezzeType). Record/variant row vars go through their
+    // own machinery — this map is effect-row-only.
+    val rowVarMappings: Map<RowVar, MezzeType.EffectRow> = emptyMap()
 ) {
     fun apply(type: MezzeType): MezzeType {
-        if (mappings.isEmpty()) {
+        if (mappings.isEmpty() && rowVarMappings.isEmpty()) {
             return type
         }
-        if (isConcreteType(type)) {
+        if (mappings.isEmpty() && isConcreteType(type)) {
             return type
         }
 
@@ -87,6 +95,7 @@ data class Substitution(
             is MezzeType.FunctionType ->
                 needsSubstitution(type.paramType) ||
                 needsSubstitution(type.returnType) ||
+                (type.effects != null && needsSubstitutionInEffectRow(type.effects!!)) ||
                 type.abilityConstraints.any { c -> c.typeArgs.any { needsSubstitution(it) } }
 
             is MezzeType.RecordType ->
@@ -125,9 +134,14 @@ data class Substitution(
     }
 
     private fun needsSubstitutionInEffectRow(effectRow: MezzeType.EffectRow): Boolean {
-        return effectRow.effectInstances.any { instance ->
+        // #274-B: an EffectRow needs substitution if its row var is
+        // bound in rowVarMappings, OR if any effect instance's
+        // associated type mentions a bound TypeVar.
+        val rowVarBound = effectRow.rowVar != null && effectRow.rowVar in rowVarMappings
+        val instanceNeeds = effectRow.effectInstances.any { instance ->
             instance.associatedTypes.values.any { needsSubstitution(it) }
         }
+        return rowVarBound || instanceNeeds
     }
 
     private fun applyWithVisited(
@@ -255,44 +269,69 @@ data class Substitution(
         visitedVars: MutableSet<TypeVar>,
         chainCache: MutableMap<TypeVar, MezzeType>
     ): MezzeType.EffectRow {
-        if (effectRow.effectInstances.isEmpty()) {
-            return effectRow
-        }
-
-        var anyChanged = false
-        val substitutedInstances = effectRow.effectInstances.map { instance ->
-            if (instance.associatedTypes.isEmpty()) {
-                instance
-            } else {
-                val needsSub = instance.associatedTypes.values.any { needsSubstitution(it) }
-                if (!needsSub) {
+        // First: substitute associated types inside effect instances.
+        var current = if (effectRow.effectInstances.isEmpty()) {
+            effectRow
+        } else {
+            var anyChanged = false
+            val substitutedInstances = effectRow.effectInstances.map { instance ->
+                if (instance.associatedTypes.isEmpty()) {
                     instance
                 } else {
-                    anyChanged = true
-                    val substitutedAssocTypes = instance.associatedTypes.mapValues { (_, type) ->
-                        applyWithVisited(type, visitedVars, chainCache)
+                    val needsSub = instance.associatedTypes.values.any { needsSubstitution(it) }
+                    if (!needsSub) {
+                        instance
+                    } else {
+                        anyChanged = true
+                        val substitutedAssocTypes = instance.associatedTypes.mapValues { (_, type) ->
+                            applyWithVisited(type, visitedVars, chainCache)
+                        }
+                        MezzeType.EffectInstance(instance.name, substitutedAssocTypes)
                     }
-                    MezzeType.EffectInstance(instance.name, substitutedAssocTypes)
                 }
             }
+            if (anyChanged) effectRow.copy(effectInstances = substitutedInstances.toSet()) else effectRow
         }
 
-        return if (anyChanged) effectRow.copy(effectInstances = substitutedInstances.toSet()) else effectRow
+        // #274-B: if the row's row var is bound, absorb the bound
+        // effects into this row. The rowVar of the result becomes the
+        // absorbed row's rowVar (chain through — if the target itself
+        // has a row var, that becomes the new tail).
+        val rowVar = current.rowVar
+        if (rowVar != null && rowVar in rowVarMappings) {
+            // Recursively apply so chains of row vars resolve.
+            val target = applyToEffectRowWithVisited(rowVarMappings[rowVar]!!, visitedVars, chainCache)
+            current = MezzeType.EffectRow(
+                effects = current.effects + target.effects,
+                effectInstances = current.effectInstances + target.effectInstances,
+                effectHashes = current.effectHashes + target.effectHashes,
+                rowVar = target.rowVar,
+                performed = current.performed || target.performed
+            )
+        }
+        return current
     }
 
     // s1's mappings take precedence — we DON'T apply this to other's values because
     // that would bake in intermediate results (e.g. partial variant fields).
     fun compose(other: Substitution): Substitution {
-        return Substitution(other.mappings + mappings)
+        return Substitution(
+            mappings = other.mappings + mappings,
+            rowVarMappings = other.rowVarMappings + rowVarMappings
+        )
     }
 
     val isEmpty: Boolean
-        get() = mappings.isEmpty()
+        get() = mappings.isEmpty() && rowVarMappings.isEmpty()
 
     companion object {
         val empty = Substitution()
 
         fun single(typeVar: TypeVar, type: MezzeType) = Substitution(mapOf(typeVar to type))
+
+        // #274-B: single-binding constructor for row var → effect row.
+        fun singleRow(rowVar: RowVar, effects: MezzeType.EffectRow) =
+            Substitution(rowVarMappings = mapOf(rowVar to effects))
     }
 
     override fun toString(): String {

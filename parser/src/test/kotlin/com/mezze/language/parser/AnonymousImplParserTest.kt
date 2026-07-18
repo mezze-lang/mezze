@@ -378,4 +378,134 @@ class AnonymousImplParserTest {
         assertTrue(impl.isInherent)
         assertEquals("classify", impl.operations[0].name)
     }
+
+    // ─── Seq (`[T]`) receivers ──────────────────────────────────────────
+    //
+    // Anonymous inherent impls on seq-shaped receivers. The parser
+    // must accept `[T]` in the receiver position, dispatching through
+    // implTargetTypeAnnotation rather than the identifier-only
+    // parseQualifiedRef path.
+
+    @Test
+    fun `test anonymous impl on Seq of concrete type`() {
+        val source = """
+            impl [Int] where {
+                sum_all = { it } -> 0
+            }
+        """.trimIndent()
+
+        val module = parser.parseParsedModule(source)
+        assertEquals(1, module.decls.size)
+
+        val impl = module.decls[0] as ParsedImplAbilityDecl
+        assertTrue(impl.isInherent, "expected inherent impl, got: ${impl.target}")
+        assertEquals(1, impl.targetTypes.size)
+        val target = impl.targetTypes[0] as ParsedSeqType
+        assertEquals("Int", (target.elementType as ParsedNamedType).name)
+        assertEquals(1, impl.operations.size)
+        assertEquals("sum_all", impl.operations[0].name)
+    }
+
+    @Test
+    fun `test anonymous impl on Seq of type variable`() {
+        val source = """
+            impl ['a] where {
+                first_or = { it, default } -> default
+            }
+        """.trimIndent()
+
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
+
+        assertTrue(impl.isInherent)
+        val target = impl.targetTypes[0] as ParsedSeqType
+        assertEquals("'a", (target.elementType as ParsedNamedType).name)
+        assertEquals("first_or", impl.operations[0].name)
+    }
+
+    @Test
+    fun `test anonymous impl on Seq of type application`() {
+        // `impl [Option 'a] where { ... }` — the seq element is itself
+        // a parametric type. Both must reach the parser correctly.
+        val source = """
+            impl [Option 'a] where {
+                unwrap_all = { it } -> 0
+            }
+        """.trimIndent()
+
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
+
+        assertTrue(impl.isInherent)
+        val target = impl.targetTypes[0] as ParsedSeqType
+        val elem = target.elementType as ParsedTypeApp
+        assertEquals("Option", elem.constructor)
+        assertEquals(1, elem.args.size)
+        assertEquals("'a", (elem.args[0] as ParsedNamedType).name)
+    }
+
+    @Test
+    fun `test anonymous impl on Seq with multiple methods`() {
+        val source = """
+            impl [Str] where {
+                joined = { it } -> "",
+                count_non_empty = { it } -> 0
+            }
+        """.trimIndent()
+
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls[0] as ParsedImplAbilityDecl
+
+        assertTrue(impl.isInherent)
+        assertEquals(2, impl.operations.size)
+        assertEquals("joined", impl.operations[0].name)
+        assertEquals("count_non_empty", impl.operations[1].name)
+    }
+
+    // ─── Ability impls on Seq (`impl Ability for [T]`) ──────────────────
+    //
+    // The `for [T]` form was already supported (seq.mz uses it for
+    // impl Default for ['a] etc.). Cover it here so the anonymous-form
+    // changes don't accidentally break the existing path.
+
+    @Test
+    fun `test ability impl on Seq of concrete type`() {
+        val source = """
+            ability MySum for 'a where {
+                sum: { xs: ['a] } -> 'a
+            }
+
+            impl MySum for [Int] where {
+                sum = { xs } -> 0
+            }
+        """.trimIndent()
+
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls.filterIsInstance<ParsedImplAbilityDecl>().first()
+
+        assertFalse(impl.isInherent)
+        assertEquals("MySum", impl.abilityName)
+        val target = impl.targetTypes[0] as ParsedSeqType
+        assertEquals("Int", (target.elementType as ParsedNamedType).name)
+    }
+
+    @Test
+    fun `test ability impl on Seq of type variable`() {
+        val source = """
+            ability Empty for 'a where {
+                empty: {} -> 'a
+            }
+
+            impl Empty for ['a] where {
+                empty = {} -> 0
+            }
+        """.trimIndent()
+
+        val module = parser.parseParsedModule(source)
+        val impl = module.decls.filterIsInstance<ParsedImplAbilityDecl>().first()
+
+        assertFalse(impl.isInherent)
+        val target = impl.targetTypes[0] as ParsedSeqType
+        assertEquals("'a", (target.elementType as ParsedNamedType).name)
+    }
 }

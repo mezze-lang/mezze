@@ -565,6 +565,7 @@ public final class ConcurrencyNatives {
     public static class MezzeMutex {
         private final ReentrantLock lock = new ReentrantLock();
         public void lock() { lock.lock(); }
+        public void lockInterruptibly() throws InterruptedException { lock.lockInterruptibly(); }
         public void unlock() { lock.unlock(); }
         public boolean tryLock() { return lock.tryLock(); }
         @Override public String toString() { return "<mutex>"; }
@@ -578,8 +579,22 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord mutexLock(MezzeRecord args) {
         MezzeMutex mutex = getMutex(args, "mutex");
-        mutex.lock();
-        return MezzeRecord.empty();
+        // #251: use lockInterruptibly so Async.cancel actually surfaces
+        // AsyncCancelled to a task blocked on mutex.lock. Wrapped in a
+        // while(true) so an uninterruptible region can re-block for the
+        // remaining acquire attempt.
+        while (true) {
+            try {
+                mutex.lockInterruptibly();
+                return MezzeRecord.empty();
+            } catch (InterruptedException e) {
+                if (com.mezze.interpreter.nodes.builtin.effects.AsyncNatives.deferInterruptIfInRegion()) {
+                    continue;
+                }
+                Thread.currentThread().interrupt();
+                throw new CancellationException("Mutex lock cancelled");
+            }
+        }
     }
 
     @TruffleBoundary
@@ -628,13 +643,20 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord semaphoreAcquire(MezzeRecord args) {
         MezzeSemaphore sem = getSemaphore(args, "sem");
-        try {
-            sem.acquire();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new CancellationException("Semaphore acquire cancelled");
+        while (true) {
+            try {
+                sem.acquire();
+                return MezzeRecord.empty();
+            } catch (InterruptedException e) {
+                // #251: inside uninterruptible, latch the interrupt and
+                // retry the acquire. Otherwise surface AsyncCancelled.
+                if (com.mezze.interpreter.nodes.builtin.effects.AsyncNatives.deferInterruptIfInRegion()) {
+                    continue;
+                }
+                Thread.currentThread().interrupt();
+                throw new CancellationException("Semaphore acquire cancelled");
+            }
         }
-        return MezzeRecord.empty();
     }
 
     @TruffleBoundary
@@ -695,13 +717,18 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord latchAwait(MezzeRecord args) {
         MezzeLatch latch = getLatch(args, "latch");
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new CancellationException("Latch await cancelled");
+        while (true) {
+            try {
+                latch.await();
+                return MezzeRecord.empty();
+            } catch (InterruptedException e) {
+                if (com.mezze.interpreter.nodes.builtin.effects.AsyncNatives.deferInterruptIfInRegion()) {
+                    continue;
+                }
+                Thread.currentThread().interrupt();
+                throw new CancellationException("Latch await cancelled");
+            }
         }
-        return MezzeRecord.empty();
     }
 
     @TruffleBoundary
@@ -763,11 +790,17 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord waitgroupWait(MezzeRecord args) {
         MezzeWaitGroup wg = getWaitGroup(args, "wg");
-        try {
-            wg.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new CancellationException("WaitGroup wait cancelled");
+        while (true) {
+            try {
+                wg.await();
+                break;
+            } catch (InterruptedException e) {
+                if (com.mezze.interpreter.nodes.builtin.effects.AsyncNatives.deferInterruptIfInRegion()) {
+                    continue;
+                }
+                Thread.currentThread().interrupt();
+                throw new CancellationException("WaitGroup wait cancelled");
+            }
         }
         return MezzeRecord.empty();
     }
@@ -1425,7 +1458,21 @@ public final class ConcurrencyNatives {
     public static Object mutexWithLock(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeMutex mutex = getMutex(args, "mutex");
         MezzeFunction f = getFunction(args, "f");
-        mutex.lock();
+        // #251: interruptible acquire so Async.cancel actually reaches
+        // tasks blocked on with_lock. Re-block inside uninterruptible
+        // regions.
+        while (true) {
+            try {
+                mutex.lockInterruptibly();
+                break;
+            } catch (InterruptedException e) {
+                if (com.mezze.interpreter.nodes.builtin.effects.AsyncNatives.deferInterruptIfInRegion()) {
+                    continue;
+                }
+                Thread.currentThread().interrupt();
+                throw new CancellationException("Mutex with_lock cancelled");
+            }
+        }
         try {
             return callNode.call(f.getCallTarget(), f.getClosureValues());
         } finally {

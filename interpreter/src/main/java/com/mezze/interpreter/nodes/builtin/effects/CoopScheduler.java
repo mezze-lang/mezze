@@ -386,6 +386,19 @@ public final class CoopScheduler {
         }
     }
 
+    /**
+     * #254 — voluntarily yield to the scheduler for one tick. Under
+     * coop, "yield" and "sleep 0" are the same shape: if any other
+     * task is ready, run it. If nothing else is ready, return
+     * immediately. Symmetric with LoomAsync.yield_now (Thread.yield).
+     */
+    @TruffleBoundary
+    public void yieldNow(IndirectCallNode callNode) {
+        if (!readyQueue.isEmpty() || !parkedFibers.isEmpty()) {
+            tick(callNode);
+        }
+    }
+
     public boolean isDone(AsyncNatives.MezzePromise promise) {
         return promise.isDone();
     }

@@ -528,10 +528,11 @@ impl Client where {
 }
 
 use std::effects::async::{ Async, par_map }
+use std::effects::time::{ Time }
 
 ## Internal: retry loop. Self-recursive — kept top-level because Mezze
 ## doesn't bind nested `let` names to themselves.
-let retry_loop : { req: Request, attempt: Int, max_attempts: Int, backoff_ms: Int } -> Result Response HttpError <Http, Async> = { req, attempt, max_attempts, backoff_ms } -> do
+let retry_loop : { req: Request, attempt: Int, max_attempts: Int, backoff_ms: Int } -> Result Response HttpError <Http, Async, Time> = { req, attempt, max_attempts, backoff_ms } -> do
   let resp = Http.request { req = req, config = default_http_config }
   match resp is
     Ok { val } -> resp
@@ -555,7 +556,7 @@ let retry_loop : { req: Request, attempt: Int, max_attempts: Int, backoff_ms: In
 ##
 ## Returns the first Ok or the last Err. `max_attempts` includes the
 ## initial attempt — `max_attempts = 1` is a single shot with no retry.
-pub let retry : { req: Request, max_attempts: Int, backoff_ms: Int } -> Result Response HttpError <Http, Async> = { req, max_attempts, backoff_ms } ->
+pub let retry : { req: Request, max_attempts: Int, backoff_ms: Int } -> Result Response HttpError <Http, Async, Time> = { req, max_attempts, backoff_ms } ->
   retry_loop { req = req, attempt = 1, max_attempts = max_attempts, backoff_ms = backoff_ms }
 
 ## Fetch multiple URLs concurrently, returning a list of Results.

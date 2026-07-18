@@ -35,10 +35,10 @@ class CoopAsyncCancelTest {
                 Async.park { predicate = {} -> Async.is_cancelled {} }
                 "saw-cancel"
               }
-              Async.cancel { p = child }
+              Async.cancel { p = child, reason = UserRequested { msg = "cancel test" } }
               match Async.await { p = child } is
                 Ok  { val = v }                      -> v
-                Err { error = AsyncCancelled }       -> "cancelled-via-err"
+                Err { error = AsyncCancelled { reason = _ } } -> "cancelled-via-err"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
         """
@@ -68,9 +68,9 @@ class CoopAsyncCancelTest {
                 Async.check {}
                 "should-not-reach"
               }
-              Async.cancel { p = child }
+              Async.cancel { p = child, reason = UserRequested { msg = "cancel test" } }
               match Async.await { p = child } is
-                Err { error = AsyncCancelled }       -> "cancelled"
+                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Ok  { val = v }                      -> v
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"

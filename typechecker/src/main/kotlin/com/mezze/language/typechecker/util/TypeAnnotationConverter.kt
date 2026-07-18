@@ -61,10 +61,17 @@ object TypeAnnotationConverter {
             }
 
             is ParsedFunctionType -> {
+                // #274-B: give each FunctionType its own SharedRowVar
+                // scope, so nested `<...>` rows (e.g. on a callback param)
+                // don't share a row var with the outer signature's row.
+                // Otherwise binding the outer row to the body's extra
+                // effects would leak into the callback's expected row too.
+                val innerSharedRowVar = SharedRowVar()
+                fun recurseInner(ann: ParsedTypeAnnotation) = convertInternal(ann, config, typeVarCache, innerSharedRowVar)
                 val effectRow = annotation.effects?.let { parsedRow ->
                     config.validateEffects?.invoke(parsedRow)
                     val rowVar = if (parsedRow.isPolymorphic) {
-                        sharedRowVar.getOrCreate()
+                        innerSharedRowVar.getOrCreate()
                     } else null
                     val hashes = config.resolveEffectHashes(parsedRow.effects.toSet())
                     if (config.convertEffectAnnotations && parsedRow.effectAnnotations.isNotEmpty()) {
@@ -94,8 +101,8 @@ object TypeAnnotationConverter {
                     )
                 }
                 MezzeType.FunctionType(
-                    paramType = recurse(annotation.paramType),
-                    returnType = recurse(annotation.returnType),
+                    paramType = recurseInner(annotation.paramType),
+                    returnType = recurseInner(annotation.returnType),
                     effects = effectRow,
                     abilityConstraints = abilityConstraints
                 )
@@ -170,7 +177,7 @@ object TypeAnnotationConverter {
             }
             is ParsedFunctionType -> {
                 val effectRow = annotation.effects?.let { row ->
-                    val rowVar = if (row.isPolymorphic) RowVar.fresh() else null
+                    val rowVar = if (row.isPolymorphic) RowVar.userOpen() else null
                     MezzeType.EffectRow.simple(row.effects.toSet(), rowVar, row.isPerformed)
                 }
                 val abilityConstraints = if (includeAbilityConstraints) {
@@ -239,7 +246,10 @@ object TypeAnnotationConverter {
 
     class SharedRowVar {
         private var rowVar: RowVar? = null
-        fun getOrCreate(): RowVar = rowVar ?: RowVar.fresh().also { rowVar = it }
+        // #274-B: user-written `<...>` must survive closeGeneratedRowVars
+        // so callers of an annotated binding see the polymorphic
+        // signature. Use userOpen() rather than fresh().
+        fun getOrCreate(): RowVar = rowVar ?: RowVar.userOpen().also { rowVar = it }
         fun reset() { rowVar = null }
     }
 

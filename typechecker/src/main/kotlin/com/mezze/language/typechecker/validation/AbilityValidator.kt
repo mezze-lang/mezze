@@ -406,6 +406,61 @@ object AbilityValidator {
         }
     }
 
+    /**
+     * Collect every nominal type name mentioned anywhere inside a parsed
+     * type annotation — outermost constructor AND every constructor in
+     * the type-argument tree. Used by the inherent-impl locality check
+     * so `impl [Promise 'a]` can live in Promise's module (Promise
+     * appears in the receiver tree even though the outermost constructor
+     * is Seq).
+     *
+     * Type variables (`'a`, `'b`) are excluded — they aren't nominal
+     * declarations. Structural placeholders (`"Record"`, `"Variant"`,
+     * `"Function"`, `"Seq"`) are still included so the check still
+     * applies to bare `impl [Int]`, `impl {x: Int}`, etc.
+     */
+    private fun collectAllTypeNames(annotation: ParsedTypeAnnotation): Set<String> {
+        val out = LinkedHashSet<String>()
+        fun walk(a: ParsedTypeAnnotation) {
+            when (a) {
+                is ParsedNamedType -> {
+                    // Type variables are prefixed with `'`; skip.
+                    if (a.name.startsWith("'")) return
+                    out.add(a.name)
+                }
+                is ParsedTypeApp -> {
+                    out.add(a.constructor)
+                    a.args.forEach { walk(it) }
+                }
+                is ParsedQualifiedType -> {
+                    out.add(a.typeName)
+                    a.args.forEach { walk(it) }
+                }
+                is ParsedSeqType -> {
+                    out.add("Seq")
+                    walk(a.elementType)
+                }
+                is ParsedRecordType -> {
+                    out.add("Record")
+                    a.entries.forEach { walk(it.type) }
+                }
+                is ParsedVariantType -> {
+                    out.add("Variant")
+                    a.constructors.forEach { ctor ->
+                        ctor.dataType?.let { walk(it) }
+                    }
+                }
+                is ParsedFunctionType -> {
+                    out.add("Function")
+                    walk(a.paramType)
+                    walk(a.returnType)
+                }
+            }
+        }
+        walk(annotation)
+        return out
+    }
+
     // #212 removed that field — the parser now rejects ability-level
     // `with` clauses with P0119_ABILITY_LEVEL_CONSTRAINT — the
     // dependency cycle check is no longer reachable. Removed.
@@ -522,16 +577,28 @@ object AbilityValidator {
         sourceLocation: Loc
     ) {
         for (targetType in impl.targetTypes) {
-            val typeName = getTypeNameFromParsedAnnotation(targetType)
-
-            if (!localTypeNames.contains(typeName)) {
+            // Locality rule for inherent impls: at least ONE nominal
+            // type mentioned anywhere in the receiver tree must be
+            // locally declared. This lets a module attach methods to
+            // parametric containers (e.g. `impl [Promise 'a]` in the
+            // module that declares Promise) — the outermost constructor
+            // (`Seq`) is not local, but Promise is, and that's the
+            // interesting locality.
+            val mentioned = collectAllTypeNames(targetType)
+            val hasLocal = mentioned.any { name -> localTypeNames.contains(name) }
+            if (!hasLocal) {
+                val outerName = getTypeNameFromParsedAnnotation(targetType)
                 throw TypeCheckError(
-                    "Cannot define inherent impl for type '$typeName' in this module. " +
-                    "Inherent impls can only be defined where the type is defined. " +
-                    "Move this impl to the module where '$typeName' is declared.",
+                    "Cannot define inherent impl for type '$outerName' in this module. " +
+                    "Inherent impls can only be defined where at least one of the " +
+                    "types mentioned in the receiver is defined. " +
+                    "Move this impl to the module where one of [${mentioned.joinToString(", ")}] " +
+                    "is declared.",
                     sourceLocation,
                     code = ErrorCode.V0406_ORPHAN_INSTANCE,
-                    hints = listOf("define the impl in the same module as either the ability or the type"),
+                    hints = listOf(
+                        "define the impl in the same module as one of the receiver's nominal types",
+                    ),
                 )
             }
         }

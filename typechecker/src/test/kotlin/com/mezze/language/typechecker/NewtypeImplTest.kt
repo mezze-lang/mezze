@@ -76,7 +76,7 @@ class NewtypeImplTest {
                 use std::effects::async::{Async, LoomAsync}
                 let main = {} -> perform LoomAsync in do
                     let p = Async.spawn {f = {} -> 42}
-                    p.cancel {}
+                    p.cancel { reason = UserRequested { msg = "test" } }
                     42
             """.trimIndent(), "Promise .cancel")
         }
