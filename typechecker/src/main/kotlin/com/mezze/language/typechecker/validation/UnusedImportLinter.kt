@@ -41,6 +41,18 @@ object UnusedImportLinter {
     }
 
     /**
+     * For a `use` decl at [useLoc]'s start line, the local names it imports that
+     * are never referenced. Empty if the decl isn't a selective `use` or nothing
+     * is unused. Lets the LSP build a surgical "remove just these items" fix
+     * instead of deleting a whole line that still has used imports.
+     */
+    fun unusedItemsFor(module: ParsedModule, useDecl: ParsedUseDecl): List<String> {
+        val referenced = HashSet<String>()
+        for (decl in module.decls) collectReferenced(decl, referenced)
+        return unusedItems(useDecl, referenced)
+    }
+
+    /**
      * The local names a `use` decl brings into scope that are NOT referenced.
      *
      * Only SELECTIVE imports (`use x::{a, b}`) are checked — a selective import

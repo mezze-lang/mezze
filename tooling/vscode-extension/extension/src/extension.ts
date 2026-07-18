@@ -34,7 +34,11 @@ export function activate(context: vscode.ExtensionContext) {
         documentSelector: [{ scheme: 'file', language: 'mezze' }],
         synchronize: {
             // Watch Mezze.toml for project configuration changes
-            fileEvents: vscode.workspace.createFileSystemWatcher('**/Mezze.toml')
+            fileEvents: vscode.workspace.createFileSystemWatcher('**/Mezze.toml'),
+            // Push the `mezze.*` settings section to the server on start and on
+            // change (the server reads debounce / inlay / codeLens toggles from
+            // didChangeConfiguration).
+            configurationSection: 'mezze'
         },
         outputChannelName: 'Mezze Language Server'
     };
@@ -55,8 +59,30 @@ export function activate(context: vscode.ExtensionContext) {
                 await client.start();
                 vscode.window.showInformationMessage('Mezze Language Server restarted');
             }
+        }),
+        // Clear the server's content-addressed analysis cache. Useful after a
+        // stale-cache glitch (e.g. a mez version bump) without a full restart.
+        vscode.commands.registerCommand('mezze.clearCache', async () => {
+            if (!client) { return; }
+            await client.sendRequest('workspace/executeCommand', {
+                command: 'mezze.clearCache', arguments: []
+            });
+            vscode.window.showInformationMessage('Mezze: analysis cache cleared');
+        }),
+        // Full server-side reset (reload store + re-analyze open docs) without
+        // tearing down the client connection.
+        vscode.commands.registerCommand('mezze.restart', async () => {
+            if (!client) { return; }
+            await client.sendRequest('workspace/executeCommand', {
+                command: 'mezze.restart', arguments: []
+            });
+            vscode.window.showInformationMessage('Mezze: server state reset');
         })
     );
+
+    // Note: the client's `synchronize.configurationSection: 'mezze'` (below)
+    // already pushes the `mezze.*` settings to the server on start and on every
+    // change, so no manual onDidChangeConfiguration handler is needed here.
 
     // CodeLens client commands. The server emits CodeLenses whose command is
     // one of these with args [uriString, Position]; each opens VS Code's peek

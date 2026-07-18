@@ -92,7 +92,40 @@ class MezzeTextDocumentService(
     // (CodeLens, inlay hints) anchored to the PRE-edit AST and visibly out of
     // sync until the re-check + refreshPositionFeatures() fires. 250ms is a
     // middle ground; the skip-unchanged guard keeps no-op edits free.
-    private val DEBOUNCE_MS: Long = 250
+    // Display code for the "impl missing method" error (V0404) — used to
+    // dispatch the auto-implement code action. Computed from the enum so it
+    // can't drift from the source of truth.
+    private val V0404_MISSING_METHOD_CODE: String =
+        com.mezze.language.parsedast.diagnostics.ErrorCode.V0404_IMPL_MISSING_METHOD.display()
+
+    // Configurable via workspace/didChangeConfiguration under the `mezze` key.
+    // Defaults match the historical hardcoded behavior; a client that never
+    // sends settings sees no change.
+    @Volatile private var DEBOUNCE_MS: Long = 250
+    @Volatile var inlayHintsEnabled: Boolean = true
+        private set
+    @Volatile var codeLensEnabled: Boolean = true
+        private set
+
+    /**
+     * Apply a settings snapshot from the client (the `mezze` section of a
+     * `workspace/didChangeConfiguration` payload). Unknown / absent keys keep
+     * their current value. Called on the workspace-service thread; fields are
+     * @Volatile so the analysis thread sees updates without extra locking.
+     */
+    fun applyConfiguration(settings: Map<String, Any?>) {
+        (settings["debounceMs"] as? Number)?.let {
+            // Clamp to a sane range; 0 would busy-recheck, huge values strand
+            // position features on a stale AST.
+            DEBOUNCE_MS = it.toLong().coerceIn(0L, 5000L)
+        }
+        (settings["inlayHints"] as? Map<*, *>)?.get("enabled")?.let {
+            if (it is Boolean) inlayHintsEnabled = it
+        }
+        (settings["codeLens"] as? Map<*, *>)?.get("enabled")?.let {
+            if (it is Boolean) codeLensEnabled = it
+        }
+    }
     // Content last handed to analyzeDocument per URI — lets the debounce skip a
     // redundant re-check when an edit round-trips to identical text (VS Code
     // sometimes emits didChange for no textual change, e.g. some cursor ops).
@@ -4073,6 +4106,7 @@ class MezzeTextDocumentService(
      */
     override fun codeLens(params: CodeLensParams): CompletableFuture<List<CodeLens>> {
         return CompletableFuture.supplyAsync {
+            if (!codeLensEnabled) return@supplyAsync emptyList()
             val uri = params.textDocument.uri
             val state = documents[uri] ?: return@supplyAsync emptyList()
             val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
@@ -4989,9 +5023,35 @@ class MezzeTextDocumentService(
                 out.add(Either.forRight(quickFix("Prefix with `_`", listOf(TextEdit(at, "_")))))
             }
             WarningCode.W0102_UNUSED_IMPORT.display() -> {
-                // Delete the whole `use` line (start of its line through the
-                // start of the next), so no blank line is left behind.
                 val startLine = diagnostic.range.start.line
+                // Find the `use` decl on this line and which of its items are
+                // unused. If SOME (not all) items of a selective import are
+                // unused, remove just those and keep the rest — deleting the
+                // whole line would drop still-used imports. Otherwise fall back
+                // to deleting the line.
+                val useDecl = state.parsedModule?.decls
+                    ?.filterIsInstance<com.mezze.language.parsedast.ParsedUseDecl>()
+                    ?.firstOrNull { it.loc.startLine - 1 == startLine }
+                val path = useDecl?.path
+                if (useDecl != null && path is com.mezze.language.parsedast.ParsedUsePath.Selective) {
+                    val unused = try {
+                        com.mezze.language.typechecker.validation.UnusedImportLinter
+                            .unusedItemsFor(state.parsedModule!!, useDecl).toSet()
+                    } catch (_: Exception) { emptySet() }
+                    val kept = path.items.filter { (it.alias ?: it.name) !in unused }
+                    if (unused.isNotEmpty() && kept.isNotEmpty()) {
+                        // Rebuild `use mod::{ a, b }` with only the kept items.
+                        val itemsText = kept.joinToString(", ") { it.alias?.let { a -> "${it.name} as $a" } ?: it.name }
+                        val rebuilt = "use ${path.modulePath}::{ $itemsText }"
+                        val lineLen = state.content.lines().getOrNull(startLine)?.length ?: 0
+                        val lineRange = Range(Position(startLine, 0), Position(startLine, lineLen))
+                        val title = if (unused.size == 1) "Remove unused import '${unused.single()}'"
+                                    else "Remove ${unused.size} unused imports"
+                        out.add(Either.forRight(quickFix(title, listOf(TextEdit(lineRange, rebuilt)))))
+                        return out
+                    }
+                }
+                // All items unused (or not selective) → delete the whole line.
                 val delRange = Range(Position(startLine, 0), Position(startLine + 1, 0))
                 out.add(Either.forRight(quickFix("Remove unused import", listOf(TextEdit(delRange, "")))))
             }
@@ -5011,8 +5071,140 @@ class MezzeTextDocumentService(
                         listOf(TextEdit(fix.first, fix.second)))))
                 }
             }
+            // #V0404: an ability impl is missing required methods. Offer to
+            // insert stub bodies for each one (`method = { params } -> ...`),
+            // derived from the ability declaration's operation signatures.
+            V0404_MISSING_METHOD_CODE -> {
+                val fix = buildAutoImplementAbilityFix(state, diagnostic.range)
+                if (fix != null) {
+                    out.add(Either.forRight(quickFix(fix.first, fix.second)))
+                }
+            }
         }
         return out
+    }
+
+    /**
+     * Auto-implement the methods missing from an ability impl. Locates the
+     * [ParsedImplAbilityDecl] covering [range], resolves its ability declaration
+     * (local module first, then the project store), computes which operations
+     * are unimplemented, and returns a (title, edit) that inserts a stub for
+     * each just before the impl's closing `}`.
+     *
+     * Each stub is `name = { p1, p2 } -> ...` where the parameter names come
+     * from the ability op's record parameter type (falling back to `it` for a
+     * single non-record param). `...` is the Mezze "hole" placeholder, so the
+     * user sees a clear TODO the typechecker will flag until filled in.
+     */
+    private fun buildAutoImplementAbilityFix(
+        state: DocumentState,
+        range: Range,
+    ): Pair<String, List<TextEdit>>? {
+        val parsedModule = state.parsedModule ?: return null
+        val diagLine = range.start.line // 0-based
+
+        // The impl covering the diagnostic line. V0404 is raised at the impl's
+        // own loc, so start-line match is enough; fall back to any impl whose
+        // span contains the line.
+        val impl = parsedModule.decls
+            .filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()
+            .firstOrNull { it.loc.startLine - 1 == diagLine }
+            ?: parsedModule.decls
+                .filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()
+                .firstOrNull { diagLine in (it.loc.startLine - 1)..(it.loc.endLine - 1) }
+            ?: return null
+
+        val abilityName = impl.abilityName ?: return null
+
+        // Resolve the ability declaration: local module, then store.
+        val abilityDecl = findAbilityDeclByName(state, abilityName) ?: return null
+
+        val implemented = impl.operations.map { it.name }.toSet()
+        val missing = abilityDecl.operations.filter { it.name !in implemented }
+        if (missing.isEmpty()) return null
+
+        // Indentation: match the first existing operation's column, else the
+        // impl's column + 2.
+        val implIndent = " ".repeat((impl.loc.startCol - 1).coerceAtLeast(0))
+        val bodyIndent = impl.operations.firstOrNull()?.let {
+            " ".repeat((it.loc.startCol - 1).coerceAtLeast(0))
+        } ?: (implIndent + "  ")
+
+        // Each stub is comma-terminated — Mezze separates impl operations with
+        // commas and allows a trailing one before `}`, so this stays valid
+        // whether or not more ops follow. The body is a bare `unimplemented`:
+        // it PARSES (so every other LSP feature keeps working on the file) and
+        // surfaces a single, clear "undefined variable" error pointing exactly
+        // at the hole the user must fill in.
+        val stubs = missing.joinToString("\n") { op ->
+            "$bodyIndent${op.name} = { ${paramNamesFor(op)} } -> unimplemented,"
+        }
+
+        val lines = state.content.lines()
+        val endLineIdx = impl.loc.endLine - 1
+        if (endLineIdx !in lines.indices) return null
+
+        val edits = mutableListOf<TextEdit>()
+
+        // Existing ops need a comma before the new ones. Find the last existing
+        // operation and, if its source line doesn't already end with a comma,
+        // append one. (The parser drops trailing commas, so we can't tell from
+        // the AST alone — inspect the source line at the op's end.)
+        impl.operations.maxByOrNull { it.loc.endLine }?.let { lastOp ->
+            val opLineIdx = lastOp.loc.endLine - 1
+            val lineText = lines.getOrNull(opLineIdx)
+            if (lineText != null && !lineText.trimEnd().endsWith(",")) {
+                val col = lineText.trimEnd().length
+                edits.add(TextEdit(Range(Position(opLineIdx, col), Position(opLineIdx, col)), ","))
+            }
+        }
+
+        // Insert the stubs on a fresh line before the closing `}` line.
+        val insertPos = Position(endLineIdx, 0)
+        edits.add(TextEdit(Range(insertPos, insertPos), "$stubs\n"))
+
+        val title = if (missing.size == 1) "Implement missing method '${missing.single().name}'"
+                    else "Implement ${missing.size} missing methods"
+        return title to edits
+    }
+
+    /**
+     * Parameter names for an ability op stub. If the op's parameter type is a
+     * record (`{ it: 'a, r: 'a }`), use its field names in order. Otherwise use
+     * a single `it` — the conventional receiver name.
+     */
+    private fun paramNamesFor(op: com.mezze.language.parsedast.ParsedAbilityOp): String {
+        val pt = op.paramType
+        return if (pt is com.mezze.language.parsedast.ParsedRecordType && pt.entries.isNotEmpty()) {
+            pt.entries.joinToString(", ") { it.name }
+        } else {
+            "it"
+        }
+    }
+
+    /**
+     * Find an ability declaration by name: the open document's module first,
+     * then any module in the project store. Returns null if unknown.
+     */
+    private fun findAbilityDeclByName(
+        state: DocumentState,
+        name: String,
+    ): com.mezze.language.parsedast.ParsedAbilityDecl? {
+        state.parsedModule?.decls
+            ?.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()
+            ?.firstOrNull { it.name == name }
+            ?.let { return it }
+
+        // Fall back to any module already parsed+typed this session (stdlib
+        // abilities like Eq/Ord/Show land here once referenced).
+        for (moduleResult in com.mezze.language.typechecker.module.ModuleTypeChecker
+                .getAllCachedModules().values) {
+            moduleResult.parsedModule?.decls
+                ?.filterIsInstance<com.mezze.language.parsedast.ParsedAbilityDecl>()
+                ?.firstOrNull { it.name == name }
+                ?.let { return it }
+        }
+        return null
     }
 
     /**
@@ -6463,6 +6655,7 @@ class MezzeTextDocumentService(
 
     override fun inlayHint(params: InlayHintParams): CompletableFuture<List<InlayHint>> {
         return CompletableFuture.supplyAsync {
+            if (!inlayHintsEnabled) return@supplyAsync emptyList()
             val uri = params.textDocument.uri
             val state = documents[uri] ?: return@supplyAsync emptyList()
             val result = state.typeCheckResult ?: lastSuccessfulResult[uri] ?: return@supplyAsync emptyList()

@@ -98,7 +98,60 @@ class MezzeWorkspaceService(
      */
     override fun didChangeConfiguration(params: DidChangeConfigurationParams) {
         server.logInfo("Configuration changed")
-        // TODO: Handle configuration updates
+        val tds = server.textDocumentService as? MezzeTextDocumentService ?: return
+        // `settings` is the client's push of the `mezze` configuration section
+        // (a JsonObject when using stdio + Gson). Coerce it to a plain Map and
+        // hand it to the TDS, which applies the keys it recognizes and ignores
+        // the rest. Any parse failure leaves the current settings untouched.
+        try {
+            val mezze = extractMezzeSection(params.settings) ?: return
+            tds.applyConfiguration(mezze)
+            server.logInfo("Applied Mezze configuration: ${mezze.keys}")
+        } catch (e: Exception) {
+            server.logWarning("Failed to apply configuration: ${e.message}")
+        }
+    }
+
+    /**
+     * Pull the `mezze` object out of a `didChangeConfiguration` settings blob.
+     * VS Code sends the whole settings tree; we accept either the tree (look up
+     * `mezze`) or a payload that is already the `mezze` section. Uses Gson's
+     * JsonObject when present (stdio transport), else a plain Map.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun extractMezzeSection(settings: Any?): Map<String, Any?>? {
+        if (settings == null) return null
+        // Gson path: settings is a com.google.gson.JsonElement.
+        if (settings is com.google.gson.JsonElement) {
+            val obj = if (settings.isJsonObject) settings.asJsonObject else return null
+            val node = if (obj.has("mezze")) obj.get("mezze") else obj
+            if (!node.isJsonObject) return null
+            return gsonObjectToMap(node.asJsonObject)
+        }
+        // Plain-Map path.
+        if (settings is Map<*, *>) {
+            val node = (settings["mezze"] as? Map<*, *>) ?: settings
+            return node.entries.associate { (k, v) -> k.toString() to v }
+        }
+        return null
+    }
+
+    private fun gsonObjectToMap(obj: com.google.gson.JsonObject): Map<String, Any?> =
+        obj.entrySet().associate { (k, v) -> k to gsonToValue(v) }
+
+    private fun gsonToValue(el: com.google.gson.JsonElement): Any? = when {
+        el.isJsonNull -> null
+        el.isJsonObject -> gsonObjectToMap(el.asJsonObject)
+        el.isJsonArray -> el.asJsonArray.map { gsonToValue(it) }
+        el.isJsonPrimitive -> {
+            val p = el.asJsonPrimitive
+            when {
+                p.isBoolean -> p.asBoolean
+                p.isNumber -> p.asNumber
+                else -> p.asString
+            }
+        }
+        else -> null
     }
 
     /**

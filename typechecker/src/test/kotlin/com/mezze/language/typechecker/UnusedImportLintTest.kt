@@ -100,4 +100,22 @@ class UnusedImportLintTest {
         assertTrue(msgs.any { it.contains("map") }, "Expected 'map' flagged unused. Got: $msgs")
         assertTrue(msgs.any { it.contains("filter") }, "Expected 'filter' flagged unused. Got: $msgs")
     }
+
+    @Test
+    fun `unusedItemsFor reports only the unused items of a partly-used import`() {
+        // Backs the LSP's surgical "remove just these items" quick-fix: `map` is
+        // used, `filter` and `reduce` are not, so only the latter two come back.
+        val module = parser.parseParsedModule("""
+            use std::collections::seq::{ map, filter, reduce }
+
+            let f = {xs: [Int]} -> map { xs = xs, f = {x} -> x + 1 }
+        """.trimIndent(), "test.mz")
+        val useDecl = module.decls
+            .filterIsInstance<com.mezze.language.parsedast.ParsedUseDecl>()
+            .single()
+        val unused = UnusedImportLinter.unusedItemsFor(module, useDecl)
+        assertTrue("filter" in unused && "reduce" in unused,
+            "Expected filter + reduce unused. Got: $unused")
+        assertFalse("map" in unused, "map is used bare. Got: $unused")
+    }
 }

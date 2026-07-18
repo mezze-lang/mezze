@@ -913,6 +913,85 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `impl missing methods offers an Auto-implement quick-fix that stubs each one`() {
+        // A local ability with two ops; an impl providing only one. V0404 fires
+        // at the impl, and the auto-implement action inserts a stub for the
+        // missing op with parameter names lifted from the ability op's record
+        // parameter type.
+        val (uri, _) = openSingleFile("""
+            ability Greet for 'a where {
+              hi: { it: 'a } -> Str,
+              bye: { it: 'a } -> Str
+            }
+
+            type Person = | Person |
+
+            impl Greet for Person where {
+              hi = { it } -> "hi"
+            }
+        """.trimIndent())
+
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags, "expected publishDiagnostics for missing-method impl")
+        val missing = diags!!.diagnostics.firstOrNull { it.code?.left == "V0404" }
+            ?: fail("expected a V0404 diagnostic among ${diags.diagnostics.map { it.code?.left to it.message }}")
+
+        val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            range = missing.range
+            context = CodeActionContext(listOf(missing))
+        }).get(5, TimeUnit.SECONDS) ?: emptyList()
+
+        val impl = actions.mapNotNull { e -> if (e.isRight) e.right else null }
+            .firstOrNull { it.title.contains("Implement") && it.title.contains("bye") }
+            ?: fail("expected an auto-implement action for `bye`, got: ${actions.mapNotNull { if (it.isRight) it.right.title else null }}")
+        val edits = impl.edit?.changes?.values?.flatten() ?: emptyList()
+        val editText = edits.joinToString("") { it.newText }
+        assertTrue(editText.contains("bye = { it } ->"),
+            "expected a `bye = { it } -> ...` stub, got edit: $editText")
+
+        // Apply all edits (a `,` after the existing `hi` op + the stub line) and
+        // confirm the result parses — the stub must be a well-formed impl op.
+        val source = """
+            ability Greet for 'a where {
+              hi: { it: 'a } -> Str,
+              bye: { it: 'a } -> Str
+            }
+
+            type Person = | Person |
+
+            impl Greet for Person where {
+              hi = { it } -> "hi"
+            }
+        """.trimIndent()
+        val after = applyEdits(source, edits)
+        // Should now contain both ops separated by a comma.
+        assertTrue(after.contains("hi = { it } -> \"hi\","),
+            "expected a comma after the existing `hi` op, got:\n$after")
+        // And it should parse cleanly.
+        val parsed = com.mezze.language.parser.MezzeParser().parseParsedModule(after, "greet.mz")
+        assertTrue(parsed.decls.isNotEmpty(), "auto-implemented impl should parse; got:\n$after")
+    }
+
+    /** Apply multiple TextEdits to source, last-offset-first so ranges stay valid. */
+    private fun applyEdits(source: String, edits: List<TextEdit>): String {
+        val lines = source.split("\n")
+        fun offset(p: Position): Int {
+            var o = 0
+            for (i in 0 until p.line) o += lines[i].length + 1
+            return o + p.character
+        }
+        // Sort by descending start offset so earlier edits don't shift later ones.
+        var result = source
+        for (edit in edits.sortedByDescending { offset(it.range.start) }) {
+            val start = offset(edit.range.start)
+            val end = offset(edit.range.end)
+            result = result.substring(0, start) + edit.newText + result.substring(end)
+        }
+        return result
+    }
+
+    @Test
     fun `semantic tokens classify params and variant constructors from the typed AST`() {
         // #99: the token stream is built from the TypedModule, so a `TypedVar`
         // resolving to a param becomes a PARAMETER token and a

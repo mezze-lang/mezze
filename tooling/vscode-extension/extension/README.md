@@ -63,10 +63,15 @@ Over 35 built-in snippets for common Mezze patterns:
 |---------|---------|-------------|
 | `mezze.executablePath` | `mez` | Path to the mez executable. If not absolute, resolved relative to workspace root. |
 | `mezze.trace.server` | `off` | Traces communication with the language server. Options: `off`, `messages`, `verbose` |
+| `mezze.debounceMs` | `250` | Milliseconds to wait after the last keystroke before re-analyzing. Lower is snappier; higher reduces CPU on large files. |
+| `mezze.inlayHints.enabled` | `true` | Show inline type / parameter / effect hints. |
+| `mezze.codeLens.enabled` | `true` | Show reference / implementation / performer counts above declarations. |
 
 ## Commands
 
-- **Mezze: Restart Language Server** - Restart the language server (useful if you update the mez compiler)
+- **Mezze: Restart Language Server** — Restart the language client process (useful after updating the mez compiler).
+- **Mezze: Clear Analysis Cache** — Clear the server's content-addressed analysis cache without a full restart.
+- **Mezze: Reset Server State** — Reload the project store and re-analyze open documents, keeping the connection alive.
 
 ## Mezze Language Overview
 
@@ -176,35 +181,17 @@ Please report any issues on the [GitHub repository](https://github.com/mezze-lan
 
 ## Release Notes
 
-### 0.4.0
+See [CHANGELOG.md](./CHANGELOG.md) for the full version history. Recent
+highlights:
 
-- **Language Server Integration**: Full LSP support for diagnostics, hover, go-to-definition, find references, and completion
-- **New Keywords**: Added `newtype` and `having` keyword highlighting
-- **Performed Marker**: Support for `<*>` performed marker in effect rows
-- **Natural Numbers**: Highlighting for natural number literals (`42n`)
-- **Boolean Literals**: Fixed to use `True`/`False` (capitalized)
-- **Configuration**: New settings for executable path and server tracing
-- **Commands**: Added "Restart Language Server" command
-
-### 0.3.x
-
-- String interpolation support
-- Let destructuring patterns
-- Ability method call highlighting
-- Fraction literals
-- Many new snippets
-
-### 0.2.0
-
-- Comprehensive syntax highlighting for all language features
-- Module system support
-- Effect rows and ability constraints
-- Smart indentation and bracket matching
-- 25+ code snippets
-
-### 0.1.0
-
-- Initial release with basic syntax highlighting
+- **0.4.7** — Clear-cache / reset commands, live-tunable settings
+  (`debounceMs`, `inlayHints.enabled`, `codeLens.enabled`), surgical
+  remove-unused-import fix, and an "Implement missing methods" quick-fix for
+  ability impls.
+- **0.4.6** — Snippets fixed, comment-aware completion/hover, crash-recovery
+  notice.
+- **0.4.x** — CodeLens peek commands, comment continuation, doc-comment hover.
+- **0.4.0** — Full language-server integration.
 
 ## Contributing
 

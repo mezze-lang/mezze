@@ -2,7 +2,7 @@
   "name": "mezze-language",
   "displayName": "Mezze Language Support",
   "description": "Full language support for Mezze: syntax highlighting, type information, diagnostics, go to definition, and more",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "publisher": "mezze-lang",
   "icon": "icon.png",
   "engines": {
@@ -75,6 +75,23 @@
           "enum": ["off", "messages", "verbose"],
           "default": "off",
           "description": "Traces the communication between VS Code and the Mezze language server."
+        },
+        "mezze.debounceMs": {
+          "type": "number",
+          "default": 250,
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "Milliseconds to wait after the last keystroke before re-analyzing a document. Lower feels snappier; higher reduces CPU on large files."
+        },
+        "mezze.inlayHints.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline type/parameter/effect hints."
+        },
+        "mezze.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show reference / implementation / performer counts above declarations."
         }
       }
     },
@@ -82,6 +99,14 @@
       {
         "command": "mezze.restartServer",
         "title": "Mezze: Restart Language Server"
+      },
+      {
+        "command": "mezze.clearCache",
+        "title": "Mezze: Clear Analysis Cache"
+      },
+      {
+        "command": "mezze.restart",
+        "title": "Mezze: Reset Server State"
       }
     ]
   },
