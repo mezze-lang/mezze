@@ -22,19 +22,19 @@ class MinimalTypeVarTest {
         // Test type variables work correctly across async boundaries
         // Using stdlib Async effect for consistency with other tests
         val code = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await }
 
             perform LoomAsync in do
                 let p1 = Async.spawn {f = {} -> 1 * 2}
                 let p2 = Async.spawn {f = {} -> 2 * 2}
                 let p3 = Async.spawn {f = {} -> 3 * 2}
-                let r1 = match Async.await {p = p1} is
+                let r1 = match await {p = p1} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
-                let r2 = match Async.await {p = p2} is
+                let r2 = match await {p = p2} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
-                let r3 = match Async.await {p = p3} is
+                let r3 = match await {p = p3} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
                 [r1, r2, r3]
@@ -81,19 +81,19 @@ class MinimalTypeVarTest {
     fun testTypeVarsWithLoomAsync() {
         // Test type variables with cooperative async (single-threaded, no multi-thread support needed)
         val code = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await }
 
             perform LoomAsync in do
                 let p1 = Async.spawn {f = {} -> 1 * 2}
                 let p2 = Async.spawn {f = {} -> 2 * 2}
                 let p3 = Async.spawn {f = {} -> 3 * 2}
-                let r1 = match Async.await {p = p1} is
+                let r1 = match await {p = p1} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
-                let r2 = match Async.await {p = p2} is
+                let r2 = match await {p = p2} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
-                let r3 = match Async.await {p = p3} is
+                let r3 = match await {p = p3} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
                 [r1, r2, r3]

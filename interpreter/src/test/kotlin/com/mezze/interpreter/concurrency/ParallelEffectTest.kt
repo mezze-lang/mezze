@@ -16,7 +16,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  * Tests cover:
  * - VirtualParallel: Default virtual thread handler
  * - VirtualParallelWith: Configurable parallelism and chunk_size handler
- * - Sequential: Single-threaded handler
+ * - ForkJoinParallel: Single-threaded handler
  * - All 12 operations: map, for_each, filter, reduce, fold, both, both3, find, any, all, partition, group_by
  * - Helper functions: sum, product, count, flatten, flat_map
  *
@@ -39,11 +39,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel map with VirtualParallel`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.map {xs = xs, f = {x} -> x * 2}
+                let result = map {xs = xs, f = {x} -> x * 2}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -59,11 +59,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel map preserves order`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [5, 4, 3, 2, 1]
-                let result = Parallel.map {xs = xs, f = {x} -> x + 10}
+                let result = map {xs = xs, f = {x} -> x + 10}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -79,11 +79,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel map with empty list`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs: [Int] = []
-                let result = Parallel.map {xs = xs, f = {x} -> x * 2}
+                let result = map {xs = xs, f = {x} -> x * 2}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -97,11 +97,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel filter`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5, 6]
-                let result = Parallel.filter {xs = xs, f = {x} -> x % 2 == 0}
+                let result = filter {xs = xs, f = {x} -> x % 2 == 0}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -115,11 +115,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel filter preserves order`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [10, 5, 20, 3, 15]
-                let result = Parallel.filter {xs = xs, f = {x} -> x >= 10}
+                let result = filter {xs = xs, f = {x} -> x >= 10}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -137,11 +137,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel for_each completes without error`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3]
-                let result = Parallel.for_each {xs = xs, f = {x} -> {}}
+                let result = for_each {xs = xs, f = {x} -> {}}
                 result
         """
         val result = eval(code)
@@ -156,11 +156,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel reduce sum`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
+                let result = reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -172,11 +172,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel reduce with single element`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [42]
-                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
+                let result = reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -188,11 +188,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel reduce with empty list returns None`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs: [Int] = []
-                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
+                let result = reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> 1
                     None -> 0
@@ -208,11 +208,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel fold`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.fold {
+                let result = fold {
                     xs = xs,
                     zero = 0,
                     map_fn = {x} -> x * 2,
@@ -227,11 +227,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel fold with empty list returns zero`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs: [Int] = []
-                let result = Parallel.fold {
+                let result = fold {
                     xs = xs,
                     zero = 100,
                     map_fn = {x} -> x,
@@ -250,10 +250,10 @@ class ParallelEffectTest {
     @Test
     fun `test parallel both runs two computations`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
-                let result = Parallel.both {
+                let result = both {
                     l = {} -> 10,
                     r = {} -> 20
                 }
@@ -270,10 +270,10 @@ class ParallelEffectTest {
     @Test
     fun `test parallel both3 runs three computations`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
-                let result = Parallel.both3 {
+                let result = both3 {
                     a = {} -> 1,
                     b = {} -> 2,
                     c = {} -> 3
@@ -291,11 +291,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel find returns first match`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.find {xs = xs, f = {x} -> x > 3}
+                let result = find {xs = xs, f = {x} -> x > 3}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -308,11 +308,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel find returns None when no match`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3]
-                let result = Parallel.find {xs = xs, f = {x} -> x > 10}
+                let result = find {xs = xs, f = {x} -> x > 10}
                 match result is
                     Some {val} -> 1
                     None -> 0
@@ -328,11 +328,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel any returns true when match exists`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.any {xs = xs, f = {x} -> x == 3}
+                let result = any {xs = xs, f = {x} -> x == 3}
                 result
         """
         val result = eval(code)
@@ -342,11 +342,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel any returns false when no match`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3]
-                let result = Parallel.any {xs = xs, f = {x} -> x > 10}
+                let result = any {xs = xs, f = {x} -> x > 10}
                 result
         """
         val result = eval(code)
@@ -360,11 +360,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel all returns true when all match`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [2, 4, 6, 8]
-                let result = Parallel.all {xs = xs, f = {x} -> x % 2 == 0}
+                let result = all {xs = xs, f = {x} -> x % 2 == 0}
                 result
         """
         val result = eval(code)
@@ -374,11 +374,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel all returns false when one fails`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [2, 4, 5, 8]
-                let result = Parallel.all {xs = xs, f = {x} -> x % 2 == 0}
+                let result = all {xs = xs, f = {x} -> x % 2 == 0}
                 result
         """
         val result = eval(code)
@@ -388,11 +388,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel all returns true for empty list`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs: [Int] = []
-                let result = Parallel.all {xs = xs, f = {x} -> x > 0}
+                let result = all {xs = xs, f = {x} -> x > 0}
                 result
         """
         val result = eval(code)
@@ -406,11 +406,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel partition`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5, 6]
-                let result = Parallel.partition {xs = xs, f = {x} -> x % 2 == 0}
+                let result = partition {xs = xs, f = {x} -> x % 2 == 0}
                 match result.pass is
                     [_, _, _] -> match result.fail is
                         [_, _, _] -> 6
@@ -428,11 +428,11 @@ class ParallelEffectTest {
     @Test
     fun `test parallel group_by`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5, 6]
-                let result = Parallel.group_by {xs = xs, f = {x} -> x % 2}
+                let result = group_by {xs = xs, f = {x} -> x % 2}
                 # Should have 2 groups: key 0 (evens) and key 1 (odds)
                 match result is
                     [_, _] -> 2
@@ -443,17 +443,17 @@ class ParallelEffectTest {
     }
 
     // =============================================================================
-    // Sequential handler tests
+    // ForkJoinParallel handler tests
     // =============================================================================
 
     @Test
     fun `test sequential map`() {
         val code = """
-            use std::effects::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform Sequential in do
+            perform ForkJoinParallel in do
                 let xs = [1, 2, 3]
-                let result = Parallel.map {xs = xs, f = {x} -> x * 10}
+                let result = map {xs = xs, f = {x} -> x * 10}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -467,11 +467,11 @@ class ParallelEffectTest {
     @Test
     fun `test sequential filter`() {
         val code = """
-            use std::effects::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform Sequential in do
+            perform ForkJoinParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.filter {xs = xs, f = {x} -> x > 2}
+                let result = filter {xs = xs, f = {x} -> x > 2}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -485,11 +485,11 @@ class ParallelEffectTest {
     @Test
     fun `test sequential reduce`() {
         val code = """
-            use std::effects::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform Sequential in do
+            perform ForkJoinParallel in do
                 let xs = [1, 2, 3, 4]
-                let result = Parallel.reduce {xs = xs, f = {l, r} -> l * r}
+                let result = reduce {xs = xs, f = {l, r} -> l * r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -501,10 +501,10 @@ class ParallelEffectTest {
     @Test
     fun `test sequential both runs sequentially`() {
         val code = """
-            use std::effects::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform Sequential in do
-                let result = Parallel.both {
+            perform ForkJoinParallel in do
+                let result = both {
                     l = {} -> 5,
                     r = {} -> 10
                 }
@@ -521,11 +521,11 @@ class ParallelEffectTest {
     @Test
     fun `test VirtualParallelWith map with parallelism limit`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallelWith}
+            use std::effects::parallel::{ Parallel, VirtualParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform VirtualParallelWith {parallelism = 2, chunk_size = 1} in do
+            perform VirtualParallelWith {max_concurrent = 2} in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.map {xs = xs, f = {x} -> x * 2}
+                let result = map {xs = xs, f = {x} -> x * 2}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -541,11 +541,11 @@ class ParallelEffectTest {
     @Test
     fun `test VirtualParallelWith map with chunking`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallelWith}
+            use std::effects::parallel::{ Parallel, VirtualParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform VirtualParallelWith {parallelism = 0, chunk_size = 2} in do
+            perform VirtualParallelWith {max_concurrent = 0} in do
                 let xs = [1, 2, 3, 4, 5, 6]
-                let result = Parallel.map {xs = xs, f = {x} -> x * 3}
+                let result = map {xs = xs, f = {x} -> x * 3}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -562,11 +562,11 @@ class ParallelEffectTest {
     @Test
     fun `test VirtualParallelWith reduce with chunking`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallelWith}
+            use std::effects::parallel::{ Parallel, VirtualParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform VirtualParallelWith {parallelism = 4, chunk_size = 3} in do
+            perform VirtualParallelWith {max_concurrent = 4} in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
+                let result = reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -578,11 +578,11 @@ class ParallelEffectTest {
     @Test
     fun `test VirtualParallelWith filter with parallelism and chunking`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallelWith}
+            use std::effects::parallel::{ Parallel, VirtualParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform VirtualParallelWith {parallelism = 2, chunk_size = 3} in do
+            perform VirtualParallelWith {max_concurrent = 2} in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-                let result = Parallel.filter {xs = xs, f = {x} -> x % 2 == 0}
+                let result = filter {xs = xs, f = {x} -> x % 2 == 0}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -598,11 +598,11 @@ class ParallelEffectTest {
     @Test
     fun `test VirtualParallelWith fold with chunking`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallelWith}
+            use std::effects::parallel::{ Parallel, VirtualParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform VirtualParallelWith {parallelism = 2, chunk_size = 2} in do
+            perform VirtualParallelWith {max_concurrent = 2} in do
                 let xs = [1, 2, 3, 4]
-                let result = Parallel.fold {
+                let result = fold {
                     xs = xs,
                     zero = 0,
                     map_fn = {x} -> x * x,
@@ -621,7 +621,7 @@ class ParallelEffectTest {
     @Test
     fun `test sum helper function`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel, sum}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let result = sum {xs = [1, 2, 3, 4, 5]}
@@ -634,7 +634,7 @@ class ParallelEffectTest {
     @Test
     fun `test product helper function`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel, product}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let result = product {xs = [1, 2, 3, 4]}
@@ -647,7 +647,7 @@ class ParallelEffectTest {
     @Test
     fun `test count helper function`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel, count}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let result = count {xs = [1, 2, 3, 4, 5, 6], f = {x} -> x % 2 == 0}
@@ -664,13 +664,13 @@ class ParallelEffectTest {
     @Test
     fun `test combining map and reduce`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5]
                 # Double each element, then sum
-                let doubled = Parallel.map {xs = xs, f = {x} -> x * 2}
-                let sum = Parallel.reduce {xs = doubled, f = {l, r} -> l + r}
+                let doubled = map {xs = xs, f = {x} -> x * 2}
+                let sum = reduce {xs = doubled, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -682,13 +682,13 @@ class ParallelEffectTest {
     @Test
     fun `test filter then map`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5, 6]
                 # Filter evens, then square
-                let evens = Parallel.filter {xs = xs, f = {x} -> x % 2 == 0}
-                let squared = Parallel.map {xs = evens, f = {x} -> x * x}
+                let evens = filter {xs = xs, f = {x} -> x % 2 == 0}
+                let squared = map {xs = evens, f = {x} -> x * x}
                 squared
         """
         val result = eval(code) as MezzeSeq<*>
@@ -703,7 +703,7 @@ class ParallelEffectTest {
     fun `test large list parallel processing`() {
         // Test with a larger list to exercise parallelism
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform VirtualParallel in do
                 # Create a list of 100 elements
@@ -717,7 +717,7 @@ class ParallelEffectTest {
                           71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
                           81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
                           91, 92, 93, 94, 95, 96, 97, 98, 99, 100]
-                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
+                let result = reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -729,9 +729,9 @@ class ParallelEffectTest {
     @Test
     fun `test large list with chunking for efficiency`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallelWith}
+            use std::effects::parallel::{ Parallel, VirtualParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform VirtualParallelWith {parallelism = 4, chunk_size = 25} in do
+            perform VirtualParallelWith {max_concurrent = 4} in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
                           11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
                           21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
@@ -742,7 +742,7 @@ class ParallelEffectTest {
                           71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
                           81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
                           91, 92, 93, 94, 95, 96, 97, 98, 99, 100]
-                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
+                let result = reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -758,11 +758,11 @@ class ParallelEffectTest {
     @Test
     fun `test ForkJoinParallel map`() {
         val code = """
-            use std::effects::parallel::{Parallel, ForkJoinParallel}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform ForkJoinParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.map {xs = xs, f = {x} -> x * 2}
+                let result = map {xs = xs, f = {x} -> x * 2}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -778,11 +778,11 @@ class ParallelEffectTest {
     @Test
     fun `test ForkJoinParallel filter`() {
         val code = """
-            use std::effects::parallel::{Parallel, ForkJoinParallel}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform ForkJoinParallel in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8]
-                let result = Parallel.filter {xs = xs, f = {x} -> x % 2 == 0}
+                let result = filter {xs = xs, f = {x} -> x % 2 == 0}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -797,11 +797,11 @@ class ParallelEffectTest {
     @Test
     fun `test ForkJoinParallel reduce`() {
         val code = """
-            use std::effects::parallel::{Parallel, ForkJoinParallel}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform ForkJoinParallel in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
+                let result = reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0
@@ -813,11 +813,11 @@ class ParallelEffectTest {
     @Test
     fun `test ForkJoinParallel fold`() {
         val code = """
-            use std::effects::parallel::{Parallel, ForkJoinParallel}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform ForkJoinParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.fold {
+                let result = fold {
                     xs = xs,
                     zero = 0,
                     map_fn = {x} -> x * x,
@@ -832,10 +832,10 @@ class ParallelEffectTest {
     @Test
     fun `test ForkJoinParallel both`() {
         val code = """
-            use std::effects::parallel::{Parallel, ForkJoinParallel}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform ForkJoinParallel in do
-                let result = Parallel.both {
+                let result = both {
                     l = {} -> 100,
                     r = {} -> 200
                 }
@@ -848,11 +848,11 @@ class ParallelEffectTest {
     @Test
     fun `test ForkJoinParallel any`() {
         val code = """
-            use std::effects::parallel::{Parallel, ForkJoinParallel}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform ForkJoinParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                Parallel.any {xs = xs, f = {x} -> x == 3}
+                any {xs = xs, f = {x} -> x == 3}
         """
         val result = eval(code)
         assertEquals(true, result)
@@ -861,11 +861,11 @@ class ParallelEffectTest {
     @Test
     fun `test ForkJoinParallel all`() {
         val code = """
-            use std::effects::parallel::{Parallel, ForkJoinParallel}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform ForkJoinParallel in do
                 let xs = [2, 4, 6, 8, 10]
-                Parallel.all {xs = xs, f = {x} -> x % 2 == 0}
+                all {xs = xs, f = {x} -> x % 2 == 0}
         """
         val result = eval(code)
         assertEquals(true, result)
@@ -874,11 +874,11 @@ class ParallelEffectTest {
     @Test
     fun `test ForkJoinParallelWith with custom threshold`() {
         val code = """
-            use std::effects::parallel::{Parallel, ForkJoinParallelWith}
+            use std::effects::parallel::{ ForkJoinParallelWith, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallelWith {threshold = 2, parallelism = 4} in do
+            perform ForkJoinParallelWith {parallelism = 4} in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8]
-                let result = Parallel.map {xs = xs, f = {x} -> x * 10}
+                let result = map {xs = xs, f = {x} -> x * 10}
                 result
         """
         val result = eval(code) as MezzeSeq<*>
@@ -897,7 +897,7 @@ class ParallelEffectTest {
     @Test
     fun `test ForkJoinParallel large list work-stealing`() {
         val code = """
-            use std::effects::parallel::{Parallel, ForkJoinParallel}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
             perform ForkJoinParallel in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
@@ -910,7 +910,7 @@ class ParallelEffectTest {
                           71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
                           81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
                           91, 92, 93, 94, 95, 96, 97, 98, 99, 100]
-                let result = Parallel.reduce {xs = xs, f = {l, r} -> l + r}
+                let result = reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
                     Some {val} -> val
                     None -> 0

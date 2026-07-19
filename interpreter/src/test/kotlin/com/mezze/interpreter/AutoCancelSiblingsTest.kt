@@ -30,7 +30,7 @@ class AutoCancelSiblingsTest {
     @Test
     fun `race cancels losing sibling under LoomAsync`() {
         val source = """
-            use std::effects::async::{ Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, LoomAsync, join, join3, race, sleep, with_timeout }
             use std::effects::async::atom::{ atom, deref, reset }
             use std::effects::time::{ Time, SystemTime }
 
@@ -38,13 +38,13 @@ class AutoCancelSiblingsTest {
               let counter = atom { val = 0 }
               let fast = {} -> 42
               let slow = {} -> do
-                Async.sleep { ms = 200 }
+                sleep { ms = 200 }
                 let _ = reset { atom = counter, val = 1 }
                 0
               let pf = Async.spawn { f = fast }
               let ps = Async.spawn { f = slow }
               let winner = race { ps = [pf, ps] }
-              Async.sleep { ms = 400 }
+              sleep { ms = 400 }
               deref { atom = counter }
         """.trimIndent()
         // Expected: 0 (slow was cancelled before bumping counter)
@@ -77,7 +77,7 @@ class AutoCancelSiblingsTest {
         // boundary would intercept the throw before it left the task.
         // `crash` is host-level and side-steps the effect row.
         val source = """
-            use std::effects::async::{ Async, LoomAsync, try_join }
+            use std::effects::async::{ Async, LoomAsync, sleep, try_join }
             use std::effects::async::atom::{ atom, deref, reset }
             use std::effects::time::{ Time, SystemTime }
 
@@ -85,11 +85,11 @@ class AutoCancelSiblingsTest {
               let counter = atom { val = 0 }
               let failer = {} -> crash { msg = "boom" }
               let slow = {} -> do
-                Async.sleep { ms = 200 }
+                sleep { ms = 200 }
                 reset { atom = counter, val = 1 }
                 0
               try_join { l = failer, r = slow }
-              Async.sleep { ms = 400 }
+              sleep { ms = 400 }
               deref { atom = counter }
         """.trimIndent()
         assertEquals(0L, eval(source))
@@ -104,7 +104,7 @@ class AutoCancelSiblingsTest {
         // Uses `swap` for an atomic increment so the read-modify-write is
         // safe under real concurrency.
         val source = """
-            use std::effects::async::{ Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, LoomAsync, join, join3, race, sleep, with_timeout }
             use std::effects::async::atom::{ atom, deref, swap }
             use std::effects::time::{ Time, SystemTime }
 
@@ -124,7 +124,7 @@ class AutoCancelSiblingsTest {
     @Test
     fun `try_join3 cancels two surviving siblings when one fails under LoomAsync`() {
         val source = """
-            use std::effects::async::{ Async, LoomAsync, try_join3 }
+            use std::effects::async::{ Async, LoomAsync, sleep, try_join3 }
             use std::effects::async::atom::{ atom, deref, swap }
             use std::effects::time::{ Time, SystemTime }
 
@@ -132,15 +132,15 @@ class AutoCancelSiblingsTest {
               let counter = atom { val = 0 }
               let failer = {} -> crash { msg = "boom" }
               let slow1 = {} -> do
-                Async.sleep { ms = 200 }
+                sleep { ms = 200 }
                 swap { atom = counter, f = { current } -> current + 1 }
                 0
               let slow2 = {} -> do
-                Async.sleep { ms = 200 }
+                sleep { ms = 200 }
                 swap { atom = counter, f = { current } -> current + 1 }
                 0
               try_join3 { a = failer, b = slow1, c = slow2 }
-              Async.sleep { ms = 400 }
+              sleep { ms = 400 }
               deref { atom = counter }
         """.trimIndent()
         assertEquals(0L, eval(source))
@@ -152,7 +152,7 @@ class AutoCancelSiblingsTest {
     fun `join3 with all success does NOT cancel anyone under LoomAsync`() {
         // All three siblings run to completion when none fail — counter = 3.
         val source = """
-            use std::effects::async::{ Async, LoomAsync, join3 }
+            use std::effects::async::{ Async, LoomAsync, join3, sleep }
             use std::effects::async::atom::{ atom, deref, swap }
             use std::effects::time::{ Time, SystemTime }
 

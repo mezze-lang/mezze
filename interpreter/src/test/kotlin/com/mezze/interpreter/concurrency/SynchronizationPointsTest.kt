@@ -43,7 +43,7 @@ class SynchronizationPointsTest {
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }
-        use std::effects::async::{ Async, LoomAsync }
+        use std::effects::async::{ Async, LoomAsync, await, sleep }
         use std::effects::exception::{ Exception, CrashException, unwrap }
         use std::effects::time::{ Time, SystemTime }
 
@@ -63,7 +63,7 @@ class SynchronizationPointsTest {
             $loomSetup
 
             let computation = Async.spawn {f = {} -> 42}
-            unwrap { result = Async.await {p = computation} }
+            unwrap { result = await {p = computation} }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -82,12 +82,12 @@ class SynchronizationPointsTest {
             let setDepStarted = {current: Bool} -> True
             let dep = Async.spawn {f = {} -> do
                 let _ = swap {atom = depStarted, f = setDepStarted}
-                let _ = Async.sleep {ms = 20}
+                let _ = sleep {ms = 20}
                 10
             }
 
             # Wait for dependency to complete, then compute
-            let depValue = unwrap { result = Async.await {p = dep} }
+            let depValue = unwrap { result = await {p = dep} }
             let setMainStarted = {current: Bool} -> True
             let _ = swap {atom = mainStarted, f = setMainStarted}
             let mainResult = depValue * 2
@@ -117,17 +117,17 @@ class SynchronizationPointsTest {
             # Create a lazy computation
             let syncPoint = Async.spawn {f = {} -> do
                 let _ = swap {atom = computationStarted, f = {current} -> True}
-                let _ = Async.sleep {ms = 50}
+                let _ = sleep {ms = 50}
                 let _ = swap {atom = computationCompleted, f = {current} -> True}
                 "computed"
             }
 
             # Small delay - computation may or may not have started yet
             # (spawn starts immediately, but this tests we can await)
-            let _ = Async.sleep {ms = 10}
+            let _ = sleep {ms = 10}
 
             # Await the result
-            let result = unwrap { result = Async.await {p = syncPoint} }
+            let result = unwrap { result = await {p = syncPoint} }
 
             # Both flags should be true after awaiting
             {
@@ -155,13 +155,13 @@ class SynchronizationPointsTest {
             let syncPoint = latch {count = 1}
 
             let worker = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 10}
+                let _ = sleep {ms = 10}
                 count_down {latch = syncPoint}
             }
 
             # Should succeed before timeout
             let success = await_latch_timeout {latch = syncPoint, ms = 500}
-            let _ = unwrap { result = Async.await {p = worker} }
+            let _ = unwrap { result = await {p = worker} }
             success
         """
         val result = eval(code)
@@ -207,7 +207,7 @@ class SynchronizationPointsTest {
 
             # Operation A (no dependencies)
             let pA = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 20}
+                let _ = sleep {ms = 20}
                 let _ = swap {atom = aValue, f = setToOne}
                 count_down {latch = aLatch}
             }
@@ -216,7 +216,7 @@ class SynchronizationPointsTest {
             let pB = Async.spawn {f = {} -> do
                 let _ = await_latch {latch = aLatch}
                 let a = deref {atom = aValue}
-                let _ = Async.sleep {ms = 10}
+                let _ = sleep {ms = 10}
                 let setBValue = {current: Int} -> a + 10
                 let _ = swap {atom = bValue, f = setBValue}
                 count_down {latch = bLatch}
@@ -226,7 +226,7 @@ class SynchronizationPointsTest {
             let pC = Async.spawn {f = {} -> do
                 let _ = await_latch {latch = aLatch}
                 let a = deref {atom = aValue}
-                let _ = Async.sleep {ms = 10}
+                let _ = sleep {ms = 10}
                 let setCValue = {current: Int} -> a + 100
                 let _ = swap {atom = cValue, f = setCValue}
                 count_down {latch = cLatch}
@@ -241,10 +241,10 @@ class SynchronizationPointsTest {
                 b + c
             }
 
-            let _ = unwrap { result = Async.await {p = pA} }
-            let _ = unwrap { result = Async.await {p = pB} }
-            let _ = unwrap { result = Async.await {p = pC} }
-            let dResult = unwrap { result = Async.await {p = pD} }
+            let _ = unwrap { result = await {p = pA} }
+            let _ = unwrap { result = await {p = pB} }
+            let _ = unwrap { result = await {p = pC} }
+            let dResult = unwrap { result = await {p = pD} }
 
             # A = 1, B = 1 + 10 = 11, C = 1 + 100 = 101, D = 11 + 101 = 112
             dResult
@@ -291,9 +291,9 @@ class SynchronizationPointsTest {
                 v1 + v2
             }
 
-            let _ = unwrap { result = Async.await {p = p1} }
-            let _ = unwrap { result = Async.await {p = p2} }
-            let result3 = unwrap { result = Async.await {p = p3} }
+            let _ = unwrap { result = await {p = p1} }
+            let _ = unwrap { result = await {p = p2} }
+            let result3 = unwrap { result = await {p = p3} }
 
             {op1 = deref {atom = op1Value}, op2 = deref {atom = op2Value}, op3 = result3}
         """
@@ -363,32 +363,32 @@ class SynchronizationPointsTest {
 
             # Create multiple concurrent computations
             let p0 = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 10}
+                let _ = sleep {ms = 10}
                 0 * 0
             }
             let p1 = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 15}
+                let _ = sleep {ms = 15}
                 1 * 1
             }
             let p2 = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 5}
+                let _ = sleep {ms = 5}
                 2 * 2
             }
             let p3 = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 20}
+                let _ = sleep {ms = 20}
                 3 * 3
             }
             let p4 = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 8}
+                let _ = sleep {ms = 8}
                 4 * 4
             }
 
             # Await all results
-            let r0 = unwrap { result = Async.await {p = p0} }
-            let r1 = unwrap { result = Async.await {p = p1} }
-            let r2 = unwrap { result = Async.await {p = p2} }
-            let r3 = unwrap { result = Async.await {p = p3} }
-            let r4 = unwrap { result = Async.await {p = p4} }
+            let r0 = unwrap { result = await {p = p0} }
+            let r1 = unwrap { result = await {p = p1} }
+            let r2 = unwrap { result = await {p = p2} }
+            let r3 = unwrap { result = await {p = p3} }
+            let r4 = unwrap { result = await {p = p4} }
 
             # Sum should be 0 + 1 + 4 + 9 + 16 = 30
             r0 + r1 + r2 + r3 + r4
@@ -413,21 +413,21 @@ class SynchronizationPointsTest {
 
             let syncPoint = Async.spawn {f = {} -> do
                 let _ = swap {atom = state, f = {current} -> "running"}
-                let _ = Async.sleep {ms = 50}
+                let _ = sleep {ms = 50}
                 let _ = swap {atom = state, f = {current} -> "completed"}
                 let _ = count_down {latch = completionLatch}
                 "done"
             }
 
             # Wait a bit for thread to start
-            let _ = Async.sleep {ms = 10}
+            let _ = sleep {ms = 10}
             let runningState = deref {atom = state}
 
             # Wait for completion
             let _ = await_latch {latch = completionLatch}
             let completedState = deref {atom = state}
 
-            let result = unwrap { result = Async.await {p = syncPoint} }
+            let result = unwrap { result = await {p = syncPoint} }
 
             {
                 running = runningState,
@@ -470,15 +470,15 @@ class SynchronizationPointsTest {
             }
 
             # Give threads time to start waiting
-            let _ = Async.sleep {ms = 20}
+            let _ = sleep {ms = 20}
             let beforeRelease = deref {atom = counter}
 
             # Release all threads at once
             let _ = count_down {latch = gate}
 
-            let _ = unwrap { result = Async.await {p = p1} }
-            let _ = unwrap { result = Async.await {p = p2} }
-            let _ = unwrap { result = Async.await {p = p3} }
+            let _ = unwrap { result = await {p = p1} }
+            let _ = unwrap { result = await {p = p2} }
+            let _ = unwrap { result = await {p = p3} }
 
             let afterRelease = deref {atom = counter}
 
@@ -545,10 +545,10 @@ class SynchronizationPointsTest {
                 swap {atom = dOrder, f = setDOrder}
             }
 
-            let _ = unwrap { result = Async.await {p = pA} }
-            let _ = unwrap { result = Async.await {p = pB} }
-            let _ = unwrap { result = Async.await {p = pC} }
-            let _ = unwrap { result = Async.await {p = pD} }
+            let _ = unwrap { result = await {p = pA} }
+            let _ = unwrap { result = await {p = pB} }
+            let _ = unwrap { result = await {p = pC} }
+            let _ = unwrap { result = await {p = pD} }
 
             {
                 a = deref {atom = aOrder},
@@ -590,8 +590,8 @@ class SynchronizationPointsTest {
                 count_down {latch = l}
             }
 
-            let _ = unwrap { result = Async.await {p = p1} }
-            let _ = unwrap { result = Async.await {p = p2} }
+            let _ = unwrap { result = await {p = p1} }
+            let _ = unwrap { result = await {p = p2} }
 
             # Latch should still have count 1
             let remainingCount = get_count {latch = l}

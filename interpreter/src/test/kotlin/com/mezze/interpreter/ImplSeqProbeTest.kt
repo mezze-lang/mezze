@@ -18,7 +18,7 @@ class ImplSeqProbeTest {
     @Timeout(value = 10, unit = TimeUnit.SECONDS)
     fun `ps dot race dispatches to stdlib impl on Promise seq`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, sleep }
 
             let main = {} -> perform LoomAsync in do
               let p1 = Async.spawn { f = {} -> 1 }
@@ -43,12 +43,12 @@ class ImplSeqProbeTest {
         // Specialization ordering for inherent impls is a followup;
         // for now the promise-seq combinator has a distinct name.
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let main = {} -> perform SystemTime in perform LoomAsync in do
               let p1 = Async.spawn { f = {} -> do
-                Async.sleep { ms = 5 }
+                sleep { ms = 5 }
                 10
               }
               let p2 = Async.spawn { f = {} -> 20 }
@@ -66,7 +66,7 @@ class ImplSeqProbeTest {
     @Timeout(value = 10, unit = TimeUnit.SECONDS)
     fun `ps dot try_all unwraps values on all-success`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, sleep }
 
             let main = {} -> perform LoomAsync in do
               let p1 = Async.spawn { f = {} -> 100 }

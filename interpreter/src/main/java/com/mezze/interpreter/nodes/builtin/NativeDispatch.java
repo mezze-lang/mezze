@@ -2579,12 +2579,7 @@ public final class NativeDispatch extends MezzeNode {
         // Simple operations that don't spawn threads use regular HANDLERS
         HANDLERS.put("__native_promise_await", (r, c) -> AsyncNatives.loomAwait(r));
         HANDLERS.put("__native_async_sleep", (r, c) -> AsyncNatives.loomSleep(r));
-        HANDLERS.put("__native_async_is_cancelled", (r, c) -> AsyncNatives.loomIsCancelled(r));
-        HANDLERS.put("__native_async_check", (r, c) -> AsyncNatives.loomCheck(r));
         HANDLERS.put("__native_async_yield_now", (r, c) -> AsyncNatives.loomYieldNow(r));
-        HANDLERS.put("__native_async_uninterruptible_enter", (r, c) -> AsyncNatives.loomUninterruptibleEnter(r));
-        HANDLERS.put("__native_async_uninterruptible_exit",  (r, c) -> AsyncNatives.loomUninterruptibleExit(r));
-        HANDLERS.put("__native_async_uninterruptible_run",   (r, c) -> AsyncNatives.loomUninterruptibleRun(r, c));
         HANDLERS.put("__native_async_park_until", (r, c) -> AsyncNatives.loomParkUntil(r, c));
         HANDLERS.put("__native_async_scope_cancel_all", (r, c) -> AsyncNatives.loomScopeCancelAll(r));
         HANDLERS.put("__native_async_scope_is_cancelled", (r, c) -> AsyncNatives.loomScopeIsCancelled(r));
@@ -2718,24 +2713,17 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_cancellation_token_create_child", (r, c) -> ConcurrencyNatives.cancellationTokenCreateChild(r));
         HANDLERS.put("__native_cancellation_token_get_reason", (r, c) -> ConcurrencyNatives.cancellationTokenGetReason(r));
 
+        // === Parallel effect: 1-primitive (join) + init/finalize scope ===
+        HANDLERS_WITH_NODE.put("__native_fjpool_init", (r, c, n) -> ParallelNatives.fjpoolInit(r, n));
+        HANDLERS.put("__native_fjpool_finalize", (r, c) -> ParallelNatives.fjpoolFinalize(r));
+        HANDLERS.put("__native_fjpool_join", (r, c) -> ParallelNatives.fjpoolJoin(r, c));
+        HANDLERS.put("__native_vthread_init", (r, c) -> ParallelNatives.vthreadInit(r));
+        HANDLERS.put("__native_vthread_finalize", (r, c) -> ParallelNatives.vthreadFinalize(r));
+        HANDLERS_WITH_NODE.put("__native_vthread_join", (r, c, n) -> ParallelNatives.vthreadJoin(r, c, n));
+
         // === Sequential operations ===
-        HANDLERS.put("__native_sequential_map", (r, c) -> ConcurrencyNatives.sequentialMap(r, c));
-        HANDLERS.put("__native_sequential_filter", (r, c) -> ConcurrencyNatives.sequentialFilter(r, c));
-        HANDLERS.put("__native_sequential_fold", (r, c) -> ConcurrencyNatives.sequentialFold(r, c));
-        HANDLERS.put("__native_sequential_reduce", (r, c) -> ConcurrencyNatives.sequentialReduce(r, c));
-        HANDLERS.put("__native_sequential_find", (r, c) -> ConcurrencyNatives.sequentialFind(r, c));
-        HANDLERS.put("__native_sequential_all", (r, c) -> ConcurrencyNatives.sequentialAll(r, c));
-        HANDLERS.put("__native_sequential_any", (r, c) -> ConcurrencyNatives.sequentialAny(r, c));
-        HANDLERS.put("__native_sequential_partition", (r, c) -> ConcurrencyNatives.sequentialPartition(r, c));
-        HANDLERS.put("__native_sequential_both", (r, c) -> ConcurrencyNatives.sequentialBoth(r, c));
 
         // === Parallel operations ===
-        HANDLERS_WITH_NODE.put("__native_parallel_map", (r, c, n) -> ConcurrencyNatives.parallelMap(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_filter", (r, c, n) -> ConcurrencyNatives.parallelFilter(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_fold", (r, c, n) -> ConcurrencyNatives.parallelFold(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_reduce", (r, c, n) -> ConcurrencyNatives.parallelReduce(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_all", (r, c, n) -> ConcurrencyNatives.parallelAll(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_any", (r, c, n) -> ConcurrencyNatives.parallelAny(r, c, n));
 
         // === SortedMap additional ===
         HANDLERS.put("__native_sorted_map_min_key", (r, c) ->
@@ -2774,30 +2762,10 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_agent_restart", (r, c) -> ConcurrencyNatives.agentRestart(r));
 
         // === Additional Sequential ===
-        HANDLERS.put("__native_sequential_for_each", (r, c) -> ConcurrencyNatives.sequentialForEach(r, c));
-        HANDLERS.put("__native_sequential_group_by", (r, c) -> ConcurrencyNatives.sequentialGroupBy(r, c));
-        HANDLERS.put("__native_sequential_both3", (r, c) -> ConcurrencyNatives.sequentialBoth3(r, c));
 
         // === Additional Parallel ===
-        HANDLERS_WITH_NODE.put("__native_parallel_for_each", (r, c, n) -> ConcurrencyNatives.parallelForEach(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_find", (r, c, n) -> ConcurrencyNatives.parallelFind(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_partition", (r, c, n) -> ConcurrencyNatives.parallelPartition(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_group_by", (r, c, n) -> ConcurrencyNatives.parallelGroupBy(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_both", (r, c, n) -> ConcurrencyNatives.parallelBoth(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_both3", (r, c, n) -> ConcurrencyNatives.parallelBoth3(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_map_cfg", (r, c, n) -> ConcurrencyNatives.parallelMapCfg(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_reduce_cfg", (r, c, n) -> ConcurrencyNatives.parallelReduceCfg(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_fold_cfg", (r, c, n) -> ConcurrencyNatives.parallelFoldCfg(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_parallel_filter_cfg", (r, c, n) -> ConcurrencyNatives.parallelFilterCfg(r, c, n));
 
         // === ForkJoin ===
-        HANDLERS_WITH_NODE.put("__native_forkjoin_map", (r, c, n) -> ConcurrencyNatives.forkjoinMap(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_forkjoin_filter", (r, c, n) -> ConcurrencyNatives.forkjoinFilter(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_forkjoin_reduce", (r, c, n) -> ConcurrencyNatives.forkjoinReduce(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_forkjoin_fold", (r, c, n) -> ConcurrencyNatives.forkjoinFold(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_forkjoin_all", (r, c, n) -> ConcurrencyNatives.forkjoinAll(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_forkjoin_any", (r, c, n) -> ConcurrencyNatives.forkjoinAny(r, c, n));
-        HANDLERS_WITH_NODE.put("__native_forkjoin_both", (r, c, n) -> ConcurrencyNatives.forkjoinBoth(r, c, n));
 
         // === SortedMap from_map ===
         HANDLERS.put("__native_sorted_map_from_map", (r, c) ->

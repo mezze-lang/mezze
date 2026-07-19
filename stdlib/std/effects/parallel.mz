@@ -1,305 +1,288 @@
 use std::collections::seq
 use std::int
 
-## Data parallelism effect for parallel collection operations.
+## Data parallelism, Rayon-shape: one runtime primitive, everything else
+## derived.
 ##
-## Callbacks are effect-polymorphic (`<...>`) so they can perform other
-## effects (Exception, Async, etc.) and have the surrounding handler chain
-## dispatch them. The runtime captures the chain at spawn time; an op-call
-## that propagates past all inherited handlers re-issues on the parent
-## fiber when the parallel op joins.
+## Runtime primitive:
+##   Parallel.join { l, r } — run l and r in parallel, return both.
+##
+## Every derived combinator (map, reduce, filter, find, ...) is a
+## threshold-based recursive split over the input, ending in a
+## sequential leaf. This is exactly how Rayon's ParallelIterator works.
+##
+## Backends:
+##   - ForkJoinParallel — ForkJoinPool + RecursiveTask (default,
+##     fastest for CPU-bound work with irregular sizes).
+##   - VirtualParallel  — one virtual thread per side (good for
+##     I/O-bound work where subtasks park).
+##
+## Both backends bracket their per-scope state via the impl-only
+## initialize_scope / finalize_scope convention.
+
 effect Parallel where {
-  ## Apply f to each element in parallel, results in input order.
-  map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Parallel, ...>,
-  ## Run f on each element in parallel for side effects.
-  for_each: { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Parallel, ...>,
-  ## Filter elements with predicate evaluated in parallel.
-  filter: { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Parallel, ...>,
-  ## Reduce with an associative operation in parallel.
-  reduce: { xs: ['a], f: { l: 'a, r: 'a } -> 'a <...> } -> Option 'a <Parallel, ...>,
-  ## Parallel fold: map each element then combine with associative combiner.
-  fold: { xs: ['a], zero: 'b, map_fn: { x: 'a } -> 'b <...>, combine: { l: 'b, r: 'b } -> 'b <...> } -> 'b <Parallel, ...>,
-  ## Run two computations in parallel.
-  both: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Parallel, ...>,
-  ## Run three computations in parallel.
-  both3: { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: 'a, b: 'b, c: 'c } <Parallel, ...>,
-  ## Find first element matching predicate (short-circuits).
-  find: { xs: ['a], f: { x: 'a } -> Bool <...> } -> Option 'a <Parallel, ...>,
-  ## Check if any element matches predicate (short-circuits).
-  any: { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...>,
-  ## Check if all elements match predicate (short-circuits).
-  all: { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...>,
-  ## Partition elements by predicate into {pass, fail}.
-  partition: { xs: ['a], f: { x: 'a } -> Bool <...> } -> { pass: ['a], fail: ['a] } <Parallel, ...>,
-  ## Group elements by key function.
-  group_by: { xs: ['a], f: { x: 'a } -> 'k <...> } -> [{ key: 'k, values: ['a] }] <Parallel, ...>
+  ## Fork two computations. The runtime decides scheduling; the caller
+  ## just declares "these two are independent."
+  join: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Parallel, ...>
 }
 
-## Default implementation using virtual threads for parallelism.
-impl Parallel for VirtualParallel where {
-  map = { xs, f } -> __native_parallel_map { xs = xs, f = f },
-  for_each = { xs, f } -> __native_parallel_for_each { xs = xs, f = f },
-  filter = { xs, f } -> __native_parallel_filter { xs = xs, f = f },
-  reduce = { xs, f } -> __native_parallel_reduce { xs = xs, f = f },
-  fold = { xs, zero, map_fn, combine } ->
-    __native_parallel_fold {
-      xs = xs,
-      zero = zero,
-      map_fn = map_fn,
-      combine = combine,
-    },
-  both = { l, r } -> __native_parallel_both { l = l, r = r },
-  both3 = { a, b, c } -> __native_parallel_both3 { a = a, b = b, c = c },
-  find = { xs, f } -> __native_parallel_find { xs = xs, f = f },
-  any = { xs, f } -> __native_parallel_any { xs = xs, f = f },
-  all = { xs, f } -> __native_parallel_all { xs = xs, f = f },
-  partition = { xs, f } -> __native_parallel_partition { xs = xs, f = f },
-  group_by = { xs, f } -> __native_parallel_group_by { xs = xs, f = f },
-}
+## ==================================================================
+## ForkJoinParallel — Rayon-shape work-stealing pool. Default.
+## ==================================================================
 
-## Configurable virtual-thread parallelism with concurrency and chunk limits.
-impl Parallel for VirtualParallelWith { parallelism: Int, chunk_size: Int } where {
-  map = { xs, f } ->
-    __native_parallel_map_cfg {
-      xs = xs,
-      f = f,
-      parallelism = parallelism,
-      chunk_size = chunk_size,
-    },
-  for_each = { xs, f } ->
-    __native_parallel_for_each_cfg {
-      xs = xs,
-      f = f,
-      parallelism = parallelism,
-      chunk_size = chunk_size,
-    },
-  filter = { xs, f } ->
-    __native_parallel_filter_cfg {
-      xs = xs,
-      f = f,
-      parallelism = parallelism,
-      chunk_size = chunk_size,
-    },
-  reduce = { xs, f } ->
-    __native_parallel_reduce_cfg {
-      xs = xs,
-      f = f,
-      parallelism = parallelism,
-      chunk_size = chunk_size,
-    },
-  fold = { xs, zero, map_fn, combine } ->
-    __native_parallel_fold_cfg {
-      xs = xs,
-      zero = zero,
-      map_fn = map_fn,
-      combine = combine,
-      parallelism = parallelism,
-      chunk_size = chunk_size,
-    },
-  both = { l, r } -> __native_parallel_both { l = l, r = r },
-  both3 = { a, b, c } -> __native_parallel_both3 { a = a, b = b, c = c },
-  find = { xs, f } ->
-    __native_parallel_find_cfg {
-      xs = xs,
-      f = f,
-      parallelism = parallelism,
-      chunk_size = chunk_size,
-    },
-  any = { xs, f } ->
-    __native_parallel_any_cfg {
-      xs = xs,
-      f = f,
-      parallelism = parallelism,
-      chunk_size = chunk_size,
-    },
-  all = { xs, f } ->
-    __native_parallel_all_cfg {
-      xs = xs,
-      f = f,
-      parallelism = parallelism,
-      chunk_size = chunk_size,
-    },
-  partition = { xs, f } ->
-    __native_parallel_partition_cfg {
-      xs = xs,
-      f = f,
-      parallelism = parallelism,
-      chunk_size = chunk_size,
-    },
-  group_by = { xs, f } ->
-    __native_parallel_group_by_cfg {
-      xs = xs,
-      f = f,
-      parallelism = parallelism,
-      chunk_size = chunk_size,
-    },
-}
-
-## ForkJoin work-stealing implementation for CPU-bound workloads.
+## Uses ForkJoinPool.commonPool() — cheap, shared across scopes.
 impl Parallel for ForkJoinParallel where {
-  map = { xs, f } -> __native_forkjoin_map { xs = xs, f = f, threshold = 64, parallelism = 0 },
-  for_each = { xs, f } ->
-    __native_forkjoin_for_each { xs = xs, f = f, threshold = 64, parallelism = 0 },
-  filter = { xs, f } ->
-    __native_forkjoin_filter { xs = xs, f = f, threshold = 64, parallelism = 0 },
-  reduce = { xs, f } ->
-    __native_forkjoin_reduce { xs = xs, f = f, threshold = 64, parallelism = 0 },
-  fold = { xs, zero, map_fn, combine } ->
-    __native_forkjoin_fold {
-      xs = xs,
-      zero = zero,
-      map_fn = map_fn,
-      combine = combine,
-      threshold = 64,
-      parallelism = 0,
-    },
-  both = { l, r } -> __native_forkjoin_both { l = l, r = r, parallelism = 0 },
-  both3 = { a, b, c } -> __native_forkjoin_both3 { a = a, b = b, c = c, parallelism = 0 },
-  find = { xs, f } -> __native_forkjoin_find { xs = xs, f = f, threshold = 64, parallelism = 0 },
-  any = { xs, f } -> __native_forkjoin_any { xs = xs, f = f, threshold = 64, parallelism = 0 },
-  all = { xs, f } -> __native_forkjoin_all { xs = xs, f = f, threshold = 64, parallelism = 0 },
-  partition = { xs, f } ->
-    __native_forkjoin_partition { xs = xs, f = f, threshold = 64, parallelism = 0 },
-  group_by = { xs, f } ->
-    __native_forkjoin_group_by { xs = xs, f = f, threshold = 64, parallelism = 0 },
+  initialize_scope = {} -> __native_fjpool_init { parallelism = 0 },
+  finalize_scope   = {} -> __native_fjpool_finalize {},
+  join             = { l, r } -> __native_fjpool_join { l = l, r = r },
 }
 
-## Configurable ForkJoin with explicit threshold and parallelism.
-impl Parallel for ForkJoinParallelWith { threshold: Int, parallelism: Int } where {
-  map = { xs, f } ->
-    __native_forkjoin_map {
-      xs = xs,
-      f = f,
-      threshold = threshold,
-      parallelism = parallelism,
-    },
-  for_each = { xs, f } ->
-    __native_forkjoin_for_each {
-      xs = xs,
-      f = f,
-      threshold = threshold,
-      parallelism = parallelism,
-    },
-  filter = { xs, f } ->
-    __native_forkjoin_filter {
-      xs = xs,
-      f = f,
-      threshold = threshold,
-      parallelism = parallelism,
-    },
-  reduce = { xs, f } ->
-    __native_forkjoin_reduce {
-      xs = xs,
-      f = f,
-      threshold = threshold,
-      parallelism = parallelism,
-    },
-  fold = { xs, zero, map_fn, combine } ->
-    __native_forkjoin_fold {
-      xs = xs,
-      zero = zero,
-      map_fn = map_fn,
-      combine = combine,
-      threshold = threshold,
-      parallelism = parallelism,
-    },
-  both = { l, r } -> __native_forkjoin_both { l = l, r = r, parallelism = parallelism },
-  both3 = { a, b, c } ->
-    __native_forkjoin_both3 { a = a, b = b, c = c, parallelism = parallelism },
-  find = { xs, f } ->
-    __native_forkjoin_find {
-      xs = xs,
-      f = f,
-      threshold = threshold,
-      parallelism = parallelism,
-    },
-  any = { xs, f } ->
-    __native_forkjoin_any {
-      xs = xs,
-      f = f,
-      threshold = threshold,
-      parallelism = parallelism,
-    },
-  all = { xs, f } ->
-    __native_forkjoin_all {
-      xs = xs,
-      f = f,
-      threshold = threshold,
-      parallelism = parallelism,
-    },
-  partition = { xs, f } ->
-    __native_forkjoin_partition {
-      xs = xs,
-      f = f,
-      threshold = threshold,
-      parallelism = parallelism,
-    },
-  group_by = { xs, f } ->
-    __native_forkjoin_group_by {
-      xs = xs,
-      f = f,
-      threshold = threshold,
-      parallelism = parallelism,
-    },
+## Fresh private pool with the given worker count. Shut down on scope exit.
+impl Parallel for ForkJoinParallelWith { parallelism: Int } where {
+  initialize_scope = {} -> __native_fjpool_init { parallelism = parallelism },
+  finalize_scope   = {} -> __native_fjpool_finalize {},
+  join             = { l, r } -> __native_fjpool_join { l = l, r = r },
 }
 
-## Sequential implementation for testing or small collections.
-impl Parallel for Sequential where {
-  map = { xs, f } -> __native_sequential_map { xs = xs, f = f },
-  for_each = { xs, f } -> __native_sequential_for_each { xs = xs, f = f },
-  filter = { xs, f } -> __native_sequential_filter { xs = xs, f = f },
-  reduce = { xs, f } -> __native_sequential_reduce { xs = xs, f = f },
-  fold = { xs, zero, map_fn, combine } ->
-    __native_sequential_fold {
-      xs = xs,
-      zero = zero,
-      map_fn = map_fn,
-      combine = combine,
-    },
-  both = { l, r } -> __native_sequential_both { l = l, r = r },
-  both3 = { a, b, c } -> __native_sequential_both3 { a = a, b = b, c = c },
-  find = { xs, f } -> __native_sequential_find { xs = xs, f = f },
-  any = { xs, f } -> __native_sequential_any { xs = xs, f = f },
-  all = { xs, f } -> __native_sequential_all { xs = xs, f = f },
-  partition = { xs, f } -> __native_sequential_partition { xs = xs, f = f },
-  group_by = { xs, f } -> __native_sequential_group_by { xs = xs, f = f },
+## ==================================================================
+## VirtualParallel — virtual threads. For I/O-bound work.
+## ==================================================================
+
+## Unbounded — every join spawns one vthread. Cheap because vthreads
+## are cheap; useful when subtasks block on I/O.
+impl Parallel for VirtualParallel where {
+  initialize_scope = {} -> __native_vthread_init { max_concurrent = 0 },
+  finalize_scope   = {} -> __native_vthread_finalize {},
+  join             = { l, r } -> __native_vthread_join { l = l, r = r },
 }
 
-## Sum a list of integers in parallel.
-pub let sum : { xs: [Int] } -> Int <Parallel> = { xs } -> match Parallel.reduce { xs = xs, f = { l, r } ->
-  l + r } is
+## Backpressure cap. At most `max_concurrent` join sub-tasks run at
+## once (semaphore-based). Useful when you'd otherwise spawn thousands
+## of vthreads and starve I/O.
+impl Parallel for VirtualParallelWith { max_concurrent: Int } where {
+  initialize_scope = {} -> __native_vthread_init { max_concurrent = max_concurrent },
+  finalize_scope   = {} -> __native_vthread_finalize {},
+  join             = { l, r } -> __native_vthread_join { l = l, r = r },
+}
+
+## Split threshold for derived combinators: below this size, the leaf
+## runs sequentially (no join call). Rayon uses ~1000 as its default;
+## same value here. Inlined at each use because module-scope globals
+## don't cross the Truffle worker-thread context boundary cleanly.
+
+## ==================================================================
+## Derived map — the workhorse. Threshold-based recursive split.
+## ==================================================================
+
+## Apply f to each element in parallel, results in input order.
+pub let map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Parallel, ...> = { xs, f } ->
+  if seq::size { xs = xs } <= 1000 then
+    seq::map { xs = xs, f = f }
+  else do
+    let n = seq::size { xs = xs }
+    let mid = n / 2
+    let left  = seq::take { xs = xs, n = mid }
+    let right = seq::drop { xs = xs, n = mid }
+    let both = Parallel.join {
+      l = {} -> map { xs = left,  f = f },
+      r = {} -> map { xs = right, f = f },
+    }
+    seq::concat { xs = both.l, ys = both.r }
+
+## Run f on each element in parallel, discarding results.
+pub let for_each : { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Parallel, ...> = { xs, f } -> do
+  let _ = map { xs = xs, f = { x } -> do
+    f { x = x }
+    0
+  }
+  {}
+
+## ==================================================================
+## Derived filter/partition/group_by — recursive split, seq op at leaf,
+## concat on the way up.
+## ==================================================================
+
+pub let filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Parallel, ...> = { xs, f } ->
+  if seq::size { xs = xs } <= 1000 then
+    seq::filter { xs = xs, p = f }
+  else do
+    let n = seq::size { xs = xs }
+    let mid = n / 2
+    let left  = seq::take { xs = xs, n = mid }
+    let right = seq::drop { xs = xs, n = mid }
+    let both = Parallel.join {
+      l = {} -> filter { xs = left,  f = f },
+      r = {} -> filter { xs = right, f = f },
+    }
+    seq::concat { xs = both.l, ys = both.r }
+
+pub let partition : { xs: ['a], f: { x: 'a } -> Bool <...> } -> { pass: ['a], fail: ['a] } <Parallel, ...> = { xs, f } ->
+  if seq::size { xs = xs } <= 1000 then
+    seq::partition { xs = xs, p = f }
+  else do
+    let n = seq::size { xs = xs }
+    let mid = n / 2
+    let left  = seq::take { xs = xs, n = mid }
+    let right = seq::drop { xs = xs, n = mid }
+    let both = Parallel.join {
+      l = {} -> partition { xs = left,  f = f },
+      r = {} -> partition { xs = right, f = f },
+    }
+    {
+      pass = seq::concat { xs = both.l.pass, ys = both.r.pass },
+      fail = seq::concat { xs = both.l.fail, ys = both.r.fail },
+    }
+
+## group_by delegates to seq::group_by at the leaf. The parallel
+## variant just splits, group_bys each half, and merges by matching
+## keys — that merge is O(N_left * N_right_keys) worst-case, so we
+## use a moderate threshold. For very large groupings a hash-merge
+## helper in seq would be a natural addition.
+pub let group_by : { xs: ['a], f: { x: 'a } -> 'k <...> } -> [{ key: 'k, values: ['a] }] <Parallel, ...> = { xs, f } ->
+  seq::group_by { xs = xs, f = f }
+
+## ==================================================================
+## Derived reduce/fold — threshold-based tree reduce.
+## ==================================================================
+
+## Reduce with an associative operation. Empty input → None.
+##
+## The user-facing combiner is `{ l, r } -> ...` (Parallel shape).
+## seq::reduce uses `{ acc, x }`; we adapt at the leaf.
+pub let reduce : { xs: ['a], f: { l: 'a, r: 'a } -> 'a <...> } -> Option 'a <Parallel, ...> = { xs, f } ->
+  if seq::size { xs = xs } == 0 then None
+  else if seq::size { xs = xs } <= 1000 then
+    seq::reduce { xs = xs, f = { acc, x } -> f { l = acc, r = x } }
+  else do
+    let n = seq::size { xs = xs }
+    let mid = n / 2
+    let left  = seq::take { xs = xs, n = mid }
+    let right = seq::drop { xs = xs, n = mid }
+    let both = Parallel.join {
+      l = {} -> reduce { xs = left,  f = f },
+      r = {} -> reduce { xs = right, f = f },
+    }
+    match { l = both.l, r = both.r } is
+      { l = Some { val = a }, r = Some { val = b } } -> Some { val = f { l = a, r = b } }
+      { l = Some { val = a }, r = None } -> Some { val = a }
+      { l = None, r = Some { val = b } } -> Some { val = b }
+      { l = None, r = None } -> None
+
+## Parallel fold: map each element then combine with associative combiner.
+## The single-pass fused version — map+reduce in one recursive walk.
+pub let fold : { xs: ['a], zero: 'b, map_fn: { x: 'a } -> 'b <...>, combine: { l: 'b, r: 'b } -> 'b <...> } -> 'b <Parallel, ...> = { xs, zero, map_fn, combine } ->
+  if seq::size { xs = xs } == 0 then zero
+  else if seq::size { xs = xs } <= 1000 then
+    seq::fold {
+      xs = xs,
+      init = zero,
+      f = { acc, x } -> combine { l = acc, r = map_fn { x = x } },
+    }
+  else do
+    let n = seq::size { xs = xs }
+    let mid = n / 2
+    let left  = seq::take { xs = xs, n = mid }
+    let right = seq::drop { xs = xs, n = mid }
+    let both = Parallel.join {
+      l = {} -> fold { xs = left,  zero = zero, map_fn = map_fn, combine = combine },
+      r = {} -> fold { xs = right, zero = zero, map_fn = map_fn, combine = combine },
+    }
+    combine { l = both.l, r = both.r }
+
+## ==================================================================
+## Derived short-circuit — find/any/all.
+##
+## Note: not truly short-circuiting across the parallel tree. We do
+## the parallel work then find/any/all sequentially over results.
+## For cheap predicates this is fine; for expensive predicates
+## consider seq::find on a subset first.
+## ==================================================================
+
+pub let find : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Option 'a <Parallel, ...> = { xs, f } ->
+  if seq::size { xs = xs } <= 1000 then
+    seq::find { xs = xs, p = f }
+  else do
+    let n = seq::size { xs = xs }
+    let mid = n / 2
+    let left  = seq::take { xs = xs, n = mid }
+    let right = seq::drop { xs = xs, n = mid }
+    let both = Parallel.join {
+      l = {} -> find { xs = left,  f = f },
+      r = {} -> find { xs = right, f = f },
+    }
+    match both.l is
+      Some { val } -> Some { val = val }
+      None -> both.r
+
+pub let any : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> = { xs, f } ->
+  if seq::size { xs = xs } <= 1000 then
+    seq::any { xs = xs, p = f }
+  else do
+    let n = seq::size { xs = xs }
+    let mid = n / 2
+    let left  = seq::take { xs = xs, n = mid }
+    let right = seq::drop { xs = xs, n = mid }
+    let both = Parallel.join {
+      l = {} -> any { xs = left,  f = f },
+      r = {} -> any { xs = right, f = f },
+    }
+    both.l || both.r
+
+pub let all : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> = { xs, f } ->
+  if seq::size { xs = xs } <= 1000 then
+    seq::all { xs = xs, p = f }
+  else do
+    let n = seq::size { xs = xs }
+    let mid = n / 2
+    let left  = seq::take { xs = xs, n = mid }
+    let right = seq::drop { xs = xs, n = mid }
+    let both = Parallel.join {
+      l = {} -> all { xs = left,  f = f },
+      r = {} -> all { xs = right, f = f },
+    }
+    both.l && both.r
+
+## ==================================================================
+## Derived both/both3 — direct wrappers on join.
+## ==================================================================
+
+pub let both : { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Parallel, ...> = { l, r } ->
+  Parallel.join { l = l, r = r }
+
+pub let both3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> { a: 'a, b: 'b, c: 'c } <Parallel, ...> = { a, b, c } -> do
+  let ab_and_c = Parallel.join {
+    l = {} -> Parallel.join { l = a, r = b },
+    r = c,
+  }
+  { a = ab_and_c.l.l, b = ab_and_c.l.r, c = ab_and_c.r }
+
+## ==================================================================
+## Numeric / convenience helpers.
+## ==================================================================
+
+pub let sum : { xs: [Int] } -> Int <Parallel> = { xs } -> match reduce { xs = xs, f = { l, r } -> l + r } is
   Some { val } -> val
   None -> 0
 
-
-## Multiply a list of integers in parallel.
-pub let product : { xs: [Int] } -> Int <Parallel> = { xs } -> match Parallel.reduce { xs = xs, f = { l, r } ->
-  l * r } is
+pub let product : { xs: [Int] } -> Int <Parallel> = { xs } -> match reduce { xs = xs, f = { l, r } -> l * r } is
   Some { val } -> val
   None -> 1
 
-
-## Count elements matching a predicate in parallel.
 pub let count : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Int <Parallel, ...> = { xs, f } ->
-  Parallel.fold {
+  fold {
     xs = xs,
     zero = 0,
-    map_fn = { x } -> match f { x = x } is
-      True -> 1
-      False -> 0
-,
+    map_fn = { x } -> if f { x = x } then 1 else 0,
     combine = { l, r } -> l + r,
   }
 
-## Flatten nested sequences in parallel.
 pub let flatten : { xs: [['a]] } -> ['a] <Parallel> = { xs } ->
-  Parallel.fold {
+  fold {
     xs = xs,
     zero = [],
     map_fn = { x } -> x,
     combine = { l, r } -> seq::concat { xs = l, ys = r },
   }
 
-## Map then flatten in parallel.
 pub let flat_map : { xs: ['a], f: { x: 'a } -> ['b] <...> } -> ['b] <Parallel, ...> = { xs, f } ->
-  flatten { xs = Parallel.map { xs = xs, f = f } }
+  flatten { xs = map { xs = xs, f = f } }

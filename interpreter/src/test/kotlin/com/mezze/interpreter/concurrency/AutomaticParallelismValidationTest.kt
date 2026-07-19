@@ -89,11 +89,11 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should detect independent operations via Mezze Parallel effect`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform VirtualParallel in do
                 # Three independent operations that can run in parallel
-                let result = Parallel.both3 {
+                let result = both3 {
                     a = {} -> 1,
                     b = {} -> 2,
                     c = {} -> 3
@@ -137,7 +137,7 @@ class AutomaticParallelismValidationTest {
             val totalTime = endTime - startTime
 
             // Should execute sequentially due to dependency
-            assertTrue(totalTime >= 140, "Sequential execution should take at least sum of durations (${totalTime}ms)")
+            assertTrue(totalTime >= 140, "ForkJoinParallel execution should take at least sum of durations (${totalTime}ms)")
             assertEquals(listOf("op1", "op2"), executionOrder, "Operations should execute in dependency order")
         } finally {
             executor.shutdown()
@@ -203,11 +203,11 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should handle mixed operations via Mezze Parallel effect`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform VirtualParallel in do
                 # First: two independent operations
-                let phase1 = Parallel.both {
+                let phase1 = both {
                     l = {} -> 10,
                     r = {} -> 20
                 }
@@ -295,15 +295,15 @@ class AutomaticParallelismValidationTest {
         // In Mezze, parallel operations that throw will propagate the error
         // Test that errors are properly caught
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform VirtualParallel in do
                 # All operations succeed
-                let result = Parallel.map {
+                let result = map {
                     xs = [1, 2, 3],
                     f = {x} -> x * 2
                 }
-                let sum = Parallel.reduce {xs = result, f = {l, r} -> l + r}
+                let sum = reduce {xs = result, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -317,17 +317,17 @@ class AutomaticParallelismValidationTest {
     fun `should cache and reuse execution plans for similar operation patterns via Mezze`() {
         // Execute same pattern multiple times - should use caching internally
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform VirtualParallel in do
                 # Pattern 1
-                let result1 = Parallel.map {xs = [1, 2], f = {x} -> x * 2}
+                let result1 = map {xs = [1, 2], f = {x} -> x * 2}
 
                 # Pattern 2 (similar to pattern 1)
-                let result2 = Parallel.map {xs = [3, 4], f = {x} -> x * 2}
+                let result2 = map {xs = [3, 4], f = {x} -> x * 2}
 
-                let sum1 = Parallel.reduce {xs = result1, f = {l, r} -> l + r}
-                let sum2 = Parallel.reduce {xs = result2, f = {l, r} -> l + r}
+                let sum1 = reduce {xs = result1, f = {l, r} -> l + r}
+                let sum2 = reduce {xs = result2, f = {l, r} -> l + r}
 
                 let s1 = match sum1 is
                     Some {val} -> val
@@ -346,18 +346,18 @@ class AutomaticParallelismValidationTest {
     fun `should handle nested parallel operations correctly via Mezze`() {
         // Test nested parallel computations through sequential phases
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform VirtualParallel in do
                 # Phase 1: Map two lists in parallel using both
-                let phase1 = Parallel.both {
+                let phase1 = both {
                     l = {} -> [1, 2, 3],
                     r = {} -> [4, 5, 6]
                 }
 
                 # Phase 2: Reduce each list
-                let left_sum = Parallel.reduce {xs = phase1.l, f = {l, r} -> l + r}
-                let right_sum = Parallel.reduce {xs = phase1.r, f = {l, r} -> l + r}
+                let left_sum = reduce {xs = phase1.l, f = {l, r} -> l + r}
+                let right_sum = reduce {xs = phase1.r, f = {l, r} -> l + r}
 
                 # Phase 3: Combine results
                 let l = match left_sum is
@@ -377,12 +377,12 @@ class AutomaticParallelismValidationTest {
     fun `should provide accurate performance statistics`() {
         // Test that parallel execution is faster than sequential
         val parallelCode = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.map {xs = xs, f = {x} -> x * x}
-                let sum = Parallel.reduce {xs = result, f = {l, r} -> l + r}
+                let result = map {xs = xs, f = {x} -> x * x}
+                let sum = reduce {xs = result, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -395,12 +395,12 @@ class AutomaticParallelismValidationTest {
         }
 
         val sequentialCode = """
-            use std::effects::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, filter, fold, map, reduce }
 
-            perform Sequential in do
+            perform ForkJoinParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.map {xs = xs, f = {x} -> x * x}
-                let sum = Parallel.reduce {xs = result, f = {l, r} -> l + r}
+                let result = map {xs = xs, f = {x} -> x * x}
+                let sum = reduce {xs = result, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -413,7 +413,7 @@ class AutomaticParallelismValidationTest {
         }
 
         println("Parallel execution: ${parallelTime}ms")
-        println("Sequential execution: ${sequentialTime}ms")
+        println("ForkJoinParallel execution: ${sequentialTime}ms")
 
         // Both should produce correct results
         val parallelResult = eval(parallelCode)
@@ -426,7 +426,7 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should handle large parallel workloads`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
@@ -434,8 +434,8 @@ class AutomaticParallelismValidationTest {
                           21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
                           31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
                           41, 42, 43, 44, 45, 46, 47, 48, 49, 50]
-                let squared = Parallel.map {xs = xs, f = {x} -> x * x}
-                let sum = Parallel.reduce {xs = squared, f = {l, r} -> l + r}
+                let squared = map {xs = xs, f = {x} -> x * x}
+                let sum = reduce {xs = squared, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -449,12 +449,12 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should handle ForkJoin parallel execution`() {
         val code = """
-            use std::effects::parallel::{Parallel, ForkJoinParallel}
+            use std::effects::parallel::{ ForkJoinParallel, Parallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform ForkJoinParallel in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8]
-                let doubled = Parallel.map {xs = xs, f = {x} -> x * 2}
-                let sum = Parallel.reduce {xs = doubled, f = {l, r} -> l + r}
+                let doubled = map {xs = xs, f = {x} -> x * 2}
+                let sum = reduce {xs = doubled, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -467,12 +467,12 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should handle parallel filter operations`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-                let evens = Parallel.filter {xs = xs, f = {x} -> x % 2 == 0}
-                let sum = Parallel.reduce {xs = evens, f = {l, r} -> l + r}
+                let evens = filter {xs = xs, f = {x} -> x % 2 == 0}
+                let sum = reduce {xs = evens, f = {l, r} -> l + r}
                 match sum is
                     Some {val} -> val
                     None -> 0
@@ -485,11 +485,11 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should handle parallel fold operations`() {
         val code = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                let result = Parallel.fold {
+                let result = fold {
                     xs = xs,
                     zero = 0,
                     map_fn = {x} -> x * x,
@@ -505,31 +505,31 @@ class AutomaticParallelismValidationTest {
     @Timeout(10)
     fun `should handle parallel any and all operations`() {
         val anyCode = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform VirtualParallel in do
                 let xs = [1, 2, 3, 4, 5]
-                Parallel.any {xs = xs, f = {x} -> x > 3}
+                any {xs = xs, f = {x} -> x > 3}
         """
         val anyResult = eval(anyCode)
         assertEquals(true, anyResult)
 
         val allCode = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform VirtualParallel in do
                 let xs = [2, 4, 6, 8]
-                Parallel.all {xs = xs, f = {x} -> x % 2 == 0}
+                all {xs = xs, f = {x} -> x % 2 == 0}
         """
         val allResult = eval(allCode)
         assertEquals(true, allResult)
 
         val allFalseCode = """
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, all, any, both, both3, filter, fold, map, reduce }
 
             perform VirtualParallel in do
                 let xs = [2, 4, 5, 8]
-                Parallel.all {xs = xs, f = {x} -> x % 2 == 0}
+                all {xs = xs, f = {x} -> x % 2 == 0}
         """
         val allFalseResult = eval(allFalseCode)
         assertEquals(false, allFalseResult)

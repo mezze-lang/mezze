@@ -40,19 +40,19 @@ class NewtypeImplTest {
         @Test
         fun `Promise has Eq`() {
             checkPasses("""
-                use std::effects::async::{Async, LoomAsync, Promise}
+                use std::effects::async::{ Async, LoomAsync, Promise, await }
                 let main = {} -> perform LoomAsync in do
                     let p1 = Async.spawn {f = {} -> 42}
                     let p2 = p1
                     let same = p1 == p2
-                    Async.await {p = p1}
+                    await {p = p1}
             """.trimIndent(), "Promise Eq")
         }
 
         @Test
         fun `Promise await method`() {
             checkPasses("""
-                use std::effects::async::{Async, LoomAsync}
+                use std::effects::async::{ Async, LoomAsync, await }
                 let main = {} -> perform LoomAsync in do
                     let p = Async.spawn {f = {} -> 42}
                     p.await {}
@@ -62,18 +62,18 @@ class NewtypeImplTest {
         @Test
         fun `Promise is_done method`() {
             checkPasses("""
-                use std::effects::async::{Async, LoomAsync}
+                use std::effects::async::{ Async, LoomAsync, await }
                 let main = {} -> perform LoomAsync in do
                     let p = Async.spawn {f = {} -> 42}
                     let done = p.is_done {}
-                    Async.await {p = p}
+                    await {p = p}
             """.trimIndent(), "Promise .is_done")
         }
 
         @Test
         fun `Promise cancel method`() {
             checkPasses("""
-                use std::effects::async::{Async, LoomAsync}
+                use std::effects::async::{ Async, LoomAsync, await }
                 let main = {} -> perform LoomAsync in do
                     let p = Async.spawn {f = {} -> 42}
                     p.cancel { reason = UserRequested { msg = "test" } }
@@ -93,7 +93,7 @@ class NewtypeImplTest {
         fun `Chan has Eq`() {
             checkPasses("""
                 use std::effects::async::channel::{Chan, chan}
-                use std::effects::async::{Async, LoomAsync}
+                use std::effects::async::{ Async, LoomAsync, await }
                 let main = {} -> perform LoomAsync in do
                     let ch1: Chan Int = chan {}
                     let ch2 = ch1
@@ -108,7 +108,7 @@ class NewtypeImplTest {
             // park-aware free functions in std::effects::async::channel.
             checkPasses("""
                 use std::effects::async::channel::{Chan, chan, send, recv}
-                use std::effects::async::{Async, LoomAsync}
+                use std::effects::async::{ Async, LoomAsync, await }
                 let main = {} -> perform LoomAsync in do
                     let ch: Chan Int = chan {}
                     send {ch = ch, val = 42}
@@ -120,7 +120,7 @@ class NewtypeImplTest {
         fun `Chan close and is_closed`() {
             checkPasses("""
                 use std::effects::async::channel::{Chan, chan, close, is_closed}
-                use std::effects::async::{Async, LoomAsync}
+                use std::effects::async::{ Async, LoomAsync, await }
                 let main = {} -> perform LoomAsync in do
                     let ch: Chan Int = chan {}
                     let closed = is_closed {ch = ch}
@@ -258,7 +258,7 @@ class NewtypeImplTest {
         fun `Atom has Eq`() {
             checkPasses("""
                 use std::effects::async::atom::{Atom, atom}
-                use std::effects::async::{Async, LoomAsync}
+                use std::effects::async::{ Async, LoomAsync, await }
                 let main = {} -> perform LoomAsync in do
                     let a: Atom Int = atom {val = 42}
                     let same = a == a
@@ -270,7 +270,7 @@ class NewtypeImplTest {
         fun `Atom deref and reset methods`() {
             checkPasses("""
                 use std::effects::async::atom::{Atom, atom}
-                use std::effects::async::{Async, LoomAsync}
+                use std::effects::async::{ Async, LoomAsync, await }
                 let main = {} -> perform LoomAsync in do
                     let a = atom {val = 42}
                     let v = a.deref {}
@@ -326,7 +326,7 @@ class NewtypeImplTest {
         @Test
         fun `CancellationToken has Eq`() {
             checkPasses("""
-                use std::effects::async::{Async, LoomAsync, CancellationToken, token}
+                use std::effects::async::{ Async, CancellationToken, LoomAsync, await, token }
                 let main = {} -> perform LoomAsync in do
                     let t = token {}
                     let same = t == t
@@ -337,7 +337,7 @@ class NewtypeImplTest {
         @Test
         fun `CancellationToken cancel_token and is_token_cancelled methods`() {
             checkPasses("""
-                use std::effects::async::{Async, LoomAsync, CancellationToken, token}
+                use std::effects::async::{ Async, CancellationToken, LoomAsync, await, token }
                 let main = {} -> perform LoomAsync in do
                     let t = token {}
                     let _ = t.cancel_token {reason = "done"}

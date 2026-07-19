@@ -279,7 +279,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void cancellationTokenEqSameReference() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::async::{Async, LoomAsync, CancellationToken, token}
+                use std::effects::async::{ Async, CancellationToken, LoomAsync, await, token }
                 perform LoomAsync in do
                     let t = token {}
                     t == t
@@ -290,7 +290,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void cancellationTokenEqDifferentReferences() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::async::{Async, LoomAsync, CancellationToken, token}
+                use std::effects::async::{ Async, CancellationToken, LoomAsync, await, token }
                 perform LoomAsync in do
                     let t1 = token {}
                     let t2 = token {}
@@ -302,7 +302,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void cancellationTokenCancelAndIsCancelledMethods() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::async::{Async, LoomAsync, CancellationToken, token}
+                use std::effects::async::{ Async, CancellationToken, LoomAsync, await, token }
                 perform LoomAsync in do
                     let t = token {}
                     let _ = t.cancel_token {reason = "done"}
@@ -314,7 +314,7 @@ class NewtypeImplRuntimeTest {
         @Test
         void cancellationTokenNotCancelledInitially() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::async::{Async, LoomAsync, CancellationToken, token}
+                use std::effects::async::{ Async, CancellationToken, LoomAsync, await, token }
                 perform LoomAsync in do
                     let t = token {}
                     t.is_token_cancelled {}
@@ -373,7 +373,7 @@ class NewtypeImplRuntimeTest {
         void chanEqSameReference() {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::channel::{Chan, chan}
-                use std::effects::async::{Async, LoomAsync}
+                use std::effects::async::{ Async, LoomAsync, await }
                 perform LoomAsync in do
                     let ch: Chan Int = chan {}
                     ch == ch
@@ -385,7 +385,7 @@ class NewtypeImplRuntimeTest {
         void chanEqDifferentReferences() {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::channel::{Chan, chan}
-                use std::effects::async::{Async, LoomAsync}
+                use std::effects::async::{ Async, LoomAsync, await }
                 perform LoomAsync in do
                     let ch1: Chan Int = chan {}
                     let ch2: Chan Int = chan {}
@@ -405,11 +405,11 @@ class NewtypeImplRuntimeTest {
         @Test
         void promiseEqSameReference() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::async::{Async, LoomAsync, Promise}
+                use std::effects::async::{ Async, LoomAsync, Promise, await }
                 let main = {} -> perform LoomAsync in do
                     let p = Async.spawn {f = {} -> 42}
                     let same = p == p
-                    let _ = Async.await {p = p}
+                    let _ = await {p = p}
                     same
                 main {}
                 """);
@@ -419,11 +419,11 @@ class NewtypeImplRuntimeTest {
         @Test
         void promiseAwaitMethod() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::async::{Async, LoomAsync, Promise}
+                use std::effects::async::{ Async, LoomAsync, Promise, await }
                 use std::result::{ get_or_else }
                 let main = {} -> perform LoomAsync in do
                   let p = Async.spawn {f = {} -> 42}
-                  let r = Async.await { p = p }
+                  let r = await { p = p }
                   get_or_else { result = r, def = -1 }
                 main {}
                 """);
@@ -433,10 +433,10 @@ class NewtypeImplRuntimeTest {
         @Test
         void promiseIsDoneMethod() {
             Object result = MezzeTestHelper.run("""
-                use std::effects::async::{Async, LoomAsync, Promise}
+                use std::effects::async::{ Async, LoomAsync, Promise, await }
                 let main = {} -> perform LoomAsync in do
                     let p = Async.spawn {f = {} -> 99}
-                    let _ = Async.await {p = p}
+                    let _ = await {p = p}
                     p.is_done {}
                 main {}
                 """);

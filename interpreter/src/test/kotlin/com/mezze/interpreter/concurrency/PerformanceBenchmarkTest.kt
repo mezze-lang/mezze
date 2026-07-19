@@ -19,9 +19,9 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  *
  * The benchmarks here exercise the **real surface**:
  *
- *   perform LoomAsync in do
+ *   perform SystemTime in perform LoomAsync in do
  *     let t = Async.spawn { f = {} -> ... }
- *     Async.await { p = t }
+ *     await { p = t }
  *
  * which routes through the new dispatch (HandleNode → EffectHandlerDriver
  * → handler chain on the spawned thread → AsyncNatives). Previously this
@@ -72,7 +72,8 @@ class PerformanceBenchmarkTest {
     // Shared prelude used by every benchmark — pulls in the Async effect
     // and its LoomAsync impl. Tests then write `perform LoomAsync in ...`.
     private val asyncSetup = """
-        use std::effects::async::{Async, LoomAsync, Promise, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+        use std::effects::async::{ Async, LoomAsync, Promise, all, par_filter, par_for_each, par_map, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map }
+        use std::effects::time::{ Time, SystemTime }
         use std::result
     """.trimIndent()
 
@@ -81,24 +82,24 @@ class PerformanceBenchmarkTest {
     private fun parallelSleepCode(n: Int, sleepMs: Long): String = buildString {
         appendLine(asyncSetup)
         appendLine()
-        appendLine("perform LoomAsync in do")
+        appendLine("perform SystemTime in perform LoomAsync in do")
         for (i in 1..n) {
             appendLine("    let op$i = Async.spawn { f = {} -> do")
-            appendLine("        Async.sleep { ms = $sleepMs }")
+            appendLine("        sleep { ms = $sleepMs }")
             appendLine("        $i")
             appendLine("    }")
         }
         appendLine("    result::get_or_else { result = try_all { ps = [${(1..n).joinToString(", ") { "op$it" }}] }, def = [] }")
     }
 
-    // Helper: sequential N sleeps in a single body — uses Async.sleep so
+    // Helper: sequential N sleeps in a single body — uses sleep so
     // it goes through the same dispatch path, just without spawning.
     private fun sequentialSleepCode(n: Int, sleepMs: Long): String = buildString {
         appendLine(asyncSetup)
         appendLine()
-        appendLine("perform LoomAsync in do")
+        appendLine("perform SystemTime in perform LoomAsync in do")
         repeat(n) {
-            appendLine("    Async.sleep { ms = $sleepMs }")
+            appendLine("    sleep { ms = $sleepMs }")
         }
         appendLine("    \"done\"")
     }
@@ -125,7 +126,7 @@ class PerformanceBenchmarkTest {
         val efficiency = speedup / n
 
         println("IO Operations Benchmark (via Async.spawn/await):")
-        println("  Sequential time: ${sequentialTime}ms")
+        println("  ForkJoinParallel time: ${sequentialTime}ms")
         println("  Parallel time:   ${parallelTime}ms")
         println("  Speedup:         ${"%.2f".format(speedup)}x")
         println("  Efficiency:      ${"%.2f".format(efficiency * 100)}%")
@@ -155,7 +156,7 @@ class PerformanceBenchmarkTest {
 
         val speedup = sequentialTime.toDouble() / parallelTime
         println("Compute Operations Benchmark (via Async.spawn/await):")
-        println("  Sequential time: ${sequentialTime}ms")
+        println("  ForkJoinParallel time: ${sequentialTime}ms")
         println("  Parallel time:   ${parallelTime}ms")
         println("  Speedup:         ${"%.2f".format(speedup)}x")
 
@@ -179,8 +180,8 @@ class PerformanceBenchmarkTest {
             val src = buildString {
                 appendLine(asyncSetup)
                 appendLine()
-                appendLine("perform LoomAsync in do")
-                durations.forEach { appendLine("    Async.sleep { ms = $it }") }
+                appendLine("perform SystemTime in perform LoomAsync in do")
+                durations.forEach { appendLine("    sleep { ms = $it }") }
                 appendLine("    \"done\"")
             }
             eval(src)
@@ -190,10 +191,10 @@ class PerformanceBenchmarkTest {
             val src = buildString {
                 appendLine(asyncSetup)
                 appendLine()
-                appendLine("perform LoomAsync in do")
+                appendLine("perform SystemTime in perform LoomAsync in do")
                 durations.forEachIndexed { i, ms ->
                     appendLine("    let op${i + 1} = Async.spawn { f = {} -> do")
-                    appendLine("        Async.sleep { ms = $ms }")
+                    appendLine("        sleep { ms = $ms }")
                     appendLine("        ${i + 1}")
                     appendLine("    }")
                 }
@@ -206,7 +207,7 @@ class PerformanceBenchmarkTest {
         val speedup = sequentialTime.toDouble() / parallelTime
         println("Mixed Workload Benchmark (via Async.spawn/await):")
         println("  Operations:      ${durations.size} (mixed durations)")
-        println("  Sequential time: ${sequentialTime}ms")
+        println("  ForkJoinParallel time: ${sequentialTime}ms")
         println("  Parallel time:   ${parallelTime}ms")
         println("  Speedup:         ${"%.2f".format(speedup)}x")
 
@@ -286,7 +287,7 @@ class PerformanceBenchmarkTest {
                     val src = buildString {
                         appendLine(asyncSetup)
                         appendLine()
-                        appendLine("perform LoomAsync in do")
+                        appendLine("perform SystemTime in perform LoomAsync in do")
                         for (i in 1..count) {
                             appendLine("    let op$i = Async.spawn { f = {} -> $i }")
                         }
@@ -367,11 +368,11 @@ class PerformanceBenchmarkTest {
         // The new dispatch carries the parent's handler chain to spawned
         // threads. When a spawned task performs an effect-op (here
         // Exception.throw) that the parent handles, the runtime stashes
-        // the op on the task's promise; Async.await re-issues it on the
+        // the op on the task's promise; await re-issues it on the
         // parent fiber. This benchmark records that round-trip cost vs.
         // running the same throws in-fiber.
         //
-        // Sequential baseline: one perform per throw, all in the main
+        // ForkJoinParallel baseline: one perform per throw, all in the main
         // fiber, no spawn.
         //
         // Cross-thread: spawn N tasks each of which throws; await the
@@ -403,7 +404,7 @@ class PerformanceBenchmarkTest {
                 appendLine(asyncSetup)
                 appendLine("use std::effects::exception::{Exception, ExceptionToResult}")
                 appendLine()
-                appendLine("perform ExceptionToResult in perform LoomAsync in do")
+                appendLine("perform ExceptionToResult in perform SystemTime in perform LoomAsync in do")
                 for (i in 1..n) {
                     appendLine("    let t$i = Async.spawn { f = {} -> Exception.throw { error = \"x\" } }")
                 }
@@ -411,7 +412,7 @@ class PerformanceBenchmarkTest {
                 // fiber; ExceptionToResult catches → aborts perform → we
                 // return Err. The other spawned tasks complete in the
                 // background but their stashed ops are never re-issued.
-                appendLine("    Async.await { p = t1 }")
+                appendLine("    await { p = t1 }")
             }
             eval(src)
         }

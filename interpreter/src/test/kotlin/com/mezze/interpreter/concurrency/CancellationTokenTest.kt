@@ -37,8 +37,8 @@ class CancellationTokenTest {
     @Test
     fun `test create token`() {
         val code = """
-            use std::effects::async::{token, is_token_cancelled}
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ is_token_cancelled, scoped, token }
+            use std::effects::async::{ Async, LoomAsync, scoped }
 
             perform LoomAsync in do
 
@@ -52,8 +52,8 @@ class CancellationTokenTest {
     @Test
     fun `test cancel token`() {
         val code = """
-            use std::effects::async::{token, cancel_token, is_token_cancelled}
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ cancel_token, is_token_cancelled, scoped, token }
+            use std::effects::async::{ Async, LoomAsync, scoped }
 
             perform LoomAsync in do
 
@@ -71,8 +71,8 @@ class CancellationTokenTest {
     @Test
     fun `test get cancellation reason`() {
         val code = """
-            use std::effects::async::{token, cancel_token, get_reason}
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ cancel_token, get_reason, scoped, token }
+            use std::effects::async::{ Async, LoomAsync, scoped }
 
             perform LoomAsync in do
 
@@ -89,8 +89,8 @@ class CancellationTokenTest {
     @Test
     fun `test uncancelled token has no reason`() {
         val code = """
-            use std::effects::async::{token, get_reason}
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ get_reason, scoped, token }
+            use std::effects::async::{ Async, LoomAsync, scoped }
 
             perform LoomAsync in do
 
@@ -110,8 +110,8 @@ class CancellationTokenTest {
     @Test
     fun `test child token cancelled when parent cancelled`() {
         val code = """
-            use std::effects::async::{token, cancel_token, create_child, is_token_cancelled}
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ cancel_token, create_child, is_token_cancelled, scoped, token }
+            use std::effects::async::{ Async, LoomAsync, scoped }
 
             perform LoomAsync in do
 
@@ -132,8 +132,8 @@ class CancellationTokenTest {
     @Test
     fun `test parent not cancelled when child cancelled`() {
         val code = """
-            use std::effects::async::{token, cancel_token, create_child, is_token_cancelled}
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ cancel_token, create_child, is_token_cancelled, scoped, token }
+            use std::effects::async::{ Async, LoomAsync, scoped }
 
             perform LoomAsync in do
 
@@ -154,8 +154,8 @@ class CancellationTokenTest {
     @Test
     fun `test deeply nested child tokens`() {
         val code = """
-            use std::effects::async::{token, cancel_token, create_child, is_token_cancelled}
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ cancel_token, create_child, is_token_cancelled, scoped, token }
+            use std::effects::async::{ Async, LoomAsync, scoped }
 
             perform LoomAsync in do
 
@@ -187,8 +187,8 @@ class CancellationTokenTest {
     @Test
     fun `test with_cancellation on active token`() {
         val code = """
-            use std::effects::async::{token, with_cancellation}
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ scoped, token, with_cancellation }
+            use std::effects::async::{ Async, LoomAsync, scoped }
 
             perform LoomAsync in do
 
@@ -205,8 +205,8 @@ class CancellationTokenTest {
     @Test
     fun `test with_cancellation on cancelled token`() {
         val code = """
-            use std::effects::async::{token, cancel_token, with_cancellation}
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ cancel_token, scoped, token, with_cancellation }
+            use std::effects::async::{ Async, LoomAsync, scoped }
 
             perform LoomAsync in do
 
@@ -228,11 +228,11 @@ class CancellationTokenTest {
     @Test
     fun `test scope has cancellation token`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, scope_get_token, scope_is_cancelled}
-            use std::effects::async::{is_token_cancelled}
+            use std::effects::async::{ Async, LoomAsync, scope_get_token, scope_is_cancelled, scoped }
+            use std::effects::async::{ is_token_cancelled, scoped }
 
             perform LoomAsync in do
-                Async.scoped {f = {sc} -> do
+                scoped {f = {sc} -> do
                     let token = scope_get_token {sc = sc}
                     let scope_cancelled = scope_is_cancelled {sc = sc}
                     scope_cancelled
@@ -245,10 +245,10 @@ class CancellationTokenTest {
     @Test
     fun `test cancellation propagates to scope tasks when scope cancelled`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, scope_cancel_all, scope_is_cancelled}
+            use std::effects::async::{ Async, LoomAsync, scope_cancel_all, scope_is_cancelled, scope_spawn, scoped }
 
             perform LoomAsync in do
-                Async.scoped {f = {sc} -> do
+                scoped {f = {sc} -> do
                     let p = scope_spawn {sc = sc, f = {} -> 42}
                     let before = scope_is_cancelled {sc = sc}
                     scope_cancel_all {sc = sc}

@@ -23,7 +23,7 @@ class WaitGroupTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // Post-#170: all primitive ops are <Async>; tests use stdlib imports
-    // and open a `perform LoomAsync in do` block.
+    // and open a `perform SystemTime in perform LoomAsync in do` block.
     private val waitGroupSetup = """
         use std::effects::async::waitgroup::{
             wait_group, add, done, wait, wait_timeout, get_count_wg
@@ -32,10 +32,11 @@ class WaitGroupTest {
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }
-        use std::effects::async::{ Async, LoomAsync }
+        use std::effects::async::{ Async, LoomAsync, await, sleep }
+        use std::effects::time::{ Time, SystemTime }
         use std::effects::exception::{ Exception, CrashException, unwrap }
 
-        perform LoomAsync in do
+        perform SystemTime in perform LoomAsync in do
     """.trimIndent()
 
     private val atomSetup = ""
@@ -251,7 +252,7 @@ class WaitGroupTest {
             }
 
             # Give thread 1 time to start waiting
-            let _ = Async.sleep {ms = 20}
+            let _ = sleep {ms = 20}
 
             # Result should still be 0 (thread 1 is blocked)
             let before = deref {atom = result}
@@ -259,7 +260,7 @@ class WaitGroupTest {
             # Done to release thread 1
             let _ = done {wg = wg}
 
-            let _ = perform CrashException in unwrap { result = Async.await {p = p1} }
+            let _ = perform CrashException in unwrap { result = await {p = p1} }
 
             {before = before, after = deref {atom = result}}
         """

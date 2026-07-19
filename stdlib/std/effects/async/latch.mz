@@ -1,5 +1,5 @@
 use std::abilities::compare::{ Eq }
-use std::effects::async::{ Async }
+use std::effects::async::{ Async, park }
 use std::int
 
 ## One-shot countdown barrier that releases waiting threads when count reaches zero.
@@ -29,9 +29,9 @@ pub let count_down : { latch: Latch } -> {} <Async> = { latch } ->
 pub let await_latch : { latch: Latch } -> {} <Async> = { latch } ->
   __native_latch_await { latch = latch }
 
-## Park-aware await: routes through Async.park.
+## Park-aware await: routes through park.
 pub let await_latch_async : { latch: Latch } -> {} <Async, ...> = { latch } ->
-  Async.park { predicate = {} -> __native_latch_get_count { latch = latch } == 0 }
+  park { predicate = {} -> __native_latch_get_count { latch = latch } == 0 }
 
 ## Wait until count reaches zero or timeout expires. Returns True if released.
 pub let await_latch_timeout : { latch: Latch, ms: Int } -> Bool <Async> = { latch, ms } ->

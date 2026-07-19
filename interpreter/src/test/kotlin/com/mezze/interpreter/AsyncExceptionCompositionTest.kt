@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Assertions.*
  * The new design (Pattern C from docs/effect-handlers/04-async-and-exceptions.md):
  * the spawned task inherits the parent's handler chain. If an op-call
  * propagates past all inherited handlers, it's stored on the task's
- * promise. `Async.await` re-issues the op-call on the parent fiber, where
+ * promise. `await` re-issues the op-call on the parent fiber, where
  * outer handlers can dispatch it as if the raise had happened there.
  *
  * These tests document that the bug is fixed.
@@ -29,11 +29,11 @@ class AsyncExceptionCompositionTest {
     fun `exception raised inside spawned task is caught by outer ExceptionToResult`() {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await }
 
             perform ExceptionToResult in perform LoomAsync in do
               let t = Async.spawn { f = {} -> Exception.throw { error = "boom" } }
-              let v = match Async.await { p = t } is
+              let v = match await { p = t } is
                 Ok { val } -> val
                 Err { error = _ } -> -1
               Ok { val = v }
@@ -53,13 +53,13 @@ class AsyncExceptionCompositionTest {
         // 42 directly; await returns Ok {val = 42}; perform returns Ok {val = 42}.
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await }
 
             perform ExceptionToResult in perform LoomAsync in do
               let t = Async.spawn { f = {} ->
                 if False then Exception.throw { error = "never" } else 42
               }
-              let v = match Async.await { p = t } is
+              let v = match await { p = t } is
                 Ok { val } -> val
                 Err { error = _ } -> -1
               Ok { val = v }
@@ -80,10 +80,10 @@ class AsyncExceptionCompositionTest {
         // parent.
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, both, for_each, map }
 
             perform ExceptionToResult in perform VirtualParallel in do
-              let r = Parallel.map { xs = [1, 2, 3, 4, 5], f = { x } ->
+              let r = map { xs = [1, 2, 3, 4, 5], f = { x } ->
                 if x == 3 then Exception.throw { error = "three" } else x * 10
               }
               Ok { val = r }
@@ -100,10 +100,10 @@ class AsyncExceptionCompositionTest {
     fun `raise inside Parallel both lands on outer handler`() {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, both, for_each, map }
 
             perform ExceptionToResult in perform VirtualParallel in do
-              let _ = Parallel.both {
+              let _ = both {
                 l = {} -> Exception.throw { error = "left-fail" },
                 r = {} -> 42,
               }
@@ -124,13 +124,13 @@ class AsyncExceptionCompositionTest {
         // its result is discarded.
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await }
 
             perform ExceptionToResult in perform LoomAsync in do
               let good = Async.spawn { f = {} -> 100 }
               let bad = Async.spawn { f = {} -> Exception.throw { error = "bad" } }
-              let _ = Async.await { p = good }
-              let v = match Async.await { p = bad } is
+              let _ = await { p = good }
+              let v = match await { p = bad } is
                 Ok { val } -> val
                 Err { error = _ } -> -1
               Ok { val = v }
@@ -151,16 +151,16 @@ class AsyncExceptionCompositionTest {
         // ExceptionToResult outside.
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await }
 
             perform ExceptionToResult in perform LoomAsync in do
               let outer = Async.spawn { f = {} -> do
                 let inner = Async.spawn { f = {} -> Exception.throw { error = "inner-bad" } }
-                match Async.await { p = inner } is
+                match await { p = inner } is
                     Ok { val } -> val
                     Err { error = _ } -> -1
               }
-              let v = match Async.await { p = outer } is
+              let v = match await { p = outer } is
                 Ok { val } -> val
                 Err { error = _ } -> -1
               Ok { val = v }
@@ -177,10 +177,10 @@ class AsyncExceptionCompositionTest {
     fun `Parallel for_each whose callback raises surfaces on the handler`() {
         val source = """
             use std::effects::exception::{Exception, ExceptionToResult}
-            use std::effects::parallel::{Parallel, VirtualParallel}
+            use std::effects::parallel::{ Parallel, VirtualParallel, both, for_each, map }
 
             perform ExceptionToResult in perform VirtualParallel in do
-              let _ = Parallel.for_each { xs = [1, 2, 3], f = { x } ->
+              let _ = for_each { xs = [1, 2, 3], f = { x } ->
                 if x == 2 then Exception.throw { error = "two-fail" } else {}
               }
               Ok { val = 0 }

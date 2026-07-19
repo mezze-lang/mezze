@@ -22,7 +22,7 @@ class AsyncModuleTest {
 
     // Helper to wrap code in LoomAsync handler
     private fun withLoomAsync(body: String): String =
-        "use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }\n" +
+        "use std::effects::async::{ Async, LoomAsync, all, await, is_done, join, join3, par_filter, par_for_each, par_map, race, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }\n" +
         "use std::collections::seq\n" +
         "use std::result\n" +
         "\n" +
@@ -35,7 +35,7 @@ class AsyncModuleTest {
     fun `test LoomAsync executes computation`() {
         val result = eval(withLoomAsync("""
             let p = Async.spawn {f = {} -> 42}
-            result::get_or_else { result = Async.await {p = p}, def = -1 }
+            result::get_or_else { result = await {p = p}, def = -1 }
         """))
         assertEquals(42L, result)
     }
@@ -46,7 +46,7 @@ class AsyncModuleTest {
     fun `test spawn and await returns result`() {
         val result = eval(withLoomAsync("""
             let p = Async.spawn {f = {} -> 42}
-            result::get_or_else { result = Async.await {p = p}, def = -1 }
+            result::get_or_else { result = await {p = p}, def = -1 }
         """))
         assertEquals(42L, result)
     }
@@ -56,8 +56,8 @@ class AsyncModuleTest {
         val result = eval(withLoomAsync("""
             let p1 = Async.spawn {f = {} -> 10}
             let p2 = Async.spawn {f = {} -> 20}
-            let r1 = result::get_or_else { result = Async.await {p = p1}, def = -1 }
-            let r2 = result::get_or_else { result = Async.await {p = p2}, def = -1 }
+            let r1 = result::get_or_else { result = await {p = p1}, def = -1 }
+            let r2 = result::get_or_else { result = await {p = p2}, def = -1 }
             r1 + r2
         """))
         assertEquals(30L, result)
@@ -69,7 +69,7 @@ class AsyncModuleTest {
     fun `test is_done on completed promise`() {
         val result = eval(withLoomAsync("""
             let p = Async.spawn {f = {} -> 42}
-            let _ = result::get_or_else { result = Async.await {p = p}, def = -1 }
+            let _ = result::get_or_else { result = await {p = p}, def = -1 }
             is_done {p = p}
         """))
         assertEquals(true, result)
@@ -208,7 +208,7 @@ class AsyncModuleTest {
     @Test
     fun `test run helper spawns and awaits`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, run, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
+            use std::effects::async::{ Async, LoomAsync, all, await, is_done, par_filter, par_for_each, par_map, run, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map }
             use std::result
 
             perform LoomAsync in do
@@ -222,7 +222,7 @@ class AsyncModuleTest {
     @Test
     fun `test go helper fires and forgets`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, go, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
+            use std::effects::async::{ Async, LoomAsync, all, await, go, is_done, par_filter, par_for_each, par_map, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map }
 
             perform LoomAsync in do
                 go {f = {} -> 42}
@@ -236,7 +236,7 @@ class AsyncModuleTest {
     @Test
     fun `test AsyncFailed construction`() {
         val result = eval("""
-            use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
+            use std::effects::async::{ AsyncError, all, await, is_done, par_filter, par_for_each, par_map, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map }
             use std::result
 
             let err: AsyncError = AsyncFailed {msg = "test error"}
@@ -250,7 +250,7 @@ class AsyncModuleTest {
     @Test
     fun `test AsyncCancelled construction`() {
         val result = eval("""
-            use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
+            use std::effects::async::{ AsyncError, all, await, is_done, par_filter, par_for_each, par_map, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map }
             use std::result
 
             let err: AsyncError = AsyncCancelled { reason = UserRequested { msg = "test" } }
@@ -264,7 +264,7 @@ class AsyncModuleTest {
     @Test
     fun `test AsyncTimedOut construction`() {
         val result = eval("""
-            use std::effects::async::{AsyncError, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
+            use std::effects::async::{ AsyncError, all, await, is_done, par_filter, par_for_each, par_map, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map }
             use std::result
 
             let err: AsyncError = AsyncTimedOut {ms = 5000}
@@ -282,9 +282,9 @@ class AsyncModuleTest {
         val result = eval(withLoomAsync("""
             let outer = Async.spawn {f = {} -> do
                 let inner = Async.spawn {f = {} -> 42}
-                result::get_or_else { result = Async.await {p = inner}, def = -1 }
+                result::get_or_else { result = await {p = inner}, def = -1 }
             }
-            result::get_or_else { result = Async.await {p = outer}, def = -1 }
+            result::get_or_else { result = await {p = outer}, def = -1 }
         """))
         assertEquals(42L, result)
     }

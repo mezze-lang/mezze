@@ -23,7 +23,7 @@ class LatchTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // Post-#170: all primitive ops are <Async>; tests use stdlib imports
-    // and open a `perform LoomAsync in do` block.
+    // and open a `perform SystemTime in perform LoomAsync in do` block.
     private val latchSetup = """
         use std::effects::async::latch::{
             latch, count_down, await_latch, await_latch_timeout, get_count
@@ -32,10 +32,11 @@ class LatchTest {
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }
-        use std::effects::async::{ Async, LoomAsync }
+        use std::effects::async::{ Async, LoomAsync, await, sleep }
+        use std::effects::time::{ Time, SystemTime }
         use std::effects::exception::{ Exception, CrashException, unwrap }
 
-        perform LoomAsync in do
+        perform SystemTime in perform LoomAsync in do
     """.trimIndent()
 
     private val atomSetup = ""
@@ -204,7 +205,7 @@ class LatchTest {
             }
 
             # Give thread 1 time to start waiting
-            let _ = Async.sleep {ms = 20}
+            let _ = sleep {ms = 20}
 
             # Result should still be 0 (thread 1 is blocked)
             let before = deref {atom = result}
@@ -212,7 +213,7 @@ class LatchTest {
             # Count down to release thread 1
             let _ = count_down {latch = l}
 
-            let _ = unwrap { result = Async.await {p = p1} }
+            let _ = unwrap { result = await {p = p1} }
 
             {before = before, after = deref {atom = result}}
         """
@@ -246,14 +247,14 @@ class LatchTest {
             }
 
             # Give threads time to start waiting
-            let _ = Async.sleep {ms = 20}
+            let _ = sleep {ms = 20}
 
             # Release all threads at once
             let _ = count_down {latch = l}
 
-            let _ = unwrap { result = Async.await {p = p1} }
-            let _ = unwrap { result = Async.await {p = p2} }
-            let _ = unwrap { result = Async.await {p = p3} }
+            let _ = unwrap { result = await {p = p1} }
+            let _ = unwrap { result = await {p = p2} }
+            let _ = unwrap { result = await {p = p3} }
 
             # All threads should have incremented
             deref {atom = counter}

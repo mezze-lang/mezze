@@ -19,7 +19,7 @@ class ScopedWithTest {
     @Test
     fun `OnAllSettled returns OnAllOutcome with all results`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, scoped_with}
+            use std::effects::async::{ Async, LoomAsync, scope_spawn, scoped_with }
             use std::result
 
             let main = {} -> do
@@ -44,7 +44,7 @@ class ScopedWithTest {
     @Test
     fun `OnFailure with all-success returns OnFailureOutcome with unwrapped values`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, scoped_with}
+            use std::effects::async::{ Async, LoomAsync, scope_spawn, scoped_with }
 
             let main = {} -> do
               let outcome = scoped_with {
@@ -68,7 +68,7 @@ class ScopedWithTest {
     @Test
     fun `OnFirst returns OnFirstOutcome wrapping the first settler's Result`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, scoped_with}
+            use std::effects::async::{ Async, LoomAsync, scope_spawn, scoped_with }
             use std::result
 
             let main = {} -> do
@@ -90,7 +90,7 @@ class ScopedWithTest {
     @Test
     fun `OnSuccess returns OnSuccessOutcome wrapping the winner`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, scoped_with}
+            use std::effects::async::{ Async, LoomAsync, scope_spawn, scoped_with }
 
             let main = {} -> do
               let outcome = scoped_with {

@@ -143,12 +143,12 @@ class CallbackContravariantRowTest {
     @Test
     fun `spawn is transparent — Time from callback surfaces at caller`() {
         val src = """
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{ Time }
 
             let outer = {} -> do
-              let p = Async.spawn { f = {} -> Async.sleep { ms = 1 } }
-              Async.await { p = p }
+              let p = Async.spawn { f = {} -> sleep { ms = 1 } }
+              await { p = p }
         """
         val effects = effectsOf(parse(src), "outer")
         assertTrue("Time" in effects, "Time performed by callback must surface. Got: $effects")
@@ -160,11 +160,11 @@ class CallbackContravariantRowTest {
     @Test
     fun `spawn with pure callback — caller row is Async only`() {
         val src = """
-            use std::effects::async::{ Async, LoomAsync }
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
 
             let outer = {} -> do
               let p = Async.spawn { f = {} -> 42 }
-              Async.await { p = p }
+              await { p = p }
         """
         val effects = effectsOf(parse(src), "outer")
         assertEquals(setOf("Async"), effects,

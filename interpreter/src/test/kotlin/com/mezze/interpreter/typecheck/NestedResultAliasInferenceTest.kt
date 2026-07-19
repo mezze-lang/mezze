@@ -38,7 +38,7 @@ class NestedResultAliasInferenceTest {
     @Test
     fun `outer-only — count Oks at top level`() {
         val code = """
-            use std::effects::async::{ Async, LoomAsync, all }
+            use std::effects::async::{ Async, LoomAsync, all, await }
             use std::collections::seq
 
             perform LoomAsync in do
@@ -65,7 +65,7 @@ class NestedResultAliasInferenceTest {
     @Test
     fun `simple all over Int promises`() {
         val code = """
-            use std::effects::async::{ Async, LoomAsync, all }
+            use std::effects::async::{ Async, LoomAsync, all, await }
             use std::collections::seq
 
             perform LoomAsync in do
@@ -180,7 +180,7 @@ class NestedResultAliasInferenceTest {
     @Test
     fun `all then first match`() {
         val code = """
-            use std::effects::async::{ Async, LoomAsync, all }
+            use std::effects::async::{ Async, LoomAsync, all, await }
             use std::collections::seq
 
             perform LoomAsync in do
@@ -199,15 +199,15 @@ class NestedResultAliasInferenceTest {
         assertEquals(10L, result)
     }
 
-    // Without `all` — just Async.await directly to compare.
+    // Without `all` — just await directly to compare.
     @Test
     fun `spawn await without all`() {
         val code = """
-            use std::effects::async::{ Async, LoomAsync, all }
+            use std::effects::async::{ Async, LoomAsync, all, await }
 
             perform LoomAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                match Async.await { p = p } is
+                match await { p = p } is
                     Ok { val } -> val
                     Err { error = _ } -> -1
         """.trimIndent()
@@ -223,7 +223,7 @@ class NestedResultAliasInferenceTest {
         // (`f: { acc: 'b, x: 'a } -> 'b`) — Mezze lambda destructure must
         // match those field names exactly. Use `x` at both call sites.
         val code = """
-            use std::effects::async::{ Async, LoomAsync, all }
+            use std::effects::async::{ Async, LoomAsync, all, await }
             use std::collections::seq
 
             perform LoomAsync in do

@@ -33,7 +33,7 @@ class AsyncEffectHandlerPropagationTest {
         // The spawned task should have access to the Console handler from the parent
         val code = """
             use std::effects::log::{Console, println}
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{ Async, LoomAsync, all, await, join, join3, par_filter, par_for_each, par_map, race, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }
             use std::result
             use std::effects::stm::{STM, tvar, deref, atomically}
 
@@ -48,7 +48,7 @@ class AsyncEffectHandlerPropagationTest {
                         # Use atomically to prove task ran
                         atomically {f = {} -> STM.write {var = flag, val = 1}}
                     }
-                    let _ = Async.await {p = p}
+                    let _ = await {p = p}
                     deref {var = flag}
         """
         val result = eval(code)
@@ -59,7 +59,7 @@ class AsyncEffectHandlerPropagationTest {
     fun `test spawned task can use STM effect from parent`() {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{ Async, LoomAsync, all, await, join, join3, par_filter, par_for_each, par_map, race, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }
             use std::result
 
             let counter = tvar {init = 100}
@@ -69,7 +69,7 @@ class AsyncEffectHandlerPropagationTest {
                     let v = STM.read {var = counter}
                     STM.write {var = counter, val = v + 50}
                 }}
-                let _ = Async.await {p = p}
+                let _ = await {p = p}
                 deref {var = counter}
         """
         val result = eval(code)
@@ -80,20 +80,20 @@ class AsyncEffectHandlerPropagationTest {
     fun `test multiple spawned tasks share effect handlers`() {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{ Async, LoomAsync, all, await, join, join3, par_filter, par_for_each, par_map, race, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }
             use std::result
 
             let counter = tvar {init = 0}
 
             perform LoomAsync in do
                 let p1 = Async.spawn {f = {} -> atomically {f = {} -> STM.write {var = counter, val = 10}}}
-                let _ = Async.await {p = p1}
+                let _ = await {p = p1}
 
                 let p2 = Async.spawn {f = {} -> atomically {f = {} -> do
                     let v = STM.read {var = counter}
                     STM.write {var = counter, val = v + 5}
                 }}
-                let _ = Async.await {p = p2}
+                let _ = await {p = p2}
 
                 deref {var = counter}
         """
@@ -109,7 +109,7 @@ class AsyncEffectHandlerPropagationTest {
     fun `test nested spawns propagate handlers`() {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{ Async, LoomAsync, all, await, join, join3, par_filter, par_for_each, par_map, race, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }
             use std::result
 
             let counter = tvar {init = 0}
@@ -124,9 +124,9 @@ class AsyncEffectHandlerPropagationTest {
                         let v = STM.read {var = counter}
                         STM.write {var = counter, val = v + 5}
                     }}
-                    Async.await {p = p2}
+                    await {p = p2}
                 }
-                let _ = Async.await {p = p1}
+                let _ = await {p = p1}
                 deref {var = counter}
         """
         val result = eval(code)
@@ -142,7 +142,7 @@ class AsyncEffectHandlerPropagationTest {
         val code = """
             use std::effects::log::{Console, println}
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{ Async, LoomAsync, all, await, join, join3, par_filter, par_for_each, par_map, race, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }
             use std::result
 
             let result_var = tvar {init = 0}
@@ -160,7 +160,7 @@ class AsyncEffectHandlerPropagationTest {
                             STM.write {var = result_var, val = v + 100}
                         }
                     }
-                    let _ = Async.await {p = p}
+                    let _ = await {p = p}
                     deref {var = result_var}
         """
         val result = eval(code)
@@ -175,7 +175,7 @@ class AsyncEffectHandlerPropagationTest {
     fun `test parallel spawns all have handlers`() {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{ Async, LoomAsync, all, await, join, join3, par_filter, par_for_each, par_map, race, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }
             use std::result
 
             let counter = tvar {init = 0}
@@ -195,9 +195,9 @@ class AsyncEffectHandlerPropagationTest {
                     STM.write {var = counter, val = v + 3}
                 }}
 
-                let _ = Async.await {p = p1}
-                let _ = Async.await {p = p2}
-                let _ = Async.await {p = p3}
+                let _ = await {p = p1}
+                let _ = await {p = p2}
+                let _ = await {p = p3}
 
                 deref {var = counter}
         """
@@ -210,7 +210,7 @@ class AsyncEffectHandlerPropagationTest {
     fun `test Async join propagates handlers to both branches`() {
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter }
+            use std::effects::async::{ Async, LoomAsync, all, await, join, join3, par_filter, par_for_each, par_map, race, settle, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }
             use std::result
 
             let a = tvar {init = 0}

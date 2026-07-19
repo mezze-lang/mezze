@@ -561,7 +561,7 @@ class ExceptionTypeInferenceTest {
     }
 
     // ========================================================================
-    // Test 16: Variant Combination in Sequential Branches
+    // Test 16: Variant Combination in ForkJoinParallel Branches
     // ========================================================================
 
     @Test

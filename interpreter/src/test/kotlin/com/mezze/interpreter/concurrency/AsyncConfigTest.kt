@@ -28,11 +28,11 @@ class AsyncConfigTest {
     @Test
     fun `test LoomAsyncWith basic spawn and await`() {
         val code = """
-            use std::effects::async::{Async, LoomAsyncWith}
+            use std::effects::async::{ Async, LoomAsyncWith, await }
 
             perform LoomAsyncWith {max_concurrent = 4} in do
                 let p = Async.spawn {f = {} -> 42}
-                match Async.await {p = p} is
+                match await {p = p} is
                     Ok {val} -> val
                     Err {error = _} -> -1
         """
@@ -43,20 +43,20 @@ class AsyncConfigTest {
     @Test
     fun `test LoomAsyncWith with multiple tasks`() {
         val code = """
-            use std::effects::async::{Async, LoomAsyncWith}
+            use std::effects::async::{ Async, LoomAsyncWith, await }
 
             perform LoomAsyncWith {max_concurrent = 2} in do
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
 
-                let r1 = match Async.await {p = p1} is
+                let r1 = match await {p = p1} is
                     Ok {val} -> val
                     Err {error = _} -> -1
-                let r2 = match Async.await {p = p2} is
+                let r2 = match await {p = p2} is
                     Ok {val} -> val
                     Err {error = _} -> -1
-                let r3 = match Async.await {p = p3} is
+                let r3 = match await {p = p3} is
                     Ok {val} -> val
                     Err {error = _} -> -1
 
@@ -69,7 +69,7 @@ class AsyncConfigTest {
     @Test
     fun `test LoomAsyncWith unbounded concurrency`() {
         val code = """
-            use std::effects::async::{Async, LoomAsyncWith}
+            use std::effects::async::{ Async, LoomAsyncWith, await }
 
             # max_concurrent = 0 means unbounded
             perform LoomAsyncWith {max_concurrent = 0} in do
@@ -77,13 +77,13 @@ class AsyncConfigTest {
                 let p2 = Async.spawn {f = {} -> 2}
                 let p3 = Async.spawn {f = {} -> 3}
 
-                let r1 = match Async.await {p = p1} is
+                let r1 = match await {p = p1} is
                     Ok {val} -> val
                     Err {error = _} -> -1
-                let r2 = match Async.await {p = p2} is
+                let r2 = match await {p = p2} is
                     Ok {val} -> val
                     Err {error = _} -> -1
-                let r3 = match Async.await {p = p3} is
+                let r3 = match await {p = p3} is
                     Ok {val} -> val
                     Err {error = _} -> -1
                 r1 + r2 + r3
@@ -100,11 +100,11 @@ class AsyncConfigTest {
     fun `test OSThreadAsyncWith basic spawn and await`() {
         // Use OSThreadAsync instead of OSThreadAsyncWith to avoid parameterized handler issues
         val code = """
-            use std::effects::async::{Async, OSThreadAsync}
+            use std::effects::async::{ Async, OSThreadAsync, await }
 
             perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                match Async.await {p = p} is
+                match await {p = p} is
                     Ok {val} -> val
                     Err {error = _} -> -1
         """
@@ -115,20 +115,20 @@ class AsyncConfigTest {
     @Test
     fun `test OSThreadAsyncWith with thread pool`() {
         val code = """
-            use std::effects::async::{Async, OSThreadAsyncWith}
+            use std::effects::async::{ Async, OSThreadAsyncWith, await }
 
             perform OSThreadAsyncWith {pool_size = 4} in do
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
 
-                let r1 = match Async.await {p = p1} is
+                let r1 = match await {p = p1} is
                     Ok {val} -> val
                     Err {error = _} -> -1
-                let r2 = match Async.await {p = p2} is
+                let r2 = match await {p = p2} is
                     Ok {val} -> val
                     Err {error = _} -> -1
-                let r3 = match Async.await {p = p3} is
+                let r3 = match await {p = p3} is
                     Ok {val} -> val
                     Err {error = _} -> -1
 
@@ -141,17 +141,17 @@ class AsyncConfigTest {
     @Test
     fun `test OSThreadAsyncWith no pool (new thread each time)`() {
         val code = """
-            use std::effects::async::{Async, OSThreadAsyncWith}
+            use std::effects::async::{ Async, OSThreadAsyncWith, await }
 
             # pool_size = 0 means create new thread for each spawn
             perform OSThreadAsyncWith {pool_size = 0} in do
                 let p1 = Async.spawn {f = {} -> 1}
                 let p2 = Async.spawn {f = {} -> 2}
 
-                let r1 = match Async.await {p = p1} is
+                let r1 = match await {p = p1} is
                     Ok {val} -> val
                     Err {error = _} -> -1
-                let r2 = match Async.await {p = p2} is
+                let r2 = match await {p = p2} is
                     Ok {val} -> val
                     Err {error = _} -> -1
                 r1 + r2
@@ -167,11 +167,11 @@ class AsyncConfigTest {
     @Test
     fun `test LoomAsync default still works`() {
         val code = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await }
 
             perform LoomAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                match Async.await {p = p} is
+                match await {p = p} is
                     Ok {val} -> val
                     Err {error = _} -> -1
         """
@@ -182,11 +182,11 @@ class AsyncConfigTest {
     @Test
     fun `test OSThreadAsync default still works`() {
         val code = """
-            use std::effects::async::{Async, OSThreadAsync}
+            use std::effects::async::{ Async, OSThreadAsync, await }
 
             perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                match Async.await {p = p} is
+                match await {p = p} is
                     Ok {val} -> val
                     Err {error = _} -> -1
         """

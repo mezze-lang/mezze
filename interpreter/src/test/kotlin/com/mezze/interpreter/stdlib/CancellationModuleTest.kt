@@ -25,7 +25,7 @@ class CancellationModuleTest {
     @Test
     fun `test create cancellation token`() {
         val result = eval("""
-            use std::effects::async::{token, is_token_cancelled}
+            use std::effects::async::{ await, is_token_cancelled, token }
 
             let ct = token {}
             is_token_cancelled {token = ct}
@@ -36,7 +36,7 @@ class CancellationModuleTest {
     @Test
     fun `test cancel marks token as cancelled`() {
         val result = eval("""
-            use std::effects::async::{token, cancel_token, is_token_cancelled}
+            use std::effects::async::{ await, cancel_token, is_token_cancelled, token }
 
             let ct = token {}
             cancel_token {token = ct, reason = "test"}
@@ -48,7 +48,7 @@ class CancellationModuleTest {
     @Test
     fun `test multiple cancellations are idempotent`() {
         val result = eval("""
-            use std::effects::async::{token, cancel_token, is_token_cancelled}
+            use std::effects::async::{ await, cancel_token, is_token_cancelled, token }
 
             let ct = token {}
             cancel_token {token = ct, reason = "first"}
@@ -64,7 +64,7 @@ class CancellationModuleTest {
     @Test
     fun `test tokens are independent`() {
         val result = eval("""
-            use std::effects::async::{token, cancel_token, is_token_cancelled}
+            use std::effects::async::{ await, cancel_token, is_token_cancelled, token }
 
             let token1 = token {}
             let token2 = token {}
@@ -81,7 +81,7 @@ class CancellationModuleTest {
     @Test
     fun `test with_cancellation runs when not cancelled`() {
         val result = eval("""
-            use std::effects::async::{token, with_cancellation}
+            use std::effects::async::{ await, token, with_cancellation }
 
             let ct = token {}
             match with_cancellation {token = ct, f = {} -> 42} is
@@ -94,7 +94,7 @@ class CancellationModuleTest {
     @Test
     fun `test with_cancellation returns None when cancelled`() {
         val result = eval("""
-            use std::effects::async::{token, cancel_token, with_cancellation}
+            use std::effects::async::{ await, cancel_token, token, with_cancellation }
 
             let ct = token {}
             cancel_token {token = ct, reason = "test"}
@@ -113,7 +113,7 @@ class CancellationModuleTest {
     @Test
     fun `test child token cancelled when parent cancelled`() {
         val result = eval("""
-            use std::effects::async::{token, cancel_token, create_child, is_token_cancelled}
+            use std::effects::async::{ await, cancel_token, create_child, is_token_cancelled, token }
 
             let parent = token {}
             let child = create_child {token = parent}
@@ -130,7 +130,7 @@ class CancellationModuleTest {
     @Test
     fun `test parent not cancelled when child cancelled`() {
         val result = eval("""
-            use std::effects::async::{token, cancel_token, create_child, is_token_cancelled}
+            use std::effects::async::{ await, cancel_token, create_child, is_token_cancelled, token }
 
             let parent = token {}
             let child = create_child {token = parent}
@@ -149,8 +149,8 @@ class CancellationModuleTest {
     @Test
     fun `test cancellation in async context`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync}
-            use std::effects::async::{token, cancel_token, is_token_cancelled}
+            use std::effects::async::{ Async, LoomAsync, await }
+            use std::effects::async::{ await, cancel_token, is_token_cancelled, token }
 
             perform LoomAsync in do
                 let ct = token {}
@@ -158,7 +158,7 @@ class CancellationModuleTest {
                     cancel_token {token = ct, reason = "from async"}
                     42
                 }
-                let _ = Async.await {p = p}
+                let _ = await {p = p}
                 is_token_cancelled {token = ct}
         """)
         assertEquals(true, result)
@@ -169,7 +169,7 @@ class CancellationModuleTest {
     @Test
     fun `test get cancellation reason`() {
         val result = eval("""
-            use std::effects::async::{token, cancel_token, get_reason}
+            use std::effects::async::{ await, cancel_token, get_reason, token }
 
             let ct = token {}
             cancel_token {token = ct, reason = "User requested"}
@@ -183,7 +183,7 @@ class CancellationModuleTest {
     @Test
     fun `test uncancelled token has no reason`() {
         val result = eval("""
-            use std::effects::async::{token, get_reason}
+            use std::effects::async::{ await, get_reason, token }
 
             let ct = token {}
             match get_reason {token = ct} is

@@ -1,5 +1,5 @@
 use std::abilities::compare::{ Eq }
-use std::effects::async::{ Async }
+use std::effects::async::{ Async, park }
 use std::effects::async::atom::{ atom, deref, reset }
 
 ## Typed channel for thread-safe message passing.
@@ -28,7 +28,7 @@ pub let chan_bounded : { cap: Int } -> Chan 'a <Async> = { cap } ->
 
 ## Send a value, parking until the channel has capacity.
 pub let send : { ch: Chan 'a, val: 'a } -> {} <Async, ...> = { ch, val } -> do
-  Async.park {
+  park {
     predicate = {} -> __native_channel_try_send { ch = ch, val = val },
   }
 
@@ -39,7 +39,7 @@ pub let recv : { ch: Chan 'a } -> 'a <Async, ...> = { ch } -> do
   # both see Some at the same instant but only one wins the queue
   # element, the loser's slot stays None and we recurse.
   let slot = atom { val = None }
-  Async.park {
+  park {
     predicate = {} -> match __native_channel_try_recv { ch = ch } is
       Some { val } -> do
         let _ = reset { atom = slot, val = Some { val = val } }

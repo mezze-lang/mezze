@@ -33,7 +33,7 @@ class ChannelTest {
     fun `test create unbounded channel`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -48,7 +48,7 @@ class ChannelTest {
     fun `test create buffered channel`() {
         val result = eval("""
             use std::effects::async::channel::{chan_bounded, send, recv, try_send, try_recv, close, is_closed}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan_bounded { cap = 10 }
@@ -67,7 +67,7 @@ class ChannelTest {
     fun `test send and receive single value`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -82,7 +82,7 @@ class ChannelTest {
     fun `test send and receive multiple values preserves order`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -109,7 +109,7 @@ class ChannelTest {
     fun `test send to closed channel fails`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -129,7 +129,7 @@ class ChannelTest {
     fun `test try_send succeeds when channel has space`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -143,7 +143,7 @@ class ChannelTest {
     fun `test try_send fails on closed channel`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -158,7 +158,7 @@ class ChannelTest {
     fun `test try_recv returns Some when value available`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -175,7 +175,7 @@ class ChannelTest {
     fun `test try_recv returns None when channel empty`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -195,7 +195,7 @@ class ChannelTest {
     fun `test close channel marks it closed`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -214,7 +214,7 @@ class ChannelTest {
     fun `test is_closed returns correct value`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -233,7 +233,7 @@ class ChannelTest {
     fun `test close is idempotent`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -250,7 +250,7 @@ class ChannelTest {
     fun `test can receive remaining values from closed channel`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -275,7 +275,7 @@ class ChannelTest {
     fun `test recv_any returns first available value`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch1 = chan {}
@@ -295,7 +295,7 @@ class ChannelTest {
     fun `test recv_any with multiple channels having data`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch1 = chan {}
@@ -317,7 +317,7 @@ class ChannelTest {
     fun `test recv_any_timeout returns None on timeout`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch1 = chan {}
@@ -335,7 +335,7 @@ class ChannelTest {
     fun `test recv_any_timeout returns Some when data available`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch1 = chan {}
@@ -358,7 +358,7 @@ class ChannelTest {
     fun `test single-threaded send and recv`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -373,7 +373,7 @@ class ChannelTest {
     fun `test recv_any_timeout returns None when all channels empty`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch1 = chan {}
@@ -394,7 +394,7 @@ class ChannelTest {
     fun `test producer consumer pattern`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -426,7 +426,7 @@ class ChannelTest {
                     let a9 = recv { ch = ch }
                     let a10 = recv { ch = ch }
 
-                    let _ = Async.await { p = producer }
+                    let _ = await { p = producer }
 
                     # Sum should be 1+2+3+4+5+6+7+8+9+10 = 55
                     a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10
@@ -438,7 +438,7 @@ class ChannelTest {
     fun `test multiple producers single consumer`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -472,9 +472,9 @@ class ChannelTest {
                     let v5 = recv { ch = ch }
                     let v6 = recv { ch = ch }
 
-                    let _ = Async.await { p = p1 }
-                    let _ = Async.await { p = p2 }
-                    let _ = Async.await { p = p3 }
+                    let _ = await { p = p1 }
+                    let _ = await { p = p2 }
+                    let _ = await { p = p3 }
 
                     # Sum should be 1+2+10+20+100+200 = 333
                     v1 + v2 + v3 + v4 + v5 + v6
@@ -486,7 +486,7 @@ class ChannelTest {
     fun `test channel send and recv across spawned tasks`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -499,7 +499,7 @@ class ChannelTest {
 
                     # Receive
                     let received = recv { ch = ch }
-                    let _ = Async.await { p = p }
+                    let _ = await { p = p }
                     received
         """)
         assertEquals(42L, result)
@@ -510,21 +510,21 @@ class ChannelTest {
         // In this test, the receiver will block until the sender sends
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
             perform SystemTime in perform LoomAsync in do
                     # Spawn sender that delays then sends
                     let sender = Async.spawn { f = {} -> do
-                        Async.sleep { ms = 50 }
+                        sleep { ms = 50 }
                         send { ch = ch, val = 42 }
                         {}
                     }
 
                     # Receiver will block until value is available
                     let received = recv { ch = ch }
-                    let _ = Async.await { p = sender }
+                    let _ = await { p = sender }
                     received
         """)
         assertEquals(42L, result)
@@ -538,7 +538,7 @@ class ChannelTest {
     fun `test channel with string values`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -553,7 +553,7 @@ class ChannelTest {
     fun `test channel with record values`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let ch = chan {}
@@ -569,7 +569,7 @@ class ChannelTest {
     fun `test channel with variant values`() {
         val result = eval("""
             use std::effects::async::channel::{chan, send, recv, try_send, try_recv, close, is_closed, recv_any, recv_any_timeout}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
             use std::effects::time::{Time, SystemTime}
 
             type Message = | Ping, Pong { value: Int } |

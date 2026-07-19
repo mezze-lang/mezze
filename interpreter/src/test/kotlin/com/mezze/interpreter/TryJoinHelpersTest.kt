@@ -17,7 +17,7 @@ class TryJoinHelpersTest {
     @Test
     fun `try_join all ok returns unwrapped pair`() {
         val code = """
-            use std::effects::async::{ LoomAsync, try_join, run }
+            use std::effects::async::{ LoomAsync, run, try_join }
             use std::result
             perform LoomAsync in match run {
               f = {} -> match try_join {
@@ -36,7 +36,7 @@ class TryJoinHelpersTest {
     @Test
     fun `try_join3 all ok returns unwrapped triple`() {
         val code = """
-            use std::effects::async::{ LoomAsync, try_join3, run }
+            use std::effects::async::{ LoomAsync, run, try_join3 }
             use std::result
             perform LoomAsync in match run {
               f = {} -> match try_join3 {
@@ -56,7 +56,7 @@ class TryJoinHelpersTest {
     @Test
     fun `try_all all ok returns unwrapped seq`() {
         val code = """
-            use std::effects::async::{ Async, LoomAsync, try_all, run }
+            use std::effects::async::{ Async, LoomAsync, run, try_all }
             use std::collections::seq
             use std::result
             perform LoomAsync in match run {

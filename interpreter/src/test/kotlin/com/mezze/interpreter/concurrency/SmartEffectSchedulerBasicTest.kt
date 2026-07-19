@@ -37,10 +37,11 @@ class SmartEffectSchedulerBasicTest {
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }
-        use std::effects::async::{ Async, LoomAsync }
+        use std::effects::async::{ Async, LoomAsync, await, sleep }
+        use std::effects::time::{ Time, SystemTime }
         use std::effects::exception::{ Exception, CrashException, unwrap }
 
-        perform LoomAsync in do
+        perform SystemTime in perform LoomAsync in do
     """.trimIndent()
 
     // Atom setup for shared state
@@ -58,7 +59,7 @@ class SmartEffectSchedulerBasicTest {
             $loomSetup
 
             let op = Async.spawn {f = {} -> "result"}
-            unwrap { result = Async.await {p = op} }
+            unwrap { result = await {p = op} }
         """
         val result = eval(code)
         assertEquals("result", result)
@@ -70,7 +71,7 @@ class SmartEffectSchedulerBasicTest {
             $loomSetup
 
             let op = Async.spawn {f = {} -> 21 * 2}
-            unwrap { result = Async.await {p = op} }
+            unwrap { result = await {p = op} }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -91,8 +92,8 @@ class SmartEffectSchedulerBasicTest {
             let op1 = Async.spawn {f = {} -> "result1"}
             let op2 = Async.spawn {f = {} -> "result2"}
 
-            let r1 = unwrap { result = Async.await {p = op1} }
-            let r2 = unwrap { result = Async.await {p = op2} }
+            let r1 = unwrap { result = await {p = op1} }
+            let r2 = unwrap { result = await {p = op2} }
 
             r1 == "result1" && r2 == "result2"
         """
@@ -111,17 +112,17 @@ class SmartEffectSchedulerBasicTest {
             let b = atom {val = 0}
 
             let op1 = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 10}
+                let _ = sleep {ms = 10}
                 reset {atom = a, val = 1}
             }
 
             let op2 = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 10}
+                let _ = sleep {ms = 10}
                 reset {atom = b, val = 2}
             }
 
-            let _ = unwrap { result = Async.await {p = op1} }
-            let _ = unwrap { result = Async.await {p = op2} }
+            let _ = unwrap { result = await {p = op1} }
+            let _ = unwrap { result = await {p = op2} }
 
             deref {atom = a} + deref {atom = b}
         """
@@ -147,12 +148,12 @@ class SmartEffectSchedulerBasicTest {
             let op1 = Async.spawn {f = {} -> reset {atom = shared, val = 42}}
 
             # Wait for op1 to complete before op2 reads
-            let _ = unwrap { result = Async.await {p = op1} }
+            let _ = unwrap { result = await {p = op1} }
 
             # op2 reads from shared (depends on op1)
             let op2 = Async.spawn {f = {} -> deref {atom = shared}}
 
-            unwrap { result = Async.await {p = op2} }
+            unwrap { result = await {p = op2} }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -169,14 +170,14 @@ class SmartEffectSchedulerBasicTest {
 
             # Sequence: write x, then read x
             let writer = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 5}
+                let _ = sleep {ms = 5}
                 reset {atom = x, val = 100}
             }
 
-            let _ = unwrap { result = Async.await {p = writer} }
+            let _ = unwrap { result = await {p = writer} }
 
             let reader = Async.spawn {f = {} -> deref {atom = x}}
-            unwrap { result = Async.await {p = reader} }
+            unwrap { result = await {p = reader} }
         """
         val result = eval(code)
         assertEquals(100L, result)
@@ -200,18 +201,18 @@ class SmartEffectSchedulerBasicTest {
 
             # op1: writes x
             let op1 = Async.spawn {f = {} -> reset {atom = x, val = 1}}
-            let _ = unwrap { result = Async.await {p = op1} }
+            let _ = unwrap { result = await {p = op1} }
 
             # op2: reads x, writes y (depends on op1)
             let op2 = Async.spawn {f = {} -> do
                 let xVal = deref {atom = x}
                 reset {atom = y, val = xVal + 1}
             }
-            let _ = unwrap { result = Async.await {p = op2} }
+            let _ = unwrap { result = await {p = op2} }
 
             # op3: writes z (independent of op1, op2)
             let op3 = Async.spawn {f = {} -> reset {atom = z, val = 10}}
-            let _ = unwrap { result = Async.await {p = op3} }
+            let _ = unwrap { result = await {p = op3} }
 
             # Verify final state
             deref {atom = x} + deref {atom = y} + deref {atom = z}
@@ -235,9 +236,9 @@ class SmartEffectSchedulerBasicTest {
             let op2 = Async.spawn {f = {} -> 2}
             let op3 = Async.spawn {f = {} -> 3}
 
-            let r1 = unwrap { result = Async.await {p = op1} }
-            let r2 = unwrap { result = Async.await {p = op2} }
-            let r3 = unwrap { result = Async.await {p = op3} }
+            let r1 = unwrap { result = await {p = op1} }
+            let r2 = unwrap { result = await {p = op2} }
+            let r3 = unwrap { result = await {p = op3} }
 
             r1 + r2 + r3
         """
@@ -266,9 +267,9 @@ class SmartEffectSchedulerBasicTest {
             let op2 = Async.spawn {f = {} -> reset {atom = b, val = 20}}
             let op3 = Async.spawn {f = {} -> reset {atom = c, val = 30}}
 
-            let _ = unwrap { result = Async.await {p = op1} }
-            let _ = unwrap { result = Async.await {p = op2} }
-            let _ = unwrap { result = Async.await {p = op3} }
+            let _ = unwrap { result = await {p = op1} }
+            let _ = unwrap { result = await {p = op2} }
+            let _ = unwrap { result = await {p = op3} }
 
             deref {atom = a} + deref {atom = b} + deref {atom = c}
         """
@@ -288,11 +289,11 @@ class SmartEffectSchedulerBasicTest {
 
             # First group: write x
             let group1Op = Async.spawn {f = {} -> swap {atom = x, f = {current} -> current * 2}}
-            let _ = unwrap { result = Async.await {p = group1Op} }
+            let _ = unwrap { result = await {p = group1Op} }
 
             # Second group: read x and use it (must come after first group)
             let group2Op = Async.spawn {f = {} -> deref {atom = x} * 3}
-            unwrap { result = Async.await {p = group2Op} }
+            unwrap { result = await {p = group2Op} }
         """
         val result = eval(code)
         assertEquals(6L, result) // (1 * 2) * 3 = 6
@@ -315,11 +316,11 @@ class SmartEffectSchedulerBasicTest {
             # Phase 1: Independent initialization
             let init1 = Async.spawn {f = {} -> 10}
             let init2 = Async.spawn {f = {} -> 20}
-            let sum = unwrap { result = Async.await {p = init1} } + unwrap { result = Async.await {p = init2} }
+            let sum = unwrap { result = await {p = init1} } + unwrap { result = await {p = init2} }
 
             # Phase 2: Use results from phase 1
             let compute = Async.spawn {f = {} -> sum * 2}
-            unwrap { result = Async.await {p = compute} }
+            unwrap { result = await {p = compute} }
         """
         val result = eval(code)
         assertEquals(60L, result) // (10 + 20) * 2 = 60
@@ -345,7 +346,7 @@ class SmartEffectSchedulerBasicTest {
             $loomSetup
 
             let op = Async.spawn {f = {} -> "single"}
-            unwrap { result = Async.await {p = op} }
+            unwrap { result = await {p = op} }
         """
         val result = eval(code)
         assertEquals("single", result)
@@ -365,8 +366,8 @@ class SmartEffectSchedulerBasicTest {
             let op1 = Async.spawn {f = {} -> 1}
             let op2 = Async.spawn {f = {} -> 2}
 
-            let r1 = unwrap { result = Async.await {p = op1} }
-            let r2 = unwrap { result = Async.await {p = op2} }
+            let r1 = unwrap { result = await {p = op1} }
+            let r2 = unwrap { result = await {p = op2} }
 
             # Verify we got exactly 2 results
             if r1 == 1 && r2 == 2 then 2 else 0
@@ -390,12 +391,12 @@ class SmartEffectSchedulerBasicTest {
             let op1 = Async.spawn {f = {} -> reset {atom = a, val = 5}}
             let op2 = Async.spawn {f = {} -> reset {atom = b, val = 10}}
 
-            let _ = unwrap { result = Async.await {p = op1} }
-            let _ = unwrap { result = Async.await {p = op2} }
+            let _ = unwrap { result = await {p = op1} }
+            let _ = unwrap { result = await {p = op2} }
 
             # op3 reads from a, so cannot merge with op1's group
             let op3 = Async.spawn {f = {} -> deref {atom = a} + deref {atom = b}}
-            unwrap { result = Async.await {p = op3} }
+            unwrap { result = await {p = op3} }
         """
         val result = eval(code)
         assertEquals(15L, result)

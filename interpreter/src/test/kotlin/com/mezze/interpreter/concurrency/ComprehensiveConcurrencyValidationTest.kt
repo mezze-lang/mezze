@@ -291,11 +291,11 @@ class ComprehensiveConcurrencyValidationTest {
         @Test
         fun `should detect independent operations for parallelization via Mezze language`() {
             val code = """
-                use std::effects::parallel::{Parallel, VirtualParallel}
+                use std::effects::parallel::{ Parallel, VirtualParallel, both, both3, fold, map, reduce }
 
                 perform VirtualParallel in do
                     # Three independent operations
-                    let result = Parallel.both3 {
+                    let result = both3 {
                         a = {} -> 1,
                         b = {} -> 2,
                         c = {} -> 3
@@ -309,12 +309,12 @@ class ComprehensiveConcurrencyValidationTest {
         @Test
         fun `should execute parallel map correctly`() {
             val code = """
-                use std::effects::parallel::{Parallel, VirtualParallel}
+                use std::effects::parallel::{ Parallel, VirtualParallel, both, both3, fold, map, reduce }
 
                 perform VirtualParallel in do
                     let xs = [1, 2, 3, 4, 5]
-                    let result = Parallel.map {xs = xs, f = {x} -> x * 2}
-                    let sum = Parallel.reduce {xs = result, f = {l, r} -> l + r}
+                    let result = map {xs = xs, f = {x} -> x * 2}
+                    let sum = reduce {xs = result, f = {l, r} -> l + r}
                     match sum is
                         Some {val} -> val
                         None -> 0
@@ -326,18 +326,18 @@ class ComprehensiveConcurrencyValidationTest {
         @Test
         fun `should handle mixed independent and dependent operations`() {
             val code = """
-                use std::effects::parallel::{Parallel, VirtualParallel}
+                use std::effects::parallel::{ Parallel, VirtualParallel, both, both3, fold, map, reduce }
 
                 perform VirtualParallel in do
                     # Two independent operations
-                    let both_result = Parallel.both {
+                    let both_result = both {
                         l = {} -> [1, 2, 3],
                         r = {} -> [4, 5, 6]
                     }
 
                     # Dependent operation - uses results from both
-                    let left_sum = Parallel.reduce {xs = both_result.l, f = {l, r} -> l + r}
-                    let right_sum = Parallel.reduce {xs = both_result.r, f = {l, r} -> l + r}
+                    let left_sum = reduce {xs = both_result.l, f = {l, r} -> l + r}
+                    let right_sum = reduce {xs = both_result.r, f = {l, r} -> l + r}
 
                     let l = match left_sum is
                         Some {val} -> val
@@ -423,7 +423,7 @@ class ComprehensiveConcurrencyValidationTest {
                 }
             }
 
-            println("Sequential time: ${sequentialTime}ms")
+            println("ForkJoinParallel time: ${sequentialTime}ms")
             println("Parallel time: ${parallelTime}ms")
             println("Speedup: ${sequentialTime.toDouble() / parallelTime}")
 
@@ -593,10 +593,10 @@ class ComprehensiveConcurrencyValidationTest {
         @Test
         fun `should integrate all concurrency components successfully via Mezze`() {
             val code = """
-                use std::effects::parallel::{Parallel, VirtualParallel}
+                use std::effects::parallel::{ Parallel, VirtualParallel, both, both3, fold, map, reduce }
 
                 perform VirtualParallel in do
-                    let result = Parallel.both3 {
+                    let result = both3 {
                         a = {} -> "Data from IO",
                         b = {} -> 42,
                         c = {} -> True
@@ -611,24 +611,24 @@ class ComprehensiveConcurrencyValidationTest {
         @Test
         fun `should handle complex dependency scenarios via Mezze`() {
             val code = """
-                use std::effects::parallel::{Parallel, VirtualParallel}
+                use std::effects::parallel::{ Parallel, VirtualParallel, both, both3, fold, map, reduce }
 
                 perform VirtualParallel in do
                     # First phase: independent operations
-                    let phase1 = Parallel.both {
+                    let phase1 = both {
                         l = {} -> [1, 2, 3],
                         r = {} -> [4, 5, 6]
                     }
 
                     # Second phase: depends on first phase
-                    let combined_sum = Parallel.fold {
+                    let combined_sum = fold {
                         xs = phase1.l,
                         zero = 0,
                         map_fn = {x} -> x,
                         combine = {l, r} -> l + r
                     }
 
-                    let right_sum = Parallel.fold {
+                    let right_sum = fold {
                         xs = phase1.r,
                         zero = 0,
                         map_fn = {x} -> x,

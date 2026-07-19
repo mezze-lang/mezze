@@ -1001,7 +1001,7 @@ class STMEffectTest {
         // Spawned tasks should be able to use atomically for STM operations
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await }
 
             let counter = tvar {init = 0}
 
@@ -1009,7 +1009,7 @@ class STMEffectTest {
                 let p = Async.spawn {f = {} -> atomically {f = {} ->
                     STM.write {var = counter, val = 42}
                 }}
-                let _ = Async.await {p = p}
+                let _ = await {p = p}
                 deref {var = counter}
         """
         val result = eval(code)
@@ -1021,7 +1021,7 @@ class STMEffectTest {
         // Spawned tasks should have access to parent's effect handlers (like Log)
         val code = """
             use std::effects::log::{Console, println}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await }
             use std::effects::stm::{STM, tvar, deref, atomically}
 
             let result_var = tvar {init = 0}
@@ -1036,7 +1036,7 @@ class STMEffectTest {
                         # Use atomically to update the tvar
                         atomically {f = {} -> STM.write {var = result_var, val = 123}}
                     }
-                    let _ = Async.await {p = p}
+                    let _ = await {p = p}
                     deref {var = result_var}
         """
         val result = eval(code)
@@ -1048,7 +1048,7 @@ class STMEffectTest {
         // Concurrent tasks using atomically should both succeed
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await }
 
             let counter = tvar {init = 0}
 
@@ -1061,8 +1061,8 @@ class STMEffectTest {
                     let v = STM.read {var = counter}
                     STM.write {var = counter, val = v + 5}
                 }}
-                let _ = Async.await {p = p1}
-                let _ = Async.await {p = p2}
+                let _ = await {p = p1}
+                let _ = await {p = p2}
                 deref {var = counter}
         """
         val result = eval(code)
@@ -1075,7 +1075,7 @@ class STMEffectTest {
         // This is the key demo - concurrent transfers should preserve total balance
         val code = """
             use std::effects::stm::{STM, tvar, deref, atomically}
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await }
 
             let alice = tvar {init = 1000}
             let bob = tvar {init = 500}
@@ -1098,8 +1098,8 @@ class STMEffectTest {
                     STM.write {var = charlie, val = c + 50}
                 }}
 
-                let _ = Async.await {p = t1}
-                let _ = Async.await {p = t2}
+                let _ = await {p = t1}
+                let _ = await {p = t2}
 
                 let final_alice = deref {var = alice}
                 let final_bob = deref {var = bob}

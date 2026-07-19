@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Timeout
 import java.util.concurrent.TimeUnit
 
 /**
- * #274 — Async.sleep routes through Time.sleep. Verify it actually
+ * #274 — sleep routes through Time.sleep. Verify it actually
  * blocks when SystemTime is installed.
  */
 class SleepRouteVerifyTest {
@@ -16,11 +16,11 @@ class SleepRouteVerifyTest {
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `Async sleep blocks under SystemTime handler`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let main = {} -> perform SystemTime in perform LoomAsync in do
-              Async.sleep { ms = 30 }
+              sleep { ms = 30 }
               42
 
             main {}

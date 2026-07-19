@@ -23,7 +23,7 @@ class SemaphoreTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     // Post-#170: all primitive ops are <Async>; tests use stdlib imports
-    // and open a `perform LoomAsync in do` block.
+    // and open a `perform SystemTime in perform LoomAsync in do` block.
     private val semaphoreSetup = """
         use std::effects::async::semaphore::{
             semaphore, acquire, acquire_n, release, release_n,
@@ -33,10 +33,11 @@ class SemaphoreTest {
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }
-        use std::effects::async::{ Async, LoomAsync }
+        use std::effects::async::{ Async, LoomAsync, await, sleep }
+        use std::effects::time::{ Time, SystemTime }
         use std::effects::exception::{ Exception, CrashException, unwrap }
 
-        perform LoomAsync in do
+        perform SystemTime in perform LoomAsync in do
     """.trimIndent()
 
     private val atomSetup = ""
@@ -169,7 +170,7 @@ class SemaphoreTest {
                     if now > current then now else current
                 }
                 # Small delay to overlap with other threads
-                let _ = Async.sleep {ms = 20}
+                let _ = sleep {ms = 20}
                 # Decrement current count
                 let _ = swap {atom = current, f = {current} -> current - 1}
                 release {sem = sem}
@@ -181,11 +182,11 @@ class SemaphoreTest {
             let p4 = Async.spawn {f = work}
             let p5 = Async.spawn {f = work}
 
-            let _ = unwrap { result = Async.await {p = p1} }
-            let _ = unwrap { result = Async.await {p = p2} }
-            let _ = unwrap { result = Async.await {p = p3} }
-            let _ = unwrap { result = Async.await {p = p4} }
-            let _ = unwrap { result = Async.await {p = p5} }
+            let _ = unwrap { result = await {p = p1} }
+            let _ = unwrap { result = await {p = p2} }
+            let _ = unwrap { result = await {p = p3} }
+            let _ = unwrap { result = await {p = p4} }
+            let _ = unwrap { result = await {p = p5} }
 
             # Max concurrent should be <= 2
             deref {atom = max_concurrent}
@@ -211,7 +212,7 @@ class SemaphoreTest {
             }
 
             # Give thread 1 time to start waiting
-            let _ = Async.sleep {ms = 20}
+            let _ = sleep {ms = 20}
 
             # Result should still be 0 (thread 1 is blocked)
             let before_release = deref {atom = result}
@@ -219,7 +220,7 @@ class SemaphoreTest {
             # Release a permit to unblock thread 1
             let _ = release {sem = sem}
 
-            let _ = unwrap { result = Async.await {p = p1} }
+            let _ = unwrap { result = await {p = p1} }
 
             {before = before_release, after = deref {atom = result}}
         """

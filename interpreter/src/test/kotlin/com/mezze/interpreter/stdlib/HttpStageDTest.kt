@@ -287,7 +287,7 @@ class HttpStageDTest {
     fun `retry returns immediately on first Ok`() {
         val result = eval("""
             use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, Response, Method, request, retry}
-            use std::effects::async::{LoomAsync}
+            use std::effects::async::{ LoomAsync }
             use std::effects::time::{Time, SystemTime}
             use std::collections::map
             use std::collections::bytes
@@ -314,7 +314,7 @@ class HttpStageDTest {
     fun `retry stops on non-retryable Err`() {
         val result = eval("""
             use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, retry}
-            use std::effects::async::{LoomAsync}
+            use std::effects::async::{ LoomAsync }
             use std::effects::time::{Time, SystemTime}
 
             let rules: [MockRule] = [
@@ -337,7 +337,7 @@ class HttpStageDTest {
     fun `retry exhausts attempts on persistent retryable Err`() {
         val result = eval("""
             use std::effects::http::{Http, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, retry}
-            use std::effects::async::{LoomAsync}
+            use std::effects::async::{ LoomAsync }
             use std::effects::time::{Time, SystemTime}
 
             let rules: [MockRule] = [

@@ -18,12 +18,12 @@ class ScopeImplMethodsTest {
     @Timeout(value = 10, unit = TimeUnit.SECONDS)
     fun `sc dot spawn and dot cancel_all and dot is_cancelled`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, scoped, sleep }
             use std::effects::time::{Time, SystemTime}
 
-            let main = {} -> Async.scoped { f = { sc } -> do
+            let main = {} -> scoped { f = { sc } -> do
               let p = sc.spawn { f = {} -> do
-                Async.sleep { ms = 5000 }
+                sleep { ms = 5000 }
                 1
               }
               let before = sc.is_cancelled {}
@@ -48,10 +48,10 @@ class ScopeImplMethodsTest {
         // Just check that calling it doesn't crash and returns something
         // that isn't the scope itself.
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, scoped, sleep }
             use std::effects::time::{Time, SystemTime}
 
-            let main = {} -> Async.scoped { f = { sc } -> do
+            let main = {} -> scoped { f = { sc } -> do
               let tok = sc.get_token {}
               # A minimal use — CancellationToken has a runtime shape;
               # we just need to know the call succeeded.
@@ -67,16 +67,16 @@ class ScopeImplMethodsTest {
     @Timeout(value = 10, unit = TimeUnit.SECONDS)
     fun `sc dot join_until returns True on all-fast children`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, scoped, sleep }
             use std::effects::time::{Time, SystemTime}
 
-            let main = {} -> Async.scoped { f = { sc } -> do
+            let main = {} -> scoped { f = { sc } -> do
               let p1 = sc.spawn { f = {} -> do
-                Async.sleep { ms = 10 }
+                sleep { ms = 10 }
                 1
               }
               let p2 = sc.spawn { f = {} -> do
-                Async.sleep { ms = 10 }
+                sleep { ms = 10 }
                 2
               }
               sc.join_until { ps = [p1, p2], ms = 2000 }
@@ -91,12 +91,12 @@ class ScopeImplMethodsTest {
     @Timeout(value = 10, unit = TimeUnit.SECONDS)
     fun `sc dot join_until returns False on straggler`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, scoped, sleep }
             use std::effects::time::{Time, SystemTime}
 
-            let main = {} -> Async.scoped { f = { sc } -> do
+            let main = {} -> scoped { f = { sc } -> do
               let p = sc.spawn { f = {} -> do
-                Async.sleep { ms = 3000 }
+                sleep { ms = 3000 }
                 1
               }
               sc.join_until { ps = [p], ms = 100 }

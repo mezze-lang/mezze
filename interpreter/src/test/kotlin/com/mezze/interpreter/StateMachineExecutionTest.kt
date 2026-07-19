@@ -320,17 +320,17 @@ class StateMachineExecutionTest {
     fun `test suspension point with async effect`() {
         // Test async-like behavior with effects
         val code = """
-            effect Async where {
-                await: {value: Int} -> Int <Async>
+            effect Async2 where {
+                suspend_at: {value: Int} -> Int <Async2>
             }
 
-            impl Async for DoubleHandler {} where {
-                await = {value} -> value * 2
+            impl Async2 for DoubleHandler where {
+                suspend_at = { value } -> value * 2
             }
 
             let computation = {} -> do
-                let a = Async.await {value = 10}
-                let b = Async.await {value = 20}
+                let a = Async2.suspend_at { value = 10 }
+                let b = Async2.suspend_at { value = 20 }
                 a + b
 
             perform DoubleHandler in computation {}

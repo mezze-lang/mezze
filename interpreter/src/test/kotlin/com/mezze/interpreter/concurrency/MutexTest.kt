@@ -33,7 +33,7 @@ class MutexTest {
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }
-        use std::effects::async::{ Async, LoomAsync }
+        use std::effects::async::{ Async, LoomAsync, await, sleep }
         use std::effects::exception::{ Exception, CrashException, unwrap }
         use std::effects::time::{ Time, SystemTime }
 
@@ -171,9 +171,9 @@ class MutexTest {
             let p2 = Async.spawn {f = increment_5}
             let p3 = Async.spawn {f = increment_5}
 
-            let _ = unwrap { result = Async.await {p = p1} }
-            let _ = unwrap { result = Async.await {p = p2} }
-            let _ = unwrap { result = Async.await {p = p3} }
+            let _ = unwrap { result = await {p = p1} }
+            let _ = unwrap { result = await {p = p2} }
+            let _ = unwrap { result = await {p = p3} }
 
             deref {atom = counter}
         """
@@ -192,19 +192,19 @@ class MutexTest {
             # First thread takes lock, does work, releases
             let p1 = Async.spawn {f = {} ->
                 with_lock {mutex = m, f = {} ->
-                    Async.sleep {ms = 10}
+                    sleep {ms = 10}
                 }
             }
 
             # Wait for first to finish
-            let _ = unwrap { result = Async.await {p = p1} }
+            let _ = unwrap { result = await {p = p1} }
 
             # Second thread should be able to acquire lock
             let p2 = Async.spawn {f = {} ->
                 with_lock {mutex = m, f = {} -> 42}
             }
 
-            unwrap { result = Async.await {p = p2} }
+            unwrap { result = await {p = p2} }
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -223,12 +223,12 @@ class MutexTest {
             # Thread 1 holds lock for a while
             let p1 = Async.spawn {f = {} -> do
                 let _ = lock {mutex = m}
-                let _ = Async.sleep {ms = 100}
+                let _ = sleep {ms = 100}
                 unlock {mutex = m}
             }
 
             # Give thread 1 time to acquire
-            let _ = Async.sleep {ms = 20}
+            let _ = sleep {ms = 20}
 
             # Thread 2 tries to acquire - should fail
             let p2 = Async.spawn {f = {} -> do
@@ -237,8 +237,8 @@ class MutexTest {
                 if acquired then unlock {mutex = m} else {}
             }
 
-            let _ = unwrap { result = Async.await {p = p2} }
-            let _ = unwrap { result = Async.await {p = p1} }
+            let _ = unwrap { result = await {p = p2} }
+            let _ = unwrap { result = await {p = p1} }
 
             deref {atom = try_result}
         """

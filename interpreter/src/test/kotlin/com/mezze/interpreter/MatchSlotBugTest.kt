@@ -17,13 +17,13 @@ class MatchSlotBugTest {
     @Test
     fun `let-bound match on ADT inside scoped body keeps sc valid`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, all}
+            use std::effects::async::{ Async, LoomAsync, all, scope_spawn, scoped }
             use std::result
 
             type AB = | A, B |
 
             let main = {} -> do
-              Async.scoped { f = { sc } -> do
+              scoped { f = { sc } -> do
                 let dummy = match A is
                   A -> 1
                   B -> 2

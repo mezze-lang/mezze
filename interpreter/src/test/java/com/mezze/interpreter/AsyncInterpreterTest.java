@@ -18,12 +18,12 @@ public class AsyncInterpreterTest {
     @Test
     void testLoomSpawnAndAwait() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, is_done }
+            use std::effects::async::{ Async, LoomAsync, await, is_done, join, join3, race, sleep, with_timeout }
             use std::result
 
             perform LoomAsync {} in do
                 let p = Async.spawn {f = {} -> 42}
-                result::get_or_else { result = Async.await {p = p}, def = -1 }
+                result::get_or_else { result = await {p = p}, def = -1 }
         """);
         assertEquals(42L, result);
     }
@@ -31,7 +31,7 @@ public class AsyncInterpreterTest {
     @Test
     void testLoomJoinTwoComputations() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, is_done }
+            use std::effects::async::{ Async, LoomAsync, await, is_done, join, join3, race, sleep, with_timeout }
             use std::result
 
             perform LoomAsync {} in do
@@ -47,11 +47,11 @@ public class AsyncInterpreterTest {
     @Test
     void testLoomSleep() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3, is_done }
+            use std::effects::async::{ Async, LoomAsync, await, is_done, join, join3, race, sleep, with_timeout }
             use std::effects::time::{Time, SystemTime}
 
             perform SystemTime in perform LoomAsync {} in do
-                Async.sleep {ms = 10}
+                sleep {ms = 10}
                 42
         """);
         assertEquals(42L, result);
@@ -63,12 +63,12 @@ public class AsyncInterpreterTest {
     @Test
     void testOsSpawnAndAwait() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3, is_done }
+            use std::effects::async::{ Async, OSThreadAsync, await, is_done, join, join3, race, sleep, with_timeout }
             use std::result
 
             perform OSThreadAsync {} in do
                 let p = Async.spawn {f = {} -> 42}
-                result::get_or_else { result = Async.await {p = p}, def = -1 }
+                result::get_or_else { result = await {p = p}, def = -1 }
         """);
         assertEquals(42L, result);
     }
@@ -76,7 +76,7 @@ public class AsyncInterpreterTest {
     @Test
     void testOsJoinTwoComputations() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3, is_done }
+            use std::effects::async::{ Async, OSThreadAsync, await, is_done, join, join3, race, sleep, with_timeout }
             use std::result
 
             perform OSThreadAsync {} in do
@@ -92,11 +92,11 @@ public class AsyncInterpreterTest {
     @Test
     void testOsSleep() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3, is_done }
+            use std::effects::async::{ Async, OSThreadAsync, await, is_done, join, join3, race, sleep, with_timeout }
             use std::effects::time::{Time, SystemTime}
 
             perform SystemTime in perform OSThreadAsync {} in do
-                Async.sleep {ms = 10}
+                sleep {ms = 10}
                 42
         """);
         assertEquals(42L, result);

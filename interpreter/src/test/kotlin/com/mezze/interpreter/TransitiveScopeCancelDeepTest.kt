@@ -31,12 +31,11 @@ class TransitiveScopeCancelDeepTest {
         // flip together on the parent thread. The deepest child's park
         // observes c_sc.cancelled = true and returns immediately.
         //
-        // Uses plain Async.scoped throughout — we're testing the scope
+        // Uses plain scoped throughout — we're testing the scope
         // cancel machinery, not the scoped_with policy layer.
         val source = """
-            use std::effects::async::{
-              Async, LoomAsync, scope_spawn, scope_cancel_all, scope_is_cancelled
-            }
+            use std::effects::async::{ Async, LoomAsync, await, park, scope_cancel_all, scope_is_cancelled, scope_spawn, scoped, sleep }
+            use std::effects::time::{ Time, SystemTime }
             use std::effects::async::atom::{atom, deref, reset}
 
             let main = {} -> do
@@ -44,23 +43,23 @@ class TransitiveScopeCancelDeepTest {
               let c_ready  = atom { val = False }
               let escaped  = atom { val = False }
 
-              Async.scoped { f = { sc } -> do
+              scoped { f = { sc } -> do
                 let a_sc = sc
                 let a_child = scope_spawn { sc = a_sc, f = {} ->
-                  Async.scoped { f = { sc } -> do
+                  scoped { f = { sc } -> do
                     let b_sc = sc
                     let b_child = scope_spawn { sc = b_sc, f = {} ->
-                      Async.scoped { f = { sc } -> do
+                      scoped { f = { sc } -> do
                         let c_sc = sc
                         # 5s guard so a broken cancel wave doesn't hang.
                         let timed_out = atom { val = False }
                         let sleeper = Async.spawn { f = {} -> do
-                          Async.sleep { ms = 5000 }
+                          sleep { ms = 5000 }
                           reset { atom = timed_out, val = True }
                           0
                         }
                         reset { atom = c_ready, val = True }
-                        Async.park { predicate = {} ->
+                        park { predicate = {} ->
                           scope_is_cancelled { sc = c_sc } || deref { atom = timed_out } }
                         # Cancel wave reached us? Then c_sc is cancelled.
                         # Otherwise the 5s guard fired — escape.
@@ -71,14 +70,14 @@ class TransitiveScopeCancelDeepTest {
                             3
                       } }
                     reset { atom = b_ready, val = True }
-                    Async.park { predicate = {} -> scope_is_cancelled { sc = b_sc } }
-                    Async.await { p = b_child }
+                    park { predicate = {} -> scope_is_cancelled { sc = b_sc } }
+                    await { p = b_child }
                   } }
                 # Wait until both nested scopes are open + registered,
                 # then request cancel at the top.
-                Async.park { predicate = {} -> deref { atom = b_ready } && deref { atom = c_ready } }
+                park { predicate = {} -> deref { atom = b_ready } && deref { atom = c_ready } }
                 scope_cancel_all { sc = a_sc }
-                Async.await { p = a_child }
+                await { p = a_child }
               }
 
               match deref { atom = escaped } is

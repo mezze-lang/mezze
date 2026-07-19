@@ -527,7 +527,7 @@ impl Client where {
   },
 }
 
-use std::effects::async::{ Async, par_map }
+use std::effects::async::{ Async, par_map, sleep }
 use std::effects::time::{ Time }
 
 ## Internal: retry loop. Self-recursive — kept top-level because Mezze
@@ -540,7 +540,7 @@ let retry_loop : { req: Request, attempt: Int, max_attempts: Int, backoff_ms: In
       if attempt >= max_attempts || ! is_retryable { err = error }
       then resp
       else do
-        Async.sleep { ms = backoff_ms }
+        sleep { ms = backoff_ms }
         retry_loop { req = req, attempt = attempt + 1, max_attempts = max_attempts, backoff_ms = backoff_ms }
 
 ## Send a Request with retry on transient failures. A failure is

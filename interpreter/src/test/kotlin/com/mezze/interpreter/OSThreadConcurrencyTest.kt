@@ -23,7 +23,8 @@ class OSThreadConcurrencyTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private val setupCode = """
-        use std::effects::async::{Async, OSThreadAsync, race, with_timeout, join, join3, par_map, par_for_each, par_filter, all, settle, try_all, try_any, try_par_map, try_par_for_each, try_par_filter, is_done }
+        use std::effects::async::{ Async, OSThreadAsync, all, await, is_done, join, join3, par_filter, par_for_each, par_map, race, settle, sleep, try_all, try_any, try_par_filter, try_par_for_each, try_par_map, with_timeout }
+        use std::effects::time::{ Time, SystemTime }
         use std::result
     """.trimIndent()
 
@@ -36,9 +37,9 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            perform OSThreadAsync in do
+            perform SystemTime in perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> 5 + 10}
-                let result = match Async.await {p = p} is
+                let result = match await {p = p} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
                 result
@@ -52,9 +53,9 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            perform OSThreadAsync in do
+            perform SystemTime in perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                let result = match Async.await {p = p} is
+                let result = match await {p = p} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
                 result
@@ -68,18 +69,18 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            perform OSThreadAsync in do
+            perform SystemTime in perform OSThreadAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
 
-                let r1 = match Async.await {p = p1} is
+                let r1 = match await {p = p1} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
-                let r2 = match Async.await {p = p2} is
+                let r2 = match await {p = p2} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
-                let r3 = match Async.await {p = p3} is
+                let r3 = match await {p = p3} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
 
@@ -100,9 +101,9 @@ class OSThreadConcurrencyTest {
             let double = {x} -> x * 2
 
             let test = {} ->
-                perform OSThreadAsync in do
+                perform SystemTime in perform OSThreadAsync in do
                     let p = Async.spawn {f = {} -> double {x = 100}}
-                    let result = match Async.await {p = p} is
+                    let result = match await {p = p} is
                         Ok { val } -> val
                         Err { error = _ } -> -1
                     result
@@ -118,14 +119,14 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            perform OSThreadAsync in do
+            perform SystemTime in perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> do
                     let a = 5
                     let b = 7
                     let c = a * b
                     c + 10
                 }
-                let result = match Async.await {p = p} is
+                let result = match await {p = p} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
                 result
@@ -139,16 +140,16 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            perform OSThreadAsync in do
+            perform SystemTime in perform OSThreadAsync in do
                 let outer = Async.spawn {f = {} ->
-                    perform OSThreadAsync in do
+                    perform SystemTime in perform OSThreadAsync in do
                         let inner = Async.spawn {f = {} -> 42}
-                        let inner_result = match Async.await {p = inner} is
+                        let inner_result = match await {p = inner} is
                             Ok { val } -> val
                             Err { error = _ } -> -1
                         inner_result
                 }
-                let outer_result = match Async.await {p = outer} is
+                let outer_result = match await {p = outer} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
                 outer_result
@@ -162,18 +163,18 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            perform OSThreadAsync in do
+            perform SystemTime in perform OSThreadAsync in do
                 let p1 = Async.spawn {f = {} -> 5 * 2}
                 let p2 = Async.spawn {f = {} -> 10 + 3}
                 let p3 = Async.spawn {f = {} -> 7 * 3}
 
-                let r1 = match Async.await {p = p1} is
+                let r1 = match await {p = p1} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
-                let r2 = match Async.await {p = p2} is
+                let r2 = match await {p = p2} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
-                let r3 = match Async.await {p = p3} is
+                let r3 = match await {p = p3} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
 
@@ -192,19 +193,19 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            perform OSThreadAsync in do
+            perform SystemTime in perform OSThreadAsync in do
                 let stage1 = Async.spawn {f = {} -> 10}
-                let result1 = match Async.await {p = stage1} is
+                let result1 = match await {p = stage1} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
 
                 let stage2 = Async.spawn {f = {} -> result1 * 2}
-                let result2 = match Async.await {p = stage2} is
+                let result2 = match await {p = stage2} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
 
                 let stage3 = Async.spawn {f = {} -> result2 + 5}
-                let result3 = match Async.await {p = stage3} is
+                let result3 = match await {p = stage3} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
                 result3
@@ -221,9 +222,9 @@ class OSThreadConcurrencyTest {
             let spawn_workers: {remaining: Int, acc: Int} -> Int = {remaining, acc} ->
                 if remaining <= 0
                 then acc
-                else perform OSThreadAsync in do
+                else perform SystemTime in perform OSThreadAsync in do
                     let p = Async.spawn {f = {} -> remaining * 2}
-                    let result = match Async.await {p = p} is
+                    let result = match await {p = p} is
                         Ok { val } -> val
                         Err { error = _ } -> -1
                     spawn_workers {remaining = remaining - 1, acc = acc + result}
@@ -246,9 +247,9 @@ class OSThreadConcurrencyTest {
             let recursive_spawn: {n: Int} -> Int = {n} ->
                 if n <= 0
                 then 0
-                else perform OSThreadAsync in do
+                else perform SystemTime in perform OSThreadAsync in do
                     let p = Async.spawn {f = {} -> recursive_spawn {n = n - 1}}
-                    let result = match Async.await {p = p} is
+                    let result = match await {p = p} is
                         Ok { val } -> val
                         Err { error = _ } -> -1
                     n + result
@@ -267,9 +268,9 @@ class OSThreadConcurrencyTest {
             let parallel_sum: {n: Int, acc: Int} -> Int = {n, acc} ->
                 if n <= 0
                 then acc
-                else perform OSThreadAsync in do
+                else perform SystemTime in perform OSThreadAsync in do
                     let p = Async.spawn {f = {} -> n}
-                    let result = match Async.await {p = p} is
+                    let result = match await {p = p} is
                         Ok { val } -> val
                         Err { error = _ } -> -1
                     parallel_sum {n = n - 1, acc = acc + result}
@@ -290,17 +291,17 @@ class OSThreadConcurrencyTest {
             $setupCode
 
             let test = {} ->
-                perform OSThreadAsync in do
+                perform SystemTime in perform OSThreadAsync in do
                     let a = 10
                     let b = 20
 
                     let p1 = Async.spawn {f = {} -> a * 2}
                     let p2 = Async.spawn {f = {} -> b * 3}
 
-                    let r1 = match Async.await {p = p1} is
+                    let r1 = match await {p = p1} is
                         Ok { val } -> val
                         Err { error = _ } -> -1
-                    let r2 = match Async.await {p = p2} is
+                    let r2 = match await {p = p2} is
                         Ok { val } -> val
                         Err { error = _ } -> -1
 
@@ -320,16 +321,16 @@ class OSThreadConcurrencyTest {
             let makeAdder = {x} -> {y} -> x + y
 
             let test = {} ->
-                perform OSThreadAsync in do
+                perform SystemTime in perform OSThreadAsync in do
                     let add10 = makeAdder {x = 10}
 
                     let p1 = Async.spawn {f = {} -> add10 {y = 5}}
                     let p2 = Async.spawn {f = {} -> add10 {y = 15}}
 
-                    let r1 = match Async.await {p = p1} is
+                    let r1 = match await {p = p1} is
                         Ok { val } -> val
                         Err { error = _ } -> -1
-                    let r2 = match Async.await {p = p2} is
+                    let r2 = match await {p = p2} is
                         Ok { val } -> val
                         Err { error = _ } -> -1
 
@@ -348,9 +349,9 @@ class OSThreadConcurrencyTest {
 
             let conditional: {use_async: Bool} -> Int = {use_async} ->
                 if use_async
-                then perform OSThreadAsync in do
+                then perform SystemTime in perform OSThreadAsync in do
                     let p = Async.spawn {f = {} -> 100}
-                    let result = match Async.await {p = p} is
+                    let result = match await {p = p} is
                         Ok { val } -> val
                         Err { error = _ } -> -1
                     result
@@ -373,7 +374,7 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            perform OSThreadAsync in do
+            perform SystemTime in perform OSThreadAsync in do
                 let p1 = Async.spawn {f = {} -> 1}
                 let p2 = Async.spawn {f = {} -> 2}
                 let p3 = Async.spawn {f = {} -> 3}
@@ -396,7 +397,7 @@ class OSThreadConcurrencyTest {
                     [] -> 0
                     [h, ...t] -> h + sum {xs = t}
 
-            perform OSThreadAsync in do
+            perform SystemTime in perform OSThreadAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
@@ -412,8 +413,8 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            perform OSThreadAsync in do
-                let _ = Async.sleep {ms = 10}
+            perform SystemTime in perform OSThreadAsync in do
+                let _ = sleep {ms = 10}
                 42
         """
         val result = eval(code)
@@ -425,9 +426,9 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            perform OSThreadAsync in do
+            perform SystemTime in perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                let _ = match Async.await {p = p} is
+                let _ = match await {p = p} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
                 is_done {p = p}
@@ -441,7 +442,7 @@ class OSThreadConcurrencyTest {
         val code = """
             $setupCode
 
-            perform OSThreadAsync in do
+            perform SystemTime in perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> 42}
                 let result = with_timeout {ms = 5000, p = p}
                 match result is

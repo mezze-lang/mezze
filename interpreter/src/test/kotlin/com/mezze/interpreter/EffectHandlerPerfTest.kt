@@ -163,14 +163,14 @@ class EffectHandlerPerfTest {
     @Test
     fun `async spawn-await 100 tasks`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await }
 
             let outer : { n: Int, acc: Int } -> Int = { n, acc } ->
                 if n <= 0 then acc
                 else do
                     let v = perform LoomAsync in do
                         let t = Async.spawn { f = {} -> 1 }
-                        match Async.await { p = t } is
+                        match await { p = t } is
                             Ok { val } -> val
                             Err _ -> -1
                     outer { n = n - 1, acc = acc + v }

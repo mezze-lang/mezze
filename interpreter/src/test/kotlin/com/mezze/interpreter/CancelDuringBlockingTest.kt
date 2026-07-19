@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test
  * Regression gate for §1 Cancel (#232, #233, #235).
  *
  * Each test spawns a task blocked in a specific native, fires
- * `Async.cancel`, and asserts the awaiter sees
+ * `cancel`, and asserts the awaiter sees
  * `Err { error = AsyncCancelled }` — NOT a `RuntimeException`
  * surfaced as task failure.
  *
@@ -29,7 +29,7 @@ class CancelDuringBlockingTest {
      */
     private fun cancelDuringBlock(blockingExpr: String): String {
         val source = """
-            use std::effects::async::{Async, LoomAsync, AsyncError}
+            use std::effects::async::{ Async, AsyncError, LoomAsync, await, cancel, park, sleep }
             use std::effects::time::{Time, SystemTime}
 
             perform SystemTime in perform LoomAsync in do
@@ -37,9 +37,9 @@ class CancelDuringBlockingTest {
                 $blockingExpr
                 "should-not-reach"
               }
-              Async.sleep { ms = 50 }
-              Async.cancel { p = child, reason = UserRequested { msg = "cancel test" } }
-              match Async.await { p = child } is
+              sleep { ms = 50 }
+              cancel { p = child, reason = UserRequested { msg = "cancel test" } }
+              match await { p = child } is
                 Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
@@ -50,21 +50,21 @@ class CancelDuringBlockingTest {
 
     @Test
     fun `cancel-during-sleep returns AsyncCancelled`() {
-        assertEquals("cancelled", cancelDuringBlock("Async.sleep { ms = 60000 }"))
+        assertEquals("cancelled", cancelDuringBlock("sleep { ms = 60000 }"))
     }
 
     @Test
     fun `cancel-during-park returns AsyncCancelled`() {
         assertEquals(
             "cancelled",
-            cancelDuringBlock("Async.park { predicate = {} -> False }")
+            cancelDuringBlock("park { predicate = {} -> False }")
         )
     }
 
     @Test
     fun `cancel-during-mutex-lock returns AsyncCancelled`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, AsyncError}
+            use std::effects::async::{ Async, AsyncError, LoomAsync, await, cancel, park, sleep }
             use std::effects::time::{Time, SystemTime}
             use std::effects::async::mutex::{mutex, with_lock}
 
@@ -74,22 +74,22 @@ class CancelDuringBlockingTest {
               let holder = Async.spawn { f = {} -> with_lock {
                 mutex = m,
                 f = {} -> do
-                  Async.sleep { ms = 60000 }
+                  sleep { ms = 60000 }
                   {}
               } }
               # Wait for holder to acquire.
-              Async.sleep { ms = 50 }
+              sleep { ms = 50 }
               # Waiter task tries to lock — will park.
               let waiter = Async.spawn { f = {} -> with_lock {
                 mutex = m,
                 f = {} -> "ran"
               } }
-              Async.sleep { ms = 50 }
-              Async.cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
-              let waiter_result = Async.await { p = waiter }
+              sleep { ms = 50 }
+              cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
+              let waiter_result = await { p = waiter }
               # Clean up holder.
-              Async.cancel { p = holder, reason = UserRequested { msg = "cancel test" } }
-              Async.await { p = holder }
+              cancel { p = holder, reason = UserRequested { msg = "cancel test" } }
+              await { p = holder }
               match waiter_result is
                 Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
@@ -102,7 +102,7 @@ class CancelDuringBlockingTest {
     @Test
     fun `cancel-during-semaphore-acquire returns AsyncCancelled`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, AsyncError}
+            use std::effects::async::{ Async, AsyncError, LoomAsync, await, cancel, park, sleep }
             use std::effects::time::{Time, SystemTime}
             use std::effects::async::semaphore::{semaphore, acquire}
 
@@ -115,9 +115,9 @@ class CancelDuringBlockingTest {
                 acquire { sem = s }
                 "ran"
               }
-              Async.sleep { ms = 50 }
-              Async.cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
-              match Async.await { p = waiter } is
+              sleep { ms = 50 }
+              cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
+              match await { p = waiter } is
                 Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
@@ -129,7 +129,7 @@ class CancelDuringBlockingTest {
     @Test
     fun `cancel-during-channel-recv returns AsyncCancelled`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, AsyncError}
+            use std::effects::async::{ Async, AsyncError, LoomAsync, await, cancel, park, sleep }
             use std::effects::time::{Time, SystemTime}
             use std::effects::async::channel::{chan, recv}
 
@@ -139,9 +139,9 @@ class CancelDuringBlockingTest {
                 let _ = recv { ch = c }
                 "ran"
               }
-              Async.sleep { ms = 50 }
-              Async.cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
-              match Async.await { p = waiter } is
+              sleep { ms = 50 }
+              cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
+              match await { p = waiter } is
                 Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
@@ -153,7 +153,7 @@ class CancelDuringBlockingTest {
     @Test
     fun `cancel-during-latch-await returns AsyncCancelled`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, AsyncError}
+            use std::effects::async::{ Async, AsyncError, LoomAsync, await, cancel, park, sleep }
             use std::effects::time::{Time, SystemTime}
             use std::effects::async::latch::{latch, await_latch}
 
@@ -164,9 +164,9 @@ class CancelDuringBlockingTest {
                 await_latch { latch = l }
                 "ran"
               }
-              Async.sleep { ms = 50 }
-              Async.cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
-              match Async.await { p = waiter } is
+              sleep { ms = 50 }
+              cancel { p = waiter, reason = UserRequested { msg = "cancel test" } }
+              match await { p = waiter } is
                 Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"

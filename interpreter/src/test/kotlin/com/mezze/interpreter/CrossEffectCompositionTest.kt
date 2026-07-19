@@ -33,7 +33,7 @@ class CrossEffectCompositionTest {
     // =========================================================================
 
     private fun asyncChannelStm(handler: String) = """
-        use std::effects::async::{ Async, $handler }
+        use std::effects::async::{ Async, $handler, await }
         use std::effects::async::channel::{ chan_bounded, send, recv }
         use std::effects::stm::{ tvar, deref, atomically, STM }
 
@@ -51,8 +51,8 @@ class CrossEffectCompositionTest {
             let v3 = recv { ch = ch }
             atomically { f = {} -> STM.write { var = total, val = v1 + v2 + v3 } }
           }
-          let _ = Async.await { p = producer }
-          let _ = Async.await { p = consumer }
+          let _ = await { p = producer }
+          let _ = await { p = consumer }
           deref { var = total }
     """.trimIndent()
 
@@ -66,7 +66,7 @@ class CrossEffectCompositionTest {
     // =========================================================================
 
     private fun asyncTQueue(handler: String) = """
-        use std::effects::async::{ Async, $handler }
+        use std::effects::async::{ Async, $handler, await }
         use std::effects::stm::{ tqueue, write_tqueue, read_tqueue, atomically }
 
         perform $handler in do
@@ -84,8 +84,8 @@ class CrossEffectCompositionTest {
             atomically { f = {} -> write_tqueue { q = q, val = 2 } }
             atomically { f = {} -> write_tqueue { q = q, val = 3 } }
           }
-          let _ = Async.await { p = producer }
-          match Async.await { p = reader } is
+          let _ = await { p = producer }
+          match await { p = reader } is
             Ok { val } -> val
             Err { error = _ } -> -1
     """.trimIndent()
@@ -100,7 +100,7 @@ class CrossEffectCompositionTest {
     // =========================================================================
 
     private fun asyncTMVar(handler: String) = """
-        use std::effects::async::{ Async, $handler }
+        use std::effects::async::{ Async, $handler, await }
         use std::effects::stm::{ tmvar_empty, take_tmvar, put_tmvar, atomically }
 
         perform $handler in do
@@ -109,7 +109,7 @@ class CrossEffectCompositionTest {
             atomically { f = {} -> put_tmvar { var = signal, val = 42 } }
           }
           let v = atomically { f = {} -> take_tmvar { var = signal } }
-          let _ = Async.await { p = producer }
+          let _ = await { p = producer }
           v
     """.trimIndent()
 
@@ -123,7 +123,7 @@ class CrossEffectCompositionTest {
     // =========================================================================
 
     private fun asyncMutexStm(handler: String) = """
-        use std::effects::async::{ Async, $handler }
+        use std::effects::async::{ Async, $handler, await }
         use std::effects::async::mutex::{ mutex, lock_async, unlock }
         use std::effects::stm::{ tvar, deref, atomically, STM }
 
@@ -137,9 +137,9 @@ class CrossEffectCompositionTest {
           let p1 = Async.spawn { f = bump }
           let p2 = Async.spawn { f = bump }
           let p3 = Async.spawn { f = bump }
-          let _ = Async.await { p = p1 }
-          let _ = Async.await { p = p2 }
-          let _ = Async.await { p = p3 }
+          let _ = await { p = p1 }
+          let _ = await { p = p2 }
+          let _ = await { p = p3 }
           deref { var = v }
     """.trimIndent()
 
@@ -153,7 +153,7 @@ class CrossEffectCompositionTest {
     // =========================================================================
 
     private fun asyncChannelMutex(handler: String) = """
-        use std::effects::async::{ Async, $handler }
+        use std::effects::async::{ Async, $handler, await }
         use std::effects::async::channel::{ chan_bounded, send, recv }
         use std::effects::async::mutex::{ mutex, lock_async, unlock }
         use std::effects::async::atom::{ atom, deref, reset }
@@ -174,9 +174,9 @@ class CrossEffectCompositionTest {
           let a = recv { ch = ch }
           let b = recv { ch = ch }
           let c = recv { ch = ch }
-          let _ = Async.await { p = p1 }
-          let _ = Async.await { p = p2 }
-          let _ = Async.await { p = p3 }
+          let _ = await { p = p1 }
+          let _ = await { p = p2 }
+          let _ = await { p = p3 }
           a + b + c + deref { atom = counter }
     """.trimIndent()
 
@@ -190,7 +190,7 @@ class CrossEffectCompositionTest {
     // =========================================================================
 
     private fun asyncWaitGroupChannel(handler: String) = """
-        use std::effects::async::{ Async, $handler }
+        use std::effects::async::{ Async, $handler, await }
         use std::effects::async::channel::{ chan_bounded, send, recv }
         use std::effects::async::waitgroup::{ wait_group, add, done, wait_async }
 
@@ -208,9 +208,9 @@ class CrossEffectCompositionTest {
           let b = recv { ch = ch }
           let c = recv { ch = ch }
           wait_async { wg = wg }
-          let _ = Async.await { p = p1 }
-          let _ = Async.await { p = p2 }
-          let _ = Async.await { p = p3 }
+          let _ = await { p = p1 }
+          let _ = await { p = p2 }
+          let _ = await { p = p3 }
           a + b + c
     """.trimIndent()
 
@@ -224,7 +224,7 @@ class CrossEffectCompositionTest {
     // =========================================================================
 
     private fun asyncStmCheckChannel(handler: String) = """
-        use std::effects::async::{ Async, $handler }
+        use std::effects::async::{ Async, $handler, await }
         use std::effects::async::channel::{ chan_bounded, send, recv }
         use std::effects::stm::{ tvar, deref, atomically, STM }
 
@@ -242,8 +242,8 @@ class CrossEffectCompositionTest {
             }
             recv { ch = ch }
           }
-          let v = Async.await { p = consumer }
-          let _ = Async.await { p = producer }
+          let v = await { p = consumer }
+          let _ = await { p = producer }
           match v is
             Ok { val } -> val
             Err { error = _ } -> -1
@@ -259,7 +259,7 @@ class CrossEffectCompositionTest {
     // =========================================================================
 
     private fun asyncSemaphoreChannel(handler: String) = """
-        use std::effects::async::{ Async, $handler }
+        use std::effects::async::{ Async, $handler, await }
         use std::effects::async::channel::{ chan_bounded, send, recv }
         use std::effects::async::semaphore::{ semaphore, acquire_async, release }
 
@@ -276,9 +276,9 @@ class CrossEffectCompositionTest {
           let a = recv { ch = ch }
           let b = recv { ch = ch }
           let c = recv { ch = ch }
-          let _ = Async.await { p = p1 }
-          let _ = Async.await { p = p2 }
-          let _ = Async.await { p = p3 }
+          let _ = await { p = p1 }
+          let _ = await { p = p2 }
+          let _ = await { p = p3 }
           a + b + c
     """.trimIndent()
 
@@ -292,14 +292,14 @@ class CrossEffectCompositionTest {
     // outer ExceptionToResult after await re-raises on the parent fiber).
     //
     // Spec (Pattern C from docs/effect-handlers/04-async-and-exceptions.md):
-    // Async.await on a failed task re-raises the stored op-call on the parent
+    // await on a failed task re-raises the stored op-call on the parent
     // fiber, where the outer ExceptionToResult catches it — so the OUTER value
     // becomes Err even when the inner match handled the Result Err branch.
     // =========================================================================
 
     private fun exceptionAsyncChannel(handler: String) = """
         use std::effects::exception::{ Exception, ExceptionToResult }
-        use std::effects::async::{ Async, $handler }
+        use std::effects::async::{ Async, $handler, await }
         use std::effects::async::channel::{ chan_bounded, send, recv }
 
         perform ExceptionToResult in perform $handler in do
@@ -309,7 +309,7 @@ class CrossEffectCompositionTest {
             Exception.throw { error = "from-spawned" }
           }
           let _ = recv { ch = ch }
-          let r = match Async.await { p = t } is
+          let r = match await { p = t } is
             Ok { val = _ } -> "ok"
             Err { error = _ } -> "err"
           Ok { val = r }

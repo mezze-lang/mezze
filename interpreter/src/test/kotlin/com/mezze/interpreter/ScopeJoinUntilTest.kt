@@ -31,17 +31,17 @@ class ScopeJoinUntilTest {
         // Two children that finish in ~10ms; deadline is 2s. Should
         // return True comfortably.
         val source = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, scope_join_until}
+            use std::effects::async::{ Async, LoomAsync, scope_join_until, scope_spawn, scoped, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let main = {} -> do
-              Async.scoped { f = { sc } -> do
+              scoped { f = { sc } -> do
                 let p1 = scope_spawn { sc = sc, f = {} -> do
-                  Async.sleep { ms = 10 }
+                  sleep { ms = 10 }
                   1
                 }
                 let p2 = scope_spawn { sc = sc, f = {} -> do
-                  Async.sleep { ms = 10 }
+                  sleep { ms = 10 }
                   2
                 }
                 scope_join_until { sc = sc, ps = [p1, p2], ms = 2000 }
@@ -58,13 +58,13 @@ class ScopeJoinUntilTest {
         // Slow child sleeps for 3s; deadline is 100ms. Should return
         // False and cancel the scope, freeing the straggler.
         val source = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, scope_join_until}
+            use std::effects::async::{ Async, LoomAsync, scope_join_until, scope_spawn, scoped, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let main = {} -> do
-              Async.scoped { f = { sc } -> do
+              scoped { f = { sc } -> do
                 let p1 = scope_spawn { sc = sc, f = {} -> do
-                  Async.sleep { ms = 3000 }
+                  sleep { ms = 3000 }
                   1
                 }
                 scope_join_until { sc = sc, ps = [p1], ms = 100 }
@@ -82,17 +82,17 @@ class ScopeJoinUntilTest {
         // must see the straggler and return False even though p1 is
         // Ok. The Ok is not "all settled" until p2 also settles.
         val source = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, scope_join_until}
+            use std::effects::async::{ Async, LoomAsync, scope_join_until, scope_spawn, scoped, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let main = {} -> do
-              Async.scoped { f = { sc } -> do
+              scoped { f = { sc } -> do
                 let p1 = scope_spawn { sc = sc, f = {} -> do
-                  Async.sleep { ms = 10 }
+                  sleep { ms = 10 }
                   1
                 }
                 let p2 = scope_spawn { sc = sc, f = {} -> do
-                  Async.sleep { ms = 3000 }
+                  sleep { ms = 3000 }
                   2
                 }
                 scope_join_until { sc = sc, ps = [p1, p2], ms = 100 }
@@ -111,13 +111,13 @@ class ScopeJoinUntilTest {
         // cares about "did they settle in time", not what they settled
         // to. Should return True.
         val source = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, scope_join_until}
+            use std::effects::async::{ Async, LoomAsync, scope_join_until, scope_spawn, scoped, sleep }
             use std::effects::time::{Time, SystemTime}
 
             let main = {} -> do
-              Async.scoped { f = { sc } -> do
+              scoped { f = { sc } -> do
                 let p1 = scope_spawn { sc = sc, f = {} -> do
-                  Async.sleep { ms = 10 }
+                  sleep { ms = 10 }
                   1
                 }
                 let p2 = scope_spawn { sc = sc, f = {} ->
@@ -125,7 +125,7 @@ class ScopeJoinUntilTest {
                   # need an actual failure to test the "all settled"
                   # invariant.
                   do
-                    Async.sleep { ms = 20 }
+                    sleep { ms = 20 }
                     2
                 }
                 scope_join_until { sc = sc, ps = [p1, p2], ms = 2000 }

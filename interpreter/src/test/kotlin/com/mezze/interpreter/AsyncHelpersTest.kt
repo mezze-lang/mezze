@@ -18,10 +18,11 @@ class AsyncHelpersTest {
     @Test
     fun `join runs two thunks and returns both values`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, join}
+            use std::effects::async::{ Async, LoomAsync, await, join, sleep }
+        use std::effects::time::{ Time, SystemTime }
             use std::result
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let r = join {
                 l = {} -> 10,
                 r = {} -> 20,
@@ -36,10 +37,11 @@ class AsyncHelpersTest {
     @Test
     fun `join3 runs three thunks`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, join3}
+            use std::effects::async::{ Async, LoomAsync, await, join3, sleep }
+            use std::effects::time::{ Time, SystemTime }
             use std::result
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let r = join3 {
                 a = {} -> 1,
                 b = {} -> 2,
@@ -56,11 +58,12 @@ class AsyncHelpersTest {
     @Test
     fun `all awaits all promises in input order`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, all}
+            use std::effects::async::{ Async, LoomAsync, all, await, sleep }
+            use std::effects::time::{ Time, SystemTime }
             use std::collections::seq
             use std::result
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let p1 = Async.spawn { f = {} -> 100 }
               let p2 = Async.spawn { f = {} -> 200 }
               let p3 = Async.spawn { f = {} -> 300 }
@@ -80,12 +83,13 @@ class AsyncHelpersTest {
     fun `race returns the first completer's value`() {
         // Spawn a fast and slow task. race should pick the fast one.
         val source = """
-            use std::effects::async::{Async, LoomAsync, race}
+            use std::effects::async::{ Async, LoomAsync, await, race, sleep }
+            use std::effects::time::{ Time, SystemTime }
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let fast = Async.spawn { f = {} -> 42 }
               let slow = Async.spawn { f = {} -> do
-                Async.sleep { ms = 100 }
+                sleep { ms = 100 }
                 99
               }
               match race { ps = [fast, slow] } is
@@ -103,16 +107,17 @@ class AsyncHelpersTest {
         // mismatch makes par_map unusable with Result-unwrapping in user code.
         // Build the same shape manually with spawn + await + unwrap.
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
+            use std::effects::time::{ Time, SystemTime }
             use std::collections::seq
             use std::result
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let xs = [1, 2, 3, 4, 5]
               let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> x * 10 } }
               seq::map {
                 xs = ps,
-                f = { x } -> result::get_or_else { result = Async.await { p = x }, def = -1 },
+                f = { x } -> result::get_or_else { result = await { p = x }, def = -1 },
               }
         """.trimIndent()
         val result = eval(source)
@@ -130,10 +135,11 @@ class AsyncHelpersTest {
     fun `par_for_each runs callback on each element, discarding results`() {
         // Use an atom-style counter to observe that each element was processed.
         val source = """
-            use std::effects::async::{Async, LoomAsync, par_for_each}
+            use std::effects::async::{ Async, LoomAsync, await, par_for_each, sleep }
+            use std::effects::time::{ Time, SystemTime }
             use std::effects::async::atom::{atom, deref, swap}
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let counter = atom { val = 0 }
               par_for_each { xs = [1, 2, 3, 4, 5], f = { x } -> do
                 let _ = swap { atom = counter, f = { current } -> current + x }
@@ -152,11 +158,12 @@ class AsyncHelpersTest {
         // Reproduce the intended par_filter semantics structurally using
         // spawn + await + filter to exercise the same concurrent shape.
         val source = """
-            use std::effects::async::{Async, LoomAsync}
+            use std::effects::async::{ Async, LoomAsync, await, sleep }
+            use std::effects::time::{ Time, SystemTime }
             use std::collections::seq
             use std::result
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let xs = [1, 2, 3, 4, 5]
               let ps = seq::map {
                 xs = xs,
@@ -165,7 +172,7 @@ class AsyncHelpersTest {
               let tagged = seq::map {
                 xs = ps,
                 f = { x } -> result::get_or_else {
-                  result = Async.await { p = x },
+                  result = await { p = x },
                   def = { elem = -1, keep = False },
                 },
               }
@@ -184,9 +191,10 @@ class AsyncHelpersTest {
     @Test
     fun `with_timeout returns Some on success`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, with_timeout}
+            use std::effects::async::{ Async, LoomAsync, await, sleep, with_timeout }
+            use std::effects::time::{ Time, SystemTime }
 
-            perform LoomAsync in do
+            perform SystemTime in perform LoomAsync in do
               let p = Async.spawn { f = {} -> 42 }
               match with_timeout { ms = 1000, p = p } is
                 Some { val } -> val

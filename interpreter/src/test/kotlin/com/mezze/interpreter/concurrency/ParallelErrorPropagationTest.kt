@@ -46,11 +46,7 @@ class ParallelErrorPropagationTest {
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }
-        use std::effects::async::{
-            Async, LoomAsync,
-            race, all, settle, try_join, try_join3, try_any, join, join3, with_timeout,
-            is_done, is_pending, is_failed, is_cancelled, inspect
-        }
+        use std::effects::async::{ Async, LoomAsync, all, await, cancel, inspect, is_cancelled, is_done, is_failed, is_pending, join, join3, race, settle, sleep, try_any, try_join, try_join3, with_timeout }
         use std::effects::exception::{ Exception, CrashException, unwrap }
         use std::effects::time::{ Time, SystemTime }
         use std::collections::seq
@@ -74,9 +70,9 @@ class ParallelErrorPropagationTest {
             let p2 = Async.spawn {f = {} -> 20}
             let p3 = Async.spawn {f = {} -> "hello"}
 
-            let r1 = unwrap { result = Async.await {p = p1} }
-            let r2 = unwrap { result = Async.await {p = p2} }
-            let r3 = unwrap { result = Async.await {p = p3} }
+            let r1 = unwrap { result = await {p = p1} }
+            let r2 = unwrap { result = await {p = p2} }
+            let r3 = unwrap { result = await {p = p3} }
 
             {r1 = r1, r2 = r2, r3 = r3}
         """
@@ -119,19 +115,19 @@ class ParallelErrorPropagationTest {
 
             let p1 = Async.spawn {f = {} -> do
                 let _ = swap {atom = execution_count, f = {current} -> current + 1}
-                let _ = Async.sleep {ms = 100}
+                let _ = sleep {ms = 100}
                 10
             }
 
             let p2 = Async.spawn {f = {} -> do
                 let _ = swap {atom = execution_count, f = {current} -> current + 1}
-                let _ = Async.sleep {ms = 50}
+                let _ = sleep {ms = 50}
                 crash { msg = "Operation 2 failed" }
             }
 
             let p3 = Async.spawn {f = {} -> do
                 let _ = swap {atom = execution_count, f = {current} -> current + 1}
-                let _ = Async.sleep {ms = 200}
+                let _ = sleep {ms = 200}
                 30
             }
 
@@ -220,11 +216,11 @@ class ParallelErrorPropagationTest {
 
             # Simple test: spawn and await, then compute
             let p1 = Async.spawn {f = {} -> 10}
-            let r1 = unwrap { result = Async.await {p = p1} }
+            let r1 = unwrap { result = await {p = p1} }
 
             # Spawn another that uses the result
             let p2 = Async.spawn {f = {} -> r1 * 2}
-            let r2 = unwrap { result = Async.await {p = p2} }
+            let r2 = unwrap { result = await {p = p2} }
 
             {first = r1, second = r2}
         """
@@ -244,12 +240,12 @@ class ParallelErrorPropagationTest {
             $loomSetup
 
             let slow_op = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 1000}
+                let _ = sleep {ms = 1000}
                 42
             }
 
             # Cancel the slow operation
-            let _ = Async.cancel {p = slow_op, reason = UserRequested { msg = "test" }}
+            let _ = cancel {p = slow_op, reason = UserRequested { msg = "test" }}
 
             # Use settle to see the cancelled state
             let results = settle {ps = [slow_op]}
@@ -273,7 +269,7 @@ class ParallelErrorPropagationTest {
             $loomSetup
 
             let fast_op = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 10}
+                let _ = sleep {ms = 10}
                 42
             }
 
@@ -297,14 +293,14 @@ class ParallelErrorPropagationTest {
             $loomSetup
 
             let op = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 2000}
+                let _ = sleep {ms = 2000}
                 42
             }
 
             # Cancel before it completes
-            let _ = Async.cancel {p = op, reason = UserRequested { msg = "test" }}
+            let _ = cancel {p = op, reason = UserRequested { msg = "test" }}
 
-            let _ = Async.sleep {ms = 50}
+            let _ = sleep {ms = 50}
 
             # Check if is_done - cancelled operations should be done
             is_done {p = op}
@@ -322,16 +318,16 @@ class ParallelErrorPropagationTest {
             let executed = atom {val = False}
 
             let op = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 500}
+                let _ = sleep {ms = 500}
                 let _ = reset {atom = executed, val = True}
                 42
             }
 
             # Cancel immediately
-            let _ = Async.cancel {p = op, reason = UserRequested { msg = "test" }}
+            let _ = cancel {p = op, reason = UserRequested { msg = "test" }}
 
             # Wait a bit to ensure operation would have run if not cancelled
-            let _ = Async.sleep {ms = 100}
+            let _ = sleep {ms = 100}
 
             deref {atom = executed}
         """
@@ -423,12 +419,12 @@ class ParallelErrorPropagationTest {
             $loomSetup
 
             let p1 = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 50}
+                let _ = sleep {ms = 50}
                 "p1"
             }
 
             let p2 = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 5}
+                let _ = sleep {ms = 5}
                 "p2"
             }
 
@@ -451,7 +447,7 @@ class ParallelErrorPropagationTest {
             $loomSetup
 
             let op = Async.spawn {f = {} -> 42}
-            let _ = unwrap { result = Async.await {p = op} }
+            let _ = unwrap { result = await {p = op} }
             is_done {p = op}
         """
         val result = eval(code)
@@ -464,7 +460,7 @@ class ParallelErrorPropagationTest {
             $loomSetup
 
             let op = Async.spawn {f = {} -> do
-                let _ = Async.sleep {ms = 500}
+                let _ = sleep {ms = 500}
                 42
             }
 
@@ -472,7 +468,7 @@ class ParallelErrorPropagationTest {
             let done_before = is_done {p = op}
 
             # Wait for completion
-            let _ = unwrap { result = Async.await {p = op} }
+            let _ = unwrap { result = await {p = op} }
             let done_after = is_done {p = op}
 
             {before = done_before, after = done_after}

@@ -35,19 +35,19 @@ class ScopeModuleTest {
     // (effect type mismatch). The tests below use the working std::async::scoped API instead.
 
     // =============================================================================
-    // Async.scoped Integration
+    // scoped Integration
     // =============================================================================
 
     @Test
     fun `test Async scoped with scope_spawn`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, LoomAsync, await, join, join3, race, scope_spawn, scoped, with_timeout }
             use std::result
 
             perform LoomAsync in do
-                Async.scoped { f = { sc } -> do
+                scoped { f = { sc } -> do
                     let p = scope_spawn { sc = sc, f = {} -> 42 }
-                    result::get_or_else { result = Async.await { p = p }, def = -1 }
+                    result::get_or_else { result = await { p = p }, def = -1 }
                 }
         """)
         assertEquals(42L, result)
@@ -56,18 +56,18 @@ class ScopeModuleTest {
     @Test
     fun `test Async scoped with multiple spawns`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, LoomAsync, await, join, join3, race, scope_spawn, scoped, with_timeout }
             use std::result
 
             perform LoomAsync in do
-                Async.scoped { f = { sc } -> do
+                scoped { f = { sc } -> do
                     let p1 = scope_spawn { sc = sc, f = {} -> 10 }
                     let p2 = scope_spawn { sc = sc, f = {} -> 20 }
                     let p3 = scope_spawn { sc = sc, f = {} -> 30 }
 
-                    let r1 = result::get_or_else { result = Async.await { p = p1 }, def = -1 }
-                    let r2 = result::get_or_else { result = Async.await { p = p2 }, def = -1 }
-                    let r3 = result::get_or_else { result = Async.await { p = p3 }, def = -1 }
+                    let r1 = result::get_or_else { result = await { p = p1 }, def = -1 }
+                    let r2 = result::get_or_else { result = await { p = p2 }, def = -1 }
+                    let r3 = result::get_or_else { result = await { p = p3 }, def = -1 }
 
                     r1 + r2 + r3
                 }
@@ -78,13 +78,13 @@ class ScopeModuleTest {
     @Test
     fun `test Async scoped returns function result`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, LoomAsync, await, join, join3, race, scope_spawn, scoped, with_timeout }
             use std::result
 
             perform LoomAsync in do
-                Async.scoped { f = { sc } -> do
+                scoped { f = { sc } -> do
                     let p = scope_spawn { sc = sc, f = {} -> 100 }
-                    let _ = result::get_or_else { result = Async.await { p = p }, def = -1 }
+                    let _ = result::get_or_else { result = await { p = p }, def = -1 }
                     "completed"
                 }
         """)
@@ -94,10 +94,10 @@ class ScopeModuleTest {
     @Test
     fun `test Async scoped with no child tasks`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, LoomAsync, await, join, join3, race, scoped, with_timeout }
 
             perform LoomAsync in do
-                Async.scoped { f = { sc } -> 42 }
+                scoped { f = { sc } -> 42 }
         """)
         assertEquals(42L, result)
     }
@@ -105,19 +105,19 @@ class ScopeModuleTest {
     @Test
     fun `test deeply nested Async scoped`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, LoomAsync, await, join, join3, race, scope_spawn, scoped, with_timeout }
             use std::result
 
             perform LoomAsync in do
-                Async.scoped { f = { sc } -> do
+                scoped { f = { sc } -> do
                     let p1 = scope_spawn { sc = sc, f = {} -> 1 }
-                    Async.scoped { f = { sc } -> do
+                    scoped { f = { sc } -> do
                         let p2 = scope_spawn { sc = sc, f = {} -> 2 }
-                        Async.scoped { f = { sc } -> do
+                        scoped { f = { sc } -> do
                             let p3 = scope_spawn { sc = sc, f = {} -> 3 }
-                            let r3 = result::get_or_else { result = Async.await { p = p3 }, def = -1 }
-                            let r2 = result::get_or_else { result = Async.await { p = p2 }, def = -1 }
-                            let r1 = result::get_or_else { result = Async.await { p = p1 }, def = -1 }
+                            let r3 = result::get_or_else { result = await { p = p3 }, def = -1 }
+                            let r2 = result::get_or_else { result = await { p = p2 }, def = -1 }
+                            let r1 = result::get_or_else { result = await { p = p1 }, def = -1 }
                             r1 + r2 + r3
                         }
                     }
@@ -133,11 +133,11 @@ class ScopeModuleTest {
     @Test
     fun `test scoped with join`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, LoomAsync, await, join, join3, race, scope_spawn, scoped, with_timeout }
             use std::result
 
             perform LoomAsync in do
-                Async.scoped { f = { sc } -> do
+                scoped { f = { sc } -> do
                     let p1 = scope_spawn { sc = sc, f = {} -> 10 }
                     let p2 = scope_spawn { sc = sc, f = {} -> 20 }
 
@@ -146,8 +146,8 @@ class ScopeModuleTest {
                         r = {} -> 15
                     }
 
-                    let r1 = result::get_or_else { result = Async.await { p = p1 }, def = -1 }
-                    let r2 = result::get_or_else { result = Async.await { p = p2 }, def = -1 }
+                    let r1 = result::get_or_else { result = await { p = p1 }, def = -1 }
+                    let r2 = result::get_or_else { result = await { p = p2 }, def = -1 }
 
                     r1 + r2 + result::get_or_else { result = joined.l, def = 0 } + result::get_or_else { result = joined.r, def = 0 }
                 }
@@ -162,16 +162,16 @@ class ScopeModuleTest {
     @Test
     fun `test scoped with record returns`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, LoomAsync, await, join, join3, race, scope_spawn, scoped, with_timeout }
             use std::result
 
             perform LoomAsync in do
-                Async.scoped { f = { sc } -> do
+                scoped { f = { sc } -> do
                     let p1 = scope_spawn { sc = sc, f = {} -> { a = 10, b = 20 } }
                     let p2 = scope_spawn { sc = sc, f = {} -> { a = 30, b = 40 } }
 
-                    let r1 = result::get_or_else { result = Async.await { p = p1 }, def = { a = -1, b = -1 } }
-                    let r2 = result::get_or_else { result = Async.await { p = p2 }, def = { a = -1, b = -1 } }
+                    let r1 = result::get_or_else { result = await { p = p1 }, def = { a = -1, b = -1 } }
+                    let r2 = result::get_or_else { result = await { p = p2 }, def = { a = -1, b = -1 } }
 
                     r1.a + r1.b + r2.a + r2.b
                 }
@@ -186,14 +186,14 @@ class ScopeModuleTest {
     @Test
     fun `test scoped with closure capture`() {
         val result = eval("""
-            use std::effects::async::{Async, LoomAsync, scope_spawn, race, with_timeout, join, join3 }
+            use std::effects::async::{ Async, LoomAsync, await, join, join3, race, scope_spawn, scoped, with_timeout }
             use std::result
 
             perform LoomAsync in do
                 let multiplier = 10
-                Async.scoped { f = { sc } -> do
+                scoped { f = { sc } -> do
                     let p = scope_spawn { sc = sc, f = {} -> 5 * multiplier }
-                    result::get_or_else { result = Async.await { p = p }, def = -1 }
+                    result::get_or_else { result = await { p = p }, def = -1 }
                 }
         """)
         assertEquals(50L, result)

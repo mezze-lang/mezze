@@ -6,7 +6,7 @@ import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
 
 /**
- * #125 — Tests for `Async.park_any` + `select`: wait on multiple
+ * #125 — Tests for `park_any` + `select`: wait on multiple
  * heterogeneous sources, run the action for whichever fires first.
  *
  * Both return Option to handle the empty-branches case without
@@ -20,7 +20,7 @@ class SelectTest {
     @Test
     fun `park_any returns the index of the first true predicate`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, park_any}
+            use std::effects::async::{ Async, LoomAsync, await, park_any }
             use std::option
 
             perform LoomAsync in do
@@ -33,7 +33,7 @@ class SelectTest {
     @Test
     fun `park_any returns None for empty list`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, park_any}
+            use std::effects::async::{ Async, LoomAsync, await, park_any }
             use std::option
 
             perform LoomAsync in do
@@ -45,7 +45,7 @@ class SelectTest {
     @Test
     fun `park_any waits for a flag set by another task`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, park_any}
+            use std::effects::async::{ Async, LoomAsync, await, park_any }
             use std::effects::async::atom::{ atom, deref, reset }
             use std::option
 
@@ -64,7 +64,7 @@ class SelectTest {
     @Test
     fun `select runs the branch whose when predicate fires`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, select}
+            use std::effects::async::{ Async, LoomAsync, await, select }
             use std::option
 
             perform LoomAsync in do
@@ -81,7 +81,7 @@ class SelectTest {
     @Test
     fun `select returns None on empty branches`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, select, SelectBranch}
+            use std::effects::async::{ Async, LoomAsync, SelectBranch, await, select }
             use std::option
 
             perform LoomAsync in do
@@ -99,7 +99,7 @@ class SelectTest {
         // await-the-result inside `run`. Both branches use spawned
         // promises so effect rows align.
         val source = """
-            use std::effects::async::{Async, LoomAsync, select}
+            use std::effects::async::{ Async, LoomAsync, await, select }
             use std::effects::async::channel::{ chan_bounded, send, recv }
             use std::result
             use std::option
@@ -112,9 +112,9 @@ class SelectTest {
               let pb = Async.spawn { f = {} -> recv { ch = ch } }
               let r = select { branches = [
                 { when = {} -> pa.is_done {},
-                  run  = {} -> result::get_or_else { result = Async.await { p = pa }, def = -1 } },
+                  run  = {} -> result::get_or_else { result = await { p = pa }, def = -1 } },
                 { when = {} -> pb.is_done {},
-                  run  = {} -> result::get_or_else { result = Async.await { p = pb }, def = -1 } },
+                  run  = {} -> result::get_or_else { result = await { p = pb }, def = -1 } },
               ] }
               option::get_or_else { opt = r, def = -2 }
         """.trimIndent()
@@ -124,7 +124,7 @@ class SelectTest {
     @Test
     fun `select under LoomAsync`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, select}
+            use std::effects::async::{ Async, LoomAsync, await, select }
             use std::option
 
             perform LoomAsync in do
@@ -140,7 +140,7 @@ class SelectTest {
     @Test
     fun `park_any under LoomAsync`() {
         val source = """
-            use std::effects::async::{Async, LoomAsync, park_any}
+            use std::effects::async::{ Async, LoomAsync, await, park_any }
             use std::effects::async::atom::{ atom, deref, reset }
             use std::option
 

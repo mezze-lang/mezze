@@ -1,7 +1,7 @@
 use std::collections::list
 use std::int
 use std::abilities::compare::{ Eq }
-use std::effects::async::{ Async }
+use std::effects::async::{ Async, park }
 
 ## Transactional variable -- can only be read/written inside STM transactions.
 pub newtype TVar 'a = TVar __NativeTVar
@@ -104,7 +104,7 @@ pub let atomically : { f: {} -> 'a <STM> } -> 'a <Async, ...> = { f } -> do
   let result = perform OptimisticSTM in __native_stm_atomic { f = f }
   match __native_stm_check_and_clear_retry_flag {} is
     True -> do
-      Async.park { predicate = {} -> __native_stm_read_set_changed {} }
+      park { predicate = {} -> __native_stm_read_set_changed {} }
       atomically { f = f }
     False -> result
 

@@ -27,24 +27,24 @@ class TransitiveScopeCancelTest {
         // cleanly. Without #252's childScopes walk, the child's park would
         // not observe the cancel and the test would time out.
         val source = """
-            use std::effects::async::{Async, LoomAsync, scope_spawn, scope_cancel_all, scope_is_cancelled}
+            use std::effects::async::{ Async, LoomAsync, park, scope_cancel_all, scope_is_cancelled, scope_spawn, scoped }
             use std::effects::async::atom::{atom, deref, reset}
 
             let main = {} -> do
               let nested_ready = atom { val = False }
-              Async.scoped { f = { sc } -> do
+              scoped { f = { sc } -> do
                 let parent_sc = sc
                 let _child = scope_spawn { sc = parent_sc, f = {} ->
-                  Async.scoped { f = { sc } -> do
+                  scoped { f = { sc } -> do
                     let nested_sc = sc
                     reset { atom = nested_ready, val = True }
                     # Park on the NESTED scope's cancel flag — the only way
                     # this returns is if cancel_all(parent_sc) walks into
                     # the childScopes list and marks nested_sc cancelled.
-                    Async.park { predicate = {} -> scope_is_cancelled { sc = nested_sc } }
+                    park { predicate = {} -> scope_is_cancelled { sc = nested_sc } }
                     7
                   } }
-                Async.park { predicate = {} -> deref { atom = nested_ready } }
+                park { predicate = {} -> deref { atom = nested_ready } }
                 scope_cancel_all { sc = parent_sc }
                 1
               }

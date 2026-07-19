@@ -33,7 +33,7 @@ class AtomTest {
             atom, deref, reset, swap, compare_and_set, swap_with, get_and_swap,
             add_watch, remove_watch, atom_validated, set_validator
         }
-        use std::effects::async::{ Async, LoomAsync }
+        use std::effects::async::{ Async, LoomAsync, await }
 
         perform LoomAsync in do
     """.trimIndent()
@@ -233,9 +233,9 @@ class AtomTest {
             let p2 = Async.spawn {f = increment_10}
             let p3 = Async.spawn {f = increment_10}
 
-            let _ = Async.await {p = p1}
-            let _ = Async.await {p = p2}
-            let _ = Async.await {p = p3}
+            let _ = await {p = p1}
+            let _ = await {p = p2}
+            let _ = await {p = p3}
 
             deref {atom = counter}
         """

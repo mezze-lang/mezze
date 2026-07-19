@@ -1,5 +1,5 @@
 use std::abilities::compare::{ Eq }
-use std::effects::async::{ Async }
+use std::effects::async::{ Async, park }
 use std::int
 
 ## Resettable counter for waiting on a group of tasks to complete.
@@ -33,9 +33,9 @@ pub let done : { wg: WaitGroup } -> {} <Async> = { wg } ->
 pub let wait : { wg: WaitGroup } -> {} <Async> = { wg } ->
   __native_waitgroup_wait { wg = wg }
 
-## Park-aware wait: routes through Async.park.
+## Park-aware wait: routes through park.
 pub let wait_async : { wg: WaitGroup } -> {} <Async, ...> = { wg } ->
-  Async.park { predicate = {} -> __native_waitgroup_get_count { wg = wg } == 0 }
+  park { predicate = {} -> __native_waitgroup_get_count { wg = wg } == 0 }
 
 ## Wait with timeout. Returns True if counter reached zero, False on timeout.
 pub let wait_timeout : { wg: WaitGroup, ms: Int } -> Bool <Async> = { wg, ms } ->
