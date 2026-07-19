@@ -169,10 +169,10 @@ public final class HandleNode extends MezzeNode {
     @Child private IndirectCallNode callNode;
     @CompilationFinal private final Hash effectHash;
 
-    public HandleNode(MezzeNode handlerNode, MezzeNode bodyNode) {
-        this(handlerNode, bodyNode, null);
-    }
-
+    // No no-hash constructor: HandleNode must always know which effect it
+    // handles so drive() can filter the handler chain by (effect_hash,
+    // op_name). Matching by op-name alone silently misroutes when two
+    // effects in scope declare an op with the same simple name (#246/#55).
     public HandleNode(MezzeNode handlerNode, MezzeNode bodyNode, Hash effectHash) {
         this.handlerNode = handlerNode;
         this.bodyNode = bodyNode;

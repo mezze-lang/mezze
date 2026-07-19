@@ -12,17 +12,21 @@ import com.mezze.language.typedast.Hash;
  * value the fiber's suspend returns when {@link EffectFiber#run()} is
  * called again.
  *
+ * <p>The 3-arg constructor is the ONLY constructor by design (#246,
+ * #55): a 2-arg convenience form that defaulted {@code effectHash} to
+ * {@code null} led to silent misroute when the runtime later fell
+ * back to name-only match. Callers that genuinely have no hash must
+ * pass {@code null} explicitly so the site is greppable.
+ *
  * @param opName     the operation name (e.g. "raise", "yield")
  * @param args       the argument record passed by the call site
  * @param effectHash content hash of the effect declaration this op belongs to.
- *                   Used when the driver hits no handler and needs to bubble
- *                   the call up as a {@code MezzeSuspended} carrying the
- *                   unhandled effect. May be {@code null} for callers that
- *                   don't have a hash (e.g. cross-thread re-raise sites).
+ *                   Used by the driver to filter the handler chain by
+ *                   (effect_hash, op_name) — matching by op-name alone
+ *                   silently picks the wrong handler when two effects
+ *                   in scope declare an op with the same simple name.
+ *                   {@code null} is a legacy escape hatch that degrades
+ *                   to "match any effect"; new code MUST pass a real hash.
  */
 public record OpCall(String opName, Object args, Hash effectHash) {
-    /** Convenience constructor for callers without an effect hash. */
-    public OpCall(String opName, Object args) {
-        this(opName, args, null);
-    }
 }

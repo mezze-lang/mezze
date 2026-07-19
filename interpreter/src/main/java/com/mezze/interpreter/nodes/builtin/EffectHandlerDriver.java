@@ -223,16 +223,54 @@ public final class EffectHandlerDriver {
 
     /**
      * True if {@code entry} implements the effect carried by {@code opCall}.
-     * Either side may have a null hash (legacy synthetic handlers / callers
-     * without a hash); in that case fall back to "match any effect" so the
-     * legacy code paths keep working. Once OpCall.effectHash and all push
-     * sites carry hashes, the null fallbacks become dead code.
+     *
+     * <p>Strict match by (effect content hash, op name). Both sides must
+     * carry a non-null hash; a null means the disambiguating identity
+     * was lost upstream. Treating that as "match any" is the exact
+     * #246 silent-misroute bug — one effect's handler picks up another
+     * effect's op with the same simple name and executes silently
+     * against the wrong body. We refuse to guess: skip the entry and
+     * emit a one-shot warning naming the site so the leak is fixable.
+     *
+     * <p>All production sites now thread a real hash:
+     * <ul>
+     *   <li>Op-call construction: {@code OpCallNode.execute},
+     *       {@code MezzeSuspended.force}, {@code SpawnSupport}.</li>
+     *   <li>Chain push: {@code TruffleCompiler} emitting {@code HandleIR}
+     *       (Kotlin {@code Hash} is non-null), and driver replay via
+     *       {@code runFunctionThroughChain}.</li>
+     * </ul>
+     * A null reaching here means someone added a new dispatch path that
+     * forgot to thread the hash — the warning tells you which one.
      */
     private static boolean handlerMatchesEffect(HandlerChainEntry entry, OpCall opCall) {
         Hash handlerEffect = entry.effectHash();
         Hash callEffect = opCall.effectHash();
-        if (handlerEffect == null || callEffect == null) return true;
+        if (handlerEffect == null || callEffect == null) {
+            warnNullEffectHash(handlerEffect, callEffect, opCall.opName(),
+                "EffectHandlerDriver.driveWithChain");
+            return false;
+        }
         return handlerEffect.equals(callEffect);
+    }
+
+    private static final java.util.Set<String> WARNED_NULL_HASH_SITES =
+        java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    @TruffleBoundary
+    public static void warnNullEffectHash(
+            Hash handlerHash, Hash callHash, String opName, String site) {
+        String key = site + ":" + opName
+            + ":handlerNull=" + (handlerHash == null)
+            + ":callNull=" + (callHash == null);
+        if (WARNED_NULL_HASH_SITES.add(key)) {
+            System.err.println(
+                "[chain-dispatch WARN #246/#55] null effect hash at " + site
+                + " for op '" + opName + "'"
+                + " — handler side null=" + (handlerHash == null)
+                + ", call side null=" + (callHash == null)
+                + "; skipping entry to avoid silent misroute.");
+        }
     }
 
     // Cache one CallTarget for chain-dispatch resume, mirroring the
@@ -499,14 +537,20 @@ public final class EffectHandlerDriver {
                     + (suspended == null ? "null" : suspended.getClass().getName()));
             }
 
-            // Look up the handler operation. Filter by (effect_hash, op_name):
-            // a handler only dispatches an op if it implements the effect
-            // the op-call belongs to (#246). Null on either side falls back
-            // to the legacy "match any effect" behavior.
-            boolean effectMatch =
-                handlerEffectHash == null
-                    || opCall.effectHash() == null
-                    || handlerEffectHash.equals(opCall.effectHash());
+            // Look up the handler operation. Filter STRICTLY by
+            // (effect_hash, op_name): a handler only dispatches an op if
+            // it implements the effect the op-call belongs to (#246/#55).
+            // Null on either side used to fall back to "match any effect";
+            // that is the silent-misroute bug — refuse to guess and treat
+            // as no-match, warning once so the leak site is fixable.
+            boolean effectMatch;
+            if (handlerEffectHash == null || opCall.effectHash() == null) {
+                warnNullEffectHash(handlerEffectHash, opCall.effectHash(),
+                    opCall.opName(), "EffectHandlerDriver.drive");
+                effectMatch = false;
+            } else {
+                effectMatch = handlerEffectHash.equals(opCall.effectHash());
+            }
             Object opHandlerObj = effectMatch
                 ? handler.getField(opCall.opName())
                 : null;

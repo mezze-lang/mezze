@@ -100,8 +100,38 @@ public final class SpawnSupport {
         AtomicReference<Throwable> errSink,
         Runnable body
     ) {
+        runBatchTask(chain, opSink, errSink, body, false);
+    }
+
+    /**
+     * Variant of {@link #runBatchTask(HandlerChainEntry[], AtomicReference,
+     * AtomicReference, Runnable)} that skips the redundant chain install
+     * when the caller guarantees the chain is already on this thread.
+     *
+     * <p>This is the case for {@code Parallel.join}'s left side: the
+     * chain snapshot was taken on the calling thread and left-side body
+     * runs on that same thread, so the chain we would install matches the
+     * one already installed. Push+pop N times is pure overhead
+     * (~200-400 ns per join). Right side must still install because it
+     * runs on a fresh FJP worker with an empty chain. #62.
+     *
+     * @param sameThreadChain true iff the caller guarantees the current
+     *   thread's chain already matches {@code chain}. Wrong value =
+     *   silent misroute; use with care.
+     */
+    public static void runBatchTask(
+        HandlerChainEntry[] chain,
+        AtomicReference<TaskUnhandledOpException> opSink,
+        AtomicReference<Throwable> errSink,
+        Runnable body,
+        boolean sameThreadChain
+    ) {
         try {
-            EffectFiber.runWithHandlerChain(chain, body);
+            if (sameThreadChain) {
+                body.run();
+            } else {
+                EffectFiber.runWithHandlerChain(chain, body);
+            }
         } catch (TaskUnhandledOpException tue) {
             opSink.compareAndSet(null, tue);
         } catch (Throwable e) {
@@ -211,7 +241,16 @@ public final class SpawnSupport {
     ) {
         for (int i = 0; i < chain.length; i++) {
             com.mezze.language.typedast.Hash chainEffect = chain[i].effectHash();
-            if (chainEffect != null && effectHash != null && !chainEffect.equals(effectHash)) {
+            // STRICT filter — null hash on either side is the #246/#55
+            // silent-misroute setup, not a legitimate fallback. Skip and
+            // warn once so the leak site can be identified.
+            if (chainEffect == null || effectHash == null) {
+                com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.warnNullEffectHash(
+                    chainEffect, effectHash, opName,
+                    "SpawnSupport.dispatchOpOnChainWithAbortPropagation");
+                continue;
+            }
+            if (!chainEffect.equals(effectHash)) {
                 continue;
             }
             Object f = chain[i].handler().getField(opName);

@@ -320,13 +320,19 @@ public final class OpCallNode extends MezzeNode {
             Hash effectHash,
             IndirectCallNode callNode) {
         for (int i = 0; i < chain.length; i++) {
-            // Filter by (effect_hash, op_name) — bare op_name match silently
-            // misroutes when two effects in scope declare an op with the
-            // same simple name (#246). Null on either side falls back to
-            // the legacy "match any effect" behavior.
+            // STRICT filter by (effect_hash, op_name). A null on either
+            // side is the #246/#55 silent-misroute setup — refuse to
+            // treat it as "match any" and skip. See
+            // {@code EffectHandlerDriver.handlerMatchesEffect} for the
+            // full rationale and warning emit path.
             Hash chainEffect = chain[i].effectHash();
-            if (chainEffect != null && effectHash != null
-                    && !chainEffect.equals(effectHash)) {
+            if (chainEffect == null || effectHash == null) {
+                com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.warnNullEffectHash(
+                    chainEffect, effectHash, operationName,
+                    "OpCallNode.dispatchOpOnChain");
+                continue;
+            }
+            if (!chainEffect.equals(effectHash)) {
                 continue;
             }
             Object f = chain[i].handler().getField(operationName);

@@ -79,8 +79,8 @@ public class ContinuationTest {
 
         EffectFiber[] holder = new EffectFiber[1];
         holder[0] = EffectFiber.create("payload-test", () -> {
-            holder[0].setSuspendedValue(new OpCall("raise", "boom"));
-            holder[0].suspend(new OpCall("ignored", "ignored")); // suspend with the OpCall above's slot
+            holder[0].setSuspendedValue(new OpCall("raise", "boom", null));
+            holder[0].suspend(new OpCall("ignored", "ignored", null)); // suspend with the OpCall above's slot
             holder[0].setSuspendedValue(new BodyResult(42L));
         });
 
