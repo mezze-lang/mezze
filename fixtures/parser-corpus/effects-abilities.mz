@@ -1,0 +1,29 @@
+# Effects, abilities, impls, perform, handlers.
+
+# === ability declaration
+ability Eq for 'a where {
+  eq: { it: 'a, r: 'a } -> Bool,
+  neq: { it: 'a, r: 'a } -> Bool
+}
+
+# === impl for a concrete type
+impl Eq for Bool where {
+  eq = { it, r } -> True,
+  neq = { it, r } -> False
+}
+
+# === empty impl body
+impl Log for Console where { }
+
+# === inherent impl
+impl Str where {
+  size = {it} -> __native_string_size { s = it }
+}
+
+# === effect declaration
+effect Log where {
+  info: { msg: String } -> {}
+}
+
+# === perform an effect operation
+let go = {} -> perform info { msg = "hi" }

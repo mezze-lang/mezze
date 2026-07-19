@@ -1,0 +1,72 @@
+# Expressions: literals, calls, operators, records, match, do, pipes, perform.
+
+# === integer literal
+let x = 1
+
+# === negative integer with underscores
+let x = -1_000
+
+# === float literal
+let x = 1_000.5
+
+# === arithmetic precedence
+let result = 1 + 2 * 3
+
+# === boolean operators
+let result = a == b && c != d || e < f
+
+# === record literal
+let obj = {a = 1, b = 2}
+
+# === record spread update
+let updated = { ...person, age = 31 }
+
+# === sequence literal
+let numbers = [1, 2, 3, 4, 5]
+
+# === empty sequence with annotation
+let xs: [Int] = []
+
+# === member access chain
+let value = obj.x.y.z
+
+# === record-argument call
+let result = add {x = 1, y = 2}
+
+# === qualified call
+let result = int::to_string {value = 42}
+
+# === method call with record arg
+let result = obj.method {x = 1}
+
+# === nested record-argument calls
+let result = f {x = g {y = 1}}
+
+# === pipe with placeholder
+let result = xs |> map { f = @ + 1 }
+
+# === lambda body
+let f = {x} -> x + 1
+
+# === if expression
+let r = {b} -> if b then 1 else 2
+
+# === do block with let then result
+let r = do
+  let x = 1
+  x + 2
+end
+
+# === match expression with indented arms
+let describe = {x} -> match x is
+  Some { val = v } -> v
+  None -> 0
+
+# === string literal
+let greeting = "hello"
+
+# === string interpolation
+let msg = {name} -> "Hello, $(name)!"
+
+# === unit literal
+let nothing = {}

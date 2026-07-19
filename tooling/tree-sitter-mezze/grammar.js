@@ -218,7 +218,14 @@ module.exports = grammar({
       repeat(field('parameter', $.type_variable)),
       '=',
       field('constructor', $.upper_identifier),
-      repeat(field('argument', $._type_atom)),
+      // The wrapped payload is either a run of plain type atoms
+      // (`Pair Int String`) OR a single function type
+      // (`Handler { x: Int } -> String`, optionally with an effect row). The
+      // two disambiguate on the presence of `->`.
+      optional(choice(
+        field('payload', $.function_type),
+        repeat1(field('argument', $._type_atom)),
+      )),
     )),
 
     _type_definition: $ => choice(
@@ -464,8 +471,13 @@ module.exports = grammar({
     record_type: $ => seq(
       '{',
       sepBy(',', $.record_type_field),
+      // Open record: `{ a: Int, ... }` — the `...` marks the row as open
+      // (extra fields allowed). Only valid trailing the field list.
+      optional(seq(optional(','), field('rest', $.record_type_rest))),
       '}',
     ),
+
+    record_type_rest: _ => '...',
 
     record_type_field: $ => seq(
       field('name', $.lower_identifier),
@@ -702,11 +714,22 @@ module.exports = grammar({
       field('value', $._expression),
     ),
 
-    perform_expression: $ => seq(
-      'perform',
-      sepBy1(',', $.handler),
-      'in',
-      field('body', $._expression),
+    perform_expression: $ => choice(
+      // Form 1: effect-operation invocation — `perform info { msg = "hi" }`.
+      // The operation is a lower-name (optionally qualified) followed by its
+      // argument record. Mirrors the parser's `perform operation {args}`.
+      prec(PREC.call, seq(
+        'perform',
+        field('operation', choice($.variable, $.qualified_reference)),
+        field('arguments', $.record_expression),
+      )),
+      // Form 2: handler installation — `perform Handler1, Handler2 in expr`.
+      seq(
+        'perform',
+        sepBy1(',', $.handler),
+        'in',
+        field('body', $._expression),
+      ),
     ),
 
     // Effect handler in a `perform` block. Can be a simple upper name
@@ -726,8 +749,15 @@ module.exports = grammar({
 
     record_expression: $ => seq(
       '{',
-      sepBy(',', $.record_field),
+      sepBy(',', choice($.record_spread, $.record_field)),
       '}',
+    ),
+
+    // Spread update: `{ ...person, age = 31 }` — copy `person`'s fields, then
+    // override. The spread source is any expression.
+    record_spread: $ => seq(
+      '...',
+      field('source', $._expression),
     ),
 
     record_field: $ => choice(
