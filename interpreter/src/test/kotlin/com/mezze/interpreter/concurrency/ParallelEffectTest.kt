@@ -524,7 +524,7 @@ class ParallelEffectTest {
         val code = """
             use std::effects::parallel::{ Parallel, VirtualParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform VirtualParallelWith {max_concurrent = 2} in do
+            perform VirtualParallelWith {max_concurrent = 2, min_chunk = 1} in do
                 let xs = [1, 2, 3, 4, 5]
                 let result = map {xs = xs, f = {x} -> x * 2}
                 result
@@ -544,7 +544,7 @@ class ParallelEffectTest {
         val code = """
             use std::effects::parallel::{ Parallel, VirtualParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform VirtualParallelWith {max_concurrent = 0} in do
+            perform VirtualParallelWith {max_concurrent = 0, min_chunk = 1} in do
                 let xs = [1, 2, 3, 4, 5, 6]
                 let result = map {xs = xs, f = {x} -> x * 3}
                 result
@@ -565,7 +565,7 @@ class ParallelEffectTest {
         val code = """
             use std::effects::parallel::{ Parallel, VirtualParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform VirtualParallelWith {max_concurrent = 4} in do
+            perform VirtualParallelWith {max_concurrent = 4, min_chunk = 1} in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9]
                 let result = reduce {xs = xs, f = {l, r} -> l + r}
                 match result is
@@ -581,7 +581,7 @@ class ParallelEffectTest {
         val code = """
             use std::effects::parallel::{ Parallel, VirtualParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform VirtualParallelWith {max_concurrent = 2} in do
+            perform VirtualParallelWith {max_concurrent = 2, min_chunk = 1} in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
                 let result = filter {xs = xs, f = {x} -> x % 2 == 0}
                 result
@@ -601,7 +601,7 @@ class ParallelEffectTest {
         val code = """
             use std::effects::parallel::{ Parallel, VirtualParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform VirtualParallelWith {max_concurrent = 2} in do
+            perform VirtualParallelWith {max_concurrent = 2, min_chunk = 1} in do
                 let xs = [1, 2, 3, 4]
                 let result = fold {
                     xs = xs,
@@ -732,7 +732,7 @@ class ParallelEffectTest {
         val code = """
             use std::effects::parallel::{ Parallel, VirtualParallelWith, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform VirtualParallelWith {max_concurrent = 4} in do
+            perform VirtualParallelWith {max_concurrent = 4, min_chunk = 1} in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
                           11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
                           21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
@@ -877,7 +877,7 @@ class ParallelEffectTest {
         val code = """
             use std::effects::parallel::{ ForkJoinParallelWith, Parallel, all, any, both, both3, count, filter, find, fold, for_each, group_by, map, partition, product, reduce, sum }
 
-            perform ForkJoinParallelWith {parallelism = 4} in do
+            perform ForkJoinParallelWith {parallelism = 4, min_chunk = 1} in do
                 let xs = [1, 2, 3, 4, 5, 6, 7, 8]
                 let result = map {xs = xs, f = {x} -> x * 10}
                 result

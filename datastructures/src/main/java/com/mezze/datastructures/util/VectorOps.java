@@ -75,6 +75,33 @@ public final class VectorOps {
     }
 
     /**
+     * Sum {@code data[from..to)} using SIMD. Same shape as
+     * {@link #sumLong(long[])} but bounded to a half-open range —
+     * lets a caller chunk the array across FJP workers without
+     * copying slices. #69.
+     */
+    @TruffleBoundary
+    public static long sumLongRange(long[] data, int from, int to) {
+        int length = to - from;
+        if (length <= 0) return 0L;
+        if (length < SIMD_THRESHOLD_LONG) {
+            long r = 0;
+            for (int j = from; j < to; j++) r += data[j];
+            return r;
+        }
+        int i = from;
+        int bound = from + LONG_SPECIES.loopBound(length);
+        LongVector acc = LongVector.zero(LONG_SPECIES);
+        for (; i < bound; i += LONG_SPECIES.length()) {
+            LongVector v = LongVector.fromArray(LONG_SPECIES, data, i);
+            acc = acc.add(v);
+        }
+        long result = acc.reduceLanes(VectorOperators.ADD);
+        for (; i < to; i++) result += data[i];
+        return result;
+    }
+
+    /**
      * Product of all elements using SIMD.
      */
     @TruffleBoundary
@@ -106,6 +133,31 @@ public final class VectorOps {
         for (long v : data) {
             result *= v;
         }
+        return result;
+    }
+
+    /**
+     * Product of {@code data[from..to)} using SIMD. Companion to
+     * {@link #sumLongRange}. #69.
+     */
+    @TruffleBoundary
+    public static long productLongRange(long[] data, int from, int to) {
+        int length = to - from;
+        if (length <= 0) return 1L;
+        if (length < SIMD_THRESHOLD_LONG) {
+            long r = 1;
+            for (int j = from; j < to; j++) r *= data[j];
+            return r;
+        }
+        int i = from;
+        int bound = from + LONG_SPECIES.loopBound(length);
+        LongVector acc = LongVector.broadcast(LONG_SPECIES, 1L);
+        for (; i < bound; i += LONG_SPECIES.length()) {
+            LongVector v = LongVector.fromArray(LONG_SPECIES, data, i);
+            acc = acc.mul(v);
+        }
+        long result = acc.reduceLanes(VectorOperators.MUL);
+        for (; i < to; i++) result *= data[i];
         return result;
     }
 

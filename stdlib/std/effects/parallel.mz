@@ -47,9 +47,24 @@ impl Parallel for ForkJoinParallel where {
   join             = { l, r } -> __native_fjpool_join { l = l, r = r },
 }
 
-## Fresh private pool with the given worker count. Shut down on scope exit.
-impl Parallel for ForkJoinParallelWith { parallelism: Int } where {
-  initialize_scope = {} -> __native_fjpool_init { parallelism = parallelism },
+## Fresh private pool with the given worker count + minimum-chunk-size
+## hint. Shut down on scope exit.
+##
+## `parallelism`: worker count. 0 or negative → Runtime.availableProcessors.
+## `min_chunk`: derived combinators (map, filter, fold, ...) stop
+## splitting at sub-batches of size ≤ `min_chunk` and run the leaf
+## inline via the corresponding `seq::` combinator instead of forking.
+## Rayon's `with_min_len` in spirit. Set to 1 to match the default
+## `ForkJoinParallel` behavior of forking down to singletons. Larger
+## values keep small sub-batches sequential — useful when per-element
+## work is light and fork overhead would dominate. #65.
+##
+## Example: `perform ForkJoinParallelWith { parallelism = 8, min_chunk = 64 } in ...`
+impl Parallel for ForkJoinParallelWith { parallelism: Int, min_chunk: Int } where {
+  initialize_scope = {} -> __native_fjpool_init {
+    parallelism = parallelism,
+    min_chunk = min_chunk,
+  },
   finalize_scope   = {} -> __native_fjpool_finalize {},
   join             = { l, r } -> __native_fjpool_join { l = l, r = r },
 }
@@ -66,13 +81,39 @@ impl Parallel for VirtualParallel where {
   join             = { l, r } -> __native_vthread_join { l = l, r = r },
 }
 
-## Backpressure cap. At most `max_concurrent` join sub-tasks run at
-## once (semaphore-based). Useful when you'd otherwise spawn thousands
-## of vthreads and starve I/O.
-impl Parallel for VirtualParallelWith { max_concurrent: Int } where {
-  initialize_scope = {} -> __native_vthread_init { max_concurrent = max_concurrent },
+## Backpressure cap + minimum-chunk-size hint. At most `max_concurrent`
+## join sub-tasks run at once (semaphore-based) — useful when you'd
+## otherwise spawn thousands of vthreads and starve I/O. Set
+## `max_concurrent = 0` for unbounded (same as VirtualParallel).
+## `min_chunk`: see ForkJoinParallelWith. Set to 1 to fork down to
+## singletons. #65.
+impl Parallel for VirtualParallelWith { max_concurrent: Int, min_chunk: Int } where {
+  initialize_scope = {} -> __native_vthread_init {
+    max_concurrent = max_concurrent,
+    min_chunk = min_chunk,
+  },
   finalize_scope   = {} -> __native_vthread_finalize {},
   join             = { l, r } -> __native_vthread_join { l = l, r = r },
+}
+
+## ==================================================================
+## DeterministicSequential — no concurrency at all. Runs l then r
+## inline on the current thread. Same effect signature as the
+## concurrent impls so caller code is portable, but zero scheduling
+## and zero nondeterminism. Useful in tests to opt out of race-flake
+## sources without changing production code.
+## ==================================================================
+
+## Sequential-only impl of Parallel. Runs {l} then {r} inline.
+## Result values are identical to the concurrent impls; only wall-clock
+## and observed interleavings differ. Useful for tests that want to
+## verify combinator correctness (order-independent reduces, associativity,
+## etc.) without any actual concurrency in the mix.
+impl Parallel for DeterministicSequential where {
+  join = { l, r } -> do
+    let lv = l {}
+    let rv = r {}
+    { l = lv, r = rv },
 }
 
 ## ==================================================================
@@ -86,15 +127,25 @@ impl Parallel for VirtualParallelWith { max_concurrent: Int } where {
 ## The n==1 base case matters: without it every leaf would still
 ## call Parallel.join once with two empty halves, which is wasted
 ## work. With it, single-element leaves are pure computation.
+##
+## Chunk-size hint (#65): when the current scope was entered via
+## ForkJoinParallelWithChunk / VirtualParallelWithChunk with a
+## `min_chunk` value > 1, combinators additionally short-circuit to
+## a sequential seq::-family call when `n <= min_chunk`. This
+## prevents fork overhead from dominating on small sub-batches.
+## The default (no chunk hint) is min_chunk = 1, matching pre-#65
+## behavior of splitting all the way to singletons.
 ## ==================================================================
+
+## Read the current scope's min_chunk hint. Returns 1 when no hint
+## is set (matches pre-#65 default behavior).
+let min_chunk : {} -> Int = {} -> __native_parallel_min_chunk_hint {}
 
 ## Apply f to each element in parallel, results in input order.
 pub let map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Parallel, ...> = { xs, f } ->
   if seq::size { xs = xs } == 0 then []
-  else if seq::size { xs = xs } == 1 then
-    match seq::get { xs = xs, i = 0 } is
-      Some { val = x } -> [f { x = x }]
-      None -> []
+  else if seq::size { xs = xs } <= min_chunk {} then
+    seq::map { xs = xs, f = f }
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -116,10 +167,8 @@ pub let for_each : { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Parallel, ...> 
 
 pub let filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Parallel, ...> = { xs, f } ->
   if seq::size { xs = xs } == 0 then []
-  else if seq::size { xs = xs } == 1 then
-    match seq::get { xs = xs, i = 0 } is
-      Some { val = x } -> if f { x = x } then [x] else []
-      None -> []
+  else if seq::size { xs = xs } <= min_chunk {} then
+    seq::filter { xs = xs, p = f }
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -133,10 +182,8 @@ pub let filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Parallel, ...
 
 pub let partition : { xs: ['a], f: { x: 'a } -> Bool <...> } -> { pass: ['a], fail: ['a] } <Parallel, ...> = { xs, f } ->
   if seq::size { xs = xs } == 0 then { pass = [], fail = [] }
-  else if seq::size { xs = xs } == 1 then
-    match seq::get { xs = xs, i = 0 } is
-      Some { val = x } -> if f { x = x } then { pass = [x], fail = [] } else { pass = [], fail = [x] }
-      None -> { pass = [], fail = [] }
+  else if seq::size { xs = xs } <= min_chunk {} then
+    seq::partition { xs = xs, p = f }
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -161,7 +208,8 @@ pub let group_by : { xs: ['a], f: { x: 'a } -> 'k <...> } -> [{ key: 'k, values:
 ## Reduce with an associative operation. Empty input → None.
 pub let reduce : { xs: ['a], f: { l: 'a, r: 'a } -> 'a <...> } -> Option 'a <Parallel, ...> = { xs, f } ->
   if seq::size { xs = xs } == 0 then None
-  else if seq::size { xs = xs } == 1 then seq::get { xs = xs, i = 0 }
+  else if seq::size { xs = xs } <= min_chunk {} then
+    seq::reduce { xs = xs, f = { acc, x } -> f { l = acc, r = x } }
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -180,10 +228,12 @@ pub let reduce : { xs: ['a], f: { l: 'a, r: 'a } -> 'a <...> } -> Option 'a <Par
 ## Parallel fold: map each element then combine with associative combiner.
 pub let fold : { xs: ['a], zero: 'b, map_fn: { x: 'a } -> 'b <...>, combine: { l: 'b, r: 'b } -> 'b <...> } -> 'b <Parallel, ...> = { xs, zero, map_fn, combine } ->
   if seq::size { xs = xs } == 0 then zero
-  else if seq::size { xs = xs } == 1 then
-    match seq::get { xs = xs, i = 0 } is
-      Some { val = x } -> combine { l = zero, r = map_fn { x = x } }
-      None -> zero
+  else if seq::size { xs = xs } <= min_chunk {} then
+    seq::fold {
+      xs = xs,
+      init = zero,
+      f = { acc, x } -> combine { l = acc, r = map_fn { x = x } },
+    }
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -197,10 +247,8 @@ pub let fold : { xs: ['a], zero: 'b, map_fn: { x: 'a } -> 'b <...>, combine: { l
 
 pub let find : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Option 'a <Parallel, ...> = { xs, f } ->
   if seq::size { xs = xs } == 0 then None
-  else if seq::size { xs = xs } == 1 then
-    match seq::get { xs = xs, i = 0 } is
-      Some { val = x } -> if f { x = x } then Some { val = x } else None
-      None -> None
+  else if seq::size { xs = xs } <= min_chunk {} then
+    seq::find { xs = xs, p = f }
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -216,10 +264,8 @@ pub let find : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Option 'a <Parallel, 
 
 pub let any : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> = { xs, f } ->
   if seq::size { xs = xs } == 0 then False
-  else if seq::size { xs = xs } == 1 then
-    match seq::get { xs = xs, i = 0 } is
-      Some { val = x } -> f { x = x }
-      None -> False
+  else if seq::size { xs = xs } <= min_chunk {} then
+    seq::any { xs = xs, p = f }
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -233,10 +279,8 @@ pub let any : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> =
 
 pub let all : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> = { xs, f } ->
   if seq::size { xs = xs } == 0 then True
-  else if seq::size { xs = xs } == 1 then
-    match seq::get { xs = xs, i = 0 } is
-      Some { val = x } -> f { x = x }
-      None -> True
+  else if seq::size { xs = xs } <= min_chunk {} then
+    seq::all { xs = xs, p = f }
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -266,13 +310,17 @@ pub let both3 : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> } -> {
 ## Numeric / convenience helpers.
 ## ==================================================================
 
-pub let sum : { xs: [Int] } -> Int <Parallel> = { xs } -> match reduce { xs = xs, f = { l, r } -> l + r } is
-  Some { val } -> val
-  None -> 0
+## Parallel sum of a Seq of Ints. Chunks the underlying long[] across
+## the pool's parallelism level, sums each chunk on one FJP worker via
+## SIMD, and combines. One flat join level instead of log₂(N) — much
+## faster than delegating to `reduce`. Falls back to a scalar loop
+## when the seq isn't a native LongSeqStorage. #69.
+pub let sum : { xs: [Int] } -> Int <Parallel> = { xs } ->
+  __native_fjpool_sum_long { xs = xs }
 
-pub let product : { xs: [Int] } -> Int <Parallel> = { xs } -> match reduce { xs = xs, f = { l, r } -> l * r } is
-  Some { val } -> val
-  None -> 1
+## Parallel product of a Seq of Ints. Same shape as `sum`. #69.
+pub let product : { xs: [Int] } -> Int <Parallel> = { xs } ->
+  __native_fjpool_product_long { xs = xs }
 
 pub let count : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Int <Parallel, ...> = { xs, f } ->
   fold {

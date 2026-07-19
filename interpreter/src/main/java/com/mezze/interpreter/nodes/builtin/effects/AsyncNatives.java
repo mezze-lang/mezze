@@ -782,24 +782,6 @@ public final class AsyncNatives {
     }
 
     /**
-     * Diagnostic: return the current thread's numeric ID. Used from
-     * benchmarks to verify that Parallel dispatch is actually running
-     * on different threads.
-     */
-    public static long threadId(MezzeRecord args) {
-        return Thread.currentThread().threadId();
-    }
-
-    /**
-     * Diagnostic: return the Truffle runtime class name to distinguish
-     * `HotSpotTruffleRuntime` (JIT-capable) from `DefaultTruffleRuntime`
-     * (interpreter-only fallback).
-     */
-    public static String truffleRuntimeName(MezzeRecord args) {
-        return com.oracle.truffle.api.Truffle.getRuntime().getClass().getName();
-    }
-
-    /**
      * Park the current task until {@code predicate} returns True.
      * Spin-park with exponential backoff up to a small cap; LockSupport
      * .parkNanos lets the scheduler hibernate the virtual thread. An

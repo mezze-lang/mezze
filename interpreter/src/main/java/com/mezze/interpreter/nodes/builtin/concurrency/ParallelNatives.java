@@ -59,6 +59,27 @@ public final class ParallelNatives {
      *  Null means unbounded (VirtualParallel default). */
     private static final ThreadLocal<Semaphore> VTHREAD_SEMAPHORE = new ThreadLocal<>();
 
+    /**
+     * Minimum chunk size for derived combinators (map, filter, fold, ...).
+     * When the input size is at or below this threshold, the combinator
+     * stops splitting and runs the leaf inline instead of forking. Default
+     * of 1 preserves the pre-#65 behavior (fork until singletons).
+     *
+     * <p>Set by the {@code With}-shaped impls (ForkJoinParallelWith,
+     * VirtualParallelWith). Read by the derived combinators via the
+     * {@code __native_parallel_min_chunk_hint} native.
+     */
+    private static final ThreadLocal<Long> MIN_CHUNK_HINT =
+        ThreadLocal.withInitial(() -> 1L);
+
+    // Chain-snapshot cache (#67) was attempted but reverted: the FJP
+    // worker's chain state depends on runBatchTask install timing, and
+    // reusing the caller's snapshot broke handler dispatch on the fresh
+    // worker (MezzeSuspended leaks in "raise inside Parallel" tests).
+    // The correct optimization needs finer-grained per-worker
+    // installed-chain tracking, which the current runtime doesn't
+    // expose cheaply. Filed as future work if perf ever demands it.
+
     // ==================== ForkJoinParallel ====================
     //
     // We build a private ForkJoinPool per scope whose workers subclass
@@ -134,6 +155,10 @@ public final class ParallelNatives {
             /* asyncMode = */ false
         );
         CURRENT_POOL.set(pool);
+        // Optional min_chunk hint (#65). Missing field or non-positive
+        // value means "always split down to singletons" (pre-#65 default).
+        long minChunk = getLongOrZero(args, "min_chunk");
+        MIN_CHUNK_HINT.set(minChunk > 0 ? minChunk : 1L);
         return MezzeUnit.INSTANCE;
     }
 
@@ -157,7 +182,20 @@ public final class ParallelNatives {
             }
         }
         CURRENT_POOL.remove();
+        MIN_CHUNK_HINT.remove();
         return MezzeUnit.INSTANCE;
+    }
+
+    /**
+     * Read the current scope's min_chunk hint. Returns 1 when no scope
+     * is active or the scope didn't set a hint — meaning derived
+     * combinators split down to singletons. Set by
+     * {@code ForkJoinParallelWithChunk} and {@code VirtualParallelWithChunk}
+     * impls at scope entry. #65.
+     */
+    @TruffleBoundary
+    public static long minChunkHint(MezzeRecord args) {
+        return MIN_CHUNK_HINT.get();
     }
 
     /**
@@ -229,9 +267,19 @@ public final class ParallelNatives {
         rightTask.fork();
 
         // Left side: run inline on this worker. Standard Rayon pattern.
+        // Skip the redundant chain reinstall ONLY when the current
+        // thread's chain already matches — the nested-join case, where
+        // fjpoolJoinInner was reached from a caller that already
+        // installed the chain. For the TOP-LEVEL entry (dispatched via
+        // pool.invoke on a fresh FJP worker), the chain is empty and
+        // we still need to install. #62.
+        boolean chainAlreadyInstalled =
+            EffectFiber.handlerChainDepth() == chain.length;
         Object[] leftResultHolder = new Object[1];
-        SpawnSupport.runBatchTask(chain, opSink, errSink, () ->
-            leftResultHolder[0] = callThunk(leftFn, callNode));
+        SpawnSupport.runBatchTask(
+            chain, opSink, errSink,
+            () -> leftResultHolder[0] = callThunk(leftFn, callNode),
+            /* sameThreadChain = */ chainAlreadyInstalled);
 
         // Wait for right. FJP's join() will pop and run the task locally
         // if nobody stole it yet — no idle blocking on light work.
@@ -246,6 +294,155 @@ public final class ParallelNatives {
     }
 
     private static final String[] LR_FIELDS = new String[]{"l", "r"};
+
+    // ==================== ForkJoinParallel numeric fast paths (#69) ====================
+    //
+    // parallel::sum / product / count via `Parallel.reduce` walk log₂(N)
+    // levels of Parallel.join, each with per-join overhead. Since the
+    // underlying seq storage is a contiguous long[], we can instead:
+    //  1. slice the array into `parallelism` fixed chunks
+    //  2. fork each chunk to an FJP worker that runs a single SIMD reduce
+    //  3. combine the partials — one flat join level, not log₂(N)
+    //
+    // These natives bypass the recursive-split path entirely. They're only
+    // eligible for seqs backed by LongSeqStorage (integer sums/products);
+    // other storage types fall back to the stdlib recursive impl by
+    // returning null so the caller's match arm on None takes over.
+
+    /** Number of chunks to split into. Uses the pool's parallelism level. */
+    private static int chunkCountForPool(ForkJoinPool pool, int arrayLen) {
+        int p = pool != null ? pool.getParallelism() : Runtime.getRuntime().availableProcessors();
+        if (arrayLen < p) return Math.max(1, arrayLen);
+        return p;
+    }
+
+    /**
+     * Parallel SIMD sum over a Seq of Ints. Splits the underlying long[]
+     * into {@code parallelism} chunks, sums each on an FJP worker via
+     * {@link com.mezze.datastructures.util.VectorOps#sumLongRange}, and
+     * combines. Falls back to a boxed-storage scalar loop when the seq
+     * isn't a LongSeqStorage. #69.
+     */
+    @TruffleBoundary
+    public static long fjpoolSumLong(MezzeRecord args) {
+        Object xs = args.getField("xs");
+        if (!(xs instanceof com.mezze.datastructures.seq.MezzeSeq seq)) return 0L;
+        com.mezze.datastructures.seq.SeqStorage storage = seq.getStorage();
+        if (!(storage instanceof com.mezze.datastructures.seq.LongSeqStorage lss)) {
+            long total = 0L;
+            for (int i = 0; i < seq.size(); i++) {
+                Object elem = seq.get(i);
+                if (elem instanceof Long l) total += l;
+                else if (elem instanceof Integer n2) total += n2;
+            }
+            return total;
+        }
+        long[] data = lss.getArray();
+        int n = data.length;
+        if (n == 0) return 0L;
+
+        ForkJoinPool pool = CURRENT_POOL.get();
+        int chunks = chunkCountForPool(pool, n);
+        if (chunks == 1) {
+            return com.mezze.datastructures.util.VectorOps.sumLongRange(data, 0, n);
+        }
+
+        int chunkSize = (n + chunks - 1) / chunks;
+        long[] partials = new long[chunks];
+        @SuppressWarnings("unchecked")
+        ForkJoinTask<Void>[] tasks = new ForkJoinTask[chunks - 1];
+        for (int c = 0; c < chunks - 1; c++) {
+            final int idx = c;
+            final int from = c * chunkSize;
+            final int to = Math.min(from + chunkSize, n);
+            tasks[c] = new RecursiveTask<Void>() {
+                @Override protected Void compute() {
+                    partials[idx] = com.mezze.datastructures.util.VectorOps
+                        .sumLongRange(data, from, to);
+                    return null;
+                }
+            };
+            if (pool != null && Thread.currentThread() instanceof TruffleFJPWorker) {
+                tasks[c].fork();
+            } else if (pool != null) {
+                pool.execute(tasks[c]);
+            } else {
+                tasks[c].invoke();
+            }
+        }
+        // Last chunk runs inline on this thread.
+        {
+            int from = (chunks - 1) * chunkSize;
+            partials[chunks - 1] = com.mezze.datastructures.util.VectorOps
+                .sumLongRange(data, from, n);
+        }
+        for (int c = 0; c < chunks - 1; c++) tasks[c].join();
+
+        long total = 0L;
+        for (long p : partials) total += p;
+        return total;
+    }
+
+    /** Parallel SIMD product over a Seq of Ints. Same shape as
+     *  {@link #fjpoolSumLong}. #69. */
+    @TruffleBoundary
+    public static long fjpoolProductLong(MezzeRecord args) {
+        Object xs = args.getField("xs");
+        if (!(xs instanceof com.mezze.datastructures.seq.MezzeSeq seq)) return 1L;
+        com.mezze.datastructures.seq.SeqStorage storage = seq.getStorage();
+        if (!(storage instanceof com.mezze.datastructures.seq.LongSeqStorage lss)) {
+            long result = 1L;
+            for (int i = 0; i < seq.size(); i++) {
+                Object elem = seq.get(i);
+                if (elem instanceof Long l) result *= l;
+                else if (elem instanceof Integer n2) result *= n2;
+            }
+            return result;
+        }
+        long[] data = lss.getArray();
+        int n = data.length;
+        if (n == 0) return 1L;
+
+        ForkJoinPool pool = CURRENT_POOL.get();
+        int chunks = chunkCountForPool(pool, n);
+        if (chunks == 1) {
+            return com.mezze.datastructures.util.VectorOps.productLongRange(data, 0, n);
+        }
+
+        int chunkSize = (n + chunks - 1) / chunks;
+        long[] partials = new long[chunks];
+        @SuppressWarnings("unchecked")
+        ForkJoinTask<Void>[] tasks = new ForkJoinTask[chunks - 1];
+        for (int c = 0; c < chunks - 1; c++) {
+            final int idx = c;
+            final int from = c * chunkSize;
+            final int to = Math.min(from + chunkSize, n);
+            tasks[c] = new RecursiveTask<Void>() {
+                @Override protected Void compute() {
+                    partials[idx] = com.mezze.datastructures.util.VectorOps
+                        .productLongRange(data, from, to);
+                    return null;
+                }
+            };
+            if (pool != null && Thread.currentThread() instanceof TruffleFJPWorker) {
+                tasks[c].fork();
+            } else if (pool != null) {
+                pool.execute(tasks[c]);
+            } else {
+                tasks[c].invoke();
+            }
+        }
+        {
+            int from = (chunks - 1) * chunkSize;
+            partials[chunks - 1] = com.mezze.datastructures.util.VectorOps
+                .productLongRange(data, from, n);
+        }
+        for (int c = 0; c < chunks - 1; c++) tasks[c].join();
+
+        long total = 1L;
+        for (long p : partials) total *= p;
+        return total;
+    }
 
     // ==================== VirtualParallel ====================
 
@@ -263,6 +460,9 @@ public final class ParallelNatives {
         } else {
             VTHREAD_SEMAPHORE.remove();
         }
+        // Optional min_chunk hint (#65).
+        long minChunk = getLongOrZero(args, "min_chunk");
+        MIN_CHUNK_HINT.set(minChunk > 0 ? minChunk : 1L);
         return MezzeUnit.INSTANCE;
     }
 
@@ -270,6 +470,7 @@ public final class ParallelNatives {
     @TruffleBoundary
     public static MezzeUnit vthreadFinalize(MezzeRecord args) {
         VTHREAD_SEMAPHORE.remove();
+        MIN_CHUNK_HINT.remove();
         return MezzeUnit.INSTANCE;
     }
 
@@ -346,8 +547,12 @@ public final class ParallelNatives {
                 }
             }
             try {
-                SpawnSupport.runBatchTask(chain, opSink, errSink, () ->
-                    leftResultHolder[0] = callThunk(leftFn, callNode));
+                // Same-thread inline: skip the redundant chain reinstall.
+                // #62.
+                SpawnSupport.runBatchTask(
+                    chain, opSink, errSink,
+                    () -> leftResultHolder[0] = callThunk(leftFn, callNode),
+                    /* sameThreadChain = */ true);
             } finally {
                 if (sem != null) sem.release();
             }

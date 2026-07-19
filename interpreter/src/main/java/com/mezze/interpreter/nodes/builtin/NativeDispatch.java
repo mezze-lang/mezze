@@ -2580,8 +2580,6 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_promise_await", (r, c) -> AsyncNatives.loomAwait(r));
         HANDLERS.put("__native_async_sleep", (r, c) -> AsyncNatives.loomSleep(r));
         HANDLERS.put("__native_async_yield_now", (r, c) -> AsyncNatives.loomYieldNow(r));
-        HANDLERS.put("__native_thread_id", (r, c) -> AsyncNatives.threadId(r));
-        HANDLERS.put("__native_truffle_runtime_name", (r, c) -> AsyncNatives.truffleRuntimeName(r));
         HANDLERS.put("__native_async_park_until", (r, c) -> AsyncNatives.loomParkUntil(r, c));
         HANDLERS.put("__native_async_scope_cancel_all", (r, c) -> AsyncNatives.loomScopeCancelAll(r));
         HANDLERS.put("__native_async_scope_is_cancelled", (r, c) -> AsyncNatives.loomScopeIsCancelled(r));
@@ -2719,6 +2717,10 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS_WITH_NODE.put("__native_fjpool_init", (r, c, n) -> ParallelNatives.fjpoolInit(r, n));
         HANDLERS.put("__native_fjpool_finalize", (r, c) -> ParallelNatives.fjpoolFinalize(r));
         HANDLERS.put("__native_fjpool_join", (r, c) -> ParallelNatives.fjpoolJoin(r, c));
+        HANDLERS.put("__native_parallel_min_chunk_hint", (r, c) -> ParallelNatives.minChunkHint(r));
+        // Parallel numeric fast paths (#69).
+        HANDLERS.put("__native_fjpool_sum_long", (r, c) -> ParallelNatives.fjpoolSumLong(r));
+        HANDLERS.put("__native_fjpool_product_long", (r, c) -> ParallelNatives.fjpoolProductLong(r));
         HANDLERS.put("__native_vthread_init", (r, c) -> ParallelNatives.vthreadInit(r));
         HANDLERS.put("__native_vthread_finalize", (r, c) -> ParallelNatives.vthreadFinalize(r));
         HANDLERS_WITH_NODE.put("__native_vthread_join", (r, c, n) -> ParallelNatives.vthreadJoin(r, c, n));
