@@ -131,6 +131,50 @@ object ExplainDocs {
               wanted), generalize it.
         """.trimIndent(),
 
+        "T0211" to """
+            # T0211: Callback parameter names don't match the signature
+
+            You passed a lambda whose parameter list destructures record fields
+            that don't match the field names the caller expects. In Mezze,
+            functions take a single record argument, and lambda parameter lists
+            ARE record destructuring by field name — so the parameter names in
+            the lambda MUST match the field names in the caller's record.
+
+            ## Example
+
+            ```mezze
+            # seq::fold's signature says: f: { acc: 'b, x: 'a } -> 'b
+            # So fold will invoke your callback with a record whose fields
+            # are literally `acc` and `x`.
+
+            seq::fold {
+              xs = [1, 2, 3],
+              init = 0,
+              f = { acc, i } -> acc + i    # ✗ tries to destructure field `i`
+            }                              #   but caller passes `{ acc, x }`
+
+            seq::fold {
+              xs = [1, 2, 3],
+              init = 0,
+              f = { acc, x } -> acc + x    # ✓ matches signature
+            }
+            ```
+
+            ## How to fix
+
+            - Rename your lambda's parameters to match the field names the
+              caller uses. Look at the signature of the HOF you're calling
+              (`mez check` on your file usually prints the expected shape).
+            - This is not arbitrary: because Mezze passes named records, the
+              stdlib author's field-name choice ("x" vs "elem" vs "item")
+              propagates to every caller. Positional arguments don't exist
+              here.
+            - Common HOFs and their expected callback records:
+              - `seq::map { xs, f: { x } -> ... }`
+              - `seq::fold { xs, init, f: { acc, x } -> ... }`
+              - `seq::filter { xs, p: { x } -> Bool }`
+        """.trimIndent(),
+
         "V0501" to """
             # V0501: Effect not handled
 

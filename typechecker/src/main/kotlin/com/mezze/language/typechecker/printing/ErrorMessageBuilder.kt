@@ -22,6 +22,28 @@ object ErrorMessageBuilder {
                 val argName = errorContext.argumentName
                 val funcName = errorContext.functionName
 
+                // T0211: prefer the callback-param-names mismatch over the
+                // generic field-type walk — the walk blames the wrong field
+                // (usually `xs`) because it stops at the record whose key
+                // set diverges (see findFieldTypeMismatch line 153). Users
+                // need to see "your lambda's params are wrong", not
+                // "field xs expects 'a but got Int". #58.
+                findCallbackFieldNameMismatch(type1, type2)?.let { m ->
+                    val callSite = if (funcName != null) " in call to `$funcName`" else ""
+                    val pathStr = if (m.path.isEmpty()) "" else " at `${m.path}`"
+                    val missing = (m.expectedFields - m.actualFields.toSet())
+                        .map { "'$it'" }
+                    val unexpected = (m.actualFields - m.expectedFields.toSet())
+                        .map { "'$it'" }
+                    val parts = mutableListOf<String>()
+                    if (missing.isNotEmpty()) parts.add("missing ${missing.joinToString(", ")}")
+                    if (unexpected.isNotEmpty()) parts.add("unexpected ${unexpected.joinToString(", ")}")
+                    val diff = if (parts.isNotEmpty()) " — ${parts.joinToString("; ")}" else ""
+                    return "Callback param names don't match$pathStr$callSite: " +
+                        "expected `{ ${m.expectedFields.joinToString(", ")} }` " +
+                        "but lambda destructures `{ ${m.actualFields.joinToString(", ")} }`$diff"
+                }
+
                 val fieldMismatch = findFieldTypeMismatch(type1, type2)
                 if (fieldMismatch != null) {
                     val (path, actualLeaf, expectedLeaf) = fieldMismatch
@@ -135,6 +157,74 @@ object ErrorMessageBuilder {
         if (missing.isNotEmpty()) parts.add("missing ${missing.joinToString(", ")}")
         if (extra.isNotEmpty()) parts.add("unexpected ${extra.joinToString(", ")}")
         return if (parts.isEmpty()) header else "$header — ${parts.joinToString("; ")}"
+    }
+
+    /**
+     * Descends into a nested type looking for a {@code FunctionType} where
+     * both sides' parameter types are records with different field-name
+     * sets. Returns the first such site plus its path. When found, this
+     * indicates the user-supplied lambda destructures record fields that
+     * don't match the caller's record shape — Mezze lambda params ARE
+     * record destructuring by field name.
+     *
+     * <p>Example: fold's arg type is
+     * {@code { xs: [Int], init: Int, f: { acc: Int, i: Int } -> Int }}
+     * (from the user's lambda), vs expected
+     * {@code { xs: ['a], init: 'b, f: { acc: 'b, x: 'a } -> 'b }}
+     * (from fold's signature). Walker descends into the outer record,
+     * then into the `f` field (both are FunctionTypes), then into their
+     * paramType records — sees {@code {acc, i}} vs {@code {acc, x}},
+     * returns the mismatch. Path is {@code "f"}.
+     */
+    private data class CallbackFieldNameMismatch(
+        val path: String,
+        val expectedFields: List<String>,
+        val actualFields: List<String>,
+    )
+
+    private fun findCallbackFieldNameMismatch(
+        actual: MezzeType,
+        expected: MezzeType,
+        path: String = "",
+    ): CallbackFieldNameMismatch? {
+        if (actual is MezzeType.VarType || expected is MezzeType.VarType) return null
+
+        if (actual is MezzeType.FunctionType && expected is MezzeType.FunctionType) {
+            // Both sides are functions — inspect their param types. If both
+            // are closed records with different fields, that's the mismatch.
+            val aParam = actual.paramType
+            val eParam = expected.paramType
+            if (aParam is MezzeType.RecordType && eParam is MezzeType.RecordType &&
+                aParam.rowVar == null && eParam.rowVar == null &&
+                aParam.fields.keys != eParam.fields.keys
+            ) {
+                return CallbackFieldNameMismatch(
+                    path = path,
+                    expectedFields = eParam.fields.keys.sorted(),
+                    actualFields = aParam.fields.keys.sorted(),
+                )
+            }
+            // Otherwise recurse into param and return types looking for a
+            // nested callback with a name mismatch.
+            findCallbackFieldNameMismatch(aParam, eParam, path)?.let { return it }
+            findCallbackFieldNameMismatch(actual.returnType, expected.returnType, path)?.let { return it }
+            return null
+        }
+        if (actual is MezzeType.RecordType && expected is MezzeType.RecordType) {
+            // Only descend into shared fields; a mismatch on non-shared
+            // fields at THIS level is not a callback mismatch (that's a
+            // record-shape mismatch handled elsewhere).
+            val sharedFields = actual.fields.keys intersect expected.fields.keys
+            for (fieldName in sharedFields) {
+                val childPath = if (path.isEmpty()) fieldName else "$path.$fieldName"
+                findCallbackFieldNameMismatch(
+                    actual.fields[fieldName]!!,
+                    expected.fields[fieldName]!!,
+                    childPath
+                )?.let { return it }
+            }
+        }
+        return null
     }
 
     private fun findFieldTypeMismatch(

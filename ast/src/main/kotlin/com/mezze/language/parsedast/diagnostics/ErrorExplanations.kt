@@ -159,6 +159,14 @@ fun ErrorCode.explain(): String = when (this) {
         "The type annotation on a binding doesn't match the inferred type of the body. " +
         "Either fix the annotation or the implementation."
 
+    ErrorCode.T0211_CALLBACK_PARAM_NAMES_MISMATCH ->
+        "A callback lambda's parameter names don't match the record field names the caller passes. " +
+        "In Mezze, lambda parameter lists ARE record destructuring — writing `{ acc, i } -> body` " +
+        "means \"extract fields `acc` and `i` from the argument record\". If the caller passes a " +
+        "record with fields `{ acc, x }`, the lambda must destructure those exact field names: " +
+        "`{ acc, x } -> body`. Rename the parameters to match, or (when supported) alias with " +
+        "`{ acc, x: myLocal } -> ...`."
+
     ErrorCode.T0301_UNBOUND_TYPE_VAR ->
         "A type variable in an annotation is not bound by any parameter. " +
         "All type variables must appear in the function's parameter types."

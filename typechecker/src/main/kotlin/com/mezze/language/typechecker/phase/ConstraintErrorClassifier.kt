@@ -19,7 +19,12 @@ internal fun classifyConstraintError(
         "either change the annotation to match the body, or change the body to produce the annotated type"
     )
 
-    val (code, hints) = when (ctx) {
+    // T0211 detection runs FIRST — it inspects the constraint's types
+    // directly so it fires regardless of ErrorContext. The T0201-favouring
+    // branches below never see the callback-mismatch shape once this
+    // catches it. #58.
+    val t0211 = detectCallbackParamMismatch(constraint)
+    val (code, hints) = t0211 ?: when (ctx) {
         is ErrorContext.TypeAnnotation ->
             ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH to annotationHint
         is ErrorContext.ReturnType ->
@@ -155,4 +160,73 @@ private fun effectRowExtraEffects(
     val actualEffects = actual.effects?.effects ?: emptySet()
     val expectedEffects = expected.effects?.effects ?: emptySet()
     return (actualEffects - expectedEffects).sorted()
+}
+
+/**
+ * Detect the "callback lambda has wrong param names" shape anywhere in
+ * the constraint's types: descends into nested records and function
+ * types until it finds a FunctionType whose paramType is a record whose
+ * field-name set doesn't match the expected side.
+ *
+ * <p>Example: fold's arg is {@code { xs: ['a], init: 'b, f: { acc: 'b, x: 'a } -> 'b }}.
+ * User wrote {@code f = { acc, i } -> ...}, so actual arg is
+ * {@code { xs: [Int], init: Int, f: { acc: ?, i: ? } -> ? }}. Top-level
+ * constraint compares the two arg records; both have the same outer
+ * field names ({xs, init, f}). We descend into `f`, see two functions
+ * whose param records have field sets {acc, i} vs {acc, x}, and flag
+ * T0211 pointing at the callback rather than the misleading downstream
+ * `xs` field mismatch T0201.
+ */
+private fun detectCallbackParamMismatch(
+    constraint: Constraint
+): Pair<ErrorCode, List<String>>? {
+    val eq = constraint as? Constraint.Equality ?: return null
+    val mismatch = findNestedCallbackMismatch(eq.left, eq.right) ?: return null
+    val expectedList = mismatch.expected.joinToString(", ")
+    val actualList = mismatch.actual.joinToString(", ")
+    return ErrorCode.T0211_CALLBACK_PARAM_NAMES_MISMATCH to listOf(
+        "the callback expects parameters `{ $expectedList }` " +
+            "but the lambda destructures `{ $actualList }`",
+        "Mezze lambda params ARE record destructuring — the names must match " +
+            "the field names the caller passes. Rename to `{ $expectedList } -> ...`."
+    )
+}
+
+private data class NestedCallbackMismatch(
+    val expected: List<String>,
+    val actual: List<String>,
+)
+
+private fun findNestedCallbackMismatch(
+    actual: MezzeType,
+    expected: MezzeType,
+): NestedCallbackMismatch? {
+    if (actual is MezzeType.VarType || expected is MezzeType.VarType) return null
+
+    if (actual is MezzeType.FunctionType && expected is MezzeType.FunctionType) {
+        val aParam = actual.paramType
+        val eParam = expected.paramType
+        if (aParam is MezzeType.RecordType && eParam is MezzeType.RecordType &&
+            aParam.rowVar == null && eParam.rowVar == null &&
+            aParam.fields.keys != eParam.fields.keys
+        ) {
+            return NestedCallbackMismatch(
+                expected = eParam.fields.keys.sorted(),
+                actual = aParam.fields.keys.sorted(),
+            )
+        }
+        findNestedCallbackMismatch(aParam, eParam)?.let { return it }
+        findNestedCallbackMismatch(actual.returnType, expected.returnType)?.let { return it }
+        return null
+    }
+    if (actual is MezzeType.RecordType && expected is MezzeType.RecordType) {
+        val shared = actual.fields.keys intersect expected.fields.keys
+        for (fieldName in shared) {
+            findNestedCallbackMismatch(
+                actual.fields[fieldName]!!,
+                expected.fields[fieldName]!!,
+            )?.let { return it }
+        }
+    }
+    return null
 }
