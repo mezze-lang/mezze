@@ -343,7 +343,12 @@ public final class EffectFiber {
         try {
             body.run();
         } finally {
-            clearHandlerChain();
+            // Pop only what we pushed. clearHandlerChain() would wipe
+            // handlers that were installed by an outer perform on the
+            // same thread — which happens when runWithHandlerChain is
+            // called inline from a thread that already has a chain
+            // (e.g. Parallel.join's left-side inline execution).
+            popHandlerChain(chain.length);
         }
     }
 

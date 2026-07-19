@@ -138,14 +138,24 @@ public final class ParallelNatives {
     }
 
     /**
-     * Exit a ForkJoinParallel scope. Shuts down the pool; worker threads
-     * leave the polyglot context in onTermination. Always clears the
-     * ThreadLocal to prevent leakage across scopes.
+     * Exit a ForkJoinParallel scope. Shuts down the pool and waits
+     * briefly for workers to terminate — this matters because workers
+     * call context.leave() in onTermination, and letting them race
+     * with the next scope's context.enter() can wedge under Truffle
+     * safepoint handshakes. Bounded wait prevents user code from
+     * hanging indefinitely if a worker is stuck.
      */
     @TruffleBoundary
     public static MezzeUnit fjpoolFinalize(MezzeRecord args) {
         ForkJoinPool pool = CURRENT_POOL.get();
-        if (pool != null) pool.shutdown();
+        if (pool != null) {
+            pool.shutdown();
+            try {
+                pool.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
         CURRENT_POOL.remove();
         return MezzeUnit.INSTANCE;
     }
@@ -179,17 +189,14 @@ public final class ParallelNatives {
             return fjpoolJoinInner(leftFn, rightFn, callNode, chain);
         }
 
-        // First entry into a Parallel scope, or called from a non-FJP
-        // thread (e.g. inside a spawn callback that itself started a
-        // Parallel perform). Submit as a top-level RecursiveTask; the
-        // pool's Truffle-aware workers will handle it. pool.invoke
-        // blocks the calling thread until done — but the actual work
-        // runs on the pool workers, so the AST sharing guard sees the
-        // right context.
+        // First entry into a Parallel scope. Submit as a top-level
+        // RecursiveTask; a worker will run it under the polyglot context
+        // (TruffleFJPWorker.onStart entered the context for us).
         ForkJoinPool pool = CURRENT_POOL.get();
         if (pool == null) {
             // Should not happen — initialize_scope always sets the pool.
-            // Fall through to running on the calling thread as a safety net.
+            // Fall back to running on the calling thread; the caller's
+            // chain is already correct.
             return fjpoolJoinInner(leftFn, rightFn, callNode, chain);
         }
         return pool.invoke(new RecursiveTask<MezzeRecord>() {
@@ -307,6 +314,9 @@ public final class ParallelNatives {
         rightThread.start();
 
         // Left side: run inline on current thread (still under permit if capped).
+        // runBatchTask handles chain install/pop properly: if the current
+        // thread already has a chain (nested Parallel.join case), pushing
+        // and popping preserves it.
         Object[] leftResultHolder = new Object[1];
         if (sem != null) {
             try { sem.acquire(); } catch (InterruptedException e) {

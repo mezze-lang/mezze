@@ -1,23 +1,33 @@
 use std::collections::seq
 use std::int
 
-## Data parallelism, Rayon-shape: one runtime primitive, everything else
-## derived.
+## Data parallelism, Rayon-shape: one runtime primitive, everything
+## else derived.
 ##
 ## Runtime primitive:
 ##   Parallel.join { l, r } — run l and r in parallel, return both.
 ##
 ## Every derived combinator (map, reduce, filter, find, ...) is a
-## threshold-based recursive split over the input, ending in a
-## sequential leaf. This is exactly how Rayon's ParallelIterator works.
+## recursive binary split over the input, bottoming out at single
+## elements. Every element gets forked via Parallel.join.
+##
+## No hidden thresholds. The user asked for parallel by writing
+## `perform ForkJoinParallel in ...`, so every derived combinator
+## actually parallelizes — even for small inputs, even when the
+## fork overhead > per-element work. Silent size-based fall-through
+## to seq::* would mean `perform Parallel` is a lie for small N.
+##
+## If a caller wants sequential behavior for tiny inputs, they
+## just don't perform Parallel and call seq::* directly.
 ##
 ## Backends:
-##   - ForkJoinParallel — ForkJoinPool + RecursiveTask (default,
-##     fastest for CPU-bound work with irregular sizes).
+##   - ForkJoinParallel — ForkJoinPool + RecursiveTask, work-stealing
+##     across a worker pool (default; fastest for CPU-bound work with
+##     irregular subtask sizes).
 ##   - VirtualParallel  — one virtual thread per side (good for
 ##     I/O-bound work where subtasks park).
 ##
-## Both backends bracket their per-scope state via the impl-only
+## Both backends bracket per-scope state via the impl-only
 ## initialize_scope / finalize_scope convention.
 
 effect Parallel where {
@@ -65,19 +75,26 @@ impl Parallel for VirtualParallelWith { max_concurrent: Int } where {
   join             = { l, r } -> __native_vthread_join { l = l, r = r },
 }
 
-## Split threshold for derived combinators: below this size, the leaf
-## runs sequentially (no join call). Rayon uses ~1000 as its default;
-## same value here. Inlined at each use because module-scope globals
-## don't cross the Truffle worker-thread context boundary cleanly.
-
 ## ==================================================================
-## Derived map — the workhorse. Threshold-based recursive split.
+## Derived combinators.
+##
+## All follow the same recursive binary split. Base cases:
+##   n == 0 → identity for the operation
+##   n == 1 → apply f to the single element, no join
+##   n >= 2 → split in half, Parallel.join, combine
+##
+## The n==1 base case matters: without it every leaf would still
+## call Parallel.join once with two empty halves, which is wasted
+## work. With it, single-element leaves are pure computation.
 ## ==================================================================
 
 ## Apply f to each element in parallel, results in input order.
 pub let map : { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } <= 1000 then
-    seq::map { xs = xs, f = f }
+  if seq::size { xs = xs } == 0 then []
+  else if seq::size { xs = xs } == 1 then
+    match seq::get { xs = xs, i = 0 } is
+      Some { val = x } -> [f { x = x }]
+      None -> []
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -97,14 +114,12 @@ pub let for_each : { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Parallel, ...> 
   }
   {}
 
-## ==================================================================
-## Derived filter/partition/group_by — recursive split, seq op at leaf,
-## concat on the way up.
-## ==================================================================
-
 pub let filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } <= 1000 then
-    seq::filter { xs = xs, p = f }
+  if seq::size { xs = xs } == 0 then []
+  else if seq::size { xs = xs } == 1 then
+    match seq::get { xs = xs, i = 0 } is
+      Some { val = x } -> if f { x = x } then [x] else []
+      None -> []
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -117,8 +132,11 @@ pub let filter : { xs: ['a], f: { x: 'a } -> Bool <...> } -> ['a] <Parallel, ...
     seq::concat { xs = both.l, ys = both.r }
 
 pub let partition : { xs: ['a], f: { x: 'a } -> Bool <...> } -> { pass: ['a], fail: ['a] } <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } <= 1000 then
-    seq::partition { xs = xs, p = f }
+  if seq::size { xs = xs } == 0 then { pass = [], fail = [] }
+  else if seq::size { xs = xs } == 1 then
+    match seq::get { xs = xs, i = 0 } is
+      Some { val = x } -> if f { x = x } then { pass = [x], fail = [] } else { pass = [], fail = [x] }
+      None -> { pass = [], fail = [] }
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -133,26 +151,17 @@ pub let partition : { xs: ['a], f: { x: 'a } -> Bool <...> } -> { pass: ['a], fa
       fail = seq::concat { xs = both.l.fail, ys = both.r.fail },
     }
 
-## group_by delegates to seq::group_by at the leaf. The parallel
-## variant just splits, group_bys each half, and merges by matching
-## keys — that merge is O(N_left * N_right_keys) worst-case, so we
-## use a moderate threshold. For very large groupings a hash-merge
-## helper in seq would be a natural addition.
+## group_by is sequential at the leaf — merging groups by key across
+## halves is O(N * K) worst case which defeats the point of parallelism
+## unless the reduction is careful. Wraps seq::group_by; parallelism
+## for group_by can be added later with a proper hash-merge helper.
 pub let group_by : { xs: ['a], f: { x: 'a } -> 'k <...> } -> [{ key: 'k, values: ['a] }] <Parallel, ...> = { xs, f } ->
   seq::group_by { xs = xs, f = f }
 
-## ==================================================================
-## Derived reduce/fold — threshold-based tree reduce.
-## ==================================================================
-
 ## Reduce with an associative operation. Empty input → None.
-##
-## The user-facing combiner is `{ l, r } -> ...` (Parallel shape).
-## seq::reduce uses `{ acc, x }`; we adapt at the leaf.
 pub let reduce : { xs: ['a], f: { l: 'a, r: 'a } -> 'a <...> } -> Option 'a <Parallel, ...> = { xs, f } ->
   if seq::size { xs = xs } == 0 then None
-  else if seq::size { xs = xs } <= 1000 then
-    seq::reduce { xs = xs, f = { acc, x } -> f { l = acc, r = x } }
+  else if seq::size { xs = xs } == 1 then seq::get { xs = xs, i = 0 }
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -162,22 +171,19 @@ pub let reduce : { xs: ['a], f: { l: 'a, r: 'a } -> 'a <...> } -> Option 'a <Par
       l = {} -> reduce { xs = left,  f = f },
       r = {} -> reduce { xs = right, f = f },
     }
-    match { l = both.l, r = both.r } is
-      { l = Some { val = a }, r = Some { val = b } } -> Some { val = f { l = a, r = b } }
-      { l = Some { val = a }, r = None } -> Some { val = a }
-      { l = None, r = Some { val = b } } -> Some { val = b }
-      { l = None, r = None } -> None
+    match both.l is
+      Some { val = a } -> match both.r is
+        Some { val = b } -> Some { val = f { l = a, r = b } }
+        None -> Some { val = a }
+      None -> both.r
 
 ## Parallel fold: map each element then combine with associative combiner.
-## The single-pass fused version — map+reduce in one recursive walk.
 pub let fold : { xs: ['a], zero: 'b, map_fn: { x: 'a } -> 'b <...>, combine: { l: 'b, r: 'b } -> 'b <...> } -> 'b <Parallel, ...> = { xs, zero, map_fn, combine } ->
   if seq::size { xs = xs } == 0 then zero
-  else if seq::size { xs = xs } <= 1000 then
-    seq::fold {
-      xs = xs,
-      init = zero,
-      f = { acc, x } -> combine { l = acc, r = map_fn { x = x } },
-    }
+  else if seq::size { xs = xs } == 1 then
+    match seq::get { xs = xs, i = 0 } is
+      Some { val = x } -> combine { l = zero, r = map_fn { x = x } }
+      None -> zero
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -189,18 +195,12 @@ pub let fold : { xs: ['a], zero: 'b, map_fn: { x: 'a } -> 'b <...>, combine: { l
     }
     combine { l = both.l, r = both.r }
 
-## ==================================================================
-## Derived short-circuit — find/any/all.
-##
-## Note: not truly short-circuiting across the parallel tree. We do
-## the parallel work then find/any/all sequentially over results.
-## For cheap predicates this is fine; for expensive predicates
-## consider seq::find on a subset first.
-## ==================================================================
-
 pub let find : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Option 'a <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } <= 1000 then
-    seq::find { xs = xs, p = f }
+  if seq::size { xs = xs } == 0 then None
+  else if seq::size { xs = xs } == 1 then
+    match seq::get { xs = xs, i = 0 } is
+      Some { val = x } -> if f { x = x } then Some { val = x } else None
+      None -> None
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -215,8 +215,11 @@ pub let find : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Option 'a <Parallel, 
       None -> both.r
 
 pub let any : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } <= 1000 then
-    seq::any { xs = xs, p = f }
+  if seq::size { xs = xs } == 0 then False
+  else if seq::size { xs = xs } == 1 then
+    match seq::get { xs = xs, i = 0 } is
+      Some { val = x } -> f { x = x }
+      None -> False
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
@@ -229,8 +232,11 @@ pub let any : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> =
     both.l || both.r
 
 pub let all : { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> = { xs, f } ->
-  if seq::size { xs = xs } <= 1000 then
-    seq::all { xs = xs, p = f }
+  if seq::size { xs = xs } == 0 then True
+  else if seq::size { xs = xs } == 1 then
+    match seq::get { xs = xs, i = 0 } is
+      Some { val = x } -> f { x = x }
+      None -> True
   else do
     let n = seq::size { xs = xs }
     let mid = n / 2
