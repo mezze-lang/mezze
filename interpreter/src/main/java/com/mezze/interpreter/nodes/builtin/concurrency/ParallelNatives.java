@@ -287,15 +287,14 @@ public final class ParallelNatives {
 
         HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         Semaphore sem = VTHREAD_SEMAPHORE.get();
+        boolean callerIsPlatform = !Thread.currentThread().isVirtual();
 
         AtomicReference<TaskUnhandledOpException> opSink = new AtomicReference<>();
         AtomicReference<Throwable> errSink = new AtomicReference<>();
 
-        // Spawn the right side via Truffle's thread builder so the vthread
-        // shares the polyglot context — direct Thread.ofVirtual() would
-        // trigger "Invalid sharing of AST nodes" when the vthread calls
-        // callNode.
         Env env = MezzeContext.get(node).getEnv();
+
+        // Right side: always on a fresh vthread.
         Object[] rightResultHolder = new Object[1];
         Thread rightThread = env.newTruffleThreadBuilder(() -> {
             if (sem != null) {
@@ -313,29 +312,53 @@ public final class ParallelNatives {
         }).virtual(true).build();
         rightThread.start();
 
-        // Left side: run inline on current thread (still under permit if capped).
-        // runBatchTask handles chain install/pop properly: if the current
-        // thread already has a chain (nested Parallel.join case), pushing
-        // and popping preserves it.
+        // Left side: if the caller is on a virtual thread, run inline
+        // (the classic Rayon pattern — cheap because we don't spawn a
+        // second vthread). If the caller is on the PLATFORM thread,
+        // running Mezze code inline while a peer vthread is doing the
+        // same triggers a Truffle safepoint / Loom pinning interaction
+        // that wedges the platform thread mid-execution. In that case
+        // spawn the left as its own vthread and let the platform thread
+        // wait on both — slower per-join but doesn't deadlock.
         Object[] leftResultHolder = new Object[1];
-        if (sem != null) {
-            try { sem.acquire(); } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("VirtualParallel.join interrupted", e);
+        Thread leftThread = null;
+        if (callerIsPlatform) {
+            leftThread = env.newTruffleThreadBuilder(() -> {
+                if (sem != null) {
+                    try { sem.acquire(); } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+                try {
+                    SpawnSupport.runBatchTask(chain, opSink, errSink, () ->
+                        leftResultHolder[0] = callThunk(leftFn, callNode));
+                } finally {
+                    if (sem != null) sem.release();
+                }
+            }).virtual(true).build();
+            leftThread.start();
+        } else {
+            if (sem != null) {
+                try { sem.acquire(); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("VirtualParallel.join interrupted", e);
+                }
             }
-        }
-        try {
-            SpawnSupport.runBatchTask(chain, opSink, errSink, () ->
-                leftResultHolder[0] = callThunk(leftFn, callNode));
-        } finally {
-            if (sem != null) sem.release();
+            try {
+                SpawnSupport.runBatchTask(chain, opSink, errSink, () ->
+                    leftResultHolder[0] = callThunk(leftFn, callNode));
+            } finally {
+                if (sem != null) sem.release();
+            }
         }
 
         try {
+            if (leftThread != null) leftThread.join();
             rightThread.join();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("VirtualParallel.join interrupted waiting for right side", e);
+            throw new RuntimeException("VirtualParallel.join interrupted waiting for peer", e);
         }
 
         SpawnSupport.propagateBatchFailure(opSink, errSink, "vthread join", callNode);
