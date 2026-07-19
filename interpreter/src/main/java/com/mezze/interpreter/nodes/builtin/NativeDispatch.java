@@ -2580,6 +2580,8 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_promise_await", (r, c) -> AsyncNatives.loomAwait(r));
         HANDLERS.put("__native_async_sleep", (r, c) -> AsyncNatives.loomSleep(r));
         HANDLERS.put("__native_async_yield_now", (r, c) -> AsyncNatives.loomYieldNow(r));
+        HANDLERS.put("__native_thread_id", (r, c) -> AsyncNatives.threadId(r));
+        HANDLERS.put("__native_truffle_runtime_name", (r, c) -> AsyncNatives.truffleRuntimeName(r));
         HANDLERS.put("__native_async_park_until", (r, c) -> AsyncNatives.loomParkUntil(r, c));
         HANDLERS.put("__native_async_scope_cancel_all", (r, c) -> AsyncNatives.loomScopeCancelAll(r));
         HANDLERS.put("__native_async_scope_is_cancelled", (r, c) -> AsyncNatives.loomScopeIsCancelled(r));
