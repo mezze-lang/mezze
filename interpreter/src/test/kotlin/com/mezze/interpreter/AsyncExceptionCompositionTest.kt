@@ -74,15 +74,15 @@ class AsyncExceptionCompositionTest {
     }
 
     @Disabled("""
-        The old test passed only because Parallel.map used to fall through
-        to seq::map for small lists (via a hidden threshold), so no fork
-        actually happened. Now that threshold is removed and every element
-        is genuinely forked, Exception propagation across the fork
-        boundary needs proper wiring — currently the raised op is returned
-        as a MezzeSuspended instead of surfacing on the outer
-        ExceptionToResult handler. Tracked in docs/PARALLEL_KNOWN_ISSUES.md.
-        Re-enable when cross-fork Exception propagation is wired for
-        Parallel.
+        Partial fix landed in task #51 — for_each, both, and spawned-task
+        Exception propagation all now work correctly. This test still
+        fails because the `let r = map { ... }` binding wraps `r` into an
+        outer `Ok { val = r }` record before the outer perform driver
+        catches the abort — so eval sees `Ok { val = MezzeSuspended }`
+        instead of the abort's Err. The abort machinery races with record
+        construction. Tracked in docs/PARALLEL_KNOWN_ISSUES.md; likely
+        needs the outer perform driver to catch TaskUnhandledOpException
+        (not just AbortPerformException) in its unwind path.
     """)
     @Test
     fun `raise inside Parallel map callback is caught by outer ExceptionToResult`() {
@@ -185,12 +185,6 @@ class AsyncExceptionCompositionTest {
         assertEquals("inner-bad", payload.getField("error"))
     }
 
-    @Disabled("""
-        Same class of issue as `raise inside Parallel map callback is
-        caught by outer ExceptionToResult` above — cross-fork Exception
-        propagation not currently wired for Parallel. See
-        docs/PARALLEL_KNOWN_ISSUES.md.
-    """)
     @Test
     fun `Parallel for_each whose callback raises surfaces on the handler`() {
         val source = """

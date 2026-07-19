@@ -237,7 +237,7 @@ public final class ParallelNatives {
         // if nobody stole it yet — no idle blocking on light work.
         rightTask.join();
 
-        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel join");
+        SpawnSupport.propagateBatchFailure(opSink, errSink, "parallel join", callNode);
 
         return MezzeRecord.fromFields(
             LR_FIELDS,
@@ -338,7 +338,7 @@ public final class ParallelNatives {
             throw new RuntimeException("VirtualParallel.join interrupted waiting for right side", e);
         }
 
-        SpawnSupport.propagateBatchFailure(opSink, errSink, "vthread join");
+        SpawnSupport.propagateBatchFailure(opSink, errSink, "vthread join", callNode);
 
         return MezzeRecord.fromFields(
             LR_FIELDS,

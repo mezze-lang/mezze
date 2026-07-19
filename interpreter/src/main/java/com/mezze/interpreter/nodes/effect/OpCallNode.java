@@ -380,7 +380,7 @@ public final class OpCallNode extends MezzeNode {
      */
     private static volatile MezzeFunction CACHED_CHAIN_RESUME_FN = null;
 
-    private static MezzeFunction makeChainResumeFunction() {
+    public static MezzeFunction makeChainResumeFunction() {
         MezzeFunction cached = CACHED_CHAIN_RESUME_FN;
         if (cached != null) return cached;
         return buildAndCacheChainResumeFunction();
