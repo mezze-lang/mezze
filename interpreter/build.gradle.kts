@@ -251,6 +251,12 @@ tasks.register<Test>("bench") {
     group = "verification"
     description = "Performance benchmarks and profiling harnesses (excluded from :test)."
     applyCommonTestConfig()
+    // Wire the custom Test task to the `test` source set explicitly.
+    // A registered custom Test task doesn't inherit testClassesDirs/
+    // classpath the way the default `test` task does, which is why bench
+    // was reporting NO-SOURCE. #70.
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
     // Bench tests need longer per-test timeout — they're allowed to run
     // for tens of seconds. Override the strict 120s default applied above.
     systemProperty("junit.jupiter.execution.timeout.default", "600s")
