@@ -67,6 +67,16 @@ public final class SeqFoldCallNode extends MezzeNode {
     @Child
     private SeqFoldLongInlinedLoopNode longInlinedLoopNode;
 
+    /**
+     * Set to true after the inlined fast path bails once (folder produced
+     * a non-Long, most commonly Long-arithmetic overflow to Double).
+     * From that point on we skip the fast path and go straight to the
+     * generic DirectCallNode fallback, avoiding a slow retry every call.
+     * #59.
+     */
+    @CompilationFinal
+    private boolean inlinedFastPathDisabled;
+
     @Child
     private SeqFoldDoubleLoopNode doubleLoopNode;
 
@@ -210,7 +220,7 @@ public final class SeqFoldCallNode extends MezzeNode {
         // single biggest closer of the user-lambda dispatch gap for
         // functional-style folds (sum, count-style, arithmetic
         // reductions, etc).
-        if (init instanceof Long initLong) {
+        if (init instanceof Long initLong && !inlinedFastPathDisabled) {
             SeqFoldLongInlinedLoopNode inlined = longInlinedLoopNode;
             if (inlined == null || inlined.getFolderTarget() != target) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
@@ -227,7 +237,18 @@ public final class SeqFoldCallNode extends MezzeNode {
                 }
             }
             if (inlined != null) {
-                return inlined.execute(data, initLong, size);
+                Long fastResult = inlined.execute(data, initLong, size);
+                if (fastResult != null) {
+                    return fastResult;
+                }
+                // Fast path bailed: folder produced a non-Long
+                // (arithmetic overflow to Double, or unexpected result
+                // type). Disable this fast path permanently for this
+                // call site so future calls go straight to the generic
+                // path. The bail-out inside execute() already deopted
+                // us. #59.
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                inlinedFastPathDisabled = true;
             }
         }
 

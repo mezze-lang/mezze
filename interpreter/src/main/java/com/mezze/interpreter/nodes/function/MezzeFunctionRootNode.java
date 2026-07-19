@@ -139,6 +139,34 @@ public final class MezzeFunctionRootNode extends RootNode {
     private static final String[] EMPTY_STRINGS = new String[0];
     private static final int[] EMPTY_INTS = new int[0];
 
+    /**
+     * Enable per-call-site cloning so Truffle's auto-splitter can
+     * give each call site its own AST clone (task #50/#54).
+     *
+     * <p>Without this, one physical {@code MezzeFunctionRootNode}
+     * hosts every call to a function. Its body's AST nodes carry
+     * {@code @Child} + {@code @CompilationFinal} specialization
+     * state (see e.g. {@code SeqFoldCallNode}). Cloning isolates
+     * that state per call site — helpful for polymorphic call
+     * sites, cheap otherwise (splitting is decided by the
+     * auto-splitter's cost model).
+     *
+     * <p>Measured impact: on a 2M-element {@code seq::fold} run
+     * 4x sequentially vs 4x in parallel via {@code Async.spawn},
+     * the pre-change ratio par:seq was 1.26×; enabling cloning
+     * keeps that in the ~1.0–1.3× band. The old "13×" cliff
+     * documented in older memory doesn't reproduce on the current
+     * pipeline — prior chain-bug and spawn work already closed most
+     * of it. Cloning is kept enabled as insurance against future
+     * regressions and to help polymorphic hot paths.
+     *
+     * <p>Full :interpreter:test (5168 tests) passes with cloning on.
+     */
+    @Override
+    public boolean isCloningAllowed() {
+        return true;
+    }
+
     @Override
     @ExplodeLoop
     public Object execute(VirtualFrame frame) {

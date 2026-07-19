@@ -3,12 +3,14 @@ package com.mezze.interpreter.nodes.seq;
 import com.mezze.interpreter.nodes.MezzeNode;
 import com.mezze.interpreter.nodes.function.MezzeFunctionRootNode;
 import com.oracle.truffle.api.CallTarget;
+import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.Truffle;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.frame.FrameSlotKind;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.nodes.ControlFlowException;
 import com.oracle.truffle.api.nodes.LoopNode;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.NodeInfo;
@@ -134,15 +136,44 @@ public final class SeqFoldLongInlinedLoopNode extends Node {
      * Runs the fold loop. {@code init} must be a {@link Long} (we
      * require it for the typed-LONG accumulator path); caller is
      * responsible for that guard.
+     *
+     * <p>Returns {@code null} if the folder produced a non-{@code Long}
+     * result mid-fold (accumulator promoted to {@code Double} via
+     * overflow, or the folder is non-arithmetic despite matching
+     * {@link #canHandle}). Caller should then fall back to the generic
+     * {@link SeqFoldLongLoopNode} or Object-typed path. See
+     * {@link NonLongResultException} for why we don't just throw
+     * {@link ClassCastException}: {@link com.oracle.truffle.api.nodes.ControlFlowException}
+     * is trusted by PE and doesn't materialize a Java stack trace on
+     * the hot path. #59.
      */
-    public long execute(long[] data, long init, int size) {
+    public Long execute(long[] data, long init, int size) {
         VirtualFrame loopFrame = Truffle.getRuntime().createVirtualFrame(
             new Object[]{data, size},
             LOOP_FD);
         loopFrame.setLong(ACC_SLOT, init);
         loopFrame.setLong(INDEX_SLOT, 0);
-        loopNode.execute(loopFrame);
+        try {
+            loopNode.execute(loopFrame);
+        } catch (NonLongResultException e) {
+            // Body produced a non-Long. Signal fallback to the caller.
+            // The @CompilationFinal fallback flag on caller ensures
+            // future iterations skip this node's fast path entirely.
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            return null;
+        }
         return loopFrame.getLong(ACC_SLOT);
+    }
+
+    /**
+     * Thrown by {@link InlinedRepeating} when the folder body returns a
+     * non-{@link Long}. Extends {@link ControlFlowException} so PE
+     * treats it as expected control flow (no stack trace, no cost when
+     * not thrown).
+     */
+    static final class NonLongResultException extends ControlFlowException {
+        private static final long serialVersionUID = 1L;
+        static final NonLongResultException INSTANCE = new NonLongResultException();
     }
 
     static final class InlinedRepeating extends Node implements RepeatingNode {
@@ -181,7 +212,16 @@ public final class SeqFoldLongInlinedLoopNode extends Node {
             innerFrame.setObject(1, element);
 
             Object result = clonedBody.execute(innerFrame);
-            // Body returns a Long for {acc, x} -> acc + x.
+            // Body returns a Long for {acc, x} -> acc + x. If the
+            // folder body arithmetic overflows Long and Mezze promotes
+            // the result to Double, the raw cast would blow up here.
+            // Signal a graceful fallback via ControlFlowException so
+            // execute() can restart the fold on the generic path.
+            // #59.
+            if (!(result instanceof Long)) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                throw NonLongResultException.INSTANCE;
+            }
             long next = (Long) result;
 
             frame.setLong(ACC_SLOT, next);
