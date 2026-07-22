@@ -36,6 +36,29 @@ object CpsDifferentialHarness {
     }
 
     /**
+     * Assert only that both pipelines yield the same result. Useful when
+     * the expected value isn't cheap to spell out (deep records, variants)
+     * but pipeline agreement is what we actually care about.
+     */
+    fun assertPipelinesAgree(source: String) {
+        val default = MezzeTestHelper.run(source)
+        val cps = withCps { MezzeTestHelper.run(source) }
+        // Use toString() as a cheap structural compare — MezzeRecord/
+        // MezzeVariant don't override equals() semantically, so
+        // Object.equals falls back to identity which is useless across
+        // two independent runs.
+        val d = default?.toString()
+        val c = cps?.toString()
+        if (d != c) {
+            throw AssertionError(
+                "default vs CPS pipeline disagree:\n" +
+                "  default = $d\n" +
+                "  cps     = $c"
+            )
+        }
+    }
+
+    /**
      * Force MEZZE_CPS lowering on for the body's duration by setting a
      * JVM system property that TypedASTCompiler will also honour. The
      * pipeline check in TypedASTCompiler prefers the property when set.

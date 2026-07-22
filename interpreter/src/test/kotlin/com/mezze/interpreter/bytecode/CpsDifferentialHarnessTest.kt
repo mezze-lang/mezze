@@ -49,4 +49,38 @@ class CpsDifferentialHarnessTest {
             42L
         )
     }
+
+    @Test
+    fun `perform with handle happy path runs identically under CPS`() {
+        CpsDifferentialHarness.assertPipelinesAgree(
+            """
+            use std::effects::exception::{Exception, ExceptionToResult}
+
+            let safe_div = {a, b} ->
+                if b == 0 then Exception.throw {error = "div by zero"} else a / b
+
+            let res = safe_div {a = 20, b = 5}
+
+            let handle = {} -> perform ExceptionToResult in Ok {val = res}
+            handle {}
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun `perform that throws is caught identically under CPS`() {
+        CpsDifferentialHarness.assertPipelinesAgree(
+            """
+            use std::effects::exception::{Exception, ExceptionToResult}
+
+            let safe_div = {a, b} ->
+                if b == 0 then Exception.throw {error = "div by zero"} else a / b
+
+            let res = safe_div {a = 4, b = 0}
+
+            let handle = {} -> perform ExceptionToResult in Ok {val = res}
+            handle {}
+            """.trimIndent()
+        )
+    }
 }
