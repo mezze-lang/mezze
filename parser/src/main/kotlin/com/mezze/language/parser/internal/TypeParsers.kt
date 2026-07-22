@@ -226,10 +226,17 @@ internal val MezzeParser.functionTypeAnnotation: Parser<ParsedTypeAnnotation>
                 currentStream = abilityStream
             }
 
-            val arrow = currentStream.current()
+            // Allow the return-arrow to sit on a following line: a wrapped
+            // signature (`… : { … }\n  -> Ret`, #78) is newline-insensitive
+            // between the parameter type, `->`, effect row, and return type.
+            // A `->` on the next line unambiguously continues the function
+            // type — nothing else legitimately follows a type across a bare
+            // newline in this position.
+            val streamBeforeArrow = skipNewlines(currentStream)
+            val arrow = streamBeforeArrow.current()
 
             if (arrow?.type == TokenType.ARROW) {
-                val arrowStream = currentStream.advance()
+                val arrowStream = streamBeforeArrow.advance()
                 val returnType = functionTypeAnnotation(arrowStream)
 
                 result = when (returnType) {

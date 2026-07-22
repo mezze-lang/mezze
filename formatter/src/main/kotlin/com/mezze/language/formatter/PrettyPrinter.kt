@@ -77,6 +77,18 @@ class PrettyPrinter {
         if (decl.visibility == Visibility.PUBLIC) append("pub ")
         append("let ")
         printPattern(decl.pattern)
+
+        val fnType = decl.typeAnnotation as? ParsedFunctionType
+        // #78 — wrap an over-budget function-type signature across lines at the
+        // top-level `:`, `->`, and `=`. The decl keyword + name stay on the
+        // anchor line (P0126); the wrapped `:`/`->`/`=` lines are indented one
+        // level. Only function-type signatures wrap (that's where the `->`
+        // break earns its keep); everything else stays single-line.
+        if (fnType != null && letSignatureExceedsBudget(decl, fnType)) {
+            printWrappedLetSignature(decl, fnType)
+            return
+        }
+
         decl.typeAnnotation?.let {
             append(": ")
             printTypeAnnotation(it)
@@ -84,6 +96,51 @@ class PrettyPrinter {
         append(" = ")
         printExpr(decl.value)
         newLine()
+    }
+
+    /** Would the one-line `[pub ]let name : T -> U = body` exceed the budget? */
+    private fun letSignatureExceedsBudget(decl: ParsedLetDecl, fnType: ParsedFunctionType): Boolean {
+        val prefix = (if (decl.visibility == Visibility.PUBLIC) 4 else 0) + 4 // "pub " + "let "
+        val nameW = estimatePatternWidth(decl.pattern)
+        val typeW = estimateTypeWidth(fnType)
+        val bodyW = estimateExprWidth(decl.value)
+        // name + ": " + type + " = " + body
+        return prefix + nameW + 2 + typeW + 3 + bodyW > config.MAX_LINE_LENGTH
+    }
+
+    /**
+     * `pub let name\n  : Param [with C]\n  -> Ret [<eff>]\n  = body`. The parser
+     * accepts arbitrary newlines between `:`, the type, `->`, the effect row,
+     * `=`, and the body once the anchor line is parsed (#78).
+     */
+    private fun printWrappedLetSignature(decl: ParsedLetDecl, fnType: ParsedFunctionType) {
+        newLine()
+        indent {
+            printIndent()
+            append(": ")
+            printTypeAnnotation(fnType.paramType)
+            if (fnType.abilityConstraints.isNotEmpty()) {
+                append(" with ")
+                printAbilityConstraints(fnType.abilityConstraints)
+            }
+            newLine()
+            printIndent()
+            append("-> ")
+            printTypeAnnotation(fnType.returnType)
+            fnType.effects?.let { append(" "); printEffectRow(it) }
+            newLine()
+            printIndent()
+            append("= ")
+            printExpr(decl.value)
+        }
+        newLine()
+    }
+
+    private fun estimatePatternWidth(pattern: ParsedPattern): Int = when (pattern) {
+        is ParsedVariablePattern -> pattern.name.length
+        is ParsedWildcardPattern -> 1
+        is ParsedRecordPattern -> 4 + pattern.entries.sumOf { it.name.length + 2 }
+        else -> 8
     }
 
     private fun printTypeDecl(decl: ParsedTypeDecl) {
