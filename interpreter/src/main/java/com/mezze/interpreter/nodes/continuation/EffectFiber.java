@@ -86,8 +86,10 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class EffectFiber {
 
-    @CompilationFinal final Object scope;
-    @CompilationFinal final Object continuation;
+    // Continuation state — routed through a swappable backend since Phase 0
+    // of Path C (docs/perf/bdsl-effects-path-c-2026-07.md). Null on
+    // dispatch-only fibers, which never suspend or resume.
+    @CompilationFinal final ContinuationBackend backend;
 
     private volatile Object suspendedValue;     // set by suspend(), read by runner
     private volatile Object resumeValue;        // set by runner, returned by suspend()
@@ -364,9 +366,8 @@ public final class EffectFiber {
         }
     }
 
-    private EffectFiber(Object scope, Object continuation) {
-        this.scope = scope;
-        this.continuation = continuation;
+    private EffectFiber(ContinuationBackend backend) {
+        this.backend = backend;
     }
 
     /**
@@ -375,9 +376,7 @@ public final class EffectFiber {
      */
     @TruffleBoundary
     public static EffectFiber create(String name, Runnable body) {
-        Object scope = LoomSupport.newScope(name);
-        Object cont = LoomSupport.newContinuation(scope, body);
-        return new EffectFiber(scope, cont);
+        return new EffectFiber(new LoomContinuationBackend(name, body));
     }
 
     /**
@@ -404,7 +403,7 @@ public final class EffectFiber {
             DISPATCH_POOL.set(null);
             return cached;
         }
-        return new EffectFiber(/* scope */ null, /* continuation */ null);
+        return new EffectFiber(/* backend */ null);
     }
 
     /** Return a dispatch fiber to the per-thread cache (best-effort). */
@@ -439,7 +438,7 @@ public final class EffectFiber {
         EffectFiber previous = CURRENT.get();
         CURRENT.set(this);
         try {
-            LoomSupport.run(continuation);
+            backend.run();
         } finally {
             CURRENT.set(previous);
         }
@@ -462,7 +461,7 @@ public final class EffectFiber {
         EffectFiber previous = CURRENT.get();
         CURRENT.set(null);
         try {
-            LoomSupport.run(continuation);
+            backend.run();
         } finally {
             CURRENT.set(previous);
         }
@@ -479,7 +478,7 @@ public final class EffectFiber {
                 "EffectFiber@" + id + " is closed; cannot suspend");
         }
         this.suspendedValue = value;
-        boolean ok = LoomSupport.yield(scope);
+        boolean ok = backend.yield();
         if (!ok) {
             throw new IllegalStateException(
                 "EffectFiber yield failed (likely native frames pinning)");
@@ -490,7 +489,7 @@ public final class EffectFiber {
     }
 
     public boolean isDone() {
-        return LoomSupport.isDone(continuation);
+        return backend.isDone();
     }
 
     /**
@@ -507,7 +506,7 @@ public final class EffectFiber {
                 "EffectFiber@" + id + " is closed; cannot suspend");
         }
         this.suspendedValue = value;
-        boolean ok = LoomSupport.yield(scope);
+        boolean ok = backend.yield();
         if (!ok) {
             throw new IllegalStateException(
                 "EffectFiber yield failed (likely native frames pinning)");
