@@ -47,6 +47,11 @@ typedef struct {
   // scanner invocations; `pending_dedents` counts how many DEDENT tokens still
   // owe emission before we consume the newline.
   uint16_t pending_dedents;
+  // After the last DEDENT lands exactly on a still-open level's column, the
+  // enclosing block resumes with a new item at that column — so we owe it a
+  // NEWLINE. e.g. an inner `match` dedents back to the outer arm column and the
+  // outer match continues with its next arm.
+  bool pending_newline;
 } Scanner;
 
 static void stack_push(Stack *s, int32_t col) {
@@ -79,6 +84,7 @@ unsigned tree_sitter_mezze_external_scanner_serialize(void *payload, char *buffe
   Scanner *scanner = (Scanner *)payload;
   unsigned size = 0;
   buffer[size++] = (char)(scanner->pending_dedents & 0xFF);
+  buffer[size++] = (char)(scanner->pending_newline ? 1 : 0);
   // Store stack (excluding the sentinel) as raw int32s, bounded by the
   // serialization buffer size.
   uint16_t n = scanner->stack.len;
@@ -95,12 +101,14 @@ void tree_sitter_mezze_external_scanner_deserialize(void *payload, const char *b
   Scanner *scanner = (Scanner *)payload;
   scanner->stack.len = 0;
   scanner->pending_dedents = 0;
+  scanner->pending_newline = false;
   if (length == 0) {
     stack_push(&scanner->stack, 0);
     return;
   }
   unsigned size = 0;
   scanner->pending_dedents = (unsigned char)buffer[size++];
+  scanner->pending_newline = buffer[size++] != 0;
   while (size + sizeof(int32_t) <= length) {
     int32_t col;
     memcpy(&col, &buffer[size], sizeof(int32_t));
@@ -122,6 +130,15 @@ bool tree_sitter_mezze_external_scanner_scan(void *payload, TSLexer *lexer,
     scanner->pending_dedents--;
     if (scanner->stack.len > 1) scanner->stack.len--; // pop the level
     lexer->result_symbol = DEDENT;
+    return true;
+  }
+
+  // After the dedents settle, if the resumed line sits exactly at a still-open
+  // block's column, emit the NEWLINE that block owes for its next item (an
+  // inner match/do dedented back to the enclosing arm/statement column).
+  if (scanner->pending_newline && valid_symbols[NEWLINE]) {
+    scanner->pending_newline = false;
+    lexer->result_symbol = NEWLINE;
     return true;
   }
 
@@ -184,6 +201,13 @@ bool tree_sitter_mezze_external_scanner_scan(void *payload, TSLexer *lexer,
       else break;
     }
     if (dedents > 0) {
+      // After all `dedents` levels pop, the top-of-stack column is what remains.
+      // If it equals the resumed line's column, the enclosing block continues
+      // with a new item here — owe it a NEWLINE once the DEDENTs are done.
+      int remaining = (int)scanner->stack.len - (int)dedents;
+      int32_t post_pop_top = (remaining >= 1) ? scanner->stack.cols[remaining - 1] : 0;
+      scanner->pending_newline = (post_pop_top == col);
+
       scanner->pending_dedents = dedents - 1;
       scanner->stack.len--; // pop first level now
       lexer->result_symbol = DEDENT;
