@@ -7191,7 +7191,7 @@ class MezzeTextDocumentService(
         val parsedModule = state.parsedModule ?: return emptyList()
         // Legend indices (must match the order in server capabilities).
         val FUNCTION = 1; val VARIABLE = 2; val ENUM_MEMBER = 10; val PARAMETER = 9
-        val NAMESPACE = 11
+        val NAMESPACE = 11; val PROPERTY = 8
         val DEFINITION = 2  // modifier bit
         val srcLines = state.content.lines()
 
@@ -7275,6 +7275,96 @@ class MezzeTextDocumentService(
                 walk(d.value)
             }
         }
+
+        // Record-shaped field names → `property`, UNIFORMLY across every `{ … }`
+        // form: record literals, record types, lambda params, record patterns,
+        // and ability/effect/impl bodies. Each is a list of `name : field`; an
+        // ability op or effect op IS a record field, so it colors identically to
+        // a field in a record literal. The field NAME is at the entry loc's
+        // start; we emit exactly `name.length` chars so the value keeps its own
+        // color. Driven off the PARSED module — these are syntactic positions the
+        // parser knows precisely (no type info needed).
+        fun emitFieldName(loc: com.mezze.language.parsedast.Loc, name: String) {
+            if (loc.startLine != loc.endLine) return
+            if (name.isEmpty()) return
+            toks.add(SemToken(loc.startLine - 1, loc.startCol - 1, name.length, PROPERTY, 0))
+        }
+
+        fun walkTypeFields(t: com.mezze.language.parsedast.ParsedTypeAnnotation) {
+            when (t) {
+                is com.mezze.language.parsedast.ParsedRecordType ->
+                    t.entries.forEach { emitFieldName(it.loc, it.name); walkTypeFields(it.type) }
+                is com.mezze.language.parsedast.ParsedFunctionType -> {
+                    walkTypeFields(t.paramType); walkTypeFields(t.returnType)
+                }
+                is com.mezze.language.parsedast.ParsedTypeApp -> t.args.forEach { walkTypeFields(it) }
+                is com.mezze.language.parsedast.ParsedSeqType -> walkTypeFields(t.elementType)
+                else -> {}
+            }
+        }
+
+        fun walkPatternFields(p: com.mezze.language.parsedast.ParsedPattern) {
+            when (p) {
+                is com.mezze.language.parsedast.ParsedRecordPattern ->
+                    p.entries.forEach { emitFieldName(it.loc, it.name); it.pattern?.let(::walkPatternFields) }
+                is com.mezze.language.parsedast.ParsedSeqPattern -> p.elements.forEach { walkPatternFields(it) }
+                else -> {}
+            }
+        }
+
+        fun walkExprFields(e: com.mezze.language.parsedast.ParsedExpr) {
+            when (e) {
+                is com.mezze.language.parsedast.ParsedRecordLit ->
+                    e.entries.forEach { entry ->
+                        when (entry) {
+                            is com.mezze.language.parsedast.ParsedRecordEntry.Field -> {
+                                emitFieldName(entry.loc, entry.name)
+                                entry.value?.let(::walkExprFields)
+                            }
+                            is com.mezze.language.parsedast.ParsedRecordEntry.Spread -> walkExprFields(entry.expr)
+                        }
+                    }
+                is com.mezze.language.parsedast.ParsedLambda -> {
+                    // Lambda params ARE a record of params → their names are fields.
+                    (e.params as? com.mezze.language.parsedast.ParsedLambdaParams.Typed)?.fields
+                        ?.forEach { emitFieldName(it.loc, it.name); walkTypeFields(it.type) }
+                    walkExprFields(e.body)
+                }
+                is com.mezze.language.parsedast.ParsedMatch ->
+                    // A match arm's pattern is record-shaped too: `{ x, y } ->`.
+                    e.cases.forEach { c -> c.patterns.forEach { walkPatternFields(it) } }
+                is com.mezze.language.parsedast.ParsedDo ->
+                    // `let { x, y } = e` inside a do-block binds a record pattern.
+                    e.statements.forEach { st ->
+                        if (st is com.mezze.language.parsedast.ParsedStatement.Let) walkPatternFields(st.pattern)
+                        if (st is com.mezze.language.parsedast.ParsedStatement.Bind) walkPatternFields(st.pattern)
+                    }
+                else -> {}
+            }
+            for (child in e.children()) walkExprFields(child)
+        }
+
+        for (decl in parsedModule.decls) {
+            when (decl) {
+                is ParsedLetDecl -> {
+                    walkPatternFields(decl.pattern)  // `let { x, y } = …`
+                    decl.typeAnnotation?.let { walkTypeFields(it) }
+                    walkExprFields(decl.value)
+                }
+                is com.mezze.language.parsedast.ParsedAbilityDecl ->
+                    decl.operations.forEach { op ->
+                        emitFieldName(op.loc, op.name)
+                        walkTypeFields(op.paramType); walkTypeFields(op.returnType)
+                    }
+                is com.mezze.language.parsedast.ParsedEffectDecl ->
+                    decl.operations.forEach { op ->
+                        emitFieldName(op.loc, op.name)
+                        walkTypeFields(op.paramType); walkTypeFields(op.returnType)
+                    }
+                else -> {}
+            }
+        }
+
         return toks
     }
 

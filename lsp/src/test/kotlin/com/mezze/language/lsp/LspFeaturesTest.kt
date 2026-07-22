@@ -1023,6 +1023,38 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `semantic tokens color record-shaped field names as property, uniformly`() {
+        // Every `{ … }` is record-shaped, so field NAMES color as `property`
+        // (legend index 8) everywhere: record literals, record types, lambda
+        // params, and ability/effect bodies. An ability/effect op IS a record
+        // field, so it colors identically to a field in a record literal.
+        val (uri, _) = openSingleFile("""
+            let mk : { x: Int, y: Int } -> Int = { x, y } -> x + y
+            let r = mk { x = 1, y = 2 }
+
+            ability Show for 'a where {
+              show : { it: 'a } -> Str
+            }
+
+            effect State s where {
+              get : {} -> s
+              set : { val: s } -> {}
+            }
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        val tokens = server.textDocumentService.semanticTokensFull(SemanticTokensParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+        }).get(5, TimeUnit.SECONDS)
+        val types = decodeSemanticTokenTypes(tokens?.data ?: emptyList())
+        // PROPERTY = 8. Record-literal fields (x,y), record-type fields (x,y,it,val),
+        // lambda-param names (x,y), and ability/effect op names (show,get,set) all
+        // land here.
+        assertTrue(types.contains(8),
+            "expected PROPERTY tokens (8) for record/ability/effect field names, got type set: $types")
+    }
+
+    @Test
     fun `semantic tokens color module qualifiers as namespace`() {
         // Tier-2: a qualified reference `std::int::add` colors the `std` and
         // `int` module segments as Namespace (legend index 11).
