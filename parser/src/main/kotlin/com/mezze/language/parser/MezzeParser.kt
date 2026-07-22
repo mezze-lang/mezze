@@ -13,6 +13,25 @@ class MezzeParser {
     companion object
 
     fun parseParsedModule(source: String, file: String = "<unknown>"): ParsedModule {
+        // Corpus capture (opt-in, off by default): when MEZZE_CORPUS_CAPTURE is
+        // set, record every (source, accepted|rejected) pair so the parser test
+        // suite can be replayed into the tree-sitter corpus. Zero cost otherwise.
+        // The record is emitted in a finally so both the success and the throw
+        // paths below are captured — the parser itself decides accept vs reject.
+        if (CorpusCapture.enabled) {
+            try {
+                val m = parseParsedModuleImpl(source, file)
+                CorpusCapture.record(source, accepted = true)
+                return m
+            } catch (e: Throwable) {
+                CorpusCapture.record(source, accepted = false)
+                throw e
+            }
+        }
+        return parseParsedModuleImpl(source, file)
+    }
+
+    private fun parseParsedModuleImpl(source: String, file: String): ParsedModule {
         currentSource = source
         currentFile = file
 
