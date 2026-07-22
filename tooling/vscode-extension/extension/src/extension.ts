@@ -62,7 +62,16 @@ export function activate(context: vscode.ExtensionContext) {
         }),
         // Clear the server's content-addressed analysis cache. Useful after a
         // stale-cache glitch (e.g. a mez version bump) without a full restart.
-        vscode.commands.registerCommand('mezze.clearCache', async () => {
+        //
+        // IMPORTANT: the palette command ID must NOT collide with the server's
+        // own executeCommand IDs (`mezze.clearCache` / `mezze.restart`).
+        // vscode-languageclient auto-registers a VS Code command for every ID
+        // the server advertises in executeCommandProvider; registering the same
+        // ID here throws `command '…' already exists` during client.start(),
+        // which fails LSP startup entirely (symptom: "Server process exited with
+        // code 0"). So the palette commands use distinct `…Command` IDs and
+        // forward to the server command by name.
+        vscode.commands.registerCommand('mezze.clearCacheCommand', async () => {
             if (!client) { return; }
             await client.sendRequest('workspace/executeCommand', {
                 command: 'mezze.clearCache', arguments: []
@@ -71,7 +80,7 @@ export function activate(context: vscode.ExtensionContext) {
         }),
         // Full server-side reset (reload store + re-analyze open docs) without
         // tearing down the client connection.
-        vscode.commands.registerCommand('mezze.restart', async () => {
+        vscode.commands.registerCommand('mezze.resetServerState', async () => {
             if (!client) { return; }
             await client.sendRequest('workspace/executeCommand', {
                 command: 'mezze.restart', arguments: []

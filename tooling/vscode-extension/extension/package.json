@@ -2,7 +2,7 @@
   "name": "mezze-language",
   "displayName": "Mezze Language Support",
   "description": "Full language support for Mezze: syntax highlighting, type information, diagnostics, go to definition, and more",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "publisher": "mezze-lang",
   "icon": "icon.png",
   "engines": {
@@ -101,11 +101,11 @@
         "title": "Mezze: Restart Language Server"
       },
       {
-        "command": "mezze.clearCache",
+        "command": "mezze.clearCacheCommand",
         "title": "Mezze: Clear Analysis Cache"
       },
       {
-        "command": "mezze.restart",
+        "command": "mezze.resetServerState",
         "title": "Mezze: Reset Server State"
       }
     ]
