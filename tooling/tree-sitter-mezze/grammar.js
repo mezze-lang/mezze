@@ -78,6 +78,13 @@ module.exports = grammar({
     // type_binding's value `'a = T` — T could be a `_type` (resolved)
     // or the start of a function_type. Explore both.
     [$._type, $.function_type],
+    // A record `{…}` at the start of a type could be a standalone record_type
+    // OR the parameter list of a function_type (`{p} with C -> Ret`). The
+    // `with`/`->` that follows disambiguates, but the parser must keep both
+    // live until it sees them — otherwise it reduces record_type early and the
+    // trailing `with`/`->` dangles. Same for a bare type_variable/named_type as
+    // the function_type parameter.
+    [$.record_type, $.function_type],
     // `having 'a = T, ...` inside an effect_reference vs ability_constraint:
     // after the first type_binding, the comma could continue the binding
     // list OR terminate the effect/constraint and start the next sibling.
@@ -460,12 +467,15 @@ module.exports = grammar({
     //   Int -> Int                -- bare concrete param
     // Effect row goes between return type and `with`. Constraints chain
     // with `,` and each may carry `having 'assoc = T`.
+    // Canonical Mezze function type: `{params} with C1, C2 -> Ret <effects>`.
+    // The `with`-clause sits BEFORE the arrow, right after the parameter record
+    // — the parser enforces this (P0120 rejects `with` after the return type).
     function_type: $ => prec.right(seq(
       field('parameters', choice($.record_type, $.type_variable, $.named_type)),
+      optional(seq('with', sepBy1(',', $.ability_constraint))),
       '->',
       field('return_type', $._type),
       optional(field('effects', $.effect_row)),
-      optional(seq('with', sepBy1(',', $.ability_constraint))),
     )),
 
     record_type: $ => seq(
