@@ -12,6 +12,12 @@
 # as the language grows. The Kotlin SharedCorpusParityTest independently proves
 # the accepted snippets parse under the real parser.
 #
+# ALWAYS regenerate the corpus from the parser BEFORE running the tree-sitter
+# tests, so the corpus can't go stale behind a parser change. The npm `test`,
+# `parity`, and `check` scripts do this for you (they run
+# gen-from-parser-tests.sh first). If you invoke THIS script directly, run
+# `scripts/gen-from-parser-tests.sh` first — or just use `npm run parity`.
+#
 # Usage:
 #   scripts/parity.sh            # check everything, print a summary
 #   scripts/parity.sh -v         # also print the offending tree for each miss
