@@ -499,13 +499,66 @@ class Lexer(
     }
 
     private fun lexComment(start: Int, startLine: Int, startColumn: Int): Token {
-        // Comments start with # and continue until end of line
-        // We include the # in the comment text
-        while (!isAtEnd() && current() != '\n') {
-            advance()
+        // `#`-lines have three well-formed shapes; anything else is a lex error:
+        //   `# text`   line comment    — `#` MUST be followed by a space/tab
+        //                                (or be empty to EOL: a bare `#`).
+        //   `## text`  doc comment     — `##` MUST be followed by a space/tab
+        //                                (or be empty to EOL: a bare `##`).
+        //   `#{ … }`   metadata        — MUST have a closing `}` on the line.
+        // `#foo`, `##foo`, and an unclosed `#{broken` are typos, not comments,
+        // and are rejected with a clear message rather than silently swallowed.
+        val second = peek(1)   // char after the first '#'
+
+        // Metadata: `#{ … }` — require a closing `}` before end of line.
+        if (second == '{') {
+            var i = position + 2
+            var closed = false
+            while (i < source.length && source[i] != '\n') {
+                if (source[i] == '}') { closed = true; break }
+                i++
+            }
+            if (!closed) {
+                // Consume the line so error recovery resyncs at the next line.
+                while (!isAtEnd() && current() != '\n') advance()
+                return Token(
+                    TokenType.ERROR,
+                    "Unclosed metadata block: `#{ … }` must have a closing `}` on the same line",
+                    start, startLine, startColumn
+                )
+            }
+            // Well-formed metadata: consume to EOL, classified downstream.
+            while (!isAtEnd() && current() != '\n') advance()
+            return Token(TokenType.COMMENT, source.substring(start, position), start, startLine, startColumn)
         }
-        val text = source.substring(start, position)
-        return Token(TokenType.COMMENT, text, start, startLine, startColumn)
+
+        // Doc comment `##` — the char after `##` must be a space/tab or EOL.
+        if (second == '#') {
+            val third = peek(2)
+            val docOk = isCommentSep(third)
+            if (!docOk) {
+                while (!isAtEnd() && current() != '\n') advance()
+                return Token(
+                    TokenType.ERROR,
+                    "A doc comment must have a space after `##` (write `## $third…` not `##$third…`)",
+                    start, startLine, startColumn
+                )
+            }
+            while (!isAtEnd() && current() != '\n') advance()
+            return Token(TokenType.COMMENT, source.substring(start, position), start, startLine, startColumn)
+        }
+
+        // Line comment `#` — the char after `#` must be a space/tab or EOL.
+        val lineOk = isCommentSep(second)
+        if (!lineOk) {
+            while (!isAtEnd() && current() != '\n') advance()
+            return Token(
+                TokenType.ERROR,
+                "A comment must have a space after `#` (write `# $second…` not `#$second…`)",
+                start, startLine, startColumn
+            )
+        }
+        while (!isAtEnd() && current() != '\n') advance()
+        return Token(TokenType.COMMENT, source.substring(start, position), start, startLine, startColumn)
     }
 
     private fun skipWhitespace() {
@@ -521,6 +574,12 @@ class Lexer(
             break
         }
     }
+
+    // A valid separator after # / ## in a comment: whitespace or EOL/EOF.
+    // \u0000 is the peek()/current() EOF sentinel (a bare # or ## at end of
+    // file is a legal empty comment).
+    private fun isCommentSep(c: Char): Boolean =
+        c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\u0000'
 
     private fun current(): Char = if (position < source.length) source[position] else '\u0000'
     private fun peek(offset: Int = 1): Char = if (position + offset < source.length) source[position + offset] else '\u0000'

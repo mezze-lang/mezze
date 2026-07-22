@@ -3,6 +3,7 @@ package com.mezze.language.parser
 import com.mezze.language.parsedast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.Nested
 
 class DocCommentAndMetadataTest {
@@ -87,14 +88,16 @@ effect Log where {
 
         @Test
         fun `doc comment strips leading space after hash`() {
+            // A doc comment requires a space after `##` (see
+            // CommentSyntaxTighteningTest — `##Without` is now rejected). The
+            // single separating space is stripped; extra spaces are kept.
             val module = parser.parseParsedModule("""
 ## With space
-##Without space
 ##  Double space
 let x = 42
 """.trimIndent())
             val decl = module.decls[0] as ParsedLetDecl
-            assertEquals("With space\nWithout space\n Double space", decl.docComment)
+            assertEquals("With space\n Double space", decl.docComment)
         }
     }
 
@@ -601,16 +604,13 @@ let x = 42
         }
 
         @Test
-        fun `malformed metadata is treated as regular comment`() {
-            // #{no closing brace should not crash
-            val module = parser.parseParsedModule("""
-#{broken
-let x = 42
-""".trimIndent())
-            val decl = module.decls[0] as ParsedLetDecl
-            // Malformed metadata: MetadataParser.parse returns null,
-            // so it should be treated as a regular comment that resets
-            assertNull(decl.metadata)
+        fun `unclosed metadata is a parse error`() {
+            // `#{` must be a well-formed `#{ … }` on one line. An unclosed
+            // `#{broken` is a typo, not a comment, and is rejected at lex time
+            // (see CommentSyntaxTighteningTest).
+            assertThrows<ParseException> {
+                parser.parseParsedModule("#{broken\nlet x = 42")
+            }
         }
     }
 
