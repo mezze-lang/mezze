@@ -373,10 +373,27 @@ public final class EffectFiber {
     /**
      * Build a fiber whose body is the given Runnable. The body does not
      * execute until {@link #run()} is called.
+     *
+     * <p>Backend today is always the Loom-based one. Path C Phase 3.1
+     * will flip this to select {@link CpsContinuationBackend} when
+     * {@link com.mezze.interpreter.runtime.MezzeLanguage#CPS_ENABLED} is
+     * on, once the CPS backend can transparently replace Loom (i.e.
+     * after the real IR transform lands in Phases 1.5-1.6).
      */
     @TruffleBoundary
     public static EffectFiber create(String name, Runnable body) {
         return new EffectFiber(new LoomContinuationBackend(name, body));
+    }
+
+    /**
+     * Build a fiber explicitly using the CPS backend. Currently only
+     * exercised by tests probing the CPS backend end-to-end; production
+     * callers should stick with {@link #create}. See
+     * {@link CpsContinuationBackend} for its scope caveats.
+     */
+    @TruffleBoundary
+    public static EffectFiber createCps(String name, Runnable body) {
+        return new EffectFiber(new CpsContinuationBackend(name, body));
     }
 
     /**
