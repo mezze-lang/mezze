@@ -335,6 +335,11 @@ module.exports = grammar({
       // the typechecker disambiguates via name lookup.
       seq(
         'impl',
+        // A qualified ability/effect name: `Eq`, `log::Log`,
+        // `std::effects::log::Log`. The module prefix is a run of
+        // `lower_identifier ::` — the trailing `::` after a lowercase segment
+        // is what tells the parser this is a module path and not an argument.
+        optional(field('module_path', repeat1(seq($.lower_identifier, '::')))),
         field('name', $.upper_identifier),
         repeat(field('argument', $._type_atom)),
         'for',
