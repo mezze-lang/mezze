@@ -164,6 +164,9 @@
 (effect_operation name: (lower_identifier) @function.method)
 (impl_operation name: (lower_identifier) @function.method)
 
+;; The operation invoked by `perform info { … }` — an effect-op call.
+(perform_expression operation: (variable (lower_identifier) @function.method))
+
 ;; Qualified reference: `module::name` — the trailing name is the
 ;; thing being referenced. We tag the module path as @namespace and
 ;; the leaf depending on shape.
@@ -184,8 +187,20 @@
 (record_pattern_field name: (lower_identifier) @variable.member)
 (record_type_field name: (lower_identifier) @variable.member)
 
+;; Record spread `{ ...base, … }` — the `...` is spread punctuation; the
+;; source expression highlights via its own rules.
+(record_spread "..." @punctuation.special)
+
+;; Open record type `{ a: Int, ... }` — the trailing `...` marks an open row.
+(record_type_rest) @punctuation.special
+
 ;; Pattern variable bindings (e.g. the `x` in `let x = …` or `Some {x}`).
 (variable_pattern (lower_identifier) @variable)
+
+;; Bare variable references in expression position (`person` in
+;; `{ ...person }`, `xs` in `xs |> …`). A general fallback — more specific
+;; rules above (function callees, qualified refs) already tagged their own.
+(variable (lower_identifier) @variable)
 
 ;; ============================================================
 ;; Imports / namespaces

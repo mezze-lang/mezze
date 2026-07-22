@@ -22,8 +22,11 @@
   ],
   "scripts": {
     "build": "tree-sitter generate && tree-sitter build",
-    "test": "tree-sitter test",
-    "parse": "tree-sitter parse"
+    "test": "tree-sitter generate && tree-sitter test",
+    "parse": "tree-sitter parse",
+    "parity": "bash scripts/parity.sh",
+    "gen-corpus": "bash scripts/gen-corpus.sh",
+    "check": "tree-sitter generate && tree-sitter test && bash scripts/parity.sh"
   },
   "tree-sitter": [
     {
