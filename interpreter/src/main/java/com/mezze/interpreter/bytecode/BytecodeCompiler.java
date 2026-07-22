@@ -139,6 +139,14 @@ import java.util.Map;
  */
 public final class BytecodeCompiler {
 
+    /**
+     * Field names of the record we yield when Path D lowering is on.
+     * See docs/perf/bdsl-effects-path-d-2026-07.md. The driver reads
+     * these three fields via MezzeRecord.getField to dispatch the op.
+     */
+    private static final String[] PERFORM_YIELD_RECORD_FIELDS =
+            new String[] { "effect_hash", "op_name", "arg" };
+
     private final MezzeLanguage language;
 
     /**
@@ -1254,7 +1262,24 @@ public final class BytecodeCompiler {
             return;
         }
         if (node instanceof PerformOpIR p) {
-            // Effect perform: fiber-yield via OpCallNode (same node used
+            // Path D (docs/perf/bdsl-effects-path-d-2026-07.md): when the
+            // MEZZE_BDSL_YIELD gate is on, lower every perform to a BDSL
+            // Yield of a synthetic {effect_hash, op_name, arg} record.
+            // Framework returns a ContinuationResult on the caller side;
+            // driver reads getResult() to see the op, dispatches, resumes
+            // via continueWith(value). Zero Loom fiber, zero reflection.
+            if (com.mezze.interpreter.runtime.MezzeLanguage.BDSL_YIELD_ENABLED) {
+                b.beginYield();
+                b.beginMakeRecord(PERFORM_YIELD_RECORD_FIELDS);
+                b.emitLoadConstant(p.getEffectHash());
+                b.emitLoadConstant(p.getOperationName());
+                emitNode(p.getArg(), b, argCount, localMap);
+                b.endMakeRecord();
+                b.endYield();
+                return;
+            }
+
+            // Path A (default): fiber-yield via OpCallNode (same node used
             // by AST). See docs/perf/bdsl-effects-path-a-2026-07.md.
             // Mut fast path: emit the raw `act` value directly and use
             // PerformMutMutateAct so the OpCallNode wraps it into the

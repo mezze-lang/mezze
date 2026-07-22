@@ -101,6 +101,16 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             System.getenv("MEZZE_CPS") != null
                 && !"0".equals(System.getenv("MEZZE_CPS"))
                 && !"false".equalsIgnoreCase(System.getenv("MEZZE_CPS"));
+
+    // Path D routing (docs/perf/bdsl-effects-path-d-2026-07.md) — opt-in
+    // via MEZZE_BDSL_YIELD env var. When on, BytecodeCompiler emits a BDSL
+    // Yield op at every PerformOpIR site (bytecode-native suspend), and the
+    // driver catches ContinuationResult on return. Requires MEZZE_BDSL=1
+    // to have any effect. Off by default; will flip in Phase D5.
+    public static final boolean BDSL_YIELD_ENABLED =
+            System.getenv("MEZZE_BDSL_YIELD") != null
+                && !"0".equals(System.getenv("MEZZE_BDSL_YIELD"))
+                && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL_YIELD"));
     private static final boolean BDSL_STATS =
             System.getenv("MEZZE_BDSL_STATS") != null
                 && !"0".equals(System.getenv("MEZZE_BDSL_STATS"))
