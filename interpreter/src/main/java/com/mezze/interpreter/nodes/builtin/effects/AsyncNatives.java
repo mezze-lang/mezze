@@ -143,6 +143,34 @@ public final class AsyncNatives {
             this.semaphore = semaphore;
         }
 
+        /**
+         * Backend-supplied cancel hook. Set by user-space Promise
+         * constructors (promise_from) so a cancel() call can propagate
+         * to a foreign scheduler (Kotlin Job, CompletableFuture, etc.).
+         *
+         * Single-writer (the promise_from setup callback), single-reader
+         * (cancel()). Volatile for visibility across threads.
+         */
+        private volatile Runnable cancelHook;
+
+        public void setCancelHook(Runnable hook) {
+            this.cancelHook = hook;
+        }
+
+        /** Build a Promise that is already Completed with `value`. */
+        public static MezzePromise completedWith(Object value) {
+            MezzePromise p = new MezzePromise(null, null);
+            p.complete(value);
+            return p;
+        }
+
+        /** Build a Promise that is already Failed with `error`. */
+        public static MezzePromise failedWith(Object error) {
+            MezzePromise p = new MezzePromise(null, null);
+            p.fail(error);
+            return p;
+        }
+
         public void setUnhandledOpCall(OpCall op) {
             this.unhandledOpCall = op;
         }
@@ -207,6 +235,10 @@ public final class AsyncNatives {
                 if (executingThread != null) {
                     executingThread.interrupt();
                 }
+                Runnable hook = cancelHook;
+                if (hook != null) {
+                    try { hook.run(); } catch (Throwable ignored) { /* hook errors don't unwind cancel */ }
+                }
                 unparkWaiter();
                 return true;
             }
@@ -242,6 +274,10 @@ public final class AsyncNatives {
             if (STATE.compareAndSet(this, PENDING, CANCELLED)) {
                 if (executingThread != null) {
                     executingThread.interrupt();
+                }
+                Runnable hook = cancelHook;
+                if (hook != null) {
+                    try { hook.run(); } catch (Throwable ignored) { /* hook errors don't unwind cancel */ }
                 }
                 unparkWaiter();
                 return CANCEL_DID_CANCEL;
