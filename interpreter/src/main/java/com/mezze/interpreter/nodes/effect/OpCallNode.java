@@ -172,6 +172,38 @@ public final class OpCallNode extends MezzeNode {
         } else {
             args = argumentNode.execute(frame);
         }
+        return dispatchWith(args);
+    }
+
+    /**
+     * BDSL entry point: called with the argument already on the operand
+     * stack. Skips the {@link #argumentNode} evaluation that {@link #execute}
+     * would do. Same lifecycle as execute for the standard path.
+     *
+     * For the Mut fast path, use {@link #executeMutMutateActFast(Object)}
+     * instead — this method does NOT wrap the raw lambda into an {@code {act}}
+     * record.
+     */
+    public Object executeWith(Object arg) {
+        return dispatchWith(arg);
+    }
+
+    /**
+     * BDSL entry point for the {@code Mut.mutate { act = X }} fast path:
+     * caller passes the {@code act} lambda directly (matching the emit
+     * shape). We build the one-field wrapper here so the mutate impl can
+     * read it, then dispatch as usual.
+     */
+    public Object executeMutMutateActFast(Object actFn) {
+        Object args = MezzeRecord.withAllObjects(actWrapperShape, new Object[] { actFn });
+        return dispatchWith(args);
+    }
+
+    /**
+     * Shared body of {@link #execute}, {@link #executeWith}, and
+     * {@link #executeMutMutateActFast} once the argument value is in hand.
+     */
+    private Object dispatchWith(Object args) {
         EffectFiber fiber = EffectFiber.current();
         if (fiber != null) {
             return fiber.suspend(new OpCall(operationName, args, effectHash));

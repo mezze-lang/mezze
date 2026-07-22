@@ -31,7 +31,9 @@ import com.mezze.language.truffleir.NodeIR;
 import com.mezze.language.truffleir.PatternIR;
 import com.mezze.language.truffleir.CallIndirectScalarIR;
 import com.mezze.language.truffleir.DictMethodCallIR;
+import com.mezze.language.truffleir.EffectBindingIR;
 import com.mezze.language.truffleir.PartialApplyDirectIR;
+import com.mezze.language.truffleir.PerformOpIR;
 import com.mezze.language.truffleir.FracLitIR;
 import com.mezze.language.truffleir.ReadArgIR;
 import com.mezze.language.truffleir.ReadCaptureIR;
@@ -264,6 +266,14 @@ public final class BytecodeCompiler {
         if (node instanceof FracLitIR) return true;
         if (node instanceof ReadArgIR) return true;
         if (node instanceof ReadCaptureIR) return true;
+        if (node instanceof EffectBindingIR) return true;
+        if (node instanceof PerformOpIR p) {
+            // Path A: arg is evaluated then handed to a cached
+            // OpCallNode.executeWith. The Mut fast path lowers the raw
+            // `act` lambda directly (no wrapper record on the stack)
+            // to preserve the marker fast path.
+            return supportsNode(p.getArg(), argCount);
+        }
         if (node instanceof WriteLocalIR w) {
             return supportsNode(w.getValue(), argCount);
         }
@@ -287,6 +297,18 @@ public final class BytecodeCompiler {
                 NodeIR child = (s instanceof StmtIR.Let l) ? l.getValue()
                              : ((StmtIR.Expr) s).getNode();
                 if (!supportsNode(child, argCount)) return false;
+                // AST's BlockNode composes a ComposedBlockThunk when a
+                // stmt returns MezzeSuspended, wrapping the remaining
+                // stmts. BDSL blocks discard each Expr's value —
+                // MezzeSuspended propagation is lost. Reject blocks
+                // where a non-tail statement could produce a
+                // MezzeSuspended (i.e. contains a Perform or transitive
+                // effect call). Let statements are safe (their result
+                // is stored, not discarded).
+                if (s instanceof StmtIR.Expr && canYieldSuspended(child)) {
+                    markReject(node, "block-stmt-may-suspend");
+                    return false;
+                }
             }
             return supportsNode(blk.getResult(), argCount);
         }
@@ -335,6 +357,15 @@ public final class BytecodeCompiler {
             for (StringPartIR p : is.getParts()) {
                 if (p instanceof StringPartIR.Expr e) {
                     if (!supportsNode(e.getNode(), argCount)) return false;
+                    // AST's InterpolatedStringNode calls .to_dbg_str on
+                    // MezzeSuspended parts to render them. BDSL's
+                    // InterpolateString op just String.valueOfs — losing
+                    // the suspension. Reject bodies where any expr part
+                    // could return MezzeSuspended.
+                    if (canYieldSuspended(e.getNode())) {
+                        markReject(node, "interp-expr-may-suspend");
+                        return false;
+                    }
                 }
             }
             return true;
@@ -722,6 +753,8 @@ public final class BytecodeCompiler {
             return false;
         }
         if (node instanceof WriteLocalIR w) return hasTailCall(w.getValue());
+        if (node instanceof PerformOpIR p) return hasTailCall(p.getArg());
+        if (node instanceof EffectBindingIR) return false;
         if (node instanceof InterpolatedStringIR is) {
             for (StringPartIR p : is.getParts()) {
                 if (p instanceof StringPartIR.Expr ep && hasTailCall(ep.getNode())) return true;
@@ -1213,6 +1246,33 @@ public final class BytecodeCompiler {
             b.endMonomorphicCall();
             return;
         }
+        if (node instanceof EffectBindingIR eb) {
+            // Delegate to a cached EffectBindingNode via the EffectBinding
+            // op — reads resume/abort/scope from EffectFiber.dispatching()
+            // or MezzeContext. Zero stack input.
+            b.emitEffectBinding(eb.getName());
+            return;
+        }
+        if (node instanceof PerformOpIR p) {
+            // Effect perform: fiber-yield via OpCallNode (same node used
+            // by AST). See docs/perf/bdsl-effects-path-a-2026-07.md.
+            // Mut fast path: emit the raw `act` value directly and use
+            // PerformMutMutateAct so the OpCallNode wraps it into the
+            // one-field {act = ...} record locally — preserves the
+            // marker fast path.
+            if (isMutMutateWithActLambda(p)) {
+                com.mezze.language.truffleir.MakeRecordIR arg =
+                        (com.mezze.language.truffleir.MakeRecordIR) p.getArg();
+                b.beginPerformMutMutateAct(p.getEffectHash());
+                emitNode(arg.getFields().get(0).getValue(), b, argCount, localMap);
+                b.endPerformMutMutateAct();
+                return;
+            }
+            b.beginPerform(p.getEffectHash(), p.getOperationName());
+            emitNode(p.getArg(), b, argCount, localMap);
+            b.endPerform();
+            return;
+        }
         if (node instanceof CallIndirectScalarIR ci) {
             // Lower as CallIndirect(function, MakeRecord(argFieldNames, args)).
             // This mirrors InvokeScalarNNode's fallback path when no
@@ -1466,6 +1526,65 @@ public final class BytecodeCompiler {
                                     MezzeBytecodeRootNodeGen.Builder b,
                                     int argCount, BytecodeLocal[] localMap) {
         emitNode(bin, b, argCount, localMap);
+    }
+
+    /**
+     * True iff evaluating {@code node} might return a
+     * {@link com.mezze.interpreter.values.MezzeSuspended} — the AST's
+     * BlockNode uses this signal to wrap remaining statements in a
+     * ComposedBlockThunk (see {@code BlockNode.handleSuspendedEffect}).
+     * BDSL blocks discard bare Expr values, so a suspend on such a stmt
+     * would be silently swallowed. Conservative: any transitive
+     * {@link PerformOpIR} makes this true.
+     */
+    private static boolean canYieldSuspended(NodeIR node) {
+        if (node == null) return false;
+        if (node instanceof PerformOpIR) return true;
+        if (node instanceof BlockIR blk) {
+            for (StmtIR s : blk.getStmts()) {
+                NodeIR child = (s instanceof StmtIR.Let l) ? l.getValue()
+                             : ((StmtIR.Expr) s).getNode();
+                if (canYieldSuspended(child)) return true;
+            }
+            return canYieldSuspended(blk.getResult());
+        }
+        if (node instanceof IfIR i) {
+            return canYieldSuspended(i.getCond())
+                || canYieldSuspended(i.getThenBr())
+                || canYieldSuspended(i.getElseBr());
+        }
+        if (node instanceof WriteLocalIR w) return canYieldSuspended(w.getValue());
+        if (node instanceof InlineBinaryOpIR bin) {
+            return canYieldSuspended(bin.getLeft()) || canYieldSuspended(bin.getRight());
+        }
+        // CallDirect/CallIndirect/CallLocal/DictMethod could evaluate a
+        // callee whose body performs — but we can't see across function
+        // boundaries here cheaply. AST's BlockNode handles the returned
+        // MezzeSuspended anyway, so a call-site whose value is dropped
+        // is what matters. Be conservative: treat calls as
+        // suspend-capable.
+        if (node instanceof CallDirectIR) return true;
+        if (node instanceof CallIndirectIR) return true;
+        if (node instanceof CallLocalIR) return true;
+        if (node instanceof DictMethodCallIR) return true;
+        if (node instanceof CallNativeIR) return true;
+        // Everything else — literals, ReadArg/Local/Global, MakeRecord etc.
+        // — cannot produce MezzeSuspended.
+        return false;
+    }
+
+    /**
+     * Mirror of {@code TruffleCompiler.isMutMutateWithActLambda}: true iff
+     * the perform-op is {@code Mut.mutate { act = X }}. In that shape the
+     * wrapper record can be elided — see the emit for {@code PerformOpIR}
+     * and {@link com.mezze.interpreter.nodes.effect.OpCallNode#createMutMutateActFast}.
+     */
+    private static boolean isMutMutateWithActLambda(PerformOpIR node) {
+        if (!"mutate".equals(node.getOperationName())) return false;
+        if (!com.mezze.interpreter.nodes.effect.MarkerEffects.isMutEffect(node.getEffectHash())) return false;
+        if (!(node.getArg() instanceof com.mezze.language.truffleir.MakeRecordIR mr)) return false;
+        if (mr.getFields().size() != 1) return false;
+        return "act".equals(mr.getFields().get(0).getName());
     }
 
     /**

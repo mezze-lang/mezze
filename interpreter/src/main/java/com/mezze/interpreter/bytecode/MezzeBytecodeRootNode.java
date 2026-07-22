@@ -46,6 +46,7 @@ import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.FrameDescriptor;
+import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.Node;
@@ -1087,6 +1088,95 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization
         public static Object doVariant(MezzeVariant variant) {
             return variant.getPayloadValue();
+        }
+    }
+
+    /**
+     * Effect perform-op call: pop the argument value and delegate to a
+     * cached {@link com.mezze.interpreter.nodes.effect.OpCallNode} via
+     * {@code executeWith}. Same lifecycle as AST — Loom fiber suspend
+     * when a driver is present, otherwise chain-dispatch or a
+     * MezzeSuspended thunk. See docs/perf/bdsl-effects-path-a-2026-07.md.
+     *
+     * <p>Lowers {@link com.mezze.language.truffleir.PerformOpIR} (default
+     * path). The Mut fast path uses a separate op below.
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    @ConstantOperand(type = String.class)
+    public static final class Perform {
+        @Specialization
+        public static Object doPerform(
+                Hash effectHash,
+                String opName,
+                Object arg,
+                @Cached(value = "createOpCall(opName, effectHash)", allowUncached = true)
+                    com.mezze.interpreter.nodes.effect.OpCallNode opCall) {
+            return opCall.executeWith(arg);
+        }
+
+        static com.mezze.interpreter.nodes.effect.OpCallNode createOpCall(
+                String opName, Hash effectHash) {
+            return com.mezze.interpreter.nodes.effect.OpCallNode.create(
+                    opName, effectHash,
+                    new com.mezze.interpreter.nodes.literal.UnitLiteralNode());
+        }
+    }
+
+    /**
+     * Fast path for {@code perform Mut mutate { act = <lambda> }}: pop
+     * the raw act lambda (no wrapper record on the operand stack). The
+     * cached OpCallNode was built via
+     * {@link com.mezze.interpreter.nodes.effect.OpCallNode#createMutMutateActFast}
+     * and knows to wrap the value into the one-field {act = ...} record
+     * before dispatching.
+     *
+     * <p>Preserves the AST's Mut marker fast path — must not regress the
+     * LocalMut hot loop.
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    public static final class PerformMutMutateAct {
+        @Specialization
+        public static Object doPerform(
+                Hash effectHash,
+                Object actFn,
+                @Cached(value = "createOpCall(effectHash)", allowUncached = true)
+                    com.mezze.interpreter.nodes.effect.OpCallNode opCall) {
+            return opCall.executeMutMutateActFast(actFn);
+        }
+
+        static com.mezze.interpreter.nodes.effect.OpCallNode createOpCall(Hash effectHash) {
+            return com.mezze.interpreter.nodes.effect.OpCallNode.createMutMutateActFast(
+                    effectHash,
+                    new com.mezze.interpreter.nodes.literal.UnitLiteralNode());
+        }
+    }
+
+    /**
+     * Read a name contributed by the effect-handler runtime (one of
+     * {@code resume}, {@code abort}, {@code scope}). Delegates to a
+     * cached {@link com.mezze.interpreter.nodes.effect.EffectBindingNode}
+     * whose {@code execute} reads {@link com.mezze.interpreter.nodes.continuation.EffectFiber#dispatching}
+     * for resume/abort, or {@link com.mezze.interpreter.runtime.MezzeContext}
+     * for scope.
+     *
+     * <p>Lowers {@link com.mezze.language.truffleir.EffectBindingIR}.
+     */
+    @Operation
+    @ConstantOperand(type = String.class)
+    public static final class EffectBinding {
+        @Specialization
+        public static Object doBinding(
+                String name,
+                @Cached(value = "createBinding(name)", allowUncached = true)
+                    com.mezze.interpreter.nodes.effect.EffectBindingNode binding) {
+            // EffectBindingNode.execute doesn't touch the frame; safe to pass null.
+            return binding.execute(null);
+        }
+
+        static com.mezze.interpreter.nodes.effect.EffectBindingNode createBinding(String name) {
+            return new com.mezze.interpreter.nodes.effect.EffectBindingNode(name);
         }
     }
 
