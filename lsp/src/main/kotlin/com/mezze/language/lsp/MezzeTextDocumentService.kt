@@ -1062,6 +1062,52 @@ class MezzeTextDocumentService(
 
         val result = state.typeCheckResult
 
+        // Impl hover: if the cursor is on the HEADER of an impl decl (the `impl`
+        // keyword, the ability/effect name, or the target type) — as opposed to
+        // deep in an op body — show which ability/effect it implements, its ops,
+        // and a link to the decl. Header = the line the impl's loc starts on.
+        run {
+            val pm = state.parsedModule ?: return@run
+            val lineNo = position.line + 1
+            // Header detection is robust to comment-shifted decl locs: the cursor
+            // line must be inside the decl's range AND its trimmed text starts
+            // with `impl` (the header line), not a `name = …` op-body line.
+            val onImplHeaderLine = line.trimStart().startsWith("impl")
+            for (decl in pm.decls) {
+                if (lineNo < decl.loc.startLine || lineNo > decl.loc.endLine) continue
+                when (decl) {
+                    is com.mezze.language.parsedast.ParsedImplAbilityDecl -> {
+                        if (onImplHeaderLine &&
+                            (word == "impl" || word == decl.abilityName ||
+                                decl.targetTypes.any { formatTypeAnnotation(it).substringBefore(' ') == word })
+                        ) {
+                            val abilityDecl = pm.decls.filterIsInstance<ParsedAbilityDecl>()
+                                .find { it.name == decl.abilityName }
+                                ?: result?.importedAbilities?.get(decl.abilityName)
+                            val fromModule = result?.resolvedImports
+                                ?.find { it.localName == decl.abilityName && it.kind == ImportKind.ABILITY }
+                                ?.modulePath
+                            return formatAbilityImplHover(decl, abilityDecl, fromModule)
+                        }
+                    }
+                    is ParsedPerformerDecl -> {
+                        if (onImplHeaderLine &&
+                            (word == "impl" || word == decl.effect.localName || word == decl.performerName)
+                        ) {
+                            val effectDecl = pm.decls.filterIsInstance<ParsedEffectDecl>()
+                                .find { it.name == decl.effect.localName }
+                                ?: result?.importedEffects?.get(decl.effect.localName)
+                            val fromModule = result?.resolvedImports
+                                ?.find { it.localName == decl.effect.localName && it.kind == ImportKind.EFFECT }
+                                ?.modulePath
+                            return formatEffectImplHover(decl, effectDecl, fromModule)
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+
         // Helper to format type with aliases
         fun formatType(type: MezzeType): String {
             return prettyPrintTypeWithAliases(type, state.typeAliases)
@@ -1497,6 +1543,71 @@ class MezzeTextDocumentService(
     }
 
     /**
+     * Hover for an ability impl (`impl Eq for Int where { … }`). Shows which
+     * ability it implements + the target type, each op with its type (the impl's
+     * own annotation when present, else the ability decl's op signature so the
+     * method's shape is always visible), and a link to where the ability is
+     * defined. `abilityDecl` is the resolved `ability` decl (may be null if the
+     * ability is imported / unresolved — then op types fall back to the impl's).
+     */
+    private fun formatAbilityImplHover(
+        decl: com.mezze.language.parsedast.ParsedImplAbilityDecl,
+        abilityDecl: ParsedAbilityDecl?,
+        fromModule: String?,
+    ): String {
+        fun codeBlock(code: String): String = "```mezze\n$code\n```"
+        val abilityName = decl.abilityName ?: "<ability>"
+        val targets = decl.targetTypes.joinToString(", ") { formatTypeAnnotation(it) }
+        val header = "impl $abilityName" + if (targets.isNotEmpty()) " for $targets" else ""
+
+        // Prefer the ability decl's op signatures (always typed); fall back to the
+        // impl op's own annotation.
+        val abilityOps = abilityDecl?.operations?.associateBy { it.name } ?: emptyMap()
+        val ops = decl.operations.joinToString("\n") { op ->
+            val sig = abilityOps[op.name]
+            val param = op.paramType ?: sig?.paramType
+            val ret = op.returnType ?: sig?.returnType
+            val ty = if (param != null && ret != null)
+                "${formatTypeAnnotation(param)} -> ${formatTypeAnnotation(ret)}" else "…"
+            "  ${op.name}: $ty"
+        }
+        val body = if (ops.isNotEmpty()) " where {\n$ops\n}" else ""
+        val link = fromModule?.takeIf { it.isNotEmpty() }
+            ?.let { "\n\nability `$abilityName` defined in `$it`" }
+            ?: "\n\nimplements ability `$abilityName`"
+        return appendDoc(codeBlock("$header$body") + link, decl.docComment, decl.metadata)
+    }
+
+    /**
+     * Hover for an effect impl / performer (`impl State for Counter where { … }`).
+     * Same shape as the ability-impl hover but for effects.
+     */
+    private fun formatEffectImplHover(
+        decl: ParsedPerformerDecl,
+        effectDecl: ParsedEffectDecl?,
+        fromModule: String?,
+    ): String {
+        fun codeBlock(code: String): String = "```mezze\n$code\n```"
+        val effectName = decl.effect.localName
+        val header = "impl $effectName for ${decl.performerName}"
+
+        val effectOps = effectDecl?.operations?.associateBy { it.name } ?: emptyMap()
+        val ops = decl.operations.joinToString("\n") { op ->
+            val sig = effectOps[op.name]
+            val param = op.paramType ?: sig?.paramType
+            val ret = op.returnType ?: sig?.returnType
+            val ty = if (param != null && ret != null)
+                "${formatTypeAnnotation(param)} -> ${formatTypeAnnotation(ret)}" else "…"
+            "  ${op.name}: $ty"
+        }
+        val body = if (ops.isNotEmpty()) " where {\n$ops\n}" else ""
+        val link = fromModule?.takeIf { it.isNotEmpty() }
+            ?.let { "\n\neffect `$effectName` defined in `$it`" }
+            ?: "\n\nimplements effect `$effectName`"
+        return appendDoc(codeBlock("$header$body") + link, decl.docComment, decl.metadata)
+    }
+
+    /**
      * Format a ParsedTypeAnnotation to a readable string.
      */
     private fun formatTypeAnnotation(type: ParsedTypeAnnotation): String {
@@ -1695,6 +1806,23 @@ class MezzeTextDocumentService(
         val word = extractWordAt(line, position.character) ?: return emptyList()
         val result = state.typeCheckResult ?: lastSuccessfulResult[state.uri]
 
+        // 0. Ability / effect NAME used in a constraint (`with Eq 'a`) or an
+        // effect row (`<State, Log>`) → its decl. The typed-AST lookup below
+        // would otherwise resolve the enclosing binding on the same line and
+        // shadow the ability/effect. Only kicks in when the word is a known
+        // ability/effect name AND sits in a `with …`/`<…>` position.
+        run {
+            val pm = state.parsedModule ?: return@run
+            val beforeWord = line.substring(0, position.character.coerceIn(0, line.length))
+            val inConstraint = Regex("\\bwith\\b").containsMatchIn(beforeWord)
+            val inEffectRow = beforeWord.lastIndexOf('<') > beforeWord.lastIndexOf('>')
+            if (!inConstraint && !inEffectRow) return@run
+            pm.decls.filterIsInstance<ParsedAbilityDecl>().find { it.name == word }
+                ?.let { return listOf(locToLocation(state.uri, it.loc)) }
+            pm.decls.filterIsInstance<ParsedEffectDecl>().find { it.name == word }
+                ?.let { return listOf(locToLocation(state.uri, it.loc)) }
+        }
+
         // 1. Try TypedAST position lookup — finds the exact expression at cursor
         val typedModule = result?.typedModule
         if (typedModule != null) {
@@ -1758,6 +1886,38 @@ class MezzeTextDocumentService(
                     return listOf(locToLocation(state.uri, lookup.loc))
                 }
                 is TypedAstLookup.LookupResult.NotFound -> {}
+            }
+        }
+
+        // 1b. Impl-method → the op's signature in the ability/effect decl.
+        // Cursor on an op NAME inside an impl body (`show = { … }`) jumps to
+        // `show: { it: 'a } -> Str` in the ability decl (or the effect op).
+        val parsedModuleForImpl = state.parsedModule
+        if (parsedModuleForImpl != null) {
+            val lineNo = position.line + 1
+            for (decl in parsedModuleForImpl.decls) {
+                if (lineNo < decl.loc.startLine || lineNo > decl.loc.endLine) continue
+                when (decl) {
+                    is com.mezze.language.parsedast.ParsedImplAbilityDecl -> {
+                        val op = decl.operations.find { it.name == word && it.loc.startLine == lineNo }
+                        if (op != null) {
+                            val abilityDecl = parsedModuleForImpl.decls
+                                .filterIsInstance<ParsedAbilityDecl>().find { it.name == decl.abilityName }
+                            val sig = abilityDecl?.operations?.find { it.name == word }
+                            if (sig != null) return listOf(locToLocation(state.uri, sig.loc))
+                        }
+                    }
+                    is ParsedPerformerDecl -> {
+                        val op = decl.operations.find { it.name == word && it.loc.startLine == lineNo }
+                        if (op != null) {
+                            val effectDecl = parsedModuleForImpl.decls
+                                .filterIsInstance<ParsedEffectDecl>().find { it.name == decl.effect.localName }
+                            val sig = effectDecl?.operations?.find { it.name == word }
+                            if (sig != null) return listOf(locToLocation(state.uri, sig.loc))
+                        }
+                    }
+                    else -> {}
+                }
             }
         }
 
@@ -6617,6 +6777,25 @@ class MezzeTextDocumentService(
         // Local file first — precise arm locs.
         val localParsed = state.parsedModule
         if (localParsed != null) {
+            // #147: the name is an ABILITY decl → all impls of that ability;
+            // an EFFECT decl → all its performers. `find-implementations` on
+            // `Show`/`State` (the decl name) lists every `impl Show for …` /
+            // `impl State for …`. Local file + all open docs.
+            val isAbility = localParsed.decls.filterIsInstance<ParsedAbilityDecl>().any { it.name == methodName }
+            val isEffect = localParsed.decls.filterIsInstance<ParsedEffectDecl>().any { it.name == methodName }
+            if (isAbility || isEffect) {
+                for ((docUri, docState) in documents) {
+                    val pm = docState.parsedModule ?: continue
+                    if (isAbility) pm.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()
+                        .filter { it.abilityName == methodName }
+                        .forEach { out.add(Location(docUri, locToRange(it.loc))) }
+                    if (isEffect) pm.decls.filterIsInstance<ParsedPerformerDecl>()
+                        .filter { it.effect.localName == methodName }
+                        .forEach { out.add(Location(docUri, locToRange(it.loc))) }
+                }
+                if (out.isNotEmpty()) return out
+            }
+
             for (impl in localParsed.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>()) {
                 for (op in impl.operations) {
                     if (op.name == methodName) out.add(Location(state.uri, locToRange(op.loc)))

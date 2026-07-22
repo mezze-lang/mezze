@@ -343,6 +343,138 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `hover on an effect impl shows which effect + its methods + a link`() {
+        val (uri, src) = openSingleFile("""
+            type MemCounter = | MemCounter |
+
+            effect Counter where {
+              get : {} -> Int,
+              incr : {} -> {}
+            }
+
+            impl Counter for MemCounter where {
+              get = {} -> 0,
+              incr = {} -> {}
+            }
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        // Find the impl header line; hover across it and pick the hover that IS
+        // the impl hover (a col may land on MemCounter → type hover; the `impl`
+        // keyword + effect name give the impl hover).
+        val implLine = src.lines().indexOfFirst { it.trimStart().startsWith("impl Counter") }
+        assertTrue(implLine >= 0, "impl header not found")
+        val txt = (0 until src.lines()[implLine].length)
+            .mapNotNull { c -> hoverAt(uri, implLine, c)?.let { hoverText(it) } }
+            .firstOrNull { it.contains("impl Counter for MemCounter") }
+            ?: error("no impl hover on the header line; hovers seen: " +
+                (0 until src.lines()[implLine].length).mapNotNull { c -> hoverAt(uri, implLine, c)?.let { hoverText(it).take(30) } }.distinct())
+        assertTrue(txt.contains("impl Counter for MemCounter"),
+            "expected the impl header naming the effect + target, got:\n$txt")
+        assertTrue(txt.contains("get") && txt.contains("incr"),
+            "expected the impl's methods listed, got:\n$txt")
+        assertTrue(txt.contains("effect `Counter`") || txt.contains("implements effect"),
+            "expected a link back to the effect, got:\n$txt")
+    }
+
+    @Test
+    fun `hover on an ability impl shows which ability + its methods`() {
+        val (uri, _) = openSingleFile("""
+            ability Show for 'a where {
+              show : { it: 'a } -> Str
+            }
+
+            impl Show for Int where {
+              show = { it } -> "n"
+            }
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        // Hover on `Show` in the impl header (0-based line 4, col 5 = the S).
+        val h = hoverAt(uri, 4, 5)
+        val txt = hoverText(h!!)
+        assertTrue(txt.contains("impl Show for Int"),
+            "expected the impl header naming the ability + target, got:\n$txt")
+        assertTrue(txt.contains("show"),
+            "expected the impl's `show` method listed, got:\n$txt")
+        assertTrue(txt.contains("ability `Show`") || txt.contains("implements ability"),
+            "expected a link back to the ability, got:\n$txt")
+    }
+
+    @Test
+    fun `find-implementations on an ability decl lists its impls`() {
+        val (uri, src) = openSingleFile("""
+            ability Show for 'a where {
+              show : { it: 'a } -> Str
+            }
+
+            impl Show for Int where {
+              show = { it } -> "n"
+            }
+
+            impl Show for Str where {
+              show = { it } -> it
+            }
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        val abilityLine = src.lines().indexOfFirst { it.startsWith("ability Show") }
+        val locs = server.textDocumentService.implementation(ImplementationParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(abilityLine, src.lines()[abilityLine].indexOf("Show"))
+        }).get(5, TimeUnit.SECONDS).let { e -> if (e.isLeft) e.left else e.right.map { Location(it.targetUri, it.targetRange) } }
+
+        val implLines = src.lines().mapIndexedNotNull { i, l -> if (l.startsWith("impl Show")) i else null }.toSet()
+        assertTrue(locs.size >= 2, "expected both impls of Show, got $locs")
+        assertTrue(locs.all { it.range.start.line in implLines },
+            "each result should point at an `impl Show` header, got $locs")
+    }
+
+    @Test
+    fun `goto-def on ability + method + constraint resolves to the decl and op`() {
+        val (uri, src) = openSingleFile("""
+            ability Show for 'a where {
+              show : { it: 'a } -> Str
+            }
+
+            let f : { x: 'a } with Show 'a -> Str = { x } -> Show::show { it = x }
+
+            impl Show for Int where {
+              show = { it } -> "n"
+            }
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        fun defAt(line: Int, ch: Int): List<Location> =
+            server.textDocumentService.definition(DefinitionParams().apply {
+                textDocument = TextDocumentIdentifier(uri); position = Position(line, ch)
+            }).get(5, TimeUnit.SECONDS).let { e ->
+                if (e.isLeft) e.left else e.right.map { Location(it.targetUri, it.targetRange) }
+            }
+
+        val abilityLine = src.lines().indexOfFirst { it.startsWith("ability Show") }
+        val constraintLine = src.lines().indexOfFirst { it.contains("with Show") }
+        val implLine = src.lines().indexOfFirst { it.startsWith("impl Show") }
+        val methodLine = src.lines().withIndex().first { (i, l) -> i > implLine && l.contains("show =") }.index
+
+        // #144: `Show` in the impl header → the ability decl.
+        val fromImpl = defAt(implLine, src.lines()[implLine].indexOf("Show"))
+        assertTrue(fromImpl.any { it.range.start.line == abilityLine },
+            "impl→ability: expected a jump to line $abilityLine, got $fromImpl")
+
+        // #146: `Show` in the `with Show 'a` constraint → the ability decl.
+        val fromConstraint = defAt(constraintLine, src.lines()[constraintLine].indexOf("Show"))
+        assertTrue(fromConstraint.any { it.range.start.line == abilityLine },
+            "constraint→ability: expected a jump to line $abilityLine, got $fromConstraint")
+
+        // #145: `show` op name in the impl body → the `show:` op in the ability decl.
+        val opSigLine = src.lines().indexOfFirst { it.contains("show :") }
+        val fromMethod = defAt(methodLine, src.lines()[methodLine].indexOf("show"))
+        assertTrue(fromMethod.any { it.range.start.line == opSigLine },
+            "method→op: expected a jump to the op sig at line $opSigLine, got $fromMethod")
+    }
+
+    @Test
     fun `hover on ability-method call result shows specialized return type`() {
         // For `let v = (make_ok {}).try {}` where make_ok returns
         // `Result Int Str`, hovering on `v` should show `Int <Exception>`
