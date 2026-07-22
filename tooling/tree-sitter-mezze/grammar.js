@@ -390,11 +390,14 @@ module.exports = grammar({
 
     variable_pattern: $ => $.lower_identifier,
     wildcard_pattern: _ => '_',
-    literal_pattern: $ => choice($.integer_literal, $.string_literal, $.bool_literal),
+    literal_pattern: $ => choice($.integer_literal, $.float_literal, $.string_literal, $.bool_literal),
 
     record_pattern: $ => seq(
       '{',
       sepBy(',', $.record_pattern_field),
+      // Open record pattern: `{ name, ... }` matches a record with at least
+      // these fields, ignoring the rest.
+      optional(seq(optional(','), '...')),
       '}',
     ),
 
