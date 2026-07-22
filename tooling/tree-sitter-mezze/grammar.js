@@ -538,7 +538,13 @@ module.exports = grammar({
     ability_constraint: $ => prec.left(seq(
       field('ability', $.qualified_upper_name),
       repeat1(field('argument', $._type_atom)),
-      optional(seq('having', sepBy1(',', $.type_binding))),
+      // `having 'item = Int, 'index = String` — reuse the having_clause node
+      // (which already carries the GLR conflicts against ability_constraint /
+      // effect_reference), so the comma after a binding can EITHER continue the
+      // binding list OR end this constraint and start the next in a `with C1,
+      // C2` list. The parser resolves it greedily (continue bindings); the
+      // declared conflict lets tree-sitter explore both.
+      optional($.having_clause),
     )),
 
     // <Effect1, Effect2, ...> or <*> or <...> — appears ONLY after a function
