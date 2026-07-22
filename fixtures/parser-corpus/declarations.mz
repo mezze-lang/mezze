@@ -1,0 +1,77 @@
+# Declarations: let, type, newtype, use, pub. One valid snippet per `# ===` block.
+
+# === simple let
+let x = 1
+
+# === let with lambda
+let f = {x} -> x + 1
+
+# === let with empty-param lambda
+let f = { } -> 42
+
+# === let with multi-param lambda
+let test = {x, y} -> x + y
+
+# === let with type annotation
+let x: [Int] = []
+
+# === let with record type annotation and literal body
+let x: { msg: String } -> Int = 42
+
+# === let value on the next line
+let x =
+  1
+
+# === let destructuring a record
+let {name} = myRecord
+
+# === let with numeric underscores
+let x = 1_000_000
+
+# === let with natural literal
+let n = 1_000_000n
+
+# === let with float underscores
+let pi = 3.141_592
+
+# === type variant declaration
+type Color = | Red, Green, Blue |
+
+# === type with generic parameter
+type Option 'a = | Some { val: 'a }, None |
+
+# === newtype wrapper
+newtype Email = Email String
+
+# === newtype with record payload
+newtype Handler = Handler { x: Int } -> String
+
+# === newtype generic
+newtype Option 'a = Option 'a
+
+# === whole-module import
+use std::int
+
+# === selective import
+use std::collections::seq::{ map, filter }
+
+# === selective import with rename
+use std::collections::seq::{ map as m }
+
+# === pub let
+pub let answer = 42
+
+# === pub type
+pub type Unit = | Unit |
+
+# === multi-line pub let signature (#78)
+pub let promise_from
+  : { setup: { complete: { val: 'a } -> {} } -> {} }
+  -> Promise 'a
+  = { setup } -> setup
+
+# === multi-line let signature with effect row
+let run
+  : { x: Int }
+  -> Int <State>
+  = { x } -> x

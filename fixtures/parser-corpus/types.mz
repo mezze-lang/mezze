@@ -1,0 +1,28 @@
+# Type annotations: records (closed + open), functions, applications, variables.
+
+# === closed record type annotation
+let f : { a: Int } -> Int = {r} -> r.a
+
+# === open record type annotation
+let f : { a: Int, ... } -> Int = {r} -> r.a
+
+# === function type annotation
+let apply : { f: { x: Int } -> Int } -> Int = {r} -> 0
+
+# === type application
+let m : { xs: [Int] } -> Int = {r} -> 0
+
+# === type variable in signature
+let id : { x: 'a } -> 'a = {r} -> r.x
+
+# === sequence type
+let head : { xs: [Int] } -> Int = {r} -> 0
+
+# === generic type declaration
+type Option 'a = | Some { val: 'a }, None |
+
+# === multi-constructor variant
+type Color = | Red, Green, Blue |
+
+# === nested type application in annotation
+let f : { r: Result Int String } -> Int = {r} -> 0

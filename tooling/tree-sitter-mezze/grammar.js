@@ -45,6 +45,18 @@ const PREC = {
 module.exports = grammar({
   name: 'mezze',
 
+  // Indentation-aware block termination is handled by the external scanner in
+  // src/scanner.c. It emits zero-width INDENT / NEWLINE / DEDENT tokens that
+  // bound `match … is` arm lists and `do` blocks — Mezze terminates those by
+  // indentation (an arm/statement continues only while the next line is
+  // indented at/past the first item's column). Elsewhere newlines stay plain
+  // whitespace (see `extras`), so the rest of the grammar is unaffected.
+  externals: $ => [
+    $._newline,
+    $._indent,
+    $._dedent,
+  ],
+
   // Newlines as plain whitespace. Mezze isn't truly newline-significant —
   // top-level decls terminate by syntactic balance (close-brace, end of
   // expression). If we later need newline-as-terminator (e.g. for do-blocks
@@ -78,6 +90,13 @@ module.exports = grammar({
     // type_binding's value `'a = T` — T could be a `_type` (resolved)
     // or the start of a function_type. Explore both.
     [$._type, $.function_type],
+    // A record `{…}` at the start of a type could be a standalone record_type
+    // OR the parameter list of a function_type (`{p} with C -> Ret`). The
+    // `with`/`->` that follows disambiguates, but the parser must keep both
+    // live until it sees them — otherwise it reduces record_type early and the
+    // trailing `with`/`->` dangles. Same for a bare type_variable/named_type as
+    // the function_type parameter.
+    [$.record_type, $.function_type],
     // `having 'a = T, ...` inside an effect_reference vs ability_constraint:
     // after the first type_binding, the comma could continue the binding
     // list OR terminate the effect/constraint and start the next sibling.
@@ -86,6 +105,9 @@ module.exports = grammar({
     [$.having_clause],
     [$.having_clause, $.effect_reference],
     [$.having_clause, $.ability_constraint],
+    // A metadata value that is a bare literal/identifier could reduce directly
+    // or via the _metadata_value wrapper; harmless, resolve either way.
+    [$._metadata_value, $._literal],
   ],
 
   rules: {
@@ -96,20 +118,26 @@ module.exports = grammar({
     source_file: $ => repeat($._top_level_with_metadata),
 
     _top_level_with_metadata: $ => seq(
-      optional($.metadata_block),
+      repeat($.metadata_block),
       $._top_level,
     ),
 
     // ===== Comments + metadata =====
 
-    // Order matters in tree-sitter token resolution: longer tokens (##, #{)
-    // beat shorter (#). Doc comments must precede line comments because
-    // they share the `#` prefix.
-    doc_comment: _ => token(seq('##', /[^\n]*/)),
+    // Comment syntax mirrors the parser (Lexer.lexComment): a `#` / `##` MUST
+    // be followed by a space/tab or end-of-line; `#foo` / `##foo` are typos,
+    // not comments. Longer tokens (`##`, `#{`) win over `#`.
 
-    // Line comment: `#` followed by anything except another `#` (doc) or
-    // `{` (metadata). The negative-set `[^#{\n]` keeps these tokens disjoint.
-    line_comment: _ => token(seq('#', /[^#{\n][^\n]*/)),
+    // Doc comment: `##` optionally followed by a space/tab and text. The
+    // trailing text is optional so a lone `##` at end of line is a valid empty
+    // doc comment; `##foo` (no space) is NOT matched (→ rejected, matching the
+    // parser). The newline itself is `extras` whitespace, not part of the token.
+    doc_comment: _ => token(seq('##', optional(/[ \t][^\n]*/))),
+
+    // Line comment: `#` optionally followed by a space/tab and text. A lone `#`
+    // is a valid empty comment; `#foo` (no space) is not matched. `##`/`#{` win
+    // as longer tokens.
+    line_comment: _ => token(seq('#', optional(/[ \t][^\n]*/))),
 
     // `#{key = value, …}` — compiler-meaningful annotation attached to the
     // following declaration. Distinct from a plain `# comment` because the
@@ -123,7 +151,28 @@ module.exports = grammar({
     metadata_entry: $ => seq(
       field('key', $.lower_identifier),
       ':',
-      field('value', $._expression),
+      field('value', $._metadata_value),
+    ),
+
+    // A metadata value is a small, self-contained set — literals, identifiers,
+    // sequences, and a NESTED metadata record (`#{config: {timeout: 5000}}`).
+    // It deliberately does NOT route through `_expression`, so the metadata `{`
+    // (a `key: value` record) never competes with a real record_expression
+    // (`key = value`) — that competition is what made a shared rule destabilize
+    // the whole `{` disambiguation.
+    _metadata_value: $ => choice(
+      $._literal,
+      $.string_literal,
+      $.lower_identifier,
+      $.upper_identifier,
+      $.sequence_expression,
+      $.metadata_record,
+    ),
+
+    metadata_record: $ => seq(
+      '{',
+      sepBy(',', $.metadata_entry),
+      '}',
     ),
 
     // ===== Top-level declarations =====
@@ -218,7 +267,14 @@ module.exports = grammar({
       repeat(field('parameter', $.type_variable)),
       '=',
       field('constructor', $.upper_identifier),
-      repeat(field('argument', $._type_atom)),
+      // The wrapped payload is either a run of plain type atoms
+      // (`Pair Int String`) OR a single function type
+      // (`Handler { x: Int } -> String`, optionally with an effect row). The
+      // two disambiguate on the presence of `->`.
+      optional(choice(
+        field('payload', $.function_type),
+        repeat1(field('argument', $._type_atom)),
+      )),
     )),
 
     _type_definition: $ => choice(
@@ -309,6 +365,11 @@ module.exports = grammar({
       // the typechecker disambiguates via name lookup.
       seq(
         'impl',
+        // A qualified ability/effect name: `Eq`, `log::Log`,
+        // `std::effects::log::Log`. The module prefix is a run of
+        // `lower_identifier ::` — the trailing `::` after a lowercase segment
+        // is what tells the parser this is a module path and not an argument.
+        optional(field('module_path', repeat1(seq($.lower_identifier, '::')))),
         field('name', $.upper_identifier),
         repeat(field('argument', $._type_atom)),
         'for',
@@ -364,11 +425,14 @@ module.exports = grammar({
 
     variable_pattern: $ => $.lower_identifier,
     wildcard_pattern: _ => '_',
-    literal_pattern: $ => choice($.integer_literal, $.string_literal, $.bool_literal),
+    literal_pattern: $ => choice($.integer_literal, $.float_literal, $.string_literal, $.bool_literal),
 
     record_pattern: $ => seq(
       '{',
       sepBy(',', $.record_pattern_field),
+      // Open record pattern: `{ name, ... }` matches a record with at least
+      // these fields, ignoring the rest.
+      optional(seq(optional(','), '...')),
       '}',
     ),
 
@@ -409,7 +473,13 @@ module.exports = grammar({
       $.function_type,
       $.record_type,
       $.sequence_type,
+      // Parenthesized type — used to group a compound type where only an atom
+      // is otherwise allowed, e.g. a `having` binding value
+      // `having 'item = (Option [Int])` or `(Result (Option String) Int)`.
+      $.parenthesized_type,
     ),
+
+    parenthesized_type: $ => seq('(', $._type, ')'),
 
     // [T] — sequence (list) of T. Used freely in type position:
     //   pub let to_seq : { s: Set 'a } -> ['a] = ...
@@ -453,19 +523,27 @@ module.exports = grammar({
     //   Int -> Int                -- bare concrete param
     // Effect row goes between return type and `with`. Constraints chain
     // with `,` and each may carry `having 'assoc = T`.
+    // Canonical Mezze function type: `{params} with C1, C2 -> Ret <effects>`.
+    // The `with`-clause sits BEFORE the arrow, right after the parameter record
+    // — the parser enforces this (P0120 rejects `with` after the return type).
     function_type: $ => prec.right(seq(
       field('parameters', choice($.record_type, $.type_variable, $.named_type)),
+      optional(seq('with', sepBy1(',', $.ability_constraint))),
       '->',
       field('return_type', $._type),
       optional(field('effects', $.effect_row)),
-      optional(seq('with', sepBy1(',', $.ability_constraint))),
     )),
 
     record_type: $ => seq(
       '{',
       sepBy(',', $.record_type_field),
+      // Open record: `{ a: Int, ... }` — the `...` marks the row as open
+      // (extra fields allowed). Only valid trailing the field list.
+      optional(seq(optional(','), field('rest', $.record_type_rest))),
       '}',
     ),
+
+    record_type_rest: _ => '...',
 
     record_type_field: $ => seq(
       field('name', $.lower_identifier),
@@ -477,10 +555,26 @@ module.exports = grammar({
       field('type', $._type),
     ),
 
+    // A module-qualified Upper name: `Log`, `log::Log`,
+    // `std::effects::log::Log`. Leading segments are lowercase module names, the
+    // final segment is the Upper name. Used where an ability / effect name may
+    // be qualified. prec.qualified keeps the `::` chain binding tightly so it
+    // isn't mistaken for a `qualified_reference` (whose leaf may be lowercase).
+    qualified_upper_name: $ => prec(PREC.qualified, seq(
+      repeat(seq($.lower_identifier, '::')),
+      $.upper_identifier,
+    )),
+
     ability_constraint: $ => prec.left(seq(
-      field('ability', $.upper_identifier),
+      field('ability', $.qualified_upper_name),
       repeat1(field('argument', $._type_atom)),
-      optional(seq('having', sepBy1(',', $.type_binding))),
+      // `having 'item = Int, 'index = String` — reuse the having_clause node
+      // (which already carries the GLR conflicts against ability_constraint /
+      // effect_reference), so the comma after a binding can EITHER continue the
+      // binding list OR end this constraint and start the next in a `with C1,
+      // C2` list. The parser resolves it greedily (continue bindings); the
+      // declared conflict lets tree-sitter explore both.
+      optional($.having_clause),
     )),
 
     // <Effect1, Effect2, ...> or <*> or <...> — appears ONLY after a function
@@ -491,15 +585,17 @@ module.exports = grammar({
     // additional effects beyond those listed.
     effect_row: $ => seq(
       '<',
-      choice(
+      optional(choice(
         '*',
         '...',
         seq(
           sepBy1(',', $.effect_reference),
-          optional(seq(',', '...')),
+          // A row can end with a `, *` (performed marker) or `, ...` (open row)
+          // after its named effects: `<Log, *>`, `<State having 'state = Int, *>`.
+          optional(seq(',', choice('*', '...'))),
         ),
-        // empty `<>`
-      ),
+      )),
+      // empty `<>` — a closed, effect-free row (the `optional` above).
       '>',
     ),
 
@@ -510,7 +606,7 @@ module.exports = grammar({
     // the comma-list terminates as soon as it hits something that doesn't
     // start a new type_binding.
     effect_reference: $ => prec.left(seq(
-      field('name', $.upper_identifier),
+      field('name', $.qualified_upper_name),
       optional($.having_clause),
     )),
 
@@ -653,11 +749,20 @@ module.exports = grammar({
     // following top-level _expression would be valid, GLR can prefer
     // ending the match. prec.right keeps multi-arm matches greedy
     // INSIDE a let body where nothing else competes.
+    // `match scrutinee is` followed by an indented block of arms. The scanner
+    // opens the block with _indent, separates arms with _newline, and closes it
+    // with _dedent when a line dedents below the arm column — this is what stops
+    // the arm list from swallowing the following top-level token. A trailing
+    // comma per arm stays allowed (some sources write `pat -> body,`).
     match_expression: $ => prec.right(seq(
       'match',
       field('scrutinee', $._expression),
       'is',
-      repeat1(prec.dynamic(1, seq($.match_arm, optional(',')))),
+      $._indent,
+      $.match_arm,
+      optional(','),
+      repeat(seq($._newline, $.match_arm, optional(','))),
+      optional($._dedent),
     )),
 
     match_arm: $ => seq(
@@ -665,20 +770,44 @@ module.exports = grammar({
       // values. Pipe-OR in patterns is left-associative; the alternatives
       // share the same arm body.
       field('pattern', $._pattern_or),
-      optional(choice(
-        // Plain boolean guard: `pat if x > 0 -> body`
-        seq('if', field('guard', $._expression)),
-        // if-let guard: `pat if let Some {v} = expr -> body`. The inner
-        // let binds patterns from a fallible match — a common idiom.
-        seq(
-          'if', 'let',
-          field('let_pattern', $._pattern),
-          '=',
-          field('let_value', $._expression),
-        ),
-      )),
+      optional(seq('if', field('guard', $._guard))),
       '->',
       field('body', $._expression),
+    ),
+
+    // A match-arm guard: a `&&`-chain (a "let-chain") whose links are either a
+    // boolean expression or an `if-let` binding. Handles `if x > 0`,
+    // `if let Some {v} = e`, and the chained
+    // `if let Some {a} = e1 && let Some {b} = e2 && a > 0`.
+    //
+    // The chain `&&` is its OWN low-precedence node (guard_and, prec below every
+    // binary op) so an ordinary `a && b` inside a single boolean link still
+    // reduces as one binary_expression, while a `let` link — which can't be a
+    // binary RHS — forces the split.
+    _guard: $ => choice(
+      $.let_condition,
+      $._expression,
+      $.guard_and,
+    ),
+
+    // Higher precedence than binary `&&` (PREC.and) so, at a `&&` token in guard
+    // position, the parser prefers the guard chain over extending a
+    // binary_expression — which is what lets a `let` link (an invalid binary
+    // RHS) sit on either side of `&&`.
+    guard_and: $ => prec.left(PREC.and + 1, seq(
+      field('left', $._guard),
+      '&&',
+      field('right', $._guard),
+    )),
+
+    // `let pat = expr` as a guard link. The value is precedence-capped ABOVE
+    // `&&` so a trailing `&&` can't extend it into a binary_expression — it
+    // belongs to the enclosing guard chain instead.
+    let_condition: $ => seq(
+      'let',
+      field('let_pattern', $._pattern),
+      '=',
+      field('let_value', prec(PREC.and + 1, $._expression)),
     ),
 
     // `do <stmt>* <result-expr>` — sequence of let-statements + final
@@ -693,41 +822,77 @@ module.exports = grammar({
     )),
 
     // Inline let in a do-block. Same shape as let_declaration minus the
-    // `pub` modifier (which only makes sense at top level).
+    // `pub` modifier (which only makes sense at top level). The tail is either
+    // a value bind (`= expr`) or a monadic do-bind (`<- expr`). Both forms
+    // share the identical `let <pattern>` prefix so they parse through ONE
+    // state; the `=` / `<-` token is what the LR parser shifts on to pick a
+    // form. Keeping them in a single rule (rather than two sibling rules) is
+    // what makes tree-sitter build the merged post-`let <pattern>` state that
+    // expects BOTH `=` and `<-` — two separate rules land in distinct
+    // continuation states and the do-block only reaches the `=` one.
     let_statement: $ => seq(
       'let',
       field('pattern', $._pattern),
-      optional(seq(':', field('type', $._signature_type))),
-      '=',
-      field('value', $._expression),
-    ),
-
-    perform_expression: $ => seq(
-      'perform',
-      sepBy1(',', $.handler),
-      'in',
-      field('body', $._expression),
-    ),
-
-    // Effect handler in a `perform` block. Can be a simple upper name
-    // (Console) or a qualified ref (log::Console). May carry an optional
-    // arg record for parameterized handlers (`FileLogger {path = "/tmp"}`).
-    handler: $ => seq(
-      field('name', choice(
-        $.upper_identifier,
+      choice(
         seq(
-          field('module', $.lower_identifier),
-          '::',
-          field('item', $.upper_identifier),
+          optional(seq(':', field('type', $._signature_type))),
+          '=',
+          field('value', $._expression),
         ),
+        seq(
+          '<-',
+          field('bind_value', $._expression),
+        ),
+      ),
+    ),
+
+    perform_expression: $ => choice(
+      // Form 1: effect-operation invocation — `perform info { msg = "hi" }`,
+      // `perform Log::info { … }`, `perform std::effects::Log::debug { … }`.
+      // The operation is a (possibly deeply-qualified) name — segments may be
+      // lower (modules) or Upper (an effect namespace), leaf lower or Upper.
+      prec(PREC.call, seq(
+        'perform',
+        field('operation', $.qualified_perform_name),
+        field('arguments', $.record_expression),
       )),
+      // Form 2: handler installation — `perform Handler1, Handler2 in expr`.
+      seq(
+        'perform',
+        sepBy1(',', $.handler),
+        'in',
+        field('body', $._expression),
+      ),
+    ),
+
+    // A dotted `::` path whose leaf is the thing being named (op or handler):
+    // `info`, `Log::info`, `std::effects::log::Console`, `a::b::c::Handler`.
+    // Segments and leaf may each be lower or Upper — this is the effect
+    // namespace path the parser accepts for both perform forms.
+    qualified_perform_name: $ => prec(PREC.qualified, seq(
+      repeat(seq(choice($.lower_identifier, $.upper_identifier), '::')),
+      choice($.lower_identifier, $.upper_identifier),
+    )),
+
+    // Effect handler in a `perform … in` block — a possibly-qualified name
+    // (`Console`, `log::Console`, `a::b::c::Handler`) with an optional arg
+    // record for parameterized handlers (`FileLogger {path = "/tmp"}`).
+    handler: $ => seq(
+      field('name', $.qualified_perform_name),
       optional(field('args', $.record_expression)),
     ),
 
     record_expression: $ => seq(
       '{',
-      sepBy(',', $.record_field),
+      sepBy(',', choice($.record_spread, $.record_field)),
       '}',
+    ),
+
+    // Spread update: `{ ...person, age = 31 }` — copy `person`'s fields, then
+    // override. The spread source is any expression.
+    record_spread: $ => seq(
+      '...',
+      field('source', $._expression),
     ),
 
     record_field: $ => choice(
@@ -781,7 +946,13 @@ module.exports = grammar({
       '"',
     ),
 
-    string_content: _ => /[^"\\$]+/,
+    // Ordinary string text: any run of chars that isn't a quote, backslash, or
+    // `$`, PLUS a lone `$` that doesn't begin an interpolation (`$100`, `$` at
+    // end). The `$(` form is claimed by string_interpolation (longer token).
+    string_content: _ => token(prec(-1, choice(
+      /[^"\\$]+/,
+      /\$/,
+    ))),
 
     escape_sequence: _ => token(seq('\\', /./)),
 
