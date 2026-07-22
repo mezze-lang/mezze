@@ -520,8 +520,18 @@ module.exports = grammar({
       field('type', $._type),
     ),
 
+    // A module-qualified Upper name: `Log`, `log::Log`,
+    // `std::effects::log::Log`. Leading segments are lowercase module names, the
+    // final segment is the Upper name. Used where an ability / effect name may
+    // be qualified. prec.qualified keeps the `::` chain binding tightly so it
+    // isn't mistaken for a `qualified_reference` (whose leaf may be lowercase).
+    qualified_upper_name: $ => prec(PREC.qualified, seq(
+      repeat(seq($.lower_identifier, '::')),
+      $.upper_identifier,
+    )),
+
     ability_constraint: $ => prec.left(seq(
-      field('ability', $.upper_identifier),
+      field('ability', $.qualified_upper_name),
       repeat1(field('argument', $._type_atom)),
       optional(seq('having', sepBy1(',', $.type_binding))),
     )),
@@ -555,7 +565,7 @@ module.exports = grammar({
     // the comma-list terminates as soon as it hits something that doesn't
     // start a new type_binding.
     effect_reference: $ => prec.left(seq(
-      field('name', $.upper_identifier),
+      field('name', $.qualified_upper_name),
       optional($.having_clause),
     )),
 
