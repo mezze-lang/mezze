@@ -1,0 +1,9 @@
+use std::effects::log::{ Console, println }
+use std::collections::seq
+
+let fill = { n } -> if n <= 0 then [] else [n, ...fill { n = n - 1 }]
+
+let sum_squares = { xs } ->
+  xs.map { f = { x } -> x * x }.fold { init = 0, f = { acc, x } -> acc + x }
+
+let main = {} -> perform Console in println { msg = sum_squares { xs = fill { n = 200 } }.to_dbg_str {} }

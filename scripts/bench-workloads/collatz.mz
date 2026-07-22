@@ -1,0 +1,12 @@
+use std::effects::log::{ Console, println }
+
+let collatz_steps = { n } ->
+  if n <= 1 then 0
+  else if n % 2 == 0 then 1 + collatz_steps { n = n / 2 }
+  else 1 + collatz_steps { n = 3 * n + 1 }
+
+let sum_steps = { limit } ->
+  if limit <= 1 then 0
+  else collatz_steps { n = limit } + sum_steps { limit = limit - 1 }
+
+let main = {} -> perform Console in println { msg = sum_steps { limit = 500 }.to_dbg_str {} }

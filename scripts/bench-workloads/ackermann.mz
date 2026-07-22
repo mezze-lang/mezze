@@ -1,0 +1,8 @@
+use std::effects::log::{ Console, println }
+
+let ack = { m, n } ->
+  if m == 0 then n + 1
+  else if n == 0 then ack { m = m - 1, n = 1 }
+  else ack { m = m - 1, n = ack { m = m, n = n - 1 } }
+
+let main = {} -> perform Console in println { msg = ack { m = 3, n = 9 }.to_dbg_str {} }
