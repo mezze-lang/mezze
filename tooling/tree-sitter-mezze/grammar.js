@@ -115,7 +115,7 @@ module.exports = grammar({
     source_file: $ => repeat($._top_level_with_metadata),
 
     _top_level_with_metadata: $ => seq(
-      optional($.metadata_block),
+      repeat($.metadata_block),
       $._top_level,
     ),
 
