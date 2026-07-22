@@ -3,5 +3,5 @@
 # error message; for now any type error is acceptable.)
 
 let foo = { } -> do
-  x <- 42
+  let x <- 42
   x

@@ -11,6 +11,6 @@ let find_user : { id: Int } -> Result User HttpError = { id } ->
   else Err { error = NotFound }
 
 let fetch_email = { id } -> do
-  user  <- find_user { id = id }
-  email <- user.email
+  let user  <- find_user { id = id }
+  let email <- user.email
   email

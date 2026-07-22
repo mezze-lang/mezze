@@ -44,7 +44,7 @@ class DoBindParseTest {
     fun `single bind statement parses to ParsedStatement_Bind`() {
         val doExpr = parseDoBody("""
             let main = {} -> do
-              a <- some_call {}
+              let a <- some_call {}
               a
         """)
         assertEquals(1, doExpr.statements.size)
@@ -58,8 +58,8 @@ class DoBindParseTest {
     fun `multiple binds parse correctly`() {
         val doExpr = parseDoBody("""
             let main = {} -> do
-              user <- find_user {id = 1}
-              bio <- parse_bio {raw = user.bio}
+              let user <- find_user {id = 1}
+              let bio <- parse_bio {raw = user.bio}
               {user, bio}
         """)
         assertEquals(2, doExpr.statements.size)
@@ -72,7 +72,7 @@ class DoBindParseTest {
     fun `bind mixed with let and expression statements`() {
         val doExpr = parseDoBody("""
             let main = {} -> do
-              user <- find_user {id = 1}
+              let user <- find_user {id = 1}
               let display = "found"
               log {msg = display}
               user
@@ -87,7 +87,7 @@ class DoBindParseTest {
     fun `bind with record-destructure pattern`() {
         val doExpr = parseDoBody("""
             let main = {} -> do
-              {user, posts} <- load_profile {id = 1}
+              let {user, posts} <- load_profile {id = 1}
               user
         """)
         assertEquals(1, doExpr.statements.size)
@@ -100,7 +100,7 @@ class DoBindParseTest {
     fun `bind with wildcard pattern`() {
         val doExpr = parseDoBody("""
             let main = {} -> do
-              _ <- some_call {}
+              let _ <- some_call {}
               42
         """)
         assertEquals(1, doExpr.statements.size)
@@ -113,8 +113,8 @@ class DoBindParseTest {
     fun `final result after bind statements`() {
         val doExpr = parseDoBody("""
             let main = {} -> do
-              x <- a {}
-              y <- b {}
+              let x <- a {}
+              let y <- b {}
               x.combine {other = y}
         """)
         // Result is the last expression, NOT a statement
@@ -130,7 +130,7 @@ class DoBindParseTest {
         try {
             parser.parseParsedModule("""
                 let main = {} -> do
-                  x <- y <- z
+                  let x <- y <- z
                   x
             """.trimIndent())
             // If we got here, parsing succeeded. Inspect — this is `x <- (y <- z)`

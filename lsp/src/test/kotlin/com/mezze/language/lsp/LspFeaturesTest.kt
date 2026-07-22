@@ -327,11 +327,13 @@ class LspFeaturesTest {
             let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
 
             let foo = {} -> do
-                a <- make_ok {}
+                let a <- make_ok {}
                 a
         """.trimIndent())
 
-        val hover = hoverAt(uri, line = 3, character = 4)
+        // `    let a <- make_ok {}` — `a` is now at col 8 (was 4 before the
+        // `let ` prefix became mandatory on binds).
+        val hover = hoverAt(uri, line = 3, character = 8)
         assertNotNull(hover, "expected hover on the `<-` pattern name")
         val content = hoverText(hover!!)
         assertTrue(content.contains("a :") || content.contains("a:"),
@@ -373,15 +375,14 @@ class LspFeaturesTest {
             let make_ok : {} -> Result Int Str = {} -> Ok {val = 42}
 
             let foo = {} -> do
-                a <- make_ok {}
+                let a <- make_ok {}
                 a
         """.trimIndent())
 
         // Cursor on the `make_ok` call inside the bind. The line is
-        // `    a <- make_ok {}` (3-space indent in trimIndent).
-        // a at col 3 (0-indexed); space; <-; space; make_ok starts at col 8.
-        // Actually the trim is 4 spaces. Verify by hovering and finding `make_ok`.
-        val hover = hoverAt(uri, line = 3, character = 9)
+        // `    let a <- make_ok {}` (4-space indent). `let ` (4) + `a ` (2) +
+        // `<- ` (3) puts `make_ok` at col 13.
+        val hover = hoverAt(uri, line = 3, character = 13)
         assertNotNull(hover, "expected hover on `make_ok` inside the bind")
         val content = hoverText(hover!!)
         assertTrue(content.contains("Result") || content.contains("Ok"),

@@ -1000,6 +1000,54 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                                 }
 
                                 val stream5 = skipNewlines(streamAfterType)
+
+                                // A `let` binding statement forks on its operator:
+                                //   `let pat = expr`   — plain value binding
+                                //   `let pat <- expr`  — do-bind: unwrap expr's
+                                //                        success value into pat,
+                                //                        short-circuiting on failure
+                                // The leading `let` is REQUIRED for both (the bind
+                                // used to be a bare `pat <- expr`, but requiring
+                                // `let` makes every binding statement start with
+                                // `let`, disambiguating it from a bare expression
+                                // at token one — which keeps the grammar
+                                // LL(1)-friendly and tooling-parseable).
+                                val bindTok = tok(TokenType.BIND)(stream5)
+                                if (bindTok is ParseResult.Success) {
+                                    // `let pat <- expr`. A type annotation before
+                                    // `<-` isn't meaningful (the bind infers the
+                                    // unwrapped type); reject it for clarity.
+                                    if (typeAnnotation != null) {
+                                        fatalFailure = stream5.failure(
+                                            "A `let … <- …` bind cannot carry a type annotation " +
+                                            "(the bind infers the unwrapped type)."
+                                        ).copy(isFatal = true)
+                                        break
+                                    }
+                                    val stream6 = skipNewlines(bindTok.remaining)
+                                    val rhs = expression(stream6)
+                                    when (rhs) {
+                                        is ParseResult.Success -> {
+                                            val stmtLoc = spanLocTo(letToken.value, rhs.remaining, file)
+                                            statements.add(
+                                                ParsedStatement.Bind(
+                                                    pattern = pattern,
+                                                    expr = rhs.value,
+                                                    loc = stmtLoc,
+                                                    leadingComments = stmtAnnotations.regularComments,
+                                                    docComment = stmtAnnotations.docComment,
+                                                    metadata = stmtAnnotations.metadata,
+                                                )
+                                            )
+                                            currentStream = skipNewlinesOnly(rhs.remaining)
+                                            lastStatementWasLet = false
+                                            lastLetName = null
+                                        }
+                                        is ParseResult.Failure -> { keepIfFatal(rhs); break }
+                                    }
+                                    continue
+                                }
+
                                 val assign = tok(TokenType.ASSIGN)(stream5)
 
                                 when (assign) {
@@ -1042,59 +1090,36 @@ internal val MezzeParser.doExpression: Parser<ParsedExpr>
                             is ParseResult.Failure -> { keepIfFatal(patternResult); break }
                         }
                     } else {
-                        // Try to parse a bind statement: `pat <- expr`.
-                        // Speculatively parse an irrefutable pattern, then check for
-                        // `<-`. If `<-` isn't there, rewind to the original stream and
-                        // try expression parsing. This is similar to how `let` parses
-                        // but without the leading keyword.
-                        //
-                        // We must be careful: many expressions also start with an
-                        // identifier (a function call, a field access, etc.), so we
-                        // can't commit until we see `<-`.
-                        val bindPatternResult = letBindingPattern(currentStream)
-                        val bindStream: TokenStream? = if (bindPatternResult is ParseResult.Success) {
-                            val afterPattern = skipNewlines(bindPatternResult.remaining)
-                            if (afterPattern.current()?.type == TokenType.BIND) afterPattern else null
-                        } else null
-
-                        if (bindPatternResult is ParseResult.Success && bindStream != null) {
-                            val pattern = bindPatternResult.value
-                            if (!pattern.isIrrefutable()) {
-                                fatalFailure = currentStream.failure(
-                                    "`<-` requires an irrefutable pattern (variable, wildcard, or record destructure). " +
-                                    "Variant patterns like `Some {val}` are not allowed because the bind can short-circuit on failure."
-                                ).copy(isFatal = true)
-                                break
-                            }
-                            val afterBind = skipNewlines(bindStream.advance())
-                            val rhs = expression(afterBind)
-                            when (rhs) {
-                                is ParseResult.Success -> {
-                                    val firstTok = currentStream.current()
-                                    val stmtLoc = if (firstTok != null)
-                                        spanLocTo(firstTok, rhs.remaining, file)
-                                    else
-                                        rhs.value.loc
-                                    statements.add(
-                                        ParsedStatement.Bind(
-                                            pattern = pattern,
-                                            expr = rhs.value,
-                                            loc = stmtLoc,
-                                            leadingComments = stmtAnnotations.regularComments,
-                                            docComment = stmtAnnotations.docComment,
-                                            metadata = stmtAnnotations.metadata,
-                                        )
-                                    )
-                                    currentStream = skipNewlinesOnly(rhs.remaining)
-                                    lastStatementWasLet = false
-                                    lastLetName = null
-                                    continue
+                        // Not a let statement (both `let pat = expr` and the
+                        // do-bind `let pat <- expr` are handled in the `let`
+                        // branch above). Before falling back to expression
+                        // parsing, detect a binding that FORGOT its leading
+                        // `let` — `x = e` or `x <- e` — and give a targeted
+                        // "you forgot `let`" error instead of the cryptic
+                        // downstream failure.
+                        val missingLetPat = letBindingPattern(currentStream)
+                        if (missingLetPat is ParseResult.Success) {
+                            val afterPat = skipNewlines(missingLetPat.remaining)
+                            when (afterPat.current()?.type) {
+                                TokenType.ASSIGN -> {
+                                    fatalFailure = currentStream.failure(
+                                        "A binding statement must start with `let`. " +
+                                        "Write `let … = …` (this `= …` binding is missing its `let`)."
+                                    ).copy(isFatal = true)
+                                    break
                                 }
-                                is ParseResult.Failure -> { keepIfFatal(rhs); break }
+                                TokenType.BIND -> {
+                                    fatalFailure = currentStream.failure(
+                                        "A do-bind must start with `let`. " +
+                                        "Write `let … <- …` (this `<- …` bind is missing its `let`)."
+                                    ).copy(isFatal = true)
+                                    break
+                                }
+                                else -> { /* genuinely an expression statement; fall through */ }
                             }
                         }
 
-                        // Not a let or bind statement, try to parse an expression
+                        // Try to parse the statement as an expression.
                         val expr = expression(currentStream)
                         when (expr) {
                             is ParseResult.Success -> {

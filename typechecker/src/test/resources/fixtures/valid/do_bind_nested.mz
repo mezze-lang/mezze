@@ -7,7 +7,7 @@ let compute : { n: Int } -> Result Int Str = { n } ->
   else Err { error = "non-positive" }
 
 let foo = { x } -> do
-  a <- do
-    b <- compute { n = x }
+  let a <- do
+    let b <- compute { n = x }
     b * 2
   a + 1

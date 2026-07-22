@@ -42,7 +42,7 @@ class DoBindErrorLocTest {
     fun `non-tryable RHS error does not leak desugar internals`() {
         val msg = expectError("""
             let foo = {} -> do
-                x <- 42
+                let x <- 42
                 x
             foo {}
         """)
@@ -65,7 +65,7 @@ class DoBindErrorLocTest {
         // about the synthetic .try call.
         val msg = expectError("""
             let foo = {} -> do
-                a <- Some {val = 42}
+                let a <- Some {val = 42}
                 a.length {}
             foo {}
         """)

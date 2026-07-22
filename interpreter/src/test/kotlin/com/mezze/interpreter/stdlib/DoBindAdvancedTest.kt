@@ -35,8 +35,8 @@ class DoBindAdvancedTest {
 
             let run = {} -> do
                 let r = do
-                    a <- opt {}
-                    b <- res {}
+                    let a <- opt {}
+                    let b <- res {}
                     a + b
                 match r is
                     Ok {val} -> val
@@ -55,8 +55,8 @@ class DoBindAdvancedTest {
 
             let run = {} -> do
                 let r = do
-                    a <- opt {}
-                    b <- res {}
+                    let a <- opt {}
+                    let b <- res {}
                     a + b
                 match r is
                     Ok {val} -> "ok"
@@ -77,8 +77,8 @@ class DoBindAdvancedTest {
 
             let run = {} -> do
                 let r = do
-                    a <- opt {}
-                    b <- res {}
+                    let a <- opt {}
+                    let b <- res {}
                     a + b
                 match r is
                     Ok {val} -> "ok"
@@ -98,8 +98,8 @@ class DoBindAdvancedTest {
 
             let run = {} -> do
                 let r = do
-                    a <- do
-                        b <- make_err {}
+                    let a <- do
+                        let b <- make_err {}
                         b * 2
                     a + 1
                 match r is
@@ -122,8 +122,8 @@ class DoBindAdvancedTest {
 
             let run = {} -> do
                 let r = do
-                    a <- do
-                        b <- make_ok {}
+                    let a <- do
+                        let b <- make_ok {}
                         b * 2
                     a + 1
                 match r is
@@ -144,7 +144,7 @@ class DoBindAdvancedTest {
 
             let run = {flag: Bool} -> do
                 let r = do
-                    a <- if flag then make_err {} else make_ok {}
+                    let a <- if flag then make_err {} else make_ok {}
                     a + 1
                 match r is
                     Ok {val} -> "ok"
@@ -163,7 +163,7 @@ class DoBindAdvancedTest {
 
             let run = {flag: Bool} -> do
                 let r = do
-                    a <- if flag then make_err {} else make_ok {}
+                    let a <- if flag then make_err {} else make_ok {}
                     a + 1
                 match r is
                     Ok {val} -> val
@@ -185,9 +185,9 @@ class DoBindAdvancedTest {
 
             let run = {} -> perform QuietConsole in do
                 let r = do
-                    a <- lookup {key = "ok"}
-                    b <- lookup {key = "missing"}
-                    c <- lookup {key = "not-reached"}
+                    let a <- lookup {key = "ok"}
+                    let b <- lookup {key = "missing"}
+                    let c <- lookup {key = "not-reached"}
                     a + b + c
                 match r is
                     Ok {val} -> "unexpected"

@@ -1241,48 +1241,48 @@ class FormatterTest {
     fun `format single bind statement`() {
         val input = """
             let foo = {} -> do
-                a <- some_call {}
+                let a <- some_call {}
                 a
         """.trimIndent()
         val output = formatter.format(input)
-        assertTrue(output.contains("a <- some_call {}"), "Expected 'a <- some_call {}' in: $output")
+        assertTrue(output.contains("let a <- some_call {}"), "Expected 'let a <- some_call {}' in: $output")
     }
 
     @Test
     fun `format multiple bind statements`() {
         val input = """
             let foo = {} -> do
-                a <- first {}
-                b <- second {}
-                c <- third {}
+                let a <- first {}
+                let b <- second {}
+                let c <- third {}
                 {a, b, c}
         """.trimIndent()
         val output = formatter.format(input)
-        assertTrue(output.contains("a <- first {}"))
-        assertTrue(output.contains("b <- second {}"))
-        assertTrue(output.contains("c <- third {}"))
+        assertTrue(output.contains("let a <- first {}"))
+        assertTrue(output.contains("let b <- second {}"))
+        assertTrue(output.contains("let c <- third {}"))
     }
 
     @Test
     fun `format mixed let and bind statements`() {
         val input = """
             let foo = {} -> do
-                a <- might_fail {}
+                let a <- might_fail {}
                 let b = 5
-                c <- another {}
+                let c <- another {}
                 a + b + c
         """.trimIndent()
         val output = formatter.format(input)
-        assertTrue(output.contains("a <- might_fail {}"))
+        assertTrue(output.contains("let a <- might_fail {}"))
         assertTrue(output.contains("let b = 5"))
-        assertTrue(output.contains("c <- another {}"))
+        assertTrue(output.contains("let c <- another {}"))
     }
 
     @Test
     fun `format bind with record destructure pattern`() {
         val input = """
             let foo = {} -> do
-                {x, y} <- get_pair {}
+                let {x, y} <- get_pair {}
                 x + y
         """.trimIndent()
         val output = formatter.format(input)
@@ -1296,8 +1296,8 @@ class FormatterTest {
     fun `formatter is idempotent on bind statements`() {
         val input = """
             let foo = {} -> do
-                a <- first {}
-                b <- second {}
+                let a <- first {}
+                let b <- second {}
                 a + b
         """.trimIndent()
         val first = formatter.format(input)

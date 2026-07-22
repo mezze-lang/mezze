@@ -37,7 +37,7 @@ class DoBindBasicTest {
 
             let run = {} -> do
                 let r = do
-                    a <- make_ok {}
+                    let a <- make_ok {}
                     a + 1
                 match r is
                     Ok {val} -> val
@@ -55,7 +55,7 @@ class DoBindBasicTest {
 
             let run = {} -> do
                 let r = do
-                    a <- make_err {}
+                    let a <- make_err {}
                     a + 1
                 match r is
                     Ok {val} -> "ok"
@@ -73,7 +73,7 @@ class DoBindBasicTest {
 
             let run = {} -> do
                 let r = do
-                    a <- make_some {}
+                    let a <- make_some {}
                     a * 10
                 match r is
                     Ok {val} -> val
@@ -91,7 +91,7 @@ class DoBindBasicTest {
 
             let run = {} -> do
                 let r = do
-                    a <- make_none {}
+                    let a <- make_none {}
                     a * 10
                 match r is
                     Ok {val} -> "ok"
@@ -113,9 +113,9 @@ class DoBindBasicTest {
 
             let run = {} -> do
                 let r = do
-                    x <- a {}
-                    y <- b {}
-                    z <- c {}
+                    let x <- a {}
+                    let y <- b {}
+                    let z <- c {}
                     x + y + z
                 match r is
                     Ok {val} -> val
@@ -135,9 +135,9 @@ class DoBindBasicTest {
 
             let run = {} -> do
                 let r = do
-                    x <- a {}
-                    y <- b {}
-                    z <- c {}
+                    let x <- a {}
+                    let y <- b {}
+                    let z <- c {}
                     x + y + z
                 match r is
                     Ok {val} -> "ok"
@@ -155,7 +155,7 @@ class DoBindBasicTest {
 
             let run = {} -> do
                 let r = do
-                    x <- a {}
+                    let x <- a {}
                     let y = 5
                     x + y
                 match r is

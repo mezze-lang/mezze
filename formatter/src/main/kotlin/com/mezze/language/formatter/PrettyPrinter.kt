@@ -831,6 +831,9 @@ class PrettyPrinter {
             }
             is ParsedStatement.Expr -> printExpr(stmt.expr)
             is ParsedStatement.Bind -> {
+                // Both binding forms lead with `let`: `let pat = e` (plain) and
+                // `let pat <- e` (do-bind). The `let` is required syntax.
+                append("let ")
                 printPattern(stmt.pattern)
                 append(" <- ")
                 printExpr(stmt.expr)

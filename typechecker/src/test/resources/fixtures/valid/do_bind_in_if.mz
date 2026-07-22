@@ -10,5 +10,5 @@ let find_user : { id: Int } -> Result User Err = { id } ->
   else Err { error = NotFound }
 
 let foo = { x } -> do
-  user <- find_user { id = x }
+  let user <- find_user { id = x }
   if user.active then user.name else "inactive"

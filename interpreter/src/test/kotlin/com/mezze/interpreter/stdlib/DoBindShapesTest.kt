@@ -36,7 +36,7 @@ class DoBindShapesTest {
 
             let run = {} -> do
                 let process = {n: Int} -> do
-                    a <- safe {n = n}
+                    let a <- safe {n = n}
                     a + 1
                 let r1 = process {n = 5}
                 match r1 is
@@ -69,7 +69,7 @@ class DoBindShapesTest {
 
             let run = {} -> do
                 let r = do
-                    v <- check {x = 7}
+                    let v <- check {x = 7}
                     v * 10
                 match r is
                     Ok {val} -> val
@@ -99,7 +99,7 @@ class DoBindShapesTest {
 
             let run = {} -> do
                 let r = do
-                    v <- check {x = 0 - 1}
+                    let v <- check {x = 0 - 1}
                     v * 10
                 match r is
                     Ok {val} -> "ok"
@@ -120,8 +120,8 @@ class DoBindShapesTest {
 
             let run = {} -> do
                 let r = do
-                    x <- a {}
-                    y <- b {}
+                    let x <- a {}
+                    let y <- b {}
                     x + y
                 match r is
                     Ok {val} -> val
@@ -146,8 +146,8 @@ class DoBindShapesTest {
 
             let run = {} -> do
                 let r = do
-                    a <- fa {}
-                    b <- fb {}
+                    let a <- fa {}
+                    let b <- fb {}
                     a + b
                 match r is
                     Ok {val} -> "ok"
@@ -174,7 +174,7 @@ class DoBindShapesTest {
 
             let run = {} -> perform QuietConsole in do
                 let r = do
-                    a <- load {id = 5}
+                    let a <- load {id = 5}
                     a + 1
                 match r is
                     Ok {val} -> val
@@ -194,8 +194,8 @@ class DoBindShapesTest {
         val r = eval("""
             let sum_two : { a: Result 'a Str, b: Result 'a Str } with NumAdd 'a -> Result 'a Str =
                 { a, b } -> do
-                    x <- a
-                    y <- b
+                    let x <- a
+                    let y <- b
                     x + y
 
             let r = sum_two { a = Ok {val = 3}, b = Ok {val = 4} }

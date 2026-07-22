@@ -5,7 +5,7 @@
 let process : { v: Int } -> Option Int = { v } -> Some { val = v * 2 }
 
 let foo = { x } -> do
-  result <- match x is
+  let result <- match x is
     Some { val = v } -> process { v = v }
     None -> Some { val = 0 }
   result

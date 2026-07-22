@@ -9,5 +9,5 @@ let read : { id: Int } -> Result Int Str <Log> = { id } -> do
   if id > 0 then Ok { val = id } else Err { error = "bad" }
 
 let process = { id } -> do
-  v <- read { id = id }
+  let v <- read { id = id }
   v + 1

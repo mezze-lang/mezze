@@ -86,7 +86,7 @@ class TryableErrorMessagesTest {
         // the underlying ability), and suggest `let x = ...` as a workaround.
         val msg = expectError("""
             let foo = {} -> do
-                x <- 42
+                let x <- 42
                 x
             foo {}
         """)

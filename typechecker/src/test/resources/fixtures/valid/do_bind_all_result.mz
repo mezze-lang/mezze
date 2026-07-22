@@ -16,6 +16,6 @@ let parse_bio : { raw: Str } -> Result Bio ParseError = { raw } ->
   else Err { error = MissingField }
 
 let fetch = { id } -> do
-  user <- find_user { id = id }
-  bio  <- parse_bio { raw = user.name }
+  let user <- find_user { id = id }
+  let bio  <- parse_bio { raw = user.name }
   { user = user, bio = bio }

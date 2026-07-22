@@ -32,7 +32,7 @@ class DoBindEdgeCasesTest {
 
             let run = {} -> do
                 let r = do
-                    {fst, snd} <- load {}
+                    let {fst, snd} <- load {}
                     fst + snd
                 match r is
                     Ok {val} -> val
@@ -51,16 +51,16 @@ class DoBindEdgeCasesTest {
 
             let run = {} -> do
                 let r = do
-                    a <- ok {x = 1}
-                    b <- ok {x = 2}
-                    c <- ok {x = 3}
-                    d <- ok {x = 4}
-                    e <- ok {x = 5}
-                    f <- ok {x = 6}
-                    g <- ok {x = 7}
-                    h <- ok {x = 8}
-                    i <- ok {x = 9}
-                    j <- ok {x = 10}
+                    let a <- ok {x = 1}
+                    let b <- ok {x = 2}
+                    let c <- ok {x = 3}
+                    let d <- ok {x = 4}
+                    let e <- ok {x = 5}
+                    let f <- ok {x = 6}
+                    let g <- ok {x = 7}
+                    let h <- ok {x = 8}
+                    let i <- ok {x = 9}
+                    let j <- ok {x = 10}
                     a + b + c + d + e + f + g + h + i + j
                 match r is
                     Ok {val} -> val
@@ -79,7 +79,7 @@ class DoBindEdgeCasesTest {
 
             let rec_sum = {n: Int} -> do
                 let r = do
-                    next <- safe_decr {n = n}
+                    let next <- safe_decr {n = n}
                     if next == 0 then 0 else next + 0
                 match r is
                     Ok {val} -> val
@@ -105,7 +105,7 @@ class DoBindEdgeCasesTest {
 
             let run = {} -> perform QuietConsole in do
                 let r = do
-                    a <- make_ok {}
+                    let a <- make_ok {}
                     a + 1
                 match r is
                     Ok {val} -> val
