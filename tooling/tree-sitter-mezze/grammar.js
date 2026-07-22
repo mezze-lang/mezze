@@ -740,20 +740,44 @@ module.exports = grammar({
       // values. Pipe-OR in patterns is left-associative; the alternatives
       // share the same arm body.
       field('pattern', $._pattern_or),
-      optional(choice(
-        // Plain boolean guard: `pat if x > 0 -> body`
-        seq('if', field('guard', $._expression)),
-        // if-let guard: `pat if let Some {v} = expr -> body`. The inner
-        // let binds patterns from a fallible match — a common idiom.
-        seq(
-          'if', 'let',
-          field('let_pattern', $._pattern),
-          '=',
-          field('let_value', $._expression),
-        ),
-      )),
+      optional(seq('if', field('guard', $._guard))),
       '->',
       field('body', $._expression),
+    ),
+
+    // A match-arm guard: a `&&`-chain (a "let-chain") whose links are either a
+    // boolean expression or an `if-let` binding. Handles `if x > 0`,
+    // `if let Some {v} = e`, and the chained
+    // `if let Some {a} = e1 && let Some {b} = e2 && a > 0`.
+    //
+    // The chain `&&` is its OWN low-precedence node (guard_and, prec below every
+    // binary op) so an ordinary `a && b` inside a single boolean link still
+    // reduces as one binary_expression, while a `let` link — which can't be a
+    // binary RHS — forces the split.
+    _guard: $ => choice(
+      $.let_condition,
+      $._expression,
+      $.guard_and,
+    ),
+
+    // Higher precedence than binary `&&` (PREC.and) so, at a `&&` token in guard
+    // position, the parser prefers the guard chain over extending a
+    // binary_expression — which is what lets a `let` link (an invalid binary
+    // RHS) sit on either side of `&&`.
+    guard_and: $ => prec.left(PREC.and + 1, seq(
+      field('left', $._guard),
+      '&&',
+      field('right', $._guard),
+    )),
+
+    // `let pat = expr` as a guard link. The value is precedence-capped ABOVE
+    // `&&` so a trailing `&&` can't extend it into a binary_expression — it
+    // belongs to the enclosing guard chain instead.
+    let_condition: $ => seq(
+      'let',
+      field('let_pattern', $._pattern),
+      '=',
+      field('let_value', prec(PREC.and + 1, $._expression)),
     ),
 
     // `do <stmt>* <result-expr>` — sequence of let-statements + final
