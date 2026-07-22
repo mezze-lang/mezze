@@ -767,12 +767,13 @@ module.exports = grammar({
     ),
 
     perform_expression: $ => choice(
-      // Form 1: effect-operation invocation — `perform info { msg = "hi" }`.
-      // The operation is a lower-name (optionally qualified) followed by its
-      // argument record. Mirrors the parser's `perform operation {args}`.
+      // Form 1: effect-operation invocation — `perform info { msg = "hi" }`,
+      // `perform Log::info { … }`, `perform std::effects::Log::debug { … }`.
+      // The operation is a (possibly deeply-qualified) name — segments may be
+      // lower (modules) or Upper (an effect namespace), leaf lower or Upper.
       prec(PREC.call, seq(
         'perform',
-        field('operation', choice($.variable, $.qualified_reference)),
+        field('operation', $.qualified_perform_name),
         field('arguments', $.record_expression),
       )),
       // Form 2: handler installation — `perform Handler1, Handler2 in expr`.
@@ -784,18 +785,20 @@ module.exports = grammar({
       ),
     ),
 
-    // Effect handler in a `perform` block. Can be a simple upper name
-    // (Console) or a qualified ref (log::Console). May carry an optional
-    // arg record for parameterized handlers (`FileLogger {path = "/tmp"}`).
+    // A dotted `::` path whose leaf is the thing being named (op or handler):
+    // `info`, `Log::info`, `std::effects::log::Console`, `a::b::c::Handler`.
+    // Segments and leaf may each be lower or Upper — this is the effect
+    // namespace path the parser accepts for both perform forms.
+    qualified_perform_name: $ => prec(PREC.qualified, seq(
+      repeat(seq(choice($.lower_identifier, $.upper_identifier), '::')),
+      choice($.lower_identifier, $.upper_identifier),
+    )),
+
+    // Effect handler in a `perform … in` block — a possibly-qualified name
+    // (`Console`, `log::Console`, `a::b::c::Handler`) with an optional arg
+    // record for parameterized handlers (`FileLogger {path = "/tmp"}`).
     handler: $ => seq(
-      field('name', choice(
-        $.upper_identifier,
-        seq(
-          field('module', $.lower_identifier),
-          '::',
-          field('item', $.upper_identifier),
-        ),
-      )),
+      field('name', $.qualified_perform_name),
       optional(field('args', $.record_expression)),
     ),
 

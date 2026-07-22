@@ -522,7 +522,7 @@ let go = {} -> perform info { msg = "hi" }
     body: (lambda_expression
       parameters: (lambda_parameters)
       body: (perform_expression
-        operation: (variable
+        operation: (qualified_perform_name
           (lower_identifier))
         arguments: (record_expression
           (record_field
