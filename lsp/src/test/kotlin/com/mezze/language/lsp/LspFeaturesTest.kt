@@ -660,6 +660,149 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `documentSymbol shows ability + effect ops as children and impls as symbols`() {
+        val (uri, _) = openSingleFile("""
+            type MemCounter = | MemCounter |
+
+            ability Show for 'a where {
+              show : { it: 'a } -> Str
+            }
+
+            effect Counter where {
+              get : {} -> Int,
+              incr : {} -> {}
+            }
+
+            impl Counter for MemCounter where {
+              get = {} -> 0,
+              incr = {} -> {}
+            }
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+
+        val symbols = server.textDocumentService.documentSymbol(DocumentSymbolParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+        }).get(5, TimeUnit.SECONDS).mapNotNull { e -> if (e.isRight) e.right else null }
+
+        val show = symbols.firstOrNull { it.name == "Show" } ?: fail("no Show symbol: ${symbols.map { it.name }}")
+        assertEquals(listOf("show"), show.children?.map { it.name }, "Show should have `show` as a child op")
+
+        val counter = symbols.firstOrNull { it.name == "Counter" } ?: fail("no Counter symbol")
+        assertEquals(listOf("get", "incr"), counter.children?.map { it.name }, "Counter should list get, incr")
+
+        val impl = symbols.firstOrNull { it.name.startsWith("impl Counter for MemCounter") }
+            ?: fail("no impl symbol; got: ${symbols.map { it.name }}")
+        assertTrue(impl.children?.map { it.name }?.containsAll(listOf("get", "incr")) == true,
+            "impl should list its implemented ops")
+    }
+
+    @Test
+    fun `references on an effect name finds the decl, impl header, and effect-row use`() {
+        val src = """
+            type MemCounter = | MemCounter |
+
+            effect Counter where {
+              get : {} -> Int,
+              incr : {} -> {}
+            }
+
+            impl Counter for MemCounter where {
+              get = {} -> 0,
+              incr = {} -> {}
+            }
+
+            let run : {} -> Int <Counter> = {} -> perform get {}
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        // Cursor on `Counter` in the `effect Counter` decl header.
+        val declLine = src.lines().indexOfFirst { it.trimStart().startsWith("effect Counter") }
+        val col = src.lines()[declLine].indexOf("Counter")
+        val refs = server.textDocumentService.references(ReferenceParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(declLine, col + 1)
+            context = ReferenceContext(true)
+        }).get(5, TimeUnit.SECONDS)
+
+        assertNotNull(refs)
+        // Expect: decl header, impl header, and the `<Counter>` effect row.
+        assertTrue(refs.size >= 3,
+            "expected >=3 refs for effect `Counter` (decl + impl + <Counter> row), got ${refs.size}: " +
+                refs.map { it.range.start.line to it.range.start.character })
+        val declHit = refs.any { it.range.start.line == declLine }
+        assertTrue(declHit, "references should include the decl header line $declLine")
+    }
+
+    @Test
+    fun `references on an ability name finds the decl, impl header, and with-constraint use`() {
+        val src = """
+            ability Show for 'a where {
+              show : { it: 'a } -> Str
+            }
+
+            impl Show for Int where {
+              show = { it } -> "n"
+            }
+
+            let describe : { x: 'a } -> Str with Show 'a = { x } -> show { it = x }
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val declLine = src.lines().indexOfFirst { it.trimStart().startsWith("ability Show") }
+        val col = src.lines()[declLine].indexOf("Show")
+        val refs = server.textDocumentService.references(ReferenceParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(declLine, col + 1)
+            context = ReferenceContext(true)
+        }).get(5, TimeUnit.SECONDS)
+
+        assertNotNull(refs)
+        // Expect: decl header, impl header, and the `with Show 'a` constraint.
+        assertTrue(refs.size >= 3,
+            "expected >=3 refs for ability `Show`, got ${refs.size}: " +
+                refs.map { it.range.start.line to it.range.start.character })
+    }
+
+    @Test
+    fun `rename of an effect name rewrites the decl, impl header, and effect-row use`() {
+        val src = """
+            type MemCounter = | MemCounter |
+
+            effect Counter where {
+              get : {} -> Int,
+              incr : {} -> {}
+            }
+
+            impl Counter for MemCounter where {
+              get = {} -> 0,
+              incr = {} -> {}
+            }
+
+            let run : {} -> Int <Counter> = {} -> perform get {}
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val declLine = src.lines().indexOfFirst { it.trimStart().startsWith("effect Counter") }
+        val col = src.lines()[declLine].indexOf("Counter")
+        val edit = server.textDocumentService.rename(RenameParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(declLine, col + 1)
+            newName = "Tally"
+        }).get(5, TimeUnit.SECONDS)
+
+        assertNotNull(edit)
+        val edits = edit!!.changes?.get(uri) ?: fail("no edits for $uri; changes=${edit.changes}")
+        // decl header, impl header, and `<Counter>` row → at least 3 edits.
+        assertTrue(edits.size >= 3,
+            "expected >=3 rename edits for effect `Counter`, got ${edits.size}: " +
+                edits.map { it.range.start.line to it.newText })
+        assertTrue(edits.all { it.newText == "Tally" }, "every edit should insert `Tally`")
+    }
+
+    @Test
     fun `code lens shows a references lens over each top-level function`() {
         val (uri, _) = openSingleFile("""
             let helper = {x: Int} -> x + 1

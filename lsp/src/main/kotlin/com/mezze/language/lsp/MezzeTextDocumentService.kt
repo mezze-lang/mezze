@@ -2220,6 +2220,89 @@ class MezzeTextDocumentService(
         ))
     }
 
+    /**
+     * True if `name` is declared as an ability or effect in this parsed module.
+     * Used to decide whether references/rename should treat the word as an
+     * ability/effect NAME (which the typed AST doesn't carry as a reference)
+     * rather than a value binding.
+     */
+    private fun isAbilityOrEffectName(pm: com.mezze.language.parsedast.ParsedModule?, name: String): Boolean {
+        if (pm == null) return false
+        return pm.decls.any {
+            (it is ParsedAbilityDecl && it.name == name) ||
+            (it is ParsedEffectDecl && it.name == name)
+        }
+    }
+
+    /**
+     * Every source occurrence of an ability/effect NAME across one document,
+     * as [Range]s. Covers the four syntactic positions the name can appear in:
+     *
+     *  1. the `ability X`/`effect X` declaration header,
+     *  2. impl headers — `impl X for …` (ability) and `impl … for … <X>` /
+     *     the effect in a `ParsedPerformerDecl`,
+     *  3. `with X 'a` ability constraints in a type signature,
+     *  4. `<X, …>` effect rows in a type signature.
+     *
+     * (1) and (2) come from parsed-decl locs; (3) and (4) are found by a
+     * constrained textual scan that only accepts a hit when it sits in a
+     * `with …` clause or an unclosed `<…>` row — the same gate goto-def uses,
+     * so we never match the name inside strings, comments, or plain code.
+     */
+    private fun findAbilityEffectNameRanges(
+        content: String,
+        pm: com.mezze.language.parsedast.ParsedModule?,
+        name: String
+    ): List<Range> {
+        if (pm == null) return emptyList()
+        val ranges = LinkedHashSet<Range>()
+        val nameLen = name.length
+
+        fun addAt(startLine1: Int, startCol1: Int) {
+            ranges.add(Range(
+                Position(startLine1 - 1, startCol1 - 1),
+                Position(startLine1 - 1, startCol1 - 1 + nameLen)
+            ))
+        }
+
+        // (1) + (2): declaration + impl headers, from parsed locs. The name is
+        // the first identifier after the keyword, so scan the header line for
+        // the first `\bname\b` occurrence within the decl's loc range.
+        val lines = content.lines()
+        fun addFirstOnLine(line1: Int) {
+            val idx0 = line1 - 1
+            if (idx0 < 0 || idx0 >= lines.size) return
+            val col = Regex("\\b${Regex.escape(name)}\\b").find(lines[idx0])?.range?.first ?: return
+            addAt(line1, col + 1)
+        }
+        for (decl in pm.decls) {
+            when (decl) {
+                is ParsedAbilityDecl -> if (decl.name == name) addFirstOnLine(decl.loc.startLine)
+                is ParsedEffectDecl -> if (decl.name == name) addFirstOnLine(decl.loc.startLine)
+                is com.mezze.language.parsedast.ParsedImplAbilityDecl ->
+                    if (decl.abilityName == name) addFirstOnLine(decl.loc.startLine)
+                is ParsedPerformerDecl ->
+                    if (decl.effect.localName == name) addFirstOnLine(decl.loc.startLine)
+                else -> {}
+            }
+        }
+
+        // (3) + (4): `with X` constraints and `<X>` effect rows anywhere in the
+        // file. Scan every occurrence of the word; keep it only when the text
+        // before it on that line is a `with …` clause or an unclosed `<…>`.
+        val wordRe = Regex("\\b${Regex.escape(name)}\\b")
+        lines.forEachIndexed { idx0, lineText ->
+            for (m in wordRe.findAll(lineText)) {
+                val before = lineText.substring(0, m.range.first)
+                val inConstraint = Regex("\\bwith\\b").containsMatchIn(before)
+                val inEffectRow = before.lastIndexOf('<') > before.lastIndexOf('>')
+                if (inConstraint || inEffectRow) addAt(idx0 + 1, m.range.first + 1)
+            }
+        }
+
+        return ranges.toList()
+    }
+
     // ========== Completion ==========
 
     override fun completion(params: CompletionParams): CompletableFuture<Either<List<CompletionItem>, CompletionList>> {
@@ -4207,27 +4290,44 @@ class MezzeTextDocumentService(
                 if (symbol != null) symbols.add(Either.forRight(symbol))
             }
 
-            // Add effect symbols from parsed module
+            // Add effect symbols with their operations as CHILD symbols, so the
+            // outline/breadcrumb shows the effect's shape (`State > get, set`).
             state.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.forEach { decl ->
-                val symbol = createDocumentSymbol(
-                    name = decl.name,
-                    kind = SymbolKind.Interface,
-                    location = decl.loc
-                )
-                if (symbol != null) {
-                    symbols.add(Either.forRight(symbol))
+                val children = decl.operations.mapNotNull { op ->
+                    createDocumentSymbol(op.name, SymbolKind.Method, op.loc)
                 }
+                val symbol = createDocumentSymbol(decl.name, SymbolKind.Interface, decl.loc, children = children)
+                if (symbol != null) symbols.add(Either.forRight(symbol))
             }
 
-            // Add ability symbols from parsed module
+            // Add ability symbols with their operations as CHILD symbols.
             state.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.forEach { decl ->
-                val symbol = createDocumentSymbol(
-                    name = decl.name,
-                    kind = SymbolKind.Interface,
-                    location = decl.loc
-                )
-                if (symbol != null) {
-                    symbols.add(Either.forRight(symbol))
+                val children = decl.operations.mapNotNull { op ->
+                    createDocumentSymbol(op.name, SymbolKind.Method, op.loc)
+                }
+                val symbol = createDocumentSymbol(decl.name, SymbolKind.Interface, decl.loc, children = children)
+                if (symbol != null) symbols.add(Either.forRight(symbol))
+            }
+
+            // Add impls to the outline (`impl Show for Int`, `impl State for
+            // Counter`) with their implemented ops as children — Class symbols
+            // so they read as a distinct group under the breadcrumb.
+            state.parsedModule?.decls?.forEach { decl ->
+                when (decl) {
+                    is com.mezze.language.parsedast.ParsedImplAbilityDecl -> {
+                        val target = decl.targetTypes.joinToString(", ") { formatTypeAnnotation(it) }
+                        val name = "impl ${decl.abilityName ?: "?"}" + if (target.isNotEmpty()) " for $target" else ""
+                        val children = decl.operations.mapNotNull { createDocumentSymbol(it.name, SymbolKind.Method, it.loc) }
+                        createDocumentSymbol(name, SymbolKind.Class, decl.loc, children = children)
+                            ?.let { symbols.add(Either.forRight(it)) }
+                    }
+                    is ParsedPerformerDecl -> {
+                        val name = "impl ${decl.effect.localName} for ${decl.performerName}"
+                        val children = decl.operations.mapNotNull { createDocumentSymbol(it.name, SymbolKind.Method, it.loc) }
+                        createDocumentSymbol(name, SymbolKind.Class, decl.loc, children = children)
+                            ?.let { symbols.add(Either.forRight(it)) }
+                    }
+                    else -> {}
                 }
             }
 
@@ -4372,6 +4472,22 @@ class MezzeTextDocumentService(
             val word = extractWordAt(lines[position.line], position.character) ?: return@supplyAsync emptyList()
 
             val locations = mutableListOf<Location>()
+
+            // Ability / effect NAME references. These names live in decl
+            // headers, impl headers, `with X` constraints, and `<X>` effect
+            // rows — none of which the typed AST carries as references, so the
+            // hash-based path below returns nothing. Handle them here across
+            // every open document. (Declaration is always included; abilities/
+            // effects don't have a "use site vs. def site" distinction worth
+            // stripping.)
+            if (isAbilityOrEffectName(state.parsedModule, word)) {
+                for ((docUri, docState) in documents) {
+                    for (range in findAbilityEffectNameRanges(docState.content, docState.parsedModule, word)) {
+                        locations.add(Location(docUri, range))
+                    }
+                }
+                return@supplyAsync locations
+            }
 
             // Resolve the hash of the decl under cursor. Two paths:
             // (a) on a TypedVar.ByHash use site → use that hash.
@@ -7258,6 +7374,21 @@ class MezzeTextDocumentService(
             val lines = state.content.lines()
             if (position.line >= lines.size) return@supplyAsync null
             val oldName = extractWordAt(lines[position.line], position.character) ?: return@supplyAsync null
+
+            // Ability / effect NAME rename. Same positions references() covers
+            // (decl header, impl headers, `with X`, `<X>` rows), across every
+            // open document. Done before the hash path — these names carry no
+            // hash, so that path would return an empty edit.
+            if (isAbilityOrEffectName(state.parsedModule, oldName)) {
+                val editsByName = LinkedHashMap<String, MutableList<TextEdit>>()
+                for ((docUri, docState) in documents) {
+                    for (range in findAbilityEffectNameRanges(docState.content, docState.parsedModule, oldName)) {
+                        editsByName.getOrPut(docUri) { mutableListOf() }.add(TextEdit(range, newName))
+                    }
+                }
+                if (editsByName.isEmpty()) return@supplyAsync null
+                return@supplyAsync WorkspaceEdit(editsByName.mapValues { it.value.toList() })
+            }
 
             val typedModule = (state.typeCheckResult ?: lastSuccessfulResult[uri])?.typedModule
 
