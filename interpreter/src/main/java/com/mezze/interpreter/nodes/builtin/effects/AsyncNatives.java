@@ -69,50 +69,83 @@ public final class AsyncNatives {
      * 4. Sampled completion time tracking for adaptive spin count
      */
     public static class MezzePromise {
-        private static final int PENDING = 0;
-        private static final int COMPLETED = 1;
-        private static final int FAILED = 2;
-        private static final int CANCELLED = 3;
+        public static final int PENDING = 0;
+        public static final int COMPLETED = 1;
+        public static final int FAILED = 2;
+        public static final int CANCELLED = 3;
 
-        // OPTIMIZATION: VarHandles for ALL volatile fields - proper memory ordering
-        private static final VarHandle STATE;
-        private static final VarHandle RESULT;
+        // #79: one atomic reference holds state + payload together.
+        // Every terminal transition is a single CAS installing an
+        // Outcome instance; readers do a single acquire-load and pattern-
+        // match. No possibility of a losing writer corrupting the
+        // winner's payload because losers never touch the field.
+        //
+        // Old design (state + result as separate volatile fields, written
+        // in a specific order) was correct only for single-writer paths;
+        // any race between complete/fail/cancel could publish inconsistent
+        // (state, result) pairs.
+
+        /** Base class for terminal outcomes. Subclasses are final. */
+        private static abstract class Outcome {
+            final int kind;
+            Outcome(int kind) { this.kind = kind; }
+        }
+        private static final class CompletedOutcome extends Outcome {
+            final Object value;
+            CompletedOutcome(Object value) { super(COMPLETED); this.value = value; }
+        }
+        private static final class FailedOutcome extends Outcome {
+            final Object error;
+            FailedOutcome(Object error) { super(FAILED); this.error = error; }
+        }
+        private static final class CancelledOutcome extends Outcome {
+            final Object reason;
+            CancelledOutcome(Object reason) { super(CANCELLED); this.reason = reason; }
+        }
+
+        /** Sentinel meaning "still pending, no outcome yet". Reference
+         *  equality with this is how readers detect the pending state. */
+        private static final Object PENDING_SENTINEL = new Object();
+
+        private static final VarHandle OUTCOME;
         private static final VarHandle WAITER;
 
         static {
             try {
                 MethodHandles.Lookup l = MethodHandles.lookup();
-                STATE = l.findVarHandle(MezzePromise.class, "state", int.class);
-                RESULT = l.findVarHandle(MezzePromise.class, "result", Object.class);
-                WAITER = l.findVarHandle(MezzePromise.class, "waiter", Thread.class);
+                OUTCOME = l.findVarHandle(MezzePromise.class, "outcome", Object.class);
+                WAITER  = l.findVarHandle(MezzePromise.class, "waiter",  Thread.class);
             } catch (Exception e) {
                 throw new ExceptionInInitializerError(e);
             }
         }
 
-        // OPTIMIZATION: Cache line padding to prevent false sharing
-        // Hot fields (state, result, waiter) are on separate cache lines from cold fields
-        // x86 cache line is 64 bytes, so we pad between hot and cold fields
+        // Cache line padding to prevent false sharing between promises
         @SuppressWarnings("unused")
-        private long p0, p1, p2, p3, p4, p5, p6; // Padding before hot fields
+        private long p0, p1, p2, p3, p4, p5, p6;
 
-        private volatile int state = PENDING;
-        private volatile Object result; // Value on success, Throwable on failure
-        private volatile Thread waiter; // Thread waiting on this promise
+        /** Either {@link #PENDING_SENTINEL} or one of the three
+         *  {@link Outcome} subclasses. Single-write via CAS by the
+         *  terminal-transition winner; observers acquire-read once and
+         *  dispatch on the concrete subclass. */
+        private volatile Object outcome = PENDING_SENTINEL;
+
+        /** Thread parked in await/awaitTimed. Written by waiters via
+         *  {@code WAITER.setRelease}; read by terminal transitions via
+         *  {@code WAITER.getAcquire} to know whom to unpark. */
+        private volatile Thread waiter;
 
         @SuppressWarnings("unused")
-        private long q0, q1, q2, q3, q4, q5, q6; // Padding after hot fields
+        private long q0, q1, q2, q3, q4, q5, q6;
 
         // Set in the constructor or via setExecutingThread() once the
         // spawned virtual thread has been created. Single writer (the
         // spawn-site code), single reader (cancel()) which only fires
         // after the spawn site has returned and the body has had a chance
         // to run, so plain field access is safe.
-        Thread executingThread; // For cancellation
-        final Semaphore semaphore; // For concurrency limiting (may be null)
+        Thread executingThread;
+        final Semaphore semaphore;
 
-        /** Set once, after the Thread is created (spawn sites first build
-         *  the promise, then the thread, then store it here). */
         public void setExecutingThread(Thread t) {
             this.executingThread = t;
         }
@@ -123,26 +156,6 @@ public final class AsyncNatives {
         // the parent's handler chain can dispatch it.
         private volatile OpCall unhandledOpCall;
 
-        // Set by cancel(reason) at the moment the CAS to CANCELLED wins.
-        // Read by every path that reconstructs an AsyncCancelled variant
-        // for a downstream observer (inspect, await, is_cancelled).
-        //
-        // Stored as a raw Object because it's a Mezze CancelReason variant
-        // (constructed on the caller side and passed through). Null means
-        // "no reason was passed in" — the createAsyncCancelled path
-        // substitutes ExternalInterrupt as a fallback.
-        //
-        // Volatile: cancel-side writer and await/inspect readers are on
-        // different threads. The STATE CAS to CANCELLED is the release
-        // fence — any read that sees CANCELLED must also see the
-        // cancelReason that was stored *before* the CAS. #250.
-        private volatile Object cancelReason;
-
-        public MezzePromise(Thread executingThread, Semaphore semaphore) {
-            this.executingThread = executingThread;
-            this.semaphore = semaphore;
-        }
-
         /**
          * Backend-supplied cancel hook. Set by user-space Promise
          * constructors (promise_from) so a cancel() call can propagate
@@ -152,6 +165,11 @@ public final class AsyncNatives {
          * (cancel()). Volatile for visibility across threads.
          */
         private volatile Runnable cancelHook;
+
+        public MezzePromise(Thread executingThread, Semaphore semaphore) {
+            this.executingThread = executingThread;
+            this.semaphore = semaphore;
+        }
 
         public void setCancelHook(Runnable hook) {
             this.cancelHook = hook;
@@ -165,16 +183,19 @@ public final class AsyncNatives {
             return unhandledOpCall;
         }
 
+        // ==================== Terminal transitions ====================
+        //
+        // Each of complete/fail/cancel/cancelOutcome does one CAS on
+        // OUTCOME. Winner allocates its Outcome; losers see non-PENDING
+        // and return false with no observable side effect. postCommit
+        // runs cancel-only side effects (interrupt, hook) for cancel
+        // and always unparks the waiter.
+
         public boolean complete(Object value) {
-            // Set result BEFORE state to ensure visibility
-            // The state CAS acts as a release fence, making result visible
-            RESULT.setVolatile(this, value);
-            if (STATE.compareAndSet(this, PENDING, COMPLETED)) {
+            if (OUTCOME.compareAndSet(this, PENDING_SENTINEL, new CompletedOutcome(value))) {
                 unparkWaiter();
                 return true;
             }
-            // CAS failed, but we already set result - this is fine because
-            // state didn't change, so no one will read the result
             return false;
         }
 
@@ -187,9 +208,7 @@ public final class AsyncNatives {
          *  The Promise's result field is Object, so either flavor fits
          *  natively. */
         public boolean fail(Object error) {
-            // Set result BEFORE state to ensure visibility
-            RESULT.setVolatile(this, error);
-            if (STATE.compareAndSet(this, PENDING, FAILED)) {
+            if (OUTCOME.compareAndSet(this, PENDING_SENTINEL, new FailedOutcome(error))) {
                 unparkWaiter();
                 return true;
             }
@@ -208,16 +227,11 @@ public final class AsyncNatives {
          * caller didn't supply one; downstream construction of
          * AsyncCancelled substitutes ExternalInterrupt as the fallback.
          *
-         * The reason MUST be stored BEFORE the CAS to CANCELLED so any
-         * reader that sees CANCELLED (via the CAS's release fence) will
-         * also see the stored reason. Losing racers still return false;
-         * only the winning cancel's reason survives.
+         * Under #79's design: the reason is embedded in the CancelledOutcome
+         * installed by the CAS winner. Losing racers cannot overwrite it.
          */
         public boolean cancel(Object reason) {
-            if (reason != null) {
-                this.cancelReason = reason;
-            }
-            if (STATE.compareAndSet(this, PENDING, CANCELLED)) {
+            if (OUTCOME.compareAndSet(this, PENDING_SENTINEL, new CancelledOutcome(reason))) {
                 if (executingThread != null) {
                     executingThread.interrupt();
                 }
@@ -230,15 +244,6 @@ public final class AsyncNatives {
             }
             return false;
         }
-
-        /**
-         * Snapshot the reason captured by whoever won the cancel CAS.
-         * Null when the Promise wasn't cancelled or the winner passed
-         * no reason. Callers converting to AsyncCancelled pass this
-         * through {@link #createAsyncCancelled(Object)}, which
-         * substitutes ExternalInterrupt when this is null.
-         */
-        public Object getCancelReason() { return cancelReason; }
 
         // Outcome codes for cancelOutcome() — mapped 1:1 to the Mezze
         // CancelOutcome ADT constructors. See AsyncNatives.promiseCancel.
@@ -254,10 +259,7 @@ public final class AsyncNatives {
         }
 
         public int cancelOutcome(Object reason) {
-            if (reason != null) {
-                this.cancelReason = reason;
-            }
-            if (STATE.compareAndSet(this, PENDING, CANCELLED)) {
+            if (OUTCOME.compareAndSet(this, PENDING_SENTINEL, new CancelledOutcome(reason))) {
                 if (executingThread != null) {
                     executingThread.interrupt();
                 }
@@ -268,24 +270,50 @@ public final class AsyncNatives {
                 unparkWaiter();
                 return CANCEL_DID_CANCEL;
             }
-            return switch (state) {
-                case COMPLETED -> CANCEL_ALREADY_COMPLETED;
-                case FAILED    -> CANCEL_ALREADY_FAILED;
-                case CANCELLED -> CANCEL_DID_CANCEL;  // racing cancel saw us
-                default        -> CANCEL_NOT_CANCELLABLE;
-            };
+            Object o = outcome;
+            if (o instanceof CompletedOutcome) return CANCEL_ALREADY_COMPLETED;
+            if (o instanceof FailedOutcome)    return CANCEL_ALREADY_FAILED;
+            if (o instanceof CancelledOutcome) return CANCEL_DID_CANCEL;  // racing cancel saw us
+            return CANCEL_NOT_CANCELLABLE;
         }
 
-        /** Snapshot the state for inspection. Returns one of the
-         *  state constants. Result field is read separately by caller
-         *  AFTER seeing a non-PENDING state (volatile state acts as
-         *  release fence). */
-        public int snapshotState() { return state; }
-        public Object snapshotResult() { return result; }
+        /**
+         * Snapshot the reason captured by whoever won the cancel CAS.
+         * Null when the Promise wasn't cancelled or the winner passed
+         * no reason. Callers converting to AsyncCancelled pass this
+         * through {@link #createAsyncCancelled(Object)}, which
+         * substitutes ExternalInterrupt when this is null.
+         */
+        public Object getCancelReason() {
+            Object o = outcome;
+            return (o instanceof CancelledOutcome c) ? c.reason : null;
+        }
 
-        // OPTIMIZATION: Use VarHandle for proper memory ordering on waiter access
+        /** Snapshot the state. Returns one of PENDING/COMPLETED/FAILED/CANCELLED. */
+        public int snapshotState() {
+            Object o = outcome;
+            return (o instanceof Outcome oc) ? oc.kind : PENDING;
+        }
+
+        /**
+         * Snapshot the terminal payload. Meaningful only after
+         * {@link #snapshotState} returns non-PENDING; on PENDING this
+         * returns null.
+         *
+         * For COMPLETED, returns the completion value (may itself be
+         * null — Mezze's Unit path stores that explicitly).
+         * For FAILED, returns the error object (Throwable or AsyncError variant).
+         * For CANCELLED, returns the cancel reason (may be null).
+         */
+        public Object snapshotResult() {
+            Object o = outcome;
+            if (o instanceof CompletedOutcome c) return c.value;
+            if (o instanceof FailedOutcome f)    return f.error;
+            if (o instanceof CancelledOutcome x) return x.reason;
+            return null;
+        }
+
         private void unparkWaiter() {
-            // Use acquire semantics to ensure we see the waiter if it was set
             Thread w = (Thread) WAITER.getAcquire(this);
             if (w != null) {
                 LockSupport.unpark(w);
@@ -293,57 +321,56 @@ public final class AsyncNatives {
         }
 
         public boolean isDone() {
-            return state != PENDING;
+            return outcome != PENDING_SENTINEL;
         }
 
         public boolean isCompleted() {
-            return state == COMPLETED;
+            return outcome instanceof CompletedOutcome;
         }
 
         public boolean isFailed() {
-            return state == FAILED;
+            return outcome instanceof FailedOutcome;
         }
 
         public boolean isCancelled() {
-            return state == CANCELLED;
+            return outcome instanceof CancelledOutcome;
         }
 
+        /** Terminal-state payload. Prefer {@link #snapshotResult()} —
+         *  this is an alias kept for existing callers. */
         public Object getResult() {
-            return result;
+            return snapshotResult();
         }
 
         /**
          * Blocking await with ADAPTIVE spin-then-park strategy for low latency.
-         * OPTIMIZATION: Spin count adapts based on historical completion times.
-         * OPTIMIZATION: Sampled nanoTime() calls to reduce overhead.
-         * OPTIMIZATION: VarHandle for proper waiter memory ordering.
+         * Loops on isDone() — reads the single outcome field per iteration.
          */
         public Object await() throws InterruptedException {
-            // OPTIMIZATION: Only measure time on sampled calls. Sampling
-            // uses a per-thread counter (no atomic) — single read +
-            // increment, no coherence traffic across awaiting threads.
             long startNanos = shouldSampleThisCall() ? System.nanoTime() : 0;
 
             // Fast path: already done
-            if (state != PENDING) {
+            Object o = outcome;
+            if (o != PENDING_SENTINEL) {
                 if (startNanos != 0) recordCompletionTime(System.nanoTime() - startNanos);
-                return getResultOrThrow();
+                return getResultOrThrow(o);
             }
 
             // Adaptive spinning based on historical completion times
             int spinCount = getAdaptiveSpinCount();
             for (int i = 0; i < spinCount; i++) {
-                if (state != PENDING) {
+                o = outcome;
+                if (o != PENDING_SENTINEL) {
                     if (startNanos != 0) recordCompletionTime(System.nanoTime() - startNanos);
-                    return getResultOrThrow();
+                    return getResultOrThrow(o);
                 }
                 Thread.onSpinWait();
             }
 
-            // Park with waiter registration - use VarHandle for proper ordering
+            // Park with waiter registration
             WAITER.setRelease(this, Thread.currentThread());
             try {
-                while (state == PENDING) {
+                while ((o = outcome) == PENDING_SENTINEL) {
                     LockSupport.park(this);
                     if (Thread.interrupted()) {
                         throw new InterruptedException();
@@ -354,23 +381,22 @@ public final class AsyncNatives {
             }
 
             if (startNanos != 0) recordCompletionTime(System.nanoTime() - startNanos);
-            return getResultOrThrow();
+            return getResultOrThrow(o);
         }
 
         /**
          * Timed await.
          */
         public Object await(long timeoutMs) throws InterruptedException, TimeoutException {
-            if (state != PENDING) {
-                return getResultOrThrow();
+            Object o = outcome;
+            if (o != PENDING_SENTINEL) {
+                return getResultOrThrow(o);
             }
 
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
-            // Match await(): VarHandle setRelease so completion-side
-            // getAcquire on the waiter sees a consistent thread reference.
             WAITER.setRelease(this, Thread.currentThread());
             try {
-                while (state == PENDING) {
+                while ((o = outcome) == PENDING_SENTINEL) {
                     long remaining = deadline - System.nanoTime();
                     if (remaining <= 0) {
                         throw new TimeoutException();
@@ -384,22 +410,22 @@ public final class AsyncNatives {
                 WAITER.setRelease(this, null);
             }
 
-            return getResultOrThrow();
+            return getResultOrThrow(o);
         }
 
-        private Object getResultOrThrow() {
-            return switch (state) {
-                case COMPLETED -> result;
-                case FAILED -> {
-                    if (result instanceof Throwable t) {
-                        throw new RuntimeException("Task failed: " + t.getMessage(), t);
-                    } else {
-                        throw new RuntimeException("Task failed with unknown error: " + result);
-                    }
+        /** Legacy throwing accessor. `o` must be a non-pending Outcome. */
+        private Object getResultOrThrow(Object o) {
+            if (o instanceof CompletedOutcome c) return c.value;
+            if (o instanceof FailedOutcome f) {
+                if (f.error instanceof Throwable t) {
+                    throw new RuntimeException("Task failed: " + t.getMessage(), t);
                 }
-                case CANCELLED -> throw new CancellationException("Task was cancelled");
-                default -> throw new IllegalStateException("Promise in unexpected state: " + state);
-            };
+                throw new RuntimeException("Task failed with unknown error: " + f.error);
+            }
+            if (o instanceof CancelledOutcome) {
+                throw new CancellationException("Task was cancelled");
+            }
+            throw new IllegalStateException("Promise in unexpected outcome: " + o);
         }
     }
 
@@ -1441,7 +1467,7 @@ public final class AsyncNatives {
     }
 
     static MezzeVariant asyncFailedResultFromPromise(MezzePromise promise) {
-        return MezzeVariant.err(asyncErrorFromResult(promise.result));
+        return MezzeVariant.err(asyncErrorFromResult(promise.snapshotResult()));
     }
 
     /** Same as {@link #cancelOtherPromises} but operates on the Object[]

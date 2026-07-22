@@ -84,17 +84,13 @@ public final class PromiseNatives {
                 MezzeRecord rec = (MezzeRecord) frameArgs[frameArgs.length - 1];
                 // Fast slot-0 read — both {val} and {err} put payload at index 0.
                 Object payload = rec.getField(0);
-                // Guard against double-call: if the promise is already
-                // resolved, this call is a no-op. MezzePromise.complete
-                // currently writes RESULT before the CAS, so a losing
-                // second-call would overwrite the winning value — the
-                // state-first check prevents that from user-space.
-                if (promise.snapshotState() == 0 /* PENDING */) {
-                    if (isComplete) {
-                        promise.complete(payload);
-                    } else {
-                        promise.fail(payload);
-                    }
+                // MezzePromise.complete/fail are CAS-safe by construction
+                // (#79): the single-outcome design means losing writers
+                // return false with no side effect.
+                if (isComplete) {
+                    promise.complete(payload);
+                } else {
+                    promise.fail(payload);
                 }
                 return MezzeUnit.INSTANCE;
             }
@@ -149,10 +145,9 @@ public final class PromiseNatives {
             callNode.call(setup.getCallTarget(), setupArgs);
         } catch (Throwable e) {
             // Auto-fail so a raising setup doesn't leave the promise
-            // Pending forever. Consumers see the failure via await/inspect.
-            if (promise.snapshotState() == 0 /* PENDING */) {
-                promise.fail(e);
-            }
+            // Pending forever. fail() is CAS-safe: if setup already
+            // resolved the promise before throwing, this is a no-op.
+            promise.fail(e);
         }
 
         return promise;
