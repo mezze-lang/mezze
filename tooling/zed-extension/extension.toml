@@ -1,0 +1,26 @@
+id = "mezze"
+name = "Mezze"
+description = "Mezze language support for Zed — tree-sitter syntax + the mez LSP (diagnostics, hover, completion, semantic tokens, code actions)."
+version = "0.1.0"
+schema_version = 1
+authors = ["Mezze"]
+repository = "https://github.com/shriyansbhatnagar/funk"
+
+# The Mezze language server: `mez lsp` over stdio. The extension resolves `mez`
+# from PATH (or a user-configured path — see languages/mezze/config.toml and the
+# lsp binary settings). Provides diagnostics, hover, completion, go-to-def,
+# code actions, and SEMANTIC TOKENS (the resolution-based coloring the
+# tree-sitter grammar can't do on its own).
+[language_servers.mezze]
+name = "Mezze LSP"
+language = "Mezze"
+
+# Tree-sitter grammar. Zed fetches the grammar from a git remote by commit and
+# builds it to WASM, so `commit` MUST be a hash that is PUSHED to `repository`
+# and whose tree contains `tooling/tree-sitter-mezze` (grammar.js + src/).
+# Update this to the pushed HEAD of the branch carrying the grammar before
+# installing. See README for the local-dev workflow.
+[grammars.mezze]
+repository = "https://github.com/shriyansbhatnagar/funk"
+commit = "5c760d4bff40d865108794516f7597d6628da3f3"
+path = "tooling/tree-sitter-mezze"
