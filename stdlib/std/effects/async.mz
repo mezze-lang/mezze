@@ -71,6 +71,37 @@ pub let is_cancelled : { p: Promise 'a } -> Bool = { p } ->
 pub let cancel : { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async> = { p, reason } ->
   __native_promise_cancel { p = p, reason = reason }
 
+## ==================================================================
+## User-space Promise constructors (#77)
+##
+## Three constructors — one primitive + two sugars. `promise_from` is
+## the general form: it invokes `setup` with a { complete, fail }
+## capability record. Whichever capability setup invokes atomically
+## transitions the promise to that state; subsequent transitions are
+## no-ops (CAS on the state field). If setup raises, the promise is
+## auto-failed so it doesn't leak in Pending forever.
+##
+## `setup` may call neither capability — the async case, where a
+## background task fulfills the promise later. That's exactly how a
+## third-party async backend (Kotlin coroutines, CompletableFuture,
+## Vert.x, ...) plugs in: build the promise, launch work on the
+## foreign scheduler, register `complete`/`fail` as the completion
+## callbacks.
+## ==================================================================
+
+## Construct a Promise via a setup callback that receives two
+## write-side capabilities. See module comment above for semantics.
+pub let promise_from : { setup: { complete: { val: 'a } -> {}, fail: { err: AsyncError } -> {} } -> {} } -> Promise 'a = { setup } ->
+  __native_promise_from { setup = setup }
+
+## A Promise already resolved with `val`. Sugar over promise_from.
+pub let promise_of : { val: 'a } -> Promise 'a = { val } ->
+  __native_promise_succeed { val = val }
+
+## A Promise already failed with `err`. Sugar over promise_from.
+pub let promise_failed : { err: AsyncError } -> Promise 'a = { err } ->
+  __native_promise_fail { err = err }
+
 ## Sleep for the given milliseconds. Delegates to Time.sleep.
 pub let sleep : { ms: Int } -> {} <Time> = { ms } ->
   Time.sleep { d = duration_millis { n = ms } }

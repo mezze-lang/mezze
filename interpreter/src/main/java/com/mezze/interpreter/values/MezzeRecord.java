@@ -547,6 +547,50 @@ public final class MezzeRecord implements TruffleObject {
         return new MezzeRecord(SHAPE_A_B, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{a, b}, true);
     }
 
+    // ==================== Promise capability record shapes ====================
+    // For promise_from's capability record `{ complete, fail }` and its
+    // sub-record args `{ val: 'a }` / `{ err }`. Pre-cached so promise_from
+    // and the two capability MezzeFunctions don't cross @TruffleBoundary.
+
+    public static final Shape SHAPE_COMPLETE_FAIL;
+    public static final Shape SHAPE_VAL;
+    public static final Shape SHAPE_ERR;
+    static {
+        SHAPE_COMPLETE_FAIL = new Shape(
+            new String[]{"complete", "fail"},
+            new FieldLocation[]{
+                new FieldLocation(FieldLocation.StorageType.OBJECT, 0),
+                new FieldLocation(FieldLocation.StorageType.OBJECT, 1)
+            }
+        );
+        SHAPE_VAL = new Shape(
+            new String[]{"val"},
+            new FieldLocation[]{new FieldLocation(FieldLocation.StorageType.OBJECT, 0)}
+        );
+        SHAPE_ERR = new Shape(
+            new String[]{"err"},
+            new FieldLocation[]{new FieldLocation(FieldLocation.StorageType.OBJECT, 0)}
+        );
+    }
+
+    /** { complete, fail } — FAST PATH for promise_from capability record. */
+    public static MezzeRecord wrapCompleteFail(Object complete, Object fail) {
+        return new MezzeRecord(SHAPE_COMPLETE_FAIL, EMPTY_LONGS, EMPTY_DOUBLES,
+            new Object[]{complete, fail}, true);
+    }
+
+    /** { val: value } — FAST PATH for promise complete-capability arg. */
+    public static MezzeRecord wrapVal(Object value) {
+        return new MezzeRecord(SHAPE_VAL, EMPTY_LONGS, EMPTY_DOUBLES,
+            new Object[]{value}, true);
+    }
+
+    /** { err: err } — FAST PATH for promise fail-capability arg. */
+    public static MezzeRecord wrapErr(Object err) {
+        return new MezzeRecord(SHAPE_ERR, EMPTY_LONGS, EMPTY_DOUBLES,
+            new Object[]{err}, true);
+    }
+
     // Shared empty arrays for cached wrapper records
     private static final long[] EMPTY_LONGS = new long[0];
     private static final double[] EMPTY_DOUBLES = new double[0];

@@ -2732,6 +2732,13 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_promise_fail",         (r, c) -> AsyncNatives.promiseFail(r));
         HANDLERS.put("__native_promise_await_result", (r, c) -> AsyncNatives.promiseAwaitResult(r));
 
+        // === User-space Promise constructor (#77) ===
+        // promise_from takes a setup callback that receives {complete, fail}
+        // capabilities; whichever it invokes transitions the promise to that
+        // state. Setup raising auto-fails the promise. Backing for
+        // std::effects::async::promise_from + promise_of / promise_failed sugar.
+        HANDLERS_WITH_NODE.put("__native_promise_from", (r, c, n) -> PromiseNatives.promiseFrom(r, c, n));
+
         // === OS Threads - true parallelism, limited scale ===
         // Only ops that genuinely create platform threads keep their own
         // natives. Stateless ops (await/race/all/etc.) and parallel

@@ -157,20 +157,6 @@ public final class AsyncNatives {
             this.cancelHook = hook;
         }
 
-        /** Build a Promise that is already Completed with `value`. */
-        public static MezzePromise completedWith(Object value) {
-            MezzePromise p = new MezzePromise(null, null);
-            p.complete(value);
-            return p;
-        }
-
-        /** Build a Promise that is already Failed with `error`. */
-        public static MezzePromise failedWith(Object error) {
-            MezzePromise p = new MezzePromise(null, null);
-            p.fail(error);
-            return p;
-        }
-
         public void setUnhandledOpCall(OpCall op) {
             this.unhandledOpCall = op;
         }
