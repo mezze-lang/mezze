@@ -135,11 +135,15 @@
 ;; user's preference: effects and abilities highlight the same.
 (impl_declaration name: (upper_identifier) @type.interface)
 
-;; Ability constraint in a signature: `with Eq 'a, Show 'a`.
-(ability_constraint ability: (upper_identifier) @type.interface)
+;; Ability constraint in a signature: `with Eq 'a, Show 'a`. The `ability`
+;; field is a qualified_upper_name; color its leaf upper_identifier.
+(ability_constraint
+  ability: (qualified_upper_name (upper_identifier) @type.interface))
 
-;; Effect references inside an effect row: `<Log, State>`.
-(effect_reference name: (upper_identifier) @type.interface)
+;; Effect references inside an effect row: `<Log, State>`. The `name` field is
+;; a qualified_upper_name; color its leaf upper_identifier.
+(effect_reference
+  name: (qualified_upper_name (upper_identifier) @type.interface))
 
 ;; ============================================================
 ;; Function names
@@ -164,8 +168,10 @@
 (effect_operation name: (lower_identifier) @function.method)
 (impl_operation name: (lower_identifier) @function.method)
 
-;; The operation invoked by `perform info { … }` — an effect-op call.
-(perform_expression operation: (variable (lower_identifier) @function.method))
+;; The operation invoked by `perform info { … }` — an effect-op call. The
+;; `operation` field is a qualified_perform_name; color its leaf name.
+(perform_expression
+  operation: (qualified_perform_name (lower_identifier) @function.method))
 
 ;; Qualified reference: `module::name` — the trailing name is the
 ;; thing being referenced. We tag the module path as @namespace and
