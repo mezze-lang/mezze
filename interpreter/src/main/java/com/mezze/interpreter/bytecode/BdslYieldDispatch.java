@@ -42,9 +42,14 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
  *       {@link EffectFiber#DISPATCH DISPATCH} thread-local so nested
  *       reads work).</li>
  *   <li>Call the op impl with {@code arg}.</li>
- *   <li>Catch {@link AbortPerformException} — its {@code value} becomes
- *       the perform expression's result. Otherwise the impl's return
- *       value is the result (fall-through mode).</li>
+ *   <li>Catch {@link AbortPerformException}. If there's an outer
+ *       {@link EffectFiber#current() live fiber}, rethrow so its driver
+ *       catches at the outer {@code perform ... in body} boundary. If
+ *       there's no fiber (top level, or spawned task thread), convert
+ *       to {@link TaskUnhandledOpException} — {@code SpawnSupport}
+ *       stashes it on the promise and {@code Async.await} re-issues on
+ *       the parent. Same criterion as
+ *       {@link OpCallNode#chainDispatch}'s fiber-vs-chain decision.</li>
  * </ol>
  *
  * <h2>What resume does under Path D</h2>
@@ -75,6 +80,18 @@ public final class BdslYieldDispatch {
 
     private BdslYieldDispatch() {}
 
+    /** Path D5 debug: set MEZZE_PATHD_TRACE=1 to log dispatch decisions. */
+    private static final boolean TRACE =
+        "1".equals(System.getenv("MEZZE_PATHD_TRACE"));
+
+    private static void trace(String msg) {
+        if (TRACE) {
+            Thread t = Thread.currentThread();
+            System.err.println("[PathD:" + t.getName() + (t.isVirtual() ? "/virt" : "/plat")
+                + "] " + msg);
+        }
+    }
+
     /**
      * Dispatch one perform against the current thread's handler chain
      * and return the value the perform expression should evaluate to.
@@ -83,6 +100,10 @@ public final class BdslYieldDispatch {
     @TruffleBoundary
     public static Object dispatch(Hash effectHash, String opName, Object arg) {
         MezzeRecord handler = EffectFiber.peekHandlerForEffect(effectHash);
+        if (TRACE) trace("dispatch " + opName + " effectHash=" + effectHash
+            + " outerFiber=" + (EffectFiber.current() == null ? "null" : "present")
+            + " chainDepth=" + currentChainDepth()
+            + " handler=" + (handler == null ? "null" : "found"));
         if (handler == null) {
             // No handler in scope — Path A wraps the op in a MezzeSuspended
             // so an outer perform (installed later, e.g. `let x = do_stuff
@@ -110,21 +131,28 @@ public final class BdslYieldDispatch {
             Object[] opArgs = new Object[cv.length + 1];
             System.arraycopy(cv, 0, opArgs, 0, cv.length);
             opArgs[cv.length] = arg;
-            return IndirectCallNode.getUncached().call(opImpl.getCallTarget(), opArgs);
+            Object result = IndirectCallNode.getUncached().call(opImpl.getCallTarget(), opArgs);
+            if (TRACE) trace("  impl returned normally: " + summarize(result));
+            return result;
         } catch (AbortPerformException abort) {
-            // Abort semantics differ between main thread and spawned task:
-            //   - Main thread: let AbortPerformException propagate up to
-            //     the outer `perform ... in body` boundary (which runs on
-            //     Path A via EffectHandlerDriver.run since HandleIR isn't
-            //     BDSL-lowered). That driver catches abort and returns
-            //     the aborted value as the perform's result.
-            //   - Spawned task: the outer perform lives on the parent
-            //     fiber, not this thread. Convert to
-            //     TaskUnhandledOpException so SpawnSupport stashes the op
-            //     on the promise and Async.await re-issues it on the
-            //     parent — mirrors OpCallNode.dispatchOpOnChain's
-            //     handling of the same case (#285).
-            if (EffectHandlerDriver.isInsideTaskBoundary()) {
+            // Decide whether abort should propagate as AbortPerformException
+            // (up to the outer `perform ... in body`'s fiber driver, which
+            // catches at EffectHandlerDriver.run:157) or convert to a
+            // TaskUnhandledOpException (which SpawnSupport catches on the
+            // spawned thread and stashes on the promise for await re-issue).
+            //
+            // Criterion: is there a "live" outer fiber whose driver will
+            // catch the abort? EffectFiber.current() being non-null on the
+            // running thread means yes — that fiber's driver is the enclosing
+            // perform. If it's null, we're either at top level (uncaught abort
+            // is a bug) or on a spawned thread (must convert to TUE so
+            // SpawnSupport catches). Same criterion as OpCallNode's
+            // chainDispatch vs fiber path (line 314).
+            EffectFiber outerFiber = EffectFiber.current();
+            if (TRACE) trace("  impl aborted with val=" + summarize(abort.value)
+                + " (outerFiber=" + (outerFiber == null ? "null" : "present")
+                + " → " + (outerFiber == null ? "throw TUE" : "rethrow abort") + ")");
+            if (outerFiber == null) {
                 throw new TaskUnhandledOpException(new OpCall(opName, arg, effectHash));
             }
             throw abort;
@@ -222,5 +250,13 @@ public final class BdslYieldDispatch {
     public static int currentChainDepth() {
         HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         return chain.length;
+    }
+
+    private static String summarize(Object v) {
+        if (v == null) return "null";
+        String cls = v.getClass().getSimpleName();
+        String s = v.toString();
+        if (s.length() > 80) s = s.substring(0, 77) + "...";
+        return cls + "(" + s + ")";
     }
 }
