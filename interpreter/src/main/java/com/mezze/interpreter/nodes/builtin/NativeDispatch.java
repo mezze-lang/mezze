@@ -185,8 +185,8 @@ public final class NativeDispatch extends MezzeNode {
         registerFracHandlers();
         // Bytes operations
         registerBytesHandlers();
-        // Time operations
-        registerTimeHandlers();
+        // DateTime + Time operations (#72)
+        registerDateTimeHandlers();
         // String case conversion operations
         registerStringCaseHandlers();
         // Float additional operations
@@ -2003,37 +2003,175 @@ public final class NativeDispatch extends MezzeNode {
             BytesNatives.compare(getBytes(r, "b1"), getBytes(r, "b2")));
     }
 
-    // ==================== Time ====================
+    // ==================== DateTime (#72) ====================
+    //
+    // Backs std::datetime (types + pure ops) and std::effects::time
+    // (Time effect ops). All natives here are thin passthroughs to
+    // java.time via DateTimeNatives.
+    //
+    // Value flow:
+    //   __native_instant_*  operate on/return DateTimeNatives.MezzeInstant
+    //   __native_duration_* operate on/return DateTimeNatives.MezzeDuration
+    //   __native_zone_*     operate on/return DateTimeNatives.MezzeZone
+    //   Fields naming: `i` = Instant, `d` = Duration, `z` = Zone.
 
-    private static void registerTimeHandlers() {
-        HANDLERS.put("__native_time_now", (r, c) -> TimeNatives.now());
-        HANDLERS.put("__native_time_now_nanos", (r, c) -> TimeNatives.nowNanos());
-        HANDLERS.put("__native_time_current_year", (r, c) -> TimeNatives.currentYear());
-        HANDLERS.put("__native_time_current_month", (r, c) -> TimeNatives.currentMonth());
-        HANDLERS.put("__native_time_current_day", (r, c) -> TimeNatives.currentDay());
-        HANDLERS.put("__native_time_current_hour", (r, c) -> TimeNatives.currentHour());
-        HANDLERS.put("__native_time_current_minute", (r, c) -> TimeNatives.currentMinute());
-        HANDLERS.put("__native_time_current_second", (r, c) -> TimeNatives.currentSecond());
-        HANDLERS.put("__native_time_year_from_timestamp", (r, c) ->
-            TimeNatives.yearFromTimestamp(getLong(r, "timestamp")));
-        HANDLERS.put("__native_time_month_from_timestamp", (r, c) ->
-            TimeNatives.monthFromTimestamp(getLong(r, "timestamp")));
-        HANDLERS.put("__native_time_day_from_timestamp", (r, c) ->
-            TimeNatives.dayFromTimestamp(getLong(r, "timestamp")));
-        HANDLERS.put("__native_time_hour_from_timestamp", (r, c) ->
-            TimeNatives.hourFromTimestamp(getLong(r, "timestamp")));
-        HANDLERS.put("__native_time_minute_from_timestamp", (r, c) ->
-            TimeNatives.minuteFromTimestamp(getLong(r, "timestamp")));
-        HANDLERS.put("__native_time_second_from_timestamp", (r, c) ->
-            TimeNatives.secondFromTimestamp(getLong(r, "timestamp")));
-        HANDLERS.put("__native_time_format", (r, c) ->
-            TimeNatives.format(getLong(r, "timestamp"), getString(r, "format")));
-        HANDLERS.put("__native_time_parse", (r, c) ->
-            TimeNatives.parse(getString(r, "date_string"), getString(r, "format")));
+    private static void registerDateTimeHandlers() {
+        // ---- Instant ----
+        HANDLERS.put("__native_instant_now", (r, c) -> DateTimeNatives.instantNow());
+        HANDLERS.put("__native_instant_from_millis", (r, c) ->
+            DateTimeNatives.instantFromMillis(getLong(r, "millis")));
+        HANDLERS.put("__native_instant_from_seconds_nanos", (r, c) ->
+            DateTimeNatives.instantFromSecondsNanos(getLong(r, "seconds"), getLong(r, "nanos")));
+        HANDLERS.put("__native_instant_to_millis", (r, c) ->
+            DateTimeNatives.instantToMillis(asInstant(r, "i")));
+        HANDLERS.put("__native_instant_to_seconds", (r, c) ->
+            DateTimeNatives.instantToSeconds(asInstant(r, "i")));
+        HANDLERS.put("__native_instant_nano_of_second", (r, c) ->
+            DateTimeNatives.instantNanoOfSecond(asInstant(r, "i")));
+        HANDLERS.put("__native_instant_add", (r, c) ->
+            DateTimeNatives.instantAdd(asInstant(r, "i"), asDuration(r, "d")));
+        HANDLERS.put("__native_instant_sub_duration", (r, c) ->
+            DateTimeNatives.instantSubDuration(asInstant(r, "i"), asDuration(r, "d")));
+        HANDLERS.put("__native_instant_diff", (r, c) ->
+            DateTimeNatives.instantDiff(asInstant(r, "end"), asInstant(r, "start")));
+        HANDLERS.put("__native_instant_before", (r, c) ->
+            DateTimeNatives.instantBefore(asInstant(r, "a"), asInstant(r, "b")));
+        HANDLERS.put("__native_instant_after", (r, c) ->
+            DateTimeNatives.instantAfter(asInstant(r, "a"), asInstant(r, "b")));
+        HANDLERS.put("__native_instant_compare", (r, c) ->
+            DateTimeNatives.instantCompare(asInstant(r, "a"), asInstant(r, "b")));
+        HANDLERS.put("__native_instant_equals", (r, c) ->
+            DateTimeNatives.instantEquals(asInstant(r, "a"), asInstant(r, "b")));
+
+        // ---- Duration ----
+        HANDLERS.put("__native_duration_monotonic", (r, c) -> DateTimeNatives.durationMonotonic());
+        HANDLERS.put("__native_duration_from_nanos", (r, c) ->
+            DateTimeNatives.durationFromNanos(getLong(r, "n")));
+        HANDLERS.put("__native_duration_from_millis", (r, c) ->
+            DateTimeNatives.durationFromMillis(getLong(r, "n")));
+        HANDLERS.put("__native_duration_from_seconds", (r, c) ->
+            DateTimeNatives.durationFromSeconds(getLong(r, "n")));
+        HANDLERS.put("__native_duration_from_minutes", (r, c) ->
+            DateTimeNatives.durationFromMinutes(getLong(r, "n")));
+        HANDLERS.put("__native_duration_from_hours", (r, c) ->
+            DateTimeNatives.durationFromHours(getLong(r, "n")));
+        HANDLERS.put("__native_duration_from_days", (r, c) ->
+            DateTimeNatives.durationFromDays(getLong(r, "n")));
+        HANDLERS.put("__native_duration_to_nanos", (r, c) ->
+            DateTimeNatives.durationToNanos(asDuration(r, "d")));
+        HANDLERS.put("__native_duration_to_millis", (r, c) ->
+            DateTimeNatives.durationToMillis(asDuration(r, "d")));
+        HANDLERS.put("__native_duration_to_seconds", (r, c) ->
+            DateTimeNatives.durationToSeconds(asDuration(r, "d")));
+        HANDLERS.put("__native_duration_add", (r, c) ->
+            DateTimeNatives.durationAdd(asDuration(r, "a"), asDuration(r, "b")));
+        HANDLERS.put("__native_duration_sub", (r, c) ->
+            DateTimeNatives.durationSub(asDuration(r, "a"), asDuration(r, "b")));
+        HANDLERS.put("__native_duration_negate", (r, c) ->
+            DateTimeNatives.durationNegate(asDuration(r, "d")));
+        HANDLERS.put("__native_duration_abs", (r, c) ->
+            DateTimeNatives.durationAbs(asDuration(r, "d")));
+        HANDLERS.put("__native_duration_is_negative", (r, c) ->
+            DateTimeNatives.durationIsNegative(asDuration(r, "d")));
+        HANDLERS.put("__native_duration_compare", (r, c) ->
+            DateTimeNatives.durationCompare(asDuration(r, "a"), asDuration(r, "b")));
+        HANDLERS.put("__native_duration_equals", (r, c) ->
+            DateTimeNatives.durationEquals(asDuration(r, "a"), asDuration(r, "b")));
+
+        // ---- Zone ----
+        HANDLERS.put("__native_zone_utc", (r, c) -> DateTimeNatives.zoneUtc());
+        HANDLERS.put("__native_zone_system", (r, c) -> DateTimeNatives.zoneSystem());
+        HANDLERS.put("__native_zone_of", (r, c) -> DateTimeNatives.zoneOf(getString(r, "id")));
+        HANDLERS.put("__native_zone_id", (r, c) -> DateTimeNatives.zoneId(asZone(r, "z")));
+        HANDLERS.put("__native_zone_offset_at", (r, c) ->
+            DateTimeNatives.zoneOffsetAt(asZone(r, "z"), asInstant(r, "at")));
+
+        // ---- Decompose / format / parse ----
+        HANDLERS.put("__native_datetime_decompose", (r, c) ->
+            DateTimeNatives.decompose(asInstant(r, "i"), asZone(r, "z")));
+        HANDLERS.put("__native_datetime_compose", (r, c) ->
+            DateTimeNatives.compose(
+                getLong(r, "year"), getLong(r, "month"), getLong(r, "day"),
+                getLong(r, "hour"), getLong(r, "minute"), getLong(r, "second"),
+                getLong(r, "nanos"), asZone(r, "z")));
+        HANDLERS.put("__native_datetime_format", (r, c) ->
+            DateTimeNatives.format(asInstant(r, "i"), getString(r, "pattern"), asZone(r, "z")));
+        HANDLERS.put("__native_datetime_parse", (r, c) ->
+            DateTimeNatives.parse(getString(r, "s"), getString(r, "pattern"), asZone(r, "z")));
+
+        // ---- Direct field accessors (skip DateTime record allocation) ----
+        HANDLERS.put("__native_year_of", (r, c) ->
+            DateTimeNatives.yearOf(asInstant(r, "i"), asZone(r, "z")));
+        HANDLERS.put("__native_month_of", (r, c) ->
+            DateTimeNatives.monthOf(asInstant(r, "i"), asZone(r, "z")));
+        HANDLERS.put("__native_day_of", (r, c) ->
+            DateTimeNatives.dayOf(asInstant(r, "i"), asZone(r, "z")));
+        HANDLERS.put("__native_hour_of", (r, c) ->
+            DateTimeNatives.hourOf(asInstant(r, "i"), asZone(r, "z")));
+        HANDLERS.put("__native_minute_of", (r, c) ->
+            DateTimeNatives.minuteOf(asInstant(r, "i"), asZone(r, "z")));
+        HANDLERS.put("__native_second_of", (r, c) ->
+            DateTimeNatives.secondOf(asInstant(r, "i"), asZone(r, "z")));
+        HANDLERS.put("__native_nanos_of", (r, c) ->
+            DateTimeNatives.nanosOf(asInstant(r, "i"), asZone(r, "z")));
+
+        // ---- Codecs (ISO8601 for Instant/Duration; zone id for Zone) ----
+        HANDLERS.put("__native_instant_encode", (r, c) ->
+            DateTimeNatives.instantEncode(asInstant(r, "i")));
+        HANDLERS.put("__native_instant_decode", (r, c) ->
+            DateTimeNatives.instantDecode(getString(r, "s")));
+        HANDLERS.put("__native_duration_encode", (r, c) ->
+            DateTimeNatives.durationEncode(asDuration(r, "d")));
+        HANDLERS.put("__native_duration_decode", (r, c) ->
+            DateTimeNatives.durationDecode(getString(r, "s")));
+        HANDLERS.put("__native_zone_encode", (r, c) ->
+            DateTimeNatives.zoneEncode(asZone(r, "z")));
+        HANDLERS.put("__native_zone_decode", (r, c) ->
+            DateTimeNatives.zoneDecode(getString(r, "s")));
+
+        // ---- TestClock (mutable-state mock handle) ----
+        HANDLERS.put("__native_test_clock_at", (r, c) ->
+            DateTimeNatives.testClockAt(asInstant(r, "i")));
+        HANDLERS.put("__native_test_clock_now", (r, c) ->
+            DateTimeNatives.testClockNow(asTestClock(r, "c")));
+        HANDLERS.put("__native_test_clock_monotonic", (r, c) ->
+            DateTimeNatives.testClockMonotonic(asTestClock(r, "c")));
+        HANDLERS.put("__native_test_clock_set", (r, c) ->
+            DateTimeNatives.testClockSet(asTestClock(r, "c"), asInstant(r, "i")));
+        HANDLERS.put("__native_test_clock_advance", (r, c) ->
+            DateTimeNatives.testClockAdvance(asTestClock(r, "c"), asDuration(r, "d")));
+
+        // ---- Sleep (backs Time.sleep) ----
         HANDLERS.put("__native_time_sleep", (r, c) ->
-            TimeNatives.sleep(getLong(r, "millis")));
-        HANDLERS.put("__native_time_sleep_nanos", (r, c) ->
-            TimeNatives.sleepNanos(getLong(r, "nanos")));
+            DateTimeNatives.sleep(asDuration(r, "d")));
+    }
+
+    private static DateTimeNatives.MezzeInstant asInstant(MezzeRecord r, String field) {
+        Object v = getField(r, field);
+        if (v instanceof DateTimeNatives.MezzeInstant i) return i;
+        throw new RuntimeException("Expected Instant for field '" + field + "', got: " +
+            (v == null ? "null" : v.getClass().getName()));
+    }
+
+    private static DateTimeNatives.MezzeDuration asDuration(MezzeRecord r, String field) {
+        Object v = getField(r, field);
+        if (v instanceof DateTimeNatives.MezzeDuration d) return d;
+        throw new RuntimeException("Expected Duration for field '" + field + "', got: " +
+            (v == null ? "null" : v.getClass().getName()));
+    }
+
+    private static DateTimeNatives.MezzeZone asZone(MezzeRecord r, String field) {
+        Object v = getField(r, field);
+        if (v instanceof DateTimeNatives.MezzeZone z) return z;
+        throw new RuntimeException("Expected Zone for field '" + field + "', got: " +
+            (v == null ? "null" : v.getClass().getName()));
+    }
+
+    private static DateTimeNatives.MezzeTestClock asTestClock(MezzeRecord r, String field) {
+        Object v = getField(r, field);
+        if (v instanceof DateTimeNatives.MezzeTestClock tc) return tc;
+        throw new RuntimeException("Expected TestClock for field '" + field + "', got: " +
+            (v == null ? "null" : v.getClass().getName()));
     }
 
     // ==================== String Case Conversions ====================

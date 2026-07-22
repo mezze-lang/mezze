@@ -1,0 +1,466 @@
+## Datetime primitive types and pure operations.
+##
+## This module is entirely PURE — no effect anywhere. It defines
+## opaque native-backed types Instant, Duration, Zone plus a plain
+## record type DateTime, and provides pure helpers for their
+## construction, arithmetic, decomposition, formatting, and parsing.
+##
+## For clock reads and sleep, see std::effects::time.
+##
+## Types:
+##   Instant   — moment in wall-clock time (nanosecond precision).
+##   Duration  — length of time in nanoseconds. Also used for monotonic
+##               readings (as a delta from an arbitrary origin).
+##   Zone      — IANA timezone (e.g. "America/New_York", "UTC").
+##   DateTime  — plain record: {year, month, day, hour, minute, second, nanos}.
+##
+## Design notes:
+##   - Instant + Duration = Instant (adds).
+##   - Instant - Instant = Duration (may be negative).
+##   - Duration + Duration = Duration.
+##   - format/parse are pure and take an explicit Zone.
+##   - decompose gives an atomic {year..nanos} snapshot in a chosen Zone.
+##   - All errors are Result Instant Str / Result Zone Str at the boundary.
+##
+## Backed by java.time.Instant / Duration / ZoneId. See #72.
+
+use std::abilities::compare::{ Eq, Ord }
+use std::abilities::default::{ Default }
+use std::abilities::sized::{ Sized }
+use std::int
+use std::result
+
+## ==================================================================
+## Types
+## ==================================================================
+
+## Moment in wall-clock time — nanosecond precision since Unix epoch.
+## Not monotonic; can jump on NTP sync, DST, admin clock changes.
+pub newtype Instant = Instant __NativeInstant
+
+## Length of time. Also used for monotonic-clock readings (as a delta
+## from an arbitrary origin).
+pub newtype Duration = Duration __NativeDuration
+
+## IANA timezone identifier. Cheap to share; construct once, use everywhere.
+pub newtype Zone = Zone __NativeZone
+
+## Decomposed date/time in a specific zone. Plain record so it works
+## with pattern matching, spread, and codec.
+pub type DateTime = {
+  year: Int,
+  month: Int,
+  day: Int,
+  hour: Int,
+  minute: Int,
+  second: Int,
+  nanos: Int,
+}
+
+## ==================================================================
+## Ability impls
+## ==================================================================
+
+impl Eq for Instant where {
+  eq  = { it, r } -> __native_instant_equals { a = it, b = r },
+  neq = { it, r } -> if __native_instant_equals { a = it, b = r } then False else True,
+}
+
+## Ord for Instant. Delegates to the native comparator, but wraps
+## in __native_int_* calls to avoid recursively dispatching `<` etc.
+## on the compare-result Long (which would loop back into Ord).
+impl Ord for Instant where {
+  lt = { it, r } -> __native_int_lt { l = __native_instant_compare { a = it, b = r }, r = 0 },
+  le = { it, r } -> __native_int_le { l = __native_instant_compare { a = it, b = r }, r = 0 },
+  gt = { it, r } -> __native_int_gt { l = __native_instant_compare { a = it, b = r }, r = 0 },
+  ge = { it, r } -> __native_int_ge { l = __native_instant_compare { a = it, b = r }, r = 0 },
+}
+
+impl Eq for Duration where {
+  eq  = { it, r } -> __native_duration_equals { a = it, b = r },
+  neq = { it, r } -> if __native_duration_equals { a = it, b = r } then False else True,
+}
+
+## Ord for Duration. See Ord for Instant above for why we route
+## through __native_int_* rather than using `<` directly.
+impl Ord for Duration where {
+  lt = { it, r } -> __native_int_lt { l = __native_duration_compare { a = it, b = r }, r = 0 },
+  le = { it, r } -> __native_int_le { l = __native_duration_compare { a = it, b = r }, r = 0 },
+  gt = { it, r } -> __native_int_gt { l = __native_duration_compare { a = it, b = r }, r = 0 },
+  ge = { it, r } -> __native_int_ge { l = __native_duration_compare { a = it, b = r }, r = 0 },
+}
+
+impl Eq for Zone where {
+  eq  = { it, r } -> __native_ref_eq { l = it, r = r },
+  neq = { it, r } -> if __native_ref_eq { l = it, r = r } then False else True,
+}
+
+## Default Instant is the Unix epoch (1970-01-01T00:00:00Z).
+impl Default for Instant where {
+  default = {} -> __native_instant_from_millis { millis = 0 }
+}
+
+## Default Duration is zero.
+impl Default for Duration where {
+  default = {} -> __native_duration_from_nanos { n = 0 }
+}
+
+## Default Zone is UTC.
+impl Default for Zone where {
+  default = {} -> __native_zone_utc {}
+}
+
+## ==================================================================
+## Duration constructors
+## ==================================================================
+
+## Duration of exactly N nanoseconds.
+pub let duration_nanos : { n: Int } -> Duration = { n } ->
+  __native_duration_from_nanos { n = n }
+
+## Duration of exactly N milliseconds.
+pub let duration_millis : { n: Int } -> Duration = { n } ->
+  __native_duration_from_millis { n = n }
+
+## Duration of exactly N seconds.
+pub let duration_seconds : { n: Int } -> Duration = { n } ->
+  __native_duration_from_seconds { n = n }
+
+## Duration of exactly N minutes (fixed 60s).
+pub let duration_minutes : { n: Int } -> Duration = { n } ->
+  __native_duration_from_minutes { n = n }
+
+## Duration of exactly N hours (fixed 3600s).
+pub let duration_hours : { n: Int } -> Duration = { n } ->
+  __native_duration_from_hours { n = n }
+
+## Duration of exactly N days (fixed 24h = 86400s). This is calendar-
+## agnostic; use with care for calendar-day arithmetic across DST.
+pub let duration_days : { n: Int } -> Duration = { n } ->
+  __native_duration_from_days { n = n }
+
+## The zero Duration.
+pub let duration_zero : {} -> Duration = {} ->
+  __native_duration_from_nanos { n = 0 }
+
+## ==================================================================
+## Duration accessors
+## ==================================================================
+
+## Total whole nanoseconds. Truncates.
+pub let duration_to_nanos : { d: Duration } -> Int = { d } ->
+  __native_duration_to_nanos { d = d }
+
+## Total whole milliseconds. Truncates.
+pub let duration_to_millis : { d: Duration } -> Int = { d } ->
+  __native_duration_to_millis { d = d }
+
+## Total whole seconds. Truncates.
+pub let duration_to_seconds : { d: Duration } -> Int = { d } ->
+  __native_duration_to_seconds { d = d }
+
+## ==================================================================
+## Duration arithmetic
+## ==================================================================
+
+## Duration + Duration.
+pub let add_duration : { a: Duration, b: Duration } -> Duration = { a, b } ->
+  __native_duration_add { a = a, b = b }
+
+## Duration - Duration (may be negative).
+pub let sub_duration : { a: Duration, b: Duration } -> Duration = { a, b } ->
+  __native_duration_sub { a = a, b = b }
+
+## Negate a Duration.
+pub let negate_duration : { d: Duration } -> Duration = { d } ->
+  __native_duration_negate { d = d }
+
+## Absolute value of a Duration.
+pub let abs_duration : { d: Duration } -> Duration = { d } ->
+  __native_duration_abs { d = d }
+
+## True iff strictly negative.
+pub let is_negative_duration : { d: Duration } -> Bool = { d } ->
+  __native_duration_is_negative { d = d }
+
+## ==================================================================
+## Instant constructors
+## ==================================================================
+
+## The Unix epoch (1970-01-01T00:00:00Z).
+pub let epoch : {} -> Instant = {} ->
+  __native_instant_from_millis { millis = 0 }
+
+## Build an Instant from milliseconds since epoch.
+pub let instant_from_millis : { n: Int } -> Instant = { n } ->
+  __native_instant_from_millis { millis = n }
+
+## Build an Instant from seconds since epoch + nanos-of-second (0-999_999_999).
+pub let instant_from_seconds : { s: Int, n: Int } -> Instant = { s, n } ->
+  __native_instant_from_seconds_nanos { seconds = s, nanos = n }
+
+## ==================================================================
+## Instant accessors
+## ==================================================================
+
+## Return as milliseconds since epoch (truncated). Useful for
+## interop with databases / JSON that store millis.
+pub let instant_to_millis : { i: Instant } -> Int = { i } ->
+  __native_instant_to_millis { i = i }
+
+## Return as seconds since epoch (truncated).
+pub let instant_to_seconds : { i: Instant } -> Int = { i } ->
+  __native_instant_to_seconds { i = i }
+
+## Nanoseconds-of-second component (0-999_999_999). Combined with
+## instant_to_seconds gives the full-precision representation.
+pub let instant_nano_of_second : { i: Instant } -> Int = { i } ->
+  __native_instant_nano_of_second { i = i }
+
+## ==================================================================
+## Instant arithmetic
+## ==================================================================
+
+## Instant + Duration = Instant.
+pub let add : { i: Instant, d: Duration } -> Instant = { i, d } ->
+  __native_instant_add { i = i, d = d }
+
+## Instant - Duration = Instant.
+pub let sub_duration_from_instant : { i: Instant, d: Duration } -> Instant = { i, d } ->
+  __native_instant_sub_duration { i = i, d = d }
+
+## Duration between two Instants (e - s, i.e. end minus start). May be negative.
+pub let diff : { s: Instant, e: Instant } -> Duration = { s, e } ->
+  __native_instant_diff { end = e, start = s }
+
+## True iff a is strictly before b (chronologically earlier).
+pub let before : { a: Instant, b: Instant } -> Bool = { a, b } ->
+  __native_instant_before { a = a, b = b }
+
+## True iff a is strictly after b (chronologically later).
+pub let after : { a: Instant, b: Instant } -> Bool = { a, b } ->
+  __native_instant_after { a = a, b = b }
+
+## ==================================================================
+## Instant + Duration convenience helpers
+## ==================================================================
+
+## Add N milliseconds to an Instant.
+pub let add_millis : { i: Instant, n: Int } -> Instant = { i, n } ->
+  add { i = i, d = duration_millis { n = n } }
+
+## Add N seconds to an Instant.
+pub let add_seconds : { i: Instant, n: Int } -> Instant = { i, n } ->
+  add { i = i, d = duration_seconds { n = n } }
+
+## Add N minutes to an Instant.
+pub let add_minutes : { i: Instant, n: Int } -> Instant = { i, n } ->
+  add { i = i, d = duration_minutes { n = n } }
+
+## Add N hours to an Instant.
+pub let add_hours : { i: Instant, n: Int } -> Instant = { i, n } ->
+  add { i = i, d = duration_hours { n = n } }
+
+## Add N (24-hour) days to an Instant. Calendar-agnostic — for calendar-
+## day arithmetic across DST use decompose + compose.
+pub let add_days : { i: Instant, n: Int } -> Instant = { i, n } ->
+  add { i = i, d = duration_days { n = n } }
+
+## Difference between two Instants in whole milliseconds.
+pub let diff_millis : { s: Instant, e: Instant } -> Int = { s, e } ->
+  duration_to_millis { d = diff { s = s, e = e } }
+
+## Difference between two Instants in whole seconds.
+pub let diff_seconds : { s: Instant, e: Instant } -> Int = { s, e } ->
+  duration_to_seconds { d = diff { s = s, e = e } }
+
+## Difference between two Instants in whole nanoseconds.
+pub let diff_nanos : { s: Instant, e: Instant } -> Int = { s, e } ->
+  duration_to_nanos { d = diff { s = s, e = e } }
+
+## ==================================================================
+## Zone
+## ==================================================================
+
+## The UTC zone. Constant, safe to reuse everywhere.
+pub let utc : {} -> Zone = {} ->
+  __native_zone_utc {}
+
+## Parse an IANA zone id (e.g. "America/New_York") or fixed offset
+## (e.g. "+05:30"). Returns Err with the JVM's error message on invalid input.
+pub let zone_of : { id: Str } -> Result Zone Str = { id } ->
+  __native_zone_of { id = id }
+
+## Canonical zone id string (e.g. "America/New_York").
+pub let zone_id : { z: Zone } -> Str = { z } ->
+  __native_zone_id { z = z }
+
+## Offset from UTC at the given Instant — DST-aware. Positive east
+## of UTC.
+pub let zone_offset_at : { z: Zone, at: Instant } -> Duration = { z, at } ->
+  __native_zone_offset_at { z = z, at = at }
+
+## ==================================================================
+## Decompose / compose
+## ==================================================================
+
+## Atomically decompose an Instant in a Zone into calendar fields.
+## One clock read → one consistent snapshot. Prevents the classic bug
+## where separate year/month/day reads span a second-rollover.
+pub let decompose : { i: Instant, z: Zone } -> DateTime = { i, z } ->
+  __native_datetime_decompose { i = i, z = z }
+
+## Compose a DateTime record back to an Instant. Returns Err for
+## impossible values (e.g. Feb 30, hour 25).
+pub let compose : { dt: DateTime, z: Zone } -> Result Instant Str = { dt, z } ->
+  __native_datetime_compose {
+    year = dt.year, month = dt.month, day = dt.day,
+    hour = dt.hour, minute = dt.minute, second = dt.second,
+    nanos = dt.nanos, z = z,
+  }
+
+## ==================================================================
+## Field accessors — sugar over decompose
+## ==================================================================
+## These read a single field from an Instant + Zone. If you need
+## multiple fields, prefer decompose for a single atomic snapshot.
+
+## Direct field accessors — one native call, no DateTime record
+## allocation. Use decompose when you want all fields at one atomic
+## clock reading; use these when you want just one.
+pub let year : { i: Instant, z: Zone } -> Int = { i, z } ->
+  __native_year_of { i = i, z = z }
+
+pub let month : { i: Instant, z: Zone } -> Int = { i, z } ->
+  __native_month_of { i = i, z = z }
+
+pub let day : { i: Instant, z: Zone } -> Int = { i, z } ->
+  __native_day_of { i = i, z = z }
+
+pub let hour : { i: Instant, z: Zone } -> Int = { i, z } ->
+  __native_hour_of { i = i, z = z }
+
+pub let minute : { i: Instant, z: Zone } -> Int = { i, z } ->
+  __native_minute_of { i = i, z = z }
+
+pub let second : { i: Instant, z: Zone } -> Int = { i, z } ->
+  __native_second_of { i = i, z = z }
+
+pub let nanos : { i: Instant, z: Zone } -> Int = { i, z } ->
+  __native_nanos_of { i = i, z = z }
+
+## ==================================================================
+## Format / parse
+## ==================================================================
+
+## Format an Instant in a Zone using a java.time.format pattern.
+## Common patterns:
+##   "yyyy-MM-dd"         → "2026-07-22"
+##   "yyyy-MM-dd HH:mm:ss" → "2026-07-22 14:30:00"
+##   "yyyy-MM-dd'T'HH:mm:ssX" → ISO 8601 with offset
+pub let format : { i: Instant, p: Str, z: Zone } -> Str = { i, p, z } ->
+  __native_datetime_format { i = i, pattern = p, z = z }
+
+## Parse a date string using a java.time.format pattern in a Zone.
+## Returns Err with the JVM's error message on invalid input.
+pub let parse : { s: Str, p: Str, z: Zone } -> Result Instant Str = { s, p, z } ->
+  __native_datetime_parse { s = s, pattern = p, z = z }
+
+## Format as ISO 8601 with UTC offset (e.g. "2026-07-22T14:30:00Z").
+pub let format_iso8601 : { i: Instant } -> Str = { i } ->
+  format { i = i, p = "yyyy-MM-dd'T'HH:mm:ss'Z'", z = utc {} }
+
+## Format as a date-only string in the given zone (e.g. "2026-07-22").
+pub let format_date : { i: Instant, z: Zone } -> Str = { i, z } ->
+  format { i = i, p = "yyyy-MM-dd", z = z }
+
+## Format as a time-only string in the given zone (e.g. "14:30:00").
+pub let format_time : { i: Instant, z: Zone } -> Str = { i, z } ->
+  format { i = i, p = "HH:mm:ss", z = z }
+
+## Format as a date+time string in the given zone (e.g. "2026-07-22 14:30:00").
+pub let format_datetime : { i: Instant, z: Zone } -> Str = { i, z } ->
+  format { i = i, p = "yyyy-MM-dd HH:mm:ss", z = z }
+
+## ==================================================================
+## Calendar utilities — pure Int math
+## ==================================================================
+
+## True iff a Gregorian year is a leap year.
+pub let is_leap_year : { year: Int } -> Bool = { year } ->
+  (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+
+## Days in a month (1-12) accounting for leap years.
+pub let days_in_month : { year: Int, month: Int } -> Int = { year, month } -> match month is
+  1 -> 31
+  2 -> match is_leap_year { year = year } is
+    True -> 29
+    False -> 28
+  3 -> 31
+  4 -> 30
+  5 -> 31
+  6 -> 30
+  7 -> 31
+  8 -> 31
+  9 -> 30
+  10 -> 31
+  11 -> 30
+  12 -> 31
+  _ -> 0
+
+## ==================================================================
+## Codecs — lossless string round-trip for the three native types.
+## Instant + Duration use ISO 8601. Zone uses its IANA id.
+## ==================================================================
+
+pub let instant_encode : { i: Instant } -> Str = { i } ->
+  __native_instant_encode { i = i }
+
+pub let instant_decode : { s: Str } -> Result Instant Str = { s } ->
+  __native_instant_decode { s = s }
+
+pub let duration_encode : { d: Duration } -> Str = { d } ->
+  __native_duration_encode { d = d }
+
+pub let duration_decode : { s: Str } -> Result Duration Str = { s } ->
+  __native_duration_decode { s = s }
+
+pub let zone_encode : { z: Zone } -> Str = { z } ->
+  __native_zone_encode { z = z }
+
+pub let zone_decode : { s: Str } -> Result Zone Str = { s } ->
+  __native_zone_decode { s = s }
+
+## ==================================================================
+## TestClock — mutable-state mock backing for MockTime.
+##
+## Mutation lives inside the native handle (AtomicReference<Instant>);
+## the Mezze surface is set/advance/now. Same shape as Spring's
+## MutableClock or Kotlin's TestClock. Use with MockTime in
+## std::effects::time to run tests where sleep advances the clock.
+## ==================================================================
+
+pub newtype TestClock = TestClock __NativeTestClock
+
+## Build a fresh TestClock starting at the given Instant.
+pub let test_clock_at : { i: Instant } -> TestClock = { i } ->
+  __native_test_clock_at { i = i }
+
+## Read the clock's current Instant.
+pub let test_clock_now : { c: TestClock } -> Instant = { c } ->
+  __native_test_clock_now { c = c }
+
+## Overwrite the clock's Instant. Not typically needed — advance covers
+## most cases.
+pub let test_clock_set : { c: TestClock, i: Instant } -> {} = { c, i } ->
+  __native_test_clock_set { c = c, i = i }
+
+## Advance the clock by the given Duration.
+pub let test_clock_advance : { c: TestClock, d: Duration } -> {} = { c, d } ->
+  __native_test_clock_advance { c = c, d = d }
+
+## Monotonic-clock reading derived from the TestClock's current Instant.
+## Advances lock-step with the wall clock so elapsed_monotonic_since
+## works under MockTime.
+pub let test_clock_monotonic : { c: TestClock } -> Duration = { c } ->
+  __native_test_clock_monotonic { c = c }

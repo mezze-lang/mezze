@@ -176,11 +176,12 @@ public class EffectsIntegrationTest {
     @Test
     void testTimeNow() {
         Object result = MezzeTestHelper.run("""
+            use std::datetime::{ epoch, before }
             use std::effects::time::{Time, SystemTime}
 
             perform SystemTime in do
-                let now = Time.now {}
-                now > 0
+                let n = Time.now {}
+                before { a = epoch {}, b = n }
             """);
 
         assertEquals(true, result);
@@ -189,10 +190,11 @@ public class EffectsIntegrationTest {
     @Test
     void testMockTime() {
         Object result = MezzeTestHelper.run("""
-            use std::effects::time::{Time, MockTime}
+            use std::datetime::{ instant_from_millis, instant_to_millis }
+            use std::effects::time::{Time, FrozenTime}
 
-            perform MockTime {fixed_time = 1234567890000} in do
-                Time.now {}
+            perform FrozenTime {fixed = instant_from_millis { n = 1234567890000 } } in do
+                instant_to_millis { i = Time.now {} }
             """);
 
         assertEquals(1234567890000L, result);

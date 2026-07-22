@@ -1,186 +1,138 @@
-use std::int
+## Time effect — clock reads and sleep. Three ops, two impls.
+##
+## Design (#72, #75):
+##
+##   effect Time { now, monotonic, sleep }
+##
+##   - now() -> Instant       — wall-clock time (can jump on NTP/DST)
+##   - monotonic() -> Duration — monotonic clock (never goes back, delta-only)
+##   - sleep(d: Duration)      — block for d
+##
+## Everything else — decompose, format, parse, arithmetic, calendar
+## helpers — lives in std::datetime as pure functions on Instant /
+## Duration / Zone. Users combine those with Time.now to get things
+## like "what year is it right now?"
+##
+## Three impls:
+##   SystemTime — reads real OS clocks, actually blocks on sleep.
+##   MockTime { clock: TestClock } — clock reads and sleep-advances
+##     go through a mutable TestClock handle. sleep { d } advances the
+##     clock by d (real Java pattern: Spring MutableClock / Kotlin
+##     TestClock — mutation hidden inside the handle).
+##   FrozenTime { fixed: Instant } — clock never advances; sleep is a
+##     no-op. Use for snapshots where you don't care about elapsed time.
+##
+## For code that runs under Async, prefer Async's own cancellable
+## sleep helpers where they exist. Time.sleep is a blocking wait
+## and won't wake early on scope cancellation.
 
-## Time effect for clock access, sleeping, and timestamp formatting.
+use std::datetime::{
+  Instant, Duration, Zone, DateTime, TestClock,
+  decompose, add, diff, utc,
+  year, month, day, hour, minute, second,
+  duration_zero, sub_duration,
+  test_clock_now, test_clock_advance, test_clock_monotonic
+}
+
+## The Time effect.
 effect Time where {
-  ## Current time in milliseconds since epoch.
-  now: {} -> Int <Time>,
-  ## Current time in nanoseconds since epoch.
-  now_nanos: {} -> Int <Time>,
-  ## Sleep for the given number of milliseconds.
-  sleep: { millis: Int } -> {} <Time>,
-  ## Sleep for the given number of nanoseconds.
-  sleep_nanos: { nanos: Int } -> {} <Time>,
-  current_year: {} -> Int <Time>,
-  current_month: {} -> Int <Time>,
-  current_day: {} -> Int <Time>,
-  current_hour: {} -> Int <Time>,
-  current_minute: {} -> Int <Time>,
-  current_second: {} -> Int <Time>,
-  ## Format a timestamp to a string using a pattern.
-  format_timestamp: { timestamp: Int, format: Str } -> Str <Time>,
-  ## Parse a date string into a timestamp using a pattern.
-  parse_timestamp: { date_string: Str, format: Str } -> Int <Time>
+  ## Current wall-clock instant. Not monotonic — can jump.
+  ## Use for timestamps, expiries, log records.
+  now: {} -> Instant <Time>,
+
+  ## Monotonic-clock reading, since some arbitrary origin (usually JVM
+  ## start). Never goes backwards. Only meaningful as a delta between
+  ## two readings. Use for benchmarks, timeouts, rate limits.
+  monotonic: {} -> Duration <Time>,
+
+  ## Block for the given Duration.
+  sleep: { d: Duration } -> {} <Time>,
 }
 
-## System clock implementation.
+## Real system clocks + real blocking sleep.
 impl Time for SystemTime where {
-  now = {} -> __native_time_now {},
-  now_nanos = {} -> __native_time_now_nanos {},
-  sleep = { millis } -> __native_time_sleep { millis = millis },
-  sleep_nanos = { nanos } -> __native_time_sleep_nanos { nanos = nanos },
-  current_year = {} -> __native_time_current_year {},
-  current_month = {} -> __native_time_current_month {},
-  current_day = {} -> __native_time_current_day {},
-  current_hour = {} -> __native_time_current_hour {},
-  current_minute = {} -> __native_time_current_minute {},
-  current_second = {} -> __native_time_current_second {},
-  format_timestamp = { timestamp, format } ->
-    __native_time_format { timestamp = timestamp, format = format },
-  parse_timestamp = { date_string, format } ->
-    __native_time_parse { date_string = date_string, format = format },
+  now       = {} -> __native_instant_now {},
+  monotonic = {} -> __native_duration_monotonic {},
+  sleep     = { d } -> __native_time_sleep { d = d },
 }
 
-## Mock time implementation with a fixed timestamp, for testing.
-impl Time for MockTime { fixed_time: Int } where {
-  now = {} -> fixed_time,
-  now_nanos = {} -> fixed_time * 1000000,
-  sleep = { millis } -> {},
-  sleep_nanos = { nanos } -> {},
-  current_year = {} -> __native_time_year_from_timestamp { timestamp = fixed_time },
-  current_month = {} -> __native_time_month_from_timestamp { timestamp = fixed_time },
-  current_day = {} -> __native_time_day_from_timestamp { timestamp = fixed_time },
-  current_hour = {} -> __native_time_hour_from_timestamp { timestamp = fixed_time },
-  current_minute = {} -> __native_time_minute_from_timestamp { timestamp = fixed_time },
-  current_second = {} -> __native_time_second_from_timestamp { timestamp = fixed_time },
-  format_timestamp = { timestamp, format } ->
-    __native_time_format { timestamp = timestamp, format = format },
-  parse_timestamp = { date_string, format } ->
-    __native_time_parse { date_string = date_string, format = format },
+## Test-time impl backed by a mutable TestClock handle. Clock reads
+## return the current TestClock Instant. sleep { d } advances the
+## clock by d instead of blocking. Both real Instant time and monotonic
+## reads track the same handle, so elapsed_monotonic_since works too.
+##
+## Example:
+##   let clock = test_clock_at { i = epoch {} }
+##   perform MockTime { clock = clock } in do
+##     Time.sleep { d = duration_seconds { n = 5 } }
+##     instant_to_millis { i = Time.now {} }  # => 5000
+impl Time for MockTime { clock: TestClock } where {
+  now       = {} -> test_clock_now       { c = clock },
+  monotonic = {} -> test_clock_monotonic { c = clock },
+  sleep     = { d } -> test_clock_advance { c = clock, d = d },
 }
 
-## Get current timestamp in milliseconds.
-pub let now : {} -> Int <Time> = {} -> Time.now {}
+## Frozen-time impl. `now` returns `fixed`, `monotonic` returns zero,
+## `sleep` is a no-op. Predictable snapshot — no clock movement,
+## no waiting. Use when your test doesn't care about elapsed time.
+impl Time for FrozenTime { fixed: Instant } where {
+  now       = {} -> fixed,
+  monotonic = {} -> duration_zero {},
+  sleep     = { d } -> {},
+}
 
-## Sleep for the given milliseconds.
-pub let sleep : { millis: Int } -> {} <Time> = { millis } -> Time.sleep { millis = millis }
+## ==================================================================
+## Sugar — thin wrappers over Time.now + std::datetime helpers.
+## Kept in this module (not std::datetime) because they carry the
+## <Time> effect row.
+## ==================================================================
 
-## Alias for now.
-pub let current_timestamp : {} -> Int <Time> = {} -> Time.now {}
+## Wall-clock instant right now — same as Time.now.
+pub let now : {} -> Instant <Time> = {} -> Time.now {}
 
-## Get the current date as a record.
-pub let current_date : {} -> { year: Int, month: Int, day: Int } <Time> = {} -> do
-  let year = Time.current_year {}
-  let month = Time.current_month {}
-  let day = Time.current_day {}
-  { year = year, month = month, day = day }
+## Monotonic reading right now — same as Time.monotonic.
+pub let monotonic : {} -> Duration <Time> = {} -> Time.monotonic {}
 
-## Get the current time-of-day as a record.
-pub let current_time : {} -> { hour: Int, minute: Int, second: Int } <Time> = {} ->
-  do
-    let hour = Time.current_hour {}
-    let minute = Time.current_minute {}
-    let second = Time.current_second {}
-    { hour = hour, minute = minute, second = second }
+## Sleep for the given Duration — same as Time.sleep.
+pub let sleep : { d: Duration } -> {} <Time> = { d } -> Time.sleep { d = d }
 
-## Get the current date and time as a record.
-pub let current_datetime : {} -> { year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int } <Time> = {} ->
-  do
-    let year = Time.current_year {}
-    let month = Time.current_month {}
-    let day = Time.current_day {}
-    let hour = Time.current_hour {}
-    let minute = Time.current_minute {}
-    let second = Time.current_second {}
-    {
-      year = year,
-      month = month,
-      day = day,
-      hour = hour,
-      minute = minute,
-      second = second,
-    }
+## Decomposed date/time right now, in the given Zone. One clock
+## read + one pure decompose — snapshot is atomic.
+pub let current_datetime : { z: Zone } -> DateTime <Time> = { z } ->
+  decompose { i = Time.now {}, z = z }
 
-## Add milliseconds to a timestamp.
-pub let add_millis : { timestamp: Int, millis: Int } -> Int = { timestamp, millis } ->
-  timestamp + millis
+## Current year in the given Zone. Fast path — no DateTime allocation.
+pub let current_year : { z: Zone } -> Int <Time> = { z } ->
+  year { i = Time.now {}, z = z }
 
-## Add seconds to a timestamp.
-pub let add_seconds : { timestamp: Int, seconds: Int } -> Int = { timestamp, seconds } ->
-  timestamp + (seconds * 1000)
+## Current month (1-12) in the given Zone.
+pub let current_month : { z: Zone } -> Int <Time> = { z } ->
+  month { i = Time.now {}, z = z }
 
-## Add minutes to a timestamp.
-pub let add_minutes : { timestamp: Int, minutes: Int } -> Int = { timestamp, minutes } ->
-  timestamp + (minutes * 60 * 1000)
+## Current day-of-month (1-31) in the given Zone.
+pub let current_day : { z: Zone } -> Int <Time> = { z } ->
+  day { i = Time.now {}, z = z }
 
-## Add hours to a timestamp.
-pub let add_hours : { timestamp: Int, hours: Int } -> Int = { timestamp, hours } ->
-  timestamp + (hours * 60 * 60 * 1000)
+## Current hour (0-23) in the given Zone.
+pub let current_hour : { z: Zone } -> Int <Time> = { z } ->
+  hour { i = Time.now {}, z = z }
 
-## Add days to a timestamp.
-pub let add_days : { timestamp: Int, days: Int } -> Int = { timestamp, days } ->
-  timestamp + (days * 24 * 60 * 60 * 1000)
+## Current minute (0-59) in the given Zone.
+pub let current_minute : { z: Zone } -> Int <Time> = { z } ->
+  minute { i = Time.now {}, z = z }
 
-## Difference in milliseconds between two timestamps.
-pub let diff_millis : { start: Int, end: Int } -> Int = { start, end } -> end - start
+## Current second (0-59) in the given Zone.
+pub let current_second : { z: Zone } -> Int <Time> = { z } ->
+  second { i = Time.now {}, z = z }
 
-## Difference in seconds between two timestamps.
-pub let diff_seconds : { start: Int, end: Int } -> Int = { start, end } -> (end - start) / 1000
+## Duration elapsed since the given wall-clock Instant. Uses `now`
+## (not `monotonic`) — may go negative if the OS clock jumps back.
+## For benchmarks prefer `elapsed_monotonic_since`.
+pub let elapsed_since : { s: Instant } -> Duration <Time> = { s } ->
+  diff { s = s, e = Time.now {} }
 
-## Difference in minutes between two timestamps.
-pub let diff_minutes : { start: Int, end: Int } -> Int = { start, end } ->
-  (end - start) / (60 * 1000)
-
-## Difference in hours between two timestamps.
-pub let diff_hours : { start: Int, end: Int } -> Int = { start, end } ->
-  (end - start) / (60 * 60 * 1000)
-
-## Difference in days between two timestamps.
-pub let diff_days : { start: Int, end: Int } -> Int = { start, end } ->
-  (end - start) / (24 * 60 * 60 * 1000)
-
-## Check if a year is a leap year.
-pub let is_leap_year : { year: Int } -> Bool = { year } ->
-  (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
-
-## Get the number of days in a month (accounts for leap years).
-pub let days_in_month : { year: Int, month: Int } -> Int = { year, month } -> match month is
-  1 -> 31
-  2 -> match is_leap_year { year = year } is
-    True -> 29
-    False -> 28
-  3 -> 31
-  4 -> 30
-  5 -> 31
-  6 -> 30
-  7 -> 31
-  8 -> 31
-  9 -> 30
-  10 -> 31
-  11 -> 30
-  12 -> 31
-  _ -> 0
-
-
-## Format a timestamp as ISO 8601.
-pub let format_iso8601 : { timestamp: Int } -> Str <Time> = { timestamp } ->
-  Time.format_timestamp {
-    timestamp = timestamp,
-    format = "yyyy-MM-dd'T'HH:mm:ss'Z'",
-  }
-
-## Format a timestamp as a date string (yyyy-MM-dd).
-pub let format_date : { timestamp: Int } -> Str <Time> = { timestamp } ->
-  Time.format_timestamp { timestamp = timestamp, format = "yyyy-MM-dd" }
-
-## Format a timestamp as a time string (HH:mm:ss).
-pub let format_time_only : { timestamp: Int } -> Str <Time> = { timestamp } ->
-  Time.format_timestamp { timestamp = timestamp, format = "HH:mm:ss" }
-
-## Format a timestamp as date and time (yyyy-MM-dd HH:mm:ss).
-pub let format_datetime : { timestamp: Int } -> Str <Time> = { timestamp } ->
-  Time.format_timestamp { timestamp = timestamp, format = "yyyy-MM-dd HH:mm:ss" }
-
-## Get milliseconds elapsed since the given timestamp.
-pub let elapsed_since : { timestamp: Int } -> Int <Time> = { timestamp } -> do
-  let current = Time.now {}
-  current - timestamp
+## Duration elapsed since a captured monotonic reading. Guaranteed
+## non-negative on the same JVM instance. Use this for benchmarks
+## and timeouts.
+pub let elapsed_monotonic_since : { s: Duration } -> Duration <Time> = { s } ->
+  sub_duration { a = Time.monotonic {}, b = s }

@@ -7,8 +7,9 @@ import org.junit.jupiter.api.BeforeEach
 import kotlin.test.assertNotNull
 
 /**
- * Tests for std/effects/time module functions.
- * Verifies that importing and using time effect functions works correctly.
+ * Tests for std/effects/time module against the redesigned 3-op Time
+ * effect (#72/#75): now, monotonic, sleep. Values are opaque Instant/
+ * Duration from std::datetime; calendar/format live in std::datetime.
  */
 class TimeEffectModuleTest {
 
@@ -17,218 +18,224 @@ class TimeEffectModuleTest {
 
     @BeforeEach
     fun setup() {
-        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
+        ModuleResolver.clearCache()
         TypeChecker.clearCache()
         typeChecker = TypeChecker()
-        // Set project root for module resolution
         TestUtils.setupProjectRoot()
     }
 
     private fun parseAndTypeCheck(source: String): TypeCheckResult {
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
-        return result
+        return typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
-    fun `test SystemTime now function`() {
+    fun `Time now returns Instant under SystemTime`() {
         val source = """
             use std::effects::time::{Time, SystemTime}
             let main = {} ->
                 perform SystemTime in do
-                    let time = Time.now {}
-                    time
+                    let i = Time.now {}
+                    i
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test SystemTime now_nanos function`() {
+    fun `Time monotonic returns Duration under SystemTime`() {
         val source = """
             use std::effects::time::{Time, SystemTime}
             let main = {} ->
                 perform SystemTime in do
-                    let time = Time.now_nanos {}
-                    time
+                    let d = Time.monotonic {}
+                    d
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test SystemTime sleep function`() {
+    fun `Time sleep takes a Duration argument`() {
         val source = """
+            use std::datetime::{ duration_millis }
             use std::effects::time::{Time, SystemTime}
             let main = {} ->
-                perform SystemTime in Time.sleep { millis = 100 }
+                perform SystemTime in
+                    Time.sleep { d = duration_millis { n = 100 } }
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test SystemTime sleep_nanos function`() {
+    fun `FrozenTime with fixed Instant`() {
         val source = """
-            use std::effects::time::{Time, SystemTime}
+            use std::datetime::{ instant_from_millis }
+            use std::effects::time::{Time, FrozenTime}
             let main = {} ->
-                perform SystemTime in Time.sleep_nanos { nanos = 1000000 }
+                perform FrozenTime { fixed = instant_from_millis { n = 1609459200000 } } in do
+                    let i = Time.now {}
+                    i
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test SystemTime current_year function`() {
+    fun `MockTime with advancing TestClock`() {
         val source = """
-            use std::effects::time::{Time, SystemTime}
-            let main = {} ->
-                perform SystemTime in do
-                    let year = Time.current_year {}
-                    year
-        """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
-    }
-
-    @Test
-    fun `test SystemTime current_month function`() {
-        val source = """
-            use std::effects::time::{Time, SystemTime}
-            let main = {} ->
-                perform SystemTime in do
-                    let month = Time.current_month {}
-                    month
-        """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
-    }
-
-    @Test
-    fun `test SystemTime current_day function`() {
-        val source = """
-            use std::effects::time::{Time, SystemTime}
-            let main = {} ->
-                perform SystemTime in do
-                    let day = Time.current_day {}
-                    day
-        """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
-    }
-
-    @Test
-    fun `test SystemTime current_hour function`() {
-        val source = """
-            use std::effects::time::{Time, SystemTime}
-            let main = {} ->
-                perform SystemTime in do
-                    let hour = Time.current_hour {}
-                    hour
-        """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
-    }
-
-    @Test
-    fun `test SystemTime current_minute function`() {
-        val source = """
-            use std::effects::time::{Time, SystemTime}
-            let main = {} ->
-                perform SystemTime in do
-                    let minute = Time.current_minute {}
-                    minute
-        """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
-    }
-
-    @Test
-    fun `test SystemTime current_second function`() {
-        val source = """
-            use std::effects::time::{Time, SystemTime}
-            let main = {} ->
-                perform SystemTime in do
-                    let second = Time.current_second {}
-                    second
-        """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
-    }
-
-    @Test
-    fun `test SystemTime format_timestamp function`() {
-        val source = """
-            use std::effects::time::{Time, SystemTime}
-            let main = {} ->
-                perform SystemTime in do
-                    let formatted = Time.format_timestamp {
-                    timestamp = 1609459200000,
-                    format = "yyyy-MM-dd"
-                }
-                    formatted
-        """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
-    }
-
-    @Test
-    fun `test SystemTime parse_timestamp function`() {
-        val source = """
-            use std::effects::time::{Time, SystemTime}
-            let main = {} ->
-                perform SystemTime in do
-                    let timestamp = Time.parse_timestamp {
-                    date_string = "2021-01-01",
-                    format = "yyyy-MM-dd"
-                }
-                    timestamp
-        """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
-    }
-
-    @Test
-    fun `test MockTime with fixed timestamp`() {
-        val source = """
+            use std::datetime::{ epoch, test_clock_at, duration_seconds, instant_to_millis }
             use std::effects::time::{Time, MockTime}
-            let main = {} ->
-                perform MockTime { fixed_time = 1609459200000 } in do
-                    let year = Time.current_year {}
-                    year
+            let main = {} -> do
+                let clock = test_clock_at { i = epoch {} }
+                perform MockTime { clock = clock } in do
+                    Time.sleep { d = duration_seconds { n = 5 } }
+                    instant_to_millis { i = Time.now {} }
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 
     @Test
-    fun `test combining time operations`() {
+    fun `Instant codec roundtrip typechecks`() {
         val source = """
+            use std::datetime::{ epoch, instant_encode, instant_decode }
+            let main = {} -> instant_decode { s = instant_encode { i = epoch {} } }
+        """.trimIndent()
+        assertNotNull(parseAndTypeCheck(source))
+    }
+
+    @Test
+    fun `Duration codec roundtrip typechecks`() {
+        val source = """
+            use std::datetime::{ duration_seconds, duration_encode, duration_decode }
+            let main = {} -> duration_decode { s = duration_encode { d = duration_seconds { n = 1 } } }
+        """.trimIndent()
+        assertNotNull(parseAndTypeCheck(source))
+    }
+
+    @Test
+    fun `Zone codec roundtrip typechecks`() {
+        val source = """
+            use std::datetime::{ utc, zone_encode, zone_decode }
+            let main = {} -> zone_decode { s = zone_encode { z = utc {} } }
+        """.trimIndent()
+        assertNotNull(parseAndTypeCheck(source))
+    }
+
+    @Test
+    fun `current_year sugar under SystemTime`() {
+        val source = """
+            use std::datetime::{ utc }
+            use std::effects::time::{Time, SystemTime, current_year}
+            let main = {} ->
+                perform SystemTime in
+                    current_year { z = utc {} }
+        """.trimIndent()
+        assertNotNull(parseAndTypeCheck(source))
+    }
+
+    @Test
+    fun `current_month sugar under SystemTime`() {
+        val source = """
+            use std::datetime::{ utc }
+            use std::effects::time::{Time, SystemTime, current_month}
+            let main = {} ->
+                perform SystemTime in
+                    current_month { z = utc {} }
+        """.trimIndent()
+        assertNotNull(parseAndTypeCheck(source))
+    }
+
+    @Test
+    fun `current_day sugar under SystemTime`() {
+        val source = """
+            use std::datetime::{ utc }
+            use std::effects::time::{Time, SystemTime, current_day}
+            let main = {} ->
+                perform SystemTime in
+                    current_day { z = utc {} }
+        """.trimIndent()
+        assertNotNull(parseAndTypeCheck(source))
+    }
+
+    @Test
+    fun `current_hour sugar under SystemTime`() {
+        val source = """
+            use std::datetime::{ utc }
+            use std::effects::time::{Time, SystemTime, current_hour}
+            let main = {} ->
+                perform SystemTime in
+                    current_hour { z = utc {} }
+        """.trimIndent()
+        assertNotNull(parseAndTypeCheck(source))
+    }
+
+    @Test
+    fun `current_minute sugar under SystemTime`() {
+        val source = """
+            use std::datetime::{ utc }
+            use std::effects::time::{Time, SystemTime, current_minute}
+            let main = {} ->
+                perform SystemTime in
+                    current_minute { z = utc {} }
+        """.trimIndent()
+        assertNotNull(parseAndTypeCheck(source))
+    }
+
+    @Test
+    fun `current_second sugar under SystemTime`() {
+        val source = """
+            use std::datetime::{ utc }
+            use std::effects::time::{Time, SystemTime, current_second}
+            let main = {} ->
+                perform SystemTime in
+                    current_second { z = utc {} }
+        """.trimIndent()
+        assertNotNull(parseAndTypeCheck(source))
+    }
+
+    @Test
+    fun `format Instant with pattern under SystemTime`() {
+        val source = """
+            use std::datetime::{ utc, format }
+            use std::effects::time::{Time, SystemTime}
+            let main = {} ->
+                perform SystemTime in do
+                    let i = Time.now {}
+                    format { i = i, p = "yyyy-MM-dd", z = utc {} }
+        """.trimIndent()
+        assertNotNull(parseAndTypeCheck(source))
+    }
+
+    @Test
+    fun `parse date string with pattern returns Result Instant`() {
+        val source = """
+            use std::datetime::{ utc, parse }
+            let main = {} ->
+                parse { s = "2021-01-01", p = "yyyy-MM-dd", z = utc {} }
+        """.trimIndent()
+        assertNotNull(parseAndTypeCheck(source))
+    }
+
+    @Test
+    fun `FrozenTime with fixed Instant plus current_year sugar`() {
+        val source = """
+            use std::datetime::{ instant_from_millis, utc }
+            use std::effects::time::{Time, FrozenTime, current_year}
+            let main = {} ->
+                perform FrozenTime { fixed = instant_from_millis { n = 1609459200000 } } in
+                    current_year { z = utc {} }
+        """.trimIndent()
+        assertNotNull(parseAndTypeCheck(source))
+    }
+
+    @Test
+    fun `combining now with format`() {
+        val source = """
+            use std::datetime::{ utc, format }
             use std::effects::time::{Time, SystemTime}
             let main = {} ->
                 perform SystemTime in do
                     let now = Time.now {}
-                    let formatted = Time.format_timestamp {
-                        timestamp = now,
-                        format = "yyyy-MM-dd HH:mm:ss"
-                    }
-                    formatted
+                    format { i = now, p = "yyyy-MM-dd HH:mm:ss", z = utc {} }
         """.trimIndent()
-
-        val typed = parseAndTypeCheck(source)
-        assertNotNull(typed)
+        assertNotNull(parseAndTypeCheck(source))
     }
 }

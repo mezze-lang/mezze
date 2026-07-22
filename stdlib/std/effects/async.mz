@@ -3,6 +3,7 @@ use std::abilities::compare::{ Eq }
 use std::result
 use std::effects::exception::{ Exception, unwrap }
 use std::effects::time::{ Time }
+use std::datetime::{ duration_millis }
 use std::int
 
 ## Opaque promise representing an asynchronous computation.
@@ -71,7 +72,8 @@ pub let cancel : { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async
   __native_promise_cancel { p = p, reason = reason }
 
 ## Sleep for the given milliseconds. Delegates to Time.sleep.
-pub let sleep : { ms: Int } -> {} <Time> = { ms } -> Time.sleep { millis = ms }
+pub let sleep : { ms: Int } -> {} <Time> = { ms } ->
+  Time.sleep { d = duration_millis { n = ms } }
 
 ## Voluntarily yield the current task's execution slot.
 pub let yield_now : {} -> {} <Async> = {} -> __native_async_yield_now {}

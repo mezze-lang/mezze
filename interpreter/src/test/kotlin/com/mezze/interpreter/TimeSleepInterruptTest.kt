@@ -1,6 +1,7 @@
 package com.mezze.interpreter
 
-import com.mezze.interpreter.nodes.builtin.io.TimeNatives
+import com.mezze.interpreter.nodes.builtin.io.DateTimeNatives
+import java.time.Duration
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 
@@ -22,7 +23,7 @@ class TimeSleepInterruptTest {
         Thread.currentThread().interrupt()
         try {
             assertThrows(RuntimeException::class.java) {
-                TimeNatives.sleep(10_000)
+                DateTimeNatives.sleep(DateTimeNatives.MezzeDuration(Duration.ofMillis(10_000)))
             }
         } finally {
             // Clean up: clear the flag so this test doesn't leak interrupt
@@ -36,7 +37,7 @@ class TimeSleepInterruptTest {
         Thread.currentThread().interrupt()
         try {
             assertThrows(RuntimeException::class.java) {
-                TimeNatives.sleepNanos(10_000_000_000L)
+                DateTimeNatives.sleep(DateTimeNatives.MezzeDuration(Duration.ofNanos(10_000_000_000L)))
             }
         } finally {
             Thread.interrupted()
@@ -53,7 +54,7 @@ class TimeSleepInterruptTest {
         interrupter.start()
         try {
             assertThrows(RuntimeException::class.java) {
-                TimeNatives.sleep(10_000)
+                DateTimeNatives.sleep(DateTimeNatives.MezzeDuration(Duration.ofMillis(10_000)))
             }
         } finally {
             Thread.interrupted()
@@ -64,7 +65,7 @@ class TimeSleepInterruptTest {
     @Test
     fun `sleep returns normally with no interrupt`() {
         // Sanity check: no interrupt → no exception, returns MezzeUnit.
-        val result = TimeNatives.sleep(1)
+        val result = DateTimeNatives.sleep(DateTimeNatives.MezzeDuration(Duration.ofMillis(1)))
         assertNotNull(result)
         assertFalse(Thread.currentThread().isInterrupted)
     }
