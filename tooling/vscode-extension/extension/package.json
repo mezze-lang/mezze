@@ -2,7 +2,7 @@
   "name": "mezze-language",
   "displayName": "Mezze Language Support",
   "description": "Full language support for Mezze: syntax highlighting, type information, diagnostics, go to definition, and more",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "publisher": "mezze-lang",
   "icon": "icon.png",
   "engines": {
@@ -62,39 +62,58 @@
         "path": "./file-icons/mezze-icon-theme.json"
       }
     ],
-    "configuration": {
-      "title": "Mezze",
-      "properties": {
-        "mezze.executablePath": {
-          "type": "string",
-          "default": "mez",
-          "description": "Path to the mez executable. If not absolute, it's resolved relative to the workspace root."
-        },
-        "mezze.trace.server": {
-          "type": "string",
-          "enum": ["off", "messages", "verbose"],
-          "default": "off",
-          "description": "Traces the communication between VS Code and the Mezze language server."
-        },
-        "mezze.debounceMs": {
-          "type": "number",
-          "default": 250,
-          "minimum": 0,
-          "maximum": 5000,
-          "description": "Milliseconds to wait after the last keystroke before re-analyzing a document. Lower feels snappier; higher reduces CPU on large files."
-        },
-        "mezze.inlayHints.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show inline type/parameter/effect hints."
-        },
-        "mezze.codeLens.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show reference / implementation / performer counts above declarations."
+    "configuration": [
+      {
+        "title": "Mezze",
+        "order": 1,
+        "properties": {
+          "mezze.executablePath": {
+            "type": "string",
+            "default": "mez",
+            "order": 1,
+            "description": "Path to the mez executable. If not absolute, it's resolved relative to the workspace root."
+          },
+          "mezze.inlayHints.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 2,
+            "description": "Show inline type/parameter/effect hints."
+          },
+          "mezze.codeLens.enabled": {
+            "type": "boolean",
+            "default": true,
+            "order": 3,
+            "description": "Show reference / implementation / performer counts above declarations."
+          }
+        }
+      },
+      {
+        "title": "Advanced",
+        "order": 2,
+        "properties": {
+          "mezze.debounceMs": {
+            "type": "number",
+            "default": 250,
+            "minimum": 0,
+            "maximum": 5000,
+            "order": 1,
+            "markdownDescription": "Milliseconds to wait after the last keystroke before re-analyzing a document. Lower feels snappier; higher reduces CPU on large files."
+          },
+          "mezze.trace.server": {
+            "type": "string",
+            "enum": ["off", "messages", "verbose"],
+            "enumDescriptions": [
+              "No tracing.",
+              "Log the method name of each request/response.",
+              "Log the full JSON-RPC payloads (very noisy — for debugging only)."
+            ],
+            "default": "off",
+            "order": 2,
+            "markdownDescription": "Traces the communication between VS Code and the Mezze language server. Leave `off` for normal use."
+          }
         }
       }
-    },
+    ],
     "commands": [
       {
         "command": "mezze.restartServer",
