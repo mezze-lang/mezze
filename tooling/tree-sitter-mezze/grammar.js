@@ -901,7 +901,13 @@ module.exports = grammar({
       '"',
     ),
 
-    string_content: _ => /[^"\\$]+/,
+    // Ordinary string text: any run of chars that isn't a quote, backslash, or
+    // `$`, PLUS a lone `$` that doesn't begin an interpolation (`$100`, `$` at
+    // end). The `$(` form is claimed by string_interpolation (longer token).
+    string_content: _ => token(prec(-1, choice(
+      /[^"\\$]+/,
+      /\$/,
+    ))),
 
     escape_sequence: _ => token(seq('\\', /./)),
 
