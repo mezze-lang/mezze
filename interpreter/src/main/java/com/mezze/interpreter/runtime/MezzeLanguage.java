@@ -91,6 +91,16 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             System.getenv("MEZZE_BDSL") != null
                 && !"0".equals(System.getenv("MEZZE_BDSL"))
                 && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL"));
+
+    // CPS routing (Path C, docs/perf/bdsl-effects-path-c-2026-07.md) — opt-in
+    // via MEZZE_CPS env var. When on, CpsLowering runs on every FunctionIR
+    // before Truffle/BDSL compilation and effect-related fibers pick the CPS
+    // backend. Off by default until Phase 3 when we flip the default and
+    // delete the Loom Continuation path.
+    public static final boolean CPS_ENABLED =
+            System.getenv("MEZZE_CPS") != null
+                && !"0".equals(System.getenv("MEZZE_CPS"))
+                && !"false".equalsIgnoreCase(System.getenv("MEZZE_CPS"));
     private static final boolean BDSL_STATS =
             System.getenv("MEZZE_BDSL_STATS") != null
                 && !"0".equals(System.getenv("MEZZE_BDSL_STATS"))
