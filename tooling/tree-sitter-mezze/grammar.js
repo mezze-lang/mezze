@@ -45,6 +45,18 @@ const PREC = {
 module.exports = grammar({
   name: 'mezze',
 
+  // Indentation-aware block termination is handled by the external scanner in
+  // src/scanner.c. It emits zero-width INDENT / NEWLINE / DEDENT tokens that
+  // bound `match … is` arm lists and `do` blocks — Mezze terminates those by
+  // indentation (an arm/statement continues only while the next line is
+  // indented at/past the first item's column). Elsewhere newlines stay plain
+  // whitespace (see `extras`), so the rest of the grammar is unaffected.
+  externals: $ => [
+    $._newline,
+    $._indent,
+    $._dedent,
+  ],
+
   // Newlines as plain whitespace. Mezze isn't truly newline-significant —
   // top-level decls terminate by syntactic balance (close-brace, end of
   // expression). If we later need newline-as-terminator (e.g. for do-blocks
@@ -683,11 +695,20 @@ module.exports = grammar({
     // following top-level _expression would be valid, GLR can prefer
     // ending the match. prec.right keeps multi-arm matches greedy
     // INSIDE a let body where nothing else competes.
+    // `match scrutinee is` followed by an indented block of arms. The scanner
+    // opens the block with _indent, separates arms with _newline, and closes it
+    // with _dedent when a line dedents below the arm column — this is what stops
+    // the arm list from swallowing the following top-level token. A trailing
+    // comma per arm stays allowed (some sources write `pat -> body,`).
     match_expression: $ => prec.right(seq(
       'match',
       field('scrutinee', $._expression),
       'is',
-      repeat1(prec.dynamic(1, seq($.match_arm, optional(',')))),
+      $._indent,
+      $.match_arm,
+      optional(','),
+      repeat(seq($._newline, $.match_arm, optional(','))),
+      optional($._dedent),
     )),
 
     match_arm: $ => seq(
