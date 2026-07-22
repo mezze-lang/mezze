@@ -803,6 +803,91 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `completion inside an effect impl body suggests the unimplemented op names`() {
+        // Cursor on a fresh field line inside `impl Counter for MemCounter`,
+        // with `get` already written → suggest the remaining op `incr`.
+        val src = """
+            type MemCounter = | MemCounter |
+
+            effect Counter where {
+              get : {} -> Int,
+              incr : {} -> {}
+            }
+
+            impl Counter for MemCounter where {
+              get = {} -> 0,
+
+            }
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        // The blank line inside the impl body (after `get = {} -> 0,`).
+        val srcLines = src.lines()
+        val getLine = srcLines.indexOfFirst { it.contains("get = {} -> 0") }
+        val blankLine = (getLine + 1 until srcLines.size).first { srcLines[it].isBlank() }
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(blankLine, 2)
+        }).get(5, TimeUnit.SECONDS)
+
+        val comps = if (result.isLeft) result.left else result.right.items
+        val labels = comps.map { it.label }
+        assertTrue(labels.contains("incr"),
+            "expected `incr` op completion in the impl body, got: $labels")
+        assertFalse(labels.contains("get"),
+            "already-implemented `get` should not be suggested, got: $labels")
+    }
+
+    @Test
+    fun `completion after with suggests ability names`() {
+        val src = """
+            ability Show for 'a where {
+              show : { it: 'a } -> Str
+            }
+
+            let f : { x: 'a } -> Str with Sh = { x } -> "n"
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val line = src.lines().indexOfFirst { it.contains("with Sh") }
+        val col = src.lines()[line].indexOf("with Sh") + "with Sh".length
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(line, col)
+        }).get(5, TimeUnit.SECONDS)
+
+        val comps = if (result.isLeft) result.left else result.right.items
+        assertTrue(comps.any { it.label == "Show" },
+            "expected `Show` after `with `, got: ${comps.map { it.label }}")
+    }
+
+    @Test
+    fun `completion inside an effect row suggests effect names`() {
+        val src = """
+            effect Counter where {
+              get : {} -> Int
+            }
+
+            let f : {} -> Int <Co = {} -> perform get {}
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val line = src.lines().indexOfFirst { it.contains("<Co") }
+        val col = src.lines()[line].indexOf("<Co") + "<Co".length
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(line, col)
+        }).get(5, TimeUnit.SECONDS)
+
+        val comps = if (result.isLeft) result.left else result.right.items
+        assertTrue(comps.any { it.label == "Counter" },
+            "expected `Counter` inside `<…>`, got: ${comps.map { it.label }}")
+    }
+
+    @Test
     fun `code lens shows a references lens over each top-level function`() {
         val (uri, _) = openSingleFile("""
             let helper = {x: Int} -> x + 1

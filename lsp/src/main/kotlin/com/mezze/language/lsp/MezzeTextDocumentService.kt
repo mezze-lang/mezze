@@ -2355,6 +2355,20 @@ class MezzeTextDocumentService(
                 return@supplyAsync Either.forLeft<List<CompletionItem>, CompletionList>(useCompletions)
             }
 
+            // Ability/effect NAME in a `with …` constraint or `<…>` effect row.
+            // Checked before the dot/keyword paths so a partial name there is
+            // completed with declared ability/effect names, not bindings.
+            val abilityEffectNames = if (state != null) getAbilityEffectNameCompletions(state, position) else null
+            if (abilityEffectNames != null) {
+                return@supplyAsync Either.forLeft<List<CompletionItem>, CompletionList>(abilityEffectNames)
+            }
+
+            // Op names at a field-start position inside an impl body.
+            val implOps = if (state != null) getImplBodyOpCompletions(state, position) else null
+            if (implOps != null && implOps.isNotEmpty()) {
+                return@supplyAsync Either.forLeft<List<CompletionItem>, CompletionList>(implOps)
+            }
+
             val dotCompletions = if (state != null) {
                 getDotCompletions(state, position)
             } else {
@@ -3731,6 +3745,99 @@ class MezzeTextDocumentService(
         // keyword name itself). Bail on `.`, `{`, `(`, `=` etc.
         if (before.any { !it.isLetterOrDigit() && it != '_' }) return false
         return true
+    }
+
+    /**
+     * Op-name completions inside an impl body. When the cursor is on a fresh
+     * field-start line inside `impl X for Y where { … }`, suggest the ops of
+     * the ability/effect X that aren't implemented yet, as `op = { … } -> …`
+     * snippets. Returns null when the cursor isn't in an impl body (so the
+     * caller falls through to the normal completion paths).
+     */
+    private fun getImplBodyOpCompletions(state: DocumentState, position: Position): List<CompletionItem>? {
+        val pm = state.parsedModule ?: return null
+        val lines = state.content.lines()
+        val lineText = lines.getOrNull(position.line) ?: return null
+        // Only at a field-start position: nothing but an identifier prefix
+        // before the cursor on this line (no `=`, `:`, `{`, `(` yet).
+        val before = lineText.substring(0, position.character.coerceIn(0, lineText.length))
+        if (!Regex("^\\s*[a-z_][a-zA-Z0-9_]*$|^\\s*$").matches(before)) return null
+        val prefix = before.trim()
+        val lineNo = position.line + 1
+
+        // Find the enclosing impl decl by loc range, resolve its ability/effect
+        // ops, and drop the ones already written in the body.
+        for (decl in pm.decls) {
+            val (declLoc, opDecls, implementedNames) = when (decl) {
+                is com.mezze.language.parsedast.ParsedImplAbilityDecl -> {
+                    val ability = pm.decls.filterIsInstance<ParsedAbilityDecl>()
+                        .find { it.name == decl.abilityName } ?: continue
+                    Triple(decl.loc, ability.operations.map { it.name }, decl.operations.map { it.name }.toSet())
+                }
+                is ParsedPerformerDecl -> {
+                    val effect = pm.decls.filterIsInstance<ParsedEffectDecl>()
+                        .find { it.name == decl.effect.localName } ?: continue
+                    Triple(decl.loc, effect.operations.map { it.name }, decl.operations.map { it.name }.toSet())
+                }
+                else -> continue
+            }
+            if (lineNo < declLoc.startLine || lineNo > declLoc.endLine) continue
+
+            val items = mutableListOf<CompletionItem>()
+            for (opName in opDecls) {
+                if (opName in implementedNames) continue
+                if (prefix.isNotEmpty() && !opName.startsWith(prefix)) continue
+                items.add(CompletionItem(opName).apply {
+                    kind = CompletionItemKind.Method
+                    detail = "impl op"
+                    insertText = "$opName = {\${1:it}} -> \${0:body}"
+                    insertTextFormat = InsertTextFormat.Snippet
+                })
+            }
+            return items
+        }
+        return null
+    }
+
+    /**
+     * Ability/effect NAME completions in a type signature — after `with ` (an
+     * ability constraint) or inside an unclosed `<…>` (an effect row). Returns
+     * null when the cursor isn't in either position. Suggests locally-declared
+     * and imported ability/effect names.
+     */
+    private fun getAbilityEffectNameCompletions(state: DocumentState, position: Position): List<CompletionItem>? {
+        val lines = state.content.lines()
+        val lineText = lines.getOrNull(position.line) ?: return null
+        val before = lineText.substring(0, position.character.coerceIn(0, lineText.length))
+        // Trailing partial name (may be empty right after `with `/`<`).
+        val prefix = Regex("[A-Za-z_][A-Za-z0-9_]*$").find(before)?.value ?: ""
+        val head = before.dropLast(prefix.length)
+        val inConstraint = Regex("\\bwith\\b[^<>]*$").containsMatchIn(head)
+        val inEffectRow = head.lastIndexOf('<') > head.lastIndexOf('>')
+        if (!inConstraint && !inEffectRow) return null
+
+        val pm = state.parsedModule
+        val names = LinkedHashSet<String>()
+        pm?.decls?.forEach {
+            when (it) {
+                is ParsedAbilityDecl -> names.add(it.name)
+                is ParsedEffectDecl -> names.add(it.name)
+                else -> {}
+            }
+        }
+        state.typeCheckResult?.resolvedImports?.forEach {
+            if (it.kind == ImportKind.ABILITY || it.kind == ImportKind.EFFECT) names.add(it.localName)
+        }
+        state.typeCheckResult?.importedAbilities?.keys?.forEach { names.add(it) }
+
+        return names
+            .filter { prefix.isEmpty() || it.startsWith(prefix) }
+            .map { name ->
+                CompletionItem(name).apply {
+                    kind = CompletionItemKind.Interface
+                    detail = if (inConstraint) "ability" else "effect"
+                }
+            }
     }
 
     private fun getKeywordCompletions(atTopLevel: Boolean): List<CompletionItem> {
