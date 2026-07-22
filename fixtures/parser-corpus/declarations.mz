@@ -63,3 +63,15 @@ pub let answer = 42
 
 # === pub type
 pub type Unit = | Unit |
+
+# === multi-line pub let signature (#78)
+pub let promise_from
+  : { setup: { complete: { val: 'a } -> {} } -> {} }
+  -> Promise 'a
+  = { setup } -> setup
+
+# === multi-line let signature with effect row
+let run
+  : { x: Int }
+  -> Int <State>
+  = { x } -> x

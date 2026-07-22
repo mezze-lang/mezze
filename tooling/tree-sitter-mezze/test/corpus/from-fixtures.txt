@@ -243,6 +243,81 @@ pub type Unit = | Unit |
         name: (upper_identifier)))))
 
 ==================
+declarations: multi-line pub let signature (#78)
+==================
+
+pub let promise_from
+  : { setup: { complete: { val: 'a } -> {} } -> {} }
+  -> Promise 'a
+  = { setup } -> setup
+
+---
+
+(source_file
+  (let_declaration
+    (visibility_modifier)
+    pattern: (variable_pattern
+      (lower_identifier))
+    type: (function_type
+      parameters: (record_type
+        (record_type_field
+          name: (lower_identifier)
+          type: (function_type
+            parameters: (record_type
+              (record_type_field
+                name: (lower_identifier)
+                type: (function_type
+                  parameters: (record_type
+                    (record_type_field
+                      name: (lower_identifier)
+                      type: (type_variable)))
+                  return_type: (record_type))))
+            return_type: (record_type))))
+      return_type: (type_application
+        constructor: (upper_identifier)
+        argument: (type_variable)))
+    body: (lambda_expression
+      parameters: (lambda_parameters
+        (lambda_parameter
+          name: (lower_identifier)))
+      body: (variable
+        (lower_identifier)))))
+
+==================
+declarations: multi-line let signature with effect row
+==================
+
+let run
+  : { x: Int }
+  -> Int <State>
+  = { x } -> x
+
+---
+
+(source_file
+  (let_declaration
+    pattern: (variable_pattern
+      (lower_identifier))
+    type: (function_type
+      parameters: (record_type
+        (record_type_field
+          name: (lower_identifier)
+          type: (named_type
+            (upper_identifier))))
+      return_type: (named_type
+        (upper_identifier))
+      effects: (effect_row
+        (effect_reference
+          name: (qualified_upper_name
+            (upper_identifier)))))
+    body: (lambda_expression
+      parameters: (lambda_parameters
+        (lambda_parameter
+          name: (lower_identifier)))
+      body: (variable
+        (lower_identifier)))))
+
+==================
 declarations: let with empty-param lambda
 ==================
 
