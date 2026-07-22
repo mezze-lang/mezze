@@ -20,8 +20,15 @@ impl zed::Extension for MezzeExtension {
         _language_server_id: &LanguageServerId,
         worktree: &zed::Worktree,
     ) -> Result<zed::Command> {
-        // Prefer a `mez` on the user's PATH; fall back to the conventional
-        // install location under ~/.mezze/bin. `mez lsp` speaks LSP over stdio.
+        // Resolve the `mez` binary; `mez lsp` speaks LSP over stdio.
+        // `worktree.which("mez")` looks up PATH; if that misses (e.g. a Zed
+        // launched from the macOS Dock/Finder does NOT inherit your shell PATH),
+        // it falls back to bare `"mez"` and lets the OS resolve it.
+        //
+        // If the server doesn't start, ensure `mez` is visible to Zed — either
+        // launch Zed from a terminal (`zed .`), add `~/.mezze/bin` to your
+        // login PATH, or set an explicit path in Zed settings:
+        //   "lsp": { "mezze": { "binary": { "path": "/Users/you/.mezze/bin/mez" } } }
         let path = worktree
             .which("mez")
             .unwrap_or_else(|| "mez".to_string());

@@ -40,6 +40,24 @@ languages/mezze/
    (diagnostics, hover, completion, code actions, semantic-token refinement)
    come online once `mez lsp` starts.
 
+### If the LSP doesn't start (macOS PATH gotcha)
+
+The extension finds the server via `worktree.which("mez")` (a PATH lookup). On
+macOS, a Zed launched from the **Dock/Finder does NOT inherit your shell PATH**,
+so `mez` may be found in a terminal but not by that Zed instance. If you get
+tree-sitter colors but no diagnostics/hover, do ONE of:
+
+- **Launch Zed from a terminal:** `cd <a mezze project> && zed .` — it inherits
+  your PATH. Simplest.
+- **Add `~/.mezze/bin` to your login PATH** (e.g. in `~/.zprofile`, or
+  `sudo launchctl config user path …`), then relaunch Zed.
+- **Point Zed at `mez` explicitly** in settings (`zed: open settings`):
+  ```json
+  "lsp": { "mezze": { "binary": { "path": "/Users/YOU/.mezze/bin/mez" } } }
+  ```
+
+Check `zed: open log` for the resolved command / server output if unsure.
+
 ## Rebuild after changes
 
 - Changed `src/lib.rs`, `config.toml`, or a query → re-run `zed: install dev

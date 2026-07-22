@@ -4,7 +4,7 @@ description = "Mezze language support for Zed — tree-sitter syntax + the mez L
 version = "0.1.0"
 schema_version = 1
 authors = ["Mezze"]
-repository = "https://github.com/shriyansbhatnagar/funk"
+repository = "https://github.com/shrynx/funk-lang"
 
 # The Mezze language server: `mez lsp` over stdio. The extension resolves `mez`
 # from PATH (or a user-configured path — see languages/mezze/config.toml and the
@@ -21,6 +21,6 @@ language = "Mezze"
 # Update this to the pushed HEAD of the branch carrying the grammar before
 # installing. See README for the local-dev workflow.
 [grammars.mezze]
-repository = "https://github.com/shriyansbhatnagar/funk"
+repository = "https://github.com/shrynx/funk-lang"
 commit = "5c760d4bff40d865108794516f7597d6628da3f3"
 path = "tooling/tree-sitter-mezze"
