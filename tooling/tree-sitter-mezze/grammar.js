@@ -423,7 +423,13 @@ module.exports = grammar({
       $.function_type,
       $.record_type,
       $.sequence_type,
+      // Parenthesized type — used to group a compound type where only an atom
+      // is otherwise allowed, e.g. a `having` binding value
+      // `having 'item = (Option [Int])` or `(Result (Option String) Int)`.
+      $.parenthesized_type,
     ),
+
+    parenthesized_type: $ => seq('(', $._type, ')'),
 
     // [T] — sequence (list) of T. Used freely in type position:
     //   pub let to_seq : { s: Set 'a } -> ['a] = ...
@@ -518,7 +524,9 @@ module.exports = grammar({
         '...',
         seq(
           sepBy1(',', $.effect_reference),
-          optional(seq(',', '...')),
+          // A row can end with a `, *` (performed marker) or `, ...` (open row)
+          // after its named effects: `<Log, *>`, `<State having 'state = Int, *>`.
+          optional(seq(',', choice('*', '...'))),
         ),
         // empty `<>`
       ),
