@@ -124,14 +124,20 @@ module.exports = grammar({
 
     // ===== Comments + metadata =====
 
-    // Order matters in tree-sitter token resolution: longer tokens (##, #{)
-    // beat shorter (#). Doc comments must precede line comments because
-    // they share the `#` prefix.
-    doc_comment: _ => token(seq('##', /[^\n]*/)),
+    // Comment syntax mirrors the parser (Lexer.lexComment): a `#` / `##` MUST
+    // be followed by a space/tab or end-of-line; `#foo` / `##foo` are typos,
+    // not comments. Longer tokens (`##`, `#{`) win over `#`.
 
-    // Line comment: `#` followed by anything except another `#` (doc) or
-    // `{` (metadata). The negative-set `[^#{\n]` keeps these tokens disjoint.
-    line_comment: _ => token(seq('#', /[^#{\n][^\n]*/)),
+    // Doc comment: `##` optionally followed by a space/tab and text. The
+    // trailing text is optional so a lone `##` at end of line is a valid empty
+    // doc comment; `##foo` (no space) is NOT matched (→ rejected, matching the
+    // parser). The newline itself is `extras` whitespace, not part of the token.
+    doc_comment: _ => token(seq('##', optional(/[ \t][^\n]*/))),
+
+    // Line comment: `#` optionally followed by a space/tab and text. A lone `#`
+    // is a valid empty comment; `#foo` (no space) is not matched. `##`/`#{` win
+    // as longer tokens.
+    line_comment: _ => token(seq('#', optional(/[ \t][^\n]*/))),
 
     // `#{key = value, …}` — compiler-meaningful annotation attached to the
     // following declaration. Distinct from a plain `# comment` because the
