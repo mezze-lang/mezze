@@ -107,6 +107,19 @@ public final class EffectHandlerDriver {
         ThreadLocal.withInitial(() -> Boolean.FALSE);
 
     /**
+     * True when the current thread is inside a spawned task (runFunctionThroughChain
+     * frame). Used by fiber-less op dispatchers (chain dispatch, Path D
+     * {@code BdslYieldDispatch}) to know whether an {@code abort} inside an
+     * impl body should propagate up as {@link AbortPerformException} (main-
+     * thread path — the outer perform's fiber driver catches it) or convert
+     * to {@link TaskUnhandledOpException} (spawned-task path — the spawn
+     * machinery stashes it on the promise for await to re-issue on the parent).
+     */
+    public static boolean isInsideTaskBoundary() {
+        return TASK_BOUNDARY.get();
+    }
+
+    /**
      * Drive a {@link MezzeFunction} as if it were the body of a series of
      * nested {@code perform Handler in body} layers — one layer per handler
      * in {@code chain}, outermost first.

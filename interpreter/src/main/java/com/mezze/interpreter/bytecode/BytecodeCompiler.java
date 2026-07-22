@@ -1264,18 +1264,14 @@ public final class BytecodeCompiler {
         if (node instanceof PerformOpIR p) {
             // Path D (docs/perf/bdsl-effects-path-d-2026-07.md): when the
             // MEZZE_BDSL_YIELD gate is on, lower every perform to a BDSL
-            // Yield of a synthetic {effect_hash, op_name, arg} record.
-            // Framework returns a ContinuationResult on the caller side;
-            // driver reads getResult() to see the op, dispatches, resumes
-            // via continueWith(value). Zero Loom fiber, zero reflection.
+            // PerformD op — a direct chain-dispatch native call, no
+            // Loom fiber, no reflection. resume is fall-through (single-
+            // return); abort throws AbortPerformException as usual. See
+            // BdslYieldDispatch for semantics.
             if (com.mezze.interpreter.runtime.MezzeLanguage.BDSL_YIELD_ENABLED) {
-                b.beginYield();
-                b.beginMakeRecord(PERFORM_YIELD_RECORD_FIELDS);
-                b.emitLoadConstant(p.getEffectHash());
-                b.emitLoadConstant(p.getOperationName());
+                b.beginPerformD(p.getEffectHash(), p.getOperationName());
                 emitNode(p.getArg(), b, argCount, localMap);
-                b.endMakeRecord();
-                b.endYield();
+                b.endPerformD();
                 return;
             }
 

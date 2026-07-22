@@ -1,70 +1,93 @@
 package com.mezze.interpreter.bytecode;
 
+import com.mezze.interpreter.nodes.MezzeNode;
+import com.mezze.interpreter.nodes.MezzeRootNode;
+import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver;
+import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException;
+import com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException;
 import com.mezze.interpreter.nodes.continuation.EffectFiber;
+import com.mezze.interpreter.nodes.continuation.OpCall;
 import com.mezze.interpreter.nodes.continuation.HandlerChainEntry;
+import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
+import com.mezze.interpreter.values.MezzeSuspended;
+import com.mezze.interpreter.values.MezzeThunk;
 import com.mezze.language.typedast.Hash;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.bytecode.ContinuationResult;
+import com.oracle.truffle.api.frame.FrameDescriptor;
+import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 
 /**
- * Path D3 glue between {@link BdslYieldDriver} and the existing
- * per-thread effect handler chain
- * ({@link EffectFiber#peekHandlerForEffect}).
+ * Path D perform-op runtime — dispatches a BDSL-lowered
+ * {@link com.mezze.language.truffleir.PerformOpIR} against the current
+ * thread's effect handler chain
+ * ({@link EffectFiber#peekHandlerForEffect}) without spinning up a
+ * Loom-backed fiber.
  *
- * <p>When a BDSL-compiled function yields (Phase D1 emits
- * {@code beginYield(MakeRecord{effect_hash, op_name, arg}) endYield}
- * at every {@code PerformOpIR}), {@link BdslYieldDriver#drive} passes
- * the (hash, name, arg) triple here. We:
- *
+ * <h2>How it works</h2>
  * <ol>
- *   <li>Look up the innermost handler for {@code effectHash} on the
- *       thread's {@link EffectFiber#peekHandlerForEffect chain}.</li>
- *   <li>Find its op impl by name via
- *       {@link MezzeRecord#getField(String)}.</li>
- *   <li>Push a dispatch-only fiber whose per-op-invocation handle
- *       stack carries a fresh {@code resume} / {@code abort} pair that
- *       close over the current {@link ContinuationResult}. Existing
- *       {@code EffectBindingIR} reads inside the op impl body pick
- *       those up unchanged.</li>
- *   <li>Invoke the op impl with {@code arg}.</li>
- *   <li>Handle the fall-through case (impl returned without calling
- *       resume) by returning that value as the perform's result — same
- *       semantics as the Loom path.</li>
+ *   <li>Find the innermost handler for {@code effectHash} on the
+ *       thread's chain.</li>
+ *   <li>Look up the op impl by name in the handler record.</li>
+ *   <li>Acquire a dispatch-only {@link EffectFiber} (recycled from a
+ *       per-thread pool) and push a fresh {@code (resume, abort)} pair
+ *       onto its per-op effect-handle stack. Existing
+ *       {@code EffectBindingIR("resume")} / {@code ("abort")} reads
+ *       inside the op impl body pick these up unchanged.</li>
+ *   <li>Enter dispatch mode on the fiber (sets
+ *       {@link EffectFiber#DISPATCH DISPATCH} thread-local so nested
+ *       reads work).</li>
+ *   <li>Call the op impl with {@code arg}.</li>
+ *   <li>Catch {@link AbortPerformException} — its {@code value} becomes
+ *       the perform expression's result. Otherwise the impl's return
+ *       value is the result (fall-through mode).</li>
  * </ol>
  *
- * <p>MVP scope (D3):
- * <ul>
- *   <li>Only handles the fall-through pattern (impl returns a value
- *       without invoking resume). Handler that explicitly calls resume
- *       is deferred to D3.1 — needs a {@link MezzeFunction}-shaped
- *       resume closure that consumes the continuation.</li>
- *   <li>Abort surfaces as a Java exception the driver already re-throws
- *       (see {@link BdslYieldDriver#drive}).</li>
- *   <li>Unhandled op (no handler on chain for {@code effectHash})
- *       throws — no MezzeSuspended wrap yet.</li>
- * </ul>
+ * <h2>What resume does under Path D</h2>
+ *
+ * <p>Path A's {@code resume {val = X}} re-enters the fiber's
+ * {@code drive} loop with X as the yielded value's answer and runs the
+ * body forward. Path D has no suspended fiber — the perform is a
+ * straight-line call. So Path D's {@code resume} is <b>fall-through
+ * only</b>: calling {@code resume {val = X}} returns X, and any code
+ * the impl runs AFTER {@code resume} is discarded. This is a
+ * behavioural narrowing from Path A.
+ *
+ * <p>All existing stdlib effect handlers except one work under Path D:
+ * Exception, Return, Log, Mut, Time, Random, FileSystem, etc. use only
+ * {@code abort} or fall-through. The one exception is
+ * {@code Generator.AsStream}, which captures {@code resume} inside an
+ * abort payload and calls it lazily — that pattern requires a real
+ * continuation. Generator stays on Path A for now (Path D6+ picks it up
+ * via the BDSL Yield primitive).
+ *
+ * <h2>Unhandled ops</h2>
+ *
+ * <p>Currently throws {@link UnhandledPathDOp}. The Loom path wraps
+ * these in {@code MezzeSuspended} for lazy evaluation — Path D catches
+ * up in a later phase.
  */
 public final class BdslYieldDispatch {
 
     private BdslYieldDispatch() {}
 
     /**
-     * Dispatch one yielded op against the current thread's handler
-     * chain and return the value the perform expression should
-     * evaluate to.
-     *
-     * <p>Uses a shared {@link IndirectCallNode} — this is a fallback
-     * path, not a hot dispatch; the JIT will inline through it fine
-     * once specialized.
+     * Dispatch one perform against the current thread's handler chain
+     * and return the value the perform expression should evaluate to.
+     * See class docs.
      */
     @TruffleBoundary
     public static Object dispatch(Hash effectHash, String opName, Object arg) {
         MezzeRecord handler = EffectFiber.peekHandlerForEffect(effectHash);
         if (handler == null) {
-            throw new UnhandledPathDOp(effectHash, opName);
+            // No handler in scope — Path A wraps the op in a MezzeSuspended
+            // so an outer perform (installed later, e.g. `let x = do_stuff
+            // {} ; perform Handler in force x`) can force it. Same shape.
+            return makeUnhandledSuspended(effectHash, opName, arg);
         }
         Object opImplRaw = handler.getField(opName);
         if (!(opImplRaw instanceof MezzeFunction opImpl)) {
@@ -74,24 +97,108 @@ public final class BdslYieldDispatch {
                 + (opImplRaw == null ? "null" : opImplRaw.getClass().getName()) + ")");
         }
 
-        // For MVP D3 we don't yet bind resume/abort — impl body must
-        // work in "fall-through" mode (return a value, which becomes
-        // the perform's result). D3.1 will wire resume/abort closures
-        // via a dispatch-only fiber, at which point existing
-        // EffectBindingIR reads pick them up unchanged.
-        IndirectCallNode callNode = IndirectCallNode.getUncached();
-        Object[] cv = opImpl.getClosureValues();
-        Object[] opArgs = new Object[cv.length + 1];
-        System.arraycopy(cv, 0, opArgs, 0, cv.length);
-        opArgs[cv.length] = arg;
-        return callNode.call(opImpl.getCallTarget(), opArgs);
+        // Set up a dispatch-only fiber that carries resume/abort as
+        // top-of-stack effect-handles for EffectBindingIR to find.
+        EffectFiber dispatchFiber = EffectFiber.acquireDispatchOnly();
+        MezzeFunction resumeFn = fallThroughResumeFn();
+        MezzeFunction abortFn = EffectHandlerDriver.makeAbortFunction();
+        dispatchFiber.pushEffectHandles(resumeFn, abortFn);
+        EffectFiber prevDispatch = dispatchFiber.enterDispatch();
+
+        try {
+            Object[] cv = opImpl.getClosureValues();
+            Object[] opArgs = new Object[cv.length + 1];
+            System.arraycopy(cv, 0, opArgs, 0, cv.length);
+            opArgs[cv.length] = arg;
+            return IndirectCallNode.getUncached().call(opImpl.getCallTarget(), opArgs);
+        } catch (AbortPerformException abort) {
+            // Abort semantics differ between main thread and spawned task:
+            //   - Main thread: let AbortPerformException propagate up to
+            //     the outer `perform ... in body` boundary (which runs on
+            //     Path A via EffectHandlerDriver.run since HandleIR isn't
+            //     BDSL-lowered). That driver catches abort and returns
+            //     the aborted value as the perform's result.
+            //   - Spawned task: the outer perform lives on the parent
+            //     fiber, not this thread. Convert to
+            //     TaskUnhandledOpException so SpawnSupport stashes the op
+            //     on the promise and Async.await re-issues it on the
+            //     parent — mirrors OpCallNode.dispatchOpOnChain's
+            //     handling of the same case (#285).
+            if (EffectHandlerDriver.isInsideTaskBoundary()) {
+                throw new TaskUnhandledOpException(new OpCall(opName, arg, effectHash));
+            }
+            throw abort;
+        } finally {
+            EffectFiber.exitDispatch(prevDispatch);
+            dispatchFiber.popEffectHandles();
+            EffectFiber.releaseDispatchOnly(dispatchFiber);
+        }
+    }
+
+    // ── resume: fall-through semantics ──────────────────────────────────
+    //
+    // Path A's resume re-enters the fiber's drive loop. Path D has no
+    // fiber, so resume is fall-through: calling resume {val = X} returns
+    // X. Anything the impl does AFTER calling resume is discarded. See
+    // class-doc "What resume does under Path D" for the caveat.
+
+    private static volatile MezzeFunction CACHED_FALLTHROUGH_RESUME_FN = null;
+
+    private static MezzeFunction fallThroughResumeFn() {
+        MezzeFunction cached = CACHED_FALLTHROUGH_RESUME_FN;
+        if (cached != null) return cached;
+        return buildAndCacheFallThroughResumeFn();
+    }
+
+    @TruffleBoundary
+    private static synchronized MezzeFunction buildAndCacheFallThroughResumeFn() {
+        if (CACHED_FALLTHROUGH_RESUME_FN != null) return CACHED_FALLTHROUGH_RESUME_FN;
+        FrameDescriptor fd = FrameDescriptor.newBuilder().build();
+        MezzeNode body = new MezzeNode() {
+            @Override
+            public Object execute(VirtualFrame frame) {
+                Object[] frameArgs = frame.getArguments();
+                int recordIdx = frameArgs.length - 1;
+                if (recordIdx < 0 || !(frameArgs[recordIdx] instanceof MezzeRecord rec)) {
+                    throw new RuntimeException(
+                        "resume expects record argument {val = ...}");
+                }
+                return rec.getField("val");
+            }
+        };
+        RootCallTarget target = new MezzeRootNode(
+            MezzeLanguage.get(null),
+            fd,
+            body,
+            "path-d-resume-fallthrough",
+            0,       // closureCount
+            1,       // paramCount (the {val = ...} record)
+            new int[0]
+        ).getCallTarget();
+        MezzeFunction fn = new MezzeFunction(target, "resume", new Object[0]);
+        CACHED_FALLTHROUGH_RESUME_FN = fn;
+        return fn;
     }
 
     /**
-     * Marker exception for a yielded op with no matching handler on
-     * the current thread's chain. Signals a bug for now — Phase D4
-     * hooks in the MezzeSuspended-wrap fallback so unhandled ops
-     * propagate lazily like the Loom path does.
+     * Build a lazy {@link MezzeSuspended} value carrying the unhandled
+     * op — same shape as {@link EffectHandlerDriver#makeUnhandledSuspended}.
+     * Used when a perform fires with no matching handler in scope; an
+     * outer handler installed later can force this and dispatch.
+     */
+    @TruffleBoundary
+    private static MezzeSuspended makeUnhandledSuspended(Hash effectHash, String opName, Object arg) {
+        var thunk = new MezzeThunk(/* effectName */ null, opName, arg, effectHash);
+        java.util.Set<Hash> effects = effectHash != null
+            ? java.util.Collections.singleton(effectHash)
+            : java.util.Collections.emptySet();
+        return new MezzeSuspended(thunk, effects);
+    }
+
+    /**
+     * Legacy marker exception — kept for the {@link BdslYieldDriver}
+     * test harness which was written before we adopted MezzeSuspended
+     * wrapping. Not thrown by {@link #dispatch} anymore.
      */
     public static final class UnhandledPathDOp extends RuntimeException {
         private static final long serialVersionUID = 1L;
@@ -101,21 +208,17 @@ public final class BdslYieldDispatch {
     }
 
     /**
-     * Convenience: wrap {@link BdslYieldDriver#drive} with a dispatcher
-     * pointed at this thread's handler chain. Useful in the epilog
-     * hook and in any call site that wants to drive a
-     * {@link ContinuationResult} to completion transparently.
+     * Legacy entry point for {@link BdslYieldDriver} — walks a
+     * ContinuationResult chain if one flows out (which no longer happens
+     * after D4 since the emit switched from Yield to a straight call,
+     * but kept for the D2 test harness).
      */
     @TruffleBoundary
     public static Object driveWithChainDispatch(Object initial) {
         return BdslYieldDriver.drive(initial, BdslYieldDispatch::dispatch);
     }
 
-    /**
-     * Debug helper: snapshot the current thread's handler chain
-     * length. Used in tests to confirm handler installation happened
-     * before Yield firing.
-     */
+    /** Debug helper — number of handlers on this thread's chain. */
     public static int currentChainDepth() {
         HandlerChainEntry[] chain = EffectFiber.snapshotHandlerChainEntries();
         return chain.length;

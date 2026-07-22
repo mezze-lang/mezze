@@ -1124,6 +1124,29 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Path D perform-op: pop the arg and dispatch directly against the
+     * current thread's handler chain via {@link BdslYieldDispatch#dispatch}.
+     * No fiber, no Loom continuation, no reflection — the dispatch pushes
+     * a lightweight per-thread dispatch-only fiber with resume/abort
+     * handles so existing {@code EffectBindingIR} reads in the impl body
+     * work unchanged. See {@link BdslYieldDispatch} for semantics
+     * (including the fall-through-only resume caveat) and
+     * docs/perf/bdsl-effects-path-d-2026-07.md for the design.
+     *
+     * <p>Emitted at every {@link com.mezze.language.truffleir.PerformOpIR}
+     * site when {@link MezzeLanguage#BDSL_YIELD_ENABLED} is on.
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    @ConstantOperand(type = String.class)
+    public static final class PerformD {
+        @Specialization
+        public static Object doPerformD(Hash effectHash, String opName, Object arg) {
+            return BdslYieldDispatch.dispatch(effectHash, opName, arg);
+        }
+    }
+
+    /**
      * Fast path for {@code perform Mut mutate { act = <lambda> }}: pop
      * the raw act lambda (no wrapper record on the operand stack). The
      * cached OpCallNode was built via

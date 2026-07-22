@@ -83,19 +83,20 @@ class BdslYieldDispatchTest {
 
     @Test
     @Timeout(value = 10, unit = TimeUnit.SECONDS)
-    void unhandledOpThrowsUnhandledPathDOp() {
+    void directDispatchWithoutRootReturnsMezzeSuspended() {
         try (Context context = Context.newBuilder("mezze")
                 .allowExperimentalOptions(true).allowAllAccess(true).build()) {
             context.enter();
             try {
-                MezzeBytecodeRootNode root = buildYieldRoot();
-                Object initial = root.getCallTarget().call(new Object[] { 0L });
-                // No handler installed for TEST_EFFECT.
-                BdslYieldDispatch.UnhandledPathDOp thrown = assertThrows(
-                    BdslYieldDispatch.UnhandledPathDOp.class,
-                    () -> BdslYieldDispatch.driveWithChainDispatch(initial));
-                assertTrue(thrown.getMessage().contains("double"),
-                    "message should include op name: " + thrown.getMessage());
+                // Direct call — no BDSL root, no continuation to resume;
+                // just verify the unhandled-op MezzeSuspended-wrap behavior
+                // in isolation. Path A does the same via
+                // EffectHandlerDriver.makeUnhandledSuspended.
+                Object result = BdslYieldDispatch.dispatch(
+                    TEST_EFFECT, "double", 21L);
+                assertInstanceOf(
+                    com.mezze.interpreter.values.MezzeSuspended.class, result,
+                    "expected MezzeSuspended for unhandled op, got " + result);
             } finally {
                 context.leave();
             }
