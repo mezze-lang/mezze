@@ -7191,7 +7191,7 @@ class MezzeTextDocumentService(
         val parsedModule = state.parsedModule ?: return emptyList()
         // Legend indices (must match the order in server capabilities).
         val FUNCTION = 1; val VARIABLE = 2; val ENUM_MEMBER = 10; val PARAMETER = 9
-        val NAMESPACE = 11; val PROPERTY = 8
+        val NAMESPACE = 11; val PROPERTY = 8; val TYPE = 3
         val DEFINITION = 2  // modifier bit
         val srcLines = state.content.lines()
 
@@ -7290,14 +7290,29 @@ class MezzeTextDocumentService(
             toks.add(SemToken(loc.startLine - 1, loc.startCol - 1, name.length, PROPERTY, 0))
         }
 
+        // A concrete type name (`Int`, `Promise`, `Str`) → `type`. A leading
+        // `'` marks a type VARIABLE (`'a`) — left to tree-sitter's
+        // @type.parameter (syntactically identifiable), not colored here, so we
+        // never miscolor a skolem as a concrete type.
+        fun emitTypeName(loc: com.mezze.language.parsedast.Loc, name: String) {
+            if (loc.startLine != loc.endLine || name.isEmpty() || name.startsWith("'")) return
+            toks.add(SemToken(loc.startLine - 1, loc.startCol - 1, name.length, TYPE, 0))
+        }
+
         fun walkTypeFields(t: com.mezze.language.parsedast.ParsedTypeAnnotation) {
             when (t) {
+                is com.mezze.language.parsedast.ParsedNamedType -> emitTypeName(t.loc, t.name)
                 is com.mezze.language.parsedast.ParsedRecordType ->
                     t.entries.forEach { emitFieldName(it.loc, it.name); walkTypeFields(it.type) }
                 is com.mezze.language.parsedast.ParsedFunctionType -> {
                     walkTypeFields(t.paramType); walkTypeFields(t.returnType)
                 }
-                is com.mezze.language.parsedast.ParsedTypeApp -> t.args.forEach { walkTypeFields(it) }
+                is com.mezze.language.parsedast.ParsedTypeApp -> {
+                    // The constructor (`Promise` in `Promise 'a`) is the type
+                    // name; its loc starts at the app loc's start.
+                    emitTypeName(t.loc, t.constructor)
+                    t.args.forEach { walkTypeFields(it) }
+                }
                 is com.mezze.language.parsedast.ParsedSeqType -> walkTypeFields(t.elementType)
                 else -> {}
             }

@@ -1052,6 +1052,33 @@ class LspFeaturesTest {
         // land here.
         assertTrue(types.contains(8),
             "expected PROPERTY tokens (8) for record/ability/effect field names, got type set: $types")
+        // TYPE = 3. Concrete type names in the signatures (Int, Str) color as type;
+        // the type variable `'a` and `s` do NOT (left to tree-sitter / not concrete).
+        assertTrue(types.contains(3),
+            "expected TYPE tokens (3) for concrete type names (Int, Str), got type set: $types")
+    }
+
+    @Test
+    fun `semantic tokens color concrete type names, and a pure type-variable sig emits none`() {
+        // A signature whose ONLY type names are variables (`'a`) must emit NO
+        // TYPE token — the leading `'` guard keeps type vars from being
+        // miscolored as concrete types.
+        val (idUri, _) = openSingleFile("let id : { x: 'a } -> 'a = { x } -> x")
+        client.awaitDiagnostics(idUri, 5_000)
+        val idTokens = server.textDocumentService.semanticTokensFull(SemanticTokensParams().apply {
+            textDocument = TextDocumentIdentifier(idUri)
+        }).get(5, TimeUnit.SECONDS)
+        assertFalse(decodeSemanticTokenTypes(idTokens?.data ?: emptyList()).contains(3),
+            "a signature with only type variables must not emit a TYPE token")
+
+        // A signature with a concrete type app `Promise Int` DOES emit TYPE.
+        val (nUri, _) = openSingleFile("let n : { p: Promise Int } -> Int = { p } -> 0")
+        client.awaitDiagnostics(nUri, 5_000)
+        val nTokens = server.textDocumentService.semanticTokensFull(SemanticTokensParams().apply {
+            textDocument = TextDocumentIdentifier(nUri)
+        }).get(5, TimeUnit.SECONDS)
+        assertTrue(decodeSemanticTokenTypes(nTokens?.data ?: emptyList()).contains(3),
+            "expected a TYPE token for the concrete types Promise/Int")
     }
 
     @Test
