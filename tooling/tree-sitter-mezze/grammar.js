@@ -534,7 +534,7 @@ module.exports = grammar({
     // additional effects beyond those listed.
     effect_row: $ => seq(
       '<',
-      choice(
+      optional(choice(
         '*',
         '...',
         seq(
@@ -543,8 +543,8 @@ module.exports = grammar({
           // after its named effects: `<Log, *>`, `<State having 'state = Int, *>`.
           optional(seq(',', choice('*', '...'))),
         ),
-        // empty `<>`
-      ),
+      )),
+      // empty `<>` — a closed, effect-free row (the `optional` above).
       '>',
     ),
 
