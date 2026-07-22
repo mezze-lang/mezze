@@ -105,6 +105,9 @@ module.exports = grammar({
     [$.having_clause],
     [$.having_clause, $.effect_reference],
     [$.having_clause, $.ability_constraint],
+    // A metadata value that is a bare literal/identifier could reduce directly
+    // or via the _metadata_value wrapper; harmless, resolve either way.
+    [$._metadata_value, $._literal],
   ],
 
   rules: {
@@ -142,7 +145,28 @@ module.exports = grammar({
     metadata_entry: $ => seq(
       field('key', $.lower_identifier),
       ':',
-      field('value', $._expression),
+      field('value', $._metadata_value),
+    ),
+
+    // A metadata value is a small, self-contained set — literals, identifiers,
+    // sequences, and a NESTED metadata record (`#{config: {timeout: 5000}}`).
+    // It deliberately does NOT route through `_expression`, so the metadata `{`
+    // (a `key: value` record) never competes with a real record_expression
+    // (`key = value`) — that competition is what made a shared rule destabilize
+    // the whole `{` disambiguation.
+    _metadata_value: $ => choice(
+      $._literal,
+      $.string_literal,
+      $.lower_identifier,
+      $.upper_identifier,
+      $.sequence_expression,
+      $.metadata_record,
+    ),
+
+    metadata_record: $ => seq(
+      '{',
+      sepBy(',', $.metadata_entry),
+      '}',
     ),
 
     // ===== Top-level declarations =====
