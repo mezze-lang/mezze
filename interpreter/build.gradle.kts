@@ -108,6 +108,7 @@ fun org.gradle.api.tasks.testing.Test.applyCommonTestConfig() {
     System.getenv("MEZZE_DEBUG")?.let { environment("MEZZE_DEBUG", it) }
     System.getenv("MEZZE_PATHD_TRACE")?.let { environment("MEZZE_PATHD_TRACE", it) }
     System.getenv("MEZZE_BDSL_STATS")?.let { environment("MEZZE_BDSL_STATS", it) }
+    System.getenv("MEZZE_LAZY_EFFECTS")?.let { environment("MEZZE_LAZY_EFFECTS", it) }
     System.getenv("MEZZE_MONO_STATS")?.let { environment("MEZZE_MONO_STATS", it) }
     System.getenv("MEZZE_MONO_TRACE")?.let { environment("MEZZE_MONO_TRACE", it) }
     System.getenv("MEZZE_DISPATCH_CENSUS")?.let { environment("MEZZE_DISPATCH_CENSUS", it) }

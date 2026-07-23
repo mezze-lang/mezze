@@ -111,6 +111,19 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             System.getenv("MEZZE_BDSL_YIELD") != null
                 && !"0".equals(System.getenv("MEZZE_BDSL_YIELD"))
                 && !"false".equalsIgnoreCase(System.getenv("MEZZE_BDSL_YIELD"));
+
+    // Path E — lazy-until-fully-discharged effect runtime (task #336).
+    // When on, HandleNode's lazy path builds a MezzeSuspended carrying the
+    // whole body continuation (bodyNode + frame + chain snapshot) instead of
+    // eagerly running the body and losing the continuation at first
+    // unhandled op. Force is atomic — merges chains, runs body inline on
+    // caller thread, no fiber. Env-gated OFF by default until Phase 4 flips.
+    // Independent of BDSL flags: the Path E runtime is language-level, not
+    // codegen-level.
+    public static final boolean LAZY_EFFECTS_ENABLED =
+            System.getenv("MEZZE_LAZY_EFFECTS") != null
+                && !"0".equals(System.getenv("MEZZE_LAZY_EFFECTS"))
+                && !"false".equalsIgnoreCase(System.getenv("MEZZE_LAZY_EFFECTS"));
     private static final boolean BDSL_STATS =
             System.getenv("MEZZE_BDSL_STATS") != null
                 && !"0".equals(System.getenv("MEZZE_BDSL_STATS"))

@@ -82,6 +82,40 @@ public final class EffectHandlerDriver {
         }
     }
 
+    /**
+     * Path E (lazy-until-fully-discharged, task #336) sentinel: thrown by
+     * {@link com.mezze.interpreter.nodes.effect.OpCallNode} when a perform
+     * fires with no handler on the chain — signals "capture the enclosing
+     * body as a MezzeSuspended and defer execution until a matching handler
+     * is provided."
+     *
+     * <p>Caught either at a top-level {@code HandleNode.execute} that chose
+     * the lazy path (builds MezzeSuspended holding the enclosing frame + this
+     * pending op) or inside {@code MezzeSuspended.force} when a resumed body
+     * re-suspends (builds a fresh MezzeSuspended for the next suspend point).
+     *
+     * <p>Extends AbstractTruffleException so BDSL's TryCatchOtherwise catches
+     * it, mirroring how AbortPerformException works.
+     *
+     * <p>Gated by env var MEZZE_LAZY_EFFECTS — under the legacy runtime the
+     * old {@link #makeUnhandledSuspended} path builds a MezzeThunk-wrapped
+     * single-op MezzeSuspended instead.
+     */
+    public static final class SuspensionRequested extends com.oracle.truffle.api.exception.AbstractTruffleException {
+        public final com.mezze.language.typedast.Hash effectHash;
+        public final String opName;
+        public final Object args;
+        public SuspensionRequested(
+                com.mezze.language.typedast.Hash effectHash,
+                String opName,
+                Object args) {
+            super();
+            this.effectHash = effectHash;
+            this.opName = opName;
+            this.args = args;
+        }
+    }
+
     private EffectHandlerDriver() {}
 
     /**
