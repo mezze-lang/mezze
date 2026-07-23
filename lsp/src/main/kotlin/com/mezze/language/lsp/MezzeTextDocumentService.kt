@@ -699,6 +699,20 @@ class MezzeTextDocumentService(
                             typedModule = partialTyped,
                             expectedTypeAt = result.expectedTypeAt,
                         )
+                        // Cache this partial result as a fallback too. A TYPE
+                        // error (not a parse error) — e.g. `"…$(x)…"` where x:Int
+                        // fails the Str-interpolation check — still parses and
+                        // fully types the module: x IS Int here. When the user
+                        // then types `.` and the file becomes a PARSE error
+                        // (empty module), this cached result is the only place
+                        // dot-completion can recover x's type. Same >=-decl guard
+                        // as the Success path so a degenerate recovery module
+                        // never clobbers a richer prior snapshot.
+                        val newDeclCount = partialTyped.decls.size
+                        val prevDeclCount = lastSuccessfulResult[uri]?.typedModule?.decls?.size ?: -1
+                        if (newDeclCount > 0 && newDeclCount >= prevDeclCount) {
+                            lastSuccessfulResult[uri] = typeCheckResult!!
+                        }
                     }
                 }
             }
@@ -1758,8 +1772,13 @@ class MezzeTextDocumentService(
         // own source) if the decl has no usable loc.
         fun effectLink(perf: ParsedPerformerDecl): String {
             val effectName = perf.effect.localName
-            val loc = effectDeclFor(effectName)?.loc?.takeIf { !it.file.isNullOrEmpty() } ?: perf.effect.loc
-            val defUri = resolveExistingFileUri(loc.file)
+            val localDecl = effectDeclFor(effectName)
+            val loc = localDecl?.loc?.takeIf { !it.file.isNullOrEmpty() } ?: perf.effect.loc
+            // A locally-declared effect (found in THIS document's parsed module)
+            // links to the current document directly — its loc.file may not
+            // resolve on disk (unsaved buffer), and resolveExistingFileUri would
+            // then drop the link to plain text.
+            val defUri = if (localDecl != null) state.uri else resolveExistingFileUri(loc.file)
             if (defUri != null) {
                 return "[`$effectName`]($defUri#L${loc.startLine},${loc.startCol})"
             }
@@ -2500,6 +2519,12 @@ class MezzeTextDocumentService(
      */
     private fun resolveExistingFileUri(file: String?): String? {
         if (file.isNullOrEmpty() || file == "built-in") return null
+        // A decl defined in a currently-OPEN document is always linkable, even
+        // if its buffer is unsaved (so the file may not exist on disk yet). This
+        // covers local decls in the file being edited — without it, a link to a
+        // same-file effect/ability decl would be dropped to plain text.
+        val asUri = if (file.startsWith("file:")) file else File(file).toURI().toString()
+        if (documents.containsKey(asUri)) return asUri
         // Already a file: URI — keep only if the target exists.
         if (file.startsWith("file:")) {
             return try {
