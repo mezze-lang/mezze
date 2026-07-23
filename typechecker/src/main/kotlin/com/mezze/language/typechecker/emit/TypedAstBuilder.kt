@@ -823,6 +823,21 @@ class TypedAstBuilder(
             }
         }
 
+        // Correct the method-var's displayed type to the ACTUAL call site. For a
+        // deferred inherent method (receiver pinned only after solving, e.g.
+        // `…eq {}.to_str {}` where the receiver is the Bool result of `.eq`),
+        // `methodFunctionType` was captured against the wrong candidate receiver
+        // (often the first / stale one — `{ it: Int }`), so hover/goto-def showed
+        // the wrong receiver even though dispatch (resolvedImplHash) and the arg
+        // record are correct. Rebuild the fn type from the real param record
+        // (wrappedArg.type carries `{ it: <solvedReceiver>, … }`) and return type.
+        val correctedFn = if (fn is TypedVar && fn.name == methodInfo.methodName) {
+            fn.copy(type = MezzeType.FunctionType(
+                paramType = substitution.apply(wrappedArg.type),
+                returnType = callReturnType,
+            ))
+        } else fn
+
         val isTailCall = isTailCallLocation(expr.loc)
 
         val typeArgsResolved = methodInfo.typeArgs.map { substitution.apply(it) }
@@ -843,7 +858,7 @@ class TypedAstBuilder(
         }
 
         return TypedCall(
-            function = fn,
+            function = correctedFn,
             arg = wrappedArg,
             instantiation = instantiation,
             isTailCall = isTailCall,

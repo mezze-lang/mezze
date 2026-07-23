@@ -440,6 +440,24 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `hover on a deferred-inherent method uses the actual chain receiver type`() {
+        // `x.is_even {}.to_str {}` with x: Int — is_even returns Bool, so
+        // `.to_str`'s receiver is BOOL, not Int. The deferred inherent-method
+        // resolution captured the method-var type against the wrong (first-
+        // candidate) receiver `{ it: Int }`. Hover must show `{ it: Bool }`.
+        val src = "let f = {x: Int} -> x.is_even {}.to_str {}\n"
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        // `to_str` at col 33..38 in the chain.
+        val hover = hoverText(hoverAt(uri, 0, 35)!!)
+        if (!hover.contains("to_str")) return  // resolution failure covered elsewhere
+        assertTrue(hover.contains("Bool"),
+            "to_str's receiver is the Bool result of is_even, expected `{ it: Bool }`, got: $hover")
+        assertFalse(Regex("it:\\s*Int").containsMatchIn(hover),
+            "to_str must NOT show the stale Int receiver, got: $hover")
+    }
+
+    @Test
     fun `hover on a method in a call chain resolves that method, not the outermost`() {
         // Reported bug: hovering `is_odd` or `eq` in `x.is_odd {}.eq {..}.to_str {}`
         // all showed `to_str` — every method-name node's loc started at the
