@@ -1249,7 +1249,14 @@ class MezzeTextDocumentService(
                             appendDoc(hover, doc, meta)
                         }
                         is com.mezze.language.typedast.TypedFieldAccess -> {
-                            val abilityHover = result?.let { renderAbilityMethodHover(expr.field, it, state, expr.type) }
+                            // A method-in-a-chain accessed as `.eq` keeps a
+                            // polymorphic solved type (dispatch not yet a call),
+                            // so pass the RECEIVER type too — renderAbilityMethodHover
+                            // specializes the generic op by the receiver when the
+                            // solved method type is still a var.
+                            val abilityHover = result?.let {
+                                renderAbilityMethodHover(expr.field, it, state, expr.type, expr.record.type)
+                            }
                             abilityHover ?: codeBlock(".${expr.field} : $typeStr")
                         }
                         is com.mezze.language.typedast.TypedCall -> codeBlock("$typeStr")
@@ -1633,6 +1640,7 @@ class MezzeTextDocumentService(
         result: TypeCheckResult,
         state: DocumentState,
         solvedType: MezzeType? = null,
+        receiverType: MezzeType? = null,
     ): String? {
         fun codeBlock(code: String): String = "```mezze\n$code\n```"
 
@@ -1646,12 +1654,19 @@ class MezzeTextDocumentService(
             ?.takeIf { it is MezzeType.FunctionType && !typeHasVar(it) }
             ?.let { prettyPrintTypeWithAliases(it, state.typeAliases) }
 
+        // When the method's OWN solved type is still polymorphic (e.g. `.eq` in a
+        // chain, accessed before the call pins dispatch), we can still specialize
+        // via the RECEIVER if it's concrete — substitute the ability's receiver
+        // type param with the receiver in the generic op annotation.
+        val concreteReceiver = (receiverType?.let { if (it is MezzeType.SuspendedType) it.valueType else it })
+            ?.takeIf { it !is MezzeType.VarType && !typeHasVar(it) }
+
         // 1. User-defined / file-level abilities
         val localAbilities = state.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>() ?: emptyList()
-        val candidates = mutableListOf<Pair<String, ParsedAbilityOp>>()
+        val candidates = mutableListOf<Pair<ParsedAbilityDecl, ParsedAbilityOp>>()
         for (ability in result.importedAbilities.values + localAbilities) {
             ability.operations.firstOrNull { it.name == methodName }?.let {
-                candidates.add(ability.name to it)
+                candidates.add(ability to it)
             }
         }
         // 2. Stdlib + transitively-imported abilities — the prelude strips
@@ -1670,16 +1685,20 @@ class MezzeTextDocumentService(
                         } catch (_: Throwable) { continue }
                         val typedOp = typedAbility.operations.firstOrNull { it.name == methodName }
                             ?: continue
-                        // Prefer the specialized call-site type; else the ability
-                        // decl's generic op signature.
-                        val sig = if (specialized != null) {
-                            "${typedAbility.name}.${typedOp.name} : $specialized"
-                        } else {
-                            "${typedAbility.name}.${typedOp.name} : " +
+                        // Prefer the specialized call-site type; else specialize
+                        // the generic op type by the concrete receiver; else the
+                        // ability decl's generic op signature verbatim.
+                        val rv = typedAbility.receiverTypeParam
+                        val bySig = if (specialized != null) specialized
+                            else if (concreteReceiver != null && rv != null) {
+                                val p = replaceNamedVar(typedOp.paramType, rv, concreteReceiver)
+                                val r = replaceNamedVar(typedOp.returnType, rv, concreteReceiver)
+                                "${prettyPrintTypeWithAliases(p, state.typeAliases)} -> ${prettyPrintTypeWithAliases(r, state.typeAliases)}"
+                            } else {
                                 "${prettyPrintTypeWithAliases(typedOp.paramType, state.typeAliases)} -> " +
-                                prettyPrintTypeWithAliases(typedOp.returnType, state.typeAliases)
-                        }
-                        return codeBlock(sig)
+                                    prettyPrintTypeWithAliases(typedOp.returnType, state.typeAliases)
+                            }
+                        return codeBlock("${typedAbility.name}.${typedOp.name} : $bySig")
                     }
                 } catch (_: Throwable) { /* store may not be open */ }
             }
@@ -1690,12 +1709,11 @@ class MezzeTextDocumentService(
         // name (rare — e.g. NumAdd.add vs Seq.add), the receiver type at
         // dispatch picks one; we don't have that info here, so just show
         // the first match. Listing all could be a follow-up.
-        val (abilityName, op) = candidates.first()
-        val sig = if (specialized != null) {
-            "$abilityName.${op.name} : $specialized"
-        } else {
-            "$abilityName.${op.name} : ${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
-        }
+        val (ability, op) = candidates.first()
+        val bySig = specialized
+            ?: (concreteReceiver?.let { specializeAbilityOp(op, ability.receiverTypeParam, it, state.typeAliases) })
+            ?: "${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
+        val sig = "${ability.name}.${op.name} : $bySig"
         val doc = op.doc?.takeIf { it.isNotBlank() }?.let { "\n\n$it" } ?: ""
         return codeBlock(sig) + doc
     }

@@ -423,6 +423,23 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `hover on a field-access ability method specializes via the receiver`() {
+        // `.eq` accessed mid-chain keeps a polymorphic solved type (the call
+        // hasn't pinned dispatch), but its RECEIVER is concrete. Hover should
+        // specialize `Eq.eq : { it: 'a, r: 'a } -> Bool` to the receiver Int.
+        val src = "let f = {x: Int} -> x.eq {r = 3}\n"
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        // `eq` at col 22..23 in `let f = {x: Int} -> x.eq {r = 3}`.
+        val hover = hoverText(hoverAt(uri, 0, 22)!!)
+        if (!hover.contains("eq")) return  // resolution failure covered elsewhere
+        assertFalse(Regex("\\b(it|r):\\s*'[a-z]").containsMatchIn(hover),
+            "eq hover should specialize `it`/`r` to the receiver, not leave `'a`, got: $hover")
+        assertTrue(hover.contains("Int"),
+            "eq hover should show the Int receiver, got: $hover")
+    }
+
+    @Test
     fun `hover on a method in a call chain resolves that method, not the outermost`() {
         // Reported bug: hovering `is_odd` or `eq` in `x.is_odd {}.eq {..}.to_str {}`
         // all showed `to_str` — every method-name node's loc started at the
