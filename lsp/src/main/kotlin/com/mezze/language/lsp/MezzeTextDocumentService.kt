@@ -1243,13 +1243,13 @@ class MezzeTextDocumentService(
                     val typeStr = formatType(expr.type)
                     return when (expr) {
                         is com.mezze.language.typedast.TypedVar -> {
-                            val abilityHover = result?.let { renderAbilityMethodHover(expr.name, it, state) }
+                            val abilityHover = result?.let { renderAbilityMethodHover(expr.name, it, state, expr.type) }
                             val hover = abilityHover ?: codeBlock("${expr.name} : $typeStr")
                             val (doc, meta) = resolveDoc(state, result, expr.name)
                             appendDoc(hover, doc, meta)
                         }
                         is com.mezze.language.typedast.TypedFieldAccess -> {
-                            val abilityHover = result?.let { renderAbilityMethodHover(expr.field, it, state) }
+                            val abilityHover = result?.let { renderAbilityMethodHover(expr.field, it, state, expr.type) }
                             abilityHover ?: codeBlock(".${expr.field} : $typeStr")
                         }
                         is com.mezze.language.typedast.TypedCall -> codeBlock("$typeStr")
@@ -1565,12 +1565,59 @@ class MezzeTextDocumentService(
      * when present. Returns null when no ability operation matches —
      * caller falls back to the generic hover.
      */
+    /** True if [type] still contains any unresolved type variable. */
+    private fun typeHasVar(type: MezzeType): Boolean =
+        com.mezze.language.ast.collectTypeVarsInOrder(type).isNotEmpty()
+
+    /**
+     * Replace every VarType named [varName] in [type] with [replacement],
+     * recursively. Used to specialize an ability op's generic annotation to a
+     * concrete receiver — e.g. `Eq for 'a`'s `eq : { it: 'a, other: 'a } -> Bool`
+     * becomes `{ it: Int, other: Int } -> Bool` when the receiver is `Int`.
+     */
+    private fun replaceNamedVar(type: MezzeType, varName: String, replacement: MezzeType): MezzeType {
+        val bare = varName.trimStart('\'')
+        if (type is MezzeType.VarType && type.variable.name.trimStart('\'') == bare) return replacement
+        return type.transformChildren { replaceNamedVar(it, varName, replacement) }
+    }
+
+    /**
+     * Specialize an ability op's `param -> return` signature to a concrete
+     * receiver [receiver] by substituting the ability's receiver type param.
+     * Returns null if the annotation can't be converted (falls back to generic).
+     */
+    private fun specializeAbilityOp(
+        op: ParsedAbilityOp,
+        receiverTypeParam: String?,
+        receiver: MezzeType,
+        aliases: Map<String, TypeAliasInfo>,
+    ): String? {
+        if (receiverTypeParam == null) return null
+        return try {
+            val conv = com.mezze.language.typechecker.util.TypeAnnotationConverter
+            val param = replaceNamedVar(conv.convert(op.paramType), receiverTypeParam, receiver)
+            val ret = replaceNamedVar(conv.convert(op.returnType), receiverTypeParam, receiver)
+            "${prettyPrintTypeWithAliases(param, aliases)} -> ${prettyPrintTypeWithAliases(ret, aliases)}"
+        } catch (_: Exception) { null }
+    }
+
     private fun renderAbilityMethodHover(
         methodName: String,
         result: TypeCheckResult,
-        state: DocumentState
+        state: DocumentState,
+        solvedType: MezzeType? = null,
     ): String? {
         fun codeBlock(code: String): String = "```mezze\n$code\n```"
+
+        // At a concrete call site the method's solved type is specialized to the
+        // receiver (`to_str : { it: Int } -> Str`), which is far more useful than
+        // the ability decl's generic `{ it: 'a } -> Str`. Prefer it whenever the
+        // solved type is a fully-resolved FunctionType (no leftover tyvars) — a
+        // still-polymorphic type means dispatch wasn't pinned yet, so fall back
+        // to the generic decl signature below.
+        val specialized = (solvedType?.let { if (it is MezzeType.SuspendedType) it.valueType else it })
+            ?.takeIf { it is MezzeType.FunctionType && !typeHasVar(it) }
+            ?.let { prettyPrintTypeWithAliases(it, state.typeAliases) }
 
         // 1. User-defined / file-level abilities
         val localAbilities = state.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>() ?: emptyList()
@@ -1596,11 +1643,15 @@ class MezzeTextDocumentService(
                         } catch (_: Throwable) { continue }
                         val typedOp = typedAbility.operations.firstOrNull { it.name == methodName }
                             ?: continue
-                        // Render the typed signature directly — no parsed
-                        // annotation needed.
-                        val sig = "${typedAbility.name}.${typedOp.name} : " +
-                            "${prettyPrintTypeWithAliases(typedOp.paramType, state.typeAliases)} -> " +
-                            prettyPrintTypeWithAliases(typedOp.returnType, state.typeAliases)
+                        // Prefer the specialized call-site type; else the ability
+                        // decl's generic op signature.
+                        val sig = if (specialized != null) {
+                            "${typedAbility.name}.${typedOp.name} : $specialized"
+                        } else {
+                            "${typedAbility.name}.${typedOp.name} : " +
+                                "${prettyPrintTypeWithAliases(typedOp.paramType, state.typeAliases)} -> " +
+                                prettyPrintTypeWithAliases(typedOp.returnType, state.typeAliases)
+                        }
                         return codeBlock(sig)
                     }
                 } catch (_: Throwable) { /* store may not be open */ }
@@ -1613,7 +1664,11 @@ class MezzeTextDocumentService(
         // dispatch picks one; we don't have that info here, so just show
         // the first match. Listing all could be a follow-up.
         val (abilityName, op) = candidates.first()
-        val sig = "$abilityName.${op.name} : ${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
+        val sig = if (specialized != null) {
+            "$abilityName.${op.name} : $specialized"
+        } else {
+            "$abilityName.${op.name} : ${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
+        }
         val doc = op.doc?.takeIf { it.isNotBlank() }?.let { "\n\n$it" } ?: ""
         return codeBlock(sig) + doc
     }
@@ -3552,10 +3607,15 @@ class MezzeTextDocumentService(
                 val paramStr = formatTypeAnnotation(op.paramType)
                 if (!paramStr.contains("it")) continue
                 val hints = paramHintsFromAnnotation(op.paramType, stripIt = true)
+                // Specialize the generic op signature to THIS receiver when we
+                // can (`{ it: Int } -> Str` beats `{ it: 'a } -> Str`). Falls
+                // back to the generic annotation if conversion fails.
+                val sigDoc = specializeAbilityOp(op, abilityDecl.receiverTypeParam, baseType, state.typeAliases)
+                    ?: "${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
                 items.add(CompletionItem(op.name).apply {
                     kind = CompletionItemKind.Method
                     detail = "${abilityDecl.name}.${op.name}"
-                    documentation = Either.forLeft("${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}")
+                    documentation = Either.forLeft(sigDoc)
                     insertText = buildMethodSnippet(op.name, hints)
                     insertTextFormat = InsertTextFormat.Snippet
                 })
@@ -3634,19 +3694,28 @@ class MezzeTextDocumentService(
                         else -> paramHintsFromAnnotation(op.paramType, stripIt = true)
                             .ifEmpty { paramHintsFromImplOpLambda(op) }
                     }
-                    items.add(CompletionItem(op.name).apply {
-                        kind = CompletionItemKind.Method
-                        detail = "$implTargetName.${op.name}"
-                        insertText = buildMethodSnippet(op.name, hints)
-                        insertTextFormat = InsertTextFormat.Snippet
-                    })
-                    addedMethods.add(op.name)
                     // For section 3 (prelude inherent impls) the parsed
                     // ImplOp.returnType is usually null — types are inferred.
                     // Pull the solved return type from the typed impl body.
                     val typedReturnType = lookupTypedImplOpReturnType(
                         precompiledForInherent, implTargetName, op.name
                     )
+                    // Show the specialized signature in the dropdown doc. The
+                    // typed impl body's param/return are ALREADY concrete for
+                    // this receiver (`{ it: Int } -> Str`), so no substitution
+                    // needed — just pretty-print them.
+                    val sigDoc = if (typedParamType != null && typedReturnType != null) {
+                        "${prettyPrintTypeWithAliases(typedParamType, state.typeAliases)} -> " +
+                            prettyPrintTypeWithAliases(typedReturnType, state.typeAliases)
+                    } else null
+                    items.add(CompletionItem(op.name).apply {
+                        kind = CompletionItemKind.Method
+                        detail = "$implTargetName.${op.name}"
+                        if (sigDoc != null) documentation = Either.forLeft(sigDoc)
+                        insertText = buildMethodSnippet(op.name, hints)
+                        insertTextFormat = InsertTextFormat.Snippet
+                    })
+                    addedMethods.add(op.name)
                     if (typedReturnType != null) {
                         candidateReturnTypes[op.name] = typedReturnType
                     } else {

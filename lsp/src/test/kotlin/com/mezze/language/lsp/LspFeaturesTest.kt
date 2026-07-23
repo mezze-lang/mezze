@@ -343,6 +343,49 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `hover on an ability method shows the specialized receiver type`() {
+        // Hovering `to_str` on a concrete Int receiver should show
+        // `{ it: Int } -> Str`, NOT the generic ability signature
+        // `{ it: 'a } -> Str`. The solved call-site type is preferred.
+        val src = "let f = {x: Int} -> x.to_str {}\n"
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        // `to_str` starts at col 22 (0-based) in `let f = {x: Int} -> x.to_str {}`.
+        val hover = hoverText(hoverAt(uri, 0, 24)!!)
+        assertTrue(hover.contains("Int"),
+            "hover on to_str should specialize the receiver to Int, got: $hover")
+        assertFalse(Regex("\\bit:\\s*'[a-z]").containsMatchIn(hover),
+            "hover should not show a generic `it: 'a` receiver, got: $hover")
+    }
+
+    @Test
+    fun `dot completion specializes ability method signatures to the receiver`() {
+        // The completion dropdown's doc for an ability method should show the
+        // receiver-specialized signature (`{ it: Int } -> Str`), not `'a`.
+        val valid = "let f = {x: Int} -> x\n"
+        val (uri, _) = openSingleFile(valid)
+        client.awaitDiagnostics(uri, 5_000)
+        val edited = "let f = {x: Int} -> x.\n"
+        server.textDocumentService.didChange(DidChangeTextDocumentParams(
+            VersionedTextDocumentIdentifier(uri, 2),
+            listOf(TextDocumentContentChangeEvent(edited))
+        ))
+        Thread.sleep(800)
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(0, "let f = {x: Int} -> x.".length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val toStr = comps.firstOrNull { it.label == "to_str" && it.kind == CompletionItemKind.Method }
+        if (toStr == null) return  // resolution failure covered elsewhere
+        val doc = toStr.documentation?.let { if (it.isLeft) it.left else it.right.value } ?: ""
+        assertTrue(doc.contains("Int"),
+            "to_str completion doc should specialize to Int receiver, got: $doc")
+        assertFalse(Regex("\\bit:\\s*'[a-z]").containsMatchIn(doc),
+            "to_str completion doc should not show generic `it: 'a`, got: $doc")
+    }
+
+    @Test
     fun `hover on a method in a call chain resolves that method, not the outermost`() {
         // Reported bug: hovering `is_odd` or `eq` in `x.is_odd {}.eq {..}.to_str {}`
         // all showed `to_str` — every method-name node's loc started at the
