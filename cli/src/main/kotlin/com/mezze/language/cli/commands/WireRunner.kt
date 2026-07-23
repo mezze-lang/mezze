@@ -151,6 +151,18 @@ object WireRunner {
         var session = WireSession.start(currentDir, timing, t0, devFlags) ?: return 1
         var prevHashes: Set<Hash> = emptySet()
 
+        // Ctrl-C in watch mode quits the whole session. We disable
+        // native-image's own exit handlers so SigintForwarder owns SIGINT;
+        // its quit hook trips this flag and interrupts THIS (watch) thread so
+        // the blocking `events.take()` throws and the loop returns cleanly.
+        val watchThread = Thread.currentThread()
+        val quitRequested = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun installQuitHook() = session.onQuit {
+            quitRequested.set(true)
+            watchThread.interrupt()
+        }
+        installQuitHook()
+
         /** Rebuild the session after wire corruption — keeps the watch
          *  loop alive across framing errors. Returns false if rebuild
          *  fails (subprocess won't start, etc); caller should bail. */
@@ -160,6 +172,7 @@ object WireRunner {
                 ?: return false
             session = fresh
             prevHashes = emptySet()  // child has no cached state anymore
+            installQuitHook()        // new session → re-arm the quit hook
             return true
         }
 
@@ -197,8 +210,15 @@ object WireRunner {
             // can fold it in (`… reloaded app.mz · prev exited 0 · 0.09s`).
             var priorOutcome: DevConsole.RunResult = DevConsole.RunResult.Reloading
 
-            while (true) {
-                when (val event = events.take()) {
+            while (!quitRequested.get()) {
+                val event = try {
+                    events.take()
+                } catch (_: InterruptedException) {
+                    // Ctrl-C quit hook interrupted us — leave the loop, the
+                    // finally-block closes the child.
+                    break
+                }
+                when (event) {
                     is DevEvent.FilesChanged -> {
                         // Coalesce any events that arrived during the take().
                         val coalesced = mutableSetOf<String>().apply { addAll(event.files) }
@@ -257,6 +277,9 @@ object WireRunner {
                     }
                 }
             }
+            // Left the loop → Ctrl-C quit. 130 is the conventional
+            // "terminated by SIGINT" exit code.
+            return 130
         } finally {
             session.close()
         }
@@ -492,6 +515,14 @@ private class WireSession private constructor(
 
     /** Result of one LOAD cycle. */
     data class RunOutcome(val exitCode: Int, val reason: String)
+
+    /**
+     * Install a watch-mode quit hook: the next Ctrl-C interrupts the running
+     * program AND runs [hook] so the watch loop can unblock and return. Only
+     * `mez dev` watch mode calls this; `--no-watch` leaves it unset so a
+     * Ctrl-C there just ends the single run.
+     */
+    fun onQuit(hook: () -> Unit) = signalHandler.setQuitHook(hook)
 
     /**
      * Send (optional) EVICT + LOAD, stream output, return when EXITED
@@ -946,7 +977,23 @@ private class WireSession private constructor(
 private class SigintForwarder(
     private val toChild: OutputStream,
     private val process: Process,
+    /**
+     * Watch-mode quit hook. When set (only `mez dev` watch mode sets it), the
+     * FIRST Ctrl-C means "quit the whole dev session": we forward INTERRUPT to
+     * stop the running program AND invoke [onQuit] so the watch loop unblocks
+     * from `events.take()` and returns (its `finally` closes the child).
+     *
+     * WHY THIS IS NEEDED: we disable native-image's own exit handlers
+     * (`-H:-InstallExitHandlers`) so THIS forwarder controls Ctrl-C. That
+     * fixed the "child left running" bug, but the parent's watch loop has no
+     * other exit path — without this hook it would hang after the interrupt.
+     * In `--no-watch` [onQuit] stays null: Ctrl-C interrupts the single run
+     * and `runOnce` returns on its own.
+     */
+    @Volatile private var onQuit: (() -> Unit)? = null,
 ) {
+    fun setQuitHook(hook: () -> Unit) { onQuit = hook }
+
     private var previous: sun.misc.SignalHandler? = null
     @Volatile private var pendingEscalation: java.util.concurrent.ScheduledFuture<*>? = null
     private val timer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
@@ -962,6 +1009,7 @@ private class SigintForwarder(
         if (already != null && !already.isDone) {
             already.cancel(false)
             kill("user pressed Ctrl-C twice")
+            onQuit?.invoke()
             return@SignalHandler
         }
         try {
@@ -971,6 +1019,7 @@ private class SigintForwarder(
             }
         } catch (_: Exception) {
             // Wire write failed — child is probably already dead; bail.
+            onQuit?.invoke()
             return@SignalHandler
         }
         pendingEscalation = timer.schedule(
@@ -978,6 +1027,9 @@ private class SigintForwarder(
             timeoutMs,
             java.util.concurrent.TimeUnit.MILLISECONDS,
         )
+        // Watch mode: a single Ctrl-C quits the session. Unblock the watch
+        // loop now — the interrupt already told the child to stop.
+        onQuit?.invoke()
     }
 
     /** Called by WireSession when EXITED arrives — cancel any pending kill. */

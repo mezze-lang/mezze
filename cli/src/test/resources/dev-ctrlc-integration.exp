@@ -1,0 +1,49 @@
+#!/usr/bin/expect -f
+#
+# Integration test for `mez dev` Ctrl-C handling (task #153).
+#
+# Ctrl-C is a signal + subprocess-lifecycle concern that cannot be faithfully
+# unit-tested (JVM signal delivery, native-image handlers, process groups), so
+# this is a real-PTY test run against the INSTALLED native `mez`. `expect` is
+# not on CI, so this is a LOCAL/manual check — run it after any change to
+# WireRunner's SIGINT path or the native-image signal flags.
+#
+# Regression it guards:
+#   - Before the fix, native-image installed its own SIGINT handler that killed
+#     the parent `mez` before SigintForwarder could forward INTERRUPT, leaving
+#     the child RuntimeServer running. Fixed by `-H:-InstallExitHandlers`
+#     (native-image-flags.txt) + a watch-mode quit hook (WireRunner.kt) that
+#     unblocks the watch loop on Ctrl-C.
+#
+# Usage:
+#   1. Build/install: ./gradlew :cli:installNative
+#   2. In a project dir with a long-running app (e.g. a countdown that sleeps),
+#      run:  expect cli/src/test/resources/dev-ctrlc-integration.exp <mode>
+#      where <mode> is "watch" or "no-watch".
+#   Exit 0 = the process terminated after Ctrl-C (pass). Exit 1 = it hung.
+
+set mode [lindex $argv 0]
+set timeout 25
+
+set mez "$env(HOME)/.mezze/bin/mez"
+if {$mode eq "no-watch"} {
+    spawn $mez dev --no-watch
+} else {
+    spawn $mez dev
+}
+
+# Wait until the program is clearly running.
+expect {
+    "tick" { }
+    timeout { puts "FAIL: never saw program output"; exit 2 }
+}
+
+# Send Ctrl-C mid-run.
+sleep 1
+send "\x03"
+
+# The process must terminate (EOF) — not hang.
+expect {
+    eof     { puts "\nPASS: process exited after Ctrl-C"; exit 0 }
+    timeout { puts "\nFAIL: still running 25s after Ctrl-C"; exit 1 }
+}

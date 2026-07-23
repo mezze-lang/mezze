@@ -124,3 +124,14 @@ com.mezze.language.store
 # tracked in #184. Until that's fixed, user-app native binaries run
 # interpreter-only and skip this flag.
 --macro:truffle-svm
+
+# Let the CLI own SIGINT/SIGTERM. By default native-image installs its
+# own signal handlers that terminate the process immediately — that
+# overrode SigintForwarder (WireRunner.kt), so Ctrl-C in `mez dev` killed
+# the parent `mez` before it could forward an INTERRUPT frame to the child
+# RuntimeServer, leaving the app running. Disabling native-image's
+# handlers (hosted-option `-H:-InstallExitHandlers`; the `=false` CLI form
+# is unsupported) lets our sun.misc.Signal handler run: one Ctrl-C
+# interrupts the running program gracefully, a second force-kills.
+# (CLI-only: user-app binaries have no such forwarder and want defaults.)
+-H:-InstallExitHandlers
