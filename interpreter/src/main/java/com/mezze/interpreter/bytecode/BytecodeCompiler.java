@@ -294,6 +294,20 @@ public final class BytecodeCompiler {
             // that already carry their own effect-safety story; if a user
             // writes a multi-shot handler in a BDSL-compiled fn they get
             // fall-through-only semantics (same as PerformD).
+            //
+            // Path E (#336) interop: when LAZY_EFFECTS is on AND this Handle
+            // is partial-discharging, reject BDSL compilation so the whole
+            // function falls back to AST. HandleNode.execute's lazy branch
+            // then builds a MezzeSuspended carrying the full body
+            // continuation — force-able under a wider chain. BDSL's inline
+            // pattern doesn't support that (would need a MakeSuspended op
+            // capturing bodyNode as a sub-CallTarget). Fallback is small
+            // perf loss, correct semantics.
+            if (com.mezze.interpreter.runtime.MezzeLanguage.LAZY_EFFECTS_ENABLED
+                    && !h.getStaticallyFullyDischarges()) {
+                markReject(node, "partial-handle-under-lazy-effects");
+                return false;
+            }
             for (HandlerBindIR hb : h.getHandlers()) {
                 if (hb.getParams() != null && !supportsNode(hb.getParams(), argCount)) {
                     return false;
@@ -1684,6 +1698,7 @@ public final class BytecodeCompiler {
             return;
         }
         HandlerBindIR hb = handlers.get(idx);
+        boolean isOutermost = idx == 0;
         b.beginBlock();
         BytecodeLocal resultSlot = b.createLocal();
         b.beginTryCatchOtherwise(() -> {
@@ -1702,9 +1717,21 @@ public final class BytecodeCompiler {
             b.emitLookupHandlerByHash(hb.getHandlerHash());
         }
         b.endPushHandlerChain();
-        // Body (recursing for next handler / final body)
+        // Body (recursing for next handler / final body). Path E (#336):
+        // at the outermost Handle wrap body's result in AutoForceIfSuspended
+        // so a lazy MezzeSuspended flowing out of body — e.g. from a
+        // top-level `let x = effectful{}` — is forced under this Handle's
+        // installed chain before the Pop. supports() rejects partial-
+        // discharging Handles under LAZY, so every BDSL Handle here IS
+        // fully-discharging and safe to force unconditionally.
         b.beginStoreLocal(resultSlot);
-        emitHandleNested(handlers, idx + 1, body, b, argCount, localMap);
+        if (isOutermost && com.mezze.interpreter.runtime.MezzeLanguage.LAZY_EFFECTS_ENABLED) {
+            b.beginAutoForceIfSuspended();
+            emitHandleNested(handlers, idx + 1, body, b, argCount, localMap);
+            b.endAutoForceIfSuspended();
+        } else {
+            emitHandleNested(handlers, idx + 1, body, b, argCount, localMap);
+        }
         b.endStoreLocal();
         b.endBlock();
         // === catch branch ===

@@ -1290,6 +1290,51 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Path E (#336) auto-force: consumes the top of the operand stack.
+     * If it's a MezzeSuspended, force it under the current handler chain
+     * (whatever handlers are pushed on this thread's chain right now).
+     * Otherwise pass through unchanged.
+     *
+     * <p>Emitted at the OUTERMOST Handle of a nested `perform A, B, C in body`
+     * chain when the outer Handle statically fully-discharges the effect
+     * row. If body returned any MezzeSuspended (legacy single-op from a
+     * top-level `let` producing a lazy effect, or Path E from an inner
+     * nested Handle that deferred), force it here so callers see a ground
+     * value.
+     *
+     * <p>Chain state is read live from HandlerChain, so this op picks up
+     * whatever the enclosing BDSL PushHandlerChain sequences have installed.
+     */
+    @Operation
+    public static final class AutoForceIfSuspended {
+        @TruffleBoundary
+        @Specialization
+        public static Object doForce(Object value) {
+            if (!(value instanceof com.mezze.interpreter.values.MezzeSuspended s)) {
+                return value;
+            }
+            if (s.isPathE()) {
+                // Path E full-body continuation: force() dispatches to
+                // forcePathE via isPathE() branch at its top.
+                return s.force(com.oracle.truffle.api.nodes.IndirectCallNode.getUncached());
+            }
+            // Legacy single-op MezzeSuspended (from BdslYieldDispatch's
+            // makeUnhandledSuspended path). Cannot chain-dispatch here
+            // because upstream may have built the wrapped MezzeThunk with
+            // a null effectHash (e.g. ComposedBlockThunk from a do-block
+            // that leaks an effect), and dispatchOpOnChain requires a
+            // non-null hash for strict routing (#246). Returning the
+            // suspended value unforced preserves legacy behavior — the
+            // outer caller sees the MezzeSuspended just as it did before
+            // Path E existed. Fixing this requires either (a) making
+            // BdslYieldDispatch produce Path E continuations, or (b)
+            // threading effect hashes through ComposedBlockThunk. Both
+            // are Phase 5+ work.
+            return value;
+        }
+    }
+
+    /**
      * Path D8: inside the catch branch of a Handle's TryCatchOtherwise,
      * unwrap an {@link com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException}
      * to its carried value. Any other exception is rethrown so it can
