@@ -552,15 +552,18 @@ public final class MezzeRecord implements TruffleObject {
     // sub-record args `{ val: 'a }` / `{ err }`. Pre-cached so promise_from
     // and the two capability MezzeFunctions don't cross @TruffleBoundary.
 
-    public static final Shape SHAPE_COMPLETE_FAIL;
+    public static final Shape SHAPE_COMPLETE_FAIL_ON_CANCEL;
     public static final Shape SHAPE_VAL;
     public static final Shape SHAPE_ERR;
+    public static final Shape SHAPE_HOOK;
+    public static final Shape SHAPE_REASON;
     static {
-        SHAPE_COMPLETE_FAIL = new Shape(
-            new String[]{"complete", "fail"},
+        SHAPE_COMPLETE_FAIL_ON_CANCEL = new Shape(
+            new String[]{"complete", "fail", "on_cancel"},
             new FieldLocation[]{
                 new FieldLocation(FieldLocation.StorageType.OBJECT, 0),
-                new FieldLocation(FieldLocation.StorageType.OBJECT, 1)
+                new FieldLocation(FieldLocation.StorageType.OBJECT, 1),
+                new FieldLocation(FieldLocation.StorageType.OBJECT, 2)
             }
         );
         SHAPE_VAL = new Shape(
@@ -571,12 +574,20 @@ public final class MezzeRecord implements TruffleObject {
             new String[]{"err"},
             new FieldLocation[]{new FieldLocation(FieldLocation.StorageType.OBJECT, 0)}
         );
+        SHAPE_HOOK = new Shape(
+            new String[]{"hook"},
+            new FieldLocation[]{new FieldLocation(FieldLocation.StorageType.OBJECT, 0)}
+        );
+        SHAPE_REASON = new Shape(
+            new String[]{"reason"},
+            new FieldLocation[]{new FieldLocation(FieldLocation.StorageType.OBJECT, 0)}
+        );
     }
 
-    /** { complete, fail } — FAST PATH for promise_from capability record. */
-    public static MezzeRecord wrapCompleteFail(Object complete, Object fail) {
-        return new MezzeRecord(SHAPE_COMPLETE_FAIL, EMPTY_LONGS, EMPTY_DOUBLES,
-            new Object[]{complete, fail}, true);
+    /** { complete, fail, on_cancel } — FAST PATH for promise_from capability record. */
+    public static MezzeRecord wrapCompleteFailOnCancel(Object complete, Object fail, Object onCancel) {
+        return new MezzeRecord(SHAPE_COMPLETE_FAIL_ON_CANCEL, EMPTY_LONGS, EMPTY_DOUBLES,
+            new Object[]{complete, fail, onCancel}, true);
     }
 
     /** { val: value } — FAST PATH for promise complete-capability arg. */
@@ -589,6 +600,12 @@ public final class MezzeRecord implements TruffleObject {
     public static MezzeRecord wrapErr(Object err) {
         return new MezzeRecord(SHAPE_ERR, EMPTY_LONGS, EMPTY_DOUBLES,
             new Object[]{err}, true);
+    }
+
+    /** { reason: reason } — FAST PATH for cancel-hook invocation arg. */
+    public static MezzeRecord wrapReason(Object reason) {
+        return new MezzeRecord(SHAPE_REASON, EMPTY_LONGS, EMPTY_DOUBLES,
+            new Object[]{reason}, true);
     }
 
     // Shared empty arrays for cached wrapper records

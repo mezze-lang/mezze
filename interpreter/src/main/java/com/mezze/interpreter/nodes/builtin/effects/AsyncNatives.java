@@ -158,20 +158,28 @@ public final class AsyncNatives {
 
         /**
          * Backend-supplied cancel hook. Set by user-space Promise
-         * constructors (promise_from) so a cancel() call can propagate
-         * to a foreign scheduler (Kotlin Job, CompletableFuture, etc.).
+         * constructors (promise_from via its on_cancel capability) so a
+         * cancel() call can propagate to a foreign scheduler (Kotlin
+         * Job, CompletableFuture, etc.) with the cancel reason.
+         *
+         * The hook receives the reason (or null → ExternalInterrupt
+         * fallback). Runs on the thread that won the cancel CAS.
+         * Errors thrown by the hook are swallowed — cancel semantics
+         * do not depend on hook success.
+         *
+         * Last-writer-wins if setCancelHook is called multiple times.
          *
          * Single-writer (the promise_from setup callback), single-reader
          * (cancel()). Volatile for visibility across threads.
          */
-        private volatile Runnable cancelHook;
+        private volatile java.util.function.Consumer<Object> cancelHook;
 
         public MezzePromise(Thread executingThread, Semaphore semaphore) {
             this.executingThread = executingThread;
             this.semaphore = semaphore;
         }
 
-        public void setCancelHook(Runnable hook) {
+        public void setCancelHook(java.util.function.Consumer<Object> hook) {
             this.cancelHook = hook;
         }
 
@@ -235,9 +243,9 @@ public final class AsyncNatives {
                 if (executingThread != null) {
                     executingThread.interrupt();
                 }
-                Runnable hook = cancelHook;
+                java.util.function.Consumer<Object> hook = cancelHook;
                 if (hook != null) {
-                    try { hook.run(); } catch (Throwable ignored) { /* hook errors don't unwind cancel */ }
+                    try { hook.accept(reason); } catch (Throwable ignored) { /* hook errors don't unwind cancel */ }
                 }
                 unparkWaiter();
                 return true;
@@ -263,9 +271,9 @@ public final class AsyncNatives {
                 if (executingThread != null) {
                     executingThread.interrupt();
                 }
-                Runnable hook = cancelHook;
+                java.util.function.Consumer<Object> hook = cancelHook;
                 if (hook != null) {
-                    try { hook.run(); } catch (Throwable ignored) { /* hook errors don't unwind cancel */ }
+                    try { hook.accept(reason); } catch (Throwable ignored) { /* hook errors don't unwind cancel */ }
                 }
                 unparkWaiter();
                 return CANCEL_DID_CANCEL;

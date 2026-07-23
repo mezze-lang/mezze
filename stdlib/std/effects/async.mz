@@ -72,26 +72,37 @@ pub let cancel : { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async
   __native_promise_cancel { p = p, reason = reason }
 
 ## ==================================================================
-## User-space Promise constructors (#77)
+## User-space Promise constructors (#77, #80)
 ##
 ## Three constructors — one primitive + two sugars. `promise_from` is
-## the general form: it invokes `setup` with a { complete, fail }
-## capability record. Whichever capability setup invokes atomically
-## transitions the promise to that state; subsequent transitions are
-## no-ops (CAS on the state field). If setup raises, the promise is
-## auto-failed so it doesn't leak in Pending forever.
+## the general form: it invokes `setup` with a
+## { complete, fail, on_cancel } capability record. Whichever
+## resolve-capability setup invokes atomically transitions the promise
+## to that state; subsequent transitions are no-ops (CAS on the state
+## field). If setup raises, the promise is auto-failed so it doesn't
+## leak in Pending forever.
 ##
-## `setup` may call neither capability — the async case, where a
-## background task fulfills the promise later. That's exactly how a
+## `setup` may invoke:
+##   - `complete { val = ... }` — resolve the promise successfully.
+##   - `fail { err = ... }` — resolve with an AsyncError.
+##   - `on_cancel { hook = { reason } -> ... }` — register a cancel
+##     hook. Fires with the CancelReason when the promise is cancelled
+##     (via Async.cancel or scope teardown). Last-writer-wins if called
+##     multiple times. Not required — omit if the backend has no cancel
+##     channel of its own.
+##
+## `setup` may call neither resolve capability — the async case, where
+## a background task fulfills the promise later. That's exactly how a
 ## third-party async backend (Kotlin coroutines, CompletableFuture,
 ## Vert.x, ...) plugs in: build the promise, launch work on the
 ## foreign scheduler, register `complete`/`fail` as the completion
-## callbacks.
+## callbacks, and route Mezze's cancel back to the foreign scheduler
+## via `on_cancel`.
 ## ==================================================================
 
-## Construct a Promise via a setup callback that receives two
+## Construct a Promise via a setup callback that receives three
 ## write-side capabilities. See module comment above for semantics.
-pub let promise_from : { setup: { complete: { val: 'a } -> {}, fail: { err: AsyncError } -> {} } -> {} } -> Promise 'a = { setup } ->
+pub let promise_from : { setup: { complete: { val: 'a } -> {}, fail: { err: AsyncError } -> {}, on_cancel: { hook: { reason: CancelReason } -> {} } -> {} } -> {} } -> Promise 'a = { setup } ->
   __native_promise_from { setup = setup }
 
 ## A Promise already resolved with `val`. Sugar over promise_from.

@@ -81,7 +81,7 @@ class PromiseFromTest {
             use std::effects::async::{ Async, LoomAsync, promise_from, await }
             perform LoomAsync in
               match await {
-                p = promise_from { setup = { complete, fail } -> complete { val = 99 } }
+                p = promise_from { setup = { complete, fail, on_cancel } -> complete { val = 99 } }
               } is
                 Ok { val } -> val
                 Err { error } -> 0 - 1
@@ -95,7 +95,7 @@ class PromiseFromTest {
             use std::effects::async::{ Async, LoomAsync, promise_from, await }
             perform LoomAsync in
               match await {
-                p = promise_from { setup = { complete, fail } ->
+                p = promise_from { setup = { complete, fail, on_cancel } ->
                   fail { err = AsyncFailed { msg = "oops" } }
                 }
               } is
@@ -113,7 +113,7 @@ class PromiseFromTest {
             use std::effects::async::{ Async, LoomAsync, promise_from, await }
             perform LoomAsync in
               match await {
-                p = promise_from { setup = { complete, fail } -> do
+                p = promise_from { setup = { complete, fail, on_cancel } -> do
                   complete { val = 1 }
                   complete { val = 2 }
                 }
@@ -130,7 +130,7 @@ class PromiseFromTest {
             use std::effects::async::{ Async, LoomAsync, promise_from, await }
             perform LoomAsync in
               match await {
-                p = promise_from { setup = { complete, fail } -> do
+                p = promise_from { setup = { complete, fail, on_cancel } -> do
                   complete { val = 5 }
                   fail { err = AsyncFailed { msg = "ignored" } }
                 }
@@ -147,7 +147,7 @@ class PromiseFromTest {
     fun `setup that calls nothing leaves promise pending`() {
         val code = """
             use std::effects::async::{ promise_from, is_pending }
-            is_pending { p = promise_from { setup = { complete, fail } -> {} } }
+            is_pending { p = promise_from { setup = { complete, fail, on_cancel } -> {} } }
         """.trimIndent()
         assertEquals(true, eval(code))
     }
@@ -163,7 +163,7 @@ class PromiseFromTest {
             use std::effects::async::{ Async, LoomAsync, promise_from, await, go }
             perform LoomAsync in
               match await {
-                p = promise_from { setup = { complete, fail } ->
+                p = promise_from { setup = { complete, fail, on_cancel } ->
                   go { f = {} -> complete { val = 123 } }
                 }
               } is
@@ -171,5 +171,135 @@ class PromiseFromTest {
                 Err { error } -> 0 - 1
         """.trimIndent()
         assertEquals(123L, eval(code))
+    }
+
+    // ==================== on_cancel capability (#80) ====================
+
+    @Test
+    fun `on_cancel hook fires when promise is cancelled`() {
+        // Register a hook that writes to an atom; verify the atom was
+        // updated after Async.cancel fires.
+        val code = """
+            use std::effects::async::{ Async, LoomAsync, LostRace, promise_from, cancel, is_cancelled }
+            use std::effects::async::atom::{ atom, reset, deref }
+
+            perform LoomAsync in do
+              let observed = atom { val = 0 }
+              let p = promise_from { setup = { complete, fail, on_cancel } ->
+                on_cancel { hook = { reason } -> do
+                reset { atom = observed, val = 42 }
+                {}
+              }
+              }
+              cancel { p = p, reason = LostRace {} }
+              deref { atom = observed }
+        """.trimIndent()
+        assertEquals(42L, eval(code))
+    }
+
+    @Test
+    fun `on_cancel hook does not fire when promise completes normally`() {
+        val code = """
+            use std::effects::async::{ Async, LoomAsync, promise_from, await }
+            use std::effects::async::atom::{ atom, reset, deref }
+
+            perform LoomAsync in do
+              let observed = atom { val = 0 }
+              let p = promise_from { setup = { complete, fail, on_cancel } -> do
+                on_cancel { hook = { reason } -> do
+                  reset { atom = observed, val = 99 }
+                  {}
+                }
+                complete { val = 7 }
+              }
+              match await { p = p } is
+                Ok { val } -> val + deref { atom = observed }
+                Err { error } -> 0 - 1
+        """.trimIndent()
+        // complete's val=7 + observed=0 (hook never fired) = 7
+        assertEquals(7L, eval(code))
+    }
+
+    @Test
+    fun `on_cancel hook does not fire when promise fails normally`() {
+        val code = """
+            use std::effects::async::{ Async, LoomAsync, promise_from }
+            use std::effects::async::atom::{ atom, reset, deref }
+
+            perform LoomAsync in do
+              let observed = atom { val = 0 }
+              let p = promise_from { setup = { complete, fail, on_cancel } -> do
+                on_cancel { hook = { reason } -> do
+                  reset { atom = observed, val = 99 }
+                  {}
+                }
+                fail { err = AsyncFailed { msg = "boom" } }
+              }
+              deref { atom = observed }
+        """.trimIndent()
+        assertEquals(0L, eval(code))
+    }
+
+    @Test
+    fun `on_cancel hook receives the cancel reason`() {
+        // Verify the reason variant reaches the hook. Use LostRace as
+        // the marker so we can distinguish it from other CancelReason cases.
+        val code = """
+            use std::effects::async::{ Async, LoomAsync, LostRace, promise_from, cancel }
+            use std::effects::async::atom::{ atom, reset, deref }
+
+            perform LoomAsync in do
+              let observed = atom { val = 0 }
+              let p = promise_from { setup = { complete, fail, on_cancel } ->
+                on_cancel { hook = { reason } -> match reason is
+                  LostRace -> do
+                    reset { atom = observed, val = 1 }
+                    {}
+                  _ -> do
+                    reset { atom = observed, val = 2 }
+                    {}
+                }
+              }
+              cancel { p = p, reason = LostRace {} }
+              deref { atom = observed }
+        """.trimIndent()
+        assertEquals(1L, eval(code))
+    }
+
+    @Test
+    fun `on_cancel is optional — cancel still works without a hook`() {
+        val code = """
+            use std::effects::async::{ Async, LoomAsync, LostRace, promise_from, cancel, is_cancelled }
+            perform LoomAsync in do
+              let p = promise_from { setup = { complete, fail, on_cancel } -> {} }
+              cancel { p = p, reason = LostRace {} }
+              is_cancelled { p = p }
+        """.trimIndent()
+        assertEquals(true, eval(code))
+    }
+
+    @Test
+    fun `on_cancel last-writer-wins if called multiple times`() {
+        val code = """
+            use std::effects::async::{ Async, LoomAsync, LostRace, promise_from, cancel }
+            use std::effects::async::atom::{ atom, reset, deref }
+
+            perform LoomAsync in do
+              let observed = atom { val = 0 }
+              let p = promise_from { setup = { complete, fail, on_cancel } -> do
+                on_cancel { hook = { reason } -> do
+                  reset { atom = observed, val = 1 }
+                  {}
+                }
+                on_cancel { hook = { reason } -> do
+                  reset { atom = observed, val = 2 }
+                  {}
+                }
+              }
+              cancel { p = p, reason = LostRace {} }
+              deref { atom = observed }
+        """.trimIndent()
+        // Second on_cancel wins → observed = 2
+        assertEquals(2L, eval(code))
     }
 }
