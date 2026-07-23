@@ -2031,6 +2031,35 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `dot completion inside string interpolation ranks Str-returning methods first`() {
+        // A `.` inside `"…$( x. )…"` demands a Str, so `to_str` / `to_dbg_str`
+        // (and any Str-returner) should sort to the very top even though the
+        // receiver is an Int. Realistic edit: open valid, then type the dot.
+        val valid = "let f = {x: Int} -> \"hi \$(x)\"\n"
+        val (uri, _) = openSingleFile(valid)
+        client.awaitDiagnostics(uri, 5_000)
+        val edited = "let f = {x: Int} -> \"hi \$(x.)\"\n"
+        server.textDocumentService.didChange(DidChangeTextDocumentParams(
+            VersionedTextDocumentIdentifier(uri, 2),
+            listOf(TextDocumentContentChangeEvent(edited))
+        ))
+        Thread.sleep(800)
+        // Cursor right after `x.` inside the interpolation.
+        val line = "let f = {x: Int} -> \"hi \$(x."
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(0, line.length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        if (comps.isEmpty()) return  // resolution failure is covered elsewhere
+        val ranked = comps.sortedBy { it.sortText ?: "5_${it.label}" }
+        val top = ranked.first { it.kind == CompletionItemKind.Method }.label
+        assertTrue(top in setOf("to_str", "to_dbg_str"),
+            "inside interpolation the first method should be a Str-renderer, got: $top " +
+            "(top-5: ${ranked.take(5).map { it.label to it.sortText }})")
+    }
+
+    @Test
     fun `resolveCompletionItem attaches the doc-comment and signature lazily`() {
         // #115: completion items carry only a type in `detail`; the doc-comment
         // is filled in on demand via completionItem/resolve.

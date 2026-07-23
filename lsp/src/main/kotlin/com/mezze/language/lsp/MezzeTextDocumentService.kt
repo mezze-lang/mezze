@@ -3715,6 +3715,14 @@ class MezzeTextDocumentService(
             items
         }
 
+        // A `.` inside string interpolation (`"…$( x. )…"`) demands a Str: the
+        // interpolation hole is unified with StringType. The typechecker doesn't
+        // record that as an `expectedTypeAt` entry, but we can see it
+        // syntactically — if the receiver sits inside an unclosed `$(` on this
+        // line, prefer methods that produce a string. `to_str`/`to_dbg_str`
+        // (and any other Str-returning method) then float to the top.
+        val expectedOverride = if (isInsideStringInterpolation(beforeCursor)) MezzeType.StringType else null
+
         // Type-aware ranking. The typechecker pre-computes `expectedTypeAt`
         // for every source position where a constraint is emitted. Look up
         // the smallest enclosing loc at the cursor; if we find an expected
@@ -3728,6 +3736,7 @@ class MezzeTextDocumentService(
             cursorCol = position.character + 1,
             result = result,
             candidateReturnTypes = candidateReturnTypes,
+            expectedOverride = expectedOverride,
         )
 
         server.logInfo("[dot-completion] returning ${rankedItems.size} method completions for type '${getTypeName(baseType) ?: baseType::class.simpleName}': ${rankedItems.take(20).map { it.label }}${if (rankedItems.size > 20) "..." else ""}")
@@ -3779,9 +3788,15 @@ class MezzeTextDocumentService(
         cursorCol: Int,
         result: TypeCheckResult,
         candidateReturnTypes: Map<String, MezzeType>,
+        expectedOverride: MezzeType? = null,
     ): List<CompletionItem> {
         val expectedTypeAt = result.expectedTypeAt
-        server.logInfo("[rank] cursor=$cursorLine:$cursorCol expectedTypeAt size=${expectedTypeAt.size} candidateReturnTypes size=${candidateReturnTypes.size}")
+        server.logInfo("[rank] cursor=$cursorLine:$cursorCol expectedTypeAt size=${expectedTypeAt.size} candidateReturnTypes size=${candidateReturnTypes.size} override=$expectedOverride")
+        // An explicit override (e.g. Str inside string interpolation) wins over
+        // the position-derived expected type — the syntax is unambiguous.
+        if (expectedOverride != null) {
+            return rankAgainst(items, expectedOverride, candidateReturnTypes)
+        }
         if (expectedTypeAt.isEmpty()) return items
 
         // Find the smallest enclosing Loc that contains the cursor.
@@ -3807,21 +3822,64 @@ class MezzeTextDocumentService(
             }
         server.logInfo("[rank] enclosing entry=${expectedEntry?.key} expected=${expectedEntry?.value ?: "<none>"}")
         val expected = expectedEntry?.value ?: return items
+        return rankAgainst(items, expected, candidateReturnTypes)
+    }
 
-        // Unification works structurally for primitives and type vars without
-        // needing typeDeclarations; alias resolution would require them, but
-        // we're matching against ability-method return types here which are
-        // built-in shapes (Int -> Str etc.). Empty map is fine.
-        return items
-            .map { item ->
-                val candType = candidateReturnTypes[item.label]
-                val rank = if (candType == null) "5"
-                else when (com.mezze.language.typechecker.solving.unify(candType, expected)) {
-                    is com.mezze.language.typechecker.solving.UnificationResult.Success -> "0"
-                    is com.mezze.language.typechecker.solving.UnificationResult.Failure -> "5"
-                }
-                item.apply { sortText = "${rank}_${label}" }
+    /**
+     * Score each candidate against `expected`: a candidate whose known return
+     * type unifies with `expected` sorts first (`0_`), others last (`5_`).
+     * When `expected` is Str, `to_dbg_str` is also floated to the top — it
+     * renders ANY value to a string, so in a string context it's always a
+     * sensible pick even for a non-Str receiver.
+     */
+    private fun rankAgainst(
+        items: List<CompletionItem>,
+        expected: MezzeType,
+        candidateReturnTypes: Map<String, MezzeType>,
+    ): List<CompletionItem> {
+        val expectsStr = expected is MezzeType.StringType
+        return items.map { item ->
+            val candType = candidateReturnTypes[item.label]
+            val matches = when {
+                // `to_dbg_str` renders anything to a string — always a good pick
+                // in a string context.
+                expectsStr && item.label == "to_dbg_str" -> true
+                candType == null -> false
+                // A candidate whose return type is still a free var would unify
+                // with ANYTHING (Int.abs : Int -> 'a at this stage), so it would
+                // spuriously "match" every expected type and defeat the ranking.
+                // Require the candidate's return type to be concrete.
+                candType is MezzeType.VarType -> false
+                else -> com.mezze.language.typechecker.solving.unify(candType, expected) is
+                    com.mezze.language.typechecker.solving.UnificationResult.Success
             }
+            item.apply { sortText = "${if (matches) "0" else "5"}_${label}" }
+        }
+    }
+
+    /**
+     * True when the character position at the end of `beforeCursor` sits inside
+     * an unclosed string-interpolation hole `"…$( … <cursor>`. We track quote
+     * state so a `$(` inside a completed string (or after the closing `)`)
+     * doesn't count. Purely lexical — good enough to know the hole wants a Str.
+     */
+    private fun isInsideStringInterpolation(beforeCursor: String): Boolean {
+        var inString = false
+        var depth = 0          // open `$(` interpolation parens
+        var i = 0
+        while (i < beforeCursor.length) {
+            val c = beforeCursor[i]
+            when {
+                c == '\\' && inString -> i++   // skip escaped char
+                c == '"' -> inString = !inString
+                inString && c == '$' && i + 1 < beforeCursor.length && beforeCursor[i + 1] == '(' -> {
+                    depth++; i++
+                }
+                depth > 0 && c == ')' -> depth--
+            }
+            i++
+        }
+        return depth > 0
     }
 
     /** Check if a MezzeType matches a TypedAST type (simplified matching). */
@@ -5540,6 +5598,14 @@ class MezzeTextDocumentService(
                     is com.mezze.language.typedast.TypedSeqElement.Regular -> elem.expr
                     is com.mezze.language.typedast.TypedSeqElement.Spread -> elem.expr
                 }
+            }
+            // A string literal's `$( … )` interpolation holes are real
+            // sub-expressions — the semantic-token walker must descend into them
+            // or the interpolated code renders with no semantic coloring (falls
+            // back to the flat string scope). Same class of gap as the parsed
+            // ParsedStringLit.children() bug (#160).
+            is com.mezze.language.typedast.TypedStringLit -> expr.parts.mapNotNull { part ->
+                (part as? com.mezze.language.typedast.TypedStringPart.Interpolation)?.expr
             }
             else -> emptyList()
         }
