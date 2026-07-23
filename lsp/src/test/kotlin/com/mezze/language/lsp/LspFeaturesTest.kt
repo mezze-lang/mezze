@@ -343,6 +343,35 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `hover on a method in a call chain resolves that method, not the outermost`() {
+        // Reported bug: hovering `is_odd` or `eq` in `x.is_odd {}.eq {..}.to_str {}`
+        // all showed `to_str` — every method-name node's loc started at the
+        // receiver `x`, so the position lookup always landed on the outermost
+        // call. Fix (memberLoc) narrows each method-name node to its own token.
+        val src = "let f = {x: Int} -> x.is_odd {}.eq {r = False}.to_str {}\n"
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        // Column offsets on line 0:
+        //   x       @ 20
+        //   is_odd  @ 22..27
+        //   eq      @ 32..33
+        //   to_str  @ 46..51
+        val isOdd = hoverText(hoverAt(uri, 0, 24)!!)
+        val eq = hoverText(hoverAt(uri, 0, 32)!!)
+        val toStr = hoverText(hoverAt(uri, 0, 48)!!)
+        // Each method's hover must mention ITS OWN name — not bleed to `to_str`.
+        assertTrue(isOdd.contains("is_odd"),
+            "hover on `is_odd` must resolve to is_odd, got: $isOdd")
+        assertTrue(eq.contains("eq"),
+            "hover on `eq` must resolve to eq, got: $eq")
+        assertTrue(toStr.contains("to_str"),
+            "hover on `to_str` must resolve to to_str, got: $toStr")
+        // And the earlier methods must NOT show the outermost `to_str`.
+        assertFalse(isOdd.contains("to_str"),
+            "hover on `is_odd` must NOT bleed to the outer to_str, got: $isOdd")
+    }
+
+    @Test
     fun `hover on an effect impl shows which effect + its methods + a link`() {
         val (uri, src) = openSingleFile("""
             type MemCounter = | MemCounter |

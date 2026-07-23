@@ -112,11 +112,13 @@ internal val MezzeParser.ifLetPostfixExpression: Parser<ParsedExpr>
                     result = when (member) {
                         is ParseResult.Success -> {
                             val file = currentFile ?: "<unknown>"
+                            val memberTokenLoc = tokenLoc(member.value, file)
                             ParseResult.Success(
                                 ParsedMemberAccess(
                                     result.value,
                                     member.value.text,
-                                    loc = result.value.loc.spanTo(tokenLoc(member.value, file))
+                                    loc = result.value.loc.spanTo(memberTokenLoc),
+                                    memberLoc = memberTokenLoc
                                 ),
                                 member.remaining
                             )
@@ -2357,11 +2359,13 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                     result = when (member) {
                         is ParseResult.Success -> {
                             val file = currentFile ?: "<unknown>"
+                            val memberTokenLoc = tokenLoc(member.value, file)
                             ParseResult.Success(
                                 ParsedMemberAccess(
                                     result.value,
                                     member.value.text,
-                                    loc = result.value.loc.spanTo(tokenLoc(member.value, file))
+                                    loc = result.value.loc.spanTo(memberTokenLoc),
+                                    memberLoc = memberTokenLoc
                                 ),
                                 member.remaining
                             )
@@ -2382,11 +2386,13 @@ internal val MezzeParser.postfixExpression: Parser<ParsedExpr>
                         result = when (member) {
                             is ParseResult.Success -> {
                                 val file = currentFile ?: "<unknown>"
+                                val memberTokenLoc = tokenLoc(member.value, file)
                                 ParseResult.Success(
                                     ParsedMemberAccess(
                                         result.value,
                                         member.value.text,
-                                        loc = result.value.loc.spanTo(tokenLoc(member.value, file))
+                                        loc = result.value.loc.spanTo(memberTokenLoc),
+                                        memberLoc = memberTokenLoc
                                     ),
                                     member.remaining
                                 )

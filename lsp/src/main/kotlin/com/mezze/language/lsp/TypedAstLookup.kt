@@ -199,6 +199,19 @@ object TypedAstLookup {
             is TypedCall -> {
                 findInExpr(expr.function, line, col, expr)
                     ?: findInExpr(expr.arg, line, col, expr)
+                    // Method calls desugar to `Call(fn=method, arg={it: receiver, …})`.
+                    // The wrapped arg record's own loc is the ORIGINAL `{}` args'
+                    // span (e.g. cols 55-56), but its `it` field holds the receiver
+                    // CHAIN, which spans further LEFT than the record itself. So the
+                    // record's containsPosition guard rejects a cursor over the
+                    // receiver, stranding the whole chain. Descend into the arg
+                    // record's entries directly to reach it.
+                    ?: (expr.arg as? TypedRecord)?.entries?.firstNotNullOfOrNull { entry ->
+                        when (entry) {
+                            is TypedRecordEntry.Field -> findInExpr(entry.value, line, col, expr)
+                            is TypedRecordEntry.Spread -> findInExpr(entry.expr, line, col, expr)
+                        }
+                    }
             }
             is TypedLambda -> findInExpr(expr.body, line, col, expr)
             is TypedRecord -> {

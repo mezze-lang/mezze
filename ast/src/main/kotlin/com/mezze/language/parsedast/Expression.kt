@@ -170,7 +170,17 @@ data class ParsedRecordLit(
 data class ParsedMemberAccess(
     val receiver: ParsedExpr,
     val member: String,
-    override val loc: Loc
+    override val loc: Loc,
+    /**
+     * Loc of the member-name token ALONE (`.to_str` → the `to_str` span),
+     * as opposed to [loc] which spans the whole `receiver.member` expression.
+     * The typechecker assigns this narrow loc to the desugared method-name
+     * node so hover/goto-def/references on a chained call (`x.a {}.b {}.c {}`)
+     * resolve to the specific method under the cursor, not the outermost one.
+     * Defaults to [loc] for synthetic member accesses (operators, do-bind
+     * desugar) where there is no distinct source token.
+     */
+    val memberLoc: Loc = loc
 ) : ParsedExpr
 
 

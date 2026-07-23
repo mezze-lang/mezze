@@ -775,7 +775,12 @@ class TypedAstBuilder(
                 name = methodInfo.methodName,
                 binding = BindingRef.ByHash(hash),
                 type = solvedFnType ?: substitution.apply(contextType),
-                loc = memberAccess.loc
+                // Narrow member-name loc, not the whole `receiver.method` span,
+                // so hover/goto-def on a chained call resolve to THIS method
+                // rather than the outermost one. Safe for tree descent: the
+                // receiver lives in the call's ARG record ({it: receiver}), not
+                // inside this function node, so narrowing it strands nothing.
+                loc = memberAccess.memberLoc
             )
         } else if (methodInfo.isInherentMethod && resolvedImplHash != null) {
             val implHash = resolvedImplHash
@@ -784,7 +789,7 @@ class TypedAstBuilder(
                 name = methodInfo.methodName,
                 binding = BindingRef.ByHash(opHash),
                 type = solvedFnType ?: substitution.apply(contextType),
-                loc = memberAccess.loc
+                loc = memberAccess.memberLoc
             )
         } else {
             buildExpr(expr.function, file)
