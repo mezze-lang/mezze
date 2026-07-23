@@ -250,6 +250,34 @@ public final class HandleNode extends MezzeNode {
             return runMarker(handler, frame);
         }
 
+        // Path E (#336) lazy branch: when MEZZE_LAZY_EFFECTS=1 AND the
+        // typechecker stamped this Handle as NOT fully-discharging, don't
+        // run body. Capture (bodyNode, frame, chain-with-this-handler-pushed)
+        // as a MezzeSuspended. Force under a wider chain will resume execution.
+        //
+        // pendingEffects is currently unknown at this level — the typechecker
+        // knows but hasn't threaded it down. Use singleton(effectHash) as a
+        // conservative marker "at least this Handle contributes"; Phase 2's
+        // force() will discover actual pending effects when body re-runs.
+        if (com.mezze.interpreter.runtime.MezzeLanguage.LAZY_EFFECTS_ENABLED
+                && !staticallyFullyDischarges) {
+            com.oracle.truffle.api.frame.MaterializedFrame materialized = frame.materialize();
+            // Snapshot chain BEFORE pushing this handler — the snapshot
+            // represents "what was installed at the enclosing scope."
+            // This handler is installed lazily inside the MezzeSuspended.
+            com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chainSnapshot =
+                com.mezze.interpreter.nodes.continuation.EffectFiber.snapshotHandlerChainEntries();
+            com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] mergedChain =
+                new com.mezze.interpreter.nodes.continuation.HandlerChainEntry[chainSnapshot.length + 1];
+            mergedChain[0] =
+                new com.mezze.interpreter.nodes.continuation.HandlerChainEntry(handler, effectHash);
+            System.arraycopy(chainSnapshot, 0, mergedChain, 1, chainSnapshot.length);
+            java.util.Set<Hash> pending = new java.util.HashSet<>();
+            pending.add(effectHash);  // placeholder — real set discovered on force
+            return com.mezze.interpreter.values.MezzeSuspended.captureContinuation(
+                bodyNode, materialized, mergedChain, pending);
+        }
+
         // Body executes inside a Loom continuation, which may yield back to
         // the driver across the frame boundary. Materialize so body's frame
         // survives the suspend/resume cycles.
