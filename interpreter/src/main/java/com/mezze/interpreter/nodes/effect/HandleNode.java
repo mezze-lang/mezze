@@ -169,15 +169,37 @@ public final class HandleNode extends MezzeNode {
     @Child private IndirectCallNode callNode;
     @CompilationFinal private final Hash effectHash;
 
+    /**
+     * Path E (#336) static discharge flag — only meaningful on the outermost
+     * HandleNode of a nested `perform A in perform B in body` chain. True
+     * iff after this Handle's discharge, no pending effects remain.
+     *
+     * <p>False for inner Handles of a nested chain (they only handle part
+     * of the row) and for any Handle that leaks an effect out to a wider
+     * scope. Legacy default false preserves eager execution for anything
+     * not stamped by the typechecker.
+     */
+    @CompilationFinal private final boolean staticallyFullyDischarges;
+
     // No no-hash constructor: HandleNode must always know which effect it
     // handles so drive() can filter the handler chain by (effect_hash,
     // op_name). Matching by op-name alone silently misroutes when two
     // effects in scope declare an op with the same simple name (#246/#55).
     public HandleNode(MezzeNode handlerNode, MezzeNode bodyNode, Hash effectHash) {
+        this(handlerNode, bodyNode, effectHash, false);
+    }
+
+    public HandleNode(MezzeNode handlerNode, MezzeNode bodyNode, Hash effectHash,
+                      boolean staticallyFullyDischarges) {
         this.handlerNode = handlerNode;
         this.bodyNode = bodyNode;
         this.callNode = IndirectCallNode.create();
         this.effectHash = effectHash;
+        this.staticallyFullyDischarges = staticallyFullyDischarges;
+    }
+
+    public boolean isStaticallyFullyDischarges() {
+        return staticallyFullyDischarges;
     }
 
     /**

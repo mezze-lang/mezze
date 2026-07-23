@@ -698,8 +698,14 @@ class TruffleCompiler(
                     // Nest HandleNodes for multiple handlers: outermost handler
                     // wraps the next which wraps ... which wraps the body.
                     // Process from last to first so the first handler is outermost.
+                    // Path E (#336): staticallyFullyDischarges flag applies only
+                    // to the OUTERMOST Handle (the last one built here). Inner
+                    // nested Handles are always partial (they leak their body's
+                    // remaining effects to the outer Handle).
                     var currentBody: MezzeNode = bodyNode
-                    for (handler in node.handlers.reversed()) {
+                    val handlersReversed = node.handlers.reversed()
+                    val lastIdx = handlersReversed.size - 1
+                    for ((idx, handler) in handlersReversed.withIndex()) {
                         val handlerNode: MezzeNode = if (handler.params != null) {
                             val paramsNode = compileNode(handler.params!!, source)
                             HandleNode.createParameterizedHandlerLookup(
@@ -710,7 +716,9 @@ class TruffleCompiler(
                                 -1, handler.handlerHash, handler.performerName
                             )
                         }
-                        currentBody = HandleNode(handlerNode, currentBody, handler.effectHash)
+                        val isOutermost = idx == lastIdx
+                        val stamp = if (isOutermost) node.staticallyFullyDischarges else false
+                        currentBody = HandleNode(handlerNode, currentBody, handler.effectHash, stamp)
                     }
                     currentBody
                 } else {
