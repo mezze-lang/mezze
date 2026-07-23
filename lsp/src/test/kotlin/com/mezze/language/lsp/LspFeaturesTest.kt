@@ -817,6 +817,59 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `references returns nothing on plain text that merely shares a name`() {
+        // Bug: references fired on a word in invalid/prose text if it happened to
+        // match a binding name elsewhere. Open a valid file with a `helper`
+        // binding, then didChange to append a stray prose line that contains the
+        // word `helper` (not a real reference). references at the prose word must
+        // return empty, not the binding's occurrences.
+        val valid = "let helper = {x: Int} -> x + 1\nlet main = {} -> helper { x = 4 }\n"
+        val (uri, _) = openSingleFile(valid)
+        client.awaitDiagnostics(uri, 5_000)
+        val edited = valid + "this helper is just prose not code\n"
+        server.textDocumentService.didChange(DidChangeTextDocumentParams(
+            VersionedTextDocumentIdentifier(uri, 2),
+            listOf(TextDocumentContentChangeEvent(edited))
+        ))
+        Thread.sleep(800)
+        // Cursor on `helper` inside the prose line (line index 2).
+        val proseLine = "this helper is just prose not code"
+        val refs = server.textDocumentService.references(ReferenceParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(2, proseLine.indexOf("helper") + 1)
+            context = ReferenceContext(true)
+        }).get(5, TimeUnit.SECONDS)
+        assertTrue(refs.isEmpty(),
+            "references on prose that isn't a real symbol occurrence must be empty, got: $refs")
+    }
+
+    @Test
+    fun `goto-def on an imported stdlib symbol never points at a non-existent file`() {
+        // Bug: goto-def on a stdlib symbol resolved its decl's stale/relative
+        // loc.file into a URI for a file that doesn't exist, so the editor
+        // offered to CREATE it. Every returned definition Location must point at
+        // a file that actually exists on disk.
+        val (uri, _) = openSingleFile("""
+            use std::effects::log::{ println, Console }
+            let main = {} -> perform Console in do
+              println { msg = "hi" }
+        """.trimIndent())
+        client.awaitDiagnostics(uri, 5_000)
+        // Cursor on `println` in the import list (line 0).
+        val importLine = "use std::effects::log::{ println, Console }"
+        val defs = server.textDocumentService.definition(DefinitionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(0, importLine.indexOf("println") + 1)
+        }).get(5, TimeUnit.SECONDS)
+        val locations = if (defs.isLeft) defs.left else defs.right.map { Location(it.targetUri, it.targetRange) }
+        for (loc in locations) {
+            val f = java.io.File(java.net.URI(loc.uri))
+            assertTrue(f.isFile,
+                "goto-def must not point at a non-existent file, got: ${loc.uri}")
+        }
+    }
+
+    @Test
     fun `documentHighlight returns the same-symbol occurrences`() {
         val (uri, _) = openSingleFile("""
             let main = {x: Int, y: Int} -> x + x + y

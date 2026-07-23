@@ -1183,8 +1183,7 @@ class MezzeTextDocumentService(
                 if (effectDecl != null && op != null) {
                     val row = if (op.effects.isNotEmpty()) " <${op.effects.joinToString(", ")}>" else ""
                     val ty = "${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}$row"
-                    val link = effectDecl.loc.file.takeIf { !it.isNullOrEmpty() }?.let { f ->
-                        val u = if (f.startsWith("file:")) f else File(f).toURI().toString()
+                    val link = resolveExistingFileUri(effectDecl.loc.file)?.let { u ->
                         "\n\nop of effect [`$effectName`]($u#L${effectDecl.loc.startLine},${effectDecl.loc.startCol})"
                     } ?: "\n\nop of effect `$effectName`"
                     return appendDoc("```mezze\n$word: $ty\n```" + link, op.doc, null)
@@ -1760,9 +1759,8 @@ class MezzeTextDocumentService(
         fun effectLink(perf: ParsedPerformerDecl): String {
             val effectName = perf.effect.localName
             val loc = effectDeclFor(effectName)?.loc?.takeIf { !it.file.isNullOrEmpty() } ?: perf.effect.loc
-            val file = loc.file
-            if (!file.isNullOrEmpty()) {
-                val defUri = if (file.startsWith("file:")) file else File(file).toURI().toString()
+            val defUri = resolveExistingFileUri(loc.file)
+            if (defUri != null) {
                 return "[`$effectName`]($defUri#L${loc.startLine},${loc.startCol})"
             }
             return "`$effectName`"
@@ -2039,9 +2037,11 @@ class MezzeTextDocumentService(
             // the defining file, so jump straight there.
             val importedPerf = result?.importedImpls?.get(word)
             if (importedPerf != null) {
-                val file = importedPerf.loc.file
-                if (file.isNotEmpty()) {
-                    val defUri = if (file.startsWith("file:")) file else File(file).toURI().toString()
+                // Only jump to the decl's own file when it resolves to a file
+                // that EXISTS (stdlib decls carry stale/relative loc.file that
+                // would otherwise make the editor offer to create a new file);
+                // else fall back to the import statement in this document.
+                resolveExistingFileUri(importedPerf.loc.file)?.let { defUri ->
                     return listOf(locToLocation(defUri, importedPerf.loc))
                 }
                 findImportLoc(state, word)?.let { return listOf(it) }
@@ -2479,13 +2479,45 @@ class MezzeTextDocumentService(
      * file. Falls back to the current document's URI if the loc carries no file.
      */
     private fun locToLocationCross(loc: Loc, fallbackUri: String? = null): Location {
-        val file = loc.file
-        val uri = when {
-            file.isNullOrEmpty() -> fallbackUri ?: ""
-            file.startsWith("file:") -> file
-            else -> File(file).toURI().toString()
-        }
+        val uri = resolveExistingFileUri(loc.file) ?: fallbackUri ?: ""
         return locToLocation(uri, loc)
+    }
+
+    /**
+     * Turn a decl's own `loc.file` into a `file://` URI that points at a file
+     * that ACTUALLY EXISTS on disk — or null if it can't. A decl loaded from the
+     * stdlib often carries a `loc.file` that is a stale JAR-extraction temp path
+     * (deleted between sessions) or a relative `stdlib/std/…` path; naively
+     * `File(f).toURI()`-ing those yields a URI to a non-existent file, and the
+     * editor then offers to CREATE it on cmd-click (bug report: goto-def on a
+     * stdlib symbol "tries to make a new file"). We instead:
+     *   1. accept an already-`file:`-scheme URI only if that file exists,
+     *   2. accept an absolute/relative path only if it exists,
+     *   3. otherwise recover a stable stdlib source path from the `std::…`
+     *      segment of the file path via resolveModulePathToUri.
+     * Returns null when nothing resolves — callers then fall back to the current
+     * document rather than a phantom path.
+     */
+    private fun resolveExistingFileUri(file: String?): String? {
+        if (file.isNullOrEmpty() || file == "built-in") return null
+        // Already a file: URI — keep only if the target exists.
+        if (file.startsWith("file:")) {
+            return try {
+                if (File(java.net.URI(file)).isFile) file else null
+            } catch (_: Exception) { null }
+        }
+        // A plain path — keep only if it exists on disk.
+        File(file).takeIf { it.isFile }?.let { return it.toURI().toString() }
+        // Recover a stable stdlib path: pull the `std/…/foo.mz` tail and map it
+        // back to a `std::…` module path the resolver understands.
+        val normalized = file.replace('\\', '/')
+        val stdIdx = normalized.indexOf("std/")
+        if (stdIdx >= 0) {
+            val rel = normalized.substring(stdIdx).removeSuffix(".mz")   // std/effects/log
+            val modulePath = rel.split('/').joinToString("::")          // std::effects::log
+            resolveModulePathToUri(modulePath)?.let { return it }
+        }
+        return null
     }
 
     /**
@@ -4895,7 +4927,9 @@ class MezzeTextDocumentService(
                     }
                     else -> null
                 }
-            } ?: typedModule?.decls
+            } ?: typedModule
+                ?.takeIf { cursorOnSymbolOccurrence(it, position, word) }
+                ?.decls
                 ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
                 ?.firstOrNull { it.name == word }
                 ?.hash
@@ -4929,7 +4963,15 @@ class MezzeTextDocumentService(
             // last resort; that produced false positives by matching
             // inside strings and comments, and trampling unrelated
             // bindings that happen to share the name.
-            if (locations.isEmpty() && typedModule != null) {
+            //
+            // Guard: only run the by-name walk when the cursor ACTUALLY sits on
+            // an occurrence of that symbol in the typed AST. Without this,
+            // `extractWordAt` happily grabs any word — including plain prose in a
+            // half-typed / invalid file — and if it coincidentally matches a
+            // binding name elsewhere in the (last-good) module we'd report those
+            // as "references" for text that isn't a reference at all.
+            if (locations.isEmpty() && typedModule != null &&
+                cursorOnSymbolOccurrence(typedModule, position, word)) {
                 collectReferencesInModule(typedModule, word, uri, locations)
             }
 
@@ -5373,6 +5415,32 @@ class MezzeTextDocumentService(
     }
 
     /** Collect all references to a name in the TypedModule. */
+    /**
+     * True when the cursor genuinely sits on an occurrence of the symbol `word`
+     * in the typed AST — either a `TypedVar` use site or a `TypedLetDecl`
+     * definition name at that position. Guards the by-name references fallback
+     * so it never fires for arbitrary text (e.g. prose in an invalid/half-typed
+     * file) that just happens to share a name with some binding.
+     */
+    private fun cursorOnSymbolOccurrence(
+        module: com.mezze.language.typedast.TypedModule,
+        position: Position,
+        word: String,
+    ): Boolean {
+        val line = position.line + 1
+        val col = position.character + 1
+        when (val r = TypedAstLookup.findAtPosition(module, line, col)) {
+            is TypedAstLookup.LookupResult.Expr ->
+                if ((r.expr as? com.mezze.language.typedast.TypedVar)?.name == word) return true
+            else -> {}
+        }
+        // Definition-site: cursor within a top-level decl's own name span.
+        return module.decls.any { d ->
+            d is com.mezze.language.typedast.TypedLetDecl && d.name == word &&
+                line == d.loc.startLine && col >= d.loc.startCol && col <= d.loc.endCol + 1
+        }
+    }
+
     private fun collectReferencesInModule(module: com.mezze.language.typedast.TypedModule, name: String, uri: String, locations: MutableList<Location>) {
         for (decl in module.decls) {
             if (decl is com.mezze.language.typedast.TypedLetDecl) {
