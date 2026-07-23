@@ -1,0 +1,3 @@
+# Packaged extension bundle — a build artifact produced by `vsce package`
+# (see tooling/install-dev.sh). Not source; regenerated on every install.
+*.vsix

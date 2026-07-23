@@ -49,6 +49,16 @@
         "path": "./syntaxes/mezze.tmLanguage.json"
       }
     ],
+    "configurationDefaults": {
+      "[mezze]": {
+        "editor.quickSuggestions": {
+          "other": true,
+          "comments": false,
+          "strings": true
+        },
+        "editor.suggestOnTriggerCharacters": true
+      }
+    },
     "snippets": [
       {
         "language": "mezze",

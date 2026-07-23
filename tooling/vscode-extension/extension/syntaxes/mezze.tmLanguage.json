@@ -63,14 +63,27 @@
           "match": "\\\\."
         },
         {
-          "comment": "String interpolation `$( expr )` — highlight the inner tokens.",
-          "name": "meta.interpolation.mezze",
+          "comment": "String interpolation `$( expr )` — highlight the inner tokens as real code. `contentName: meta.embedded` scopes the body so themes stop painting it with the enclosing string foreground (that's why `{}` looked like a string). Nested `(...)` are consumed by #balanced-parens so the region ends on the MATCHING `)`, not the first one.",
           "begin": "\\$\\(",
           "end": "\\)",
+          "contentName": "meta.embedded.line.mezze",
           "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.mezze" } },
           "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.mezze" } },
-          "patterns": [{ "include": "$self" }]
+          "patterns": [
+            { "include": "#balanced-parens" },
+            { "include": "$self" }
+          ]
         }
+      ]
+    },
+
+    "balanced-parens": {
+      "comment": "A parenthesized group `( … )` — used INSIDE string interpolation so a nested `)` doesn't prematurely end the `$( … )` region. Recursively consumes its own nested groups and highlights the inner tokens as code.",
+      "begin": "\\(",
+      "end": "\\)",
+      "patterns": [
+        { "include": "#balanced-parens" },
+        { "include": "$self" }
       ]
     },
 
