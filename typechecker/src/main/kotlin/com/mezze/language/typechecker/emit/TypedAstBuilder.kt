@@ -1180,6 +1180,28 @@ class TypedAstBuilder(
         if (expr is TypedVariantConstruct) { expr.payload?.let { walkForCaptures(it, paramNames, captures, seen) }; return }
         if (expr is TypedRecordUpdate) { walkForCaptures(expr.record, paramNames, captures, seen); for (entry in expr.updates) { if (entry is TypedRecordEntry.Field) walkForCaptures(entry.value, paramNames, captures, seen) }; return }
         if (expr is TypedPipe) { walkForCaptures(expr.left, paramNames, captures, seen); walkForCaptures(expr.right, paramNames, captures, seen); return }
+        if (expr is TypedStringLit) {
+            // #84: interpolation parts contain sub-expressions that may reference
+            // captured vars (e.g. "$(prefix)/$(x)" inside a lambda). Without this
+            // recursion, `prefix` would not be marked as a capture and the lambda
+            // body would read a null value at runtime.
+            for (part in expr.parts) {
+                if (part is TypedStringPart.Interpolation) walkForCaptures(part.expr, paramNames, captures, seen)
+            }
+            return
+        }
+        if (expr is TypedSeq) {
+            // #84 followup: seq literals `[a, b, c]` inside a lambda body contain
+            // sub-expressions that may reference captured vars. Without this
+            // recursion, e.g. `[path, x.name]` would miss `path` as a capture.
+            for (elem in expr.elements) {
+                when (elem) {
+                    is TypedSeqElement.Regular -> walkForCaptures(elem.expr, paramNames, captures, seen)
+                    is TypedSeqElement.Spread -> walkForCaptures(elem.expr, paramNames, captures, seen)
+                }
+            }
+            return
+        }
     }
 
     private fun buildLambdaParams(

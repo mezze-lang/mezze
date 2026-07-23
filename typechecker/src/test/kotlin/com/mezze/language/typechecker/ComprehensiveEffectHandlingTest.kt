@@ -104,10 +104,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 "Done"
 
             let partiallyHandled = perform Console in myFunc
@@ -124,10 +125,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 "Done"
 
             let step1 = perform Console in myFunc
@@ -189,10 +191,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 "Done"
 
             let partiallyHandled = perform Console in myFunc
@@ -210,10 +213,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 "Done"
 
             let getResult = {} -> do
@@ -235,10 +239,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 "Done"
 
             let getResult = {} -> do
@@ -262,10 +267,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 "Done"
 
             let called = myFunc {}
@@ -304,10 +310,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 "Done"
 
             let called = myFunc {}
@@ -324,10 +331,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 "Done"
 
             let called = myFunc {}
@@ -345,10 +353,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 "Done"
 
             let called = myFunc {}
@@ -367,10 +376,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 "Done"
 
             let partiallyHandled = perform Console in myFunc
@@ -390,10 +400,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 "Done"
 
             let getResult = {} -> perform LocalDisk in (perform Console in (myFunc {}))
@@ -458,10 +469,11 @@ class ComprehensiveEffectHandlingTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let myFunc: {} -> Str <FileSystem, Log> = {} -> do
                 println { msg = "Hello" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 "Done"
 
             let called = myFunc {}

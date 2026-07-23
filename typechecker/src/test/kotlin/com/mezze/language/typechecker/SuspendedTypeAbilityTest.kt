@@ -391,10 +391,11 @@ class SuspendedTypeAbilityTest {
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
+            use std::collections::bytes
 
             let getNumber: {} -> Int <FileSystem, Log> = {} -> do
                 println { msg = "Getting number" }
-                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                FileSystem.write_bytes { path = "/tmp/test.txt", bytes = bytes::from_string { s = "data" } }
                 42
 
             let result = getNumber {} + 10

@@ -520,7 +520,6 @@ class FileSystemEffectTest {
         assertEquals("ok", eval(code))
     }
 
-    @org.junit.jupiter.api.Disabled("Blocked on #84 — nested-lambda closure capture bug prevents delete_recursive Mezze recursion from working. The 13 primitives all pass; only this derived helper is affected.")
     @Test
     fun `delete_recursive removes tree`() {
         val code = """
