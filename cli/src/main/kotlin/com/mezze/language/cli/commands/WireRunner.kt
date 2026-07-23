@@ -163,9 +163,21 @@ object WireRunner {
             return true
         }
 
+        // TTY detection: colour only when stderr is an interactive terminal.
+        val console = DevConsole(appName, color = System.console() != null)
+        val watchedDirLabel = appFile.parentFile?.let {
+            runCatching { it.toPath().let(currentDir.toPath()::relativize).toString() }.getOrNull()
+        } ?: appFile.parent ?: "."
+
         try {
-            System.err.println("[mez dev] $appName · ${appFile.name}")
+            val tFirst = System.nanoTime()
             var lastCompile: CompileResult? = compile(currentDir, appFile, entryName, appName, timing, t0)
+            val compileSecs = (System.nanoTime() - tFirst) / 1e9
+            for (line in console.banner(watchedDirLabel, compileSecs)) System.err.println(line)
+
+            // The first run's separator precedes its output.
+            System.err.println(console.separator("running · ^C to stop"))
+            System.err.println(console.blank())
             if (lastCompile != null) {
                 session.runOnce(lastCompile)
                 prevHashes = lastCompile.hashes
@@ -180,7 +192,10 @@ object WireRunner {
 
             val events = java.util.concurrent.LinkedBlockingQueue<DevEvent>()
             startFileWatcherThread(watcher, events)
-            printWatchingBanner()
+
+            // Carries how the PREVIOUS run ended so the NEXT reload separator
+            // can fold it in (`… reloaded app.mz · prev exited 0 · 0.09s`).
+            var priorOutcome: DevConsole.RunResult = DevConsole.RunResult.Reloading
 
             while (true) {
                 when (val event = events.take()) {
@@ -196,6 +211,17 @@ object WireRunner {
                         val tReload = System.nanoTime()
                         val next = compile(currentDir, appFile, entryName, appName, timing, tReload)
                         if (next != null) {
+                            val reloadSecs = (System.nanoTime() - tReload) / 1e9
+                            val changed = coalesced.firstOrNull() ?: appFile.name
+                            // Separator PRECEDES this run's output; it folds in
+                            // how the previous run ended.
+                            System.err.println(console.blank())
+                            System.err.println(console.separator(
+                                label = "reloaded $changed · ${fmtSecs(reloadSecs)}",
+                                priorStatus = console.priorStatus(priorOutcome),
+                            ))
+                            System.err.println(console.blank())
+
                             // EVICT: hashes that were in the previous closure
                             // but aren't in the new one. They identify
                             // functions whose source changed (so the hash
@@ -206,16 +232,18 @@ object WireRunner {
                             val outcome = session.runOnce(next, evict = if (evict.isEmpty()) null else evict)
                             prevHashes = next.hashes
                             lastCompile = next
-                            if (outcome.reason == "exit_called") {
-                                System.err.println("[mez dev] program exited with code ${outcome.exitCode}")
-                            } else if (outcome.reason == "wire_error" || outcome.reason == "crashed") {
+                            priorOutcome = when (outcome.reason) {
+                                "exit_called" -> DevConsole.RunResult.Exited(outcome.exitCode)
+                                "wire_error", "crashed" -> DevConsole.RunResult.Crashed
+                                else -> DevConsole.RunResult.Exited(outcome.exitCode)
+                            }
+                            if (outcome.reason == "wire_error" || outcome.reason == "crashed") {
                                 // Session is unusable — wire corrupted or
                                 // child died. Restart so the next file save
                                 // gets a fresh runtime. Bail entirely if
                                 // even the restart fails.
-                                System.err.println("[mez dev] runtime session lost (${outcome.reason}) — restarting")
                                 if (!restartSession()) {
-                                    System.err.println("[mez dev] couldn't restart runtime — exiting")
+                                    System.err.println(console.separator("couldn't restart runtime — exiting"))
                                     return 1
                                 }
                             }
@@ -226,7 +254,6 @@ object WireRunner {
                             val n = events.poll() ?: break
                             if (n !is DevEvent.FilesChanged) { events.add(n); break }
                         }
-                        printWatchingBanner()
                     }
                 }
             }
@@ -235,14 +262,13 @@ object WireRunner {
         }
     }
 
+    private fun fmtSecs(s: Double): String =
+        if (s < 1.0) "${(s * 1000).toInt()}ms" else "${"%.2f".format(s)}s"
+
     // ─── Watch helpers: file watcher, dep tracking ──────────
 
     private sealed class DevEvent {
         data class FilesChanged(val files: Set<String>) : DevEvent()
-    }
-
-    private fun printWatchingBanner() {
-        System.err.println("[mez dev] watching · Ctrl-C to stop")
     }
 
     /**
