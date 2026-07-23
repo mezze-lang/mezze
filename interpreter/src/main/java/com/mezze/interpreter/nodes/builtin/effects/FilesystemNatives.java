@@ -1,311 +1,437 @@
 package com.mezze.interpreter.nodes.builtin.effects;
 
-import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeUnit;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
-import java.io.File;
 import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.channels.ClosedChannelException;
+import java.nio.channels.FileChannel;
 import java.nio.file.AccessDeniedException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.util.Arrays;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Native implementations for Filesystem effect operations.
+ * Native implementations for LocalDisk FileSystem effect (#82).
  *
- * All operations return Result types with proper error variants:
- * - FileNotFound { path }
- * - PermissionDenied { path, operation }
- * - AlreadyExists { path }
- * - DirectoryNotEmpty { path }
- * - IOError { path, message }
+ * Thirteen primitive ops mapping to java.nio.file kernel fast paths:
+ *   read_bytes   — Files.readAllBytes
+ *   write_bytes  — Files.write (create-or-truncate)
+ *   delete       — Files.delete (unlink)
+ *   list         — Files.newDirectoryStream (names only)
+ *   list_with_stat — Files.newDirectoryStream + readAttributes (bundled)
+ *   stat         — Files.readAttributes; NotFound is a legal FileKind
+ *   create_directory — Files.createDirectory (mkdir)
+ *   copy_file    — Files.copy (kernel sendfile on Linux)
+ *   move_file    — Files.move (atomic rename on same fs)
+ *   open         — FileChannel.open (with mode)
+ *   read_chunk   — FileChannel.read (advances position)
+ *   write_chunk  — FileChannel.write (advances position)
+ *   close        — FileChannel.close (idempotent)
+ *
+ * All ops return {@code Result 'a FsError}. FsError constructors match
+ * the Mezze-side ADT in {@code std::effects::filesystem}.
  */
 public final class FilesystemNatives {
 
     private FilesystemNatives() {}
 
-    // ============== Read/Write Operations ==============
+    // ==================== FileHandle ====================
+
+    /**
+     * Handle for streaming file I/O. Wraps a FileChannel opened in a
+     * specific mode. Used by open / read_chunk / write_chunk / close.
+     *
+     * The `closed` flag makes close() idempotent — repeat calls no-op.
+     */
+    public static final class MezzeFileHandle {
+        final FileChannel channel;
+        final String path;
+        final AtomicBoolean closed = new AtomicBoolean(false);
+
+        MezzeFileHandle(FileChannel channel, String path) {
+            this.channel = channel;
+            this.path = path;
+        }
+
+        boolean isClosed() { return closed.get(); }
+    }
+
+    // ==================== Read / Write (whole-file) ====================
 
     @TruffleBoundary
-    public static Object readFile(MezzeRecord args) {
+    public static Object readBytes(MezzeRecord args) {
         String path = getString(args, "path");
         try {
-            String content = Files.readString(Path.of(path));
-            return createOk(content);
-        } catch (java.nio.file.NoSuchFileException e) {
-            return fileNotFound(path);
+            byte[] data = Files.readAllBytes(Paths.get(path));
+            return ok(new MezzeBytes(data));
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
         } catch (AccessDeniedException e) {
-            return permissionDenied(path, "read");
+            return errPermissionDenied(path, "read_bytes");
         } catch (IOException e) {
-            return ioError(path, e.getMessage());
+            return errIO(path, e.getMessage());
         }
     }
 
     @TruffleBoundary
-    public static Object writeFile(MezzeRecord args) {
+    public static Object writeBytes(MezzeRecord args) {
         String path = getString(args, "path");
-        String content = getString(args, "content");
+        MezzeBytes bytes = getBytes(args, "bytes");
         try {
-            File file = new File(path);
-            File parent = file.getParentFile();
-            if (parent != null && !parent.exists()) {
-                return fileNotFound(path);
-            }
-            Files.writeString(Path.of(path), content);
-            return createOk(MezzeUnit.INSTANCE);
-        } catch (java.nio.file.NoSuchFileException e) {
-            return fileNotFound(path);
+            Files.write(Paths.get(path), bytes.getData());
+            return ok(MezzeUnit.INSTANCE);
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
         } catch (AccessDeniedException e) {
-            return permissionDenied(path, "write");
+            return errPermissionDenied(path, "write_bytes");
         } catch (IOException e) {
-            if (e.getMessage() != null && e.getMessage().contains("No space left")) {
-                return diskFull(path, content.length());
+            String msg = e.getMessage();
+            if (msg != null && msg.contains("No space left")) {
+                return errDiskFull(path, bytes.length());
             }
-            return ioError(path, e.getMessage());
+            return errIO(path, msg);
         }
     }
 
+    // ==================== Metadata ====================
+
     @TruffleBoundary
-    public static Object appendFile(MezzeRecord args) {
+    public static Object stat(MezzeRecord args) {
         String path = getString(args, "path");
-        String content = getString(args, "content");
+        Path p = Paths.get(path);
         try {
-            File file = new File(path);
-            if (!file.exists()) {
-                return fileNotFound(path);
-            }
-            Files.writeString(Path.of(path), content, java.nio.file.StandardOpenOption.APPEND);
-            return createOk(MezzeUnit.INSTANCE);
+            BasicFileAttributes attrs = Files.readAttributes(p, BasicFileAttributes.class);
+            String kind = attrs.isDirectory() ? "Directory"
+                        : attrs.isRegularFile() ? "File"
+                        : "Other";
+            return ok(fileStatRecord(kind, attrs.size(), attrs.lastModifiedTime().toMillis()));
+        } catch (NoSuchFileException e) {
+            // NotFound is a legal FileKind, not an FsError — inspection
+            // path stays fast for existence checks in tight loops.
+            return ok(fileStatRecord("NotFound", 0L, 0L));
         } catch (AccessDeniedException e) {
-            return permissionDenied(path, "append");
+            return errPermissionDenied(path, "stat");
         } catch (IOException e) {
-            return ioError(path, e.getMessage());
+            return errIO(path, e.getMessage());
         }
-    }
-
-    // ============== File Query Operations ==============
-
-    @TruffleBoundary
-    public static Object exists(MezzeRecord args) {
-        String path = getString(args, "path");
-        return createOk(new File(path).exists());
     }
 
     @TruffleBoundary
-    public static Object fileSize(MezzeRecord args) {
+    public static Object list(MezzeRecord args) {
         String path = getString(args, "path");
-        File file = new File(path);
-        if (!file.exists()) {
-            return fileNotFound(path);
+        Path p = Paths.get(path);
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(p)) {
+            List<Object> names = new ArrayList<>();
+            for (Path child : stream) {
+                names.add(child.getFileName().toString());
+            }
+            return ok(MezzeSeq.fromArray(names.toArray()));
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
+        } catch (java.nio.file.NotDirectoryException e) {
+            return errNotADirectory(path);
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(path, "list");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
         }
-        if (!file.canRead()) {
-            return permissionDenied(path, "file_size");
-        }
-        return createOk(file.length());
     }
 
     @TruffleBoundary
-    public static Object isDirectory(MezzeRecord args) {
+    public static Object listWithStat(MezzeRecord args) {
         String path = getString(args, "path");
-        File file = new File(path);
-        if (!file.exists()) {
-            return fileNotFound(path);
+        Path p = Paths.get(path);
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(p)) {
+            List<Object> entries = new ArrayList<>();
+            for (Path child : stream) {
+                try {
+                    BasicFileAttributes a = Files.readAttributes(child, BasicFileAttributes.class);
+                    String kind = a.isDirectory() ? "Directory"
+                                : a.isRegularFile() ? "File"
+                                : "Other";
+                    Object stat = fileStatRecord(kind, a.size(), a.lastModifiedTime().toMillis());
+                    entries.add(dirEntryRecord(child.getFileName().toString(), stat));
+                } catch (IOException perEntry) {
+                    // Skip entries we can't stat (e.g. broken symlinks) —
+                    // real filesystems have transiently-inconsistent
+                    // entries and users don't want a full failure.
+                }
+            }
+            return ok(MezzeSeq.fromArray(entries.toArray()));
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
+        } catch (java.nio.file.NotDirectoryException e) {
+            return errNotADirectory(path);
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(path, "list_with_stat");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
         }
-        return createOk(file.isDirectory());
     }
 
-    @TruffleBoundary
-    public static Object isFile(MezzeRecord args) {
-        String path = getString(args, "path");
-        File file = new File(path);
-        if (!file.exists()) {
-            return fileNotFound(path);
-        }
-        return createOk(file.isFile());
-    }
-
-    // ============== Directory Operations ==============
-
-    @TruffleBoundary
-    public static Object createDirectory(MezzeRecord args) {
-        String path = getString(args, "path");
-        File file = new File(path);
-        if (file.exists()) {
-            return alreadyExists(path);
-        }
-        if (!file.mkdirs()) {
-            return permissionDenied(path, "create_directory");
-        }
-        return createOk(MezzeUnit.INSTANCE);
-    }
-
-    @TruffleBoundary
-    public static Object createDirectories(MezzeRecord args) {
-        String path = getString(args, "path");
-        File file = new File(path);
-        if (file.exists() && file.isDirectory()) {
-            return createOk(MezzeUnit.INSTANCE);  // Already exists, ok
-        }
-        if (file.exists()) {
-            return alreadyExists(path);  // Exists but not a directory
-        }
-        if (!file.mkdirs()) {
-            return permissionDenied(path, "create_directories");
-        }
-        return createOk(MezzeUnit.INSTANCE);
-    }
-
-    @TruffleBoundary
-    public static Object listDirectory(MezzeRecord args) {
-        String path = getString(args, "path");
-        File file = new File(path);
-        if (!file.exists()) {
-            return fileNotFound(path);
-        }
-        if (!file.isDirectory()) {
-            return ioError(path, "Not a directory");
-        }
-        if (!file.canRead()) {
-            return permissionDenied(path, "list_directory");
-        }
-        String[] entries = file.list();
-        if (entries == null) {
-            entries = new String[0];
-        }
-        return createOk(MezzeList.of(Arrays.stream(entries).toArray()));
-    }
-
-    // ============== Delete Operations ==============
+    // ==================== Structural mutation ====================
 
     @TruffleBoundary
     public static Object delete(MezzeRecord args) {
         String path = getString(args, "path");
-        File file = new File(path);
-        if (!file.exists()) {
-            return fileNotFound(path);
+        try {
+            Files.delete(Paths.get(path));
+            return ok(MezzeUnit.INSTANCE);
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
+        } catch (java.nio.file.DirectoryNotEmptyException e) {
+            return errNotEmpty(path);
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(path, "delete");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
         }
-        if (file.isDirectory() && file.list() != null && file.list().length > 0) {
-            return directoryNotEmpty(path);
-        }
-        if (!file.delete()) {
-            return permissionDenied(path, "delete");
-        }
-        return createOk(MezzeUnit.INSTANCE);
     }
 
     @TruffleBoundary
-    public static Object deleteRecursive(MezzeRecord args) {
+    public static Object createDirectory(MezzeRecord args) {
         String path = getString(args, "path");
-        File file = new File(path);
-        if (!file.exists()) {
-            return fileNotFound(path);
+        try {
+            Files.createDirectory(Paths.get(path));
+            return ok(MezzeUnit.INSTANCE);
+        } catch (FileAlreadyExistsException e) {
+            return errAlreadyExists(path);
+        } catch (NoSuchFileException e) {
+            // Parent doesn't exist.
+            return errNotFound(path);
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(path, "create_directory");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
         }
-        if (!deleteRecursively(file)) {
-            return permissionDenied(path, "delete_recursive");
-        }
-        return createOk(MezzeUnit.INSTANCE);
     }
 
-    private static boolean deleteRecursively(File file) {
-        if (file.isDirectory()) {
-            File[] children = file.listFiles();
-            if (children != null) {
-                for (File child : children) {
-                    if (!deleteRecursively(child)) {
-                        return false;
-                    }
-                }
-            }
-        }
-        return file.delete();
-    }
-
-    // ============== Copy/Move Operations ==============
-
+    /**
+     * Kernel-level copy. On Linux this uses sendfile() when available,
+     * avoiding userspace round-trip for large files. That's why this
+     * is an effect primitive, not a derived helper.
+     */
     @TruffleBoundary
     public static Object copyFile(MezzeRecord args) {
         String src = getString(args, "src");
         String dest = getString(args, "dest");
         try {
-            File srcFile = new File(src);
-            File destFile = new File(dest);
-            if (!srcFile.exists()) {
-                return fileNotFound(src);
-            }
-            if (destFile.exists()) {
-                return alreadyExists(dest);
-            }
-            Files.copy(srcFile.toPath(), destFile.toPath());
-            return createOk(MezzeUnit.INSTANCE);
+            Files.copy(Paths.get(src), Paths.get(dest));
+            return ok(MezzeUnit.INSTANCE);
+        } catch (NoSuchFileException e) {
+            return errNotFound(src);
+        } catch (FileAlreadyExistsException e) {
+            return errAlreadyExists(dest);
         } catch (AccessDeniedException e) {
-            return permissionDenied(src, "copy");
+            return errPermissionDenied(src, "copy_file");
         } catch (IOException e) {
-            return ioError(src, e.getMessage());
+            return errIO(src, e.getMessage());
         }
     }
 
+    /**
+     * Atomic move. On the same filesystem Linux uses rename(2) —
+     * atomic; observers never see a half-moved file. Derived
+     * copy+delete would break that guarantee.
+     */
     @TruffleBoundary
     public static Object moveFile(MezzeRecord args) {
         String src = getString(args, "src");
         String dest = getString(args, "dest");
         try {
-            File srcFile = new File(src);
-            File destFile = new File(dest);
-            if (!srcFile.exists()) {
-                return fileNotFound(src);
+            Files.move(Paths.get(src), Paths.get(dest), StandardCopyOption.ATOMIC_MOVE);
+            return ok(MezzeUnit.INSTANCE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            // Cross-filesystem move — fall back to non-atomic.
+            try {
+                Files.move(Paths.get(src), Paths.get(dest));
+                return ok(MezzeUnit.INSTANCE);
+            } catch (IOException retry) {
+                return errIO(src, retry.getMessage());
             }
-            if (destFile.exists()) {
-                return alreadyExists(dest);
-            }
-            if (!srcFile.renameTo(destFile)) {
-                return ioError(src, "Failed to move file");
-            }
-            return createOk(MezzeUnit.INSTANCE);
-        } catch (Exception e) {
-            return ioError(src, e.getMessage());
+        } catch (NoSuchFileException e) {
+            return errNotFound(src);
+        } catch (FileAlreadyExistsException e) {
+            return errAlreadyExists(dest);
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(src, "move_file");
+        } catch (IOException e) {
+            return errIO(src, e.getMessage());
         }
     }
 
-    // ============== Result/Error Helpers ==============
+    // ==================== Streaming ====================
 
-    private static MezzeVariant createOk(Object value) {
+    @TruffleBoundary
+    public static Object open(MezzeRecord args) {
+        String path = getString(args, "path");
+        String mode = getVariantTag(args, "mode");
+        try {
+            FileChannel channel;
+            switch (mode) {
+                case "Read":
+                    channel = FileChannel.open(Paths.get(path), StandardOpenOption.READ);
+                    break;
+                case "Write":
+                    channel = FileChannel.open(Paths.get(path),
+                        StandardOpenOption.WRITE,
+                        StandardOpenOption.CREATE,
+                        StandardOpenOption.TRUNCATE_EXISTING);
+                    break;
+                case "Append":
+                    channel = FileChannel.open(Paths.get(path),
+                        StandardOpenOption.WRITE,
+                        StandardOpenOption.CREATE,
+                        StandardOpenOption.APPEND);
+                    break;
+                default:
+                    return errIO(path, "Unknown OpenMode: " + mode);
+            }
+            return ok(new MezzeFileHandle(channel, path));
+        } catch (NoSuchFileException e) {
+            return errNotFound(path);
+        } catch (AccessDeniedException e) {
+            return errPermissionDenied(path, "open");
+        } catch (IOException e) {
+            return errIO(path, e.getMessage());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object readChunk(MezzeRecord args) {
+        MezzeFileHandle h = getHandle(args, "handle");
+        long maxBytes = getLong(args, "max_bytes");
+        if (h.isClosed()) {
+            return errClosedHandle(h.path);
+        }
+        try {
+            int cap = (int) Math.min(maxBytes, Integer.MAX_VALUE);
+            ByteBuffer buf = ByteBuffer.allocate(cap);
+            int n = h.channel.read(buf);
+            if (n <= 0) {
+                // EOF or nothing read — return empty Bytes.
+                return ok(new MezzeBytes(new byte[0]));
+            }
+            byte[] out = new byte[n];
+            buf.flip();
+            buf.get(out);
+            return ok(new MezzeBytes(out));
+        } catch (ClosedChannelException e) {
+            return errClosedHandle(h.path);
+        } catch (IOException e) {
+            return errIO(h.path, e.getMessage());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object writeChunk(MezzeRecord args) {
+        MezzeFileHandle h = getHandle(args, "handle");
+        MezzeBytes bytes = getBytes(args, "bytes");
+        if (h.isClosed()) {
+            return errClosedHandle(h.path);
+        }
+        try {
+            h.channel.write(ByteBuffer.wrap(bytes.getData()));
+            return ok(MezzeUnit.INSTANCE);
+        } catch (ClosedChannelException e) {
+            return errClosedHandle(h.path);
+        } catch (IOException e) {
+            return errIO(h.path, e.getMessage());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object close(MezzeRecord args) {
+        MezzeFileHandle h = getHandle(args, "handle");
+        if (h.closed.compareAndSet(false, true)) {
+            try {
+                h.channel.close();
+                return ok(MezzeUnit.INSTANCE);
+            } catch (IOException e) {
+                return errIO(h.path, e.getMessage());
+            }
+        }
+        // Already closed — idempotent, no-op success.
+        return ok(MezzeUnit.INSTANCE);
+    }
+
+    // ==================== Record helpers ====================
+
+    private static final String[] FILE_STAT_FIELDS = {"kind", "size", "modified"};
+    private static final String[] DIR_ENTRY_FIELDS = {"name", "stat"};
+
+    private static MezzeRecord fileStatRecord(String kind, long size, long modifiedMs) {
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag(kind);
+        Object kindVariant = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+        return MezzeRecord.fromFields(FILE_STAT_FIELDS, new Object[]{kindVariant, size, modifiedMs});
+    }
+
+    private static MezzeRecord dirEntryRecord(String name, Object stat) {
+        return MezzeRecord.fromFields(DIR_ENTRY_FIELDS, new Object[]{name, stat});
+    }
+
+    // ==================== Result / FsError helpers ====================
+
+    private static MezzeVariant ok(Object value) {
         return MezzeVariant.ok(value);
     }
 
-    private static MezzeVariant fileNotFound(String path) {
-        return createErr("FileNotFound", new String[]{"path"}, new Object[]{path});
+    private static MezzeVariant errNotFound(String path) {
+        return err("FsNotFound", new String[]{"path"}, new Object[]{path});
     }
 
-    private static MezzeVariant permissionDenied(String path, String operation) {
-        return createErr("PermissionDenied",
+    private static MezzeVariant errPermissionDenied(String path, String operation) {
+        return err("FsPermissionDenied",
             new String[]{"path", "operation"},
             new Object[]{path, operation});
     }
 
-    private static MezzeVariant alreadyExists(String path) {
-        return createErr("AlreadyExists", new String[]{"path"}, new Object[]{path});
+    private static MezzeVariant errAlreadyExists(String path) {
+        return err("FsAlreadyExists", new String[]{"path"}, new Object[]{path});
     }
 
-    private static MezzeVariant directoryNotEmpty(String path) {
-        return createErr("DirectoryNotEmpty", new String[]{"path"}, new Object[]{path});
+    private static MezzeVariant errNotEmpty(String path) {
+        return err("FsNotEmpty", new String[]{"path"}, new Object[]{path});
     }
 
-    private static MezzeVariant ioError(String path, String message) {
-        return createErr("IOError",
+    private static MezzeVariant errNotADirectory(String path) {
+        return err("FsNotADirectory", new String[]{"path"}, new Object[]{path});
+    }
+
+    private static MezzeVariant errIO(String path, String message) {
+        return err("FsIOError",
             new String[]{"path", "message"},
             new Object[]{path, message != null ? message : "Unknown error"});
     }
 
-    private static MezzeVariant diskFull(String path, long bytesNeeded) {
-        return createErr("DiskFull",
+    private static MezzeVariant errDiskFull(String path, long bytesNeeded) {
+        return err("FsDiskFull",
             new String[]{"path", "bytes_needed"},
             new Object[]{path, bytesNeeded});
     }
 
-    private static MezzeVariant createErr(String constructor, String[] fields, Object[] values) {
+    private static MezzeVariant errClosedHandle(String path) {
+        return err("FsClosedHandle", new String[]{"path"}, new Object[]{path});
+    }
+
+    private static MezzeVariant err(String constructor, String[] fields, Object[] values) {
         MezzeRecord payload = MezzeRecord.fromFields(fields, values);
         int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag(constructor);
         MezzeVariant errorVariant = MezzeVariant.singlePayload(
@@ -313,15 +439,52 @@ public final class FilesystemNatives {
         return MezzeVariant.err(errorVariant);
     }
 
-    // ============== Field Helpers ==============
+    // ==================== Field helpers ====================
 
     private static String getString(MezzeRecord r, String name) {
         int index = r.getFieldIndex(name);
-        if (index < 0) {
-            throw new RuntimeException("Missing field '" + name + "'");
-        }
+        if (index < 0) throw new RuntimeException("Missing field '" + name + "'");
         Object val = r.getField(index);
         if (val instanceof String s) return s;
         throw new RuntimeException("Expected String for field '" + name + "'");
+    }
+
+    private static long getLong(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new RuntimeException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof Long l) return l;
+        if (val instanceof Integer i) return i;
+        throw new RuntimeException("Expected Int for field '" + name + "'");
+    }
+
+    private static MezzeBytes getBytes(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new RuntimeException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MezzeBytes b) return b;
+        throw new RuntimeException("Expected Bytes for field '" + name + "'");
+    }
+
+    private static MezzeFileHandle getHandle(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new RuntimeException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MezzeFileHandle h) return h;
+        throw new RuntimeException("Expected FileHandle for field '" + name + "'");
+    }
+
+    /**
+     * Extract the tag name of a variant (e.g. "Read" from OpenMode.Read).
+     * Used for OpenMode dispatch. Nullary variants only.
+     */
+    private static String getVariantTag(MezzeRecord r, String name) {
+        int index = r.getFieldIndex(name);
+        if (index < 0) throw new RuntimeException("Missing field '" + name + "'");
+        Object val = r.getField(index);
+        if (val instanceof MezzeVariant v) {
+            return v.getConstructorName();
+        }
+        throw new RuntimeException("Expected variant for field '" + name + "'");
     }
 }

@@ -1,37 +1,52 @@
 package com.mezze.interpreter.nodes.builtin.effects;
 
-import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeUnit;
 import com.mezze.interpreter.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Native implementations for MemoryFS effect operations.
+ * In-memory FileSystem impl for tests (#82).
  *
- * Provides an in-memory filesystem for testing, thread-safe via ConcurrentHashMap.
- * All operations return Result types with proper error variants.
+ * Same 13-op surface as LocalDisk, backed by a ConcurrentHashMap of
+ * path → { bytes, modifiedMs }. Directories tracked as a separate map.
+ * Streaming handles carry their own position and refer back to the map.
  */
 public final class MemoryFilesystemNatives {
 
     private MemoryFilesystemNatives() {}
 
-    // In-memory file storage
-    private static final ConcurrentHashMap<String, String> files = new ConcurrentHashMap<>();
-    // Directory entries (directory path -> set of child names)
+    /** File entry: content bytes + last-modified epoch millis. */
+    private static final class Entry {
+        volatile byte[] bytes;
+        volatile long modifiedMs;
+        Entry(byte[] bytes) {
+            this.bytes = bytes;
+            this.modifiedMs = System.currentTimeMillis();
+        }
+    }
+
+    private static final ConcurrentHashMap<String, Entry> files = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, ConcurrentHashMap.KeySetView<String, Boolean>> directories = new ConcurrentHashMap<>();
 
+    private static final AtomicLong nowMs = new AtomicLong(0);
+
     static {
-        // Initialize root directory
         directories.put("/", ConcurrentHashMap.newKeySet());
     }
 
     /**
-     * Clear the in-memory filesystem (for test isolation)
+     * Clear the in-memory filesystem — used by tests for isolation.
+     * Registered as {@code __native_memfs_clear} in NativeDispatch.
      */
     @TruffleBoundary
     public static void clear() {
@@ -40,362 +55,329 @@ public final class MemoryFilesystemNatives {
         directories.put("/", ConcurrentHashMap.newKeySet());
     }
 
-    // ============== Path Utilities ==============
+    // ==================== Path normalization ====================
 
     private static String normalize(String path) {
         if (path == null || path.isEmpty()) return "/";
-        // Ensure leading slash
-        if (!path.startsWith("/")) {
-            path = "/" + path;
-        }
-        // Remove trailing slash (unless root)
+        if (!path.startsWith("/")) path = "/" + path;
         if (path.length() > 1 && path.endsWith("/")) {
             path = path.substring(0, path.length() - 1);
         }
         return path;
     }
 
-    private static String getParent(String path) {
-        int lastSlash = path.lastIndexOf('/');
-        if (lastSlash <= 0) return "/";
-        return path.substring(0, lastSlash);
+    private static String parentOf(String path) {
+        int i = path.lastIndexOf('/');
+        if (i <= 0) return "/";
+        return path.substring(0, i);
     }
 
-    private static String getFileName(String path) {
-        int lastSlash = path.lastIndexOf('/');
-        if (lastSlash < 0) return path;
-        return path.substring(lastSlash + 1);
+    private static String basenameOf(String path) {
+        int i = path.lastIndexOf('/');
+        if (i < 0) return path;
+        return path.substring(i + 1);
     }
 
-    private static boolean pathExists(String path) {
-        return files.containsKey(path) || directories.containsKey(path);
+    private static boolean isFile(String p) { return files.containsKey(p); }
+    private static boolean isDir(String p)  { return directories.containsKey(p); }
+
+    // ==================== FileHandle (in-memory) ====================
+
+    /**
+     * Streaming handle for MemoryFS. Reads/writes byte-array pages
+     * held by the file's {@link Entry}. Position advances on each op.
+     *
+     * write handles accumulate bytes in a ByteArrayOutputStream; on
+     * close(), the accumulated bytes replace or extend the file.
+     * append writes seed the stream from the existing content.
+     */
+    public static final class MemFileHandle {
+        final String path;
+        final String mode;               // "Read" | "Write" | "Append"
+        int pos;                          // read position
+        ByteArrayOutputStream writeBuf;   // null for read handles
+        final AtomicBoolean closed = new AtomicBoolean(false);
+
+        MemFileHandle(String path, String mode) {
+            this.path = path;
+            this.mode = mode;
+        }
     }
 
-    private static boolean isDirectory(String path) {
-        return directories.containsKey(path);
-    }
-
-    private static boolean isFile(String path) {
-        return files.containsKey(path);
-    }
-
-    // ============== Read/Write Operations ==============
+    // ==================== Read / Write (whole-file) ====================
 
     @TruffleBoundary
-    public static Object readFile(MezzeRecord args) {
+    public static Object readBytes(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
-        if (!files.containsKey(path)) {
-            return fileNotFound(path);
+        Entry e = files.get(path);
+        if (e == null) {
+            return isDir(path) ? errIO(path, "Is a directory") : errNotFound(path);
         }
-        return createOk(files.get(path));
-    }
-
-    @TruffleBoundary
-    public static Object writeFile(MezzeRecord args) {
-        String path = normalize(getString(args, "path"));
-        String content = getString(args, "content");
-        String parent = getParent(path);
-
-        if (!isDirectory(parent)) {
-            return fileNotFound(path);
-        }
-        if (isDirectory(path)) {
-            return ioError(path, "Is a directory");
-        }
-
-        files.put(path, content);
-        // Add to parent directory
-        var parentChildren = directories.get(parent);
-        if (parentChildren != null) {
-            parentChildren.add(getFileName(path));
-        }
-        return createOk(MezzeUnit.INSTANCE);
+        return ok(new MezzeBytes(e.bytes));
     }
 
     @TruffleBoundary
-    public static Object appendFile(MezzeRecord args) {
+    public static Object writeBytes(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
-        String content = getString(args, "content");
-
-        if (!files.containsKey(path)) {
-            return fileNotFound(path);
-        }
-        if (isDirectory(path)) {
-            return ioError(path, "Is a directory");
-        }
-
-        files.compute(path, (k, existing) -> (existing == null ? "" : existing) + content);
-        return createOk(MezzeUnit.INSTANCE);
+        MezzeBytes bytes = getBytes(args, "bytes");
+        String parent = parentOf(path);
+        if (!isDir(parent)) return errNotFound(parent);
+        if (isDir(path)) return errIO(path, "Is a directory");
+        files.put(path, new Entry(bytes.getData()));
+        directories.get(parent).add(basenameOf(path));
+        return ok(MezzeUnit.INSTANCE);
     }
 
-    // ============== File Query Operations ==============
+    // ==================== Metadata ====================
 
     @TruffleBoundary
-    public static Object exists(MezzeRecord args) {
+    public static Object stat(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
-        return createOk(pathExists(path));
-    }
-
-    @TruffleBoundary
-    public static Object fileSize(MezzeRecord args) {
-        String path = normalize(getString(args, "path"));
-        if (!files.containsKey(path)) {
-            if (isDirectory(path)) {
-                return ioError(path, "Is a directory");
-            }
-            return fileNotFound(path);
+        if (isDir(path)) {
+            return ok(fileStatRecord("Directory", 0L, 0L));
         }
-        String content = files.get(path);
-        return createOk((long) (content != null ? content.length() : 0));
+        Entry e = files.get(path);
+        if (e == null) {
+            return ok(fileStatRecord("NotFound", 0L, 0L));
+        }
+        return ok(fileStatRecord("File", (long) e.bytes.length, e.modifiedMs));
     }
 
     @TruffleBoundary
-    public static Object isDirectoryOp(MezzeRecord args) {
+    public static Object list(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
-        if (!pathExists(path)) {
-            return fileNotFound(path);
-        }
-        return createOk(isDirectory(path));
-    }
-
-    @TruffleBoundary
-    public static Object isFileOp(MezzeRecord args) {
-        String path = normalize(getString(args, "path"));
-        if (!pathExists(path)) {
-            return fileNotFound(path);
-        }
-        return createOk(isFile(path));
-    }
-
-    // ============== Directory Operations ==============
-
-    @TruffleBoundary
-    public static Object createDirectory(MezzeRecord args) {
-        String path = normalize(getString(args, "path"));
-        String parent = getParent(path);
-
-        if (pathExists(path)) {
-            return alreadyExists(path);
-        }
-        if (!isDirectory(parent)) {
-            return fileNotFound(parent);
-        }
-
-        directories.put(path, ConcurrentHashMap.newKeySet());
-        var parentChildren = directories.get(parent);
-        if (parentChildren != null) {
-            parentChildren.add(getFileName(path));
-        }
-        return createOk(MezzeUnit.INSTANCE);
-    }
-
-    @TruffleBoundary
-    public static Object createDirectories(MezzeRecord args) {
-        String path = normalize(getString(args, "path"));
-
-        if (isDirectory(path)) {
-            return createOk(MezzeUnit.INSTANCE); // Already exists
-        }
-        if (isFile(path)) {
-            return alreadyExists(path);
-        }
-
-        // Build path components and create from root
-        String[] parts = path.split("/");
-        StringBuilder current = new StringBuilder();
-        for (String part : parts) {
-            if (part.isEmpty()) continue;
-            current.append("/").append(part);
-            String currentPath = current.toString();
-            if (!isDirectory(currentPath)) {
-                if (isFile(currentPath)) {
-                    return alreadyExists(currentPath);
-                }
-                directories.put(currentPath, ConcurrentHashMap.newKeySet());
-                String parentPath = getParent(currentPath);
-                var parentChildren = directories.get(parentPath);
-                if (parentChildren != null) {
-                    parentChildren.add(part);
-                }
-            }
-        }
-        return createOk(MezzeUnit.INSTANCE);
-    }
-
-    @TruffleBoundary
-    public static Object listDirectory(MezzeRecord args) {
-        String path = normalize(getString(args, "path"));
-
-        if (!pathExists(path)) {
-            return fileNotFound(path);
-        }
-        if (!isDirectory(path)) {
-            return ioError(path, "Not a directory");
-        }
-
         var children = directories.get(path);
-        List<Object> entries = new ArrayList<>();
-        if (children != null) {
-            entries.addAll(children);
+        if (children == null) {
+            return isFile(path) ? errNotADirectory(path) : errNotFound(path);
         }
-        return createOk(MezzeList.of(entries.toArray()));
+        List<Object> names = new ArrayList<>(children);
+        return ok(MezzeSeq.fromArray(names.toArray()));
     }
 
-    // ============== Delete Operations ==============
+    @TruffleBoundary
+    public static Object listWithStat(MezzeRecord args) {
+        String path = normalize(getString(args, "path"));
+        var children = directories.get(path);
+        if (children == null) {
+            return isFile(path) ? errNotADirectory(path) : errNotFound(path);
+        }
+        List<Object> entries = new ArrayList<>();
+        for (String name : children) {
+            String childPath = path.equals("/") ? "/" + name : path + "/" + name;
+            Object stat;
+            if (isDir(childPath)) {
+                stat = fileStatRecord("Directory", 0L, 0L);
+            } else {
+                Entry e = files.get(childPath);
+                if (e == null) continue;  // race with delete; skip
+                stat = fileStatRecord("File", (long) e.bytes.length, e.modifiedMs);
+            }
+            entries.add(dirEntryRecord(name, stat));
+        }
+        return ok(MezzeSeq.fromArray(entries.toArray()));
+    }
+
+    // ==================== Structural mutation ====================
 
     @TruffleBoundary
     public static Object delete(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
-
-        if (!pathExists(path)) {
-            return fileNotFound(path);
-        }
-
-        if (isDirectory(path)) {
+        if (isDir(path)) {
             var children = directories.get(path);
-            if (children != null && !children.isEmpty()) {
-                return directoryNotEmpty(path);
-            }
+            if (children != null && !children.isEmpty()) return errNotEmpty(path);
             directories.remove(path);
-        } else {
+        } else if (isFile(path)) {
             files.remove(path);
+        } else {
+            return errNotFound(path);
         }
-
-        // Remove from parent
-        String parent = getParent(path);
+        String parent = parentOf(path);
         var parentChildren = directories.get(parent);
         if (parentChildren != null) {
-            parentChildren.remove(getFileName(path));
+            parentChildren.remove(basenameOf(path));
         }
-        return createOk(MezzeUnit.INSTANCE);
+        return ok(MezzeUnit.INSTANCE);
     }
 
     @TruffleBoundary
-    public static Object deleteRecursive(MezzeRecord args) {
+    public static Object createDirectory(MezzeRecord args) {
         String path = normalize(getString(args, "path"));
-
-        if (!pathExists(path)) {
-            return fileNotFound(path);
-        }
-
-        deleteRecursively(path);
-        return createOk(MezzeUnit.INSTANCE);
+        if (isDir(path) || isFile(path)) return errAlreadyExists(path);
+        String parent = parentOf(path);
+        if (!isDir(parent)) return errNotFound(parent);
+        directories.put(path, ConcurrentHashMap.newKeySet());
+        directories.get(parent).add(basenameOf(path));
+        return ok(MezzeUnit.INSTANCE);
     }
-
-    private static void deleteRecursively(String path) {
-        if (isDirectory(path)) {
-            var children = directories.get(path);
-            if (children != null) {
-                for (String child : new ArrayList<>(children)) {
-                    deleteRecursively(path + "/" + child);
-                }
-            }
-            directories.remove(path);
-        } else {
-            files.remove(path);
-        }
-
-        // Remove from parent
-        String parent = getParent(path);
-        var parentChildren = directories.get(parent);
-        if (parentChildren != null) {
-            parentChildren.remove(getFileName(path));
-        }
-    }
-
-    // ============== Copy/Move Operations ==============
 
     @TruffleBoundary
     public static Object copyFile(MezzeRecord args) {
         String src = normalize(getString(args, "src"));
         String dest = normalize(getString(args, "dest"));
-
-        if (!files.containsKey(src)) {
-            if (isDirectory(src)) {
-                return ioError(src, "Is a directory");
-            }
-            return fileNotFound(src);
+        Entry srcEntry = files.get(src);
+        if (srcEntry == null) {
+            return isDir(src) ? errIO(src, "Is a directory") : errNotFound(src);
         }
-        if (pathExists(dest)) {
-            return alreadyExists(dest);
-        }
-
-        String destParent = getParent(dest);
-        if (!isDirectory(destParent)) {
-            return fileNotFound(destParent);
-        }
-
-        files.put(dest, files.get(src));
-        var parentChildren = directories.get(destParent);
-        if (parentChildren != null) {
-            parentChildren.add(getFileName(dest));
-        }
-        return createOk(MezzeUnit.INSTANCE);
+        if (isFile(dest) || isDir(dest)) return errAlreadyExists(dest);
+        String destParent = parentOf(dest);
+        if (!isDir(destParent)) return errNotFound(destParent);
+        // MemoryFS is a byte-array copy — no kernel path, but still
+        // faster than deriving read+write because we skip the
+        // intermediate MezzeBytes allocation.
+        files.put(dest, new Entry(srcEntry.bytes.clone()));
+        directories.get(destParent).add(basenameOf(dest));
+        return ok(MezzeUnit.INSTANCE);
     }
 
     @TruffleBoundary
     public static Object moveFile(MezzeRecord args) {
         String src = normalize(getString(args, "src"));
         String dest = normalize(getString(args, "dest"));
+        Entry srcEntry = files.get(src);
+        if (srcEntry == null) {
+            return isDir(src) ? errIO(src, "Is a directory") : errNotFound(src);
+        }
+        if (isFile(dest) || isDir(dest)) return errAlreadyExists(dest);
+        String destParent = parentOf(dest);
+        if (!isDir(destParent)) return errNotFound(destParent);
+        files.put(dest, srcEntry);
+        files.remove(src);
+        String srcParent = parentOf(src);
+        directories.get(srcParent).remove(basenameOf(src));
+        directories.get(destParent).add(basenameOf(dest));
+        return ok(MezzeUnit.INSTANCE);
+    }
 
-        if (!files.containsKey(src)) {
-            if (isDirectory(src)) {
-                return ioError(src, "Is a directory");
+    // ==================== Streaming ====================
+
+    @TruffleBoundary
+    public static Object open(MezzeRecord args) {
+        String path = normalize(getString(args, "path"));
+        String mode = getVariantTag(args, "mode");
+        MemFileHandle h = new MemFileHandle(path, mode);
+        switch (mode) {
+            case "Read":
+                if (!isFile(path)) return errNotFound(path);
+                h.pos = 0;
+                return ok(h);
+            case "Write":
+                if (isDir(path)) return errIO(path, "Is a directory");
+                String parentW = parentOf(path);
+                if (!isDir(parentW)) return errNotFound(parentW);
+                h.writeBuf = new ByteArrayOutputStream();
+                return ok(h);
+            case "Append":
+                if (isDir(path)) return errIO(path, "Is a directory");
+                String parentA = parentOf(path);
+                if (!isDir(parentA)) return errNotFound(parentA);
+                h.writeBuf = new ByteArrayOutputStream();
+                Entry existing = files.get(path);
+                if (existing != null) {
+                    try {
+                        h.writeBuf.write(existing.bytes);
+                    } catch (Exception e) {
+                        return errIO(path, e.getMessage());
+                    }
+                }
+                return ok(h);
+            default:
+                return errIO(path, "Unknown OpenMode: " + mode);
+        }
+    }
+
+    @TruffleBoundary
+    public static Object readChunk(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        long maxBytes = getLong(args, "max_bytes");
+        if (h.closed.get()) return errClosedHandle(h.path);
+        if (!"Read".equals(h.mode)) return errIO(h.path, "Handle not opened for reading");
+        Entry e = files.get(h.path);
+        if (e == null) return errNotFound(h.path);
+        if (h.pos >= e.bytes.length) return ok(new MezzeBytes(new byte[0]));
+        int cap = (int) Math.min(maxBytes, e.bytes.length - h.pos);
+        byte[] chunk = new byte[cap];
+        System.arraycopy(e.bytes, h.pos, chunk, 0, cap);
+        h.pos += cap;
+        return ok(new MezzeBytes(chunk));
+    }
+
+    @TruffleBoundary
+    public static Object writeChunk(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        MezzeBytes bytes = getBytes(args, "bytes");
+        if (h.closed.get()) return errClosedHandle(h.path);
+        if (h.writeBuf == null) return errIO(h.path, "Handle not opened for writing");
+        try {
+            h.writeBuf.write(bytes.getData());
+            return ok(MezzeUnit.INSTANCE);
+        } catch (Exception e) {
+            return errIO(h.path, e.getMessage());
+        }
+    }
+
+    @TruffleBoundary
+    public static Object close(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        if (!h.closed.compareAndSet(false, true)) {
+            return ok(MezzeUnit.INSTANCE);  // idempotent
+        }
+        if (h.writeBuf != null) {
+            byte[] finalBytes = h.writeBuf.toByteArray();
+            String parent = parentOf(h.path);
+            if (isDir(parent)) {
+                files.put(h.path, new Entry(finalBytes));
+                directories.get(parent).add(basenameOf(h.path));
             }
-            return fileNotFound(src);
         }
-        if (pathExists(dest)) {
-            return alreadyExists(dest);
-        }
-
-        String destParent = getParent(dest);
-        if (!isDirectory(destParent)) {
-            return fileNotFound(destParent);
-        }
-
-        // Copy content
-        String content = files.remove(src);
-        files.put(dest, content);
-
-        // Update parent directories
-        String srcParent = getParent(src);
-        var srcParentChildren = directories.get(srcParent);
-        if (srcParentChildren != null) {
-            srcParentChildren.remove(getFileName(src));
-        }
-        var destParentChildren = directories.get(destParent);
-        if (destParentChildren != null) {
-            destParentChildren.add(getFileName(dest));
-        }
-
-        return createOk(MezzeUnit.INSTANCE);
+        return ok(MezzeUnit.INSTANCE);
     }
 
-    // ============== Result/Error Helpers ==============
+    // ==================== Record helpers ====================
 
-    private static MezzeVariant createOk(Object value) {
-        return MezzeVariant.ok(value);
+    private static final String[] FILE_STAT_FIELDS = {"kind", "size", "modified"};
+    private static final String[] DIR_ENTRY_FIELDS = {"name", "stat"};
+
+    private static MezzeRecord fileStatRecord(String kind, long size, long modifiedMs) {
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag(kind);
+        Object kindVariant = MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+        return MezzeRecord.fromFields(FILE_STAT_FIELDS, new Object[]{kindVariant, size, modifiedMs});
     }
 
-    private static MezzeVariant fileNotFound(String path) {
-        return createErr("FileNotFound", new String[]{"path"}, new Object[]{path});
+    private static MezzeRecord dirEntryRecord(String name, Object stat) {
+        return MezzeRecord.fromFields(DIR_ENTRY_FIELDS, new Object[]{name, stat});
     }
 
-    private static MezzeVariant alreadyExists(String path) {
-        return createErr("AlreadyExists", new String[]{"path"}, new Object[]{path});
+    // ==================== Result / FsError helpers ====================
+
+    private static MezzeVariant ok(Object value) { return MezzeVariant.ok(value); }
+
+    private static MezzeVariant errNotFound(String path) {
+        return err("FsNotFound", new String[]{"path"}, new Object[]{path});
     }
 
-    private static MezzeVariant directoryNotEmpty(String path) {
-        return createErr("DirectoryNotEmpty", new String[]{"path"}, new Object[]{path});
+    private static MezzeVariant errAlreadyExists(String path) {
+        return err("FsAlreadyExists", new String[]{"path"}, new Object[]{path});
     }
 
-    private static MezzeVariant ioError(String path, String message) {
-        return createErr("IOError",
+    private static MezzeVariant errNotEmpty(String path) {
+        return err("FsNotEmpty", new String[]{"path"}, new Object[]{path});
+    }
+
+    private static MezzeVariant errNotADirectory(String path) {
+        return err("FsNotADirectory", new String[]{"path"}, new Object[]{path});
+    }
+
+    private static MezzeVariant errIO(String path, String message) {
+        return err("FsIOError",
             new String[]{"path", "message"},
             new Object[]{path, message != null ? message : "Unknown error"});
     }
 
-    private static MezzeVariant createErr(String constructor, String[] fields, Object[] values) {
+    private static MezzeVariant errClosedHandle(String path) {
+        return err("FsClosedHandle", new String[]{"path"}, new Object[]{path});
+    }
+
+    private static MezzeVariant err(String constructor, String[] fields, Object[] values) {
         MezzeRecord payload = MezzeRecord.fromFields(fields, values);
         int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag(constructor);
         MezzeVariant errorVariant = MezzeVariant.singlePayload(
@@ -403,15 +385,46 @@ public final class MemoryFilesystemNatives {
         return MezzeVariant.err(errorVariant);
     }
 
-    // ============== Field Helpers ==============
+    // ==================== Field helpers ====================
 
     private static String getString(MezzeRecord r, String name) {
-        int index = r.getFieldIndex(name);
-        if (index < 0) {
-            throw new RuntimeException("Missing field '" + name + "'");
-        }
-        Object val = r.getField(index);
-        if (val instanceof String s) return s;
+        int i = r.getFieldIndex(name);
+        if (i < 0) throw new RuntimeException("Missing field '" + name + "'");
+        Object v = r.getField(i);
+        if (v instanceof String s) return s;
         throw new RuntimeException("Expected String for field '" + name + "'");
+    }
+
+    private static long getLong(MezzeRecord r, String name) {
+        int i = r.getFieldIndex(name);
+        if (i < 0) throw new RuntimeException("Missing field '" + name + "'");
+        Object v = r.getField(i);
+        if (v instanceof Long l) return l;
+        if (v instanceof Integer x) return x;
+        throw new RuntimeException("Expected Int for field '" + name + "'");
+    }
+
+    private static MezzeBytes getBytes(MezzeRecord r, String name) {
+        int i = r.getFieldIndex(name);
+        if (i < 0) throw new RuntimeException("Missing field '" + name + "'");
+        Object v = r.getField(i);
+        if (v instanceof MezzeBytes b) return b;
+        throw new RuntimeException("Expected Bytes for field '" + name + "'");
+    }
+
+    private static MemFileHandle getMemHandle(MezzeRecord r, String name) {
+        int i = r.getFieldIndex(name);
+        if (i < 0) throw new RuntimeException("Missing field '" + name + "'");
+        Object v = r.getField(i);
+        if (v instanceof MemFileHandle h) return h;
+        throw new RuntimeException("Expected MemFileHandle for field '" + name + "'");
+    }
+
+    private static String getVariantTag(MezzeRecord r, String name) {
+        int i = r.getFieldIndex(name);
+        if (i < 0) throw new RuntimeException("Missing field '" + name + "'");
+        Object v = r.getField(i);
+        if (v instanceof MezzeVariant vv) return vv.getConstructorName();
+        throw new RuntimeException("Expected variant for field '" + name + "'");
     }
 }

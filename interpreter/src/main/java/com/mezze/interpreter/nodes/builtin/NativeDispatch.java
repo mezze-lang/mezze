@@ -2622,43 +2622,52 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_reset_seeded_random", (r, c) -> RandomNatives.resetSeededRandom(r));
     }
 
-    // ==================== Filesystem ====================
+    // ==================== Filesystem (LocalDisk, #82) ====================
+    // 13 primitive ops. Bytes are the wire format; text conversions live
+    // in Mezze helpers. FileHandle is opaque; open/read_chunk/write_chunk/
+    // close forms the streaming primitives.
 
     private static void registerFilesystemHandlers() {
-        HANDLERS.put("__native_fs_read_file", (r, c) -> FilesystemNatives.readFile(r));
-        HANDLERS.put("__native_fs_write_file", (r, c) -> FilesystemNatives.writeFile(r));
-        HANDLERS.put("__native_fs_append_file", (r, c) -> FilesystemNatives.appendFile(r));
-        HANDLERS.put("__native_fs_exists", (r, c) -> FilesystemNatives.exists(r));
-        HANDLERS.put("__native_fs_delete", (r, c) -> FilesystemNatives.delete(r));
-        HANDLERS.put("__native_fs_delete_recursive", (r, c) -> FilesystemNatives.deleteRecursive(r));
+        // Whole-file
+        HANDLERS.put("__native_fs_read_bytes",       (r, c) -> FilesystemNatives.readBytes(r));
+        HANDLERS.put("__native_fs_write_bytes",      (r, c) -> FilesystemNatives.writeBytes(r));
+        // Metadata
+        HANDLERS.put("__native_fs_stat",             (r, c) -> FilesystemNatives.stat(r));
+        HANDLERS.put("__native_fs_list",             (r, c) -> FilesystemNatives.list(r));
+        HANDLERS.put("__native_fs_list_with_stat",   (r, c) -> FilesystemNatives.listWithStat(r));
+        // Structural
+        HANDLERS.put("__native_fs_delete",           (r, c) -> FilesystemNatives.delete(r));
         HANDLERS.put("__native_fs_create_directory", (r, c) -> FilesystemNatives.createDirectory(r));
-        HANDLERS.put("__native_fs_create_directories", (r, c) -> FilesystemNatives.createDirectories(r));
-        HANDLERS.put("__native_fs_list_directory", (r, c) -> FilesystemNatives.listDirectory(r));
-        HANDLERS.put("__native_fs_file_size", (r, c) -> FilesystemNatives.fileSize(r));
-        HANDLERS.put("__native_fs_is_directory", (r, c) -> FilesystemNatives.isDirectory(r));
-        HANDLERS.put("__native_fs_is_file", (r, c) -> FilesystemNatives.isFile(r));
-        HANDLERS.put("__native_fs_copy_file", (r, c) -> FilesystemNatives.copyFile(r));
-        HANDLERS.put("__native_fs_move_file", (r, c) -> FilesystemNatives.moveFile(r));
+        HANDLERS.put("__native_fs_copy_file",        (r, c) -> FilesystemNatives.copyFile(r));
+        HANDLERS.put("__native_fs_move_file",        (r, c) -> FilesystemNatives.moveFile(r));
+        // Streaming
+        HANDLERS.put("__native_fs_open",             (r, c) -> FilesystemNatives.open(r));
+        HANDLERS.put("__native_fs_read_chunk",       (r, c) -> FilesystemNatives.readChunk(r));
+        HANDLERS.put("__native_fs_write_chunk",      (r, c) -> FilesystemNatives.writeChunk(r));
+        HANDLERS.put("__native_fs_close",            (r, c) -> FilesystemNatives.close(r));
     }
 
-    // ==================== Memory Filesystem ====================
+    // ==================== Memory Filesystem (MemoryFS, #82) ====================
 
     private static void registerMemoryFilesystemHandlers() {
-        HANDLERS.put("__native_memfs_read_file", (r, c) -> MemoryFilesystemNatives.readFile(r));
-        HANDLERS.put("__native_memfs_write_file", (r, c) -> MemoryFilesystemNatives.writeFile(r));
-        HANDLERS.put("__native_memfs_append_file", (r, c) -> MemoryFilesystemNatives.appendFile(r));
-        HANDLERS.put("__native_memfs_exists", (r, c) -> MemoryFilesystemNatives.exists(r));
-        HANDLERS.put("__native_memfs_delete", (r, c) -> MemoryFilesystemNatives.delete(r));
-        HANDLERS.put("__native_memfs_delete_recursive", (r, c) -> MemoryFilesystemNatives.deleteRecursive(r));
+        // Whole-file
+        HANDLERS.put("__native_memfs_read_bytes",       (r, c) -> MemoryFilesystemNatives.readBytes(r));
+        HANDLERS.put("__native_memfs_write_bytes",      (r, c) -> MemoryFilesystemNatives.writeBytes(r));
+        // Metadata
+        HANDLERS.put("__native_memfs_stat",             (r, c) -> MemoryFilesystemNatives.stat(r));
+        HANDLERS.put("__native_memfs_list",             (r, c) -> MemoryFilesystemNatives.list(r));
+        HANDLERS.put("__native_memfs_list_with_stat",   (r, c) -> MemoryFilesystemNatives.listWithStat(r));
+        // Structural
+        HANDLERS.put("__native_memfs_delete",           (r, c) -> MemoryFilesystemNatives.delete(r));
         HANDLERS.put("__native_memfs_create_directory", (r, c) -> MemoryFilesystemNatives.createDirectory(r));
-        HANDLERS.put("__native_memfs_create_directories", (r, c) -> MemoryFilesystemNatives.createDirectories(r));
-        HANDLERS.put("__native_memfs_list_directory", (r, c) -> MemoryFilesystemNatives.listDirectory(r));
-        HANDLERS.put("__native_memfs_file_size", (r, c) -> MemoryFilesystemNatives.fileSize(r));
-        HANDLERS.put("__native_memfs_is_directory", (r, c) -> MemoryFilesystemNatives.isDirectoryOp(r));
-        HANDLERS.put("__native_memfs_is_file", (r, c) -> MemoryFilesystemNatives.isFileOp(r));
-        HANDLERS.put("__native_memfs_copy_file", (r, c) -> MemoryFilesystemNatives.copyFile(r));
-        HANDLERS.put("__native_memfs_move_file", (r, c) -> MemoryFilesystemNatives.moveFile(r));
-        // Clear operation for test isolation
+        HANDLERS.put("__native_memfs_copy_file",        (r, c) -> MemoryFilesystemNatives.copyFile(r));
+        HANDLERS.put("__native_memfs_move_file",        (r, c) -> MemoryFilesystemNatives.moveFile(r));
+        // Streaming
+        HANDLERS.put("__native_memfs_open",             (r, c) -> MemoryFilesystemNatives.open(r));
+        HANDLERS.put("__native_memfs_read_chunk",       (r, c) -> MemoryFilesystemNatives.readChunk(r));
+        HANDLERS.put("__native_memfs_write_chunk",      (r, c) -> MemoryFilesystemNatives.writeChunk(r));
+        HANDLERS.put("__native_memfs_close",            (r, c) -> MemoryFilesystemNatives.close(r));
+        // Test isolation
         HANDLERS.put("__native_memfs_clear", (r, c) -> {
             MemoryFilesystemNatives.clear();
             return MezzeUnit.INSTANCE;
