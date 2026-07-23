@@ -989,12 +989,31 @@ class TypedASTCompiler(
             )
 
             // Effects
-            is TypedPerform -> HandleIR(
-                compileExpr(expr.body),
-                expr.handlers.map { h ->
-                    HandlerBindIR(h.performerHash, h.effectHash, h.performerName, h.params?.let { compileExpr(it) })
-                }, src
-            )
+            is TypedPerform -> {
+                // Path E (#336): "fully discharged" iff perform's result type
+                // is NOT a SuspendedType carrying any pending effect. If the
+                // typechecker gave us Foo directly (or SuspendedType with
+                // effects.effects empty AND effectInstances empty AND
+                // rowVar null), body's row after this handler is empty and
+                // the runtime can execute the body eagerly. If pending
+                // effects remain, the runtime must build a MezzeSuspended
+                // holding the body continuation.
+                val fullyDischarged = when (val t = expr.type) {
+                    is MezzeType.SuspendedType ->
+                        t.effects.effects.isEmpty() &&
+                        t.effects.effectInstances.isEmpty() &&
+                        t.effects.rowVar == null
+                    else -> true
+                }
+                HandleIR(
+                    compileExpr(expr.body),
+                    expr.handlers.map { h ->
+                        HandlerBindIR(h.performerHash, h.effectHash, h.performerName, h.params?.let { compileExpr(it) })
+                    },
+                    src,
+                    staticallyFullyDischarges = fullyDischarged
+                )
+            }
             is TypedPerformOp -> PerformOpIR(expr.effectHash, expr.operationName, compileExpr(expr.arg), src)
 
             // Pipe (should be desugared, but handle gracefully)

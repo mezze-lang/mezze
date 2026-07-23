@@ -302,7 +302,21 @@ sealed interface PatternIR {
 @Serializable data class CaptureIR(val slot: Int, val kind: SlotKind)
 
 // Effects
-@Serializable data class HandleIR(val body: NodeIR, val handlers: List<HandlerBindIR>, override val src: SourceInfo) : NodeIR
+/**
+ * `perform Handler in body`. `staticallyFullyDischarges` is set by the
+ * typechecker/compiler to `true` when this Handle discharges every effect
+ * present in `body`'s row — i.e. the row-after-this-Handle is empty. Used
+ * by the Path E lazy runtime (#336) to choose between eager execution
+ * (row empty → run body inline) and deferred capture (row non-empty →
+ * build MezzeSuspended). Default false preserves legacy semantics for
+ * existing serialized IR and cache blobs.
+ */
+@Serializable data class HandleIR(
+    val body: NodeIR,
+    val handlers: List<HandlerBindIR>,
+    override val src: SourceInfo,
+    val staticallyFullyDischarges: Boolean = false
+) : NodeIR
 @Serializable data class HandlerBindIR(val handlerHash: Hash, val effectHash: Hash, val performerName: String, val params: NodeIR?)
 /** Effect operation call — runtime dispatch via handler stack.
  *  Can't be CallDirect because the performer isn't known at compile time
