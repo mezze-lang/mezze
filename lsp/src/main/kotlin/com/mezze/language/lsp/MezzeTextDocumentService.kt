@@ -1257,8 +1257,35 @@ class MezzeTextDocumentService(
                     }
                 }
                 is TypedAstLookup.LookupResult.Binding -> {
+                    // Effect / ability / type decl names: findAtPosition returns
+                    // a Binding with a SYNTHETIC fresh VarType (there's no real
+                    // value-level type for a decl name), which would render the
+                    // meaningless `Log : 'a`. Route to the proper structural
+                    // hover instead (`effect Log where { … }`).
+                    val effectDeclHit = state.parsedModule?.decls
+                        ?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == lookup.name }
+                        ?: result?.importedEffects?.get(lookup.name)
+                    if (effectDeclHit != null) {
+                        val fromModule = result?.resolvedImports
+                            ?.find { it.localName == lookup.name && it.kind == ImportKind.EFFECT }?.modulePath
+                        return formatEffectHover(effectDeclHit, fromModule)
+                    }
+                    val abilityDeclHit = state.parsedModule?.decls
+                        ?.filterIsInstance<ParsedAbilityDecl>()?.find { it.name == lookup.name }
+                        ?: result?.importedAbilities?.get(lookup.name)
+                    if (abilityDeclHit != null) {
+                        val fromModule = result?.resolvedImports
+                            ?.find { it.localName == lookup.name && it.kind == ImportKind.ABILITY }?.modulePath
+                        return formatAbilityHover(abilityDeclHit, fromModule)
+                    }
                     val typeStr = formatType(lookup.type)
                     val (doc, meta) = resolveDoc(state, result, lookup.name)
+                    // A synthetic VarType named after a type decl (e.g. `Log`)
+                    // renders as a bare type var — show `type Log` instead.
+                    if (lookup.type is MezzeType.VarType &&
+                        state.parsedModule?.decls?.filterIsInstance<ParsedTypeDecl>()?.any { it.name == lookup.name } == true) {
+                        return appendDoc(codeBlock("type ${lookup.name}"), doc, meta)
+                    }
                     return appendDoc(codeBlock("${lookup.name} : $typeStr"), doc, meta)
                 }
                 is TypedAstLookup.LookupResult.NotFound -> {} // Fall through to word-based lookup

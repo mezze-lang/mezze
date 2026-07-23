@@ -386,6 +386,43 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `hover on an effect declaration name shows the effect, not a type var`() {
+        // Reported bug: hovering `Log` at its `effect Log where {…}` decl showed
+        // `Log : 'a` (a synthetic type var from findAtPosition). It must show the
+        // effect structure `effect Log where { … }` instead.
+        val src = """
+            effect Log where {
+              log : { level: Int } -> {}
+            }
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        // `Log` is on line 0, after `effect ` (col 7..10).
+        val hover = hoverText(hoverAt(uri, 0, 8)!!)
+        assertTrue(hover.contains("effect Log"),
+            "hover on the effect decl name should show `effect Log`, got: $hover")
+        assertFalse(Regex("Log\\s*:\\s*'[a-z]").containsMatchIn(hover),
+            "hover must NOT render the synthetic `Log : 'a` type var, got: $hover")
+    }
+
+    @Test
+    fun `hover on an ability declaration name shows the ability, not a type var`() {
+        val src = """
+            ability Show for 'a where {
+              show : { it: 'a } -> Str
+            }
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        // `Show` after `ability ` (col 8..12).
+        val hover = hoverText(hoverAt(uri, 0, 9)!!)
+        assertTrue(hover.contains("ability Show"),
+            "hover on the ability decl name should show `ability Show`, got: $hover")
+        assertFalse(Regex("Show\\s*:\\s*'[a-z]").containsMatchIn(hover),
+            "hover must NOT render the synthetic `Show : 'a` type var, got: $hover")
+    }
+
+    @Test
     fun `hover on a method in a call chain resolves that method, not the outermost`() {
         // Reported bug: hovering `is_odd` or `eq` in `x.is_odd {}.eq {..}.to_str {}`
         // all showed `to_str` — every method-name node's loc started at the
