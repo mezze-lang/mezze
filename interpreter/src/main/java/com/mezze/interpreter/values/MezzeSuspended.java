@@ -188,6 +188,16 @@ public final class MezzeSuspended implements TruffleObject {
      */
     @TruffleBoundary
     public Object force(IndirectCallNode callNode) {
+        // Path E (#336): full-body continuation. Merge captured chain with
+        // this thread's live chain, install temporarily, execute bodyNode
+        // on the captured frame. If body completes → ground value. If body
+        // aborts → return abort value. If body re-suspends via another
+        // unhandled op → captureContinuation for the next suspend point
+        // (handled naturally by the enclosing HandleNode when the resumed
+        // body reaches another perform without a matching handler).
+        if (bodyNode != null) {
+            return forcePathE(callNode);
+        }
         com.mezze.interpreter.nodes.continuation.EffectFiber fiber =
             com.mezze.interpreter.nodes.continuation.EffectFiber.current();
         if (fiber == null) {
@@ -218,6 +228,56 @@ public final class MezzeSuspended implements TruffleObject {
         }
         // Regular function thunk — no effect to dispatch, just execute.
         return computation.execute(callNode);
+    }
+
+    /**
+     * Path E (#336) atomic force. Installs the captured chainSnapshot on
+     * this thread's HandlerChain, executes bodyNode on the captured
+     * materialized frame, restores chain on exit.
+     *
+     * <p>Body may:
+     * <ul>
+     *   <li>Complete normally → return ground value.</li>
+     *   <li>Fire {@code abort {val = X}} in a matched op impl →
+     *       {@link com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException}
+     *       caught here, return the abort value.</li>
+     *   <li>Perform an op with no matching handler → nested MezzeSuspended
+     *       returned by the inner HandleNode (or MezzeSuspended propagated
+     *       up from OpCallNode's createSuspended). Force returns that,
+     *       preserving lazy semantics for still-unhandled effects.</li>
+     * </ul>
+     *
+     * <p>Same-thread only: bodyFrame carries slot references specific to
+     * the thread it was materialized on. Cross-thread force is undefined
+     * under this initial cut; Phase 3 will decide the cross-thread policy.
+     */
+    @TruffleBoundary
+    private Object forcePathE(IndirectCallNode callNode) {
+        int depthBefore =
+            com.mezze.interpreter.nodes.continuation.EffectFiber.handlerChainDepth();
+        // Push captured chain entries in reverse — chainSnapshot[0] was
+        // the innermost at capture, so we want it pushed LAST so it ends
+        // up on top of the deque.
+        for (int i = chainSnapshot.length - 1; i >= 0; i--) {
+            com.mezze.interpreter.nodes.continuation.HandlerChainEntry entry = chainSnapshot[i];
+            com.mezze.interpreter.nodes.continuation.EffectFiber.pushHandlerOnChain(
+                entry.handler(), entry.effectHash());
+        }
+        try {
+            Object out = bodyNode.execute(bodyFrame);
+            // Cascade: if body execution produced another lazy MezzeSuspended
+            // (from an inner nested Handle further down that also deferred),
+            // force it now under the same installed chain. Loop rather than
+            // recurse to avoid stack growth for deeply-nested `perform` chains.
+            while (out instanceof MezzeSuspended nested && nested.isPathE()) {
+                out = nested.forcePathE(callNode);
+            }
+            return out;
+        } catch (com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
+            return abort.value;
+        } finally {
+            com.mezze.interpreter.nodes.continuation.EffectFiber.truncateHandlerChainTo(depthBefore);
+        }
     }
 
     @TruffleBoundary

@@ -281,8 +281,28 @@ public final class HandleNode extends MezzeNode {
         // Body executes inside a Loom continuation, which may yield back to
         // the driver across the frame boundary. Materialize so body's frame
         // survives the suspend/resume cycles.
-        return EffectHandlerDriver.run(
+        Object result = EffectHandlerDriver.run(
             handler, effectHash, bodyNode, frame.materialize(), callNode, this);
+        // Path E (#336): if body produced a lazy MezzeSuspended (typically
+        // because an inner nested Handle deferred), force it under this
+        // Handle's chain. `staticallyFullyDischarges` being true here means
+        // the row is empty at this scope — every effect should be handleable,
+        // so force must complete to a ground value. The chain must be
+        // re-installed around the force call because EffectHandlerDriver.run
+        // popped it on its own finally.
+        if (com.mezze.interpreter.runtime.MezzeLanguage.LAZY_EFFECTS_ENABLED
+                && staticallyFullyDischarges
+                && result instanceof com.mezze.interpreter.values.MezzeSuspended s
+                && s.isPathE()) {
+            com.mezze.interpreter.nodes.continuation.EffectFiber.pushHandlerOnChain(
+                handler, effectHash);
+            try {
+                result = s.force(callNode);
+            } finally {
+                com.mezze.interpreter.nodes.continuation.EffectFiber.popHandlerOffChain();
+            }
+        }
+        return result;
     }
 
     /**
