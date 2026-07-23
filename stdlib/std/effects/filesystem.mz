@@ -235,20 +235,36 @@ pub let write_text_mkdirs : { path: Str, text: Str } -> Result {} FsError <FileS
 
 ## ---------- Recursive delete ----------
 
-## Delete a file or directory tree. For directories, deletes children
-## first, then the directory itself.
+## Delete a file or directory tree.
+##
+## For directories, deletes children first (recursively), then the
+## directory itself. Uses `list_with_stat` so we don't re-stat each
+## child — one syscall per directory instead of N.
+##
+## BROKEN — pending #84. The nested-lambda inside seq::fold /
+## seq::map does not close over `path` from the enclosing pub let
+## parameter, so recursive calls see `path = null`. When the
+## closure-capture bug is fixed, the fold form below will work.
 pub let delete_recursive : { path: Str } -> Result {} FsError <FileSystem> = { path } ->
-  match is_directory { path = path } is
-    Ok { val = True } -> match FileSystem.list { path = path } is
-      Ok { val = children } -> do
-        let _ = seq::for_each { xs = children, f = { x } -> do
-          let _ = delete_recursive { path = fs::path_join { parts = [path, x] } }
-          {}
-        }
-        FileSystem.delete { path = path }
-      Err { error } -> Err { error = error }
-    Ok { val = False } -> FileSystem.delete { path = path }
+  match FileSystem.stat { path = path } is
     Err { error } -> Err { error = error }
+    Ok { val = s } -> match s.kind is
+      NotFound -> Err { error = FsNotFound { path = path } }
+      File -> FileSystem.delete { path = path }
+      Other -> FileSystem.delete { path = path }
+      Directory -> match FileSystem.list_with_stat { path = path } is
+        Err { error } -> Err { error = error }
+        Ok { val = entries } -> match seq::fold {
+          xs = entries,
+          init = Ok { val = {} },
+          f = { acc, x } -> match acc is
+            Err { error } -> Err { error = error }
+            Ok { val } -> delete_recursive {
+              path = fs::path_join { parts = [path, x.name] }
+            }
+        } is
+          Err { error } -> Err { error = error }
+          Ok { val } -> FileSystem.delete { path = path }
 
 ## ---------- Streaming safety ----------
 
