@@ -41,6 +41,17 @@ class LetBoundAbilityCallTest {
         typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
+    /** Asserts the program is REJECTED by the typechecker (any TypeCheckError). */
+    private fun assertTypeError(code: String) {
+        val parsedModule = parser.parseParsedModule(code, "test.mz")
+        val typeChecker = TypeChecker()
+        org.junit.jupiter.api.Assertions.assertThrows(
+            com.mezze.language.typechecker.TypeCheckError::class.java
+        ) {
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
+        }
+    }
+
     // ── Inline forms (baseline — these already work) ───────────────────────
 
     @Test
@@ -136,6 +147,136 @@ class LetBoundAbilityCallTest {
             let main = {} -> do
               let result = double { n = 21 }
               "value = ${'$'}(result.to_str {})"
+            """.trimIndent()
+        )
+    }
+
+    // ── #160: POLYMORPHIC callee (return type is a tyvar until solving) ─────
+    //
+    // The cases above use a monomorphic `double : {n:Int} -> Int` — its return
+    // is concretely Int at generation time. When the callee is polymorphic
+    // (`help : {a:'a,b:'a} with NumAdd 'a -> 'a`, pinned to Int only by its
+    // literal args during solving), the inherent method's target type can't be
+    // chosen statically. These exercise the deferred-dispatch path.
+
+    @Test
+    fun `parenthesized literal + to_str works`() {
+        // `(5)` is transparent to type; the parens must not hide Int from
+        // inherent-method dispatch.
+        assertTypeChecks("let g = {} -> (5).to_str {}")
+    }
+
+    @Test
+    fun `polymorphic call result + to_str (inline) works`() {
+        assertTypeChecks(
+            """
+            let help = { a, b } -> a + b
+            let g = {} -> help { a = 5, b = 6 }.to_str {}
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun `polymorphic call result + to_str (parenthesized) works`() {
+        assertTypeChecks(
+            """
+            let help = { a, b } -> a + b
+            let g = {} -> (help { a = 5, b = 6 }).to_str {}
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun `let-bound polymorphic call result + to_str in interpolation works`() {
+        // The exact shape the user hit: `let x = help {..}` (polymorphic help)
+        // then `x.to_str {}` inside `$(...)`.
+        assertTypeChecks(
+            """
+            let help = { a, b } -> a + b
+            let main = {} -> do
+              let x = help { a = 5, b = 6 }
+              "hi ${'$'}(x.to_str {})"
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun `chained abs then to_str on a let-bound Int works`() {
+        assertTypeChecks(
+            """
+            let g = {} -> do
+              let x = 5
+              x.abs {}.to_str {}
+            """.trimIndent()
+        )
+    }
+
+    // ── #160: RECEIVER-DEPENDENT RETURN TYPE (abs: Int->Int, Float->Float, …) ──
+    //
+    // Unlike `to_str` (all impls return Str), `abs`'s return type VARIES by
+    // receiver, so there is no single representative signature to pick at
+    // generation time. These exercise the deferred InherentMethodResolve path:
+    // the solver picks the impl AND its return type once the receiver is pinned.
+
+    @Test
+    fun `abs on a polymorphic call result (Int) works`() {
+        // `help {..}` returns `'a`, pinned to Int only by its literal args during
+        // solving; `.abs {}` must dispatch to Int.abs and the call type is Int.
+        assertTypeChecks(
+            """
+            let help = { a, b } -> a + b
+            let g = {} -> (help { a = 5, b = 6 }).abs {}
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun `abs on a polymorphic call result (Float) works`() {
+        // Same shape but the args pin `'a` to Float, so `.abs {}` dispatches to
+        // Float.abs whose return is Float. Proves the return type follows the
+        // solved receiver (the homogeneous-group heuristic couldn't do this).
+        assertTypeChecks(
+            """
+            let help = { a, b } -> a + b
+            let g = {} -> (help { a = 5.0, b = 6.0 }).abs {}
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun `abs then to_str chain on a polymorphic call result works`() {
+        // `(help {..}).abs {}.to_str {}` — a two-link chain of deferred inherent
+        // methods: to_str's receiver is abs's (deferred) result. Both resolve.
+        assertTypeChecks(
+            """
+            let help = { a, b } -> a + b
+            let g = {} -> (help { a = 5, b = 6 }).abs {}.to_str {}
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun `abs on a fully-unconstrained lambda param stays a hard error`() {
+        // `{x} -> x.abs {}` — `x` is a genuinely-polymorphic param with no runtime
+        // impl to dispatch to. It infers a structural record `{ x: { abs: … } }`
+        // (no def-site error), so CALLING it with a real Int must fail (Int has no
+        // `abs` field). Must NOT silently dispatch to a real abs impl (#216).
+        assertTypeError(
+            """
+            let f = { x } -> x.abs {}
+            let main = {} -> f { x = 5 }
+            """.trimIndent()
+        )
+    }
+
+    @Test
+    fun `abs on a receiver that solves to a non-candidate type is rejected`() {
+        // The receiver solves to Bool, which has no `abs` impl (only Int/Float/
+        // Frac). Soundly rejected rather than silently mis-dispatched.
+        assertTypeError(
+            """
+            let pick = { x, y } -> if x then y else y
+            let main = {} -> (pick { x = True, y = True }).abs {}
             """.trimIndent()
         )
     }

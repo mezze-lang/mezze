@@ -133,6 +133,53 @@ sealed interface Constraint {
     ) : Constraint {
         override fun mapTypes(f: (MezzeType) -> MezzeType) = copy(recordType = f(recordType))
     }
+
+    /**
+     * #160: resolve an inherent method whose receiver type is only known AFTER
+     * solving, when the candidate impls DON'T share a signature (e.g. `abs`:
+     * Int->Int, Float->Float, Frac->Frac — the return type varies by receiver).
+     *
+     * At generation time we can't pick the impl (the receiver is a tyvar) nor a
+     * representative return type. So we defer: the solver waits until
+     * [receiverType] resolves to a concrete type, then picks the candidate whose
+     * `targetTypeName` matches, unifies [argsType] with that candidate's non-`it`
+     * param record and [resultType] with its return type. A receiver that solves
+     * to a type with no matching candidate is a real error (sound: dispatch would
+     * have no runtime impl). See `solveInherentMethodResolve`.
+     */
+    data class InherentMethodResolve(
+        val receiverType: MezzeType,
+        val methodName: String,
+        val candidates: List<InherentMethodCandidate>,
+        val argsType: MezzeType,
+        val resultType: MezzeType,
+        // #160: the RECEIVER expression's own loc. Emit resolves a receiver's type
+        // via the per-call-site callReturnTypes map (keyed by loc), which can pin a
+        // type the flat substitution alone doesn't (forward-refs / effect contexts).
+        // The undispatchability check consults it so it matches what emit dispatches
+        // on — avoiding false "could not be determined" on resolvable receivers.
+        val receiverLoc: Loc? = null,
+        override val context: String? = null,
+        override val loc: Loc? = null
+    ) : Constraint {
+        override fun mapTypes(f: (MezzeType) -> MezzeType) = copy(
+            receiverType = f(receiverType),
+            argsType = f(argsType),
+            resultType = f(resultType),
+            candidates = candidates.map { it.copy(methodType = f(it.methodType)) }
+        )
+    }
+
+    /**
+     * #160: one candidate for [InherentMethodResolve] — enough to unify the
+     * call's args/return against the picked impl's signature and to re-pick the
+     * impl by solved receiver type at emit time.
+     */
+    data class InherentMethodCandidate(
+        val targetTypeName: String,
+        val methodType: MezzeType,
+        val implContentHash: Hash,
+    )
 }
 
 data class ConstraintResult(
@@ -190,6 +237,24 @@ data class ConstraintResult(
         // populating site hasn't been built yet.
         val typeArgs: List<MezzeType> = emptyList(),
         val abilityImpls: List<AbilityImplRef> = emptyList(),
+        // #160: when an inherent method's receiver type is only known after
+        // solving (e.g. `help {..}.to_str {}` where `help` is polymorphic and
+        // the args pin it to Int), we can't pick the concrete `impl Int` /
+        // `impl Str` / … at generation time. Instead we record every
+        // homogeneous candidate here (each carries its `targetTypeName` +
+        // `implContentHash`), and TypedAstBuilder picks the one whose target
+        // matches the SOLVED receiver type. Empty for the common case where the
+        // impl was resolved statically (implContentHash is authoritative then).
+        val candidateImpls: List<InherentImplCandidate> = emptyList(),
+    )
+
+    /**
+     * A deferred-resolution candidate for [MethodCallInfo.candidateImpls]:
+     * enough to re-pick the impl by solved receiver type at emit time.
+     */
+    data class InherentImplCandidate(
+        val targetTypeName: String,
+        val implContentHash: Hash,
     )
     data class UndefinedVariable(
         val name: String,

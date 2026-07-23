@@ -25,6 +25,10 @@ class ConstraintSolver(
         is Constraint.Subsumes,
         is Constraint.MustBeOpen,
         is Constraint.RecordPatternExhaustive -> 3
+        // #160: dispatch by SOLVED receiver type, so run after Equality/HasField
+        // have had a chance to pin the receiver tyvar. Deferred until it is
+        // concrete (see solveInherentMethodResolve).
+        is Constraint.InherentMethodResolve -> 4
     }
 
     // The "subject" type vars a constraint's failure is really about — the
@@ -52,6 +56,9 @@ class ConstraintSolver(
                 vars.add(constraint.primaryTypeVar)
                 vars.addAll(constraint.associatedTypeVars.values)
             }
+            // #160: the receiver is the subject whose wrong/absent type triggers
+            // "no <method> for type <T>"; result/args vars are per-call incidentals.
+            is Constraint.InherentMethodResolve -> addVarsOf(constraint.receiverType)
         }
         return vars
     }
@@ -90,6 +97,12 @@ class ConstraintSolver(
     // nothing in the exhaustive `when (type)` blocks across the codebase.
     private val poisonedVars = mutableSetOf<TypeVar>()
 
+    // #160: InherentMethodResolve constraints whose receiver hadn't resolved by
+    // the end of the main worklist. They may still resolve during later phases
+    // (deferred ability inference), so we re-check them after the substitution is
+    // complete (see the tail of solve()). Cleared per solve().
+    private val deferredInherentLeftovers = mutableListOf<Constraint.InherentMethodResolve>()
+
     private val variantSolver = VariantSolver(registry, patternBasedRowVars, mustBeOpenRowVars)
 
     fun getMustBeOpenRowVars(): Set<RowVar> = mustBeOpenRowVars.toSet()
@@ -102,7 +115,14 @@ class ConstraintSolver(
             val mustBeOpenTypes: Set<TypeVar> = emptySet(),
             val mustBeOpenRowVars: Set<RowVar> = emptySet(),
             val mustBeOpenBindings: Set<String> = emptySet(),
-            val patternBasedRowVars: Set<RowVar> = emptySet()
+            val patternBasedRowVars: Set<RowVar> = emptySet(),
+            // #160: InherentMethodResolve constraints whose receiver never became
+            // concrete in THIS solve. The global solve's substitution can lack the
+            // per-binding resolution that emit later composes in, so the receiver
+            // may still resolve. TypeChecker re-checks these against the COMPOSED
+            // (global ∘ per-binding) substitution — only then is a still-tyvar
+            // receiver genuinely undispatchable.
+            val unresolvedInherentMethods: List<Constraint.InherentMethodResolve> = emptyList()
         ) : SolveResult()
 
         data class Failure(
@@ -128,6 +148,7 @@ class ConstraintSolver(
         // can't suppress an unrelated failure in the next (the solver instance is
         // reused across per-binding solves).
         poisonedVars.clear()
+        deferredInherentLeftovers.clear()
         var substitution = Substitution.empty
         val errors = mutableListOf<ConstraintError>()
         val warnings = mutableListOf<String>()
@@ -164,6 +185,11 @@ class ConstraintSolver(
 
         substitution = solveMainWorklist(remainingHasConstructors + otherConstraints, substitution, warnings, errors)
         substitution = finalizeDeferredAbilities(substitution, errors)
+        // #160: now the substitution is complete (incl. deferred ability
+        // inference that pins e.g. `help`'s `'a` to Int). Re-check the inherent
+        // methods that couldn't dispatch earlier — most now resolve; only a
+        // receiver that STILL isn't concrete is genuinely undispatchable.
+        substitution = resolveDeferredInherentMethods(substitution, errors)
         resolveMustBeOpenRowVars(substitution)
 
         return if (errors.isEmpty()) {
@@ -174,7 +200,8 @@ class ConstraintSolver(
                 mustBeOpenTypes = mustBeOpenTypes.toSet(),
                 mustBeOpenRowVars = mustBeOpenRowVars.toSet(),
                 mustBeOpenBindings = mustBeOpenBindings.toSet(),
-                patternBasedRowVars = patternBasedRowVars.toSet()
+                patternBasedRowVars = patternBasedRowVars.toSet(),
+                unresolvedInherentMethods = deferredInherentLeftovers.toList()
             )
         } else {
             SolveResult.Failure(errors)
@@ -445,6 +472,58 @@ class ConstraintSolver(
             }
         }
 
+        // #160: a chain of deferred InherentMethodResolve constraints (e.g.
+        // `x.abs {}.to_str {}` — to_str's receiver is abs's result tyvar) may
+        // need SEVERAL passes: to_str only becomes concrete after abs resolves.
+        // The main loop above can bail once no *other* constraint makes progress,
+        // leaving these Deferred. Re-run the leftovers to a fixpoint, composing
+        // each Success so the pinned result/return types reach emit. Success and
+        // Failure both remove the constraint (so it's reported at most once);
+        // only genuinely-stuck Deferred constraints survive to the sweep below.
+        var finalProgress = true
+        var finalIterations = 0
+        while (finalProgress && constraintWorklist.isNotEmpty() && finalIterations < constraintWorklist.size + 2) {
+            finalProgress = false
+            finalIterations++
+            val it = constraintWorklist.iterator()
+            while (it.hasNext()) {
+                val constraint = it.next()
+                val appliedConstraint = applySubstitutionToConstraint(constraint, substitution)
+                val result = when (constraint) {
+                    is Constraint.HasConstructor -> variantSolver.solveHasConstructor(appliedConstraint as Constraint.HasConstructor, substitution, constraint)
+                    else -> solveConstraint(appliedConstraint, substitution)
+                }
+                when (result) {
+                    is ConstraintResult.Success -> {
+                        if (result.substitution.mappings.isNotEmpty() || result.substitution.rowVarMappings.isNotEmpty()) {
+                            substitution = result.substitution.compose(substitution)
+                        }
+                        finalProgress = true
+                        it.remove()
+                    }
+                    is ConstraintResult.Failure -> {
+                        if (!isCascade(constraint)) {
+                            errors.add(ConstraintError(
+                                message = result.message,
+                                constraint = appliedConstraint,
+                                context = appliedConstraint.context
+                            ))
+                            poison(constraint)
+                        }
+                        finalProgress = true
+                        it.remove()
+                    }
+                    is ConstraintResult.Deferred -> { /* wait for another pass */ }
+                }
+            }
+        }
+
+        // Terminal sweep: whatever is STILL unresolved is a genuine failure.
+        // EXCEPTION: a still-Deferred InherentMethodResolve isn't necessarily a
+        // failure yet — its receiver may resolve during LATER phases (deferred
+        // ability inference pins e.g. help's `'a` to Int only in
+        // finalizeDeferredAbilities, AFTER this worklist). Stash those leftovers
+        // so solve() can re-check them once the substitution is complete.
         for (constraint in constraintWorklist) {
             val appliedConstraint = applySubstitutionToConstraint(constraint, substitution)
             val result = when (constraint) {
@@ -458,9 +537,76 @@ class ConstraintSolver(
                     context = appliedConstraint.context
                 ))
                 poison(constraint)
+            } else if (result is ConstraintResult.Deferred &&
+                       constraint is Constraint.InherentMethodResolve) {
+                deferredInherentLeftovers.add(constraint)
             }
         }
 
+        return substitution
+    }
+
+    /**
+     * #160: final re-check of inherent-method dispatch that couldn't resolve
+     * during the main worklist. Runs AFTER deferred ability inference, so this
+     * solve's substitution is complete. Each leftover is re-solved once:
+     *   - Success → compose (pins the call's result/return type for emit).
+     *   - Failure → report (a receiver that solved to a non-candidate type).
+     *   - Deferred (receiver STILL a tyvar HERE) → not necessarily an error: the
+     *     receiver may resolve once the CALLER composes the per-binding
+     *     substitution, so it's left in deferredInherentLeftovers for the
+     *     TypeChecker's final undispatchability check against the composed subst.
+     * Iterated to a fixpoint so method CHAINS (abs then to_str) settle.
+     */
+    private fun resolveDeferredInherentMethods(
+        inputSubst: Substitution,
+        errors: MutableList<ConstraintError>
+    ): Substitution {
+        if (deferredInherentLeftovers.isEmpty()) return inputSubst
+        var substitution = inputSubst
+        val worklist = deferredInherentLeftovers.toMutableList()
+
+        var progress = true
+        var iterations = 0
+        while (progress && worklist.isNotEmpty() && iterations < worklist.size + 2) {
+            progress = false
+            iterations++
+            val it = worklist.iterator()
+            while (it.hasNext()) {
+                val constraint = it.next()
+                val applied = applySubstitutionToConstraint(constraint, substitution) as Constraint.InherentMethodResolve
+                when (val result = solveInherentMethodResolve(applied, substitution)) {
+                    is ConstraintResult.Success -> {
+                        if (result.substitution.mappings.isNotEmpty() || result.substitution.rowVarMappings.isNotEmpty()) {
+                            substitution = result.substitution.compose(substitution)
+                        }
+                        progress = true
+                        it.remove()
+                    }
+                    is ConstraintResult.Failure -> {
+                        if (!isCascade(constraint)) {
+                            errors.add(ConstraintError(
+                                message = result.message,
+                                constraint = applied,
+                                context = applied.context,
+                                code = ErrorCode.T0206_METHOD_NOT_FOUND,
+                            ))
+                            poison(constraint)
+                        }
+                        progress = true
+                        it.remove()
+                    }
+                    is ConstraintResult.Deferred -> { /* still unresolved — see below */ }
+                }
+            }
+        }
+
+        // Anything STILL Deferred here has a receiver that didn't become
+        // concrete in THIS solve's substitution. Don't error yet: the receiver
+        // may resolve once the caller composes the per-binding substitution.
+        // Keep them in deferredInherentLeftovers for TypeChecker's final check.
+        deferredInherentLeftovers.clear()
+        deferredInherentLeftovers.addAll(worklist)
         return substitution
     }
 
@@ -550,7 +696,89 @@ class ConstraintSolver(
             is Constraint.HasConstructor -> variantSolver.solveHasConstructor(constraint, currentSubst)
             is Constraint.MustBeOpen -> solveMustBeOpen(constraint, currentSubst)
             is Constraint.RecordPatternExhaustive -> solveRecordPatternExhaustive(constraint, currentSubst)
+            is Constraint.InherentMethodResolve -> solveInherentMethodResolve(constraint, currentSubst)
         }
+    }
+
+    /**
+     * #160: pick an inherent-method impl by the SOLVED receiver type, then unify
+     * the call's args/return against that impl's signature. Deferred until the
+     * receiver is concrete; a receiver that resolves to a type with no matching
+     * candidate is a real error (dispatch would have no runtime impl).
+     */
+    private fun solveInherentMethodResolve(
+        constraint: Constraint.InherentMethodResolve,
+        currentSubst: Substitution
+    ): ConstraintResult {
+        val receiver = currentSubst.apply(constraint.receiverType)
+        if (receiver is MezzeType.VarType) {
+            return ConstraintResult.Deferred("Waiting for receiver type of .${constraint.methodName} to resolve")
+        }
+
+        val typeName = inherentReceiverTypeName(receiver)
+        val picked = typeName?.let { name -> constraint.candidates.firstOrNull { it.targetTypeName == name } }
+        if (picked == null) {
+            val shown = typeName ?: prettyPrintType(receiver)
+            val known = constraint.candidates.map { it.targetTypeName }.distinct().joinToString(", ")
+            return ConstraintResult.Failure(
+                "No inherent method '${constraint.methodName}' for type '$shown' (candidates: $known)",
+                terminal = true
+            )
+        }
+
+        val fn = picked.methodType as? MezzeType.FunctionType
+            ?: return ConstraintResult.Failure(
+                "Inherent method '${constraint.methodName}' on '${picked.targetTypeName}' is not a function",
+                terminal = true
+            )
+        val fullParams = (fn.paramType as? MezzeType.RecordType)?.fields ?: emptyMap()
+        val strippedParamType = MezzeType.RecordType(
+            fields = fullParams.filterKeys { it != Keywords.IT },
+            rowVar = null
+        )
+
+        var subst = Substitution.empty
+        // args must match the picked impl's non-`it` params …
+        when (val r = unify(subst.apply(constraint.argsType), subst.apply(strippedParamType), registry)) {
+            is UnificationResult.Success -> subst = r.substitution.compose(subst)
+            is UnificationResult.Failure -> return ConstraintResult.Failure(
+                "Arguments to '${constraint.methodName}' don't match impl for '${picked.targetTypeName}': ${r.message}"
+            )
+        }
+        // … and the call's result type is the picked impl's return type.
+        when (val r = unify(subst.apply(constraint.resultType), subst.apply(fn.returnType), registry)) {
+            is UnificationResult.Success -> subst = r.substitution.compose(subst)
+            is UnificationResult.Failure -> return ConstraintResult.Failure(
+                "Return type of '${constraint.methodName}' for '${picked.targetTypeName}' mismatch: ${r.message}"
+            )
+        }
+        return ConstraintResult.Success(subst)
+    }
+
+    /**
+     * #160: nominal type name of a solved receiver, mirroring
+     * ExprMethodConstraints.getReceiverTypeName. Used to pick a deferred
+     * inherent-method candidate by `targetTypeName`.
+     */
+    private fun inherentReceiverTypeName(type: MezzeType): String? = when (type) {
+        is MezzeType.IntType -> "Int"
+        is MezzeType.FloatType -> "Float"
+        is MezzeType.StringType -> "Str"
+        is MezzeType.BoolType -> "Bool"
+        is MezzeType.NatType -> "Nat"
+        is MezzeType.FracType -> "Frac"
+        is MezzeType.CharType -> "Char"
+        is MezzeType.BytesType -> "Bytes"
+        is MezzeType.OrderingType -> "Ordering"
+        is MezzeType.SeqType -> "Seq"
+        is MezzeType.ListType -> "List"
+        is MezzeType.SetType -> "Set"
+        is MezzeType.MapType -> "Map"
+        is MezzeType.TypeApplication -> type.constructor
+        is MezzeType.RecordType -> type.typeName
+        is MezzeType.VariantType -> type.typeName
+            ?: if (type.constructors.size == 1) type.constructors.keys.first() else null
+        else -> null
     }
 
     private fun solveEquality(constraint: Constraint.Equality): ConstraintResult {

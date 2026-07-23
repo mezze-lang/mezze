@@ -85,6 +85,39 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
             if (concrete.size == 1) {
                 return generateInherentMethodCall(expr, memberAccess, concrete, context)
             }
+            // #160: the receiver's concrete type isn't known yet (e.g.
+            // `help {a=5,b=6}.abs {}` where help is polymorphic and the args pin
+            // it to Int only during solving). Two sub-cases:
+            //
+            // (a) HOMOGENEOUS family — every candidate has the SAME non-`it`
+            //     params AND the SAME return type (e.g. `to_str`: all `{it} ->
+            //     Str`). The call typechecks IDENTICALLY whichever impl is picked,
+            //     so we DON'T need the receiver's concrete type to type it: use a
+            //     representative signature now and defer only the IMPL pick to
+            //     emit (by the solved receiver). This still typechecks even if the
+            //     receiver never fully resolves at the value level.
+            //
+            // (b) NON-HOMOGENEOUS family — the return varies by receiver (e.g.
+            //     `abs`: Int->Int, Float->Float, Frac->Frac). There is no
+            //     representative return type, so we MUST know the receiver first.
+            //     Emit a DEFERRED constraint (InherentMethodResolve): the solver
+            //     waits until the receiver is pinned, then picks the candidate and
+            //     unifies the call's args/return against that impl's signature.
+            //
+            // Both only fire when the receiver PRODUCES a value with a solvable
+            // type — a call `f {}.m`, a parens `(e).m`, or a monomorphic local. A
+            // bare GENERALIZED param (`{x} -> x.m {}`) is genuinely polymorphic
+            // with no runtime impl to dispatch to; it falls through to null (a
+            // structural field-access) — receiverHasSolvableType excludes it.
+            if (receiverHasSolvableType(memberAccess.receiver, context) && concrete.size >= 2) {
+                val homogeneous = homogeneousCandidateGroup(concrete)
+                if (homogeneous.size >= 2) {
+                    return generateInherentMethodCall(
+                        expr, memberAccess, homogeneous, context, deferImplByReceiver = true
+                    )
+                }
+                return generateDeferredInherentMethodCall(expr, memberAccess, concrete, context)
+            }
             return null
         }
         // #188: when the receiver IS concrete but anonymous (a record literal
@@ -448,6 +481,70 @@ internal fun ExpressionConstraintGenerator.isReceiverUnresolved(receiver: Parsed
     return getReceiverConcreteType(receiver, context) == null
 }
 
+/**
+ * #160: true when a receiver whose static type is a tyvar will nonetheless be
+ * pinned to a concrete type by SOLVING — so deferring inherent-method dispatch
+ * to emit time is safe. That's the case for:
+ *   - a call `f {..}` or a parenthesized `(e)` — produces a value whose type
+ *     the surrounding constraints determine (e.g. a poly fn's literal args), and
+ *   - a bare identifier bound MONOMORPHICALLY to a LOCAL (`let x = help {..}` —
+ *     its fresh tyvar gets unified during solving).
+ * It is NOT safe for a LAMBDA PARAM (a genuinely-polymorphic-in-body value like
+ * `{x} -> x.abs {}`): `x` is a free type variable that NOTHING in the body pins,
+ * so there is no runtime impl to dispatch to. Emitting a deferred constraint
+ * there would silently vanish (the receiver never resolves) and wrongly accept
+ * the definition; instead we fall through to structural field-access, which
+ * keeps the call-site error (#216). Lambda params are exactly the names in the
+ * enclosing scope's `currentScopeBindings` (seeded by withFreshScope), so we
+ * exclude them here.
+ */
+internal fun ExpressionConstraintGenerator.receiverHasSolvableType(receiver: ParsedExpr, context: ConstraintContext): Boolean {
+    return when (receiver) {
+        is ParsedFunctionCall, is ParsedParens -> true
+        is ParsedIdentifier -> {
+            if (receiver.qualifier != null) return false
+            // A lambda param is monomorphic-but-unpinnable; not solvable.
+            if (receiver.localName in context.currentScopeBindings) return false
+            val lookup = context.typingContext.lookup(receiver.localName)
+            (lookup as? TypingContext.LookupResult.Found)?.binding is TypingContext.Binding.Monomorphic
+        }
+        else -> false
+    }
+}
+
+/**
+ * #160: the LARGEST subset of inherent-method candidates that differ ONLY in
+ * their `it` (receiver) slot — same non-`it` params AND same return type. A call
+ * over such a group typechecks IDENTICALLY whichever impl is picked, so it can be
+ * typed now (from a representative) with only the impl pick deferred to emit —
+ * WITHOUT needing the receiver's concrete type. That's what lets `to_str` work on
+ * a receiver whose value type never fully resolves (e.g. a plain generalized
+ * callee's result), where the receiver-dependent `abs` cannot.
+ *
+ * We take the largest homogeneous group rather than requiring ALL candidates to
+ * match because real method families aren't perfectly uniform — e.g. `to_str` is
+ * `{it} -> Str` for Int/Float/Bool/… but `{it} -> Result Str Str` for Bytes. A
+ * receiver that solves to Bytes simply won't be in this group (it dispatches via
+ * the deferred path instead). Returns emptyList when no group of ≥2 qualifies.
+ */
+internal fun ExpressionConstraintGenerator.homogeneousCandidateGroup(
+    candidates: List<TypingContext.InherentMethodInfo>
+): List<TypingContext.InherentMethodInfo> {
+    fun sig(mi: TypingContext.InherentMethodInfo): Pair<Map<String, MezzeType>, MezzeType>? {
+        val fn = mi.methodType as? MezzeType.FunctionType ?: return null
+        val params = (fn.paramType as? MezzeType.RecordType)?.fields ?: return null
+        if (!params.containsKey(Keywords.IT)) return null   // must be a receiver method
+        return params.filterKeys { it != Keywords.IT } to fn.returnType
+    }
+    return candidates
+        .mapNotNull { mi -> sig(mi)?.let { it to mi } }
+        .groupBy({ it.first }, { it.second })
+        .values
+        .maxByOrNull { it.size }
+        ?.takeIf { it.size >= 2 }
+        ?: emptyList()
+}
+
 internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: ParsedExpr, context: ConstraintContext): MezzeType? {
     when (receiver) {
         is ParsedIntLit -> return MezzeType.IntType
@@ -458,6 +555,19 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
         is ParsedCharLit -> return MezzeType.CharType
         is ParsedSeqLit ->
             return MezzeType.SeqType(MezzeType.VarType(TypeVar.fresh()))
+        // `(expr).method` — a parenthesized receiver is type-transparent, so
+        // look through it. Without this `(5).to_str {}` and `(f {}).to_str {}`
+        // reported the receiver as "unresolved" and fell through to a HasField
+        // constraint on the concrete type → T0205 (#194 follow-up).
+        is ParsedParens -> return getReceiverConcreteType(receiver.expr, context)
+        // `f { … }.method` — the receiver is a call whose result type is
+        // concrete even though the syntax isn't a literal/identifier. Resolve
+        // the callee's return type so e.g. `help { a = 5, b = 6 }.to_str {}`
+        // (help : … -> Int) dispatches on Int.
+        is ParsedFunctionCall -> {
+            val ret = calleeReturnType(receiver, context)
+            return if (ret == null || ret is MezzeType.VarType) null else ret
+        }
         else -> { /* fall through */ }
     }
     if (receiver !is ParsedIdentifier) return null
@@ -471,11 +581,40 @@ internal fun ExpressionConstraintGenerator.getReceiverConcreteType(receiver: Par
     return if (type is MezzeType.VarType) null else type
 }
 
+/**
+ * Best-effort static lookup of a function call's return type — the callee's
+ * FunctionType.returnType, when the callee is a simple in-scope identifier.
+ * Returns null for indirect/computed callees (the receiver then stays
+ * "unresolved", preserving the conservative default). Mirrors the callee
+ * resolution in [lookupConstructorTypeName].
+ */
+private fun ExpressionConstraintGenerator.calleeReturnType(
+    call: ParsedFunctionCall,
+    context: ConstraintContext
+): MezzeType? {
+    val fn = call.function as? ParsedIdentifier ?: return null
+    val key = fn.qualifier?.toString()?.let { BindingKey(it, fn.localName) }
+        ?: BindingKey.unqualified(fn.localName)
+    val lookup = context.typingContext.lookup(key)
+    if (lookup !is TypingContext.LookupResult.Found) return null
+    val fnType = when (val b = lookup.binding) {
+        is TypingContext.Binding.Monomorphic -> b.type
+        is TypingContext.Binding.Polymorphic -> b.scheme.instantiate().type
+    }
+    return (fnType as? MezzeType.FunctionType)?.returnType
+}
+
 internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     expr: ParsedFunctionCall,
     memberAccess: ParsedMemberAccess,
     inherentMethods: List<TypingContext.InherentMethodInfo>,
-    context: ConstraintContext
+    context: ConstraintContext,
+    // #160: HOMOGENEOUS-family deferral. When true, the candidates all share a
+    // signature apart from their `it` slot, so any is a valid representative for
+    // typing the call — but the receiver's concrete type isn't known yet, so
+    // don't pin the receiver to the representative's `it`. Record every candidate
+    // (candidateImpls) so emit picks the impl by the SOLVED receiver type.
+    deferImplByReceiver: Boolean = false,
 ): ConstraintResult {
     val methodName = memberAccess.member
 
@@ -506,7 +645,11 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
 
     val receiverTypeName = getReceiverTypeName(receiverType)
         ?: lookupConstructorTypeName(memberAccess.receiver, context)
-    val methodInfo = if (inherentMethods.size == 1) {
+    val methodInfo = if (deferImplByReceiver) {
+        // Homogeneous candidates — any is a valid signature representative; the
+        // concrete impl is picked from candidateImpls at emit time.
+        inherentMethods.first()
+    } else if (inherentMethods.size == 1) {
         inherentMethods.first()
     } else if (receiverTypeName != null) {
         inherentMethods.firstOrNull { it.targetTypeName == receiverTypeName }
@@ -532,7 +675,11 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
             // Bidirectional push now that the param type is known (lambda args only).
             argumentResult = pushParamTypeIntoArgs(expr.arguments, argumentResult, strippedParamType, context)
 
-            if (methodInfo.isImported) {
+            // When deferring impl selection (#160 homogeneous), do NOT pin the
+            // receiver to the representative candidate's `it` type — that would
+            // force e.g. Bool. The receiver's real type is fixed by OTHER
+            // constraints, and emit picks the impl accordingly.
+            if (methodInfo.isImported && !deferImplByReceiver) {
                 val itType = fullParams[Keywords.IT]
                 if (itType != null) {
                     constraints.add(Constraint.Equality(
@@ -584,7 +731,15 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
             implStartCol = methodInfo.implStartCol,
             implSourceFile = methodInfo.implSourceFile,
             methodFunctionType = freshMethodType,
-            typeArgs = if (inherentItType != null) listOf(inherentItType) else emptyList()
+            typeArgs = if (inherentItType != null) listOf(inherentItType) else emptyList(),
+            // #160: when the impl couldn't be picked statically (homogeneous
+            // deferral), carry every candidate so emit resolves by the solved
+            // receiver type.
+            candidateImpls = if (deferImplByReceiver) {
+                inherentMethods.map {
+                    ConstraintResult.InherentImplCandidate(it.targetTypeName, it.implContentHash)
+                }
+            } else emptyList(),
         )
     } else null
 
@@ -602,6 +757,133 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
         usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
         methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf((expr.loc to inherentMethodCallInfo.methodName) to inherentMethodCallInfo) else emptyMap()),
         callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType)
+    )
+}
+
+/**
+ * #160: emit a DEFERRED inherent-method call. Used when the receiver's concrete
+ * type is only known after solving AND the candidates DON'T share a signature
+ * (so no representative return type exists — e.g. `abs`). We generate a fresh
+ * `resultType` tyvar for the call and an [Constraint.InherentMethodResolve] that
+ * the solver resolves once the receiver tyvar is pinned: it picks the candidate
+ * whose target matches the solved receiver, then unifies the call's args against
+ * that impl's non-`it` params and `resultType` against its return type.
+ *
+ * The impl hash (for emit) is carried in [ConstraintResult.MethodCallInfo.candidateImpls];
+ * TypedAstBuilder re-picks it by the solved receiver type (same path as the
+ * homogeneous case). `methodFunctionType` is a synthetic `args -> resultType`
+ * function so the emitted method ref gets a proper (post-solve concrete)
+ * FunctionType and the call's return type derives from `resultType`.
+ */
+internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
+    expr: ParsedFunctionCall,
+    memberAccess: ParsedMemberAccess,
+    candidates: List<TypingContext.InherentMethodInfo>,
+    context: ConstraintContext,
+): ConstraintResult {
+    val methodName = memberAccess.member
+
+    val receiverResult = generate(memberAccess.receiver, context.notInTailPosition())
+    val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
+
+    val receiverType: MezzeType
+    val extraEffects: Set<String>
+    val extraEffectInstances: Set<MezzeType.EffectInstance>
+    when (val rt = receiverResult.type) {
+        is MezzeType.SuspendedType -> {
+            receiverType = rt.valueType
+            extraEffects = rt.effects.effects
+            extraEffectInstances = rt.effects.effectInstances
+        }
+        else -> {
+            receiverType = rt
+            extraEffects = emptySet()
+            extraEffectInstances = emptySet()
+        }
+    }
+
+    // Fresh-instantiate imported method types so their type params don't clash
+    // across candidates; local ones are used as-is (mirrors generateInherentMethodCall).
+    val resolvedCandidates = candidates.map { mi ->
+        val fnType = if (mi.isImported) instantiateTypeWithFreshVars(mi.methodType) else mi.methodType
+        mi to fnType
+    }
+
+    val resultType = MezzeType.VarType(TypeVar.fresh())
+
+    val constraints = mutableListOf<Constraint>()
+    constraints.addAll(receiverResult.constraints)
+    constraints.addAll(argumentResult.constraints)
+
+    constraints.add(
+        Constraint.InherentMethodResolve(
+            receiverType = receiverType,
+            methodName = methodName,
+            candidates = resolvedCandidates.map { (mi, fnType) ->
+                Constraint.InherentMethodCandidate(
+                    targetTypeName = mi.targetTypeName,
+                    methodType = fnType,
+                    implContentHash = mi.implContentHash,
+                )
+            },
+            argsType = argumentResult.type,
+            resultType = resultType,
+            receiverLoc = memberAccess.receiver.loc,
+            context = "Deferred inherent method: $methodName",
+            loc = expr.loc,
+        )
+    )
+
+    // Effects the call site must account for regardless of which impl is picked:
+    // the union of every candidate's declared effects (empty for abs/to_str).
+    val candidateEffects: Set<String> = resolvedCandidates
+        .mapNotNull { (_, fnType) -> (fnType as? MezzeType.FunctionType)?.effects?.effects }
+        .flatten()
+        .toSet()
+    val (callType, methodDeclaredEffects, methodDeclaredEffectInstances) =
+        wrapCallResultWithEffects(
+            resultType,
+            if (candidateEffects.isEmpty()) null
+            else MezzeType.EffectRow(effects = candidateEffects, effectInstances = emptySet(), rowVar = null)
+        )
+
+    // Synthetic FunctionType so the emitted method ref has a proper (post-solve
+    // concrete) function type; return type derives from `resultType`.
+    val syntheticFnType = MezzeType.FunctionType(
+        paramType = argumentResult.type,
+        returnType = resultType,
+        effects = MezzeType.EffectRow(effects = candidateEffects, effectInstances = emptySet(), rowVar = null)
+    )
+
+    val methodCallInfo = ConstraintResult.MethodCallInfo(
+        abilityName = null,
+        methodName = methodName,
+        methodHash = null,
+        receiverFieldName = Keywords.IT,
+        isInherentMethod = true,
+        // fallback impl if the receiver somehow resolves to a non-candidate type
+        // at emit (the solver would already have errored) — first candidate.
+        implContentHash = resolvedCandidates.first().first.implContentHash,
+        implStartLine = resolvedCandidates.first().first.implStartLine,
+        implStartCol = resolvedCandidates.first().first.implStartCol,
+        implSourceFile = resolvedCandidates.first().first.implSourceFile,
+        methodFunctionType = syntheticFnType,
+        candidateImpls = resolvedCandidates.map { (mi, _) ->
+            ConstraintResult.InherentImplCandidate(mi.targetTypeName, mi.implContentHash)
+        },
+    )
+
+    return ConstraintResult(
+        type = callType,
+        constraints = constraints,
+        effects = receiverResult.effects + argumentResult.effects + extraEffects + methodDeclaredEffects,
+        effectInstances = receiverResult.effectInstances + argumentResult.effectInstances + extraEffectInstances + methodDeclaredEffectInstances,
+        abilityConstraints = receiverResult.abilityConstraints + argumentResult.abilityConstraints,
+        associatedTypeConstraints = receiverResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints,
+        undefinedVariables = receiverResult.undefinedVariables + argumentResult.undefinedVariables,
+        usedVariables = receiverResult.usedVariables + argumentResult.usedVariables,
+        methodCallResolutions = receiverResult.methodCallResolutions + argumentResult.methodCallResolutions + mapOf((expr.loc to methodName) to methodCallInfo),
+        callReturnTypes = receiverResult.callReturnTypes + argumentResult.callReturnTypes + (expr.loc to callType),
     )
 }
 

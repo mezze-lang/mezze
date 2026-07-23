@@ -50,6 +50,73 @@ class TypeChecker(
         return cachedPreludeLoadedModules
     }
 
+    /**
+     * #160: an InherentMethodResolve whose receiver never became concrete can't
+     * dispatch — there's no impl to pick. We consider it dispatchable if the
+     * receiver resolves via EITHER the flat substitution OR the per-call-site
+     * callReturnTypes (what emit dispatches on; it pins forward-ref / effect-
+     * context receivers the flat subst can miss). Only when BOTH leave it a bare
+     * tyvar is it genuinely undispatchable (e.g. `{a} -> (id {v=a}).abs`) → T0206.
+     * A receiver that resolved to a NON-candidate type is already reported by the
+     * solver, so we don't duplicate that here.
+     */
+    private fun undispatchableInherentMethodErrors(
+        unresolved: List<com.mezze.language.typechecker.constraints.Constraint.InherentMethodResolve>,
+        substitution: Substitution,
+        callReturnTypes: Map<Loc, MezzeType>,
+    ): List<TypeCheckError> = unresolved.mapNotNull { c ->
+        val fromSubst = substitution.apply(c.receiverType)
+        val fromCallSite = c.receiverLoc?.let { callReturnTypes[it] }?.let { substitution.apply(it) }
+        val resolved = when {
+            fromSubst !is MezzeType.VarType -> fromSubst
+            fromCallSite != null && fromCallSite !is MezzeType.VarType -> fromCallSite
+            else -> fromSubst
+        }
+        if (resolved is MezzeType.VarType) {
+            TypeCheckError(
+                phase = "Constraint Solving",
+                message = "Cannot resolve inherent method '${c.methodName}': the receiver's " +
+                    "type could not be determined. Annotate the receiver or call the method " +
+                    "on a value of a known type.",
+                loc = c.loc,
+                code = ErrorCode.T0206_METHOD_NOT_FOUND,
+            )
+        } else null
+    }
+
+    /**
+     * #160: when inherent-method dispatch can't resolve, the per-binding solve
+     * (which fully instantiates the receiver) and the global solve (where the
+     * receiver may stay a polymorphic-scheme tyvar) can each emit a T0206 at the
+     * same site — one naming the concrete type ("no `abs` for type `Bool`") and
+     * one generic ("could not be determined"). They're the same error; keep the
+     * most informative (the concrete-type one) per (loc). No-op unless two T0206s
+     * share a loc.
+     */
+    private fun collapseInherentMethodErrors(errors: List<TypeCheckError>): List<TypeCheckError> {
+        val t0206ByLoc = errors
+            .withIndex()
+            .filter { it.value.code == ErrorCode.T0206_METHOD_NOT_FOUND && it.value.loc != null }
+            .groupBy { it.value.loc }
+        if (t0206ByLoc.none { it.value.size > 1 }) return errors
+        // For each loc with duplicates, keep the "most specific" message — the one
+        // that names a concrete type (heuristic: does NOT contain "could not be
+        // determined"); fall back to the longest message.
+        val dropIndices = mutableSetOf<Int>()
+        for ((_, group) in t0206ByLoc) {
+            if (group.size <= 1) continue
+            // Prefer the concrete-type message (NOT "could not be determined");
+            // tie-break by the longer message.
+            val keep = group.sortedWith(
+                compareBy<IndexedValue<TypeCheckError>> {
+                    if (it.value.message.contains("could not be determined")) 1 else 0
+                }.thenByDescending { it.value.message.length }
+            ).first()
+            group.forEach { if (it.index != keep.index) dropIndices.add(it.index) }
+        }
+        return errors.filterIndexed { i, _ -> i !in dropIndices }
+    }
+
         sealed class TypeCheckResult {
                 data class Success(
             val substitution: Substitution,
@@ -272,7 +339,8 @@ class TypeChecker(
             is ConstraintSolver.SolveResult.Failure -> {
                 collectedErrors.addAll(solveResult.errors.map { classifyConstraintError(it) })
                 val seen = mutableSetOf<Pair<Loc?, String>>()
-                val deduped = collectedErrors.filter { e -> seen.add(e.loc to e.message) }
+                val deduped = collapseInherentMethodErrors(collectedErrors)
+                    .filter { e -> seen.add(e.loc to e.message) }
                 val partialTyped = buildPartialTypedModule(
                     parsedModule = parsedModule, substitution = perBindingSubstitution,
                     constraintResults = constraintResults, context = context,
@@ -293,6 +361,7 @@ class TypeChecker(
                 val substitution = solveResult.substitution.compose(perBindingSubstitution)
                 InvariantChecker.checkSubstitution(substitution, "post-solve")
                 ConstraintDumper.dumpSolverResult(substitution)
+
 
                 val warnings = solveResult.warnings.map { msg ->
                     TypeCheckWarning(message = msg, loc = null)
@@ -320,6 +389,18 @@ class TypeChecker(
                 InvariantChecker.checkConstraintResultsConsistent(globallyResolvedConstraintResults, "post-resolve")
 
                 val aggregated = aggregateConstraintResults(constraintResults, substitution)
+
+                // #160: inherent-method dispatch the solver left unresolved. A
+                // receiver still not concrete — checked BOTH via the flat
+                // substitution AND the per-call-site callReturnTypes (which emit
+                // dispatches on; it can pin forward-ref / effect-context receivers
+                // the flat subst misses) — is genuinely undispatchable (no runtime
+                // impl), e.g. `{a} -> (id {v=a}).abs`. Report it as T0206.
+                collectedErrors.addAll(
+                    undispatchableInherentMethodErrors(
+                        solveResult.unresolvedInherentMethods, substitution, aggregated.callReturnTypes
+                    )
+                )
 
                 val validator = TypeValidator(context, registry, buildResult.implDeclarations)
                 val constraintValidation = validator.validateConstraints(allConstraints, substitution)
@@ -353,7 +434,8 @@ class TypeChecker(
 
                 if (collectedErrors.isNotEmpty()) {
                     val seen = mutableSetOf<Pair<Loc?, String>>()
-                    val deduped = collectedErrors.filter { e -> seen.add(e.loc to e.message) }
+                    val deduped = collapseInherentMethodErrors(collectedErrors)
+                        .filter { e -> seen.add(e.loc to e.message) }
                     return TypeCheckResult.Failure(
                         errors = deduped, typedModule = emitResult.typedModule,
                         expectedTypeAt = aggregated.expectedTypeAt,

@@ -105,6 +105,10 @@ private fun classifyByConstraintAndMessage(
         ErrorCode.V0602_NON_EXHAUSTIVE_RECORD_PATTERN to emptyList()
     constraint is Constraint.Subsumes ->
         ErrorCode.T0201_TYPE_MISMATCH to emptyList()
+    // #160: inherent method dispatch couldn't resolve (no matching candidate for
+    // the solved receiver type, or the receiver never became concrete).
+    constraint is Constraint.InherentMethodResolve ->
+        ErrorCode.T0206_METHOD_NOT_FOUND to emptyList()
     msg.startsWith("Field '") && msg.contains("type mismatch") ->
         ErrorCode.T0201_TYPE_MISMATCH to emptyList()
     msg.contains("Cannot access field") ->

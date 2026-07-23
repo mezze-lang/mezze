@@ -69,6 +69,8 @@ object ConstraintDumper {
             "MustBeOpen(${formatLoc(constraint)}): ${prettyPrintType(constraint.type)}"
         is Constraint.RecordPatternExhaustive ->
             "RecordPatternExhaustive(${formatLoc(constraint)}): ${prettyPrintType(constraint.recordType)}"
+        is Constraint.InherentMethodResolve ->
+            "InherentMethodResolve(${formatLoc(constraint)}): ${prettyPrintType(constraint.receiverType)}.${constraint.methodName} -> ${prettyPrintType(constraint.resultType)} [${constraint.candidates.joinToString(", ") { it.targetTypeName }}]"
     }
 
     private fun formatErrorContext(ctx: ErrorContext?): String = when (ctx) {

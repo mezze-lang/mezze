@@ -755,6 +755,20 @@ class TypedAstBuilder(
 
         val solvedFnType = methodInfo.methodFunctionType?.let { substitution.apply(it) }
 
+        // #160: when the inherent impl was deferred (the receiver's concrete
+        // type was only known after solving, e.g. `help {..}.to_str {}`), pick
+        // the candidate whose target matches the SOLVED receiver type. Falls
+        // back to the statically-recorded implContentHash if no candidate
+        // matches (e.g. a receiver that solved to a non-candidate type — the
+        // solver would already have errored in practice).
+        val resolvedImplHash: Hash? = run {
+            if (methodInfo.candidateImpls.isEmpty()) return@run methodInfo.implContentHash
+            val solvedReceiver = substitution.apply(receiverExpr.type)
+            val name = solvedTypeName(solvedReceiver)
+            methodInfo.candidateImpls.firstOrNull { it.targetTypeName == name }?.implContentHash
+                ?: methodInfo.implContentHash
+        }
+
         val fn = if (methodInfo.methodHash != null) {
             val hash = methodInfo.methodHash!!
             TypedVar(
@@ -763,8 +777,8 @@ class TypedAstBuilder(
                 type = solvedFnType ?: substitution.apply(contextType),
                 loc = memberAccess.loc
             )
-        } else if (methodInfo.isInherentMethod && methodInfo.implContentHash != null) {
-            val implHash = methodInfo.implContentHash
+        } else if (methodInfo.isInherentMethod && resolvedImplHash != null) {
+            val implHash = resolvedImplHash
             val opHash = Hash.computeOpHash(implHash, methodInfo.methodName)
             TypedVar(
                 name = methodInfo.methodName,
@@ -831,6 +845,33 @@ class TypedAstBuilder(
             type = callReturnType,
             loc = loc
         )
+    }
+
+    /**
+     * #160: nominal type name of a solved receiver type, for picking a deferred
+     * inherent-impl candidate by its `targetTypeName`. Mirrors
+     * ExprMethodConstraints.getReceiverTypeName; returns null for unresolved /
+     * structural types (the caller then keeps the recorded fallback impl).
+     */
+    private fun solvedTypeName(type: MezzeType): String? = when (type) {
+        is MezzeType.IntType -> "Int"
+        is MezzeType.FloatType -> "Float"
+        is MezzeType.StringType -> "Str"
+        is MezzeType.BoolType -> "Bool"
+        is MezzeType.NatType -> "Nat"
+        is MezzeType.FracType -> "Frac"
+        is MezzeType.CharType -> "Char"
+        is MezzeType.BytesType -> "Bytes"
+        is MezzeType.OrderingType -> "Ordering"
+        is MezzeType.SeqType -> "Seq"
+        is MezzeType.ListType -> "List"
+        is MezzeType.SetType -> "Set"
+        is MezzeType.MapType -> "Map"
+        is MezzeType.TypeApplication -> type.constructor
+        is MezzeType.RecordType -> type.typeName
+        is MezzeType.VariantType -> type.typeName
+            ?: if (type.constructors.size == 1) type.constructors.keys.first() else null
+        else -> null
     }
 
     private fun buildDoBlock(expr: ParsedDo, file: String, contextType: MezzeType): TypedBlock {
