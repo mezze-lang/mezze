@@ -33,8 +33,22 @@ import java.util.Set;
  */
 public final class MezzeSuspended implements TruffleObject {
 
+    // ----- Legacy shape (pre-Path-E, still active when MEZZE_LAZY_EFFECTS is off).
+    // Discriminator: `computation != null` → legacy shape. force() dispatches
+    // via MezzeThunk (single-op deferred call or ComposedBlockThunk).
+
     @CompilationFinal
     private final MezzeThunk computation;
+
+    // ----- Path E (task #336) shape — full body continuation.
+    // Discriminator: `bodyNode != null` → new shape. force() runs bodyNode.
+    // See docs/perf/effect-lazy-redesign-2026-07.md.
+    @CompilationFinal
+    private final com.mezze.interpreter.nodes.MezzeNode bodyNode;
+    @CompilationFinal
+    private final com.oracle.truffle.api.frame.MaterializedFrame bodyFrame;
+    @CompilationFinal(dimensions = 1)
+    private final com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chainSnapshot;
 
     @CompilationFinal(dimensions = 1)
     private final Hash[] unhandledEffects;
@@ -43,7 +57,7 @@ public final class MezzeSuspended implements TruffleObject {
     @CompilationFinal
     private Set<Hash> unhandledEffectsSet;
 
-    // Handlers already captured (for partial handling)
+    // Handlers already captured (for partial handling — legacy shape only).
     private final Map<Hash, Object> capturedHandlers;
 
     public MezzeSuspended(MezzeThunk computation, Set<Hash> unhandledEffects) {
@@ -52,8 +66,60 @@ public final class MezzeSuspended implements TruffleObject {
 
     public MezzeSuspended(MezzeThunk computation, Set<Hash> unhandledEffects, Map<Hash, Object> capturedHandlers) {
         this.computation = computation;
+        this.bodyNode = null;
+        this.bodyFrame = null;
+        this.chainSnapshot = null;
         this.unhandledEffects = unhandledEffects.toArray(new Hash[0]);
         this.capturedHandlers = capturedHandlers;
+    }
+
+    /**
+     * Path E constructor — capture a full body continuation instead of a
+     * single deferred op-call. Body doesn't run; execution defers until
+     * {@link #force(IndirectCallNode)} sees all effects in
+     * {@code unhandledEffects} discharged by the current chain.
+     *
+     * <p>{@code chainSnapshot} = handlers already installed at capture time
+     * (the enclosing HandleNode's push). Force merges these with the chain
+     * live at force time.
+     */
+    public static MezzeSuspended captureContinuation(
+            com.mezze.interpreter.nodes.MezzeNode bodyNode,
+            com.oracle.truffle.api.frame.MaterializedFrame bodyFrame,
+            com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chainSnapshot,
+            Set<Hash> unhandledEffects) {
+        return new MezzeSuspended(bodyNode, bodyFrame, chainSnapshot, unhandledEffects);
+    }
+
+    private MezzeSuspended(
+            com.mezze.interpreter.nodes.MezzeNode bodyNode,
+            com.oracle.truffle.api.frame.MaterializedFrame bodyFrame,
+            com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] chainSnapshot,
+            Set<Hash> unhandledEffects) {
+        this.computation = null;
+        this.bodyNode = bodyNode;
+        this.bodyFrame = bodyFrame;
+        this.chainSnapshot = chainSnapshot;
+        this.unhandledEffects = unhandledEffects.toArray(new Hash[0]);
+        this.capturedHandlers = Collections.emptyMap();
+    }
+
+    /** True when this value carries a Path E full-body continuation
+     *  (as opposed to the legacy single-op MezzeThunk shape). */
+    public boolean isPathE() {
+        return bodyNode != null;
+    }
+
+    public com.mezze.interpreter.nodes.MezzeNode getBodyNode() {
+        return bodyNode;
+    }
+
+    public com.oracle.truffle.api.frame.MaterializedFrame getBodyFrame() {
+        return bodyFrame;
+    }
+
+    public com.mezze.interpreter.nodes.continuation.HandlerChainEntry[] getChainSnapshot() {
+        return chainSnapshot;
     }
 
     public MezzeThunk getComputation() {
