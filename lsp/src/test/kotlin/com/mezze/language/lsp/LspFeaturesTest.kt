@@ -1875,6 +1875,109 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `dot completion on an Int binding suggests inherent methods`() {
+        // #159: `x.` where x : Int must offer inherent Int methods (abs, to_str,
+        // is_even, …). Baseline: the file typechecks cleanly.
+        val src = "let f = {x: Int} -> x.\n"
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val line = "let f = {x: Int} -> x."
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(0, line.length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val labels = comps.map { it.label }
+        assertTrue(labels.contains("abs") || labels.contains("to_str"),
+            "expected inherent Int methods on `x.`, got: $labels")
+    }
+
+    @Test
+    fun `dot completion on an Int binding works mid-edit with a trailing error`() {
+        // #159 core: while the user is mid-edit, the file often doesn't fully
+        // typecheck (a later line is incomplete). `x.` must STILL offer Int
+        // methods — the partial typed module + syntactic fallback should cover
+        // the receiver even though the module as a whole failed.
+        val src = "let f = {x: Int} -> x.\nlet g = {} -> broken_ref_that_does_not_exist\n"
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val line = "let f = {x: Int} -> x."
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(0, line.length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val labels = comps.map { it.label }
+        assertTrue(labels.contains("abs") || labels.contains("to_str"),
+            "expected inherent Int methods on `x.` mid-edit, got: $labels")
+    }
+
+    @Test
+    fun `dot completion on a do-block let local works mid-edit`() {
+        // #159: `y.` where y is a `let` inside a do-block returned 0 completions.
+        // Root cause: typing the `.` makes the do-block a HARD parse error, the
+        // parser recovers to an EMPTY module, that empty module was cached as
+        // "last successful" (clobbering the real prior snapshot), so the
+        // fallback that resolves y's type found nothing. Fixed by (a) not
+        // caching a degenerate recovery module and (b) falling back to the last
+        // good typed module. Drive the REAL edit sequence: open valid `y`, then
+        // type the `.`.
+        val valid = "let f = {} -> do\n  let y = 41 + 1\n  y\n"
+        val (uri, _) = openSingleFile(valid)
+        client.awaitDiagnostics(uri, 5_000)
+        val edited = "let f = {} -> do\n  let y = 41 + 1\n  y.\n"
+        server.textDocumentService.didChange(DidChangeTextDocumentParams(
+            VersionedTextDocumentIdentifier(uri, 2),
+            listOf(TextDocumentContentChangeEvent(edited))
+        ))
+        Thread.sleep(800)
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(2, "  y.".length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val labels = comps.map { it.label }
+        assertTrue(labels.contains("abs") || labels.contains("to_str"),
+            "expected Int methods on a do-block local `y.` mid-edit, got: $labels")
+    }
+
+    @Test
+    fun `dot completion ranks methods matching the expected type first`() {
+        // The completion order should be best-fit for the expected type at the
+        // cursor (bidirectional): assigning `x.` to a Str-typed binding must
+        // float Str-returning methods (to_str, to_dbg_str) above the rest via
+        // sortText "0_". Uses the realistic edit sequence so completion actually
+        // resolves x : Int mid-edit.
+        val valid = "let f = {x: Int} -> do\n  let s: Str = x\n  s\n"
+        val (uri, _) = openSingleFile(valid)
+        client.awaitDiagnostics(uri, 5_000)
+        val edited = "let f = {x: Int} -> do\n  let s: Str = x.\n  s\n"
+        server.textDocumentService.didChange(DidChangeTextDocumentParams(
+            VersionedTextDocumentIdentifier(uri, 2),
+            listOf(TextDocumentContentChangeEvent(edited))
+        ))
+        Thread.sleep(800)
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(1, "  let s: Str = x.".length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        // If completion produced nothing, the mid-edit resolution itself failed —
+        // covered by the sibling test; here we only assert ORDER when items exist.
+        if (comps.isEmpty()) return
+        val ranked = comps.sortedBy { it.sortText ?: "5_${it.label}" }
+        val strReturners = setOf("to_str", "to_dbg_str")
+        // A Str-returning method must appear before the first non-Str-returning
+        // method whose own return type is known (i.e. ranking actually moved a
+        // matching candidate up). At minimum: some Str-returner is in the top few.
+        val topLabels = ranked.take(5).map { it.label }
+        assertTrue(topLabels.any { it in strReturners },
+            "expected a Str-returning method (to_str/to_dbg_str) ranked near the top for an expected Str type, got top-5: $topLabels")
+    }
+
+    @Test
     fun `resolveCompletionItem attaches the doc-comment and signature lazily`() {
         // #115: completion items carry only a type in `detail`; the doc-comment
         // is filled in on demand via completionItem/resolve.

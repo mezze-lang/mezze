@@ -136,6 +136,12 @@ class TypeChecker(
             val errors: List<TypeCheckError>,
             val typedModule: TypedAstModule? = null,
             val expectedTypeAt: Map<Loc, MezzeType> = emptyMap(),
+            // #159: carry the import context on the failure path too, so the LSP
+            // can populate imported abilities/effects/impls for completion and
+            // hover even when the module as a whole didn't typecheck (mid-edit).
+            // Without it, `x.` completion loses ability methods on first open of
+            // a file that has an error (no prior successful result to fall back on).
+            val importContext: ModuleImportContext? = null,
         ) : TypeCheckResult()
     }
 
@@ -355,6 +361,7 @@ class TypeChecker(
                 return TypeCheckResult.Failure(
                     errors = deduped, typedModule = partialTyped,
                     expectedTypeAt = partialExpectedTypeAt,
+                    importContext = importContext,
                 )
             }
             is ConstraintSolver.SolveResult.Success -> {
@@ -439,6 +446,7 @@ class TypeChecker(
                     return TypeCheckResult.Failure(
                         errors = deduped, typedModule = emitResult.typedModule,
                         expectedTypeAt = aggregated.expectedTypeAt,
+                        importContext = importContext,
                     )
                 }
                 return TypeCheckResult.Success(

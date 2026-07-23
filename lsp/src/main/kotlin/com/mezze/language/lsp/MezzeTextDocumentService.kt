@@ -571,7 +571,20 @@ class MezzeTextDocumentService(
                         },
                         expectedTypeAt = result.expectedTypeAt,
                     )
-                    lastSuccessfulResult[uri] = typeCheckResult!!
+                    // #159: a parse error inside a decl (e.g. a half-typed `y.`
+                    // in a do-block) makes the parser recover to an EMPTY
+                    // ParsedModule, which typechecks as Success with a 0-decl
+                    // typedModule. Caching that as "last successful" CLOBBERS the
+                    // real prior result, so mid-edit features (dot-completion,
+                    // hover) that fall back to lastSuccessfulResult find nothing.
+                    // Only cache when the new result carries at least as many
+                    // top-level decls as the one we'd replace — a degenerate
+                    // recovery module never overwrites a richer prior snapshot.
+                    val newDeclCount = typeCheckResult!!.typedModule?.decls?.size ?: 0
+                    val prevDeclCount = lastSuccessfulResult[uri]?.typedModule?.decls?.size ?: -1
+                    if (newDeclCount >= prevDeclCount) {
+                        lastSuccessfulResult[uri] = typeCheckResult!!
+                    }
 
                     // Unused-import diagnostics now come from the typechecker's
                     // W0102 warning (UnusedImportLinter), published in the loop
@@ -669,7 +682,20 @@ class MezzeTextDocumentService(
                     // wipes out type info for the whole file.
                     val partialTyped = result.typedModule
                     if (partialTyped != null) {
+                        // #159: carry the same import-derived context the Success
+                        // path builds (abilities/effects/impls/resolved imports),
+                        // so completion (`x.` ability methods) and hover keep
+                        // working mid-edit — with no prior successful result to
+                        // fall back on, this is the ONLY source of those.
+                        val ic = result.importContext
                         typeCheckResult = TypeCheckResult(
+                            resolvedImports = buildResolvedImports(ic),
+                            importedAbilities = ic?.importedAbilities ?: emptyMap(),
+                            importedEffects = ic?.importedEffects ?: emptyMap(),
+                            importedImpls = ic?.importedImpls ?: emptyMap(),
+                            allEffects = ic?.let {
+                                it.importedEffects + it.effectsByHash.values.associateBy { e -> e.name }
+                            } ?: emptyMap(),
                             typedModule = partialTyped,
                             expectedTypeAt = result.expectedTypeAt,
                         )
@@ -3389,7 +3415,7 @@ class MezzeTextDocumentService(
         // Find the receiver's type — either by binding-scope lookup (named
         // identifier) or by typed-AST position lookup (any expression).
         val receiverType = if (receiverName != null) {
-            findReceiverType(receiverName, result, position)
+            findReceiverType(receiverName, result, position, state.uri)
         } else {
             findReceiverTypeForExpressionAt(state, position, result)
         } ?: run {
@@ -3812,7 +3838,7 @@ class MezzeTextDocumentService(
 
 
     /** Find the type of a receiver identifier at a given position. */
-    private fun findReceiverType(name: String, result: TypeCheckResult, position: Position): MezzeType? {
+    private fun findReceiverType(name: String, result: TypeCheckResult, position: Position, currentUri: String): MezzeType? {
         // Check top-level bindings via TypedModule
         val typedBinding = result.typedModule?.decls
             ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
@@ -3826,8 +3852,22 @@ class MezzeTextDocumentService(
         val resolvedImport = result.resolvedImports.find { it.localName == name }
         if (resolvedImport != null) return resolvedImport.type
 
-        // Check local bindings
-        return findLocalBindingType(name, result.typedModule, position.line + 1)
+        // Check local bindings (do-block lets, match/lambda bindings) in the
+        // current typed module.
+        findLocalBindingType(name, result.typedModule, position.line + 1)?.let { return it }
+
+        // #159: the receiver line the user is editing (`y.`) is often a HARD
+        // parse error inside a do-block ("must end with a result expression"),
+        // so the WHOLE enclosing decl is missing from the current typed module
+        // and the local lookup above finds nothing. Fall back to the last
+        // successful typed module — before the `.` was typed, `let y = …` was
+        // valid and carried y's type. This is what lights up `y.` completion
+        // mid-edit for do-block / match / lambda locals.
+        val lastGood = lastSuccessfulResult[currentUri]?.typedModule
+        if (lastGood != null && lastGood !== result.typedModule) {
+            findLocalBindingType(name, lastGood, position.line + 1)?.let { return it }
+        }
+        return null
     }
 
     /**
