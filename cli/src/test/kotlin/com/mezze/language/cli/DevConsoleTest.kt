@@ -104,6 +104,28 @@ class DevConsoleTest {
     }
 
     @Test
+    fun `error separator marks a broken save as waiting for a fix`() {
+        val sep = console().errorSeparator("app.mz")
+        assertTrue(sep.contains("app.mz"), "should name the file that broke")
+        assertTrue(sep.contains("waiting for a fix"), "should tell the user what to do")
+        assertTrue(sep.contains("─"), "should render a rule like other separators")
+    }
+
+    @Test
+    fun `recovered separator names the file and the recompile time`() {
+        val sep = console().recovered("app.mz", 0.04)
+        assertTrue(sep.contains("recovered"), "should announce recovery")
+        assertTrue(sep.contains("app.mz"), "should name the fixed file")
+        assertTrue(sep.contains("40ms"), "should show the recompile time")
+    }
+
+    @Test
+    fun `error separator is red under color`() {
+        assertTrue(console(color = true).errorSeparator("app.mz").contains(ESC),
+            "error separator should be styled under color")
+    }
+
+    @Test
     fun `separator width stays bounded even with a long label`() {
         // A very long label shouldn't produce a negative-length rule / crash.
         val sep = console().separator("reloaded a-very-long-filename-that-exceeds-the-rule-width.mz · 1.23s")

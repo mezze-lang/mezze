@@ -40,12 +40,11 @@ class DevCommand {
         // Boolean flags pass through verbatim; --insight=<path> too.
         val devFlags = args.filter { it in DEV_FLAGS_BOOLEAN || it.startsWith("--insight=") }
 
+        val msg = CliMessages()
         val mezzeToml = File(currentDir, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
-            println("Error: No Mezze.toml found in current directory")
-            println()
-            println("Run 'mez init' to create a new project, or use 'mez exec <file>' for single-file execution.")
+            System.err.println(msg.noManifest())
             return
         }
 
@@ -53,17 +52,12 @@ class DevCommand {
         val manifest = try {
             Toml.decodeFromString(MezzeToml.serializer(), tomlContent)
         } catch (e: Exception) {
-            println("Error: Failed to parse Mezze.toml: ${e.message}")
+            System.err.println(msg.badManifest(e.message))
             return
         }
 
         if (manifest.app == null || manifest.app.isEmpty()) {
-            println("Error: No [[app]] entries in Mezze.toml")
-            println()
-            println("Add an app:")
-            println("  [[app]]")
-            println("  name = \"${manifest.`package`.name}\"")
-            println("  path = \"src/app.mz\"")
+            System.err.println(msg.noApp(manifest.`package`.name))
             return
         }
 
@@ -72,7 +66,7 @@ class DevCommand {
 
         val appConfig = if (appName != null) {
             manifest.app.find { it.name == appName } ?: run {
-                println("Error: App '$appName' not found. Available: ${manifest.app.map { it.name }}")
+                System.err.println(msg.appNotFound(appName, manifest.app.map { it.name }))
                 return
             }
         } else {
@@ -81,7 +75,7 @@ class DevCommand {
 
         val appFile = File(currentDir, appConfig.path)
         if (!appFile.exists()) {
-            println("Error: App file not found: ${appFile.absolutePath}")
+            System.err.println(msg.appFileNotFound(appFile))
             return
         }
 

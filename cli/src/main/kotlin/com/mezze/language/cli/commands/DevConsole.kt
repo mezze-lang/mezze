@@ -60,6 +60,26 @@ class DevConsole(
         RunResult.Crashed -> red("prev crashed")
     }
 
+    /**
+     * A red separator shown when a save fails to compile:
+     * `─ ✗ <changed> · waiting for a fix`. Printed AFTER the pretty diagnostic
+     * (which already itemizes the errors) so the user sees the error, then a
+     * persistent "still broken" marker; the prior run keeps running underneath.
+     * Rule length mirrors [separator].
+     */
+    fun errorSeparator(changed: String): String {
+        val text = "✗ $changed · waiting for a fix"
+        val ruleLen = (width - text.length - 1).coerceAtLeast(3)
+        return "$indent${red("─".repeat(ruleLen))} ${red(text)}"
+    }
+
+    /**
+     * Separator shown when a previously-broken file compiles again, before its
+     * fresh run: `─ recovered · app.mz · 40ms`.
+     */
+    fun recovered(changed: String, seconds: Double): String =
+        separator("recovered · $changed · ${fmtSeconds(seconds)}")
+
     /** A blank line — the spacing the caller inserts around program output. */
     fun blank(): String = ""
 

@@ -29,23 +29,23 @@ import java.security.MessageDigest
 class BuildCommand {
 
     fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
+        val msg = CliMessages()
         val mezzeToml = File(currentDir, "Mezze.toml")
 
         if (!mezzeToml.exists()) {
-            println("Error: No Mezze.toml found in current directory")
-            println("Run 'mez init' to create a new project.")
+            System.err.println(msg.noManifest())
             return
         }
 
         val manifest = try {
             Toml.decodeFromString(MezzeToml.serializer(), mezzeToml.readText())
         } catch (e: Exception) {
-            println("Error: Failed to parse Mezze.toml: ${e.message}")
+            System.err.println(msg.badManifest(e.message))
             return
         }
 
         if (manifest.app == null || manifest.app.isEmpty()) {
-            println("Error: No [[app]] entries in Mezze.toml")
+            System.err.println(msg.noApp(manifest.`package`.name))
             return
         }
 
@@ -77,7 +77,7 @@ class BuildCommand {
 
         val appConfig = if (appName != null) {
             manifest.app.find { it.name == appName } ?: run {
-                println("Error: App '$appName' not found. Available: ${manifest.app.map { it.name }}")
+                System.err.println(msg.appNotFound(appName, manifest.app.map { it.name }))
                 return
             }
         } else {
@@ -86,7 +86,7 @@ class BuildCommand {
 
         val appFile = File(currentDir, appConfig.path)
         if (!appFile.exists()) {
-            println("Error: App file not found: ${appFile.absolutePath}")
+            System.err.println(msg.appFileNotFound(appFile))
             return
         }
 
@@ -148,6 +148,7 @@ class BuildCommand {
             // on cache hits (if the IR was good enough to cache, the shape
             // already passed).
             val typedModuleForValidation: com.mezze.language.typedast.TypedModule?
+            var warningCount = 0
 
             if (cached != null) {
                 loweredFunctions = cached.functions
@@ -170,6 +171,7 @@ class BuildCommand {
                 loweredFunctions = compiled.loweredFunctions
                 performerRecords = compiled.performerRecords
                 typedModuleForValidation = compiled.typedModule
+                warningCount = compiled.warningCount
             }
 
             // 2b. Stdlib FunctionIRs are NOT seeded into cache.sqlite.
@@ -301,17 +303,25 @@ class BuildCommand {
             // Paths relative to project root — what the user types to run.
             val relTarget = currentDir.toPath().relativize(targetDir.toPath()).toString()
 
-            println()
-            println("Built ${appConfig.name} in ${formatDuration(buildTime)}")
-            println()
-            println("  Run:")
-            println("    ./$relTarget/${unixLauncher.name}")
-            if (nativeBinary != null) {
-                println("    ./$relTarget/${nativeBinary.name}    (native, no JVM)")
+            // (label, run-command, sizeBytes) — JVM launcher always, native
+            // when built. Size is the actual artifact the launcher runs.
+            val artifacts = buildList {
+                add(Triple("jar", "./$relTarget/${unixLauncher.name}", jarFile.length()))
+                if (nativeBinary != null) {
+                    add(Triple("native", "./$relTarget/${nativeBinary.name}", nativeBinary.length()))
+                }
             }
+            val msg = CliMessages()
+            println()
+            println(msg.buildSummary(
+                appName = appConfig.name,
+                durationLabel = formatDuration(buildTime),
+                artifacts = artifacts,
+                warningCount = warningCount,
+            ))
 
         } catch (e: Exception) {
-            println("Error: ${e.message}")
+            System.err.println(CliMessages().buildFailed(e.message))
             kotlin.system.exitProcess(1)
         } finally {
             store.close()
@@ -328,6 +338,9 @@ class BuildCommand {
         val loweredFunctions: List<FunctionIR>,
         val performerRecords: List<Array<String>>,
         val typedModule: com.mezze.language.typedast.TypedModule?,
+        // Warnings from the fresh typecheck (0 on a cache hit — we didn't
+        // re-typecheck, so there's nothing new to report).
+        val warningCount: Int = 0,
     )
 
     /**
@@ -399,6 +412,7 @@ class BuildCommand {
             loweredFunctions = typeCheckResult.loweredFunctions,
             performerRecords = typeCheckResult.performerRecords,
             typedModule = typeCheckResult.typedModule,
+            warningCount = typeCheckResult.warnings.size,
         )
     }
 

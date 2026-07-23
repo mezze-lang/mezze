@@ -209,6 +209,9 @@ object WireRunner {
             // Carries how the PREVIOUS run ended so the NEXT reload separator
             // can fold it in (`… reloaded app.mz · prev exited 0 · 0.09s`).
             var priorOutcome: DevConsole.RunResult = DevConsole.RunResult.Reloading
+            // True while the current source doesn't compile — so the next good
+            // save shows a `recovered` separator instead of a plain `reloaded`.
+            var inErrorState = false
 
             while (!quitRequested.get()) {
                 val event = try {
@@ -229,21 +232,34 @@ object WireRunner {
                         }
                         invalidateChangedModules(coalesced, currentDir)
                         val tReload = System.nanoTime()
+                        val changed = coalesced.firstOrNull() ?: appFile.name
+                        // Clear the visible screen on EVERY reload (success OR
+                        // error) so each save shows only the fresh result;
+                        // scrollback keeps the old output. No-op off a TTY.
+                        System.err.print(console.clearScreen())
                         val next = compile(currentDir, appFile, entryName, appName, timing, tReload)
-                        if (next != null) {
-                            val reloadSecs = (System.nanoTime() - tReload) / 1e9
-                            val changed = coalesced.firstOrNull() ?: appFile.name
-                            // Clear the visible screen so each save shows only
-                            // the fresh run (scrollback keeps the old output).
-                            // No-op when stderr isn't a TTY.
-                            System.err.print(console.clearScreen())
-                            // Separator PRECEDES this run's output; it folds in
-                            // how the previous run ended.
+                        if (next == null) {
+                            // Save doesn't compile. compile() already printed the
+                            // pretty diagnostic; add a persistent "waiting for a
+                            // fix" marker and keep the prior run alive underneath.
                             System.err.println(console.blank())
-                            System.err.println(console.separator(
-                                label = "reloaded $changed · ${fmtSecs(reloadSecs)}",
-                                priorStatus = console.priorStatus(priorOutcome),
-                            ))
+                            System.err.println(console.errorSeparator(changed))
+                            inErrorState = true
+                        } else {
+                            val reloadSecs = (System.nanoTime() - tReload) / 1e9
+                            // Separator PRECEDES this run's output. Coming out of
+                            // an error → `recovered`; otherwise a normal reload
+                            // that folds in how the previous run ended.
+                            System.err.println(console.blank())
+                            if (inErrorState) {
+                                System.err.println(console.recovered(changed, reloadSecs))
+                            } else {
+                                System.err.println(console.separator(
+                                    label = "reloaded $changed · ${fmtSecs(reloadSecs)}",
+                                    priorStatus = console.priorStatus(priorOutcome),
+                                ))
+                            }
+                            inErrorState = false
                             System.err.println(console.blank())
 
                             // EVICT: hashes that were in the previous closure
