@@ -60,19 +60,12 @@ public class MezzeThunk implements TruffleObject {
 
     /**
      * Create a thunk for a deferred effect operation.
-     * The function will be resolved later when handlers become available.
-     */
-    public MezzeThunk(String effectName, String operationName, Object arguments) {
-        this.function = null;
-        this.arguments = arguments;
-        this.effectName = effectName;
-        this.operationName = operationName;
-        this.effectContentHash = null;
-    }
-
-    /**
-     * Create a thunk for a deferred effect operation with content hash.
-     * The content hash enables O(1) collision-free handler lookup.
+     *
+     * <p>The content hash is required — see {@link com.mezze.interpreter.nodes.continuation.OpCall}
+     * and the class-level note above. A previous no-hash constructor was
+     * killed to avoid the {@code #246}/{@code #55} silent-misroute bug
+     * class: forcing every caller through this constructor makes any
+     * unknown effect-hash source visible at compile time.
      */
     public MezzeThunk(String effectName, String operationName, Object arguments, Hash effectContentHash) {
         this.function = null;
@@ -137,35 +130,6 @@ public class MezzeThunk implements TruffleObject {
 
         CallTarget target = function.getCallTarget();
         Object[] closureValues = function.getClosureValues();
-        int closureLength = closureValues.length;
-
-        // Build arguments array with closure values prepended
-        Object[] fullArgs;
-        if (closureLength == 0) {
-            fullArgs = new Object[]{arguments};
-        } else {
-            fullArgs = new Object[closureLength + 1];
-            for (int i = 0; i < closureLength; i++) {
-                fullArgs[i] = closureValues[i];
-            }
-            fullArgs[closureLength] = arguments;
-        }
-
-        return callNode.call(target, fullArgs);
-    }
-
-    /**
-     * Execute the thunk with closure values already provided.
-     */
-    public Object executeWithClosure(IndirectCallNode callNode, Object[] closureValues) {
-        if (function == null) {
-            throw new RuntimeException(
-                "Cannot execute deferred effect thunk directly. " +
-                "Effect: " + effectName + ", operation: " + operationName
-            );
-        }
-
-        CallTarget target = function.getCallTarget();
         int closureLength = closureValues.length;
 
         // Build arguments array with closure values prepended

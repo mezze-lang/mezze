@@ -14,9 +14,12 @@ import com.mezze.language.typedast.Hash;
  * if two handlers both happen to have that field, even though they
  * implement different effects.
  *
- * <p>{@code effectHash} may be {@code null} only for legacy/synthetic
- * handlers that predate the runId-tag rollout; the dispatcher treats
- * null as "match any effect" for backward compatibility.
+ * <p>{@code effectHash} must be non-null in every production caller:
+ * task #55 tightened the dispatcher so a null hash on either side is
+ * treated as <em>no match</em> and emits a one-shot
+ * {@code [chain-dispatch WARN #246/#55]} naming the leak site. Any
+ * warning at runtime means a new dispatch path forgot to thread the
+ * hash — fix the caller, don't loosen the filter.
  *
  * @param handler    the impl record with fields op_name → MezzeFunction
  * @param effectHash content hash of the effect this handler implements

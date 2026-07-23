@@ -25,8 +25,10 @@ import com.mezze.language.typedast.Hash;
  *                   (effect_hash, op_name) — matching by op-name alone
  *                   silently picks the wrong handler when two effects
  *                   in scope declare an op with the same simple name.
- *                   {@code null} is a legacy escape hatch that degrades
- *                   to "match any effect"; new code MUST pass a real hash.
+ *                   Must be non-null in every production caller; the
+ *                   dispatcher treats {@code null} as <em>no match</em>
+ *                   and emits {@code [chain-dispatch WARN #246/#55]} at
+ *                   the leak site (task #55).
  */
 public record OpCall(String opName, Object args, Hash effectHash) {
 }

@@ -1228,21 +1228,24 @@ class TypedAstBuilder(
 
         val implDecl = implDeclarations[performerName]
         val importedImpl = importContext?.importedImpls?.get(performerName)
+        // No Hash.ZERO fallback: both hashes land on HandlerBindIR →
+        // HandlerChainEntry, and two chain entries carrying ZERO would
+        // silently collide on the strict (effect_hash, op_name) filter —
+        // the same misroute pattern as #246/#55. If a performer or its
+        // effect can't be resolved here, the perform site is structurally
+        // broken; fail loud so the caller surfaces a real typecheck error
+        // instead of shipping a poisoned handler entry.
         val performerHash = identifierContentHashes[BindingKey(null, performerName)]
             ?: implDecl?.contentHash
             ?: importedImpl?.contentHash
             ?: implDecl?.let { ParsedDeclHasher.hashPerformerDecl(it) }
-            ?: Hash("0".repeat(64))
+            ?: error("Performer '$performerName' has no content hash — cannot build handler chain entry")
 
         val effectName = implDecl?.effect?.localName
             ?: importedImpl?.effect?.localName
             ?: performerToEffect[performerName]
-        val effectDecl = effectName?.let { registry.lookupEffect(it) ?: importContext?.importedEffects?.get(it) }
-        val effectHash = if (effectName != null) {
-            resolveEffectHash(effectName)
-        } else {
-            Hash.ZERO
-        }
+            ?: error("Performer '$performerName' has no resolvable effect — cannot build handler chain entry")
+        val effectHash = resolveEffectHash(effectName)
 
         val paramsExpr = handler.params?.let { buildExpr(it, file) }
 

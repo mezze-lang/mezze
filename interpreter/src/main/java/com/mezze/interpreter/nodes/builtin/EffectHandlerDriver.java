@@ -348,9 +348,11 @@ public final class EffectHandlerDriver {
      * @param effectHash   content hash of the effect this handler implements,
      *                     used so the dispatcher disambiguates when two
      *                     in-scope effects declare ops with the same simple
-     *                     name (#246). May be null only for legacy callers
-     *                     that predate the runId-tag rollout; null falls
-     *                     back to "match any effect" so old behavior holds.
+     *                     name (#246). Must be non-null in every production
+     *                     caller — the dispatcher treats null on either side
+     *                     as no match and emits
+     *                     {@code [chain-dispatch WARN #246/#55]} at the
+     *                     leak site (task #55).
      * @param bodyNode     the body to execute; runs inside the fiber
      * @param bodyFrame    the materialized caller frame used to execute body
      *                     across suspend/resume cycles
