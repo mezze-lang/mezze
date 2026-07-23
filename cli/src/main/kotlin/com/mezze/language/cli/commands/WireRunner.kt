@@ -233,6 +233,10 @@ object WireRunner {
                         if (next != null) {
                             val reloadSecs = (System.nanoTime() - tReload) / 1e9
                             val changed = coalesced.firstOrNull() ?: appFile.name
+                            // Clear the visible screen so each save shows only
+                            // the fresh run (scrollback keeps the old output).
+                            // No-op when stderr isn't a TTY.
+                            System.err.print(console.clearScreen())
                             // Separator PRECEDES this run's output; it folds in
                             // how the previous run ended.
                             System.err.println(console.blank())

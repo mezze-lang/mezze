@@ -63,6 +63,15 @@ class DevConsole(
     /** A blank line — the spacing the caller inserts around program output. */
     fun blank(): String = ""
 
+    /**
+     * Clear the visible screen for a fresh run, WITHOUT wiping scrollback —
+     * the previous run's output is still reachable by scrolling up (Vite/Next
+     * convention). `ESC[H` homes the cursor, `ESC[2J` clears the screen.
+     * Returns "" when not a TTY (piped output / CI) so logs aren't corrupted
+     * with escape sequences. The caller decides WHEN to clear (on reload).
+     */
+    fun clearScreen(): String = if (color) "$ESC[H$ESC[2J" else ""
+
     private fun fmtSeconds(s: Double): String =
         if (s < 1.0) "${(s * 1000).toInt()}ms" else "${"%.2f".format(s)}s"
 

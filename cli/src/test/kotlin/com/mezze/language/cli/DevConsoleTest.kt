@@ -90,6 +90,20 @@ class DevConsoleTest {
     }
 
     @Test
+    fun `clearScreen emits home + clear when color, nothing when plain`() {
+        // TTY: home cursor (ESC[H) + clear screen (ESC[2J), NOT the
+        // scrollback-wiping ESC[3J (we preserve scrollback).
+        val tty = console(color = true).clearScreen()
+        assertTrue(tty.contains("${ESC}[H") && tty.contains("${ESC}[2J"),
+            "TTY clear should home + clear the screen, got: ${tty.replace(ESC, "<ESC>")}")
+        assertFalse(tty.contains("${ESC}[3J"),
+            "must NOT wipe scrollback (ESC[3J), got: ${tty.replace(ESC, "<ESC>")}")
+        // Non-TTY / piped: emit nothing so logs aren't corrupted.
+        assertEquals("", console(color = false).clearScreen(),
+            "plain mode must not emit any escape")
+    }
+
+    @Test
     fun `separator width stays bounded even with a long label`() {
         // A very long label shouldn't produce a negative-length rule / crash.
         val sep = console().separator("reloaded a-very-long-filename-that-exceeds-the-rule-width.mz · 1.23s")
