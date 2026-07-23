@@ -1108,6 +1108,22 @@ class MezzeTextDocumentService(
             }
         }
 
+        // Perform-handler hover: the cursor is on the performer name in
+        // `perform Console in do …`. Without this, the typed-AST lookup below
+        // resolves `Console` as a nullary constructor and shows a bare `{}`
+        // type. Instead, show which effect(s) this performer handles and a
+        // link to the impl. Gated on the word being immediately preceded by
+        // `perform ` on the line (a comma-separated handler list also counts,
+        // e.g. `perform A, B in …`).
+        run {
+            val beforeWord = line.substring(0, position.character.coerceIn(0, line.length))
+            val atHandlerPos = Regex("\\bperform\\b[^)]*$").containsMatchIn(beforeWord) &&
+                !Regex("\\bin\\b").containsMatchIn(beforeWord.substringAfterLast("perform"))
+            if (!atHandlerPos) return@run
+            val hover = performerHover(state, result, word) ?: return@run
+            return hover
+        }
+
         // Helper to format type with aliases
         fun formatType(type: MezzeType): String {
             return prettyPrintTypeWithAliases(type, state.typeAliases)
@@ -1608,6 +1624,39 @@ class MezzeTextDocumentService(
     }
 
     /**
+     * Hover text for a performer NAME used at a `perform X in …` site.
+     * Resolves `name` to the effect performer(s) it names — the local
+     * `impl <Effect> for <name>` decl(s), or an imported PERFORMER — and shows
+     * the effect handled plus a source link. Returns null if `name` isn't a
+     * known performer (so hover falls through to the generic paths).
+     */
+    private fun performerHover(state: DocumentState, result: TypeCheckResult?, name: String): String? {
+        fun codeBlock(code: String): String = "```mezze\n$code\n```"
+        val pm = state.parsedModule
+
+        // Local performer impls whose target is this name.
+        val localImpls = pm?.decls?.filterIsInstance<ParsedPerformerDecl>()
+            ?.filter { it.performerName == name } ?: emptyList()
+        if (localImpls.isNotEmpty()) {
+            val effects = localImpls.map { it.effect.localName }.distinct()
+            val handled = effects.joinToString(", ")
+            val body = codeBlock("performer $name  (handles $handled)")
+            val links = effects.joinToString("\n") { "implements effect `$it`" }
+            return "$body\n\n$links"
+        }
+
+        // Imported performer.
+        val importedPerformer = result?.resolvedImports
+            ?.find { it.localName == name && it.kind == ImportKind.PERFORMER }
+        if (importedPerformer != null) {
+            val from = importedPerformer.modulePath.takeIf { it.isNotEmpty() }
+                ?.let { "\n\n*from* `$it`" } ?: ""
+            return codeBlock("performer $name") + from
+        }
+        return null
+    }
+
+    /**
      * Format a ParsedTypeAnnotation to a readable string.
      */
     private fun formatTypeAnnotation(type: ParsedTypeAnnotation): String {
@@ -1821,6 +1870,31 @@ class MezzeTextDocumentService(
                 ?.let { return listOf(locToLocation(state.uri, it.loc)) }
             pm.decls.filterIsInstance<ParsedEffectDecl>().find { it.name == word }
                 ?.let { return listOf(locToLocation(state.uri, it.loc)) }
+        }
+
+        // 0b. Performer NAME at a `perform X in …` site → the `impl <Effect>
+        // for X` decl (local), else the imported performer's source. The
+        // typed-AST lookup below would otherwise resolve `X` as a nullary
+        // constructor and jump nowhere useful. Gated on the word sitting in a
+        // perform-handler position (after `perform`, before `in`).
+        run {
+            val pm = state.parsedModule ?: return@run
+            val beforeWord = line.substring(0, position.character.coerceIn(0, line.length))
+            val atHandlerPos = Regex("\\bperform\\b[^)]*$").containsMatchIn(beforeWord) &&
+                !Regex("\\bin\\b").containsMatchIn(beforeWord.substringAfterLast("perform"))
+            if (!atHandlerPos) return@run
+            // Local impl for this performer.
+            pm.decls.filterIsInstance<ParsedPerformerDecl>().find { it.performerName == word }
+                ?.let { return listOf(locToLocation(state.uri, it.loc)) }
+            // Imported performer → its defining module.
+            val import = result?.resolvedImports?.find { it.localName == word && it.kind == ImportKind.PERFORMER }
+            if (import != null) {
+                findCrossModuleDefLocationByName(import.modulePath, import.originalName)
+                    ?.let { return listOf(it) }
+                findCrossModuleDefInMemory(import.modulePath, import.originalName)
+                    ?.let { return listOf(it) }
+                findImportLoc(state, word)?.let { return listOf(it) }
+            }
         }
 
         // 1. Try TypedAST position lookup — finds the exact expression at cursor

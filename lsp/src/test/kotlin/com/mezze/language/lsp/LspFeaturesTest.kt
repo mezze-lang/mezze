@@ -402,6 +402,72 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `hover on a performer name at a perform site shows the effect it handles`() {
+        // Regression: hovering `MyConsole` in `perform MyConsole in do` used to
+        // show a bare `{}` (the nullary-constructor type). It should instead
+        // say it's a performer that handles the effect.
+        val src = """
+            type MyConsole = | MyConsole |
+
+            effect Greet where {
+              hello : {} -> {} <Greet>
+            }
+
+            impl Greet for MyConsole where {
+              hello = {} -> {}
+            }
+
+            let main = {} -> perform MyConsole in do
+              Greet.hello {}
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val performLine = src.lines().indexOfFirst { it.contains("perform MyConsole") }
+        val col = src.lines()[performLine].indexOf("MyConsole") + 2  // inside the word
+        val h = hoverAt(uri, performLine, col) ?: fail("no hover on the performer name")
+        val txt = hoverText(h)
+        assertTrue(txt.contains("performer") && txt.contains("Greet"),
+            "expected a performer hover naming the effect Greet, got:\n$txt")
+        assertFalse(txt.trim() == "```mezze\n{}\n```" || txt.contains("\n{}\n"),
+            "performer hover must not be the bare `{}` constructor type, got:\n$txt")
+    }
+
+    @Test
+    fun `goto-def on a performer name at a perform site jumps to its impl`() {
+        val src = """
+            type MyConsole = | MyConsole |
+
+            effect Greet where {
+              hello : {} -> {} <Greet>
+            }
+
+            impl Greet for MyConsole where {
+              hello = {} -> {}
+            }
+
+            let main = {} -> perform MyConsole in do
+              Greet.hello {}
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val performLine = src.lines().indexOfFirst { it.contains("perform MyConsole") }
+        val col = src.lines()[performLine].indexOf("MyConsole") + 2
+        val defs = server.textDocumentService.definition(DefinitionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(performLine, col)
+        }).get(5, TimeUnit.SECONDS)
+
+        val locs = if (defs.isLeft) defs.left else defs.right.map { Location(it.targetUri, it.targetRange) }
+        assertTrue(locs.isNotEmpty(), "expected a definition for the performer, got none")
+        val implLine = src.lines().indexOfFirst { it.trimStart().startsWith("impl Greet for MyConsole") }
+        assertTrue(locs.any { it.range.start.line == implLine },
+            "expected goto-def to land on the impl header (line $implLine), got: " +
+                locs.map { it.range.start.line })
+    }
+
+    @Test
     fun `find-implementations on an ability decl lists its impls`() {
         val (uri, src) = openSingleFile("""
             ability Show for 'a where {
