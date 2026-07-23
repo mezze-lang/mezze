@@ -1636,27 +1636,55 @@ class MezzeTextDocumentService(
         fun codeBlock(code: String): String = "```mezze\n$code\n```"
         val pm = state.parsedModule
 
+        // Resolve an effect decl (local or imported) to a clickable markdown
+        // link at its source, so the reader can dig into the effect from the
+        // performer hover. Falls back to a plain code span if the decl has no
+        // usable source loc.
+        fun effectLink(effectName: String): String {
+            val effectDecl = pm?.decls?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == effectName }
+                ?: result?.importedEffects?.get(effectName)
+            val file = effectDecl?.loc?.file
+            if (effectDecl != null && !file.isNullOrEmpty()) {
+                val defUri = if (file.startsWith("file:")) file else File(file).toURI().toString()
+                return "[`$effectName`]($defUri#L${effectDecl.loc.startLine},${effectDecl.loc.startCol})"
+            }
+            return "`$effectName`"
+        }
+
+        // Format one performer's ops as `op: Param -> Ret` lines, preferring the
+        // impl's own annotation, else the effect decl's op signature.
+        fun opLines(perf: ParsedPerformerDecl): String {
+            val effectDecl = pm?.decls?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == perf.effect.localName }
+                ?: result?.importedEffects?.get(perf.effect.localName)
+            val sigByName = effectDecl?.operations?.associateBy { it.name } ?: emptyMap()
+            return perf.operations.joinToString("\n") { op ->
+                val sig = sigByName[op.name]
+                val param = op.paramType ?: sig?.paramType
+                val ret = op.returnType ?: sig?.returnType
+                val ty = if (param != null && ret != null)
+                    "${formatTypeAnnotation(param)} -> ${formatTypeAnnotation(ret)}" else "…"
+                "  ${op.name}: $ty"
+            }
+        }
+
         // Local performer impls whose target is this name.
         val localImpls = pm?.decls?.filterIsInstance<ParsedPerformerDecl>()
             ?.filter { it.performerName == name } ?: emptyList()
-        if (localImpls.isNotEmpty()) {
-            val effects = localImpls.map { it.effect.localName }.distinct()
-            val handled = effects.joinToString(", ")
-            val body = codeBlock("performer $name  (handles $handled)")
-            val links = effects.joinToString("\n") { "implements effect `$it`" }
-            return "$body\n\n$links"
-        }
+        val perfs = if (localImpls.isNotEmpty()) localImpls
+            // Imported performer. Performers live in TypeCheckResult.importedImpls
+            // (keyed by name), NOT resolvedImports — the ResolvedImport builder
+            // has no PERFORMER case, so a `use …::{ Console }` performer is
+            // absent from resolvedImports entirely.
+            else result?.importedImpls?.get(name)?.let { listOf(it) } ?: emptyList()
+        if (perfs.isEmpty()) return null
 
-        // Imported performer. Performers live in TypeCheckResult.importedImpls
-        // (keyed by performer name), NOT resolvedImports — the ResolvedImport
-        // builder has no PERFORMER case, so a `use …::{ Console }` performer is
-        // absent from resolvedImports entirely.
-        val importedPerformer = result?.importedImpls?.get(name)
-        if (importedPerformer != null) {
-            val effect = importedPerformer.effect.localName
-            return codeBlock("performer $name  (handles $effect)") + "\n\nimplements effect `$effect`"
-        }
-        return null
+        val effects = perfs.map { it.effect.localName }.distinct()
+        val ops = perfs.joinToString("\n") { opLines(it) }
+        val header = codeBlock("performer $name where {\n$ops\n}".let {
+            if (ops.isBlank()) "performer $name" else it
+        })
+        val links = effects.joinToString("\n") { "implements effect ${effectLink(it)}" }
+        return "$header\n\n$links"
     }
 
     /**
@@ -7404,9 +7432,26 @@ class MezzeTextDocumentService(
     ) {
         val typeStr = prettyPrintTypeWithAliases(type, typeAliases)
         if (isUninformativeType(typeStr)) return
-        val lineIdx = (anchorLine - 1).coerceAtLeast(0).coerceAtMost(sourceLines.lastIndex)
+        var lineIdx = (anchorLine - 1).coerceAtLeast(0).coerceAtMost(sourceLines.lastIndex)
+        var col = anchorCol
+        // A multi-line body's loc can over-extend past its trailing blank lines
+        // onto the FIRST column of a following line (anchorCol == 0). Anchoring
+        // there drops a stray `: T` on top of the next decl (e.g. an `impl`
+        // header). Walk back to the last line that actually has content and
+        // anchor at its end instead.
+        if (col == 0) {
+            var i = lineIdx - 1
+            while (i >= 0 && sourceLines[i].isBlank()) i--
+            if (i < 0) return
+            lineIdx = i
+            col = sourceLines[i].length
+        }
+        // Never anchor a trailing type hint on a line that begins a new
+        // declaration — the body doesn't extend there.
+        val target = sourceLines.getOrNull(lineIdx)?.trimStart() ?: return
+        if (Regex("^(pub\\s+)?(let|impl|type|newtype|effect|ability|use)\\b").containsMatchIn(target)) return
         val hint = InlayHint()
-        hint.position = Position(lineIdx, anchorCol)
+        hint.position = Position(lineIdx, col)
         hint.setLabel(": $typeStr")
         hint.kind = InlayHintKind.Type
         hint.paddingLeft = true

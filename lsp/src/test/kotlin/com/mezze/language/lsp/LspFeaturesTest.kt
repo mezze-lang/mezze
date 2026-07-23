@@ -427,10 +427,17 @@ class LspFeaturesTest {
         val col = src.lines()[performLine].indexOf("MyConsole") + 2  // inside the word
         val h = hoverAt(uri, performLine, col) ?: fail("no hover on the performer name")
         val txt = hoverText(h)
-        assertTrue(txt.contains("performer") && txt.contains("Greet"),
-            "expected a performer hover naming the effect Greet, got:\n$txt")
-        assertFalse(txt.trim() == "```mezze\n{}\n```" || txt.contains("\n{}\n"),
+        assertTrue(txt.contains("performer MyConsole"),
+            "expected a performer hover for MyConsole, got:\n$txt")
+        // Must NOT be the bare `{}` constructor type (the regression).
+        assertFalse(txt.trimStart().startsWith("```mezze\n{}\n```"),
             "performer hover must not be the bare `{}` constructor type, got:\n$txt")
+        // Lists the implemented op(s).
+        assertTrue(txt.contains("hello"),
+            "expected the performer's `hello` op listed, got:\n$txt")
+        // The effect is a clickable markdown link back to its decl.
+        assertTrue(Regex("""implements effect \[`Greet`\]\(""").containsMatchIn(txt),
+            "expected a clickable link to effect Greet, got:\n$txt")
     }
 
     @Test
@@ -604,6 +611,40 @@ class LspFeaturesTest {
         assertTrue(
             hints.any { it.kind == InlayHintKind.Type },
             "expected at least one Type inlay hint for a multi-line let, got: ${hints.map { it.kind to labelText(it) }}"
+        )
+    }
+
+    @Test
+    fun `no trailing type hint bleeds onto the next declaration`() {
+        // Regression: a multi-line match-body lambda whose body loc over-extends
+        // past its trailing blank lines used to drop a stray `: Str` at column 0
+        // of the FOLLOWING declaration (an `impl` header). Assert no hint lands
+        // on the impl line.
+        val src = """
+            type C = | C |
+
+            effect Fmt where {
+              fmt : { x: Str } -> Str <Fmt>
+            }
+
+            let describe : { x: Str } -> Str = { x } ->
+              match x is
+                _ -> x
+
+            impl Fmt for C where {
+              fmt = { x } -> x
+            }
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val hints = inlayHints(uri, src)
+        val implLine = src.lines().indexOfFirst { it.trimStart().startsWith("impl Fmt") }
+        assertTrue(implLine >= 0, "impl line not found")
+        assertTrue(
+            hints.none { it.position.line == implLine },
+            "no inlay hint should land on the impl header line $implLine, got: " +
+                hints.map { it.position.line to labelText(it) }
         )
     }
 
