@@ -2075,6 +2075,37 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `dot completion recovers Int on a cold-broken interpolation via strip-and-reparse`() {
+        // COLD open of an already-broken `$(x.)` — no editing history, so nothing
+        // is cached. The dangling `.` is a parse error and no typed info for x
+        // exists. Strip-and-reparse must delete the `.`, re-typecheck (`$(x)` is
+        // only a TYPE error, so x IS Int), and offer Int methods.
+        val coldBroken = "use std::effects::log::{ println, Console }\n" +
+            "let main = {} -> perform Console in do\n" +
+            "  let x = help { a = 5, b = 6 }\n" +
+            "  println { msg = \"hi \$(x.)\" }\n" +
+            "let help = { a, b } -> a + b\n"
+        val (uri, _) = openSingleFile(coldBroken)  // opened directly in broken state
+        client.awaitDiagnostics(uri, 5_000)
+        val line = "  println { msg = \"hi \$(x."
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(3, line.length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val methods = comps.filter { it.kind == CompletionItemKind.Method }.mapNotNull { it.detail }
+        // Strip-and-reparse should recover x : Int. If it can't (returns nothing)
+        // that's still acceptable per the "never dump" rule — but assert NO leak.
+        val foreign = methods.filter { d ->
+            listOf("Float.", "Seq.", "Map.", "Set.", "Option.", "Result.", "List.").any { d.startsWith(it) }
+        }
+        assertTrue(foreign.isEmpty(),
+            "cold-broken must not dump foreign-type methods, got: ${foreign.take(8)}")
+        assertTrue(methods.any { it == "Int.to_str" },
+            "strip-and-reparse must recover Int methods (Int.to_str), got: ${methods.take(10)}")
+    }
+
+    @Test
     fun `dot completion recovers Int from a type-error interpolation state`() {
         // User's case: `"$(x)"` where x : Int is a TYPE error (interpolation
         // needs Str) but PARSES fine — x IS Int in the partial typed module.

@@ -3472,7 +3472,7 @@ class MezzeTextDocumentService(
         // Find the receiver's type — either by binding-scope lookup (named
         // identifier) or by typed-AST position lookup (any expression).
         val receiverType = if (receiverName != null) {
-            findReceiverType(receiverName, result, position, state.uri)
+            findReceiverType(receiverName, result, position, state)
         } else {
             findReceiverTypeForExpressionAt(state, position, result)
         } ?: run {
@@ -3971,7 +3971,8 @@ class MezzeTextDocumentService(
 
 
     /** Find the type of a receiver identifier at a given position. */
-    private fun findReceiverType(name: String, result: TypeCheckResult, position: Position, currentUri: String): MezzeType? {
+    private fun findReceiverType(name: String, result: TypeCheckResult, position: Position, state: DocumentState): MezzeType? {
+        val currentUri = state.uri
         // Check top-level bindings via TypedModule
         val typedBinding = result.typedModule?.decls
             ?.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
@@ -4010,9 +4011,88 @@ class MezzeTextDocumentService(
                 ?.takeIf { it !is MezzeType.VarType }
                 ?.let { return it }
         }
+
+        // Last resort — strip-and-reparse. On a COLD broken `x.` (opened
+        // already broken, no editing history so nothing is cached), the dangling
+        // `.` is a parse error and no typed info for `x` exists anywhere. But the
+        // fix is mechanical: delete the `.` the user just typed, re-typecheck
+        // that snapshot in memory, and read `x`'s type from it — `"…$(x)…"` is
+        // only a TYPE error (x IS Int), so it parses and types fine. Best-effort:
+        // any failure yields null and we fall through to the VarType/empty path.
+        stripDotAndResolveReceiver(name, state, position)
+            ?.takeIf { it !is MezzeType.VarType }
+            ?.let { return it }
+
         // Nothing concrete anywhere — return the VarType hit (if any) so the
         // caller still knows the binding EXISTS, even if unresolved.
         return local
+    }
+
+    /**
+     * #159/interp cold-broken recovery: delete the `.` at the cursor from the
+     * current buffer, re-typecheck that snapshot in memory, and resolve the
+     * receiver `name`'s type from the fresh module. Returns null on any failure
+     * (still a parse error, name not found, etc.). Cheap enough for a completion
+     * request — only runs when every cached lookup already failed.
+     */
+    private fun stripDotAndResolveReceiver(
+        name: String,
+        state: DocumentState,
+        position: Position,
+    ): MezzeType? {
+        return try {
+            val lines = state.content.lines().toMutableList()
+            val li = position.line
+            if (li !in lines.indices) return null
+            val line = lines[li]
+            // The `.` is the char immediately before the cursor (we're at `x.|`).
+            val dotIdx = position.character - 1
+            if (dotIdx < 0 || dotIdx >= line.length || line[dotIdx] != '.') return null
+            // COMPLETE the dangling dot into a valid, side-effect-free method
+            // call so the module TYPECHECKS (Success), not just parses. This
+            // matters because a forward-referenced polymorphic receiver
+            // (`let x = help{…}`) is only baked to its concrete type in a fully
+            // SOLVED module — a mere type error (e.g. `$(x)` needing Str) leaves
+            // it an unresolved tyvar. `to_dbg_str {}` works on ANY type and
+            // returns Str (so it satisfies string-interpolation too), making the
+            // synthesized edit typecheck regardless of the receiver.
+            lines[li] = line.substring(0, dotIdx) + ".to_dbg_str {}" + line.substring(dotIdx + 1)
+            val stripped = lines.joinToString("\n")
+
+            val fileName = uriToPath(state.uri)?.fileName?.toString()
+            val parsed = parser.parseWithRecovery(stripped, file = fileName).module
+            val workspaceRoot = server.getWorkspaceRoot()
+            val projectRoot = if (workspaceRoot != null) Paths.get(workspaceRoot)
+                else uriToPath(state.uri)?.parent ?: Paths.get(".")
+            val typed = when (val r = typeChecker.checkParsedModule(parsed, projectRoot, null, enablePrelude = true)) {
+                is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success -> r.typedModule
+                is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> r.typedModule
+            } ?: return null
+
+            // Prefer the type at the RECEIVER'S USE SITE. The stripped `$(x)`
+            // still USES `x` (right where the dot was), and that TypedVar carries
+            // the RESOLVED type (Int) — whereas the do-block `let x = help{…}`
+            // binding stores an unresolved tyvar for a forward-ref poly call
+            // (#159/#160 family). Look up the type at the char just before where
+            // the dot was (dotIdx, now the last char of `x`).
+            val useLine = li + 1
+            val useCol = dotIdx  // 1-based col of the receiver's last char (`x` ends just before the dot)
+            (TypedAstLookup.findAtPosition(typed, useLine, useCol) as? TypedAstLookup.LookupResult.Expr)
+                ?.expr?.type
+                ?.let { if (it is MezzeType.SuspendedType) it.valueType else it }
+                ?.takeIf { it !is MezzeType.VarType }
+                ?.let { return it }
+
+            // Fallbacks: top-level decl, then local binding's stored type.
+            typed.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+                .firstOrNull { it.name == name }
+                ?.scheme?.type
+                ?.takeIf { it !is MezzeType.VarType }
+                ?.let { return it }
+            findLocalBindingType(name, typed, position.line + 1)?.takeIf { it !is MezzeType.VarType }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /**
