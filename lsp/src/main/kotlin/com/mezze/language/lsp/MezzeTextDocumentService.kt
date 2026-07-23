@@ -4096,6 +4096,64 @@ class MezzeTextDocumentService(
     }
 
     /**
+     * Expression-chain analogue of [stripDotAndResolveReceiver]. For a
+     * dangling dot after a call/index/group (`x.is_odd {}.`, `nums.first {}.`)
+     * the receiver has no single name to look up — so we COMPLETE the dot into
+     * a valid, side-effect-free `.to_dbg_str {}` call, typecheck the whole
+     * module to Success, then read the type of the enclosing expression that
+     * ENDS at the original closing delimiter (the receiver chain's result).
+     *
+     * This recovers the type even when the current buffer is a hard parse
+     * error (dangling `.`) or a type error (chain result isn't Str inside an
+     * interpolation) — the same states that leave the live typed module
+     * unusable for this lookup.
+     */
+    private fun stripDotAndResolveExpressionReceiver(
+        state: DocumentState,
+        position: Position,
+    ): MezzeType? {
+        return try {
+            val lines = state.content.lines().toMutableList()
+            val li = position.line
+            if (li !in lines.indices) return null
+            val line = lines[li]
+            val dotIdx = position.character - 1
+            if (dotIdx < 0 || dotIdx >= line.length || line[dotIdx] != '.') return null
+            val closerIdx = dotIdx - 1
+            if (closerIdx < 0) return null
+            val closer = line[closerIdx]
+            if (closer != '}' && closer != ')' && closer != ']') return null
+
+            // Complete the dangling dot into a valid Str-returning call so the
+            // module TYPECHECKS (Success). `to_dbg_str {}` works on any type.
+            lines[li] = line.substring(0, dotIdx) + ".to_dbg_str {}" + line.substring(dotIdx + 1)
+            val stripped = lines.joinToString("\n")
+
+            val fileName = uriToPath(state.uri)?.fileName?.toString()
+            val parsed = parser.parseWithRecovery(stripped, file = fileName).module
+            val workspaceRoot = server.getWorkspaceRoot()
+            val projectRoot = if (workspaceRoot != null) Paths.get(workspaceRoot)
+                else uriToPath(state.uri)?.parent ?: Paths.get(".")
+            val typed = when (val r = typeChecker.checkParsedModule(parsed, projectRoot, null, enablePrelude = true)) {
+                is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success -> r.typedModule
+                is com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Failure -> r.typedModule
+            } ?: return null
+
+            // The receiver chain still ends at the same closing delimiter
+            // (col closerIdx, 0-based → closerIdx+1 1-based). Read the widest
+            // expr ending there — the call whose result we want.
+            val endLine = li + 1
+            val endCol = closerIdx + 1
+            TypedAstLookup.findExprEndingAt(typed, endLine, endCol)
+                ?.type
+                ?.let { if (it is MezzeType.SuspendedType) it.valueType else it }
+                ?.takeIf { it !is MezzeType.VarType }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
      * Find the receiver type for an arbitrary expression-receiver dot
      * completion (`[1,2,3].`, `"hi".`, `(x + y).`, `xs[0].`, `nums.first {}.`).
      *
@@ -4119,13 +4177,31 @@ class MezzeTextDocumentService(
         val dotIdx = beforeCursor.lastIndexOf('.')
         if (dotIdx < 0) return null
 
-        // 1. Typed-AST lookup at column-just-before-the-dot.
+        val charBeforeDot = dotIdx - 1
+        // Is the receiver a call/index/group ending in a closing delimiter
+        // (`x.is_odd {}.`, `nums.first {}.`, `(a + b).`, `xs[0].`)? If so the
+        // receiver type is the ENCLOSING expression that ENDS at that
+        // delimiter — its result type — NOT the innermost node there (which
+        // findAtPosition returns: the argument record `{ it }` or the group's
+        // inner expr). findExprEndingAt picks the widest expr ending at the
+        // delimiter (the call), giving us the call's result type.
+        val endsInCloser = charBeforeDot >= 0 &&
+            line[charBeforeDot].let { it == '}' || it == ')' || it == ']' }
+
+        // 1. Typed-AST lookup.
         val typedModule = result.typedModule ?: lastSuccessfulResult[state.uri]?.typedModule
-        if (typedModule != null) {
-            val charBeforeDot = dotIdx - 1
-            if (charBeforeDot >= 0) {
-                val lookupLine = position.line + 1
-                val lookupCol = charBeforeDot + 1
+        if (typedModule != null && charBeforeDot >= 0) {
+            val lookupLine = position.line + 1
+            val lookupCol = charBeforeDot + 1
+            if (endsInCloser) {
+                val enclosing = TypedAstLookup.findExprEndingAt(typedModule, lookupLine, lookupCol)
+                val t = enclosing?.type
+                if (t != null && t !is MezzeType.VarType) return t
+                // Enclosing call resolved to a tyvar (mid-edit / forward-ref /
+                // type-error state) — complete-the-dot to recover it, same as
+                // the bare-name path.
+                stripDotAndResolveExpressionReceiver(state, position)?.let { return it }
+            } else {
                 val lookup = TypedAstLookup.findAtPosition(typedModule, lookupLine, lookupCol)
                 if (lookup is TypedAstLookup.LookupResult.Expr) {
                     val t = lookup.expr.type

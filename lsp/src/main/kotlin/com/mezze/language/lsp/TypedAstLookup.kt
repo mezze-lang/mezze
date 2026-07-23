@@ -94,7 +94,101 @@ object TypedAstLookup {
     }
 
     /**
-     * Find the innermost expression at a position within an expression tree.
+     * Find the OUTERMOST typed expression whose span *ends* exactly at
+     * `(line, col)`. Used by dot-completion to resolve the receiver of a
+     * chain like `x.is_odd {}.` — the char just before the `.` is the `}`
+     * closing the call's argument, and the receiver we want is the whole
+     * call `x.is_odd {}` (type `Bool`), NOT the innermost node at that
+     * position (which `findAtPosition` returns — the argument record `{ it }`).
+     *
+     * We walk into children while a child still ends at the target, then
+     * unwind: the FIRST ancestor whose end matches but has no
+     * same-ending child is the call/index/group we want. Concretely we
+     * collect every expr whose `(endLine, endCol)` equals the target and
+     * return the one with the widest span (earliest start) — that's the
+     * enclosing call, not the inner arg record.
+     */
+    fun findExprEndingAt(module: TypedModule, line: Int, col: Int): TypedExpr? {
+        var best: TypedExpr? = null
+        fun consider(e: TypedExpr) {
+            if (e.loc.endLine == line && e.loc.endCol == col) {
+                val b = best
+                if (b == null || startsBefore(e.loc, b.loc)) best = e
+            }
+        }
+        for (decl in module.decls) {
+            if (decl is TypedLetDecl) walkExprs(decl.value, ::consider)
+        }
+        return best
+    }
+
+    /** True if `a` starts strictly before `b` (wider span on the left). */
+    private fun startsBefore(a: Loc, b: Loc): Boolean {
+        if (a.startLine != b.startLine) return a.startLine < b.startLine
+        return a.startCol < b.startCol
+    }
+
+    /** Pre-order visit of every TypedExpr in the tree. */
+    private fun walkExprs(expr: TypedExpr, visit: (TypedExpr) -> Unit) {
+        visit(expr)
+        when (expr) {
+            is TypedCall -> { walkExprs(expr.function, visit); walkExprs(expr.arg, visit) }
+            is TypedLambda -> walkExprs(expr.body, visit)
+            is TypedRecord -> expr.entries.forEach { entry ->
+                when (entry) {
+                    is TypedRecordEntry.Field -> walkExprs(entry.value, visit)
+                    is TypedRecordEntry.Spread -> walkExprs(entry.expr, visit)
+                }
+            }
+            is TypedFieldAccess -> walkExprs(expr.record, visit)
+            is TypedRecordUpdate -> {
+                walkExprs(expr.record, visit)
+                expr.updates.forEach { entry ->
+                    when (entry) {
+                        is TypedRecordEntry.Field -> walkExprs(entry.value, visit)
+                        is TypedRecordEntry.Spread -> walkExprs(entry.expr, visit)
+                    }
+                }
+            }
+            is TypedVariantConstruct -> expr.payload?.let { walkExprs(it, visit) }
+            is TypedMatch -> {
+                walkExprs(expr.scrutinee, visit)
+                expr.cases.forEach { case ->
+                    case.guard?.let { walkExprs(it, visit) }
+                    walkExprs(case.body, visit)
+                }
+            }
+            is TypedIf -> {
+                walkExprs(expr.condition, visit)
+                walkExprs(expr.thenBranch, visit)
+                walkExprs(expr.elseBranch, visit)
+            }
+            is TypedBlock -> {
+                expr.statements.forEach { stmt ->
+                    when (stmt) {
+                        is TypedStatement.Let -> walkExprs(stmt.value, visit)
+                        is TypedStatement.Expr -> walkExprs(stmt.expr, visit)
+                    }
+                }
+                walkExprs(expr.result, visit)
+            }
+            is TypedSeq -> expr.elements.forEach { elem ->
+                when (elem) {
+                    is TypedSeqElement.Regular -> walkExprs(elem.expr, visit)
+                    is TypedSeqElement.Spread -> walkExprs(elem.expr, visit)
+                }
+            }
+            is TypedPerform -> walkExprs(expr.body, visit)
+            is TypedPipe -> { walkExprs(expr.left, visit); walkExprs(expr.right, visit) }
+            is TypedStringLit -> expr.parts.filterIsInstance<TypedStringPart.Interpolation>()
+                .forEach { walkExprs(it.expr, visit) }
+            is TypedVar, is TypedIntLit, is TypedNatLit, is TypedFloatLit,
+            is TypedBoolLit, is TypedCharLit, is TypedFracLit, is TypedPerformOp -> {}
+        }
+    }
+
+    /**
+     * Find the innermost expression at a given position within an expression tree.
      * Returns (expr, parent) or null.
      */
     private fun findInExpr(expr: TypedExpr, line: Int, col: Int, parent: TypedExpr? = null): Pair<TypedExpr, TypedExpr?>? {

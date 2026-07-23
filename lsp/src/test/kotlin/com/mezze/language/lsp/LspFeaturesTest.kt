@@ -2106,6 +2106,49 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `dot completion on a call-chain resolves the call result not the arg record`() {
+        // Reported bug: `$(x.is_odd {}.)` inside interpolation gave `it` — the
+        // is_odd ARGUMENT record `{ it }` — instead of Bool methods. The char
+        // before the trailing `.` is the `}` closing the arg, and the innermost
+        // node there is the arg record. The receiver we actually want is the
+        // ENCLOSING call `x.is_odd {}`, whose result is Bool. Completion must
+        // therefore offer Bool methods (to_str / to_dbg_str), never `it`.
+        val valid = "use std::effects::log::{ println, Console }\n" +
+            "let main = {} -> perform Console in do\n" +
+            "  let x = help { a = 5, b = 6 }\n" +
+            "  println { msg = \"hi \$(x.is_odd {})\" }\n" +
+            "let help = { a, b } -> a + b\n"
+        val (uri, _) = openSingleFile(valid)
+        client.awaitDiagnostics(uri, 5_000)
+        // Type the trailing dot on the call result: `is_odd {})` → `is_odd {}.)`.
+        val edited = valid.replace("is_odd {})", "is_odd {}.)")
+        server.textDocumentService.didChange(DidChangeTextDocumentParams(
+            VersionedTextDocumentIdentifier(uri, 2),
+            listOf(TextDocumentContentChangeEvent(edited))
+        ))
+        Thread.sleep(800)
+        val line = "  println { msg = \"hi \$(x.is_odd {}."
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(3, line.length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        // The arg-record's `it` field must NEVER be offered as a completion here.
+        assertTrue(comps.none { it.label == "it" && it.kind == CompletionItemKind.Field },
+            "must not offer the is_odd arg record's `it` field; got: ${comps.take(12).map { it.label }}")
+        if (comps.isEmpty()) return  // resolution failure acceptable (never-dump), but no `it`
+        val methods = comps.filter { it.kind == CompletionItemKind.Method }.mapNotNull { it.detail }
+        // Receiver is Bool → Bool renderers, no foreign-type leak.
+        val foreign = methods.filter { d ->
+            listOf("Float.", "Seq.", "Map.", "Set.", "Option.", "Result.", "List.").any { d.startsWith(it) }
+        }
+        assertTrue(foreign.isEmpty(),
+            "call-chain receiver Bool must not leak foreign methods, got: ${foreign.take(8)}")
+        assertTrue(methods.any { it == "Bool.to_str" || it == "Bool.to_dbg_str" },
+            "expected Bool renderer methods on the call result, got: ${methods.take(12)}")
+    }
+
+    @Test
     fun `dot completion recovers Int from a type-error interpolation state`() {
         // User's case: `"$(x)"` where x : Int is a TYPE error (interpolation
         // needs Str) but PARSES fine — x IS Int in the partial typed module.
