@@ -32,6 +32,8 @@ import com.mezze.language.truffleir.PatternIR;
 import com.mezze.language.truffleir.CallIndirectScalarIR;
 import com.mezze.language.truffleir.DictMethodCallIR;
 import com.mezze.language.truffleir.EffectBindingIR;
+import com.mezze.language.truffleir.HandleIR;
+import com.mezze.language.truffleir.HandlerBindIR;
 import com.mezze.language.truffleir.PartialApplyDirectIR;
 import com.mezze.language.truffleir.PerformOpIR;
 import com.mezze.language.truffleir.FracLitIR;
@@ -281,6 +283,23 @@ public final class BytecodeCompiler {
             // `act` lambda directly (no wrapper record on the stack)
             // to preserve the marker fast path.
             return supportsNode(p.getArg(), argCount);
+        }
+        if (node instanceof HandleIR h) {
+            // Path D8 (endgame): every HandleIR compiles to inline BDSL
+            // ops (PushHandlerChain / body / PopHandlerChain wrapped in
+            // TryCatchOtherwise with UnwrapAbortValue in the catch branch).
+            // See emit for shape. Path D single-shot semantics apply — the
+            // handler impls that use multi-shot resume (Generator.AsStream)
+            // won't behave correctly, but those live in stdlib functions
+            // that already carry their own effect-safety story; if a user
+            // writes a multi-shot handler in a BDSL-compiled fn they get
+            // fall-through-only semantics (same as PerformD).
+            for (HandlerBindIR hb : h.getHandlers()) {
+                if (hb.getParams() != null && !supportsNode(hb.getParams(), argCount)) {
+                    return false;
+                }
+            }
+            return supportsNode(h.getBody(), argCount);
         }
         if (node instanceof WriteLocalIR w) {
             return supportsNode(w.getValue(), argCount);
@@ -762,6 +781,13 @@ public final class BytecodeCompiler {
         }
         if (node instanceof WriteLocalIR w) return hasTailCall(w.getValue());
         if (node instanceof PerformOpIR p) return hasTailCall(p.getArg());
+        if (node instanceof HandleIR h) {
+            if (hasTailCall(h.getBody())) return true;
+            for (HandlerBindIR hb : h.getHandlers()) {
+                if (hb.getParams() != null && hasTailCall(hb.getParams())) return true;
+            }
+            return false;
+        }
         if (node instanceof EffectBindingIR) return false;
         if (node instanceof InterpolatedStringIR is) {
             for (StringPartIR p : is.getParts()) {
@@ -1294,6 +1320,10 @@ public final class BytecodeCompiler {
             b.endPerform();
             return;
         }
+        if (node instanceof HandleIR h) {
+            emitHandle(h, b, argCount, localMap);
+            return;
+        }
         if (node instanceof CallIndirectScalarIR ci) {
             // Lower as CallIndirect(function, MakeRecord(argFieldNames, args)).
             // This mirrors InvokeScalarNNode's fallback path when no
@@ -1606,6 +1636,89 @@ public final class BytecodeCompiler {
         if (!(node.getArg() instanceof com.mezze.language.truffleir.MakeRecordIR mr)) return false;
         if (mr.getFields().size() != 1) return false;
         return "act".equals(mr.getFields().get(0).getName());
+    }
+
+    /**
+     * Path D8 endgame — lower a {@link HandleIR} entirely inline in BDSL
+     * with zero heap alloc per Handle. See project_d8_handleir_design.md.
+     *
+     * <p>Shape per handler (nested outermost-first so first handler in list
+     * is outermost, matching {@code TruffleCompiler.kt:638}):
+     *
+     * <pre>
+     * Block {
+     *   local resultSlot
+     *   TryCatchOtherwise(otherwiseGen = { PopHandlerChain }):
+     *     try:  Block {
+     *             PushHandlerChain(hash, handler)   // handler on stack
+     *             StoreLocal(resultSlot, body)
+     *           }
+     *     catch: Block {
+     *              StoreLocal(resultSlot, UnwrapAbortValue(LoadException))
+     *              PopHandlerChain
+     *            }
+     *   LoadLocal(resultSlot)                       // the value
+     * }
+     * </pre>
+     *
+     * <p>Both normal and abort exits pop the chain exactly once. Non-abort
+     * exceptions rethrow from UnwrapAbortValue without popping the chain —
+     * matches AST behavior; the chain is truncated by higher-level frame
+     * cleanup on function exit.
+     *
+     * <p>Nested handlers (perform A in perform B in body) compose by
+     * wrapping in reverse: emit the innermost B first as {@code body},
+     * then A wraps that.
+     */
+    private void emitHandle(HandleIR h, MezzeBytecodeRootNodeGen.Builder b,
+                            int argCount, BytecodeLocal[] localMap) {
+        emitHandleNested(h.getHandlers(), 0, h.getBody(), b, argCount, localMap);
+    }
+
+    private void emitHandleNested(java.util.List<HandlerBindIR> handlers, int idx,
+                                  NodeIR body,
+                                  MezzeBytecodeRootNodeGen.Builder b,
+                                  int argCount, BytecodeLocal[] localMap) {
+        if (idx >= handlers.size()) {
+            emitNode(body, b, argCount, localMap);
+            return;
+        }
+        HandlerBindIR hb = handlers.get(idx);
+        b.beginBlock();
+        BytecodeLocal resultSlot = b.createLocal();
+        b.beginTryCatchOtherwise(() -> {
+            // otherwise (normal exit): pop the chain
+            b.emitPopHandlerChain();
+        });
+        // === try branch ===
+        b.beginBlock();
+        // Push handler on chain
+        b.beginPushHandlerChain(hb.getEffectHash());
+        if (hb.getParams() != null) {
+            b.beginLookupParameterizedHandlerByHash(hb.getHandlerHash());
+            emitNode(hb.getParams(), b, argCount, localMap);
+            b.endLookupParameterizedHandlerByHash();
+        } else {
+            b.emitLookupHandlerByHash(hb.getHandlerHash());
+        }
+        b.endPushHandlerChain();
+        // Body (recursing for next handler / final body)
+        b.beginStoreLocal(resultSlot);
+        emitHandleNested(handlers, idx + 1, body, b, argCount, localMap);
+        b.endStoreLocal();
+        b.endBlock();
+        // === catch branch ===
+        b.beginBlock();
+        b.beginStoreLocal(resultSlot);
+        b.beginUnwrapAbortValue();
+        b.emitLoadException();
+        b.endUnwrapAbortValue();
+        b.endStoreLocal();
+        b.emitPopHandlerChain();
+        b.endBlock();
+        b.endTryCatchOtherwise();
+        b.emitLoadLocal(resultSlot);
+        b.endBlock();
     }
 
     /**

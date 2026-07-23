@@ -1147,6 +1147,175 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Path D8 (Handle @Operation, endgame Shape B — see
+     * docs/perf/bdsl-effects-path-d-2026-07.md §D8).
+     *
+     * <p>Push the handler value (popped from the operand stack) onto the
+     * per-thread handler chain, tagged with {@code effectHash} so
+     * {@link BdslYieldDispatch#dispatch} finds it by (effectHash, opName).
+     * Pairs with {@link PopHandlerChain}. The emit-site brackets the body
+     * with these two ops inside a {@code TryCatchOtherwise} so both normal
+     * and abort exits pop the chain — no fiber, no lambda, no dispatch
+     * object, no heap alloc per handle.
+     *
+     * <p>Void op: consumes the handler, produces nothing.
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    public static final class PushHandlerChain {
+        @TruffleBoundary
+        @Specialization
+        public static void doPush(Hash effectHash, Object handler, @Bind Node node) {
+            if (!(handler instanceof MezzeRecord rec)) {
+                throw new RuntimeException(
+                    "Handler must be a record, got: "
+                    + (handler == null ? "null" : handler.getClass().getSimpleName()));
+            }
+            // Scope hook: initialize_scope creates the scope value; store
+            // (scope, prevContextScope) on the D8 scope stack for the
+            // paired PopHandlerChain to invoke finalize_scope + restore.
+            // No-alloc common case (no hooks): the stack push writes null
+            // and PopHandlerChain sees the null and skips.
+            Object initFn = rec.getField(
+                com.mezze.language.ast.ScopedEffectConstants.INITIALIZE_SCOPE);
+            Object scope = null;
+            Object prevScope = null;
+            if (initFn instanceof MezzeFunction fn) {
+                scope = D8ScopeHooks.invokeInitializeScope(fn);
+                prevScope = D8ScopeHooks.installScope(node, scope);
+            }
+            com.mezze.interpreter.nodes.continuation.EffectFiber
+                .pushHandlerOnChain(rec, effectHash);
+            com.mezze.interpreter.nodes.continuation.EffectFiber
+                .enterBdslHandleWithScope(scope, prevScope);
+        }
+    }
+
+    /**
+     * Path D8: pop the innermost handler off the per-thread chain.
+     * Emitted twice per Handle by the compiler — once in the "otherwise"
+     * (normal exit) branch of TryCatchOtherwise and once in the "catch"
+     * (abort exit) branch — so the chain is always balanced regardless of
+     * how the body exits.
+     */
+    @Operation
+    public static final class PopHandlerChain {
+        @TruffleBoundary
+        @Specialization
+        public static void doPop(@Bind Node node) {
+            // Read scope hook state from the D8 stack BEFORE popping the
+            // chain (the chain entry still points at the handler whose
+            // finalize_scope we want to invoke).
+            var handler = com.mezze.interpreter.nodes.continuation.EffectFiber
+                .peekTopHandlerRecord();
+            var frame = com.mezze.interpreter.nodes.continuation.EffectFiber
+                .peekBdslHandleScope();
+            com.mezze.interpreter.nodes.continuation.EffectFiber
+                .popHandlerOffChain();
+            com.mezze.interpreter.nodes.continuation.EffectFiber
+                .exitBdslHandle();
+            if (frame != null && handler != null) {
+                Object finFn = handler.getField(
+                    com.mezze.language.ast.ScopedEffectConstants.FINALIZE_SCOPE);
+                if (finFn instanceof MezzeFunction fn) {
+                    D8ScopeHooks.invokeFinalizeScope(fn, frame.scope);
+                }
+                D8ScopeHooks.restoreScope(node, frame.prevScope);
+            }
+        }
+    }
+
+    /**
+     * Path D8: look up the pre-constructed handler record for a
+     * non-parameterized performer by content hash. Mirrors
+     * {@code HandlerLookupNode.lookupInContext} — reads from
+     * {@code MezzeContext.handlersByHash}, throws loudly on miss.
+     *
+     * <p>Zero stack input; produces the handler record.
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    public static final class LookupHandlerByHash {
+        @Specialization
+        public static Object doLookup(Hash contentHash, @Bind Node node) {
+            com.mezze.interpreter.runtime.MezzeContext ctx =
+                com.mezze.interpreter.runtime.MezzeContext.get(node);
+            Object handler = ctx.lookupHandler(contentHash);
+            if (!(handler instanceof MezzeRecord)) {
+                throw new RuntimeException(
+                    "Handler not found for: " + contentHash.getHex());
+            }
+            return handler;
+        }
+    }
+
+    /**
+     * Path D8: look up a parameterized performer's handler record by
+     * calling its factory CallTarget with the user-provided params record.
+     * Mirrors {@code ParameterizedHandlerLookupNode.lookupInContextWithParams}.
+     *
+     * <p>Consumes params record from stack; produces the handler record.
+     */
+    @Operation
+    @ConstantOperand(type = Hash.class)
+    public static final class LookupParameterizedHandlerByHash {
+        @TruffleBoundary
+        @Specialization
+        public static Object doLookup(Hash contentHash, Object params, @Bind Node node) {
+            var lang = MezzeLanguage.get(node);
+            var ct = lang.getCachedStdlibCallTarget(contentHash);
+            if (ct != null) {
+                MezzeFunction handlerFn = MezzeFunction.create(ct, contentHash.getHex());
+                Object[] closure = handlerFn.getClosureValues();
+                Object[] callArgs = new Object[closure.length + 1];
+                System.arraycopy(closure, 0, callArgs, 0, closure.length);
+                callArgs[closure.length] = params;
+                Object result = handlerFn.getCallTarget().call(callArgs);
+                if (result instanceof MezzeFunction innerFn) {
+                    Object[] innerClosure = innerFn.getClosureValues();
+                    Object[] innerCallArgs = new Object[innerClosure.length + 1];
+                    System.arraycopy(innerClosure, 0, innerCallArgs, 0, innerClosure.length);
+                    innerCallArgs[innerClosure.length] = params;
+                    result = innerFn.getCallTarget().call(innerCallArgs);
+                }
+                if (result instanceof MezzeRecord) return result;
+            }
+            com.mezze.interpreter.runtime.MezzeContext ctx =
+                com.mezze.interpreter.runtime.MezzeContext.get(node);
+            Object record = ctx.lookupHandler(contentHash);
+            if (record instanceof MezzeRecord) return record;
+            throw new RuntimeException(
+                "Parameterized performer factory not found for: " + contentHash.getHex());
+        }
+    }
+
+    /**
+     * Path D8: inside the catch branch of a Handle's TryCatchOtherwise,
+     * unwrap an {@link com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException}
+     * to its carried value. Any other exception is rethrown so it can
+     * propagate to the enclosing handler or the caller.
+     *
+     * <p>Consumes the exception (from {@code LoadException}), produces the
+     * aborted value.
+     */
+    @Operation
+    public static final class UnwrapAbortValue {
+        @Specialization
+        public static Object doUnwrap(Object exception) {
+            if (exception instanceof com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException abort) {
+                return abort.value;
+            }
+            // Not an abort — rethrow. Wrap in RuntimeException only if the
+            // exception isn't already unchecked (it always is in practice —
+            // BDSL exceptions are all Truffle/Runtime — but the compiler
+            // doesn't know that at this signature).
+            if (exception instanceof RuntimeException re) throw re;
+            if (exception instanceof Error err) throw err;
+            throw new RuntimeException((Throwable) exception);
+        }
+    }
+
+    /**
      * Fast path for {@code perform Mut mutate { act = <lambda> }}: pop
      * the raw act lambda (no wrapper record on the operand stack). The
      * cached OpCallNode was built via

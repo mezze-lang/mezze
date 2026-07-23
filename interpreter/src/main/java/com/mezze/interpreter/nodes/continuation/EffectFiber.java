@@ -235,6 +235,73 @@ public final class EffectFiber {
         return HANDLER_CHAIN.get().size();
     }
 
+    // ----------------------------------------------------------------
+    // D8 BDSL Handle depth counter — only touched by
+    // MezzeBytecodeRootNode.PushHandlerChain / PopHandlerChain.
+    // Distinct from the general HANDLER_CHAIN depth so a Path A snapshot-
+    // install on a spawned thread (which populates HANDLER_CHAIN without
+    // establishing a catch site on this frame) doesn't fool BdslYieldDispatch
+    // into thinking a BDSL Handle boundary is live. See project_d8_handleir_design.
+    // ----------------------------------------------------------------
+
+    /** Per-Handle scope-hook frame. Non-null only when the handler has an
+     *  initialize_scope hook. */
+    public static final class BdslHandleFrame {
+        public final Object scope;
+        public final Object prevScope;
+        public BdslHandleFrame(Object scope, Object prevScope) {
+            this.scope = scope;
+            this.prevScope = prevScope;
+        }
+    }
+
+    private static final ThreadLocal<java.util.ArrayDeque<BdslHandleFrame>>
+        D8_HANDLE_STACK = ThreadLocal.withInitial(java.util.ArrayDeque::new);
+
+    /** Sentinel pushed for handlers without scope hooks — avoids nullable
+     *  ArrayDeque entries. Identity-compared, never dereferenced. */
+    private static final BdslHandleFrame NO_SCOPE_FRAME = new BdslHandleFrame(null, null);
+
+    public static void enterBdslHandle() {
+        D8_HANDLE_STACK.get().push(NO_SCOPE_FRAME);
+    }
+
+    public static void enterBdslHandleWithScope(Object scope, Object prevScope) {
+        D8_HANDLE_STACK.get().push(
+            scope == null && prevScope == null ? NO_SCOPE_FRAME
+                : new BdslHandleFrame(scope, prevScope));
+    }
+
+    public static void exitBdslHandle() {
+        D8_HANDLE_STACK.get().pop();
+    }
+
+    /** Peek the scope frame at the innermost live BDSL Handle, or null if
+     *  that Handle has no scope hooks (common case). Called by
+     *  PopHandlerChain before it pops the stack. */
+    public static BdslHandleFrame peekBdslHandleScope() {
+        var s = D8_HANDLE_STACK.get();
+        if (s.isEmpty()) return null;
+        BdslHandleFrame top = s.peek();
+        return top == NO_SCOPE_FRAME ? null : top;
+    }
+
+    /** Peek the handler record on the top of the per-thread chain — used
+     *  by PopHandlerChain to reach finalize_scope before popping. */
+    public static com.mezze.interpreter.values.MezzeRecord peekTopHandlerRecord() {
+        var chain = HANDLER_CHAIN.get();
+        if (chain.isEmpty()) return null;
+        HandlerChainEntry entry = chain.peek();
+        return entry == null ? null : entry.handler();
+    }
+
+    /** True when at least one BDSL Handle catch boundary is live on this
+     *  thread, i.e. a PushHandlerChain has fired without a matching
+     *  PopHandlerChain (in either the otherwise or catch branch). */
+    public static boolean insideBdslHandle() {
+        return !D8_HANDLE_STACK.get().isEmpty();
+    }
+
     /**
      * Force the per-thread handler chain back to the given depth by
      * popping until size == depth. Used by {@code EffectHandlerDriver.run}'s

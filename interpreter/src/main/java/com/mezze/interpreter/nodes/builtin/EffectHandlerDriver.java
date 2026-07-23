@@ -68,12 +68,16 @@ public final class EffectHandlerDriver {
 
     // Sentinel thrown by an op handler's `abort` to skip body and return
     // a value as the perform's result. Caught by `drive` (parent thread
-    // path) and by {@link com.mezze.interpreter.nodes.effect.OpCallNode}
-    // (spawned-thread chain dispatch path).
-    public static final class AbortPerformException extends RuntimeException {
+    // path), by {@link com.mezze.interpreter.nodes.effect.OpCallNode}
+    // (spawned-thread chain dispatch path), and by BDSL Handle's
+    // TryCatchOtherwise catch branch (Path D8 endgame). Extends
+    // AbstractTruffleException so BDSL's TryCatch catches it (BDSL filters
+    // out non-Truffle exceptions — a plain RuntimeException would escape
+    // the catch branch entirely).
+    public static final class AbortPerformException extends com.oracle.truffle.api.exception.AbstractTruffleException {
         public final Object value;
         public AbortPerformException(Object value) {
-            super(null, null, false, false);
+            super();
             this.value = value;
         }
     }

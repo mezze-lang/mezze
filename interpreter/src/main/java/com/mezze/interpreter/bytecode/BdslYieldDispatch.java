@@ -136,23 +136,27 @@ public final class BdslYieldDispatch {
             return result;
         } catch (AbortPerformException abort) {
             // Decide whether abort should propagate as AbortPerformException
-            // (up to the outer `perform ... in body`'s fiber driver, which
-            // catches at EffectHandlerDriver.run:157) or convert to a
-            // TaskUnhandledOpException (which SpawnSupport catches on the
-            // spawned thread and stashes on the promise for await re-issue).
-            //
-            // Criterion: is there a "live" outer fiber whose driver will
-            // catch the abort? EffectFiber.current() being non-null on the
-            // running thread means yes — that fiber's driver is the enclosing
-            // perform. If it's null, we're either at top level (uncaught abort
-            // is a bug) or on a spawned thread (must convert to TUE so
-            // SpawnSupport catches). Same criterion as OpCallNode's
-            // chainDispatch vs fiber path (line 314).
+            // or convert to TaskUnhandledOpException. Rules:
+            //   - If a live outer fiber's driver is on this thread, rethrow
+            //     abort — the driver catches at EffectHandlerDriver.run:157.
+            //   - If the abort would land inside a BDSL Handle's
+            //     TryCatchOtherwise catch branch (D8), rethrow — the catch
+            //     branch reads it via UnwrapAbortValue. We detect this by
+            //     checking the per-thread handler-chain depth: our chain
+            //     entry (pushed by PushHandlerChain) is still on the stack
+            //     until the finally-generator pops it, so depth > 0 here
+            //     means at least one Handle boundary is between us and the
+            //     thread top.
+            //   - Otherwise (no fiber, empty chain) we're at top level or on
+            //     a spawned thread with no enclosing handler — convert to
+            //     TUE so SpawnSupport catches and stashes on the promise.
             EffectFiber outerFiber = EffectFiber.current();
+            boolean insideD8 = EffectFiber.insideBdslHandle();
             if (TRACE) trace("  impl aborted with val=" + summarize(abort.value)
                 + " (outerFiber=" + (outerFiber == null ? "null" : "present")
-                + " → " + (outerFiber == null ? "throw TUE" : "rethrow abort") + ")");
-            if (outerFiber == null) {
+                + " insideD8=" + insideD8
+                + " → " + (outerFiber == null && !insideD8 ? "throw TUE" : "rethrow abort") + ")");
+            if (outerFiber == null && !insideD8) {
                 throw new TaskUnhandledOpException(new OpCall(opName, arg, effectHash));
             }
             throw abort;

@@ -387,10 +387,18 @@ public final class OpCallNode extends MezzeNode {
                 try {
                     return callNode.call(op.getCallTarget(), callArgs);
                 } catch (AbortPerformException abort) {
-                    // The handler called abort {val = ...}. The enclosing
-                    // perform lives on the parent fiber; re-issue the
-                    // original op-call there so the parent's driver runs
-                    // the handler and terminates the parent's perform.
+                    // The handler called abort {val = ...}. Two cases:
+                    //   - Inside a BDSL Handle (Path D8): rethrow so the
+                    //     enclosing Handle's TryCatchOtherwise catch branch
+                    //     picks it up via UnwrapAbortValue.
+                    //   - Otherwise (spawned task, top level): convert to
+                    //     TaskUnhandledOpException so SpawnSupport stashes it
+                    //     on the promise for parent await re-issue. Same
+                    //     rule as BdslYieldDispatch — the two dispatch
+                    //     paths must agree on when to convert.
+                    if (EffectFiber.insideBdslHandle()) {
+                        throw abort;
+                    }
                     throw new TaskUnhandledOpException(
                         new OpCall(operationName, args, effectHash));
                 } finally {
