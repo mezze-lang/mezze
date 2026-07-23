@@ -3944,20 +3944,32 @@ class MezzeTextDocumentService(
 
         // Check local bindings (do-block lets, match/lambda bindings) in the
         // current typed module.
-        findLocalBindingType(name, result.typedModule, position.line + 1)?.let { return it }
+        val local = findLocalBindingType(name, result.typedModule, position.line + 1)
+        // A CONCRETE local hit wins immediately. But a VarType hit is useless
+        // for dot-completion (it can't be filtered/ranked) — it happens when the
+        // receiver line is mid-edit (`x.`), a parse error corrupts the enclosing
+        // decl's inference, and the local's stored type stays an unresolved
+        // tyvar. In that case, prefer the last-good module where the same
+        // binding was fully solved (`x : Int`). Same reason as #159 — but there
+        // the current lookup returned null; here it returns a VarType.
+        if (local != null && local !is MezzeType.VarType) return local
 
         // #159: the receiver line the user is editing (`y.`) is often a HARD
         // parse error inside a do-block ("must end with a result expression"),
-        // so the WHOLE enclosing decl is missing from the current typed module
-        // and the local lookup above finds nothing. Fall back to the last
-        // successful typed module — before the `.` was typed, `let y = …` was
-        // valid and carried y's type. This is what lights up `y.` completion
+        // so the enclosing decl is missing OR only partially inferred (a bare
+        // tyvar) in the current typed module. Fall back to the last successful
+        // typed module — before the `.` was typed, `let y = …` was valid and
+        // carried y's concrete type. This is what lights up `y.` completion
         // mid-edit for do-block / match / lambda locals.
         val lastGood = lastSuccessfulResult[currentUri]?.typedModule
         if (lastGood != null && lastGood !== result.typedModule) {
-            findLocalBindingType(name, lastGood, position.line + 1)?.let { return it }
+            findLocalBindingType(name, lastGood, position.line + 1)
+                ?.takeIf { it !is MezzeType.VarType }
+                ?.let { return it }
         }
-        return null
+        // Nothing concrete anywhere — return the VarType hit (if any) so the
+        // caller still knows the binding EXISTS, even if unresolved.
+        return local
     }
 
     /**

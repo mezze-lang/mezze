@@ -2031,6 +2031,48 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `dot completion filters to Int methods for a poly-fn-call local mid-edit`() {
+        // User's case: `x = help {..}` (help = forward-ref polymorphic fn); then
+        // `x.`. Typing the `.` corrupts the enclosing decl's inference, so the
+        // current typed module has x as an unresolved tyvar → completion dumped
+        // ALL ~140 methods. Fix: fall back to the last-good module where x : Int.
+        // Use a NON-interpolation receiver line so the pre-edit state actually
+        // typechecks (an interpolated `$(x)` with x:Int is itself a T0201 error,
+        // which would leave no clean last-good state to fall back to).
+        val valid = "let main = {} -> do\n  let x = help { a = 5, b = 6 }\n  x\nlet help = { a, b } -> a + b\n"
+        val (uri, _) = openSingleFile(valid)
+        client.awaitDiagnostics(uri, 5_000)
+        val edited = valid.replace("\n  x\n", "\n  x.\n")
+        server.textDocumentService.didChange(DidChangeTextDocumentParams(
+            VersionedTextDocumentIdentifier(uri, 2),
+            listOf(TextDocumentContentChangeEvent(edited))
+        ))
+        Thread.sleep(800)
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(2, "  x.".length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val methodDetails = comps.filter { it.kind == CompletionItemKind.Method }.mapNotNull { it.detail }
+        if (methodDetails.isEmpty()) return  // resolution failure covered elsewhere
+        // x : Int, so completions must be Int's own methods — inherent (`Int.*`)
+        // or ability impls Int satisfies (NumAdd/Eq/Ord/Inspect/...). Methods
+        // whose receiver is a DIFFERENT concrete type (Float.*, Seq.*, Map.*,
+        // Str.*, Option.*, …) must NOT appear — their presence means the
+        // receiver wasn't resolved to Int and the whole method universe leaked.
+        val foreignReceivers = setOf(
+            "Float.", "Seq.", "List.", "Map.", "Set.", "Str.", "Char.", "Bool.",
+            "Nat.", "Frac.", "Bytes.", "Option.", "Result.", "Deque.",
+            "SortedMap.", "SortedSet."
+        )
+        val leaked = methodDetails.filter { d -> foreignReceivers.any { d.startsWith(it) } }
+        assertTrue(leaked.isEmpty(),
+            "x : Int but completion leaked methods for other types (receiver not resolved): ${leaked.take(12)}")
+        assertTrue(methodDetails.any { it == "Int.to_str" },
+            "expected Int.to_str among the completions, got: ${methodDetails.take(12)}")
+    }
+
+    @Test
     fun `dot completion inside string interpolation ranks Str-returning methods first`() {
         // A `.` inside `"…$( x. )…"` demands a Str, so `to_str` / `to_dbg_str`
         // (and any Str-returner) should sort to the very top even though the
