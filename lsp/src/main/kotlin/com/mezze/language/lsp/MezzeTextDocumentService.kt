@@ -1636,23 +1636,30 @@ class MezzeTextDocumentService(
         fun codeBlock(code: String): String = "```mezze\n$code\n```"
         val pm = state.parsedModule
 
-        // Resolve an effect decl (local or imported) to a clickable markdown
-        // link at its source, so the reader can dig into the effect from the
-        // performer hover. Falls back to a plain code span if the decl has no
-        // usable source loc.
-        fun effectLink(effectName: String): String {
-            val effectDecl = pm?.decls?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == effectName }
-                ?: result?.importedEffects?.get(effectName)
-            val file = effectDecl?.loc?.file
-            if (effectDecl != null && !file.isNullOrEmpty()) {
+        // Resolve an effect to a clickable markdown link. Prefer the effect
+        // DECL's source (local decl or a by-name import); otherwise fall back to
+        // the effect reference in the performer's impl header (`perf.effect.loc`,
+        // which lives in the performer's source file) — a `use …::{ Console }`
+        // performer doesn't bring `Log` into importedEffects, so the decl loc is
+        // often unavailable but the header reference always is.
+        fun effectLink(perf: ParsedPerformerDecl): String {
+            val effectName = perf.effect.localName
+            val declLoc = (pm?.decls?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == effectName }
+                ?: result?.importedEffects?.get(effectName))?.loc
+            val loc = declLoc?.takeIf { !it.file.isNullOrEmpty() } ?: perf.effect.loc
+            val file = loc.file
+            if (!file.isNullOrEmpty()) {
                 val defUri = if (file.startsWith("file:")) file else File(file).toURI().toString()
-                return "[`$effectName`]($defUri#L${effectDecl.loc.startLine},${effectDecl.loc.startCol})"
+                return "[`$effectName`]($defUri#L${loc.startLine},${loc.startCol})"
             }
             return "`$effectName`"
         }
 
-        // Format one performer's ops as `op: Param -> Ret` lines, preferring the
-        // impl's own annotation, else the effect decl's op signature.
+        // Format one performer's ops. Show `op: Param -> Ret` when the type is
+        // known (impl annotation, else the effect decl's op sig); otherwise just
+        // the op name — an imported performer's op types are usually inferred
+        // (null) and the effect decl may not be a named import, so `: …` would
+        // add noise, not signal.
         fun opLines(perf: ParsedPerformerDecl): String {
             val effectDecl = pm?.decls?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == perf.effect.localName }
                 ?: result?.importedEffects?.get(perf.effect.localName)
@@ -1661,9 +1668,9 @@ class MezzeTextDocumentService(
                 val sig = sigByName[op.name]
                 val param = op.paramType ?: sig?.paramType
                 val ret = op.returnType ?: sig?.returnType
-                val ty = if (param != null && ret != null)
-                    "${formatTypeAnnotation(param)} -> ${formatTypeAnnotation(ret)}" else "…"
-                "  ${op.name}: $ty"
+                if (param != null && ret != null)
+                    "  ${op.name}: ${formatTypeAnnotation(param)} -> ${formatTypeAnnotation(ret)}"
+                else "  ${op.name}"
             }
         }
 
@@ -1678,12 +1685,11 @@ class MezzeTextDocumentService(
             else result?.importedImpls?.get(name)?.let { listOf(it) } ?: emptyList()
         if (perfs.isEmpty()) return null
 
-        val effects = perfs.map { it.effect.localName }.distinct()
         val ops = perfs.joinToString("\n") { opLines(it) }
-        val header = codeBlock("performer $name where {\n$ops\n}".let {
-            if (ops.isBlank()) "performer $name" else it
-        })
-        val links = effects.joinToString("\n") { "implements effect ${effectLink(it)}" }
+        val header = codeBlock(if (ops.isBlank()) "performer $name" else "performer $name where {\n$ops\n}")
+        val links = perfs
+            .distinctBy { it.effect.localName }
+            .joinToString("\n") { "implements effect ${effectLink(it)}" }
         return "$header\n\n$links"
     }
 
