@@ -477,6 +477,120 @@ class LspFeaturesTest {
     }
 
     @Test
+    fun `hover on a qualified effect-op call shows the effect and the op signature`() {
+        // Hovering `Greet` / `hello` in `Greet.hello { … }` should show the
+        // effect decl and the op's signature — not the call's `{}` return type.
+        val src = """
+            type MyC = | MyC |
+
+            effect Greet where {
+              hello : { who: Str } -> {} <Greet>
+            }
+
+            impl Greet for MyC where {
+              hello = { who } -> {}
+            }
+
+            let main = {} -> perform MyC in do
+              Greet.hello { who = "x" }
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val callLine = src.lines().indexOfFirst { it.contains("Greet.hello") }
+        val effCol = src.lines()[callLine].indexOf("Greet") + 1
+        val opCol = src.lines()[callLine].indexOf(".hello") + 2
+
+        val effHover = hoverText(hoverAt(uri, callLine, effCol) ?: fail("no hover on the effect qualifier"))
+        assertTrue(effHover.contains("effect Greet"),
+            "hover on `Greet` should show the effect decl, got:\n$effHover")
+
+        val opHover = hoverText(hoverAt(uri, callLine, opCol) ?: fail("no hover on the op name"))
+        assertTrue(opHover.contains("hello:") && opHover.contains("who"),
+            "hover on `hello` should show its signature, got:\n$opHover")
+        assertTrue(opHover.contains("op of effect"),
+            "op hover should link back to the effect, got:\n$opHover")
+        assertFalse(opHover.trimStart().startsWith("```mezze\n{}\n```"),
+            "op hover must not be the bare `{}` return type, got:\n$opHover")
+    }
+
+    @Test
+    fun `goto-def on a qualified effect-op call jumps to the effect and op`() {
+        val src = """
+            type MyC = | MyC |
+
+            effect Greet where {
+              hello : { who: Str } -> {} <Greet>
+            }
+
+            impl Greet for MyC where {
+              hello = { who } -> {}
+            }
+
+            let main = {} -> perform MyC in do
+              Greet.hello { who = "x" }
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val callLine = src.lines().indexOfFirst { it.contains("Greet.hello") }
+        val effCol = src.lines()[callLine].indexOf("Greet") + 1
+        val opCol = src.lines()[callLine].indexOf(".hello") + 2
+        val declLine = src.lines().indexOfFirst { it.trimStart().startsWith("effect Greet") }
+        val opDeclLine = src.lines().indexOfFirst { it.trimStart().startsWith("hello :") }
+
+        fun defLines(ch: Int): List<Int> {
+            val defs = server.textDocumentService.definition(DefinitionParams().apply {
+                textDocument = TextDocumentIdentifier(uri)
+                position = Position(callLine, ch)
+            }).get(5, TimeUnit.SECONDS)
+            val locs = if (defs.isLeft) defs.left else defs.right.map { Location(it.targetUri, it.targetRange) }
+            return locs.map { it.range.start.line }
+        }
+
+        assertTrue(defLines(effCol).contains(declLine),
+            "goto-def on `Greet` should land on the effect decl (line $declLine), got: ${defLines(effCol)}")
+        assertTrue(defLines(opCol).contains(opDeclLine),
+            "goto-def on `hello` should land on the op sig (line $opDeclLine), got: ${defLines(opCol)}")
+    }
+
+    @Test
+    fun `hover and goto-def on a qualified ability-method call resolve the ability`() {
+        val src = """
+            ability Show for 'a where {
+              show : { it: 'a } -> Str
+            }
+
+            impl Show for Int where {
+              show = { it } -> "n"
+            }
+
+            let describe = {} -> Show.show { it = 3 }
+        """.trimIndent()
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+
+        val callLine = src.lines().indexOfFirst { it.contains("Show.show") }
+        val abiCol = src.lines()[callLine].indexOf("Show") + 1
+        val declLine = src.lines().indexOfFirst { it.trimStart().startsWith("ability Show") }
+
+        // Hover on the ability qualifier shows the ability decl (not `'a`).
+        val h = hoverText(hoverAt(uri, callLine, abiCol) ?: fail("no hover on the ability qualifier"))
+        assertTrue(h.contains("ability Show"),
+            "hover on `Show` should show the ability decl, got:\n$h")
+        assertFalse(h.contains("''"), "ability header should not double the apostrophe, got:\n$h")
+
+        // Goto-def on the ability qualifier lands on the ability decl.
+        val defs = server.textDocumentService.definition(DefinitionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(callLine, abiCol)
+        }).get(5, TimeUnit.SECONDS)
+        val locs = if (defs.isLeft) defs.left else defs.right.map { Location(it.targetUri, it.targetRange) }
+        assertTrue(locs.any { it.range.start.line == declLine },
+            "goto-def on `Show` should land on the ability decl (line $declLine), got: ${locs.map { it.range.start.line }}")
+    }
+
+    @Test
     fun `find-implementations on an ability decl lists its impls`() {
         val (uri, src) = openSingleFile("""
             ability Show for 'a where {

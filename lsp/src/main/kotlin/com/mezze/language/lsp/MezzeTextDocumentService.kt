@@ -1132,6 +1132,57 @@ class MezzeTextDocumentService(
             return hover
         }
 
+        // Qualified effect-op call hover: the cursor is on `Log` or `log` in
+        // `Log.log { … }`. The typed-AST lookup below resolves the whole call to
+        // its `{}` return type, hiding what the reader wants — the effect and
+        // the op's signature. Detect the `<Effect>.<op>` shape textually and:
+        //   • on the effect qualifier → the effect decl (name + ops + link),
+        //   • on the op name          → that op's signature `op: P -> R <E>`.
+        run {
+            // Find the word's actual span around the cursor (which may sit in
+            // the middle of the word). Then `beforeWord`/`after` are the text
+            // strictly before/after the whole word on this line.
+            val cur = position.character.coerceIn(0, line.length)
+            var ws = cur; while (ws > 0 && (line[ws - 1].isLetterOrDigit() || line[ws - 1] == '_')) ws--
+            var we = cur; while (we < line.length && (line[we].isLetterOrDigit() || line[we] == '_')) we++
+            val beforeWord = line.substring(0, ws)
+            val after = line.substring(we)
+
+            // Case A — cursor on the op name: preceded by `<Effect>.` on the line.
+            val qualMatch = Regex("([A-Z][A-Za-z0-9_]*)\\.$").find(beforeWord)
+            if (qualMatch != null) {
+                val effectName = qualMatch.groupValues[1]
+                val effectDecl = effectDeclByName(state, result, effectName)
+                val op = effectDecl?.operations?.find { it.name == word }
+                if (effectDecl != null && op != null) {
+                    val row = if (op.effects.isNotEmpty()) " <${op.effects.joinToString(", ")}>" else ""
+                    val ty = "${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}$row"
+                    val link = effectDecl.loc.file.takeIf { !it.isNullOrEmpty() }?.let { f ->
+                        val u = if (f.startsWith("file:")) f else File(f).toURI().toString()
+                        "\n\nop of effect [`$effectName`]($u#L${effectDecl.loc.startLine},${effectDecl.loc.startCol})"
+                    } ?: "\n\nop of effect `$effectName`"
+                    return appendDoc("```mezze\n$word: $ty\n```" + link, op.doc, null)
+                }
+            }
+
+            // Case B — cursor on the qualifier: `word` is a known effect OR
+            // ability, immediately followed by `.<op>` on the line → its decl.
+            if (Regex("^\\.[a-z_]").containsMatchIn(after)) {
+                val effectDecl = effectDeclByName(state, result, word)
+                if (effectDecl != null) {
+                    val fromModule = result?.resolvedImports
+                        ?.find { it.localName == word && it.kind == ImportKind.EFFECT }?.modulePath
+                    return formatEffectHover(effectDecl, fromModule)
+                }
+                val abilityDecl = abilityDeclByName(state, result, word)
+                if (abilityDecl != null) {
+                    val fromModule = result?.resolvedImports
+                        ?.find { it.localName == word && it.kind == ImportKind.ABILITY }?.modulePath
+                    return formatAbilityHover(abilityDecl, fromModule)
+                }
+            }
+        }
+
         // Helper to format type with aliases
         fun formatType(type: MezzeType): String {
             return prettyPrintTypeWithAliases(type, state.typeAliases)
@@ -1534,9 +1585,17 @@ class MezzeTextDocumentService(
     private fun formatAbilityHover(decl: ParsedAbilityDecl, fromModule: String?): String {
         fun codeBlock(code: String): String = "```mezze\n$code\n```"
 
-        val typeParams = decl.typeParams.joinToString(" ") { "'$it" }
-        val forClause = decl.receiverTypeParam?.let { " for '$it" } ?: ""
-        val header = "ability ${decl.name} $typeParams$forClause"
+        // Normalize a type-param token to exactly one leading apostrophe
+        // (parser may store it with or without the `'`).
+        fun tv(name: String) = "'" + name.trimStart('\'')
+        // `typeParams` already includes the receiver (parser appends it), so
+        // render `ability Name <extra generics> for 'receiver` without
+        // repeating the receiver in both places.
+        val receiver = decl.receiverTypeParam
+        val generics = decl.typeParams.filter { it.trimStart('\'') != receiver?.trimStart('\'') }
+        val genericsStr = if (generics.isNotEmpty()) " " + generics.joinToString(" ") { tv(it) } else ""
+        val forClause = receiver?.let { " for ${tv(it)}" } ?: ""
+        val header = "ability ${decl.name}$genericsStr$forClause"
 
         val ops = decl.operations.joinToString("\n") { op ->
             "  ${op.name}: ${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
@@ -1639,16 +1698,35 @@ class MezzeTextDocumentService(
      * clickable link to the effect decl. Returns null if `name` isn't the
      * target of any known effect impl (so hover falls through).
      */
+    /**
+     * Resolve an effect decl by name, from anywhere it might be reachable:
+     * local decls, then by-name + transitively-loaded effects (allEffects),
+     * then — for an effect whose ONLY its performer was imported (`Log` behind
+     * `use …::{ Console }`, so it's in neither map) — a scan of every parsed
+     * module. The last fallback recovers op signatures + decl loc.
+     */
+    private fun effectDeclByName(state: DocumentState, result: TypeCheckResult?, effectName: String): ParsedEffectDecl? =
+        state.parsedModule?.decls?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == effectName }
+            ?: result?.allEffects?.get(effectName)
+            ?: com.mezze.language.typechecker.ModuleResolver.getAllParsedModules().values
+                .firstNotNullOfOrNull { m ->
+                    m.decls.filterIsInstance<ParsedEffectDecl>().find { it.name == effectName }
+                }
+
+    /** Ability-decl analogue of [effectDeclByName] (local → imported → scan). */
+    private fun abilityDeclByName(state: DocumentState, result: TypeCheckResult?, abilityName: String): ParsedAbilityDecl? =
+        state.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>()?.find { it.name == abilityName }
+            ?: result?.importedAbilities?.get(abilityName)
+            ?: com.mezze.language.typechecker.ModuleResolver.getAllParsedModules().values
+                .firstNotNullOfOrNull { m ->
+                    m.decls.filterIsInstance<ParsedAbilityDecl>().find { it.name == abilityName }
+                }
+
     private fun performerHover(state: DocumentState, result: TypeCheckResult?, name: String): String? {
         fun codeBlock(code: String): String = "```mezze\n$code\n```"
         val pm = state.parsedModule
 
-        // Every effect decl reachable by name: local decls + all transitively
-        // loaded effects (allEffects), so an effect whose only the performer was
-        // imported (e.g. `Log` behind `use …::{ Console }`) still resolves.
-        fun effectDeclFor(effectName: String): ParsedEffectDecl? =
-            pm?.decls?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == effectName }
-                ?: result?.allEffects?.get(effectName)
+        fun effectDeclFor(effectName: String): ParsedEffectDecl? = effectDeclByName(state, result, effectName)
 
         // Clickable markdown link to the effect decl; falls back to the effect
         // reference in the impl header (`perf.effect.loc`, always in the impl's
@@ -1941,6 +2019,34 @@ class MezzeTextDocumentService(
                     return listOf(locToLocation(defUri, importedPerf.loc))
                 }
                 findImportLoc(state, word)?.let { return listOf(it) }
+            }
+        }
+
+        // 0c. Qualified effect-op call `Log.log { … }`. The typed-AST lookup
+        // resolves the whole call to its return value, so goto-def lands nowhere
+        // useful. On the op name → the op's sig in the effect decl; on the effect
+        // qualifier → the effect decl. Effect decl comes from effectDeclByName
+        // (local, allEffects, or a parsed-module scan for perform-only imports).
+        run {
+            val cur = position.character.coerceIn(0, line.length)
+            var ws = cur; while (ws > 0 && (line[ws - 1].isLetterOrDigit() || line[ws - 1] == '_')) ws--
+            var we = cur; while (we < line.length && (line[we].isLetterOrDigit() || line[we] == '_')) we++
+            val beforeWord = line.substring(0, ws)
+            val after = line.substring(we)
+
+            // Cursor on the op/method name (`<Effect|Ability>.<op>`).
+            val qualMatch = Regex("([A-Z][A-Za-z0-9_]*)\\.$").find(beforeWord)
+            if (qualMatch != null) {
+                val qual = qualMatch.groupValues[1]
+                effectDeclByName(state, result, qual)?.operations?.find { it.name == word }
+                    ?.let { return listOf(locToLocationCross(it.loc)) }
+                abilityDeclByName(state, result, qual)?.operations?.find { it.name == word }
+                    ?.let { return listOf(locToLocationCross(it.loc)) }
+            }
+            // Cursor on the qualifier (`<Effect|Ability>.<op>`) → its decl.
+            if (Regex("^\\.[a-z_]").containsMatchIn(after)) {
+                effectDeclByName(state, result, word)?.let { return listOf(locToLocationCross(it.loc)) }
+                abilityDeclByName(state, result, word)?.let { return listOf(locToLocationCross(it.loc)) }
             }
         }
 
@@ -2339,6 +2445,21 @@ class MezzeTextDocumentService(
             Position(loc.startLine - 1, loc.startCol - 1),
             Position(loc.endLine - 1, loc.endCol)
         ))
+    }
+
+    /**
+     * Like [locToLocation] but resolves the URI from the loc's OWN `file` —
+     * used when jumping to a decl that lives in another (e.g. stdlib) source
+     * file. Falls back to the current document's URI if the loc carries no file.
+     */
+    private fun locToLocationCross(loc: Loc, fallbackUri: String? = null): Location {
+        val file = loc.file
+        val uri = when {
+            file.isNullOrEmpty() -> fallbackUri ?: ""
+            file.startsWith("file:") -> file
+            else -> File(file).toURI().toString()
+        }
+        return locToLocation(uri, loc)
     }
 
     /**
