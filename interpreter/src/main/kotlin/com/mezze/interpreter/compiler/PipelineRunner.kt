@@ -175,24 +175,37 @@ object PipelineRunner {
         val bodyNode: com.mezze.interpreter.nodes.MezzeNode
 
         if (namedEntry != null) {
-            // Named entry function exists (mez dev path).
-            // __entry__ body evaluates all declarations and returns the entry closure.
-            // We then invoke that closure with {}.
+            // Named entry function exists (mez dev / exec / build path).
+            //
+            // __entry__'s block body binds every top-level `let` as a global
+            // (its side effect) and evaluates to the value of the LAST decl —
+            // NOT necessarily the entry. So we must NOT invoke __entry__'s
+            // result: any `let` declared AFTER `main` would otherwise be run
+            // instead of `main` (main's effects never fire). Instead we run
+            // __entry__'s body purely for its global-binding side effect, then
+            // read the NAMED entry function by its content hash and invoke it
+            // with {}.
             val wrapperFn = functions.find { it.name == "__entry__" }
             mainFn = wrapperFn ?: namedEntry
             source = compiler.getOrCreateSourcePublic(mainFn.sourceFile)
 
-            // __entry__ body returns the entry function closure
-            val entryClosureNode = compiler.compileNode(mainFn.body, source)
-            // Create empty record {} argument (MezzeRecord.empty(), not MezzeUnit)
+            // Run __entry__'s body (binds all globals). Its return value — the
+            // last decl's closure — is discarded because it's not the last
+            // statement of the enclosing BlockNode.
+            val bindGlobalsNode = compiler.compileNode(mainFn.body, source)
+
+            // Read the entry function by hash (no auto-eval), then invoke with {}.
+            val entryFnNode = com.mezze.interpreter.nodes.ReadGlobalFnByHashNode(namedEntry.hash)
             val emptyRecordNode = object : com.mezze.interpreter.nodes.MezzeNode() {
                 override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): Any {
                     return com.mezze.interpreter.values.MezzeRecord.empty()
                 }
             }
-            // Invoke the closure with {}
-            bodyNode = com.mezze.interpreter.nodes.function.InvokeNode.create(
-                entryClosureNode, arrayOf(emptyRecordNode)
+            val invokeEntryNode = com.mezze.interpreter.nodes.function.InvokeNode.create(
+                entryFnNode, arrayOf(emptyRecordNode)
+            )
+            bodyNode = com.mezze.interpreter.nodes.control.BlockNode(
+                arrayOf(bindGlobalsNode, invokeEntryNode)
             )
         } else {
             // No named entry — fall back to __entry__ (tests/REPL) or last function
