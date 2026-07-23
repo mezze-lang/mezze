@@ -100,4 +100,28 @@ class ChainMethodDebugTest {
             (help { a = 5.0, b = 6.0 }).abs {}.to_str {}
         """))
     }
+
+    // ── #160 final edge: the chain lives INSIDE string interpolation AND the
+    // callee is FORWARD-REFERENCED (help declared after its caller). Before the
+    // fix, ParsedStringLit.children() dropped interpolation holes, so the
+    // dependency walk never saw `help`, help stayed unresolved, and the chain's
+    // receiver type never pinned → T0206 at typecheck. These RUN end-to-end.
+
+    @Test
+    fun `interpolated abs-to_str chain on forward-ref poly call runs as 11`() {
+        assertEquals("11", eval("""
+            let g = {} -> "${'$'}(help { a = 5, b = 6 }.abs {}.to_str {})"
+            let help = { a, b } -> a + b
+            g {}
+        """))
+    }
+
+    @Test
+    fun `interpolated single to_str on forward-ref poly call runs as 11`() {
+        assertEquals("11", eval("""
+            let g = {} -> "${'$'}(help { a = 5, b = 6 }.to_str {})"
+            let help = { a, b } -> a + b
+            g {}
+        """))
+    }
 }

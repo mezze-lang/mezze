@@ -106,4 +106,37 @@ class InherentMethodDispatchRegressionTest {
         // depends on row inference, but typechecking must not fail.
         assertNotNull(r.getVariableType("has_head"))
     }
+
+    /**
+     * Issue #160: an inherent-method CHAIN on a FORWARD-REFERENCED
+     * polymorphic call, inside STRING INTERPOLATION. All three conditions
+     * were required to trigger T0206:
+     *   - interpolation `"$( … )"` — its holes were invisible to
+     *     ParsedExpr.children(), so `collectReferencedNames` couldn't see
+     *     `help` and dependencyOrderedDecls never ordered help before g.
+     *   - forward reference — help declared AFTER its caller; ordering would
+     *     otherwise have inferred help's scheme first (help-before worked).
+     *   - a multi-method chain — `.abs {}` is the deferred inherent method
+     *     whose receiver (help's return) stayed a free tyvar.
+     * Fix: ParsedStringLit.children() now yields its interpolation exprs.
+     */
+    @Test
+    fun `interpolated inherent chain on forward-ref poly call typechecks`() {
+        // Before the fix this threw T0206 (`abs` receiver undetermined).
+        // A resolved `g` type proves the whole module typechecked.
+        val r = check(
+            """let g = {} -> "${'$'}(help { a = 5, b = 6 }.abs {}.to_str {})"
+              |let help = { a, b } -> a + b""".trimMargin()
+        )
+        assertNotNull(r.getVariableType("g"))
+    }
+
+    @Test
+    fun `interpolated single inherent method on forward-ref poly call typechecks`() {
+        val r = check(
+            """let g = {} -> "${'$'}(help { a = 5, b = 6 }.to_str {})"
+              |let help = { a, b } -> a + b""".trimMargin()
+        )
+        assertNotNull(r.getVariableType("g"))
+    }
 }

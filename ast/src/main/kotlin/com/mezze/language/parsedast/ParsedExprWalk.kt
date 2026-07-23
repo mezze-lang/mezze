@@ -11,8 +11,16 @@ package com.mezze.language.parsedast
  */
 fun ParsedExpr.children(): List<ParsedExpr> = when (this) {
     is ParsedIntLit, is ParsedNatLit, is ParsedFloatLit, is ParsedFracLit,
-    is ParsedStringLit, is ParsedCharLit, is ParsedIdentifier,
+    is ParsedCharLit, is ParsedIdentifier,
     is ParsedPipePlaceholder -> emptyList()
+    // A string literal's `$( … )` interpolation holes ARE sub-expressions.
+    // Omitting them made every children()-driven walk (dependency ordering,
+    // linters, LSP node-at-position, refactors) blind to references inside
+    // interpolation — e.g. `"$(help {…})"` didn't register `help` as a
+    // dependency, so a forward-referenced `help` stayed unresolved (#160).
+    is ParsedStringLit -> parts.mapNotNull { part ->
+        (part as? ParsedStringPart.Interpolation)?.expr
+    }
     is ParsedParens -> listOf(expr)
     is ParsedSeqLit -> elements.map { el ->
         when (el) {
