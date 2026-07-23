@@ -3504,6 +3504,20 @@ class MezzeTextDocumentService(
 
         val targetTypeName = getTypeName(baseType)
 
+        // NEVER dump the whole method universe. If we couldn't resolve the
+        // receiver to a concrete named type (it's a bare tyvar mid-edit, or an
+        // unnameable shape), do NOT fall through to the by-name method lists
+        // below — with `targetTypeName == null` their `!= null && ...` filters
+        // don't fire and EVERY method from EVERY type leaks (fold, Seq.*,
+        // Map.*, …). That's actively misleading, so return nothing here rather
+        // than a garbage list. (Real editing recovers the type from the
+        // last-good module — see findReceiverType — so this only bites the
+        // genuinely-unknowable case, where empty is correct.)
+        if (targetTypeName == null) {
+            server.logInfo("[dot-completion] receiver type unresolved ($baseType) — returning no methods (never dump all)")
+            return emptyList()
+        }
+
         // 1. Ability methods whose ability is in scope (imported or local) AND
         //    whose impl exists for this receiver type.
         for (abilityDecl in allAbilities) {
@@ -3838,12 +3852,16 @@ class MezzeTextDocumentService(
         candidateReturnTypes: Map<String, MezzeType>,
     ): List<CompletionItem> {
         val expectsStr = expected is MezzeType.StringType
+        // Methods that return Str by contract, regardless of receiver — the
+        // universal string renderers. Their return type isn't always captured
+        // in candidateReturnTypes (the precompiled inherent-impl body type can
+        // come back as an unresolved tyvar), so recognize them by name so they
+        // still float to the top of an interpolation / Str-expected context.
+        val strRenderers = setOf("to_str", "to_dbg_str")
         return items.map { item ->
             val candType = candidateReturnTypes[item.label]
             val matches = when {
-                // `to_dbg_str` renders anything to a string — always a good pick
-                // in a string context.
-                expectsStr && item.label == "to_dbg_str" -> true
+                expectsStr && item.label in strRenderers -> true
                 candType == null -> false
                 // A candidate whose return type is still a free var would unify
                 // with ANYTHING (Int.abs : Int -> 'a at this stage), so it would

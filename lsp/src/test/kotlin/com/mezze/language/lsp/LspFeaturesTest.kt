@@ -2094,11 +2094,33 @@ class LspFeaturesTest {
         }).get(5, TimeUnit.SECONDS)
         val comps = if (result.isLeft) result.left else result.right.items
         if (comps.isEmpty()) return  // resolution failure is covered elsewhere
-        val ranked = comps.sortedBy { it.sortText ?: "5_${it.label}" }
-        val top = ranked.first { it.kind == CompletionItemKind.Method }.label
-        assertTrue(top in setOf("to_str", "to_dbg_str"),
-            "inside interpolation the first method should be a Str-renderer, got: $top " +
-            "(top-5: ${ranked.take(5).map { it.label to it.sortText }})")
+        // BOTH to_str and to_dbg_str must be in the top-ranked group (sortText
+        // "0_"): they return Str, which the interpolation hole demands.
+        val topGroup = comps.filter { it.kind == CompletionItemKind.Method && it.sortText?.startsWith("0_") == true }
+            .map { it.label }.toSet()
+        assertTrue("to_str" in topGroup,
+            "to_str must rank in the top (0_) group inside interpolation, got 0_-group: $topGroup")
+        assertTrue("to_dbg_str" in topGroup,
+            "to_dbg_str must rank in the top (0_) group inside interpolation, got 0_-group: $topGroup")
+    }
+
+    @Test
+    fun `dot completion returns nothing when the receiver type is unknown`() {
+        // NEVER dump the whole method universe. On a cold-broken state where the
+        // receiver can't resolve to a concrete type, completion must return no
+        // methods — not fold/Seq/Map/etc. Open a file that's broken from the
+        // start (no last-good state to recover x's type from).
+        val src = "let f = {} -> do\n  let x = mystery {}\n  x.\n"
+        val (uri, _) = openSingleFile(src)
+        client.awaitDiagnostics(uri, 5_000)
+        val result = server.textDocumentService.completion(CompletionParams().apply {
+            textDocument = TextDocumentIdentifier(uri)
+            position = Position(2, "  x.".length)
+        }).get(5, TimeUnit.SECONDS)
+        val comps = if (result.isLeft) result.left else result.right.items
+        val methods = comps.filter { it.kind == CompletionItemKind.Method }.map { it.detail }
+        assertTrue(methods.isEmpty(),
+            "unknown receiver type must yield NO methods (never dump the universe), got: ${methods.take(12)}")
     }
 
     @Test
