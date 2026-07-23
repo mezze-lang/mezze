@@ -360,7 +360,24 @@ class TypeValidator(
     ): List<ValidationError> {
         if (!decl.isSimpleBinding) return emptyList()
         val finalType = substitution.apply(constraintResults[decl.variableName]?.type ?: return emptyList())
-        if (finalType is MezzeType.SuspendedType && finalType.effects.performed) {
+        // Reject a top-level `let` only when the RHS would ACTUALLY EXECUTE at
+        // module load — that is, when its type is a SuspendedType whose effect
+        // row is (a) fully discharged (nothing pending) AND (b) carries the
+        // performed marker (a handler chain is installed and would fire ops).
+        //
+        // Values with residual pending effects (e.g. `Int <Log, *>`) are still
+        // lazy — the runtime doesn't execute anything until every effect in
+        // the row has a matching handler on the chain. Those are legitimately
+        // deferred values and belong at top level as declarative bindings.
+        //
+        // Previously we rejected on `performed` alone, which over-rejected the
+        // partially-handled shapes. Loosened per the effect execution semantics
+        // discussion (2026-07-23) — see project_effect_redesign_plan memory.
+        if (finalType is MezzeType.SuspendedType &&
+            finalType.effects.performed &&
+            finalType.effects.effects.isEmpty() &&
+            finalType.effects.effectInstances.isEmpty() &&
+            finalType.effects.rowVar == null) {
             return listOf(ValidationError.TopLevelPerformedEffects(
                 bindingName = decl.variableName, effectRow = finalType.effects, loc = decl.loc
             ))

@@ -53,6 +53,11 @@ class ComprehensiveEffectHandlingTest {
         }
     }
 
+    /** Assert the source type-checks without inspecting a specific variable. */
+    private fun assertTypeCheckSucceeds(code: String) {
+        parseAndTypeCheck(code)
+    }
+
     private fun assertFunctionReturnTypeChecks(code: String, variableName: String, expectedReturnType: String) {
         val result = parseAndTypeCheck(code)
         val actualType = getVariableType(result, variableName)
@@ -184,10 +189,13 @@ class ComprehensiveEffectHandlingTest {
     }
 
     @Test
-    fun `test 2b - handle one effect then call returns suspended with remaining effects is rejected at top level`() {
-        // Calling a partially handled function returns value with <*>
-        // This is rejected at top level because * means effects were executed
-        assertTypeCheckFails(
+    fun `test 2b - handle one effect then call returns suspended with remaining effects is allowed at top level`() {
+        // Calling a partially-handled function returns value with <FileSystem, *>.
+        // Top-level rule (2026-07-23 loosened): reject only when the row is
+        // fully discharged (empty) AND <*> is set — i.e. execution really fires
+        // at load. With residual <FileSystem>, the value is still lazy
+        // (nothing runs), so this is legitimate deferred code.
+        assertTypeCheckSucceeds(
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
@@ -302,11 +310,13 @@ class ComprehensiveEffectHandlingTest {
     }
 
     @Test
-    fun `test 3c - call function then partially handle effects is rejected at top level`() {
-        // After calling myFunc {}, we get String <FileSystem, Log>
-        // After perform Console, we should get String <FileSystem, *>
-        // But this is rejected at top level because * means effects were executed
-        assertTypeCheckFails(
+    fun `test 3c - call function then partially handle effects is allowed at top level`() {
+        // After calling myFunc {}, we get Str <FileSystem, Log>.
+        // After perform Console, we get Str <FileSystem, *>.
+        // Top-level rule (2026-07-23 loosened): reject only when row is empty
+        // AND <*> is set. Residual <FileSystem> keeps the value lazy — nothing
+        // executes at load, so this is a legitimate deferred computation.
+        assertTypeCheckSucceeds(
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
@@ -463,9 +473,11 @@ class ComprehensiveEffectHandlingTest {
     }
 
     @Test
-    fun `test 4d - verify intermediate types in two effect sequence is rejected at top level`() {
-        // Intermediate values with <*> are rejected at top level
-        assertTypeCheckFails(
+    fun `test 4d - verify intermediate types in two effect sequence is allowed at top level`() {
+        // Intermediate value with <FileSystem, *> is lazy (residual FileSystem
+        // means nothing runs at bind). Top-level rule (2026-07-23 loosened):
+        // reject only on empty-row + <*>.
+        assertTypeCheckSucceeds(
             """
             use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
