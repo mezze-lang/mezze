@@ -556,6 +556,7 @@ class MezzeTextDocumentService(
                         resolvedImports = buildResolvedImports(result.importContext),
                         importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
                         importedEffects = result.importContext?.importedEffects ?: emptyMap(),
+                        importedImpls = result.importContext?.importedImpls ?: emptyMap(),
                         // Critical: hover, inlay hints, find-references, rename and
                         // every other position-based feature read typedModule from
                         // this object. Without it, the entire LSP appears to "work"
@@ -626,6 +627,7 @@ class MezzeTextDocumentService(
                                     },
                                     importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
                                     importedEffects = result.importContext?.importedEffects ?: emptyMap(),
+                                    importedImpls = result.importContext?.importedImpls ?: emptyMap(),
                                     loweredFunctions = result.loweredFunctions ?: emptyList(),
                                     typedModule = typedMod,
                                     performerRecords = result.loweredPerformers
@@ -1645,13 +1647,14 @@ class MezzeTextDocumentService(
             return "$body\n\n$links"
         }
 
-        // Imported performer.
-        val importedPerformer = result?.resolvedImports
-            ?.find { it.localName == name && it.kind == ImportKind.PERFORMER }
+        // Imported performer. Performers live in TypeCheckResult.importedImpls
+        // (keyed by performer name), NOT resolvedImports — the ResolvedImport
+        // builder has no PERFORMER case, so a `use …::{ Console }` performer is
+        // absent from resolvedImports entirely.
+        val importedPerformer = result?.importedImpls?.get(name)
         if (importedPerformer != null) {
-            val from = importedPerformer.modulePath.takeIf { it.isNotEmpty() }
-                ?.let { "\n\n*from* `$it`" } ?: ""
-            return codeBlock("performer $name") + from
+            val effect = importedPerformer.effect.localName
+            return codeBlock("performer $name  (handles $effect)") + "\n\nimplements effect `$effect`"
         }
         return null
     }
@@ -1886,13 +1889,16 @@ class MezzeTextDocumentService(
             // Local impl for this performer.
             pm.decls.filterIsInstance<ParsedPerformerDecl>().find { it.performerName == word }
                 ?.let { return listOf(locToLocation(state.uri, it.loc)) }
-            // Imported performer → its defining module.
-            val import = result?.resolvedImports?.find { it.localName == word && it.kind == ImportKind.PERFORMER }
-            if (import != null) {
-                findCrossModuleDefLocationByName(import.modulePath, import.originalName)
-                    ?.let { return listOf(it) }
-                findCrossModuleDefInMemory(import.modulePath, import.originalName)
-                    ?.let { return listOf(it) }
+            // Imported performer. Performers live in TypeCheckResult.importedImpls
+            // (keyed by name), not resolvedImports. The decl's own loc carries
+            // the defining file, so jump straight there.
+            val importedPerf = result?.importedImpls?.get(word)
+            if (importedPerf != null) {
+                val file = importedPerf.loc.file
+                if (file.isNotEmpty()) {
+                    val defUri = if (file.startsWith("file:")) file else File(file).toURI().toString()
+                    return listOf(locToLocation(defUri, importedPerf.loc))
+                }
                 findImportLoc(state, word)?.let { return listOf(it) }
             }
         }

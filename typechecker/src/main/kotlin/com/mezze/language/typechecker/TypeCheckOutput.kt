@@ -5,6 +5,7 @@ import com.mezze.language.ast.ModulePath
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.parsedast.ParsedAbilityDecl
 import com.mezze.language.parsedast.ParsedEffectDecl
+import com.mezze.language.parsedast.ParsedPerformerDecl
 import com.mezze.language.truffleir.FunctionIR
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedLetDecl
@@ -18,6 +19,10 @@ data class TypeCheckResult(
     val warnings: List<TypeCheckWarning> = emptyList(),
     val importedAbilities: Map<String, ParsedAbilityDecl> = emptyMap(),
     val importedEffects: Map<String, ParsedEffectDecl> = emptyMap(),
+    // Imported effect performers, keyed by performer name (e.g. `Console`).
+    // Performers aren't ResolvedImports (the builder has no PERFORMER case), so
+    // the LSP resolves `perform X` handler names through this map instead.
+    val importedImpls: Map<String, ParsedPerformerDecl> = emptyMap(),
     val loweredFunctions: List<FunctionIR> = emptyList(),
     val typedModule: TypedModule? = null,
     val performerRecords: List<Array<String>> = emptyList(),

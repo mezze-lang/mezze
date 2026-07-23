@@ -575,6 +575,7 @@ class TypeChecker(
                     warnings = structuredWarnings,
                     importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
                     importedEffects = result.importContext?.importedEffects ?: emptyMap(),
+                    importedImpls = result.importContext?.importedImpls ?: emptyMap(),
                     loweredFunctions = result.loweredFunctions ?: emptyList(),
                     typedModule = result.typedModule,
                     performerRecords = result.loweredPerformers,
