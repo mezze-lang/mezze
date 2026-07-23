@@ -427,16 +427,18 @@ class LspFeaturesTest {
         val col = src.lines()[performLine].indexOf("MyConsole") + 2  // inside the word
         val h = hoverAt(uri, performLine, col) ?: fail("no hover on the performer name")
         val txt = hoverText(h)
-        assertTrue(txt.contains("performer MyConsole"),
-            "expected a performer hover for MyConsole, got:\n$txt")
+        // Rendered as real Mezze — `impl <Effect> for <Type>` (no invented
+        // "performer" keyword).
+        assertTrue(txt.contains("impl Greet for MyConsole"),
+            "expected an `impl Greet for MyConsole` hover, got:\n$txt")
         // Must NOT be the bare `{}` constructor type (the regression).
         assertFalse(txt.trimStart().startsWith("```mezze\n{}\n```"),
-            "performer hover must not be the bare `{}` constructor type, got:\n$txt")
-        // Lists the implemented op(s).
-        assertTrue(txt.contains("hello"),
-            "expected the performer's `hello` op listed, got:\n$txt")
+            "hover must not be the bare `{}` constructor type, got:\n$txt")
+        // Lists the implemented op with its signature.
+        assertTrue(txt.contains("hello:"),
+            "expected the `hello` op with its type listed, got:\n$txt")
         // The effect is a clickable markdown link back to its decl.
-        assertTrue(Regex("""implements effect \[`Greet`\]\(""").containsMatchIn(txt),
+        assertTrue(Regex("""handles effect \[`Greet`\]\(""").containsMatchIn(txt),
             "expected a clickable link to effect Greet, got:\n$txt")
     }
 

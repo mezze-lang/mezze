@@ -557,6 +557,9 @@ class MezzeTextDocumentService(
                         importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
                         importedEffects = result.importContext?.importedEffects ?: emptyMap(),
                         importedImpls = result.importContext?.importedImpls ?: emptyMap(),
+                        allEffects = result.importContext?.let { ic ->
+                            ic.importedEffects + ic.effectsByHash.values.associateBy { it.name }
+                        } ?: emptyMap(),
                         // Critical: hover, inlay hints, find-references, rename and
                         // every other position-based feature read typedModule from
                         // this object. Without it, the entire LSP appears to "work"
@@ -628,6 +631,9 @@ class MezzeTextDocumentService(
                                     importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
                                     importedEffects = result.importContext?.importedEffects ?: emptyMap(),
                                     importedImpls = result.importContext?.importedImpls ?: emptyMap(),
+                                    allEffects = result.importContext?.let { ic ->
+                                        ic.importedEffects + ic.effectsByHash.values.associateBy { it.name }
+                                    } ?: emptyMap(),
                                     loweredFunctions = result.loweredFunctions ?: emptyList(),
                                     typedModule = typedMod,
                                     performerRecords = result.loweredPerformers
@@ -1626,27 +1632,30 @@ class MezzeTextDocumentService(
     }
 
     /**
-     * Hover text for a performer NAME used at a `perform X in …` site.
-     * Resolves `name` to the effect performer(s) it names — the local
-     * `impl <Effect> for <name>` decl(s), or an imported PERFORMER — and shows
-     * the effect handled plus a source link. Returns null if `name` isn't a
-     * known performer (so hover falls through to the generic paths).
+     * Hover text for the target type used at a `perform X in …` site (`X` is
+     * the type an `impl <Effect> for X` handles — there is no "performer"
+     * keyword in Mezze; it's just an impl target). Renders each impl as real
+     * Mezze — `impl <Effect> for X where { op: Param -> Ret }` — plus a
+     * clickable link to the effect decl. Returns null if `name` isn't the
+     * target of any known effect impl (so hover falls through).
      */
     private fun performerHover(state: DocumentState, result: TypeCheckResult?, name: String): String? {
         fun codeBlock(code: String): String = "```mezze\n$code\n```"
         val pm = state.parsedModule
 
-        // Resolve an effect to a clickable markdown link. Prefer the effect
-        // DECL's source (local decl or a by-name import); otherwise fall back to
-        // the effect reference in the performer's impl header (`perf.effect.loc`,
-        // which lives in the performer's source file) — a `use …::{ Console }`
-        // performer doesn't bring `Log` into importedEffects, so the decl loc is
-        // often unavailable but the header reference always is.
+        // Every effect decl reachable by name: local decls + all transitively
+        // loaded effects (allEffects), so an effect whose only the performer was
+        // imported (e.g. `Log` behind `use …::{ Console }`) still resolves.
+        fun effectDeclFor(effectName: String): ParsedEffectDecl? =
+            pm?.decls?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == effectName }
+                ?: result?.allEffects?.get(effectName)
+
+        // Clickable markdown link to the effect decl; falls back to the effect
+        // reference in the impl header (`perf.effect.loc`, always in the impl's
+        // own source) if the decl has no usable loc.
         fun effectLink(perf: ParsedPerformerDecl): String {
             val effectName = perf.effect.localName
-            val declLoc = (pm?.decls?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == effectName }
-                ?: result?.importedEffects?.get(effectName))?.loc
-            val loc = declLoc?.takeIf { !it.file.isNullOrEmpty() } ?: perf.effect.loc
+            val loc = effectDeclFor(effectName)?.loc?.takeIf { !it.file.isNullOrEmpty() } ?: perf.effect.loc
             val file = loc.file
             if (!file.isNullOrEmpty()) {
                 val defUri = if (file.startsWith("file:")) file else File(file).toURI().toString()
@@ -1655,16 +1664,13 @@ class MezzeTextDocumentService(
             return "`$effectName`"
         }
 
-        // Format one performer's ops. Show `op: Param -> Ret` when the type is
-        // known (impl annotation, else the effect decl's op sig); otherwise just
-        // the op name — an imported performer's op types are usually inferred
-        // (null) and the effect decl may not be a named import, so `: …` would
-        // add noise, not signal.
-        fun opLines(perf: ParsedPerformerDecl): String {
-            val effectDecl = pm?.decls?.filterIsInstance<ParsedEffectDecl>()?.find { it.name == perf.effect.localName }
-                ?: result?.importedEffects?.get(perf.effect.localName)
-            val sigByName = effectDecl?.operations?.associateBy { it.name } ?: emptyMap()
-            return perf.operations.joinToString("\n") { op ->
+        // Render one impl as Mezze: `impl <Effect> for <name> where { ops }`.
+        // Each op shows `op: Param -> Ret`, preferring the impl's own annotation
+        // else the effect decl's op sig (imported impl ops carry null types).
+        fun renderImpl(perf: ParsedPerformerDecl): String {
+            val effectName = perf.effect.localName
+            val sigByName = effectDeclFor(effectName)?.operations?.associateBy { it.name } ?: emptyMap()
+            val opLines = perf.operations.joinToString("\n") { op ->
                 val sig = sigByName[op.name]
                 val param = op.paramType ?: sig?.paramType
                 val ret = op.returnType ?: sig?.returnType
@@ -1672,9 +1678,11 @@ class MezzeTextDocumentService(
                     "  ${op.name}: ${formatTypeAnnotation(param)} -> ${formatTypeAnnotation(ret)}"
                 else "  ${op.name}"
             }
+            return if (opLines.isBlank()) "impl $effectName for $name"
+                else "impl $effectName for $name where {\n$opLines\n}"
         }
 
-        // Local performer impls whose target is this name.
+        // Local impls whose target is this name.
         val localImpls = pm?.decls?.filterIsInstance<ParsedPerformerDecl>()
             ?.filter { it.performerName == name } ?: emptyList()
         val perfs = if (localImpls.isNotEmpty()) localImpls
@@ -1685,12 +1693,11 @@ class MezzeTextDocumentService(
             else result?.importedImpls?.get(name)?.let { listOf(it) } ?: emptyList()
         if (perfs.isEmpty()) return null
 
-        val ops = perfs.joinToString("\n") { opLines(it) }
-        val header = codeBlock(if (ops.isBlank()) "performer $name" else "performer $name where {\n$ops\n}")
+        val body = perfs.joinToString("\n\n") { renderImpl(it) }
         val links = perfs
             .distinctBy { it.effect.localName }
-            .joinToString("\n") { "implements effect ${effectLink(it)}" }
-        return "$header\n\n$links"
+            .joinToString("\n") { "handles effect ${effectLink(it)}" }
+        return codeBlock(body) + "\n\n$links"
     }
 
     /**

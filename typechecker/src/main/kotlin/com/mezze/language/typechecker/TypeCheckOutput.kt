@@ -23,6 +23,11 @@ data class TypeCheckResult(
     // Performers aren't ResolvedImports (the builder has no PERFORMER case), so
     // the LSP resolves `perform X` handler names through this map instead.
     val importedImpls: Map<String, ParsedPerformerDecl> = emptyMap(),
+    // Every transitively-loaded effect decl, keyed by name — a superset of
+    // importedEffects (which only has BY-NAME imports). Lets the LSP read an
+    // effect's op signatures even when only its performer was imported (e.g.
+    // `use …::{ Console }` brings the performer but not the `Log` effect).
+    val allEffects: Map<String, ParsedEffectDecl> = emptyMap(),
     val loweredFunctions: List<FunctionIR> = emptyList(),
     val typedModule: TypedModule? = null,
     val performerRecords: List<Array<String>> = emptyList(),
